@@ -1,15 +1,15 @@
-"""LanceDB ``user_profile`` table schema.
+"""Derived-index ``user_profile`` record.
 
 Profile is a single-file kind: one ``users/<user_id>/user.md`` per
 user, replaced wholesale on edit (mirrors ``AgentSkill`` for the
-upsert/single-row contract). The LanceDB row is a typed projection
+upsert/single-row contract). The index row is a typed projection
 of the md frontmatter that the cascade keeps in sync; it carries no
 vector / no BM25 because the recall surface is pure KV-by-owner
 (``fetch(owner_id)``) — when query-aware profile lookup ships later
 the schema will gain ``vector`` + ``*_tokens`` columns then.
 
 ``explicit_info`` / ``implicit_traits`` are heterogeneous LLM
-emissions (mostly small dicts mixed with strings) — LanceDB has no
+emissions (mostly small dicts mixed with strings) — the index schema has no
 ``list[dict]`` column type, so we stash them as JSON strings and
 unpack at the recall boundary into ``profile_data`` of the DTO.
 """
@@ -18,11 +18,11 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable
+from everos.infra.persistence.records.base import IndexRecord
 
 
-class UserProfile(BaseLanceTable):
-    """One ``users/<user_id>/user.md`` indexed in LanceDB."""
+class UserProfile(IndexRecord):
+    """One ``users/<user_id>/user.md`` in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "user_profile"
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
@@ -47,7 +47,7 @@ class UserProfile(BaseLanceTable):
 
     explicit_info_json: str
     """JSON-serialised ``list[Any]`` — the algo's verbatim evidence
-    bucket. Stored as a string because LanceDB has no
+    bucket. Stored as a string because the index schema has no
     ``list[dict]`` column type. The recaller json-decodes it back into
     ``profile_data['explicit_info']`` at the DTO boundary."""
 
@@ -67,4 +67,4 @@ class UserProfile(BaseLanceTable):
     explicit_info_json + implicit_traits_json). Matches → cascade
     skips re-upsert. ``profile_timestamp_ms`` is intentionally not in
     the hash: it drifts with every synthesis even when the underlying
-    content is identical, and the LanceDB row treats it as audit."""
+    content is identical, and the index row treats it as audit."""

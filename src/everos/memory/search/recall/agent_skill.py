@@ -9,40 +9,40 @@ single-shot.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
-from everalgo.types import Candidate
-
-from everos.infra.persistence.index import (
-    AgentSkill,
-    Predicate,
-    agent_skill_repo,
+from everos.memory.models import AgentSkill
+from everos.memory.ports import (
+    AgentSkillIndex,
+    Filter,
+    SearchHit,
     all_of,
     any_of,
     contains,
 )
 
-from .base import (
-    RecallerDeps,
-    cosine_score_from_distance,
-    row_to_candidate,
-)
+from .base import RecallerDeps, RecallResult, from_hits
 
 
 class AgentSkillRecaller:
-    """BM25 + vector recall over the LanceDB ``agent_skill`` table."""
+    """BM25 + vector recall over the agent-skill index.
+
+    Args:
+        deps: Shared recaller dependencies (tokenizer).
+        index: The agent-skill index port.
+    """
 
     kind: ClassVar[str] = "agent_skill"
     everalgo_memory_type: ClassVar[str] = "skill"
-    text_field: ClassVar[str] = "description"
 
-    def __init__(self, deps: RecallerDeps) -> None:
+    def __init__(self, deps: RecallerDeps, index: AgentSkillIndex) -> None:
         self._deps = deps
+        self._index = index
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
-    ) -> list[Candidate]:
+        self, query: str, where: Filter, *, limit: int
+    ) -> RecallResult[AgentSkill]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
         Mirrors ``AgentCaseRecaller.sparse_recall`` — see there for
@@ -51,46 +51,51 @@ class AgentSkillRecaller:
         """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
-            return []
-        merged_rows = await agent_skill_repo.sparse_search(
-            terms, where, columns=AgentSkill.BM25_FIELDS, limit=limit
-        )
-        return [
-            row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
-            for r in merged_rows
-        ]
+            return RecallResult.empty()
+        hits = await self._index.sparse_search(terms, where, limit=limit)
+        return from_hits(hits, source="keyword")
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
-    ) -> list[Candidate]:
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> RecallResult[AgentSkill]:
         if not vector:
-            return []
-        rows = await agent_skill_repo.dense_search(vector, where, limit=limit)
-        return [
-            row_to_candidate(
-                r,
-                source="vector",
-                score=cosine_score_from_distance(r.get("_distance")),
-            )
-            for r in rows
-        ]
+            return RecallResult.empty()
+        hits = await self._index.dense_search(vector, where, limit=limit)
+        return from_hits(hits, source="vector")
 
-    async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: Predicate, *, limit: int
-    ) -> list[Candidate]:
-        """Skills whose ``source_case_ids`` intersect ``case_ids``.
-        Filter is ``array_has`` OR-ed per id (same as
-        ``filters._compile_op_clause`` for ``array_str``).
+    async def bridged_from_cases(
+        self, case_scores: Mapping[str, float], where: Filter, *, top_k: int
+    ) -> RecallResult[AgentSkill]:
+        """Skills learned from the given cases, scored by their best case.
 
-        ``score`` returns ``0.0`` — the manager re-attaches the max-pooled
-        source-case score. ``source_case_ids`` rides in ``metadata`` so
-        the manager can max-pool without a second fetch.
+        The case->skill bridge: each skill whose ``source_case_ids`` meets
+        ``case_scores`` takes the highest score among those cases. The keys
+        are case *entry ids* (``ac_<YYYYMMDD>_<NNNN>``, the shape written to
+        ``source_case_ids``), never the index row ids. Scores must
+        be LLM-rerank relevance in ``[0, 1]`` to stay comparable with the
+        direct dense pool -- never BM25 / fusion scores. One case can map to
+        several skills, so the fetch allows a small fan-out per case.
         """
-        if not case_ids:
-            return []
+        if not case_scores:
+            return RecallResult.empty()
         full_where = all_of(
             where,
-            any_of(*(contains("source_case_ids", case_id) for case_id in case_ids)),
+            any_of(*(contains("source_case_ids", case_id) for case_id in case_scores)),
         )
-        rows = await agent_skill_repo.search(where=full_where, limit=limit)
-        return [row_to_candidate(r, source="vector", score=0.0) for r in rows]
+        limit = max(top_k, len(case_scores) * 4)
+        hits = await self._index.find(full_where, limit=limit)
+        bridged = [
+            SearchHit(
+                stored=hit.stored,
+                score=max(
+                    (
+                        case_scores[cid]
+                        for cid in hit.stored.item.source_case_ids
+                        if cid in case_scores
+                    ),
+                    default=0.0,
+                ),
+            )
+            for hit in hits
+        ]
+        return from_hits(bridged, source="vector")

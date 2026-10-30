@@ -1,8 +1,8 @@
 """Knowledge document CRUD + search HTTP endpoints.
 
 Routes follow the thin-adapter pattern: validate the DTO, delegate to
-the service layer, format the response envelope.  No business logic
-lives here.
+the service layer, format the response envelope. Request and response
+models live in ``schemas.knowledge``. No business logic lives here.
 
 Endpoint overview (design spec sections 6.2-6.6):
     POST   /documents          — upload a new document (multipart)
@@ -18,101 +18,41 @@ Endpoint overview (design spec sections 6.2-6.6):
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
-if TYPE_CHECKING:
-    from everos.service.knowledge import KnowledgeExtractor
-
-from everalgo.types import ParsedContent
-from fastapi import APIRouter, Depends, Path, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Path, Query, Response, UploadFile
 from fastapi.params import Form
-from pydantic import BaseModel, Field
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.llm import get_llm_client
-from everos.component.rerank import get_rerank_capability
-from everos.component.utils.datetime import to_display_tz
-from everos.config import load_settings
-from everos.core.errors import (
-    InvalidInputError,
-    ProviderNotConfiguredError,
-    UnsupportedModalityError,
-)
-from everos.core.persistence import MemoryRoot
-from everos.entrypoints.api.utils import extract_request_id
-from everos.service import (
-    CreateDocumentResult,
-    DocumentDetail,
-    DocumentListResult,
-    SearchKnowledgeResult,
-    TopicDetail,
-    create_document,
-    delete_document,
-    get_document,
-    get_topic,
-    list_categories,
-    list_documents,
-    patch_document,
-    replace_document,
-    search_knowledge,
+from everos.core.utils.datetime import to_display_tz
+from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.schemas import (
+    AppScopeId,
+    CategoryDTO,
+    CategoryListResponse,
+    DocumentCreateResponse,
+    DocumentDeleteResponse,
+    DocumentDetailResponse,
+    DocumentListResponse,
+    DocumentPatchRequest,
+    DocumentPatchResponse,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+    ProjectScopeId,
+    SuccessEnvelope,
+    TopicDetailResponse,
 )
 
-# PathSafeId and SuccessEnvelope are imported from memorize routes;
-# a shared module would be cleaner but is out of scope for this PR.
-from .memorize import AppScopeId, ProjectScopeId, SuccessEnvelope
 
-_KNOWLEDGE_FEATURE = "knowledge"
+def _require_knowledge_capabilities(app: ApplicationDep) -> None:
+    """Per-endpoint gate: uploads and search need embedding + rerank.
 
-
-def _require_knowledge_capabilities() -> None:
-    """Per-endpoint gate: knowledge writes/search require embed + rerank.
-
-    **Why the gate lives at the HTTP layer, not at cascade registry**:
-    cascade handlers register **unconditionally** now (see
-    ``memory/cascade/registry.py:177-194`` — the earlier atomic-pair
-    gate that lived there was removed because it broke the delete
-    path: a Tier-3 → Tier-2/1 downgrade would strand existing knowledge
-    documents with no handler to process their deletion). Handlers
-    body-guard the embed/rerank branches internally instead, so the
-    delete path stays reachable across tier changes.
-
-    Because the cascade layer no longer refuses the write, the HTTP
-    layer is now the *only* place that enforces "knowledge features
-    require Tier 3". Without this gate a Tier-1/2 upload would:
-
-    - accept the multipart request → md write succeeds
-    - enqueue for cascade → cascade handler body-guards on
-      ``get_embedding_capability().available`` and no-ops the
-      index write
-    - client sees 201 but the doc is permanently keyword-only /
-      unsearchable
-
-    Returning 422 up front is the honest answer.
-
-    **Attached per-endpoint (not router-wide)** so read / list /
-    delete / metadata-patch routes stay reachable after a Tier-3 →
-    Tier-2/1 downgrade: users can still inspect and clean up their
-    existing docs (rename, recategorize, delete) even when the
-    providers that would embed or rerank new content are no longer
-    configured. Title / category patches only rewrite md frontmatter
-    (and move the doc directory when category changes) — no embed or
-    rerank code runs on that path.
-
-    Checks both capabilities (not just embedding) up front so a client
-    missing only rerank gets a rerank-specific message rather than
-    passing this gate and failing later inside search.
+    The rule is :meth:`KnowledgeService.require_search_providers`; it runs as
+    a dependency so FastAPI resolves it before validating the body, and a
+    deployment without the providers gets the provider-specific 422 for any
+    request. Attached per endpoint, not router-wide, so reads, deletes and
+    metadata patches stay reachable after a provider is removed.
     """
-    if not get_embedding_capability().available:
-        raise ProviderNotConfiguredError(
-            provider="embedding",
-            feature=_KNOWLEDGE_FEATURE,
-        )
-    if not get_rerank_capability().available:
-        raise ProviderNotConfiguredError(
-            provider="rerank",
-            feature=_KNOWLEDGE_FEATURE,
-        )
+    app.knowledge.require_search_providers()
 
 
 # Router prefix is /knowledge; app.py mounts it under both /api/v1 and
@@ -134,410 +74,11 @@ _QueryPageSize = Annotated[int, Query(ge=1, le=100)]
 _QuerySortBy = Annotated[Literal["created_at", "updated_at", "title"], Query()]
 _QuerySortOrder = Annotated[Literal["asc", "desc"], Query()]
 
-# Upper bound on a search query string — guards the embedding call against
-# pathologically long input.
-_MAX_QUERY_LENGTH = 2000
-
 # doc_id: system-generated "d_<hex12..32>"; topic_id: "{doc_id}_{index}".
 _DOC_ID_PATTERN = r"^d_[a-f0-9]{12,32}$"
 _TOPIC_ID_PATTERN = r"^d_[a-f0-9]{12,32}_\d+$"
 _PathDocId = Annotated[str, Path(pattern=_DOC_ID_PATTERN)]
 _PathTopicId = Annotated[str, Path(pattern=_TOPIC_ID_PATTERN)]
-
-
-# ── Response DTOs ────────────────────────────────────────────────────────────
-
-
-class DocumentCreateResponse(BaseModel):
-    """Response for POST/PUT /documents."""
-
-    doc_id: str
-    category_id: str
-    topic_count: int
-    source_name: str | None
-    md_path: str
-    original_file_path: str | None
-
-
-class DocumentDeleteResponse(BaseModel):
-    """Response for DELETE /documents/{doc_id}."""
-
-    doc_id: str
-    deleted_topics: int
-
-
-class TopicOverviewDTO(BaseModel):
-    """Minimal topic summary inside a document detail."""
-
-    topic_id: str
-    topic_name: str
-    topic_path: str
-    depth: int
-    summary: str
-
-
-class DocumentDetailResponse(BaseModel):
-    """Response for GET /documents/{doc_id}."""
-
-    doc_id: str
-    category_id: str
-    title: str
-    summary: str
-    source_name: str | None
-    source_type: str | None
-    original_file_path: str | None
-    topics: list[TopicOverviewDTO]
-    created_at: datetime
-    updated_at: datetime
-
-
-class DocumentOverviewItemDTO(BaseModel):
-    """One row in the paginated document list."""
-
-    doc_id: str
-    category_id: str
-    title: str
-    topic_count: int
-    created_at: datetime
-
-
-class DocumentListResponse(BaseModel):
-    """Response for GET /documents."""
-
-    documents: list[DocumentOverviewItemDTO]
-    total: int
-    page: int
-    page_size: int
-
-
-class TopicDetailResponse(BaseModel):
-    """Response for GET /topics/{topic_id}."""
-
-    topic_id: str
-    doc_id: str
-    category_id: str
-    topic_name: str
-    topic_path: str
-    depth: int
-    summary: str
-    content: str
-    content_labels: list[str]
-    parent_topic_id: str | None
-    children_topic_ids: list[str]
-    created_at: datetime
-    updated_at: datetime
-
-
-class DocumentContextDTO(BaseModel):
-    """L1 document metadata attached to every search hit."""
-
-    doc_id: str
-    title: str
-    summary: str
-
-
-class SearchHitDTO(BaseModel):
-    """One ranked result from knowledge search."""
-
-    topic_id: str
-    category_id: str
-    topic_name: str
-    topic_path: str
-    depth: int
-    summary: str
-    content: str | None
-    score: float
-    retrieval_method: str
-    source: str | None
-    document: DocumentContextDTO
-
-
-class KnowledgeSearchResponse(BaseModel):
-    """Response for POST /search."""
-
-    hits: list[SearchHitDTO]
-    total: int
-    took_ms: float
-
-
-class CategoryDTO(BaseModel):
-    """One taxonomy category."""
-
-    category_id: str
-    description: str
-    document_count: int
-
-
-class CategoryListResponse(BaseModel):
-    """Response for GET /categories."""
-
-    categories: list[CategoryDTO]
-
-
-class DocumentPatchResponse(BaseModel):
-    """Response for PATCH /documents/{doc_id}."""
-
-    doc_id: str
-    updated_fields: list[str]
-    updated_at: datetime
-
-
-# ── Request DTOs ─────────────────────────────────────────────────────────────
-
-
-class KnowledgeSearchRequest(BaseModel):
-    """Request body for POST /search."""
-
-    query: str = Field(..., min_length=1, max_length=_MAX_QUERY_LENGTH)
-    method: Literal["keyword", "vector", "hybrid"] = "hybrid"
-    top_k: int = Field(default=10, ge=1, le=100)
-    score_threshold: float | None = None
-    include_content: bool = False
-    app_id: AppScopeId = "default"
-    project_id: ProjectScopeId = "default"
-
-
-class DocumentPatchRequest(BaseModel):
-    """Request body for PATCH /documents/{doc_id}."""
-
-    title: str | None = Field(default=None, min_length=1, pattern=r"\w")
-    category_id: str | None = Field(default=None, min_length=1)
-    app_id: AppScopeId = "default"
-    project_id: ProjectScopeId = "default"
-
-
-# ── Extractor builder ───────────────────────────────────────────────────────
-
-
-def _build_extractor() -> KnowledgeExtractor:
-    """Lazily import and build the knowledge extractor from ``everalgo``.
-
-    Returns an object satisfying the ``KnowledgeExtractor`` protocol
-    defined in ``service.knowledge``.
-    """
-    # Deferred: heavy everalgo import; only needed on document creation.
-    from everalgo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
-
-    return AlgoKnowledgeExtractor(llm=get_llm_client())
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _reject_oversized_upload(file: UploadFile) -> None:
-    """Reject an upload whose declared size exceeds the configured limit.
-
-    Raises:
-        InvalidInputError: When ``file.size`` exceeds ``knowledge.max_upload_bytes``.
-    """
-    max_bytes = load_settings().knowledge.max_upload_bytes
-    if file.size is not None and file.size > max_bytes:
-        limit_mib = max_bytes / (1024 * 1024)
-        raise InvalidInputError(f"Uploaded file exceeds the {limit_mib:.1f} MiB limit.")
-
-
-_PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {"md", "txt", "rst", "markdown", "text"}
-)
-# Explicit mime allowlist. ``text/*`` prefix matching would let
-# ``text/html`` (and any future ``text/xml`` etc.) bypass the parser and
-# feed raw markup — script tags, HTML comments, style blocks — straight
-# into the knowledge-extraction LLM. everalgo's HTML parser runs
-# ``clean_html_for_llm`` (strips ``<script>/<style>/<nav>/<iframe>`` +
-# comments) and caps output at 1 MiB — semantics we must NOT skip.
-_PLAIN_TEXT_MIMES: frozenset[str] = frozenset(
-    {"text/plain", "text/markdown", "text/x-rst", "text/x-markdown"}
-)
-
-
-def _looks_like_utf8_text(file: UploadFile) -> bool:
-    """Decide whether to skip the parser and go straight to UTF-8 decode.
-
-    A file is treated as plain UTF-8 text when its ``content_type`` is on
-    ``_PLAIN_TEXT_MIMES`` (browsers set ``text/markdown`` / ``text/plain``
-    for ``.md`` / ``.txt`` uploads), or when the mime is missing /
-    ``application/octet-stream`` (typical for ``curl -F file=@x.md``
-    without an explicit ``type=`` hint) AND the filename extension is on
-    the extension allowlist.
-
-    ``text/html`` is deliberately EXCLUDED — HTML uploads must go through
-    the parser so ``clean_html_for_llm`` can strip active markup and cap
-    the payload; the ``text/*`` prefix match this file used to carry
-    would have let raw HTML (including ``<script>`` bodies and
-    ``<!-- prompt injection -->`` comments) reach the LLM as-is.
-    """
-    mime = (file.content_type or "").lower()
-    if mime in _PLAIN_TEXT_MIMES:
-        return True
-    if mime and mime != "application/octet-stream":
-        return False
-    if file.filename and "." in file.filename:
-        return file.filename.rsplit(".", 1)[-1].lower() in _PLAIN_TEXT_EXTENSIONS
-    return False
-
-
-def _decode_as_utf8(raw_bytes: bytes) -> ParsedContent:
-    """Decode ``raw_bytes`` as UTF-8 or raise a caller-friendly error."""
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise UnsupportedModalityError(
-            "File is not UTF-8 text. "
-            "Install everos[multimodal] for PDF/HTML/DOCX support."
-        ) from exc
-    parsed = ParsedContent(text=text)
-    if not parsed.text or not parsed.text.strip():
-        raise InvalidInputError("Uploaded file has no valid content.")
-    return parsed
-
-
-async def _parse_upload(
-    file: UploadFile, *, raw_bytes: bytes | None = None
-) -> ParsedContent:
-    """Parse an uploaded file via component.parser, or fall back to UTF-8.
-
-    Args:
-        file: FastAPI upload file handle.
-        raw_bytes: Pre-read bytes; when provided, skips ``file.read()``.
-
-    Raises:
-        UnsupportedModalityError: When the file cannot be parsed.
-        InvalidInputError: When the parsed content is empty.
-    """
-    from everos.component.parser import parser_available  # Deferred: optional dep
-
-    if raw_bytes is None:
-        raw_bytes = await file.read()
-
-    # Short-circuit plain-text uploads even when everalgo.parser is
-    # installed — the parser path depends on [multimodal] being
-    # configured, which markdown/plaintext ingestion doesn't need.
-    if _looks_like_utf8_text(file):
-        return _decode_as_utf8(raw_bytes)
-
-    if parser_available():
-        from everalgo.types import RawFile  # Deferred: optional dep
-
-        from everos.component.parser import aparse_file  # Deferred: optional dep
-
-        extension = ""
-        if file.filename and "." in file.filename:
-            extension = file.filename.rsplit(".", 1)[-1].lower()
-        parsed = await aparse_file(
-            RawFile(
-                content=raw_bytes,
-                mime=file.content_type or "",
-                extension=extension,
-            )
-        )
-        if not parsed.text or not parsed.text.strip():
-            raise InvalidInputError("Uploaded file has no valid content.")
-        return parsed
-
-    return _decode_as_utf8(raw_bytes)
-
-
-def _map_create_result(result: CreateDocumentResult) -> DocumentCreateResponse:
-    """Map CreateDocumentResult to response DTO."""
-    return DocumentCreateResponse(
-        doc_id=result.doc_id,
-        category_id=result.category_id,
-        topic_count=result.topic_count,
-        source_name=result.source_name,
-        md_path=result.md_path,
-        original_file_path=result.original_file_path,
-    )
-
-
-def _map_document_detail(detail: DocumentDetail) -> DocumentDetailResponse:
-    """Map DocumentDetail to response DTO."""
-    return DocumentDetailResponse(
-        doc_id=detail.doc_id,
-        category_id=detail.category_id,
-        title=detail.title,
-        summary=detail.summary,
-        source_name=detail.source_name,
-        source_type=detail.source_type,
-        original_file_path=detail.original_file_path,
-        topics=[
-            TopicOverviewDTO(
-                topic_id=t.topic_id,
-                topic_name=t.topic_name,
-                topic_path=t.topic_path,
-                depth=t.depth,
-                summary=t.summary,
-            )
-            for t in detail.topics
-        ],
-        created_at=to_display_tz(detail.created_at),
-        updated_at=to_display_tz(detail.updated_at),
-    )
-
-
-def _map_list_result(result: DocumentListResult) -> DocumentListResponse:
-    """Map DocumentListResult to response DTO."""
-    return DocumentListResponse(
-        documents=[
-            DocumentOverviewItemDTO(
-                doc_id=d.doc_id,
-                category_id=d.category_id,
-                title=d.title,
-                topic_count=d.topic_count,
-                created_at=to_display_tz(d.created_at),
-            )
-            for d in result.documents
-        ],
-        total=result.total,
-        page=result.page,
-        page_size=result.page_size,
-    )
-
-
-def _map_topic_detail(detail: TopicDetail) -> TopicDetailResponse:
-    """Map TopicDetail to response DTO."""
-    return TopicDetailResponse(
-        topic_id=detail.topic_id,
-        doc_id=detail.doc_id,
-        category_id=detail.category_id,
-        topic_name=detail.topic_name,
-        topic_path=detail.topic_path,
-        depth=detail.depth,
-        summary=detail.summary,
-        content=detail.content,
-        content_labels=detail.content_labels,
-        parent_topic_id=detail.parent_topic_id,
-        children_topic_ids=detail.children_topic_ids,
-        created_at=to_display_tz(detail.created_at),
-        updated_at=to_display_tz(detail.updated_at),
-    )
-
-
-def _map_search_result(result: SearchKnowledgeResult) -> KnowledgeSearchResponse:
-    """Map SearchKnowledgeResult to response DTO."""
-    return KnowledgeSearchResponse(
-        hits=[
-            SearchHitDTO(
-                topic_id=h.topic_id,
-                category_id=h.category_id,
-                topic_name=h.topic_name,
-                topic_path=h.topic_path,
-                depth=h.depth,
-                summary=h.summary,
-                content=h.content,
-                score=h.score,
-                retrieval_method=h.retrieval_method,
-                source=h.source,
-                document=DocumentContextDTO(
-                    doc_id=h.document.doc_id,
-                    title=h.document.title,
-                    summary=h.document.summary,
-                ),
-            )
-            for h in result.hits
-        ],
-        total=result.total,
-        took_ms=result.took_ms,
-    )
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -550,7 +91,8 @@ def _map_search_result(result: SearchKnowledgeResult) -> KnowledgeSearchResponse
 )
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def create_document_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     file: UploadFile,
     title: _FormTitle,
     source_type: _FormOptStr = None,
@@ -559,26 +101,17 @@ async def create_document_route(
     project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Upload a new knowledge document."""
-    rid = extract_request_id(request)
-    _reject_oversized_upload(file)
-    file_content = await file.read()
-    parsed = await _parse_upload(file, raw_bytes=file_content)
-    source_name = file.filename
-
-    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
-    extractor = _build_extractor()
-
-    result = await create_document(
-        extractor=extractor,
-        parsed=parsed,
+    result = await app.knowledge.create_from_upload(
+        file,
         title=title,
-        knowledge_dir=knowledge_dir,
-        source_name=source_name,
+        app_id=app_id,
+        project_id=project_id,
         source_type=source_type,
         category_id=category_id,
-        file_content=file_content,
     )
-    return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
+    return SuccessEnvelope(
+        request_id=request_id, data=DocumentCreateResponse.from_result(result)
+    )
 
 
 @router.put(
@@ -588,7 +121,8 @@ async def create_document_route(
 )
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def replace_document_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     doc_id: _PathDocId,
     file: UploadFile,
     title: _FormTitle,
@@ -598,44 +132,36 @@ async def replace_document_route(
     project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Replace an existing knowledge document (atomic backup/restore on failure)."""
-    rid = extract_request_id(request)
-    _reject_oversized_upload(file)
-    file_content = await file.read()
-    parsed = await _parse_upload(file, raw_bytes=file_content)
-
-    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
-    extractor = _build_extractor()
-
-    result = await replace_document(
-        extractor=extractor,
-        parsed=parsed,
+    result = await app.knowledge.replace_from_upload(
+        doc_id,
+        file,
         title=title,
-        doc_id=doc_id,
-        knowledge_dir=knowledge_dir,
-        source_name=file.filename,
+        app_id=app_id,
+        project_id=project_id,
         source_type=source_type,
         category_id=category_id,
-        file_content=file_content,
     )
-    return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
+    return SuccessEnvelope(
+        request_id=request_id, data=DocumentCreateResponse.from_result(result)
+    )
 
 
 @router.delete("/documents/{doc_id}", response_model=None)
 async def delete_document_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     doc_id: _PathDocId,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[DocumentDeleteResponse] | Response:
     """Remove a knowledge document."""
-    rid = extract_request_id(request)
-    result = await delete_document(doc_id, app_id, project_id)
+    result = await app.knowledge.delete_document(doc_id, app_id, project_id)
 
     if result.deleted_topics == 0:
         return Response(status_code=204)
 
     return SuccessEnvelope(
-        request_id=rid,
+        request_id=request_id,
         data=DocumentDeleteResponse(
             doc_id=result.doc_id,
             deleted_topics=result.deleted_topics,
@@ -646,7 +172,8 @@ async def delete_document_route(
 @router.get("/documents")
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def list_documents_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
     category_id: _QueryOptStr = None,
@@ -656,8 +183,7 @@ async def list_documents_route(
     sort_order: _QuerySortOrder = "desc",
 ) -> SuccessEnvelope[DocumentListResponse]:
     """Paginated document listing."""
-    rid = extract_request_id(request)
-    result = await list_documents(
+    result = await app.knowledge.list_documents(
         app_id,
         project_id,
         category_id=category_id,
@@ -666,33 +192,39 @@ async def list_documents_route(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    return SuccessEnvelope(request_id=rid, data=_map_list_result(result))
+    return SuccessEnvelope(
+        request_id=request_id, data=DocumentListResponse.from_result(result)
+    )
 
 
 @router.get("/documents/{doc_id}")
 async def get_document_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     doc_id: _PathDocId,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[DocumentDetailResponse]:
     """Fetch a single document with its topic list."""
-    rid = extract_request_id(request)
-    detail = await get_document(doc_id, app_id, project_id)
-    return SuccessEnvelope(request_id=rid, data=_map_document_detail(detail))
+    detail = await app.knowledge.get_document(doc_id, app_id, project_id)
+    return SuccessEnvelope(
+        request_id=request_id, data=DocumentDetailResponse.from_result(detail)
+    )
 
 
 @router.get("/topics/{topic_id}")
 async def get_topic_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     topic_id: _PathTopicId,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[TopicDetailResponse]:
     """Fetch a single topic with full content."""
-    rid = extract_request_id(request)
-    detail = await get_topic(topic_id, app_id, project_id)
-    return SuccessEnvelope(request_id=rid, data=_map_topic_detail(detail))
+    detail = await app.knowledge.get_topic(topic_id, app_id, project_id)
+    return SuccessEnvelope(
+        request_id=request_id, data=TopicDetailResponse.from_result(detail)
+    )
 
 
 @router.post(
@@ -700,12 +232,12 @@ async def get_topic_route(
     dependencies=[Depends(_require_knowledge_capabilities)],
 )
 async def search_knowledge_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     req: KnowledgeSearchRequest,
 ) -> SuccessEnvelope[KnowledgeSearchResponse]:
     """Knowledge retrieval (keyword / vector / hybrid)."""
-    rid = extract_request_id(request)
-    result = await search_knowledge(
+    result = await app.knowledge.search_knowledge(
         query=req.query,
         method=req.method,
         top_k=req.top_k,
@@ -714,18 +246,20 @@ async def search_knowledge_route(
         app_id=req.app_id,
         project_id=req.project_id,
     )
-    return SuccessEnvelope(request_id=rid, data=_map_search_result(result))
+    return SuccessEnvelope(
+        request_id=request_id, data=KnowledgeSearchResponse.from_result(result)
+    )
 
 
 @router.get("/categories")
 async def list_categories_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[CategoryListResponse]:
     """List taxonomy categories from ``.taxonomy.md``."""
-    rid = extract_request_id(request)
-    overviews = await list_categories(app_id, project_id)
+    overviews = await app.knowledge.list_categories(app_id, project_id)
     categories = [
         CategoryDTO(
             category_id=c.category_id,
@@ -735,20 +269,20 @@ async def list_categories_route(
         for c in overviews
     ]
     return SuccessEnvelope(
-        request_id=rid,
+        request_id=request_id,
         data=CategoryListResponse(categories=categories),
     )
 
 
 @router.patch("/documents/{doc_id}")
 async def patch_document_route(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     doc_id: _PathDocId,
     req: DocumentPatchRequest,
 ) -> SuccessEnvelope[DocumentPatchResponse]:
     """Update mutable document metadata fields."""
-    rid = extract_request_id(request)
-    result = await patch_document(
+    result = await app.knowledge.patch_document(
         doc_id,
         req.app_id,
         req.project_id,
@@ -756,7 +290,7 @@ async def patch_document_route(
         category_id=req.category_id,
     )
     return SuccessEnvelope(
-        request_id=rid,
+        request_id=request_id,
         data=DocumentPatchResponse(
             doc_id=result.doc_id,
             updated_fields=result.updated_fields,

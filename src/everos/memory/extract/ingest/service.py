@@ -24,10 +24,10 @@ Output: :class:`everos.memory.IngestResult`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from everos.component.utils.datetime import from_timestamp
 from everos.config import load_settings
+from everos.core.utils.datetime import from_timestamp
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
 from everos.memory.extract.parser import (
     enrich_content_items,
@@ -38,12 +38,25 @@ from everos.memory.extract.parser import (
 from .id_gen import gen_message_id
 from .multimodal import coerce_items, derive_text
 
+if TYPE_CHECKING:
+    from everalgo.llm import LLMClient
 
-async def process(payload: dict[str, Any]) -> IngestResult:
+    from everos.component.parser import RawFileBuilder
+
+
+async def process(
+    payload: dict[str, Any],
+    *,
+    multimodal_llm: LLMClient | None,
+    raw_file_builder: RawFileBuilder,
+) -> IngestResult:
     """Normalise the raw add payload into an :class:`IngestResult`.
 
-    The function is ``async`` for symmetry with the rest of the pipeline,
-    even though current logic is pure CPU.
+    Args:
+        payload: The raw add payload.
+        multimodal_llm: Parses non-text content items; ``None`` when
+            ``[multimodal]`` is not configured.
+        raw_file_builder: Host input hydration, passed to each unparsed item.
     """
     session_id: str = payload["session_id"]
     app_id: str = payload.get("app_id") or "default"
@@ -58,6 +71,8 @@ async def process(payload: dict[str, Any]) -> IngestResult:
             require_multimodal()
             await enrich_content_items(
                 content_items,
+                llm=multimodal_llm,
+                raw_file_builder=raw_file_builder,
                 max_concurrency=load_settings().multimodal.max_concurrency,
             )
         text, non_text = derive_text(content_items)

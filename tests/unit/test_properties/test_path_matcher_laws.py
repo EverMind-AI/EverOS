@@ -26,7 +26,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from everos.memory.cascade.registry import KIND_REGISTRY, KindSpec, match_kind
+from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec, match_kind
 
 _segment = st.from_regex(r"[A-Za-z0-9_-]{1,12}", fullmatch=True)
 

@@ -16,14 +16,13 @@ import pyarrow as pa
 import pytest
 
 from everos.infra.persistence.lancedb import (
-    _TABLE_SCHEMA_VERSION,
     BUSINESS_SCHEMAS_WITH_VECTOR,
     AtomicFact,
     Episode,
     LanceDBMigrationError,
-    lancedb_manager,
-    migrate_table_schemas,
 )
+from everos.infra.persistence.lancedb.backend import _TABLE_SCHEMA_VERSION
+from tests.fakes.storage import Storage
 
 
 def _v1_shape_schema() -> pa.Schema:
@@ -40,37 +39,31 @@ def _v1_shape_schema() -> pa.Schema:
     )
 
 
-@pytest.fixture(autouse=True)
-async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Point the singleton connection at an isolated memory-root."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    yield
-    await lancedb_manager.dispose_connection()
-
-
-async def _create_v1_table(name: str) -> None:
-    conn = await lancedb_manager.get_connection()
+async def _create_v1_table(storage: Storage, name: str) -> None:
+    conn = await storage.lance.connect()
     await conn.create_table(name, schema=_v1_shape_schema())
 
 
-async def test_migration_alters_all_business_tables_to_nullable() -> None:
+async def test_migration_alters_all_business_tables_to_nullable(
+    storage: Storage,
+) -> None:
     for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
-        await _create_v1_table(schema.TABLE_NAME)
+        await _create_v1_table(storage, schema.TABLE_NAME)
 
-    await migrate_table_schemas()
+    await storage.backend.migrate_table_schemas()
 
     for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
-        table = await lancedb_manager.get_table(schema.TABLE_NAME, schema)
+        table = await storage.lance.table(schema.TABLE_NAME, schema)
         arrow_schema = await table.schema()
         assert arrow_schema.field("vector").nullable is True
 
 
-async def test_migration_writes_marker_with_target_version(tmp_path: Path) -> None:
-    await _create_v1_table(Episode.TABLE_NAME)
+async def test_migration_writes_marker_with_target_version(
+    tmp_path: Path, storage: Storage
+) -> None:
+    await _create_v1_table(storage, Episode.TABLE_NAME)
 
-    await migrate_table_schemas()
+    await storage.backend.migrate_table_schemas()
 
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"
     assert marker.exists()
@@ -78,14 +71,14 @@ async def test_migration_writes_marker_with_target_version(tmp_path: Path) -> No
 
 
 async def test_migration_idempotent_second_call_skips_alter(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Second call short-circuits at the marker; ``alter_columns`` is not
     re-issued."""
-    await _create_v1_table(Episode.TABLE_NAME)
-    await migrate_table_schemas()
+    await _create_v1_table(storage, Episode.TABLE_NAME)
+    await storage.backend.migrate_table_schemas()
 
-    table = await lancedb_manager.get_table(Episode.TABLE_NAME, Episode)
+    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
     calls: list[object] = []
     original_alter_columns = table.alter_columns
 
@@ -95,14 +88,13 @@ async def test_migration_idempotent_second_call_skips_alter(
 
     monkeypatch.setattr(table, "alter_columns", _spy_alter_columns)
 
-    await migrate_table_schemas()
+    await storage.backend.migrate_table_schemas()
 
     assert calls == []
 
 
 async def test_migrate_table_schemas_raises_on_alter_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Any table's failing ``alter_columns`` must fail startup loudly:
     :class:`LanceDBMigrationError` is raised, the version marker stays
@@ -112,9 +104,9 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     NULL vectors into a still-NOT-NULL column and silently drop every
     row."""
     for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
-        await _create_v1_table(schema.TABLE_NAME)
+        await _create_v1_table(storage, schema.TABLE_NAME)
 
-    episode_table = await lancedb_manager.get_table(Episode.TABLE_NAME, Episode)
+    episode_table = await storage.lance.table(Episode.TABLE_NAME, Episode)
 
     async def _raise_alter_columns(*alterations: object) -> object:
         raise RuntimeError("simulated alter_columns failure")
@@ -122,7 +114,7 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     monkeypatch.setattr(episode_table, "alter_columns", _raise_alter_columns)
 
     with pytest.raises(LanceDBMigrationError) as excinfo:
-        await migrate_table_schemas()
+        await storage.backend.migrate_table_schemas()
 
     message = str(excinfo.value)
     assert Episode.TABLE_NAME in message
@@ -142,8 +134,6 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     # Sibling tables reached in the loop before the failure keep the
     # per-table alter that already succeeded — only the marker write
     # (i.e. "the migration as a whole is done") is gated.
-    atomic_fact_table = await lancedb_manager.get_table(
-        AtomicFact.TABLE_NAME, AtomicFact
-    )
+    atomic_fact_table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
     atomic_fact_schema = await atomic_fact_table.schema()
     assert atomic_fact_schema.field("vector").nullable is True

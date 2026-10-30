@@ -9,6 +9,7 @@ touches the search request path: ``enqueue`` is O(1) and never blocks / raises
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 
 from pydantic import SecretStr
 
@@ -24,31 +25,45 @@ from everos.core.observability.tracing.scores import (
     shutdown_score_sink,
 )
 
+_ENABLED = ObservabilitySettings(
+    enabled=True,
+    emit_recall_scores=True,
+    langfuse_public_key="pk",
+    langfuse_secret_key=SecretStr("sk"),
+    langfuse_host="https://us.cloud.langfuse.com",
+)
+
+
+def _capture(into: list[dict]) -> Callable[[dict], Awaitable[None]]:
+    async def sender(payload: dict) -> None:
+        into.append(payload)
+
+    return sender
+
+
+def _emit_one() -> None:
+    emit_recall_scores(
+        trace_id="tid", observation_id="oid", top_score=1.0, hit=None, method="m"
+    )
+
 
 async def test_init_score_sink_tears_down_previous() -> None:
     """Re-init without an intervening shutdown must not leak the previous
-    sink's worker task + httpx client: the old sink is stopped first."""
-    settings = ObservabilitySettings(
-        enabled=True,
-        emit_recall_scores=True,
-        langfuse_public_key="pk",
-        langfuse_secret_key=SecretStr("sk"),
-        langfuse_host="https://us.cloud.langfuse.com",
-    )
-    from everos.core.observability.tracing import scores as scores_mod
-
+    sink: the old sink is stopped -- its queue drained -- before the new one
+    takes over."""
+    first: list[dict] = []
+    second: list[dict] = []
     try:
-        assert await init_score_sink(settings) is True
-        first = scores_mod._sink
-        assert first is not None and first._task is not None
+        assert await init_score_sink(_ENABLED, sender=_capture(first)) is True
+        _emit_one()
 
-        assert await init_score_sink(settings) is True
-        # The previous sink was torn down (stop() nulls its task) and a new
-        # sink installed in its place.
-        assert first._task is None
-        assert scores_mod._sink is not first
+        assert await init_score_sink(_ENABLED, sender=_capture(second)) is True
+        assert len(first) == 1
+        _emit_one()
     finally:
         await shutdown_score_sink()
+    assert len(first) == 1
+    assert len(second) == 1
 
 
 async def test_worker_sends_payload_in_langfuse_shape() -> None:
@@ -106,21 +121,12 @@ async def test_worker_forwards_score_metadata() -> None:
 
 async def _emitted(**kwargs: object) -> list[dict]:
     """Install a capturing sink, run ``emit_recall_scores``, return the payloads."""
-    from everos.core.observability.tracing import scores as scores_mod
-
     sent: list[dict] = []
-
-    async def sender(payload: dict) -> None:
-        sent.append(payload)
-
-    sink = RecallScoreSink(sender=sender, max_queue=10)
-    sink.start()
-    previous, scores_mod._sink = scores_mod._sink, sink
+    await init_score_sink(_ENABLED, sender=_capture(sent))
     try:
         emit_recall_scores(**kwargs)  # type: ignore[arg-type]
-        await sink.stop()  # drains before returning
     finally:
-        scores_mod._sink = previous
+        await shutdown_score_sink()  # drains before returning
     return sent
 
 
@@ -155,19 +161,19 @@ async def test_uncalibrated_method_reports_raw_name_and_no_hit() -> None:
 
 
 async def test_emit_is_a_noop_without_a_sink() -> None:
-    from everos.core.observability.tracing import scores as scores_mod
+    await shutdown_score_sink()
+    _emit_one()
 
-    previous, scores_mod._sink = scores_mod._sink, None
-    try:
-        emit_recall_scores(
-            trace_id="tid",
-            observation_id="oid",
-            top_score=1.0,
-            hit=True,
-            method="hybrid",
-        )
-    finally:
-        scores_mod._sink = previous
+
+async def test_disabled_scores_install_no_sink() -> None:
+    sent: list[dict] = []
+    disabled = ObservabilitySettings(enabled=True, emit_recall_scores=False)
+
+    assert await init_score_sink(disabled, sender=_capture(sent)) is False
+    _emit_one()
+    await shutdown_score_sink()
+
+    assert sent == []
 
 
 async def test_enqueue_never_blocks_or_raises_when_full() -> None:

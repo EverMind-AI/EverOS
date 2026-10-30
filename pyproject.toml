@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.5.1"
+version = "1.6.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -88,29 +88,25 @@ dependencies = [
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
     # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-user-memory==0.4.0",
-    "everalgo-agent-memory==0.4.0",
-    "everalgo-rank==0.4.1",
-    "everalgo-knowledge==0.1.1",
-
-    # everalgo's own transitive layer, pinned to what this repo's uv.lock —
-    # and therefore the whole test suite — actually resolves. The packages
-    # above declare it as `>=0.2.0,<2.0.0`, treating a 0.x line as if a major
-    # bump were the only breaking one, so a fresh `pip install everos` picks
-    # up releases the suite has never run against. That is not theoretical:
-    # everalgo-boundary 0.3.0 added a third required field to the public
-    # `DetectionResult` NamedTuple while everalgo-agent-memory 0.4.0 still
-    # builds it with two, so `POST /add` answered 500 on a default
-    # (`memorize.mode = "agent"`) install of 1.2.3 while every local suite
-    # stayed green on the locked 0.2.1. Raise these deliberately, together
-    # with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-boundary==0.2.1",
-    "everalgo-core==0.3.0",
-    "everalgo-clustering==0.2.1",
+    #
+    # All eight everalgo packages (the four below, the three transitive ones
+    # after them, and everalgo-parser in the `multimodal` extra) ship on one
+    # contract line -- currently the 2026-10-13 line, built on everalgo-core
+    # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
+    # one another, so a fresh `pip install everos` would otherwise mix lines
+    # the suite has never run together. Pin every one with `==` and raise them
+    # together, with a run of the release smoke against a PyPI-resolved install.
+    "everalgo-user-memory==0.9.0rc4",
+    "everalgo-agent-memory==0.6.0rc3",
+    "everalgo-rank==0.5.0rc3",
+    "everalgo-knowledge==0.3.0rc2",
+    "everalgo-boundary==0.4.1",
+    "everalgo-core==0.6.0",
+    "everalgo-clustering==0.3.0rc2",
 ]
 
 [project.optional-dependencies]
-multimodal = ["everalgo-parser[svg]>=0.2.1"]  # [svg] bundles cairosvg → SVG works by default
+multimodal = ["everalgo-parser[svg]==0.3.0rc2"]  # [svg] bundles cairosvg → SVG works by default
 # Native OpenTelemetry tracing export. Optional — EverOS never imports these
 # unless [observability] is enabled. Install with: pip install everos[otel]
 otel = [
@@ -244,15 +240,96 @@ exclude_lines = [
 
 [tool.importlinter]
 root_packages = ["everos"]
+# Annotation-only imports under ``if TYPE_CHECKING:`` never run, so they
+# cannot couple layers at runtime; contracts check runtime imports only.
+exclude_type_checking_imports = true
+# External packages enter the graph so ``no-bypass-facade`` can name
+# structlog / logging / opentelemetry.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
+# Dependency inversion (stage 2b): the domain declares storage ports in
+# ``everos.memory.ports`` and ``everos.infra`` implements them, so infra
+# sits outside this order; ``infra-inverted`` and ``memory-forbidden``
+# below pin both directions.
 name = "Layered architecture"
 type = "layers"
 layers = [
     "everos.entrypoints",
     "everos.service",
     "everos.memory",
+]
+
+[[tool.importlinter.contracts]]
+# Entry points translate a protocol (HTTP, CLI, TUI) into facade calls and
+# back. Request / response DTOs and error types reach them through the
+# ``everos.service`` facade or ``everos.core``; nothing below the service is
+# theirs to import. Direct imports only: an entry point reaching the domain
+# *through* the service is the point.
+name = "entrypoints-forbidden: entry points import the service, not what it wires"
+type = "forbidden"
+source_modules = ["everos.entrypoints"]
+forbidden_modules = [
+    "everos.memory",
     "everos.infra",
+    "everos.component",
+    "everalgo",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "infra-inverted: infra reaches the domain only through its ports"
+type = "forbidden"
+source_modules = ["everos.infra"]
+forbidden_modules = [
+    "everos.memory.extract",
+    "everos.memory.get",
+    "everos.memory.custom_instructions",
+    "everos.memory.reflection",
+    "everos.memory.search",
+    "everos.memory.strategies",
+    "everos.memory._partition_locks",
+    "everos.service",
+    "everos.entrypoints",
+]
+
+[[tool.importlinter.contracts]]
+name = "memory-forbidden: the domain does not import infra"
+type = "forbidden"
+source_modules = ["everos.memory"]
+forbidden_modules = ["everos.infra"]
+
+[[tool.importlinter.contracts]]
+name = "core-forbidden: core and config depend on nothing above them"
+type = "forbidden"
+source_modules = ["everos.core", "everos.config"]
+forbidden_modules = [
+    "everos.component",
+    "everos.memory",
+    "everos.service",
+    "everos.entrypoints",
+    "everos.infra",
+]
+
+[[tool.importlinter.contracts]]
+name = "component-forbidden: injectable providers depend on no layer"
+type = "forbidden"
+source_modules = ["everos.component"]
+forbidden_modules = [
+    "everos.memory",
+    "everos.service",
+    "everos.entrypoints",
+    "everos.infra",
+]
+
+[[tool.importlinter.contracts]]
+name = "mappers-pure: algo <-> domain mapping does no IO"
+type = "forbidden"
+source_modules = ["everos.memory.mappers"]
+forbidden_modules = [
+    "everos.infra",
+    "everos.component",
+    "everos.service",
 ]
 
 [[tool.importlinter.contracts]]
@@ -268,6 +345,7 @@ forbidden_modules = [
     "everos.infra.persistence.index.**",
     "everos.infra.persistence.records.**",
     "everos.infra.persistence.milvus.**",
+    "everos.infra.cascade.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -281,34 +359,68 @@ forbidden_modules = [
 # because the transitive scan walks one hop further into the package.
 #
 # Direct imports from outer layers into a subpackage internal module
-# (e.g. ``from everos.infra.persistence.sqlite.tables import X`` written
+# (e.g. ``from everos.infra.persistence.sqlite._tables import X`` written
 # in ``service`` or ``entrypoints``) remain blocked — that edge is not
 # in this whitelist.
 #
-# One edge below is *not* intra-subpackage wiring: ``lancedb -> records``.
+# Two edges below are *not* intra-subpackage wiring: ``lancedb -> records``
+# and ``index -> records``.
 # ``records/`` holds the table declarations every index backend reads
 # (TABLE_NAME / BM25_FIELDS / PRIMARY_KEY); it is the one shared schema
 # module inside ``persistence/`` (docs/architecture.md, dependency table).
 ignore_imports = [
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._tables",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._repos",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repositories",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
-    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb._repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.backend",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._mds",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._writers",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._readers",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.maintenance",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.vector_projection",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.vector_backfill",
     "everos.infra.persistence.index -> everos.infra.persistence.index._provenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
     "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
-    "everos.infra.persistence.index -> everos.infra.persistence.index.router",
     "everos.infra.persistence.index -> everos.infra.persistence.index.schema",
-    # The facade and the router select the engine at call time; the Milvus
-    # import is function-level so pymilvus stays an optional extra, but the
-    # transitive scan still walks it.
-    "everos.infra.persistence.index -> everos.infra.persistence.milvus",
-    "everos.infra.persistence.index.router -> everos.infra.persistence.milvus",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.derived_index",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.repositories",
+    # The storage factories are persistence's own wiring: they build the
+    # configured engine's backend (Milvus only when selected, so pymilvus
+    # stays an optional extra) and the domain's index adapters over it.
+    "everos.infra.persistence.factories -> everos.infra.persistence.index.adapters",
+    "everos.infra.persistence.factories -> everos.infra.persistence.milvus",
+    # Persistence primitives moved out of ``core`` (stage 2a): each storage
+    # subpackage facade re-exports its own ``base`` primitives, and
+    # ``records`` re-exports the base table it shares with every backend.
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._base",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._base",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb._base",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.base",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.vector",
+    "everos.infra.persistence.records -> everos.infra.persistence.records._parent_type",
+    "everos.infra.persistence.records -> everos.infra.persistence.records._provenance_key",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_case",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_skill",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.atomic_fact",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.episode",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.foresight",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.knowledge_topic",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
+    # The cascade facade assembles its public surface from its own modules.
+    "everos.infra.cascade -> everos.infra.cascade._worker",
+    "everos.infra.cascade -> everos.infra.cascade.admin",
+    "everos.infra.cascade -> everos.infra.cascade.orchestrator",
+    "everos.infra.cascade -> everos.infra.cascade.registry",
 ]
 
 [[tool.importlinter.contracts]]
@@ -323,24 +435,104 @@ type = "forbidden"
 source_modules = [
     "everos.infra.persistence.index.protocols",
     "everos.infra.persistence.index.schema",
-    "everos.infra.persistence.predicate",
+    "everos.infra.persistence.index.vector_projection",
+    "everos.memory.ports",
 ]
 forbidden_modules = [
     "everos.infra.persistence.lancedb",
     "everos.infra.persistence.milvus",
-    "everos.core.persistence.lancedb",
 ]
 
 [[tool.importlinter.contracts]]
-name = "OME does not depend on memory/service/entrypoints or sibling infra subpackages"
+# The record models declare columns, keys and which columns are embeddings;
+# every backend derives its physical schema from them through ``schema_for``.
+# The moment a record imports an engine (or its storage format), the
+# declarations stop being shared and the vector width can creep back into
+# import time (issue #476). Indirect imports are checked, so a helper module
+# cannot smuggle an engine in either.
+name = "records-neutral: record declarations know no index backend"
+type = "forbidden"
+source_modules = ["everos.infra.persistence.records"]
+forbidden_modules = [
+    "everos.infra.persistence.lancedb",
+    "everos.infra.persistence.milvus",
+    "lancedb",
+    "pymilvus",
+    "pyarrow",
+]
+
+[[tool.importlinter.contracts]]
+name = "OME does not depend on service/entrypoints or sibling infra subpackages"
 type = "forbidden"
 source_modules = ["everos.infra.ome"]
 forbidden_modules = [
     "everos.infra.persistence",
-    "everos.memory",
     "everos.service",
     "everos.entrypoints",
 ]
+
+[[tool.importlinter.contracts]]
+# The domain declares the types OME schedules (events, triggers, gates,
+# StrategySpec) in ``everos.memory.ports``; OME imports those and nothing
+# else of the domain. Direct imports only: the ports themselves reach
+# ``memory.models`` (and ``memory.deps`` for an annotation), which OME
+# never touches by name.
+name = "ome-ports-only: OME reaches the domain only through its ports"
+type = "forbidden"
+source_modules = ["everos.infra.ome"]
+forbidden_modules = [
+    "everos.memory._partition_locks",
+    "everos.memory.deps",
+    "everos.memory.events",
+    "everos.memory.extract",
+    "everos.memory.get",
+    "everos.memory.mappers",
+    "everos.memory.models",
+    "everos.memory.custom_instructions",
+    "everos.memory.reflection",
+    "everos.memory.search",
+    "everos.memory.strategies",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+# The service layer has one assembler: ``service.bootstrap`` builds every
+# adapter and provider and injects them, so the use-case modules depend on
+# ports and protocols only. Direct imports only -- a use case reaching
+# ``bootstrap`` is the facade, not a bypass. A component protocol is
+# imported under ``TYPE_CHECKING`` (excluded above), which is what keeps
+# ``component.*.protocol`` usable here.
+name = "service-usecases-forbidden: only the bootstrap builds adapters"
+type = "forbidden"
+source_modules = ["everos.service"]
+forbidden_modules = [
+    "everos.infra",
+    "everos.component.embedding",
+    "everos.component.llm",
+    "everos.component.parser",
+    "everos.component.rerank",
+    "everos.component.tokenizer",
+]
+allow_indirect_imports = true
+ignore_imports = [
+    "everos.service.bootstrap -> everos.infra.**",
+    "everos.service.bootstrap -> everos.component.**",
+]
+
+[[tool.importlinter.contracts]]
+# Logging, tracing and metrics are reached through ``everos.core.observability``
+# only: the backends are swapped where they are configured, not where they
+# are called. ``core`` itself is the facade, so it is not a source here.
+name = "no-bypass-facade: business layers log and trace through core.observability"
+type = "forbidden"
+source_modules = [
+    "everos.entrypoints",
+    "everos.service",
+    "everos.memory",
+    "everos.infra",
+]
+forbidden_modules = ["structlog", "logging", "opentelemetry"]
+allow_indirect_imports = true
 
 [dependency-groups]
 dev = [

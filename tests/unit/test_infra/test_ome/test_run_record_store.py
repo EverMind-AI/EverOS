@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.utils.datetime import get_now_with_timezone
+from everos.core.utils.datetime import get_now_with_timezone
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.records import RunStatus

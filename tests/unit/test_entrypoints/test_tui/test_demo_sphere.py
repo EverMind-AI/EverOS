@@ -9,10 +9,12 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
     SHARED_EDGE_INNER_RADIUS,
     SPHERE_STATES,
     DotSphereFrame,
-    _cell_projection_radius,
-    _sphere_geometry,
     blend_dot_sphere_frames,
     build_dot_sphere,
+)
+from everos.entrypoints.tui.demo.widgets.sphere._geometry import (
+    _cell_projection_radius,
+    _sphere_geometry,
 )
 
 

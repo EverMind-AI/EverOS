@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,11 +14,11 @@ from everalgo.types import (
     ToolCallResult,
 )
 
-from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory.events import UserPipelineStarted
-from everos.memory.strategies.extract_foresight import extract_foresight
+from everos.memory.strategies import EXTRACT_FORESIGHT_SPEC, extract_foresight
+from tests.fakes import make_deps
 
-mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+_EXTRACTOR = "everos.memory.strategies.extract_foresight.ForesightExtractor"
 
 
 def _two_user_memcell() -> MemCell:
@@ -66,30 +65,20 @@ def _event() -> UserPipelineStarted:
     )
 
 
-async def test_strategy_meta_is_attached() -> None:
-    meta = extract_foresight.meta
-    assert meta.name == "extract_foresight"
-    assert UserPipelineStarted in meta.trigger.on
-    assert meta.emits == frozenset()
-    assert meta.max_retries == 2
+def test_spec() -> None:
+    spec = EXTRACT_FORESIGHT_SPEC
+    assert spec.name == "extract_foresight"
+    assert UserPipelineStarted in spec.trigger.on
+    assert spec.emits == frozenset()
+    assert spec.max_retries == 2
+    assert spec.enabled is False
 
 
-async def test_extracts_per_sender(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_extracts_per_sender() -> None:
     """Per-sender extraction (like Episode, unlike AtomicFact's fan-out)."""
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    deps = make_deps()
     with (
-        patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
         # sender_ids in the strategy are sorted: alice first, bob second.
@@ -99,36 +88,29 @@ async def test_extracts_per_sender(
                 [_foresight("u_bob", "buy plane tickets")],
             ]
         )
-        mock_wcls.return_value.append_entries = AsyncMock(return_value=[])
+        events = await extract_foresight(_event(), deps)
 
-        await extract_foresight(_event(), FakeStrategyContext())
-
+    assert events == []
     # Per-sender semantics: one LLM call per user sender.
-    assert mock_cls.return_value.aextract.await_count == 2
     sender_id_calls = [
         call.kwargs.get("sender_id")
         for call in mock_cls.return_value.aextract.call_args_list
     ]
     assert sender_id_calls == ["u_alice", "u_bob"]
 
-    # Per-owner batching: one batch call per owner; here each owner has 1
-    # foresight, so two batches each carrying 1 item.
-    assert mock_wcls.return_value.append_entries.call_count == 2
-    batched_owners = sorted(
-        c.args[0] for c in mock_wcls.return_value.append_entries.call_args_list
-    )
-    assert batched_owners == ["u_alice", "u_bob"]
+    # Each foresight lands under its own owner.
+    stored = deps.stores.foresight.records
+    assert sorted((s.scope.owner_id, s.item.foresight) for s in stored) == [
+        ("u_alice", "trip to tokyo"),
+        ("u_bob", "buy plane tickets"),
+    ]
 
-    matching = [e for e in captured if e.get("event") == "foresights_extracted"]
-    assert matching, "expected foresights_extracted log line"
-    record = matching[0]
+    record = next(e for e in captured if e.get("event") == "foresights_extracted")
     assert record["count"] == 2
     assert sorted(record["owner_ids"]) == ["u_alice", "u_bob"]
 
 
-async def test_writes_md_for_each_foresight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_writes_every_foresight_of_a_sender_in_one_batch() -> None:
     foresights = [
         Foresight(
             owner_id="u_alice",
@@ -145,98 +127,55 @@ async def test_writes_md_for_each_foresight(
             duration_days=7,
         ),
     ]
-
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
-    with (
-        patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
+    event = UserPipelineStarted(
+        memcell_id="mc_a",
+        session_id="s1",
+        memcell=MemCell(
+            items=[
+                ChatMessage(
+                    id="m1",
+                    role="user",
+                    content="planning a trip",
+                    timestamp=1_700_000_000_000,
+                    sender_id="u_alice",
+                )
+            ],
+            timestamp=1_700_000_000_000,
         ),
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightWriter"
-        ) as mock_wcls,
-    ):
+    )
+    deps = make_deps()
+    with patch(_EXTRACTOR) as mock_cls:
         mock_cls.return_value.aextract = AsyncMock(return_value=foresights)
-        mock_wcls.return_value.append_entries = AsyncMock(return_value=[])
+        await extract_foresight(event, deps)
 
-        event = UserPipelineStarted(
-            memcell_id="mc_a",
-            session_id="s1",
-            memcell=MemCell(
-                items=[
-                    ChatMessage(
-                        id="m1",
-                        role="user",
-                        content="planning a trip",
-                        timestamp=1_700_000_000_000,
-                        sender_id="u_alice",
-                    )
-                ],
-                timestamp=1_700_000_000_000,
-            ),
-        )
-        await extract_foresight(event, FakeStrategyContext())
-
-    # Single sender (u_alice) → one batch call with both foresights.
-    assert mock_wcls.return_value.append_entries.call_count == 1
-    batch_call = mock_wcls.return_value.append_entries.call_args
-    assert batch_call.args[0] == "u_alice"
-    items = batch_call.args[1]
-    assert len(items) == 2
-
-    # First foresight: no optional time fields
-    inline0, sections0 = items[0]
-    assert inline0["owner_id"] == "u_alice"
-    assert inline0["session_id"] == "s1"
-    assert inline0["parent_type"] == "memcell"
-    assert inline0["parent_id"] == "mc_a"
-    assert "sender_ids" not in inline0
-    assert "start_time" not in inline0
-    assert "duration_days" not in inline0
-    assert sections0 == {"Foresight": "trip to tokyo", "Evidence": "said so"}
-
-    # Second foresight: has start_time + duration_days
-    inline1, sections1 = items[1]
-    assert inline1["start_time"] == "2023-11-15"
-    assert inline1["duration_days"] == 7
-    assert sections1 == {"Foresight": "buy tickets", "Evidence": "confirmed"}
+    stored = deps.stores.foresight.records
+    assert [s.scope.owner_id for s in stored] == ["u_alice", "u_alice"]
+    first, second = (s.item for s in stored)
+    assert (first.session_id, first.parent_id) == ("s1", "mc_a")
+    assert (first.foresight, first.evidence) == ("trip to tokyo", "said so")
+    assert first.start_time is None
+    assert first.duration_days is None
+    assert (second.start_time, second.duration_days) == ("2023-11-15", 7)
+    assert (second.foresight, second.evidence) == ("buy tickets", "confirmed")
 
 
-async def test_skips_when_memcell_has_no_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_skips_when_memcell_has_no_messages() -> None:
     event = UserPipelineStarted(
         memcell_id="mc_b",
         session_id="s1",
         memcell=MemCell(items=[], timestamp=1_700_000_000_000),
     )
-
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    deps = make_deps()
     with (
-        patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
-        mock_cls.return_value.aextract = AsyncMock(return_value=[])
-        mock_wcls.return_value.append_entries = AsyncMock(return_value=[])
-        ctx = FakeStrategyContext()
-        await extract_foresight(event, ctx)
+        await extract_foresight(event, deps)
 
-    matching = [e for e in captured if e.get("event") == "foresights_extracted"]
-    assert matching, "log line should still fire (count=0)"
-    assert matching[0]["count"] == 0
-    mock_wcls.return_value.append_entries.assert_not_called()
+    record = next(e for e in captured if e.get("event") == "foresights_extracted")
+    assert record["count"] == 0
+    mock_cls.assert_not_called()
+    assert deps.stores.foresight.records == []
 
 
 # ── mixed agent/user memcells (tool calls) ──────────────────────────────
@@ -290,7 +229,6 @@ def _tool_call_memcell(*, with_user_message: bool) -> MemCell:
     ],
 )
 async def test_tool_calls_do_not_crash_the_sender_scan(
-    monkeypatch: pytest.MonkeyPatch,
     with_user_message: bool,
     expected_senders: list[str],
 ) -> None:
@@ -316,23 +254,9 @@ async def test_tool_calls_do_not_crash_the_sender_scan(
         session_id="s1",
         memcell=_tool_call_memcell(with_user_message=with_user_message),
     )
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
-
-    with (
-        patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightWriter"
-        ) as mock_wcls,
-    ):
+    with patch(_EXTRACTOR) as mock_cls:
         mock_cls.return_value.aextract = AsyncMock(return_value=[])
-        mock_wcls.return_value.append_entries = AsyncMock(return_value=[])
-        await extract_foresight(event, FakeStrategyContext())
+        await extract_foresight(event, make_deps())
 
     called_senders = [
         call.kwargs["sender_id"]

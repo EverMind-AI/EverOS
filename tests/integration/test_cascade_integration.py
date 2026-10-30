@@ -7,7 +7,7 @@ Drives the full pipeline once with real components except the embedder
     watchdog FSEvents thread     ─▶  CascadeWatcher._enqueue_async
     md_change_state.upsert        ─▶  pending row
     CascadeWorker.drain_once     ─▶  EpisodeHandler.handle_added_or_modified
-    episode_repo.upsert          ─▶  LanceDB row
+    storage.repos.episode.upsert          ─▶  LanceDB row
 
 Asserts the row landed with the right shape (md_path, content_sha256,
 episode tokens, vector dim). Validates that the three loops actually
@@ -22,23 +22,13 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from sqlmodel import SQLModel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
-from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.lancedb import (
-    dispose_connection,
-    ensure_business_indexes,
-    episode_repo,
-)
+from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import EpisodeWriter
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
+from tests.fakes.storage import Storage
 
 
 class _StubEmbedder(EmbeddingProvider):
@@ -59,13 +49,12 @@ class _StubEmbedder(EmbeddingProvider):
 
 @pytest.fixture
 async def cascade_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[MemoryRoot]:
     """Boot sqlite + lancedb against a tmp memory_root; dispose at teardown.
 
-    Cascade uses module-level singletons; we reset them up-front to
-    guarantee no state leaks in from neighbouring tests, then dispose
-    on the way out so the next test sees a clean slate.
+    The storage is the ``storage`` fixture's: fresh per test, disposed at
+    teardown.
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     # Embedding settings are required for the lifespan factory; the
@@ -75,32 +64,11 @@ async def cascade_runtime(
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
 
-    await dispose_connection()
-    await dispose_engine()
-
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await ensure_business_indexes()
+    await storage.create_schema()
+    await storage.index.ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.resolve()
-
-    await dispose_connection()
-    await dispose_engine()
-
-
-def _patch_embedding_capability(
-    monkeypatch: pytest.MonkeyPatch, embedder: _StubEmbedder
-) -> None:
-    """EpisodeHandler fetches the embedder lazily via
-    ``get_embedding_capability()`` — patch the process-wide singleton so
-    cascade never hits the fake network target set up by ``cascade_runtime``.
-    """
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
+    yield storage.root
 
 
 async def _poll(condition, *, deadline_seconds: float = 10.0, interval: float = 0.05):  # type: ignore[no-untyped-def]
@@ -119,16 +87,17 @@ async def _poll(condition, *, deadline_seconds: float = 10.0, interval: float = 
 
 
 async def test_append_to_md_propagates_to_lancedb(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Happy path: writer append → watcher → state row → worker → LanceDB."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    _patch_embedding_capability(monkeypatch, embedder)
     orchestrator = CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=embedder,
         # Tight worker poll so the test wraps in seconds, not minutes.
         # Scanner interval kept long so the watcher path is the one
         # actually exercised (the scanner would mask a watcher bug).
@@ -172,14 +141,14 @@ async def test_append_to_md_propagates_to_lancedb(
 
         # 1. Watcher enqueues the path.
         async def _state_appeared():  # type: ignore[no-untyped-def]
-            return await md_change_state_repo.get_by_id(md_path)
+            return await storage.sqlite.md_change_state.get_by_id(md_path)
 
         row = await _poll(_state_appeared, deadline_seconds=5.0)
         assert row.kind == "episode"
 
         # 2. Worker drives it to done.
         async def _state_done():  # type: ignore[no-untyped-def]
-            r = await md_change_state_repo.get_by_id(md_path)
+            r = await storage.sqlite.md_change_state.get_by_id(md_path)
             return r if (r is not None and r.status == "done") else None
 
         done_row = await _poll(_state_done, deadline_seconds=10.0)
@@ -187,7 +156,7 @@ async def test_append_to_md_propagates_to_lancedb(
 
         # 3. LanceDB carries the typed episode row.
         episode_id = f"u_integration_{eid.format()}"
-        ep_row = await episode_repo.get_by_id(episode_id)
+        ep_row = await storage.repos.episode.get_by_id(episode_id)
         assert ep_row is not None
         assert ep_row.episode == "the user mentioned dark mode preference"
         assert ep_row.episode_tokens  # tokenizer ran
@@ -201,15 +170,16 @@ async def test_append_to_md_propagates_to_lancedb(
 
 
 async def test_delete_md_wipes_lancedb_row(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Append + drain, then ``unlink`` the md and watch the row evaporate."""
     memory_root = cascade_runtime
-    _patch_embedding_capability(monkeypatch, _StubEmbedder())
     orchestrator = CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_StubEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
             worker_batch_size=10,
@@ -242,7 +212,7 @@ async def test_delete_md_wipes_lancedb_row(
         absolute = memory_root.root / md_path
 
         async def _ep_present():  # type: ignore[no-untyped-def]
-            return await episode_repo.get_by_id(f"u_del_{eid.format()}")
+            return await storage.repos.episode.get_by_id(f"u_del_{eid.format()}")
 
         await _poll(_ep_present, deadline_seconds=10.0)
 
@@ -250,7 +220,7 @@ async def test_delete_md_wipes_lancedb_row(
         absolute.unlink()
 
         async def _ep_gone():  # type: ignore[no-untyped-def]
-            row = await episode_repo.get_by_id(f"u_del_{eid.format()}")
+            row = await storage.repos.episode.get_by_id(f"u_del_{eid.format()}")
             return row is None
 
         assert await _poll(_ep_gone, deadline_seconds=10.0)

@@ -1,47 +1,64 @@
-"""LLM provider adapters (one provider per file, mem0-style).
+"""EverOS's implementation of the everalgo ``LLMClient`` contract.
 
-Public surface:
+The contract and its types (``LLMClient``, ``LLMMessage``, ``LLMOutputError``,
+``StrictOutputModel``) belong to everalgo; import them from ``everalgo.llm``.
+This package exports only what EverOS itself defines:
 
-- :class:`LLMClient` — Protocol every provider satisfies (re-exported
-  from :mod:`everalgo.llm`; same shape so everos providers can be
-  handed to everalgo operators).
-- :class:`ChatMessage` / :class:`ChatResponse` / :class:`Usage` — chat
-  payload types (re-exported from :mod:`everalgo.llm`).
-- :class:`LLMError` — provider-side failure (re-exported).
-- :class:`LLMNotConfiguredError` — raised when credentials are missing.
-- :class:`OpenAIProvider` — concrete provider wrapping
-  ``openai.AsyncOpenAI`` against any OpenAI-compatible endpoint.
-- :func:`build_llm_provider` — settings-driven factory.
-- :func:`get_llm_client` — process-wide lazy singleton accessor.
+- :class:`OpenAIProvider` -- the one ``LLMClient`` implementation, over any
+  OpenAI-compatible Chat Completions endpoint.
+- :class:`LLMCallError` -- what a failed call raises, with a ``reason``.
+- :class:`LLMCaseJudge` -- everalgo's agent-case gate question answered by
+  an ``LLMClient``.
+- :class:`LLMCallObserver` / :class:`TokenUsage` / :class:`NullObserver` --
+  the hook that sees each completion's usage and finish reason.
+- :class:`LLMClientConfig` / :func:`build_llm_provider` -- the factory.
+- :func:`resolve_llm_config` / :func:`resolve_decider_config` /
+  :func:`resolve_multimodal_config` / :func:`observer_for` -- what the
+  application bootstrap feeds the factory, one per LLM role; a role whose
+  credentials are missing raises :class:`LLMNotConfiguredError`.
+
+There is no process-wide accessor: the application bootstrap builds each
+provider once and injects it.
 
 External usage::
 
-    from everos.component.llm import build_llm_provider, LLMClient
-    provider = build_llm_provider(settings.llm)
+    from everos.component.llm import (
+        build_llm_provider, observer_for, resolve_llm_config,
+    )
+
+    llm = build_llm_provider(
+        resolve_llm_config(settings), observer=observer_for(settings)
+    )
 """
 
-from .client import LLMNotConfiguredError as LLMNotConfiguredError
-from .client import get_decider_llm_client as get_decider_llm_client
-from .client import get_llm_client as get_llm_client
-from .client import get_multimodal_llm_client as get_multimodal_llm_client
+from .case_judge import LLMCaseJudge as LLMCaseJudge
+from .errors import LLMCallError as LLMCallError
+from .factory import DeciderClientConfig as DeciderClientConfig
+from .factory import LLMClientConfig as LLMClientConfig
+from .factory import LLMNotConfiguredError as LLMNotConfiguredError
 from .factory import build_llm_provider as build_llm_provider
+from .factory import observer_for as observer_for
+from .factory import resolve_decider_config as resolve_decider_config
+from .factory import resolve_llm_config as resolve_llm_config
+from .factory import resolve_multimodal_config as resolve_multimodal_config
+from .observer import LLMCallObserver as LLMCallObserver
+from .observer import NullObserver as NullObserver
+from .observer import TokenUsage as TokenUsage
 from .openai_provider import OpenAIProvider as OpenAIProvider
-from .protocol import ChatMessage as ChatMessage
-from .protocol import ChatResponse as ChatResponse
-from .protocol import LLMClient as LLMClient
-from .protocol import LLMError as LLMError
-from .protocol import Usage as Usage
 
 __all__ = [
-    "ChatMessage",
-    "ChatResponse",
-    "LLMClient",
-    "LLMError",
+    "DeciderClientConfig",
+    "LLMCallError",
+    "LLMCallObserver",
+    "LLMCaseJudge",
+    "LLMClientConfig",
     "LLMNotConfiguredError",
+    "NullObserver",
     "OpenAIProvider",
-    "Usage",
+    "TokenUsage",
     "build_llm_provider",
-    "get_decider_llm_client",
-    "get_llm_client",
-    "get_multimodal_llm_client",
+    "observer_for",
+    "resolve_decider_config",
+    "resolve_llm_config",
+    "resolve_multimodal_config",
 ]

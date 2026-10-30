@@ -8,11 +8,10 @@ import pytest
 from everos.infra.ome._background.idle_scanner import IdleScanner
 from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.storage import OMEStorage
-from everos.infra.ome.events import BaseEvent, IdleTick
-from everos.infra.ome.triggers import Idle
+from everos.memory.ports import Event, Idle, IdleTick
 
 
-class _M(BaseEvent):
+class _M(Event):
     user_id: str = "u1"
 
 
@@ -27,7 +26,7 @@ async def test_scan_once_emits_idle_ticks(tmp_path: Path) -> None:
 
     emitted: list[IdleTick] = []
 
-    async def emit(e: BaseEvent) -> None:
+    async def emit(e: Event) -> None:
         if isinstance(e, IdleTick):
             emitted.append(e)
 
@@ -54,7 +53,7 @@ async def test_scan_once_with_now_none_uses_current_time(tmp_path: Path) -> None
 
     emitted: list[IdleTick] = []
 
-    async def emit(e: BaseEvent) -> None:
+    async def emit(e: Event) -> None:
         if isinstance(e, IdleTick):
             emitted.append(e)
 
@@ -89,7 +88,7 @@ async def test_scan_once_isolates_failing_emit(tmp_path: Path) -> None:
 
     emitted: list[str] = []
 
-    async def emit(e: BaseEvent) -> None:
+    async def emit(e: Event) -> None:
         if isinstance(e, IdleTick):
             if e.bucket_key == "u_boom":
                 raise RuntimeError("downstream dispatch transient error")

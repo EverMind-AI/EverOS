@@ -5,10 +5,10 @@ multiplying with the decider's: four decider attempts times three SDK requests a
 60s deadline is a 728s round that still ends in the fixed top-3 fallback. It was
 declared and documented and reached nothing. Two gaps, both invisible:
 
-* ``get_decider_llm_client()`` built an everalgo ``LLMConfig``, whose fields are
+* the decider's client was built from an everalgo ``LLMConfig``, whose fields are
   ``model, api_key, base_url, temperature, max_tokens, timeout, extra`` -- there is no
   ``max_retries``, so ``AsyncOpenAI`` kept its default of 2.
-* With no ``[decider].model`` the function returned the shared extraction client, which
+* With no ``[decider].model`` the decider was the shared extraction client, which
   cannot carry a decider-specific retry count even in principle: the SDK reads
   ``max_retries`` at construction.
 
@@ -24,19 +24,22 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-import everos.component.llm.client as client_mod
+from everos.component.llm import (
+    DeciderClientConfig,
+    LLMNotConfiguredError,
+    build_llm_provider,
+    resolve_decider_config,
+)
 from everos.config import load_settings
 from everos.config.settings import DeciderSettings
+from everos.service import Providers, build_providers
 
 NO_THINK_PARSED = {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
 NO_THINK = '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
 
 
 @pytest.fixture(autouse=True)
-def _fresh_clients(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Both singletons are process-wide; a leaked one would answer for the next test."""
-    monkeypatch.setattr(client_mod, "_decider_client", None)
-    monkeypatch.setattr(client_mod, "_llm_client", None)
+def _llm_endpoint(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
     monkeypatch.setenv("EVEROS_LLM__BASE_URL", "http://gw.invalid/v1")
     load_settings.cache_clear()
@@ -45,10 +48,13 @@ def _fresh_clients(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def _sdk_of(client: Any) -> Any:
-    """Unwrap the logging / usage decorators down to the ``AsyncOpenAI`` instance."""
-    while hasattr(client, "_inner"):
-        client = client._inner
+    """The ``AsyncOpenAI`` instance inside the provider."""
     return client._client
+
+
+def _providers() -> Providers:
+    """The providers the application bootstrap builds from the current settings."""
+    return build_providers(load_settings())
 
 
 def test_an_explicit_decider_model_turns_the_sdk_retries_off(
@@ -56,7 +62,7 @@ def test_an_explicit_decider_model_turns_the_sdk_retries_off(
 ) -> None:
     monkeypatch.setenv("EVEROS_DECIDER__MODEL", "qwen3.6-27b")
     load_settings.cache_clear()
-    assert _sdk_of(client_mod.get_decider_llm_client()).max_retries == 0
+    assert _sdk_of(_providers().decider).max_retries == 0
 
 
 def test_an_inherited_decider_config_turns_the_sdk_retries_off() -> None:
@@ -65,9 +71,9 @@ def test_an_inherited_decider_config_turns_the_sdk_retries_off() -> None:
     This is the configuration every store built before ``[decider]`` existed runs
     under, so it is the one that mattered most and the one that could not work.
     """
-    client = client_mod.get_decider_llm_client()
-    assert _sdk_of(client).max_retries == 0
-    assert client is not client_mod.get_llm_client()
+    providers = _providers()
+    assert _sdk_of(providers.decider).max_retries == 0
+    assert providers.decider is not providers.llm
 
 
 def test_a_configured_count_is_what_the_sdk_gets(
@@ -76,23 +82,19 @@ def test_a_configured_count_is_what_the_sdk_gets(
     """Not hardcoded to zero somewhere along the way."""
     monkeypatch.setenv("EVEROS_DECIDER__SDK_MAX_RETRIES", "4")
     load_settings.cache_clear()
-    assert _sdk_of(client_mod.get_decider_llm_client()).max_retries == 4
+    assert _sdk_of(_providers().decider).max_retries == 4
 
 
-def test_none_leaves_the_sdk_default_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_none_leaves_the_sdk_default_alone() -> None:
     """The documented opt-out: say nothing and the SDK behaves as it always did."""
-    monkeypatch.setattr(
-        client_mod,
-        "resolve_decider_config",
-        lambda *_a, **_k: client_mod.DeciderClientConfig(
-            model="m",
-            api_key="k",
-            base_url="http://gw.invalid/v1",
-            timeout=60.0,
-            max_retries=None,
-        ),
+    config = DeciderClientConfig(
+        model="m",
+        api_key="k",
+        base_url="http://gw.invalid/v1",
+        timeout=60.0,
+        max_retries=None,
     )
-    assert _sdk_of(client_mod.get_decider_llm_client()).max_retries == 2
+    assert _sdk_of(build_llm_provider(config)).max_retries == 2
 
 
 def test_a_negative_retry_count_is_rejected() -> None:
@@ -106,7 +108,7 @@ def test_the_decider_deadline_reaches_the_sdk(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("EVEROS_LLM__TIMEOUT_SECONDS", "300")
     monkeypatch.setenv("EVEROS_DECIDER__TIMEOUT_SECONDS", "20")
     load_settings.cache_clear()
-    assert _sdk_of(client_mod.get_decider_llm_client()).timeout == 20.0
+    assert _sdk_of(_providers().decider).timeout == 20.0
 
 
 # ── `extra` travels with whichever section supplied the endpoint ──────────────
@@ -123,7 +125,7 @@ def test_inheriting_the_endpoint_keeps_its_provider_fields(
     """
     monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
     load_settings.cache_clear()
-    assert client_mod.resolve_decider_config().extra == NO_THINK_PARSED
+    assert resolve_decider_config(load_settings()).extra == NO_THINK_PARSED
 
 
 def test_its_own_endpoint_does_not_inherit_them(
@@ -134,7 +136,7 @@ def test_its_own_endpoint_does_not_inherit_them(
     monkeypatch.setenv("EVEROS_DECIDER__MODEL", "gpt-4.1-mini")
     monkeypatch.setenv("EVEROS_DECIDER__BASE_URL", "http://other.invalid/v1")
     load_settings.cache_clear()
-    assert client_mod.resolve_decider_config().extra == {}
+    assert resolve_decider_config(load_settings()).extra == {}
 
 
 def test_the_model_falls_back_to_the_main_section(
@@ -142,7 +144,7 @@ def test_the_model_falls_back_to_the_main_section(
 ) -> None:
     monkeypatch.setenv("EVEROS_LLM__MODEL", "backbone-model")
     load_settings.cache_clear()
-    cfg = client_mod.resolve_decider_config()
+    cfg = resolve_decider_config(load_settings())
     assert (cfg.model, cfg.inherits_model) == ("backbone-model", True)
 
 
@@ -150,8 +152,8 @@ def test_no_credentials_anywhere_is_an_error(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("EVEROS_LLM__API_KEY", raising=False)
     monkeypatch.delenv("EVEROS_LLM__BASE_URL", raising=False)
     load_settings.cache_clear()
-    with pytest.raises(client_mod.LLMNotConfiguredError):
-        client_mod.resolve_decider_config()
+    with pytest.raises(LLMNotConfiguredError):
+        resolve_decider_config(load_settings())
 
 
 # ── and the fields the decider sends per call ────────────────────────────────
@@ -163,8 +165,12 @@ class _StopError(Exception):
 
 async def test_client_level_extra_and_per_call_kwargs_both_reach_the_request() -> None:
     """Per-call wins on a collision, matching everalgo's own merge order."""
-    from everos.component.llm.openai_provider import OpenAIProvider
-    from everos.component.llm.protocol import ChatMessage
+    from everalgo.llm import LLMMessage, StrictOutputModel
+
+    from everos.component.llm import OpenAIProvider
+
+    class _Reply(StrictOutputModel):
+        text: str
 
     provider = OpenAIProvider(
         model="m", api_key="k", base_url="http://gw.invalid/v1", extra=NO_THINK_PARSED
@@ -180,8 +186,11 @@ async def test_client_level_extra_and_per_call_kwargs_both_reach_the_request() -
         "_C", (), {"chat": type("_Chat", (), {"completions": _Completions()})()}
     )()
     with pytest.raises(_StopError):
-        await provider.chat(
-            [ChatMessage(role="user", content="hi")], max_tokens=512, top_p=0.9
+        await provider.achat(
+            [LLMMessage(role="user", content="hi")],
+            response_format=_Reply,
+            max_tokens=512,
+            top_p=0.9,
         )
 
     assert seen["max_tokens"] == 512

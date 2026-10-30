@@ -1,6 +1,6 @@
 # End-to-end memorize test
 
-In-process driver that pushes a realistic fixture through `service.memorize`,
+In-process driver that pushes a realistic fixture through `MemoryService.add`,
 batching by 6 messages per `/add` call and then `/flush` at the end.
 
 ## What's here
@@ -19,17 +19,17 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
    - `EVEROS_LLM__MODEL=...` (defaults to `gpt-4.1-mini`)
    - Without these, the boundary stage logs `memorize_no_llm_client` and skips the run.
 2. **Memory root**: defaults to `~/.everos`; override with `EVEROS_ROOT=...`.
-3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `memorize()` call.
+3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `add()` call.
 
 ## Run
 
 ```bash
-# Chat mode — boundary uses everalgo.boundary.detect_boundaries
+# Chat mode — boundary uses everalgo.boundary.adetect_boundaries
 EVEROS_MEMORIZE__MODE=chat uv run python scripts/e2e_memorize/run.py \
     --fixture scripts/e2e_memorize/fixtures/chat_session.json \
     --expected-mode chat
 
-# Agent mode — boundary uses everalgo.agent_memory.AgentBoundaryDetector
+# Agent mode — the same operator over the full item list (tool rows kept)
 # (filter→detect→remap; tool items preserved in cells)
 EVEROS_MEMORIZE__MODE=agent uv run python scripts/e2e_memorize/run.py \
     --fixture scripts/e2e_memorize/fixtures/agent_session.json \

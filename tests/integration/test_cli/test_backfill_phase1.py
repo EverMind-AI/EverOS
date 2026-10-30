@@ -20,20 +20,21 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
-from everos.component.utils.datetime import get_utc_now
+from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.core.utils.datetime import get_utc_now
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.lancedb import (
     AtomicFact,
     Episode,
-    atomic_fact_repo,
-    dispose_connection,
-    episode_repo,
 )
+from everos.service import OpsService, build_application
+from tests.fakes import make_providers
+from tests.fakes.storage import StorageView
 
 _DIM = 1024
 
@@ -48,25 +49,36 @@ class _StubEmbedder(EmbeddingProvider):
         return [[float(len(t) % 7)] * self.dim for t in texts]
 
 
+_PROVIDERS: dict[str, Any] = {"embedding": None}
+"""The embedder the test configured; ``_ops()`` builds the app over it."""
+
+
 @pytest.fixture
 async def backfill_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[Path]:
-    """Tmp memory root + stub embedder; disposes the lancedb singleton
-    around the test so no stale connection from a neighbouring test
-    leaks in (mirrors ``cascade_runtime`` in the cascade test suite)."""
+    """Tmp memory root + stub embedder; the test reads back through
+    ``storage_view``."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    await dispose_connection()
 
-    import everos.component.embedding.accessor as acc
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
+    _PROVIDERS["embedding"] = _StubEmbedder()
 
     yield tmp_path
-    await dispose_connection()
+
+
+def _ops() -> OpsService:
+    """The ops facade over the embedding provider the test configured.
+
+    The phases read their embedding provider from the application; tests
+    here pick it in ``_PROVIDERS``, so the application is built over
+    whatever that holds when the phase runs.
+    """
+    settings = load_settings()
+    providers = make_providers(
+        embedding=_PROVIDERS["embedding"],
+    )
+    return build_application(settings, providers=providers).ops
 
 
 def _episode(
@@ -116,7 +128,7 @@ def _fact(entry_id: str, *, vector: list[float] | None = None) -> AtomicFact:
 async def test_empty_db_reports_nothing_to_backfill(
     backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
@@ -124,33 +136,37 @@ async def test_empty_db_reports_nothing_to_backfill(
 
 
 async def test_declined_confirmation_writes_nothing_and_exits_one(
-    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch
+    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> None:
-    await episode_repo.add([_episode("ep1")])
+    await storage_view.repos.episode.add([_episode("ep1")])
     monkeypatch.setattr("typer.confirm", lambda *a, **k: False)
 
-    code = await run_backfill(phase="vectors", auto_yes=False)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=False)
 
     assert code == 1
-    row = await episode_repo.get_by_id("u1_ep1")
+    row = await storage_view.repos.episode.get_by_id("u1_ep1")
     assert row is not None
     assert row.vector is None
 
 
 async def test_small_db_backfills_null_vector_rows_only(
-    backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
+    backfill_runtime: Path,
+    capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
     pre_embedded = [0.5] * _DIM
-    await episode_repo.add([_episode("ep1"), _episode("ep2", vector=pre_embedded)])
-    await atomic_fact_repo.add([_fact("af1")])
+    await storage_view.repos.episode.add(
+        [_episode("ep1"), _episode("ep2", vector=pre_embedded)]
+    )
+    await storage_view.repos.atomic_fact.add([_fact("af1")])
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
-    ep1 = await episode_repo.get_by_id("u1_ep1")
-    ep2 = await episode_repo.get_by_id("u1_ep2")
-    af1 = await atomic_fact_repo.get_by_id("u1_af1")
+    ep1 = await storage_view.repos.episode.get_by_id("u1_ep1")
+    ep2 = await storage_view.repos.episode.get_by_id("u1_ep2")
+    af1 = await storage_view.repos.atomic_fact.get_by_id("u1_af1")
     assert ep1 is not None and ep1.vector is not None
     assert ep2 is not None and ep2.vector == pytest.approx(pre_embedded)
     assert af1 is not None and af1.vector is not None
@@ -159,12 +175,14 @@ async def test_small_db_backfills_null_vector_rows_only(
 
 
 async def test_token_estimate_uses_kilo_notation(
-    backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
+    backfill_runtime: Path,
+    capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
     long_text = "word " * 3000
-    await episode_repo.add([_episode("epbig", text=long_text)])
+    await storage_view.repos.episode.add([_episode("epbig", text=long_text)])
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
@@ -176,6 +194,7 @@ async def test_failed_row_is_tallied_and_does_not_abort_the_phase(
     backfill_runtime: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
     """Round-2 finding M8: a batch failure now falls back to per-row
     ``embed(...)`` calls (see ``_embed_primary_batch``). A poison row —
@@ -188,8 +207,6 @@ async def test_failed_row_is_tallied_and_does_not_abort_the_phase(
     poison text ("boom"), so the row remains unwritable after fallback.
     Healthy rows still succeed via the per-row retry path.
     """
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
 
     class _FlakyEmbedder(_StubEmbedder):
         async def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -202,19 +219,17 @@ async def test_failed_row_is_tallied_and_does_not_abort_the_phase(
                 raise RuntimeError("simulated per-row embed failure")
             return await super().embed(text)
 
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_FlakyEmbedder())
-    )
-    await episode_repo.add(
+    _PROVIDERS["embedding"] = _FlakyEmbedder()
+    await storage_view.repos.episode.add(
         [_episode("epok", text="fine content"), _episode("epbad", text="boom content")]
     )
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 4
-    ok_row = await episode_repo.get_by_id("u1_epok")
-    bad_row = await episode_repo.get_by_id("u1_epbad")
+    ok_row = await storage_view.repos.episode.get_by_id("u1_epok")
+    bad_row = await storage_view.repos.episode.get_by_id("u1_epbad")
     assert ok_row is not None and ok_row.vector is not None
     assert bad_row is not None and bad_row.vector is None
     assert "phase 1 complete" in out
@@ -223,22 +238,24 @@ async def test_failed_row_is_tallied_and_does_not_abort_the_phase(
 
 
 async def test_episode_subject_vector_also_backfilled(
-    backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
+    backfill_runtime: Path,
+    capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
     """Episode is the only table with a second, independent embed
     (``subject_vector`` — see ``EpisodeHandler._build_row``). A row that
     has a ``subject`` must come out of Phase 1 with *both* vectors set,
     exercising ``_embed_subject_batch``'s secondary ``embed_batch`` call.
     """
-    await episode_repo.add(
+    await storage_view.repos.episode.add(
         [_episode("epsub", text="episode body", subject="What is the meaning of X?")]
     )
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
-    row = await episode_repo.get_by_id("u1_epsub")
+    row = await storage_view.repos.episode.get_by_id("u1_epsub")
     assert row is not None
     assert row.vector is not None and len(row.vector) == _DIM
     assert row.subject_vector is not None and len(row.subject_vector) == _DIM
@@ -246,18 +263,17 @@ async def test_episode_subject_vector_also_backfilled(
 
 
 async def test_missing_embedding_capability_returns_exit_two(
-    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch
+    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> None:
     """When the embedding capability is unavailable (no provider
     configured), Phase 1 must fail cleanly with exit 2 rather than
     silently skipping rows or crashing uncaught."""
-    import everos.component.embedding.accessor as acc
 
-    await episode_repo.add([_episode("ep1")])
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=None))
+    await storage_view.repos.episode.add([_episode("ep1")])
+    _PROVIDERS["embedding"] = None
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
 
     assert code == 2
-    row = await episode_repo.get_by_id("u1_ep1")
+    row = await storage_view.repos.episode.get_by_id("u1_ep1")
     assert row is not None and row.vector is None

@@ -1,10 +1,12 @@
 """RunRecord / RunStatus / StrategyRouteInfo / CounterProgress — pure data classes.
 
-Persistence in _stores/run_record.py.
+Plus :func:`runs_settled`, the one rule for reading an event's run records as
+finished. Persistence in _stores/run_record.py.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, NamedTuple, Self
 
@@ -45,14 +47,14 @@ class RunRecord(BaseModel):
         Field(
             min_length=1,
             description="Stable cross-process event identifier in "
-            "``<module>:<class>`` form (see ``BaseEvent.topic()``).",
+            "``<module>:<class>`` form (see ``Event.topic()``).",
         ),
     ]
     event_payload: Annotated[
         str,
         Field(
             min_length=1,
-            description="JSON-encoded event (``BaseEvent.model_dump_json`` output).",
+            description="JSON-encoded event (``Event.model_dump_json`` output).",
         ),
     ]
     max_retries_snapshot: Annotated[int, Field(ge=0)]
@@ -74,6 +76,42 @@ class RunRecord(BaseModel):
             elif self.error is None:
                 raise ValueError(f"RunRecord: {self.status} must have error set")
         return self
+
+
+TERMINAL_STATUSES = frozenset(
+    {
+        RunStatus.SUCCESS,
+        RunStatus.DEAD_LETTER,
+        RunStatus.CRASHED,
+    }
+)
+"""Statuses after which no further run follows for the same attempt chain.
+
+``FAILED`` is not one of them: the runner writes it *before* the backoff
+sleep and gives the retry a fresh ``run_id``, so an event whose only row
+is ``FAILED`` has a retry pending (a failure with no retry left is
+written as ``DEAD_LETTER``). Treating it as terminal let
+``OfflineEngine.wait_for_event`` return during the backoff window with the
+retry still to run -- a caller acting on the outcome would have acted on one
+that was not final.
+"""
+
+
+def runs_settled(runs: Iterable[RunRecord]) -> bool:
+    """Whether every strategy's attempt chain for one event has ended.
+
+    Each attempt is its own row, so the chain's state is its newest
+    row: ``RUNNING`` or ``FAILED`` (retry pending) means more to come,
+    the terminal statuses mean the chain is over. Earlier ``FAILED``
+    rows stay in the table after their retry and must not hold the
+    wait open.
+    """
+    newest: dict[str, RunRecord] = {}
+    for r in runs:
+        cur = newest.get(r.strategy_name)
+        if cur is None or (r.started_at, r.attempt) > (cur.started_at, cur.attempt):
+            newest[r.strategy_name] = r
+    return all(r.status in TERMINAL_STATUSES for r in newest.values())
 
 
 class CounterProgress(NamedTuple):

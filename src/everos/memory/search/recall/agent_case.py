@@ -16,30 +16,30 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from everalgo.types import Candidate
+from everos.memory.models import AgentCase
+from everos.memory.ports import AgentCaseIndex, Filter
 
-from everos.infra.persistence.index import AgentCase, Predicate, agent_case_repo
-
-from .base import (
-    RecallerDeps,
-    cosine_score_from_distance,
-    row_to_candidate,
-)
+from .base import RecallerDeps, RecallResult, from_hits
 
 
 class AgentCaseRecaller:
-    """BM25 (dual-column) + vector recall over the LanceDB ``agent_case`` table."""
+    """BM25 (dual-column) + vector recall over the agent-case index.
+
+    Args:
+        deps: Shared recaller dependencies (tokenizer).
+        index: The agent-case index port.
+    """
 
     kind: ClassVar[str] = "agent_case"
     everalgo_memory_type: ClassVar[str] = "case"
-    text_field: ClassVar[str] = "task_intent"
 
-    def __init__(self, deps: RecallerDeps) -> None:
+    def __init__(self, deps: RecallerDeps, index: AgentCaseIndex) -> None:
         self._deps = deps
+        self._index = index
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
-    ) -> list[Candidate]:
+        self, query: str, where: Filter, *, limit: int
+    ) -> RecallResult[AgentCase]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
         Each tokenised term becomes a ``SHOULD`` clause so a single
@@ -50,26 +50,14 @@ class AgentCaseRecaller:
         """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
-            return []
-        merged_rows = await agent_case_repo.sparse_search(
-            terms, where, columns=AgentCase.BM25_FIELDS, limit=limit
-        )
-        return [
-            row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
-            for r in merged_rows
-        ]
+            return RecallResult.empty()
+        hits = await self._index.sparse_search(terms, where, limit=limit)
+        return from_hits(hits, source="keyword")
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
-    ) -> list[Candidate]:
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> RecallResult[AgentCase]:
         if not vector:
-            return []
-        rows = await agent_case_repo.dense_search(vector, where, limit=limit)
-        return [
-            row_to_candidate(
-                r,
-                source="vector",
-                score=cosine_score_from_distance(r.get("_distance")),
-            )
-            for r in rows
-        ]
+            return RecallResult.empty()
+        hits = await self._index.dense_search(vector, where, limit=limit)
+        return from_hits(hits, source="vector")

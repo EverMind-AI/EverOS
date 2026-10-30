@@ -8,15 +8,15 @@ import re
 from collections.abc import Collection
 from typing import Final
 
-from everos.component.utils.datetime import ensure_utc, to_timestamp_ms
-from everos.infra.persistence.predicate import (
+from everos.core.utils.datetime import ensure_utc, to_timestamp_ms
+from everos.memory.ports.query import (
     All,
     AnyOf,
     Comparison,
     Contains,
+    Filter,
     In,
     IsNull,
-    Predicate,
     Scalar,
 )
 
@@ -32,7 +32,7 @@ _OPERATORS: Final[dict[str, str]] = {
 
 
 def render_predicate(
-    predicate: Predicate | None,
+    predicate: Filter | None,
     *,
     datetime_fields: Collection[str] = (),
     vector_fields: Collection[str] = (),
@@ -65,7 +65,7 @@ def render_predicate(
 
 
 def _render_group(
-    children: tuple[Predicate, ...],
+    children: tuple[Filter, ...],
     operator: str,
     datetime_fields: Collection[str],
     vector_fields: Collection[str],

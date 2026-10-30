@@ -9,19 +9,18 @@ White-box surfaces: none — all assertions are on HTTP responses.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from everalgo.types import ParsedContent
 from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.infra.persistence import MemoryRoot
 from everos.service import (
     DocumentDetail,
     DocumentListResult,
@@ -30,54 +29,69 @@ from everos.service import (
     TopicNotFoundError,
     TopicOverview,
 )
+from tests.fakes import make_application, make_knowledge_service
+from tests.fakes.storage import Storage
 
-knowledge_service_mod = import_module("everos.service.knowledge")
+# Use-case calls are patched on the facade class, which the application's
+# KnowledgeService instance resolves.
+_SERVICE = "everos.service.knowledge.KnowledgeService"
+_CONFIGURED = object()
+"""Stands in for a configured embedding / rerank provider (only presence counts)."""
 
-# The route module binds service functions at import time, so patches
-# must target the name in the route module's namespace.
-_ROUTE_MOD = "everos.entrypoints.api.routes.knowledge"
+
+async def _parser_must_not_run(raw_file: object) -> ParsedContent:
+    raise AssertionError("parser must not be called")
 
 
-@pytest.fixture
-async def client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+async def _client_over(
+    tmp_path: Path, storage: Storage, *, parser_available: bool
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; resets knowledge singletons per test.
-
-    The knowledge router gates every route on the embed + rerank
-    capability singletons (Task 13). This suite exercises DTO
-    validation / route mapping, not the capability gate itself, so
-    both singletons are stubbed available here -- otherwise every
-    request would short-circuit into the 422 gate response instead
-    of reaching the mocked service call under test.
-    """
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    load_settings.cache_clear()
-
-    import everos.component.embedding.accessor as embedding_acc
-    import everos.component.rerank.accessor as rerank_acc
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.rerank import RerankCapability
-
-    monkeypatch.setattr(
-        embedding_acc, "_capability", EmbeddingCapability(provider=object())
+    knowledge = make_knowledge_service(
+        root=MemoryRoot(tmp_path),
+        embedding=_CONFIGURED,
+        reranker=_CONFIGURED,
+        parse_file=_parser_must_not_run,
+        parser_available=parser_available,
+        documents=storage.sqlite.knowledge_document,
+        topics=storage.sqlite.knowledge_topic,
     )
-    monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=object()))
-
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    for attr in ("_embedding", "_reranker"):
-        setattr(knowledge_service_mod, attr, None)
-    for attr in ("_embedding_resolved", "_reranker_resolved"):
-        setattr(knowledge_service_mod, attr, False)
-
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application(knowledge=knowledge))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await lancedb_manager.dispose_connection()
+
+@pytest.fixture
+async def client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
+) -> AsyncIterator[AsyncClient]:
+    """FastAPI app over a stub application whose knowledge facade is real.
+
+    The knowledge router gates every write / search route on the embed +
+    rerank providers. This suite exercises DTO validation / route mapping,
+    not the gate itself, so both providers are configured -- otherwise every
+    request would short-circuit into the 422 gate response instead of
+    reaching the mocked service call under test. The optional parser is
+    absent, so non-text uploads are refused.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    load_settings.cache_clear()
+    async for c in _client_over(tmp_path, storage, parser_available=False):
+        yield c
+    await storage.lance.close()
+    load_settings.cache_clear()
+
+
+@pytest.fixture
+async def client_with_parser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
+) -> AsyncIterator[AsyncClient]:
+    """Same as ``client``, with the optional parser installed (it must not run)."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    load_settings.cache_clear()
+    async for c in _client_over(tmp_path, storage, parser_available=True):
+        yield c
+    await storage.lance.close()
     load_settings.cache_clear()
 
 
@@ -134,7 +148,7 @@ async def test_get_document_success(client: AsyncClient) -> None:
     """Mocked service returns detail; route maps to 200 envelope."""
     detail = _make_document_detail()
     with patch(
-        f"{_ROUTE_MOD}.get_document",
+        f"{_SERVICE}.get_document",
         new_callable=AsyncMock,
         return_value=detail,
     ):
@@ -150,7 +164,7 @@ async def test_get_document_success(client: AsyncClient) -> None:
 async def test_get_document_404(client: AsyncClient) -> None:
     """Nonexistent doc_id returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.get_document",
+        f"{_SERVICE}.get_document",
         new_callable=AsyncMock,
         side_effect=DocumentNotFoundError("d_000000000000"),
     ):
@@ -166,7 +180,7 @@ async def test_get_topic_success(client: AsyncClient) -> None:
     """Mocked service returns topic detail; route maps to 200 envelope."""
     detail = _make_topic_detail()
     with patch(
-        f"{_ROUTE_MOD}.get_topic",
+        f"{_SERVICE}.get_topic",
         new_callable=AsyncMock,
         return_value=detail,
     ):
@@ -181,7 +195,7 @@ async def test_get_topic_success(client: AsyncClient) -> None:
 async def test_get_topic_404(client: AsyncClient) -> None:
     """Nonexistent topic_id returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.get_topic",
+        f"{_SERVICE}.get_topic",
         new_callable=AsyncMock,
         side_effect=TopicNotFoundError("d_000000000000_999"),
     ):
@@ -254,7 +268,7 @@ async def test_get_categories_returns_taxonomy(
         ),
     ]
     with patch(
-        f"{_ROUTE_MOD}.list_categories",
+        f"{_SERVICE}.list_categories",
         new=AsyncMock(return_value=overviews),
     ):
         resp = await client.get("/api/v1/knowledge/categories")
@@ -276,7 +290,7 @@ async def test_list_documents_empty(client: AsyncClient) -> None:
     """Empty result returns paginated envelope with zero items."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     with patch(
-        f"{_ROUTE_MOD}.list_documents",
+        f"{_SERVICE}.list_documents",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -292,7 +306,7 @@ async def test_list_documents_pagination_params(client: AsyncClient) -> None:
     """Pagination params are forwarded to the service."""
     result = DocumentListResult(documents=[], total=0, page=2, page_size=5)
     mock = AsyncMock(return_value=result)
-    with patch(f"{_ROUTE_MOD}.list_documents", mock):
+    with patch(f"{_SERVICE}.list_documents", mock):
         resp = await client.get(
             "/api/v1/knowledge/documents",
             params={"page": 2, "page_size": 5, "sort_by": "title", "sort_order": "asc"},
@@ -323,7 +337,7 @@ async def test_list_documents_sort_by_updated_at(client: AsyncClient) -> None:
     """sort_by=updated_at is accepted and forwarded (repo supports it)."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     mock = AsyncMock(return_value=result)
-    with patch(f"{_ROUTE_MOD}.list_documents", mock):
+    with patch(f"{_SERVICE}.list_documents", mock):
         resp = await client.get(
             "/api/v1/knowledge/documents",
             params={"sort_by": "updated_at"},
@@ -331,21 +345,6 @@ async def test_list_documents_sort_by_updated_at(client: AsyncClient) -> None:
 
     assert resp.status_code == 200
     assert mock.call_args.kwargs["sort_by"] == "updated_at"
-
-
-def test_reject_oversized_upload() -> None:
-    """Uploads above max_upload_bytes are rejected; smaller/unknown pass."""
-    from types import SimpleNamespace
-
-    from everos.core.errors import InvalidInputError
-    from everos.entrypoints.api.routes.knowledge import _reject_oversized_upload
-
-    over_limit = SimpleNamespace(size=load_settings().knowledge.max_upload_bytes + 1)
-    with pytest.raises(InvalidInputError, match="exceeds"):
-        _reject_oversized_upload(over_limit)  # type: ignore[arg-type]  # duck-typed stub
-
-    _reject_oversized_upload(SimpleNamespace(size=1024))  # type: ignore[arg-type]
-    _reject_oversized_upload(SimpleNamespace(size=None))  # type: ignore[arg-type]
 
 
 # ── DELETE /documents/{doc_id} ──────────────────────────────────────────────
@@ -359,7 +358,7 @@ async def test_delete_document_returns_204_when_not_found(
 
     result = DeleteResult(doc_id="d_111111111111", deleted_topics=0)
     with patch(
-        f"{_ROUTE_MOD}.delete_document",
+        f"{_SERVICE}.delete_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -374,7 +373,7 @@ async def test_delete_document_returns_envelope(client: AsyncClient) -> None:
 
     result = DeleteResult(doc_id="d_aabbccddee01", deleted_topics=3)
     with patch(
-        f"{_ROUTE_MOD}.delete_document",
+        f"{_SERVICE}.delete_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -390,23 +389,10 @@ async def test_delete_document_returns_envelope(client: AsyncClient) -> None:
 
 async def test_put_document_404_when_not_found(client: AsyncClient) -> None:
     """PUT on nonexistent doc_id returns 404 (strict replace, not upsert)."""
-    from everalgo.types import ParsedContent
-
-    with (
-        patch(
-            f"{_ROUTE_MOD}._parse_upload",
-            new_callable=AsyncMock,
-            return_value=ParsedContent(text="# Hello"),
-        ),
-        patch(
-            f"{_ROUTE_MOD}._build_extractor",
-            return_value=AsyncMock(),
-        ),
-        patch(
-            f"{_ROUTE_MOD}.replace_document",
-            new_callable=AsyncMock,
-            side_effect=DocumentNotFoundError("d_000000000000"),
-        ),
+    with patch(
+        f"{_SERVICE}.replace_document",
+        new_callable=AsyncMock,
+        side_effect=DocumentNotFoundError("d_000000000000"),
     ):
         resp = await client.put(
             "/api/v1/knowledge/documents/d_000000000000",
@@ -428,7 +414,7 @@ async def test_patch_document_success(client: AsyncClient) -> None:
         doc_id="d_aabbccddee01", updated_fields=["title"], updated_at=_NOW
     )
     with patch(
-        f"{_ROUTE_MOD}.patch_document",
+        f"{_SERVICE}.patch_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -445,7 +431,7 @@ async def test_patch_document_success(client: AsyncClient) -> None:
 async def test_patch_document_404(client: AsyncClient) -> None:
     """Patching nonexistent doc returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.patch_document",
+        f"{_SERVICE}.patch_document",
         new_callable=AsyncMock,
         side_effect=DocumentNotFoundError("d_000000000000"),
     ):
@@ -498,7 +484,7 @@ async def test_pathsafe_rejects_traversal_in_query(client: AsyncClient) -> None:
     """app_id with '..' in query param is rejected."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     with patch(
-        f"{_ROUTE_MOD}.list_documents",
+        f"{_SERVICE}.list_documents",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -519,36 +505,18 @@ async def test_pathsafe_rejects_traversal_in_body(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
-# ── _parse_upload: binary file rejection ────────────────────────────────────
-
-
-def _hide_everalgo_parser() -> MagicMock:
-    """Return a sys.modules patch that makes ``everalgo.parser`` unimportable."""
-    fake_modules = {k: v for k, v in sys.modules.items()}
-    fake_modules["everalgo.parser"] = None  # type: ignore[assignment]
-    return fake_modules
+# ── Upload parsing: binary file rejection ───────────────────────────────────
 
 
 async def test_post_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file without parser → UnsupportedModalityError → 415."""
-    # ``parser_available()`` is @lru_cache'd — clear it so this test's
-    # sys.modules patch actually reaches the import check instead of
-    # hitting a stale cached True/False from an earlier test in the
-    # same worker (round-4 review M7).
-    from everos.component.parser import parser_available
-
-    parser_available.cache_clear()
-    with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
-        resp = await client.post(
-            "/api/v1/knowledge/documents",
-            files={
-                "file": ("test.bin", b"\x80\x81\x82\x83", "application/octet-stream")
-            },
-            data={"title": "Binary Test"},
-        )
-    parser_available.cache_clear()  # leave clean for the next test
+    resp = await client.post(
+        "/api/v1/knowledge/documents",
+        files={"file": ("test.bin", b"\x80\x81\x82\x83", "application/octet-stream")},
+        data={"title": "Binary Test"},
+    )
     assert resp.status_code == 415
 
 
@@ -556,69 +524,16 @@ async def test_put_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file on PUT → UnsupportedModalityError → 415."""
-    from everos.component.parser import parser_available
-
-    parser_available.cache_clear()
-    with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
-        resp = await client.put(
-            "/api/v1/knowledge/documents/d_aabbccddee01",
-            files={
-                "file": ("test.bin", b"\x80\x81\x82\x83", "application/octet-stream")
-            },
-            data={"title": "Binary Test"},
-        )
-    parser_available.cache_clear()
+    resp = await client.put(
+        "/api/v1/knowledge/documents/d_aabbccddee01",
+        files={"file": ("test.bin", b"\x80\x81\x82\x83", "application/octet-stream")},
+        data={"title": "Binary Test"},
+    )
     assert resp.status_code == 415
 
 
-# ── _looks_like_utf8_text: plain-text short-circuit ─────────────────────────
-
-
-class _UploadStub:
-    """Minimal UploadFile-shaped stand-in for _looks_like_utf8_text."""
-
-    def __init__(self, mime: str | None, filename: str | None) -> None:
-        self.content_type = mime
-        self.filename = filename
-
-
-@pytest.mark.parametrize(
-    "mime, filename, expected",
-    [
-        # Explicit plain-text mimes: short-circuit
-        ("text/markdown", "note.md", True),
-        ("text/plain", "note.txt", True),
-        ("TEXT/MARKDOWN", "note.md", True),  # case-insensitive
-        ("text/x-rst", "readme.rst", True),
-        # HTML must NOT short-circuit — needs everalgo's clean_html_for_llm
-        # (strips <script>/<style>/<nav>/comments) + 1 MiB cap. Was a
-        # regression when the whitelist used ``startswith("text/")``.
-        ("text/html", "page.html", False),
-        ("TEXT/HTML", "page.html", False),
-        # Missing / octet-stream mime + known plaintext extension: OK
-        ("application/octet-stream", "note.md", True),
-        (None, "note.md", True),
-        ("", "notes.rst", True),
-        # Unknown extension: fall through
-        ("application/octet-stream", "note.bin", False),
-        (None, "note.bin", False),
-        # Non-text mimes always route to parser
-        ("application/pdf", "doc.pdf", False),
-        ("image/png", "img.png", False),
-        ("application/json", "data.json", False),
-        ("text/xml", "data.xml", False),  # future text/* additions default to safe
-    ],
-)
-def test_looks_like_utf8_text_matrix(
-    mime: str | None, filename: str, expected: bool
-) -> None:
-    from everos.entrypoints.api.routes.knowledge import _looks_like_utf8_text
-
-    assert _looks_like_utf8_text(_UploadStub(mime, filename)) is expected  # type: ignore[arg-type]
-
-
 async def test_utf8_short_circuit_skips_parser_when_available(
-    client: AsyncClient,
+    client_with_parser: AsyncClient,
 ) -> None:
     """Markdown upload must NOT call the parser even when parser_available.
 
@@ -636,30 +551,9 @@ async def test_utf8_short_circuit_skips_parser_when_available(
         source_name="note.md",
         md_path="/tmp/note.md",
     )
-    # `parser_available` / `aparse_file` are locally imported inside
-    # _parse_upload (deferred), so patch the source modules — patches on
-    # the route module namespace won't intercept a `from … import` that
-    # happens at call time.
-    with (
-        patch(
-            "everos.component.parser.parser_available",
-            return_value=True,
-        ),
-        patch(
-            "everos.component.parser.aparse_file",
-            new=AsyncMock(side_effect=AssertionError("parser must not be called")),
-            create=True,
-        ),
-        patch(
-            f"{_ROUTE_MOD}._build_extractor",
-            return_value=MagicMock(),
-        ),
-        patch(
-            f"{_ROUTE_MOD}.create_document",
-            new=AsyncMock(return_value=result),
-        ),
-    ):
-        resp = await client.post(
+    # The parser is installed but refuses to run (see `_client_over`).
+    with patch(f"{_SERVICE}.create_document", new=AsyncMock(return_value=result)):
+        resp = await client_with_parser.post(
             "/api/v1/knowledge/documents",
             files={"file": ("note.md", b"# Hello\n\nplain text.", "text/markdown")},
             data={"title": "MD Test"},

@@ -21,17 +21,16 @@ from pathlib import Path
 import pytest
 
 from everos.config import LanceDBSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    open_lancedb_connection,
-)
-from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import open_lancedb_connection
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.records.episode import Episode
+from tests.fakes import TEST_DIM, arrow_schema
 
 
 @pytest.fixture(autouse=True)
 def _reset_write_locks() -> None:
-    from everos.core.persistence.lancedb import LanceRepoBase
+    from everos.infra.persistence.lancedb import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 
@@ -41,8 +40,10 @@ async def episode_repo(tmp_path: Path) -> _EpisodeRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table("episode", schema=Episode)
-    return _EpisodeRepo(table=table)
+    table = await conn.create_table(
+        "episode", schema=arrow_schema(Episode, dim=TEST_DIM)
+    )
+    return _EpisodeRepo(table=table, dim=TEST_DIM)
 
 
 def _episode(

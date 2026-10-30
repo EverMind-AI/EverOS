@@ -154,9 +154,9 @@ def test_scanner_ignores_inline_trailing_comment(tmp_path: Path) -> None:
 
 
 def test_scanner_clean_on_typical_use_of_helper(tmp_path: Path) -> None:
-    """Code that goes through ``component.utils.datetime`` is clean."""
+    """Code that goes through ``core.utils.datetime`` is clean."""
     body = (
-        "from everos.component.utils.datetime import (\n"
+        "from everos.core.utils.datetime import (\n"
         "    get_utc_now, get_now_with_timezone, to_display_tz,\n"
         ")\n"
         "ts = get_utc_now()\n"

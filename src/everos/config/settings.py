@@ -15,7 +15,7 @@ The settings tree mirrors the TOML structure: ``settings.sqlite.busy_timeout_ms`
 maps to ``[sqlite].busy_timeout_ms`` and to ``EVEROS_SQLITE__BUSY_TIMEOUT_MS``.
 
 ``load_settings`` is ``functools.cache``-d so callers in hot paths (e.g.
-:mod:`everos.component.utils.datetime`) don't re-parse the TOML on every
+:mod:`everos.core.utils.datetime`) don't re-parse the TOML on every
 call. Tests that mutate environment variables must call
 ``load_settings.cache_clear()`` after the mutation to invalidate.
 """
@@ -58,6 +58,11 @@ def resolve_root(explicit: str | None = None) -> Path:
     if from_env:
         return Path(from_env).expanduser().resolve()
     return _DEFAULT_ROOT.expanduser().resolve()
+
+
+ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
+"""How an LLM section asks its endpoint for JSON; see
+:attr:`LLMSettings.response_format_mode`."""
 
 
 class MemorySettings(BaseModel):
@@ -159,6 +164,8 @@ class LLMSettings(BaseModel):
         EVEROS_LLM__BASE_URL
         EVEROS_LLM__TIMEOUT_SECONDS
         EVEROS_LLM__EXTRA
+        EVEROS_LLM__RESPONSE_FORMAT_MODE
+        EVEROS_LLM__INVALID_REPLY_RETRIES
     """
 
     model: str = "gpt-4.1-mini"
@@ -200,6 +207,23 @@ class LLMSettings(BaseModel):
 
     Merged under the per-call ``extra``, so a caller can still override a key.
     """
+
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested from the endpoint.
+
+    ``json_schema`` sends the strict schema of the operator's reply model,
+    ``json_object`` sends JSON mode, ``prompt_only`` sends neither and relies on
+    the prompt (the reply is still JSON, and is still validated locally). It is
+    a deployment choice because endpoint support differs: everalgo's contract
+    (``llm-contract.md`` §7.2) measured 24 of 32 OpenRouter endpoints for one
+    model accepting a strict schema, 29 accepting JSON mode, and all 32 with
+    neither -- and sending a format the provider lacks reroutes the request.
+    """
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts of the identical request after a reply that fails
+    validation against the operator's model, has no choice, or was aborted by
+    the server. Bounded here, cheaply, rather than by rerunning the whole
+    operator; ``0`` hands the first failure straight to the caller."""
 
 
 class DeciderSettings(BaseModel):
@@ -270,6 +294,14 @@ class DeciderSettings(BaseModel):
     Bounded at zero: the SDK reads it as a count, so a negative value is not "fewer
     retries" but a misconfiguration that would reach ``AsyncOpenAI`` unexamined."""
 
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested. See
+    :attr:`LLMSettings.response_format_mode`. Inherited from ``[llm]``
+    together with the model when ``model`` is empty."""
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after an unusable reply. See
+    :attr:`LLMSettings.invalid_reply_retries`."""
+
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)
     """Hard cap on retrieval rounds. The cost bound: each round is one decider call
@@ -337,6 +369,12 @@ class MultimodalSettings(BaseModel):
     api_key: SecretStr | None = None
     base_url: str | None = None
     max_concurrency: int = 4
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested. See
+    :attr:`LLMSettings.response_format_mode`."""
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after an unusable reply. See
+    :attr:`LLMSettings.invalid_reply_retries`."""
 
     # ``file://`` content-item support (read locally by EverOS, not everalgo).
     file_uri_allow_dirs: list[str] = []
@@ -438,7 +476,7 @@ class RerankSettings(BaseModel):
 
 
 class BoundaryDetectionSettings(BaseModel):
-    """Hard limits passed through to ``everalgo`` BoundaryDetector."""
+    """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
 
     hard_token_limit: int = Field(default=65536, ge=1)
     hard_msg_limit: int = Field(default=500, ge=1)
@@ -503,16 +541,16 @@ class AsyncQueueSettings(BaseModel):
 class MemorizeSettings(BaseModel):
     """Memorize use-case configuration.
 
-    ``mode`` selects which boundary detector runs and which pipelines are
+    ``mode`` selects what boundary detection sees and which pipelines are
     dispatched. A service process serves one mode at a time; toggling
     requires a restart.
 
-        - ``"chat"``  -> ``everalgo.user_memory.BoundaryDetector`` and only the
-          user-memory pipeline runs.
-        - ``"agent"`` -> ``everalgo.agent_memory.AgentBoundaryDetector`` and
-          both user-memory + agent-memory pipelines run.
+        - ``"chat"``  -> tool rows are dropped before boundary detection and
+          only the user-memory pipeline runs.
+        - ``"agent"`` -> tool rows stay in the cells (the model sees only the
+          chat messages) and both user-memory + agent-memory pipelines run.
 
-    ``session_lock_timeout_seconds`` caps how long one ``memorize()``
+    ``session_lock_timeout_seconds`` caps how long one ``add()`` / ``flush()``
     invocation can hold the per-session lock. Covers boundary LLM call +
     memcell DB writes + (synchronous portion of) pipeline dispatch. Stops
     a stuck LLM from deadlocking subsequent concurrent calls on the same
@@ -528,6 +566,24 @@ class MemorizeSettings(BaseModel):
     mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
+
+
+class AgentMemorySettings(BaseModel):
+    """Agent-memory extraction (``[agent_memory]``).
+
+    ``case_gate_enabled`` puts everalgo's correctness gate in front of
+    agent-case extraction: the extraction LLM judges whether the
+    conversation's work was completed correctly, and only admitted
+    conversations become cases (each admitted case then drives skill
+    extraction whatever its quality score). It costs one extra LLM call per
+    conversation up to the gate's length threshold. Off, cases are admitted
+    by everalgo's complexity and value filters, as before. Needs a restart.
+
+    Env binding:
+        EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED
+    """
+
+    case_gate_enabled: bool = False
 
 
 class ClusteringSettings(BaseModel):
@@ -653,12 +709,28 @@ class LanceDBSettings(BaseModel):
 
 
 class CascadeSettings(BaseModel):
-    """Cascade maintenance cadences.
+    """Cascade on/off switches and maintenance cadences.
 
-    These are *how often* each background job runs, not how long it is allowed
-    to take — the deadlines that bound a hung call stay as constants next to the
-    code they guard, sized from measurement, because a wrong value there either
-    masks a hang or manufactures failures.
+    ``enabled``:
+      Whether the server runs the cascade at all (watcher + scanner + worker).
+      Turned off, md edits never reach the index -- only useful for a run that
+      does not search, or one that drives ``everos cascade sync`` itself.
+
+    ``watcher_enabled``:
+      Whether the filesystem watcher runs. The scanner already re-derives the
+      same truth from the filesystem every ``scan_interval_seconds``, so the
+      only thing lost is latency: an md edit is picked up within one scan
+      instead of immediately. That trade is forced on a shared host, where
+      inotify watches are a per-user kernel resource -- an IDE indexing the
+      workspace can hold 350k of the 524k ceiling by itself, and every EverOS
+      server then dies at startup with ``OSError: [Errno 28] inotify watch
+      limit reached``. Unlike ``enabled = false`` this keeps the worker, so md
+      still reaches the index -- which an ingesting run cannot do without.
+
+    The cadences below are *how often* each background job runs, not how long
+    it is allowed to take — the deadlines that bound a hung call stay as
+    constants next to the code they guard, sized from measurement, because a
+    wrong value there either masks a hang or manufactures failures.
 
     ``optimize_heartbeat_seconds``:
       Idle sweep that offers every kind to the optimizer, so an unindexed tail
@@ -692,11 +764,44 @@ class CascadeSettings(BaseModel):
       which over a slow mount is the cost to weigh against it.
     """
 
+    enabled: bool = True
+    watcher_enabled: bool = True
     optimize_heartbeat_seconds: float = 60.0
     optimize_prune_interval_seconds: float = 300.0
     optimize_prune_retention_seconds: float = 60.0
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
     scan_interval_seconds: float = Field(default=30.0, gt=0)
+
+
+class OmeSettings(BaseModel):
+    """Offline memory engine (OME) tunables.
+
+    Engine-wide knobs only. Per-strategy overrides (enable / gate / cron) live
+    in ``<memory-root>/ome.toml``, a separate file the engine reads itself.
+
+    ``max_concurrent_runs``:
+      Engine-wide cap on concurrent strategy invocations. The default suits an
+      interactive install; a bulk ingest of many conversations is throttled by
+      it long before the machine is, since each slot spends almost all its
+      time waiting on a remote extraction call rather than using CPU.
+
+    ``run_timeout_seconds``:
+      Wall-clock ceiling on one strategy attempt; ``0`` (or ``None``) disables
+      it -- TOML has no null, so ``0`` is the operator's off switch.
+      Without a ceiling, a coroutine parked on an await that carries no
+      deadline of its own (a lock held by another stuck coroutine, a
+      connection-pool wait) keeps its slot forever: it never raises, so it
+      never retries. The 30-minute default is a deadlock backstop, not a
+      latency target.
+    """
+
+    max_concurrent_runs: int = Field(default=20, gt=0)
+    run_timeout_seconds: float | None = Field(default=1800.0, ge=0)
+
+    @field_validator("run_timeout_seconds")
+    @classmethod
+    def _zero_disables(cls, value: float | None) -> float | None:
+        return value or None
 
 
 class IndexSettings(BaseModel):
@@ -742,6 +847,20 @@ class KnowledgeSettings(BaseModel):
 
     max_upload_bytes: int = 52_428_800  # 50 MiB
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
+
+
+class LoggingSettings(BaseModel):
+    """``[logging]`` — the process's console log output.
+
+    ``everos server start --log-level`` and ``EVEROS_LOG_LEVEL`` override
+    ``level`` for the server; interactive commands log ``WARNING`` (``INFO``
+    with ``--verbose``) whatever it says.
+
+    Env binding:
+        EVEROS_LOGGING__LEVEL
+    """
+
+    level: str = "INFO"
 
 
 class ObservabilitySettings(BaseModel):
@@ -806,10 +925,13 @@ class Settings(BaseSettings):
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
+    agent_memory: AgentMemorySettings = AgentMemorySettings()
     clustering: ClusteringSettings = ClusteringSettings()
     cascade: CascadeSettings = CascadeSettings()
+    ome: OmeSettings = OmeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
 
     model_config = SettingsConfigDict(

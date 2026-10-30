@@ -16,18 +16,20 @@ directories, one doc_id).
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
 
-from everos.component.utils.datetime import get_utc_now
-from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.sqlite.tables.knowledge import KnowledgeDocumentRow
-from everos.service import knowledge as knowledge_mod
+from everos.core.utils.datetime import get_utc_now
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite._tables.knowledge import KnowledgeDocumentRow
+from tests.fakes import make_knowledge_service
 
 DOC_ID = "d_abc123000000"
 
@@ -58,6 +60,7 @@ def _doc_dirs(knowledge_dir: Path) -> list[Path]:
 async def test_replace_leaves_one_directory_for_the_document(
     new_title: str, new_category: str, fail_where: str
 ) -> None:
+    repo = MagicMock()
     tmp = Path(tempfile.mkdtemp(prefix="replace_restore_"))
     try:
         root = MemoryRoot(tmp)
@@ -65,60 +68,55 @@ async def test_replace_leaves_one_directory_for_the_document(
         kdir = root.knowledge_dir("default", "default")
         extractor = AsyncMock()
         extractor.aextract.return_value = _memories("Old Title", "Technology")
-        with (
-            patch.object(
-                knowledge_mod.MemoryRoot, "resolve", staticmethod(lambda: root)
-            ),
-            patch.object(knowledge_mod, "knowledge_document_repo") as repo,
-        ):
-            repo.doc_id_exists = AsyncMock(return_value=False)
-            created = await knowledge_mod.create_document(
-                extractor=extractor,
-                parsed=ParsedContent(text="x"),
-                title="Old Title",
-                knowledge_dir=kdir,
+        service = make_knowledge_service(documents=repo, root=root, extractor=extractor)
+        repo.doc_id_exists = AsyncMock(return_value=False)
+        created = await service.create_document(
+            parsed=ParsedContent(text="x"),
+            title="Old Title",
+            doc_id=DOC_ID,
+        )
+        old_dir = Path(created.md_path)
+        old_index = (old_dir / "index.md").read_text()
+        now = get_utc_now()
+        repo.get_by_doc_id = AsyncMock(
+            return_value=KnowledgeDocumentRow(
                 doc_id=DOC_ID,
+                app_id="default",
+                project_id="default",
+                category_id="Technology",
+                title="Old Title",
+                summary="s",
+                source_name=None,
+                source_type=None,
+                md_path=str((old_dir / "index.md").relative_to(root.root)),
+                created_at=now,
+                updated_at=now,
             )
-            old_dir = Path(created.md_path)
-            old_index = (old_dir / "index.md").read_text()
-            now = get_utc_now()
-            repo.get_by_doc_id = AsyncMock(
-                return_value=KnowledgeDocumentRow(
+        )
+        extractor.aextract.return_value = _memories(new_title, new_category)
+        if fail_where == "extract":
+            extractor.aextract.side_effect = RuntimeError("llm down")
+        # The upload's original is the one file written with ``write_bytes``:
+        # failing it fails the step after the new document directory exists.
+        disk_full = (
+            patch.object(
+                anyio.Path, "write_bytes", AsyncMock(side_effect=OSError("disk full"))
+            )
+            if fail_where == "after_write"
+            else contextlib.nullcontext()
+        )
+        with disk_full:
+            raised: type[BaseException] | None = None
+            try:
+                await service.replace_document(
+                    parsed=ParsedContent(text="y"),
+                    title=new_title,
                     doc_id=DOC_ID,
-                    app_id="default",
-                    project_id="default",
-                    category_id="Technology",
-                    title="Old Title",
-                    summary="s",
-                    source_name=None,
-                    source_type=None,
-                    md_path=str((old_dir / "index.md").relative_to(root.root)),
-                    created_at=now,
-                    updated_at=now,
+                    source_name="f.pdf",
+                    file_content=b"bytes",
                 )
-            )
-            extractor.aextract.return_value = _memories(new_title, new_category)
-            if fail_where == "extract":
-                extractor.aextract.side_effect = RuntimeError("llm down")
-            original_file = (
-                AsyncMock(side_effect=OSError("disk full"))
-                if fail_where == "after_write"
-                else knowledge_mod._write_original_file
-            )
-            with patch.object(knowledge_mod, "_write_original_file", original_file):
-                raised: type[BaseException] | None = None
-                try:
-                    await knowledge_mod.replace_document(
-                        extractor=extractor,
-                        parsed=ParsedContent(text="y"),
-                        title=new_title,
-                        doc_id=DOC_ID,
-                        knowledge_dir=kdir,
-                        source_name="f.pdf",
-                        file_content=b"bytes",
-                    )
-                except (RuntimeError, OSError) as e:
-                    raised = type(e)
+            except (RuntimeError, OSError) as e:
+                raised = type(e)
         assert (raised is None) == (fail_where == "none")
         dirs = _doc_dirs(kdir)
         assert len(dirs) == 1, [str(d.relative_to(kdir)) for d in dirs]

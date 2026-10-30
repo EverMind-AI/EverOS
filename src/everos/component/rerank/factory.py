@@ -13,8 +13,7 @@ Adding a new provider = one match arm here + one new file under
 
 from __future__ import annotations
 
-from everos.component.utils.config_hints import missing_config_error
-from everos.config import RerankSettings
+from everos.config import RerankSettings, missing_config_error
 
 from .dashscope_provider import DashScopeRerankProvider
 from .deepinfra_provider import DeepInfraRerankProvider

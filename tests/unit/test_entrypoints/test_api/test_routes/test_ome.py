@@ -7,14 +7,12 @@ count and a per-run ``runs`` list are always present, and ``status`` gains
 settled or didn't within the wait window).
 
 Each test wires a bare FastAPI app carrying only the ``ome`` router to a
-real, started ``OfflineEngine`` (no lifespan, no LanceDB, no LLM) — the
-route's deferred ``_get_engine()`` import resolves to whatever
-``everos.service.memorize._ome_engine`` holds, which is patched per test.
+real, started ``OfflineEngine`` (no lifespan, no LanceDB, no LLM) through a
+real ``OpsService`` whose only live collaborator is that engine.
 """
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -24,20 +22,20 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.routes.ome import router as ome_router
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.engine import OfflineEngine
-from everos.infra.ome.events import CronTick, ManualTick
-from everos.infra.ome.triggers import Cron, Immediate
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Cron, CronTick, Event, Immediate, ManualTick
+from tests.fakes import make_application
+from tests.fakes.application import make_ops
+from tests.helpers.ome import ome_strategy
 
 
 async def _client_for(
     engine: OfflineEngine, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
     """FastAPI app exposing only the ome router, wired to ``engine``."""
-    svc = importlib.import_module("everos.service.memorize")
-    monkeypatch.setattr(svc, "_ome_engine", engine, raising=False)
     app = FastAPI()
+    app.state.application = make_application(ops=make_ops(engine=engine))
     app.include_router(ome_router, prefix="/api/v1")
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
@@ -46,14 +44,14 @@ async def _client_for(
 async def gated_off_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
     """Engine with one strategy registered but ``enabled=False``."""
 
-    @offline_strategy(
+    @ome_strategy(
         name="gated_off_strategy",
         trigger=Immediate(on=[ManualTick]),
         emits=[],
         enabled=False,
     )
-    async def _s(event: ManualTick, ctx: StrategyContext) -> None:
-        return None
+    async def _s(event: ManualTick, deps: MemoryDeps) -> list[Event]:
+        return []
 
     engine = OfflineEngine(
         config=OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
@@ -70,13 +68,13 @@ async def gated_off_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
 async def cron_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
     """Engine with one Cron strategy — the ``reflect_episodes`` shape."""
 
-    @offline_strategy(
+    @ome_strategy(
         name="weekly_job",
         trigger=Cron(expr="0 2 * * 1"),
         emits=[],
     )
-    async def _s(event: CronTick, ctx: StrategyContext) -> None:
-        return None
+    async def _s(event: CronTick, deps: MemoryDeps) -> list[Event]:
+        return []
 
     engine = OfflineEngine(
         config=OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
@@ -97,13 +95,13 @@ async def always_fails_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
     no retry backoff sleep, so the test stays fast under the default runner.
     """
 
-    @offline_strategy(
+    @ome_strategy(
         name="always_fails",
         trigger=Immediate(on=[ManualTick]),
         emits=[],
         max_retries=0,
     )
-    async def _s(event: ManualTick, ctx: StrategyContext) -> None:
+    async def _s(event: ManualTick, deps: MemoryDeps) -> list[Event]:
         raise RuntimeError("boom")
 
     engine = OfflineEngine(

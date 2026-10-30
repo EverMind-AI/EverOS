@@ -7,18 +7,14 @@ Public surface:
 - :class:`EmbeddingServiceError` — provider-side failure (retryable).
 - :class:`EmbeddingInputError` — the provider rejected the input (permanent).
 - :class:`EmbeddingError` — backward-compat alias for ``EmbeddingServiceError``.
-- :class:`EmbeddingCapability` — soft-dependency wrapper around an
-  optional :class:`EmbeddingProvider` (``available`` / ``embed_or_none``
-  / ``require``).
 - :class:`OpenAIEmbeddingProvider` — concrete provider for any
   OpenAI-protocol embeddings endpoint (DeepInfra, vLLM, OpenAI, …).
 - :func:`build_embedding_provider` — settings-driven factory.
-- :func:`get_embedding_capability` — process-wide lazy singleton
-  accessor for :class:`EmbeddingCapability`. There is no separate
-  ``get_embedder`` accessor: consumers that need a provider call
-  ``get_embedding_capability().require()``, which routes every caller
-  through a single shared provider (and its single ``AsyncOpenAI``
-  client + ``asyncio.Semaphore``).
+
+There is no process-wide accessor: the application bootstrap builds one
+provider (one ``AsyncOpenAI`` client + ``asyncio.Semaphore``, so the
+configured ``max_concurrent`` bound holds) and injects it, or ``None``
+when embedding is not configured.
 
 External usage::
 
@@ -30,20 +26,16 @@ External usage::
 from everos.core.errors import EmbeddingInputError as EmbeddingInputError
 from everos.core.errors import EmbeddingServiceError as EmbeddingServiceError
 
-from .accessor import get_embedding_capability as get_embedding_capability
-from .capability import EmbeddingCapability as EmbeddingCapability
 from .factory import build_embedding_provider as build_embedding_provider
 from .openai_provider import OpenAIEmbeddingProvider as OpenAIEmbeddingProvider
 from .protocol import EmbeddingError as EmbeddingError
 from .protocol import EmbeddingProvider as EmbeddingProvider
 
 __all__ = [
-    "EmbeddingCapability",
     "EmbeddingError",
     "EmbeddingInputError",
     "EmbeddingProvider",
     "EmbeddingServiceError",
     "OpenAIEmbeddingProvider",
     "build_embedding_provider",
-    "get_embedding_capability",
 ]

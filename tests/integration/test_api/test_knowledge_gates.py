@@ -34,6 +34,7 @@ missing-provider check), independent of MemoryRoot / SQLite setup.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -41,12 +42,10 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-import everos.component.embedding.accessor as embedding_accessor
-import everos.component.rerank.accessor as rerank_accessor
-from everos.component.embedding import EmbeddingCapability
-from everos.component.rerank import RerankCapability
 from everos.entrypoints.api.exception_handlers import register_handlers
 from everos.entrypoints.api.routes import knowledge as knowledge_routes
+from tests.fakes import make_application, make_knowledge_service
+from tests.fakes.application import _ALL_CAPABILITIES
 
 # Endpoints that MUST return 422 when embed or rerank is missing.
 # These paths either write new md that cascade will need to embed
@@ -84,45 +83,51 @@ def _build_app() -> FastAPI:
     # the effective paths become /api/v1/knowledge/... — same shape the
     # _GATED / _UNGATED constants below use.
     app.include_router(knowledge_routes.router, prefix="/api/v1")
+    # Both providers unconfigured by default; tests opt into availability
+    # per provider via the fixtures below.
+    app.state.providers = {"embedding": None, "reranker": None}
+    app.state.application = make_application(
+        knowledge=make_knowledge_service(),
+        capabilities=dataclasses.replace(
+            _ALL_CAPABILITIES, embedding=False, rerank=False
+        ),
+    )
     return app
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    app = _build_app()
+def app() -> FastAPI:
+    return _build_app()
+
+
+def _make_available(app: FastAPI, provider: str) -> None:
+    """Configure ``provider`` on a fresh knowledge service (the gate's input)."""
+    app.state.providers[provider] = object()
+    app.state.application = dataclasses.replace(
+        app.state.application,
+        knowledge=make_knowledge_service(**app.state.providers),
+    )
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
-@pytest.fixture(autouse=True)
-def _capabilities_unavailable_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default both singletons to unavailable; tests opt into availability
-    per-capability via the fixtures below. Mirrors ``tests/unit/test_memory
-    /test_search/test_validate_components.py``.
-    """
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
-    )
-    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
+@pytest.fixture
+def embed_available(app: FastAPI) -> None:
+    _make_available(app, "embedding")
 
 
 @pytest.fixture
-def embed_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=object())
-    )
+def rerank_available(app: FastAPI) -> None:
+    _make_available(app, "reranker")
 
 
 @pytest.fixture
-def rerank_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        rerank_accessor, "_capability", RerankCapability(provider=object())
-    )
-
-
-@pytest.fixture
-def _stub_read_services(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_read_services(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace every read/delete/list service call with a benign stub.
 
     The tests in this module care only about whether the capability
@@ -142,7 +147,7 @@ def _stub_read_services(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     async def _fake_get_document(*args: Any, **kwargs: Any) -> Any:
-        from everos.component.utils.datetime import get_utc_now
+        from everos.core.utils.datetime import get_utc_now
 
         now = get_utc_now()
         return knowledge_service.DocumentDetail(
@@ -159,7 +164,7 @@ def _stub_read_services(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     async def _fake_get_topic(*args: Any, **kwargs: Any) -> Any:
-        from everos.component.utils.datetime import get_utc_now
+        from everos.core.utils.datetime import get_utc_now
 
         now = get_utc_now()
         return knowledge_service.TopicDetail(
@@ -181,15 +186,16 @@ def _stub_read_services(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_list_categories(*args: Any, **kwargs: Any) -> list[Any]:
         return []
 
-    monkeypatch.setattr(knowledge_routes, "delete_document", _fake_delete_document)
-    monkeypatch.setattr(knowledge_routes, "list_documents", _fake_list_documents)
-    monkeypatch.setattr(knowledge_routes, "get_document", _fake_get_document)
-    monkeypatch.setattr(knowledge_routes, "get_topic", _fake_get_topic)
-    monkeypatch.setattr(knowledge_routes, "list_categories", _fake_list_categories)
+    knowledge = app.state.application.knowledge
+    monkeypatch.setattr(knowledge, "delete_document", _fake_delete_document)
+    monkeypatch.setattr(knowledge, "list_documents", _fake_list_documents)
+    monkeypatch.setattr(knowledge, "get_document", _fake_get_document)
+    monkeypatch.setattr(knowledge, "get_topic", _fake_get_topic)
+    monkeypatch.setattr(knowledge, "list_categories", _fake_list_categories)
 
 
 @pytest.fixture
-def _stub_patch_document(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_patch_document(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub ``patch_document`` to echo the requested title back.
 
     Mirrors the real service contract: a title change lands in
@@ -197,7 +203,7 @@ def _stub_patch_document(monkeypatch: pytest.MonkeyPatch) -> None:
     the response envelope. Keeps the assertion focused on the gate
     (or lack of it) instead of on md / SQLite plumbing.
     """
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
     from everos.service import knowledge as knowledge_service
 
     captured: dict[str, Any] = {}
@@ -223,7 +229,9 @@ def _stub_patch_document(monkeypatch: pytest.MonkeyPatch) -> None:
             updated_at=get_utc_now(),
         )
 
-    monkeypatch.setattr(knowledge_routes, "patch_document", _fake_patch_document)
+    monkeypatch.setattr(
+        app.state.application.knowledge, "patch_document", _fake_patch_document
+    )
 
 
 async def _call(client: AsyncClient, method: str, path: str) -> Any:
@@ -313,6 +321,7 @@ async def test_ungated_endpoint_not_422_with_embed_only(
 
 
 async def test_search_not_422_when_both_available(
+    app: FastAPI,
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
     embed_available: None,
@@ -329,7 +338,9 @@ async def test_search_not_422_when_both_available(
     async def _fake_search_knowledge(**kwargs: Any) -> Any:
         return stub_result
 
-    monkeypatch.setattr(knowledge_routes, "search_knowledge", _fake_search_knowledge)
+    monkeypatch.setattr(
+        app.state.application.knowledge, "search_knowledge", _fake_search_knowledge
+    )
     resp = await client.post(
         "/api/v1/knowledge/search",
         json={"query": "hello"},

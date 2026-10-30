@@ -1,4 +1,4 @@
-"""Tests for :class:`_ClusterRepo` — cluster + cluster_member persistence.
+"""Tests for :class:`ClusterRepo` — cluster + cluster_member persistence.
 
 Verifies the boundary translations between the algo value object
 (:class:`everalgo.clustering.Cluster`) and the two-table storage shape:
@@ -22,26 +22,20 @@ from everalgo.clustering import Cluster as AlgoCluster
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
-from everos.infra.persistence.sqlite.repos.cluster import (
-    _ClusterRepo,
-    mint_cluster_id,
-)
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
+from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> _ClusterRepo:
+async def repo(tmp_path: Path) -> ClusterRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return _ClusterRepo(session_factory=factory)
+    return ClusterRepo(session_factory=factory)
 
 
 def _make_cluster(
@@ -63,17 +57,11 @@ def _make_cluster(
     )
 
 
-def test_mint_cluster_id_shape() -> None:
-    cid = mint_cluster_id()
-    assert cid.startswith("cl_")
-    assert len(cid) == 3 + 12  # ``cl_`` + 12 hex chars
-
-
 # ── round-trip ─────────────────────────────────────────────────────────
 
 
 async def test_upsert_then_list_round_trips_full_algo_cluster(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """Insert → list — every algo field survives storage."""
     cluster = _make_cluster(
@@ -107,7 +95,7 @@ async def test_upsert_then_list_round_trips_full_algo_cluster(
 
 
 async def test_list_for_owner_isolates_by_owner_and_kind(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """Different owner_id or different kind = separate buckets."""
     alice = _make_cluster(
@@ -159,7 +147,7 @@ async def test_list_for_owner_isolates_by_owner_and_kind(
 
 
 async def test_upsert_appends_new_members_and_overwrites_scalar_fields(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """A second upsert with new members appends; centroid / count / preview replace."""
     initial = _make_cluster(
@@ -206,7 +194,7 @@ async def test_upsert_appends_new_members_and_overwrites_scalar_fields(
     )
 
 
-async def test_upsert_is_idempotent_under_retry(repo: _ClusterRepo) -> None:
+async def test_upsert_is_idempotent_under_retry(repo: ClusterRepo) -> None:
     """OME at-least-once retry: same upsert twice → state unchanged, no duplicates."""
     cluster = _make_cluster(
         cluster_id="cl_idempot00001",
@@ -233,7 +221,7 @@ async def test_upsert_is_idempotent_under_retry(repo: _ClusterRepo) -> None:
     assert rows[0].members == ["mc_one", "mc_two"]
 
 
-async def test_upsert_rejects_unset_cluster_id(repo: _ClusterRepo) -> None:
+async def test_upsert_rejects_unset_cluster_id(repo: ClusterRepo) -> None:
     """Algo's ``Cluster.id`` is caller-supplied — None is a programming error."""
     cluster = AlgoCluster(
         id=None,
@@ -257,7 +245,7 @@ async def test_upsert_rejects_unset_cluster_id(repo: _ClusterRepo) -> None:
 
 
 async def test_find_cluster_id_for_member_reverse_lookup(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """``(member_type, member_id) → cluster_id`` index works both ways across kinds."""
     user_cluster = _make_cluster(
@@ -339,7 +327,7 @@ async def test_find_cluster_id_for_member_reverse_lookup(
 
 
 async def test_find_cluster_id_for_member_scoped_to_owner(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """Same ``member_id`` under two owners resolves to each owner's own cluster.
 
@@ -347,7 +335,7 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
     would falsely resolve owner B's episode ``ep_20260517_00000001`` to
     owner A's cluster (or vice versa) whenever ``entry_id`` collided —
     which is by design for entry_id (see
-    ``core/persistence/markdown/entries.py``: entry_id is per-owner
+    ``infra/persistence/markdown/_base/entries.py``: entry_id is per-owner
     unique, cross-owner uniqueness comes from the composite
     ``<owner>_<entry_id>`` at the storage layer).
     """
@@ -412,95 +400,18 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
     )
 
 
-# ── remove_members ─────────────────────────────────────────────────────
+# ── replace_members ────────────────────────────────────────────────────
 
 
-async def test_remove_members_deletes_specified(repo: _ClusterRepo) -> None:
-    """Removing a subset of members leaves the rest intact."""
+async def test_replace_members_swaps_members_and_restamps_the_row(
+    repo: ClusterRepo,
+) -> None:
+    """Removed members go, the merged one joins, the snapshot is restamped."""
     cluster = _make_cluster(
-        cluster_id="cl_rm_000000001",
+        cluster_id="cl_rep_00000001",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one", "mc_two", "mc_three"],
+        members=["ep_one", "ep_two", "ep_three"],
         count=3,
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.remove_members("cl_rm_000000001", {"mc_one", "mc_three"})
-
-    members = await repo.get_members_with_type("cl_rm_000000001")
-    assert [mid for mid, _ in members] == ["mc_two"]
-
-
-async def test_remove_members_empty_set_is_noop(
-    repo: _ClusterRepo,
-) -> None:
-    """An empty member_ids set should not touch the database."""
-    cluster = _make_cluster(
-        cluster_id="cl_noop0000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.remove_members("cl_noop0000001", set())
-
-    members = await repo.get_members_with_type("cl_noop0000001")
-    assert len(members) == 1
-
-
-# ── add_member ─────────────────────────────────────────────────────────
-
-
-async def test_add_member_with_episode_type(repo: _ClusterRepo) -> None:
-    """Add a single member and verify it appears in the membership list."""
-    cluster = _make_cluster(
-        cluster_id="cl_add_00000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.add_member("cl_add_00000001", "ep_new_001", "episode")
-
-    members = await repo.get_members_with_type("cl_add_00000001")
-    member_ids = [mid for mid, _ in members]
-    assert "ep_new_001" in member_ids
-    # Verify type stored correctly
-    ep_row = [(mid, mt) for mid, mt in members if mid == "ep_new_001"]
-    assert ep_row[0][1] == "episode"
-
-
-# ── update_metadata ────────────────────────────────────────────────────
-
-
-async def test_update_metadata_changes_cluster_row(
-    repo: _ClusterRepo,
-) -> None:
-    """update_metadata overwrites centroid, count, last_ts_ms, preview."""
-    cluster = _make_cluster(
-        cluster_id="cl_meta0000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-        count=1,
-        last_ts_ms=1_700_000_000_000,
         preview=["old preview"],
     )
     await repo.upsert_with_members(
@@ -508,75 +419,73 @@ async def test_update_metadata_changes_cluster_row(
         owner_id="u_alice",
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
-    new_centroid = np.array([0.5, 0.5], dtype=np.float32).tobytes()
-    await repo.update_metadata(
-        "cl_meta0000001",
-        centroid_blob=new_centroid,
-        count=3,
+    await repo.replace_members(
+        "cl_rep_00000001",
+        removed={"ep_one", "ep_three"},
+        added="ep_merged",
+        member_type="episode",
+        centroid_blob=np.array([0.5, 0.5], dtype=np.float32).tobytes(),
+        count=1,
         last_ts_ms=1_700_000_099_000,
         preview_json='["new preview"]',
     )
 
-    rows = await repo.list_for_owner("u_alice", "user_memory")
-    assert len(rows) == 1
-    got = rows[0]
-    assert got.count == 3
-    assert got.last_ts == 1_700_000_099_000
-    assert got.preview == ["new preview"]
+    assert await repo.get_members_with_type("cl_rep_00000001") == [
+        ("ep_two", "episode"),
+        ("ep_merged", "episode"),
+    ]
+    got = await repo.get_with_members("cl_rep_00000001")
+    assert got is not None
+    assert (got.count, got.last_ts, got.preview) == (
+        1,
+        1_700_000_099_000,
+        ["new preview"],
+    )
     np.testing.assert_allclose(
-        np.asarray(got.centroid),
-        np.array([0.5, 0.5], dtype=np.float32),
+        np.asarray(got.centroid), np.array([0.5, 0.5], dtype=np.float32)
     )
 
 
-# ── list_ids_and_member_counts ─────────────────────────────────────────
-
-
-async def test_list_ids_and_member_counts_returns_actual_member_count(
-    repo: _ClusterRepo,
+async def test_replace_members_with_nothing_removed_only_appends(
+    repo: ClusterRepo,
 ) -> None:
-    """Count comes from cluster_member rows, not the Cluster.count field."""
-    c1 = _make_cluster(
-        cluster_id="cl_cnt_00000001",
+    """An empty ``removed`` set keeps every existing member."""
+    cluster = _make_cluster(
+        cluster_id="cl_rep_00000002",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one", "mc_two"],
-        count=99,  # deliberately wrong — repo counts actual rows
-    )
-    c2 = _make_cluster(
-        cluster_id="cl_cnt_00000002",
-        centroid_vals=[0.0, 1.0],
-        members=["mc_three"],
-        count=99,
+        members=["ep_one"],
     )
     await repo.upsert_with_members(
-        c1,
+        cluster,
         owner_id="u_alice",
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
-    )
-    await repo.upsert_with_members(
-        c2,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
-    result = await repo.list_ids_and_member_counts("u_alice", "user_memory")
-    result_dict = dict(result)
-    assert result_dict["cl_cnt_00000001"] == 2
-    assert result_dict["cl_cnt_00000002"] == 1
+    await repo.replace_members(
+        "cl_rep_00000002",
+        removed=set(),
+        added="ep_merged",
+        member_type="episode",
+        centroid_blob=np.array([1.0, 0.0], dtype=np.float32).tobytes(),
+        count=1,
+        last_ts_ms=1_700_000_000_000,
+        preview_json="[]",
+    )
+
+    members = await repo.get_members_with_type("cl_rep_00000002")
+    assert [mid for mid, _ in members] == ["ep_one", "ep_merged"]
 
 
 # ── get_members_with_type ──────────────────────────────────────────────
 
 
 async def test_get_members_with_type_returns_tuples(
-    repo: _ClusterRepo,
+    repo: ClusterRepo,
 ) -> None:
     """Returns (member_id, member_type) tuples in insertion order."""
     cluster = _make_cluster(

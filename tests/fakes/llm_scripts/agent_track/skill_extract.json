@@ -1,0 +1,14 @@
+{
+  "operations": [
+    {
+      "action": "add",
+      "data": {
+        "name": "fix_naive_aware_datetime_bugs",
+        "description": "Diagnose and fix test failures caused by mixing naive and aware datetimes.",
+        "content": "1. Re-run the failing test and capture the traceback.\n2. Find where a naive datetime meets an aware one.\n3. Normalise both sides to UTC at the parsing boundary.\n4. Add a regression test with an aware timestamp.\n5. Re-run the whole suite before committing.",
+        "confidence": 0.7
+      }
+    }
+  ],
+  "update_note": "Added a skill for naive / aware datetime bugs."
+}

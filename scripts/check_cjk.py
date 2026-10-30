@@ -25,6 +25,10 @@ import subprocess
 # and halfwidth/fullwidth forms. Kept as escapes so this file stays ASCII.
 _CJK = re.compile("[\\u3000-\\u9fff\\uac00-\\ud7af\\uff00-\\uffef]")
 
+# A line carrying this marker (in a comment) is exempt: a language switcher
+# names the language in itself, a community badge names its group.
+_ALLOW_MARKER = "cjk-allow"
+
 
 def _is_allowlisted(path: str) -> bool:
     """Return True if CJK is permitted in this path (see language-policy.md)."""
@@ -42,7 +46,11 @@ def _is_allowlisted(path: str) -> bool:
     if re.search(r"\.(zh|ja|ko)\.md$", path):
         return True
     # 5. Filenames explicitly marked with a CJK/locale token.
-    return bool(re.search(r"(^|[._-])(cjk|zh|ja|ko)([._-]|$)", name))
+    if re.search(r"(^|[._-])(cjk|zh|ja|ko)([._-]|$)", name):
+        return True
+    # 6. Third-party integration samples: each use case ships its own demo
+    #    content and branding for its audience, like test fixtures do.
+    return path.startswith("use-cases/")
 
 
 def _tracked_files() -> list[str]:
@@ -67,7 +75,7 @@ def main() -> int:
         except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
             continue  # binary / missing / directory: nothing to scan
         for i, line in enumerate(lines, start=1):
-            if _CJK.search(line):
+            if _CJK.search(line) and _ALLOW_MARKER not in line:
                 violations.append((path, i, line.strip()))
 
     if not violations:

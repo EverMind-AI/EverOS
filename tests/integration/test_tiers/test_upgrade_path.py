@@ -22,24 +22,22 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.persistence.lancedb import (
-    AtomicFact,
-    Episode,
-    atomic_fact_repo,
-    get_table,
-)
-from everos.memory.cascade import _backfill as _backfill_mod
+from everos.core.utils.datetime import get_utc_now
+from everos.entrypoints.cli.commands._backfill import run_backfill
+from everos.infra.persistence.index import eq
+from everos.infra.persistence.records import AtomicFact
+from tests.fakes import FakeOmeLock, make_backfill_deps, make_ops
 
-from .conftest import _tier_client, add_payload, cascade_progress
+from .conftest import (
+    StubEmbedder,
+    _tier_client,
+    add_payload,
+    cascade_progress,
+    episode_rows,
+    tier_storage,
+)
 
 _N_ITEMS = 4
-
-
-async def _episode_rows(owner_id: str) -> list[dict]:
-    table = await get_table(Episode.TABLE_NAME, Episode)
-    return await table.query().where(f"owner_id = '{owner_id}'").to_list()
 
 
 async def _wait_for_episode_rows(
@@ -48,15 +46,15 @@ async def _wait_for_episode_rows(
     """Wait for every logical entry in a debounced daily-log update."""
     async with asyncio.timeout(deadline_seconds):
         while True:
-            rows = await _episode_rows(owner_id)
+            rows = await episode_rows(owner_id)
             if len(rows) >= expected:
                 return rows
             await asyncio.sleep(0.1)
 
 
 async def _atomic_fact_rows(owner_id: str) -> list[dict]:
-    table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
-    return await table.query().where(f"owner_id = '{owner_id}'").to_list()
+    rows = await tier_storage().repos.atomic_fact.scan(eq("owner_id", owner_id))
+    return [row.model_dump(mode="python") for row in rows]
 
 
 async def _seed_unvectorized_fact(episode_row: dict) -> None:
@@ -72,7 +70,7 @@ async def _seed_unvectorized_fact(episode_row: dict) -> None:
     """
     entry_id = f"af_seed_{episode_row['entry_id']}"
     owner_id = episode_row["owner_id"]
-    await atomic_fact_repo.add(
+    await tier_storage().repos.atomic_fact.add(
         [
             AtomicFact(
                 id=f"{owner_id}_{entry_id}",
@@ -161,7 +159,7 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "restarted service must now report embed available"
         )
 
-        pre_episode_rows = await _episode_rows("u_alice")
+        pre_episode_rows = await episode_rows("u_alice")
         assert all(r["vector"] is None for r in pre_episode_rows), (
             "rows written before the upgrade must still be NULL pre-backfill"
         )
@@ -169,15 +167,19 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
         # ``run_backfill`` refuses to run against a live OME lock (Phase
         # 1 / 2 / 3 all preflight it — round-4 review J10 aligned Phase
         # 1 with the other two). In-process this test still holds the
-        # server lifespan open around the call, so bypass the probe
-        # locally to simulate the intended "server stopped, then
-        # backfill runs" sequence. A real user's flow does stop the
-        # server; the probe is the mechanism that enforces it.
-        monkeypatch.setattr(_backfill_mod, "_probe_ome_lock_available", lambda: True)
-        exit_code = await run_backfill(phase="vectors", auto_yes=True)
+        # server lifespan open around the call, so backfill runs over
+        # the production wiring with a lock that reads free, simulating
+        # the intended "server stopped, then backfill runs" sequence. A
+        # real user's flow does stop the server; the probe enforces it.
+        ops = make_ops(
+            backfill=make_backfill_deps(
+                root=tmp_path, embedding=StubEmbedder(), ome_lock=FakeOmeLock()
+            )
+        )
+        exit_code = await run_backfill(ops, phase="vectors", auto_yes=True)
         assert exit_code == 0
 
-        post_episode_rows = await _episode_rows("u_alice")
+        post_episode_rows = await episode_rows("u_alice")
         assert len(post_episode_rows) == _N_ITEMS
         assert all(r["vector"] is not None for r in post_episode_rows), (
             "every pre-upgrade episode must carry a vector after backfill"

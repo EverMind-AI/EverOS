@@ -1,6 +1,6 @@
-"""LanceDB ``episode`` table schema.
+"""Derived-index ``episode`` record.
 
-Field set is fixed by the LanceDB tables design spec. Rows are populated
+Field set is fixed by the index tables design spec. Rows are populated
 by the cascade daemon from ``users/<owner_id>/episodes/episode-<YYYY-MM-DD>.md``
 and from ``agents/<owner_id>/episodes/...`` symmetrically.
 """
@@ -10,18 +10,14 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable, Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from ._dim import configured_dim
 from ._parent_type import ParentType
-
-# Vector dimension is settings-managed at runtime; the class-level
-# constant pins the schema dim used at table creation.
-_DIM = configured_dim()
+from .vector import DenseVector
 
 
-class Episode(BaseLanceTable):
-    """One episode record indexed in LanceDB."""
+class Episode(IndexRecord):
+    """One episode record in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "episode"
     BM25_FIELDS: ClassVar[list[str]] = ["episode_tokens"]
@@ -62,7 +58,7 @@ class Episode(BaseLanceTable):
 
     episode_tokens: str
     """App-layer pre-tokenised ``episode`` text — space-joined tokens
-    (e.g. produced by jieba). LanceDB FTS index is built on **this**
+    (e.g. produced by jieba). The BM25 index is built on **this**
     column using a whitespace tokenizer; the original ``episode`` field
     is what callers display. Two-field BM25 scheme keeps tokenisation
     deterministic and provider-pluggable at the app layer."""
@@ -82,5 +78,5 @@ class Episode(BaseLanceTable):
     consolidated into a cluster. Value is the cluster entry_id that
     supersedes this row. ``NULL`` means the row is still active."""
 
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
-    subject_vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
+    vector: DenseVector | None = None
+    subject_vector: DenseVector | None = None

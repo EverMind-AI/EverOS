@@ -3,6 +3,7 @@
 External usage::
 
     from everos.core.observability.tracing import (
+        configure_tracing,
         gen_request_id,
         get_tracer,
         init_tracing,
@@ -27,6 +28,7 @@ from .attributes import set_generation_usage as set_generation_usage
 from .attributes import set_redactor as set_redactor
 from .attributes import use_traceparent as use_traceparent
 from .ids import gen_request_id as gen_request_id
+from .provider import configure_tracing as configure_tracing
 from .provider import force_flush as force_flush
 from .provider import get_tracer as get_tracer
 from .provider import init_tracing as init_tracing
@@ -38,6 +40,7 @@ from .scores import shutdown_score_sink as shutdown_score_sink
 __all__ = [
     "capture_input",
     "capture_output",
+    "configure_tracing",
     "current_trace_ids",
     "current_traceparent",
     "emit_recall_scores",

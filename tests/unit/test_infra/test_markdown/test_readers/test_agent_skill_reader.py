@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from everos.core.persistence import MemoryRoot
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,
     AgentSkillReader,

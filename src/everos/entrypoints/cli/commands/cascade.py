@@ -13,7 +13,7 @@ without standing up the FastAPI app:
   worker once so the retry actually runs before the command returns.
 - ``cascade backfill`` — one-shot Tier 1 → Tier 2/3 migration: re-embed
   vectors, build clusters, extract skills. See
-  :func:`everos.entrypoints.cli.commands._backfill_cmd.run_backfill`
+  :func:`everos.entrypoints.cli.commands._backfill.run_backfill`
   for the phase orchestration.
 - ``cascade rebuild`` — drop every business LanceDB table and re-index
   all md from scratch. Recovery for a drifted / corrupt index; safe
@@ -21,16 +21,16 @@ without standing up the FastAPI app:
   are preserved. Skips the schema-verify guard (which the drift would
   otherwise trip on startup).
 
-CLI is in-process (12 doc §7.1 + 16 doc §9.2): it constructs the same
-:class:`CascadeOrchestrator` as the daemon but only calls
-``sync_once`` / ``drain_once`` / ``queue_summary``. No watcher /
-scanner background task is started.
+CLI is in-process (12 doc §7.1 + 16 doc §9.2): each command builds the
+same :class:`~everos.service.Application` as the server but never starts
+it -- it opens storage for the one command through
+:meth:`~everos.service.OpsService.index_session` and calls ``ops``
+methods. No watcher / scanner background task is started.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import enum
 import os
 from collections import Counter
@@ -40,42 +40,19 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from sqlmodel import SQLModel
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.tokenizer import build_tokenizer
-from everos.component.utils.datetime import to_display_tz
-from everos.config import load_settings
+from everos.config import Settings, load_settings
 from everos.core.errors import (
     EmbeddingProvenanceError,
     IndexSchemaMismatchError,
+    LLMNotConfiguredError,
+    MemoryRootLockedError,
 )
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.entrypoints.cli._log_setup import configure_cli_logging
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.ome.exceptions import EngineLockHeldError
-from everos.infra.persistence.index import (
-    assert_record_dim_matches_settings,
-    connect,
-    count_business_rows,
-    drop_business_tables,
-    ensure_business_indexes,
-    shutdown,
-    verify_configuration,
-    write_embedding_model,
-)
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import (
-    CascadeOrchestrator,
-    hold_ome_lock,
-    match_kind,
-    ome_lock_is_free,
-)
+from everos.core.utils.datetime import to_display_tz
+from everos.entrypoints.cli._process import configure_interactive
+from everos.entrypoints.cli.commands._backfill import run_backfill
+from everos.service import Application, OpsService, build_application
 
 logger = get_logger(__name__)
 
@@ -88,6 +65,7 @@ app = typer.Typer(
 
 @app.callback()
 def _cascade_callback(
+    ctx: typer.Context,
     root: str | None = typer.Option(
         None,
         "--root",
@@ -100,9 +78,9 @@ def _cascade_callback(
         help="Emit INFO-level lifecycle logs (default: WARNING only).",
     ),
 ) -> None:
-    """Set memory root and log level before any cascade subcommand runs."""
-    configure_cli_logging(verbose=verbose)
+    """Record the group-level memory root and log level for the subcommand."""
     _apply_root_env(root)
+    ctx.ensure_object(dict)["verbose"] = verbose
 
 
 def _apply_root_env(root: str | None) -> None:
@@ -117,21 +95,21 @@ def _apply_root_env(root: str | None) -> None:
         os.environ["EVEROS_ROOT"] = root
 
 
-def _apply_verbose_logging(verbose: bool | None) -> None:
-    """Re-apply the CLI log level from a subcommand-level ``--verbose``.
+def _command_settings(
+    ctx: typer.Context, *, root: str | None = None, verbose: bool | None = None
+) -> Settings:
+    """Settle the subcommand's root and log level; return its settings.
 
-    ``None`` means the subcommand did not receive its own ``--verbose``
-    flag — leave whatever level the group callback set (default
-    WARNING, or INFO if the user passed ``cascade --verbose``). A
-    ``True``/``False`` value came from the subcommand and wins over the
-    group callback (later configuration overrides earlier).
-
-    Mirrors :func:`_apply_root_env`'s "either position works" pattern
-    for symmetry — users can write ``everos cascade --verbose status``
-    or ``everos cascade status --verbose`` and get the same behaviour.
+    A subcommand-level ``--root`` / ``--verbose`` wins over the group's
+    (``None`` means the subcommand did not get its own ``--verbose``), so
+    ``everos cascade --verbose status`` and ``everos cascade status
+    --verbose`` behave the same. Settings are loaded only after the root is
+    settled, since the root decides which ``everos.toml`` they read.
     """
-    if verbose is not None:
-        configure_cli_logging(verbose=verbose)
+    _apply_root_env(root)
+    if verbose is None:
+        verbose = bool(ctx.ensure_object(dict).get("verbose", False))
+    return configure_interactive(verbose=verbose, settings=load_settings())
 
 
 _ROOT_OPTION_HELP = (
@@ -149,38 +127,37 @@ _VERBOSE_OPTION_HELP = (
 
 @asynccontextmanager
 async def _runtime(
-    *, verify: bool = True, ensure: bool = True, exclusive: bool = False
-) -> AsyncIterator[None]:
-    """Stand up sqlite + lancedb the same way the API lifespan would.
+    settings: Settings,
+    *,
+    verify: bool = True,
+    ensure: bool = True,
+    exclusive: bool = False,
+) -> AsyncIterator[OpsService]:
+    """Build the application and open its storage for one command.
 
-    The CLI uses the same lazy, process-wide singletons the API lifespan
-    does. They are **per-process**: a running daemon has its own
-    connection and table-handle cache, and reads its own LanceDB
-    snapshot. Reads interleave safely; writes do not — a second process
-    upserting the same table cannot see what the daemon just committed
-    (nor the other way round) and both insert the row, so every command
-    that writes the index (``sync``, ``fix --apply``, ``rebuild``) passes
+    The application is per-process: a running daemon has its own
+    connection and table-handle cache, and reads its own index snapshot.
+    Reads interleave safely; writes do not -- a second process upserting
+    the same table cannot see what the daemon just committed (nor the
+    other way round) and both insert the row, so every command that writes
+    the index (``sync``, ``fix --apply``, ``rebuild``) passes
     ``exclusive=True`` and holds the OME lock for its whole run. Refused
     with exit code 3 while a server (or another exclusive CLI phase) holds
     it; a server starting meanwhile fails at its own lock instead.
 
-    ``verify=False`` skips :func:`verify_business_schemas` — required by
-    ``cascade rebuild``, whose whole purpose is to recover from a table
-    whose schema *has* drifted; running the guard there would abort
-    startup before the rebuild could fix it (chicken-and-egg).
-
-    ``ensure=False`` additionally skips :func:`ensure_business_indexes`.
-    That call runs the schema / FTS migrations against the **existing**
-    tables, and on the corruption classes rebuild exists to repair (a
-    missing column, an un-alterable type) it raises before the drop can
-    happen — the recovery path dying on the damage it was invoked to fix.
-    Rebuild recreates the tables and their indexes itself after dropping,
-    so skipping the pre-drop pass loses nothing.
+    ``verify=False`` / ``ensure=False`` are for ``cascade rebuild``, which
+    repairs exactly what verification rejects and what the index
+    migrations raise on (see :meth:`OpsService.index_session`).
     """
-    lock = hold_ome_lock() if exclusive else contextlib.nullcontext()
     try:
-        lock.__enter__()
-    except EngineLockHeldError:
+        async with (
+            _build_application(settings) as application,
+            application.ops.index_session(
+                verify=verify, ensure=ensure, exclusive=exclusive
+            ),
+        ):
+            yield application.ops
+    except MemoryRootLockedError:
         typer.echo(
             "error: another process holds this memory root's OME lock — a "
             "running `everos server`\n"
@@ -188,70 +165,19 @@ async def _runtime(
             "same index insert rows\n"
             "  twice, so this command needs the root to itself. A server "
             "projects markdown changes\n"
-            "  on its own unless it was started with EVEROS_DISABLE_CASCADE=1 "
-            "or quiesced; stop it\n"
-            "  first, then re-run.",
+            "  on its own unless it was started with [cascade] enabled = false "
+            "or quiesced;\n"
+            "  stop it first, then re-run.",
             err=True,
         )
         raise typer.Exit(code=3) from None
-    try:
-        engine = get_engine()
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        # Unconditional, including under `verify=False`: `rebuild` skips
-        # verification precisely because it is repairing the index, but it is
-        # also the one command that creates every table from scratch -- a
-        # disagreement between the two readers of `dim` would be baked into
-        # the new tables and only surface on the next `server start`.
-        assert_record_dim_matches_settings()
-        await connect()
-        if verify:
-            # The rest of the facade's startup() sequence; the dim assertion
-            # above is hoisted out of it so `rebuild` gets it too.
-            # `_runtime` does not call it (it drives connect / verify /
-            # ensure separately so `rebuild` can skip the middle), so the
-            # dim guard and the provenance check have to be named here or
-            # they would be absent from every CLI phase.
-            # Attest only while holding the index lock -- `status`,
-            # `fix` and `backfill` are read-only phases.
-            await verify_configuration(may_attest=exclusive)
-        if ensure:
-            await ensure_business_indexes()
-        try:
-            yield
-        finally:
-            await shutdown()
-            await dispose_engine()
     except (IndexSchemaMismatchError, EmbeddingProvenanceError) as exc:
-        # Same shape as the lock message above: the operator has one thing to
-        # go and do, so say what drifted and stop. Without this the startup
-        # guards reach the user as a bare traceback and exit 1 -- and 1
-        # already means "no everos.toml here", so the two would be
-        # indistinguishable in a script.
+        # The operator has one thing to go and do, so say what drifted and
+        # stop. Without this the startup guards reach the user as a bare
+        # traceback and exit 1 -- and 1 already means "no everos.toml here",
+        # so the two would be indistinguishable in a script.
         typer.secho(str(exc), err=True)
         raise typer.Exit(code=3) from None
-    finally:
-        lock.__exit__(None, None, None)
-
-
-def _build_orchestrator() -> CascadeOrchestrator:
-    memory_root = MemoryRoot.resolve()
-    memory_root.ensure()
-    tokenizer = build_tokenizer()
-
-    capability = get_embedding_capability()
-    if capability.available:
-        logger.info("cli_cascade_embed_available")
-    else:
-        logger.info(
-            "cli_cascade_embed_unavailable",
-            reason="embedding not configured; keyword-only mode",
-        )
-
-    return CascadeOrchestrator(
-        memory_root=memory_root,
-        tokenizer=tokenizer,
-    )
 
 
 # ── sync ─────────────────────────────────────────────────────────────────
@@ -259,6 +185,7 @@ def _build_orchestrator() -> CascadeOrchestrator:
 
 @app.command("sync")
 def sync(
+    ctx: typer.Context,
     path: Annotated[
         Path | None,
         typer.Argument(
@@ -294,17 +221,15 @@ def sync(
     10-hour soak with two concurrent ``cascade sync`` processes). Refused
     with exit code 3 while a server holds the root.
     """
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     if force_all and path is not None:
         raise typer.BadParameter("--force-all re-enqueues every md; do not pass PATH")
 
     async def _run() -> None:
-        async with _runtime(exclusive=True):
-            orchestrator = _build_orchestrator()
+        async with _runtime(settings, exclusive=True) as ops:
             if force_all:
-                rows = await orchestrator.force_enqueue_all()
+                rows = await ops.cascade_force_enqueue_all()
                 by_status = Counter(row.status for row in rows)
                 summary = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
                 typer.echo(
@@ -312,18 +237,17 @@ def sync(
                     + (f": {summary}" if summary else "")
                 )
             if path is not None:
-                rel = _resolve_relative(path)
-                spec = match_kind(rel)
-                if spec is None:
+                rel = _resolve_relative(ops, path)
+                kind = await ops.cascade_force_enqueue(rel)
+                if kind is None:
                     typer.echo(
                         f"error: path does not match any registered cascade "
                         f"kind: {rel}",
                         err=True,
                     )
                     raise typer.Exit(code=1)
-                await md_change_state_repo.force_enqueue(rel, spec.name)
-                typer.echo(f"force-enqueued {rel} (kind={spec.name})")
-            processed = await orchestrator.drain_fully()
+                typer.echo(f"force-enqueued {rel} (kind={kind})")
+            processed = await ops.cascade_sync()
             typer.echo(f"sync complete — processed {processed} row(s)")
 
     asyncio.run(_run())
@@ -334,6 +258,7 @@ def sync(
 
 @app.command("status")
 def status(
+    ctx: typer.Context,
     root: Annotated[
         str | None,
         typer.Option("--root", help=_ROOT_OPTION_HELP),
@@ -344,12 +269,12 @@ def status(
     ] = None,
 ) -> None:
     """Print the queue / LSN summary."""
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> None:
-        async with _runtime():
-            summary = await md_change_state_repo.queue_summary()
+        async with _runtime(settings) as ops:
+            status = await ops.cascade_status()
+            summary = status.summary
             lag = max(0, summary.max_lsn - summary.last_processed_lsn)
             typer.echo("queue:")
             typer.echo(f"  pending:                  {summary.pending}")
@@ -377,14 +302,14 @@ def status(
             # Counted live here, unlike /health's startup snapshot: this is
             # a command someone runs *because* they are suspicious, and the
             # answer they came for is whether the index holds anything.
-            rows = await count_business_rows()
+            rows = status.index_rows
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
             # `summary.done` would count completed deletions, so a user who
             # removed their last markdown file would be warned that their
             # index is missing and sent to rebuild it from nothing.
-            live = await md_change_state_repo.count_done_live_sources()
+            live = status.live_sources
             if live > 0 and summary.pending == 0 and not any(rows.values()):
                 typer.secho(
                     f"\n  {live} source file(s) are indexed but every "
@@ -404,6 +329,7 @@ def status(
 
 @app.command("fix")
 def fix(
+    ctx: typer.Context,
     apply: Annotated[
         bool,
         typer.Option(
@@ -421,12 +347,11 @@ def fix(
     ] = None,
 ) -> None:
     """List failed rows (default) or re-enqueue retryable ones (``--apply``)."""
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> None:
-        async with _runtime(exclusive=apply):
-            rows = await md_change_state_repo.list_failed()
+        async with _runtime(settings, exclusive=apply) as ops:
+            rows = await ops.cascade_failed()
             if not rows:
                 typer.echo("no failed rows")
                 return
@@ -448,11 +373,9 @@ def fix(
                     )
                 return
 
-            moved = await md_change_state_repo.reset_retryable_to_pending()
+            moved, processed = await ops.cascade_fix()
             typer.echo(f"re-enqueued {moved} retryable row(s)")
             if moved:
-                orchestrator = _build_orchestrator()
-                processed = await orchestrator.drain_once()
                 typer.echo(f"[worker] processed {processed} row(s) on drain")
             permanent_rows = [r for r in rows if not r.retryable]
             if permanent_rows:
@@ -469,7 +392,7 @@ def fix(
 
 
 class _BackfillPhaseOption(enum.StrEnum):
-    """CLI-facing ``--phase`` choices — mirrors ``BackfillPhase.slug``."""
+    """``--phase`` choices: ``all`` plus :data:`everos.service.BACKFILL_PHASES`."""
 
     VECTORS = "vectors"
     CLUSTERS = "clusters"
@@ -479,6 +402,7 @@ class _BackfillPhaseOption(enum.StrEnum):
 
 @app.command("backfill")
 def backfill(
+    ctx: typer.Context,
     phase: Annotated[
         _BackfillPhaseOption,
         typer.Option(
@@ -526,12 +450,11 @@ def backfill(
     re-running the same ``--phase`` (or ``--phase all``) afterwards only
     picks up what's left — nothing is redone from scratch.
     """
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> int:
-        async with _runtime():
-            return await run_backfill(phase=phase.value, auto_yes=yes)
+        async with _runtime(settings) as ops:
+            return await run_backfill(ops, phase=phase.value, auto_yes=yes)
 
     try:
         code = asyncio.run(_run())
@@ -555,6 +478,7 @@ def backfill(
 
 @app.command("rebuild")
 def rebuild(
+    ctx: typer.Context,
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
@@ -581,7 +505,8 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
-    if not ome_lock_is_free():
+    settings = _command_settings(ctx)
+    if not asyncio.run(_root_is_free(settings)):
         typer.echo(
             "error: a server (or another exclusive CLI phase) is running on "
             "this memory root.\n"
@@ -605,33 +530,17 @@ def rebuild(
         # to fix; the startup guard would abort before we could rebuild.
         # ensure=False: the pre-drop migration pass would raise on exactly
         # the damage we are here to repair (see _runtime).
-        async with _runtime(verify=False, ensure=False, exclusive=True):
-            # Reset the queue FIRST so every crash window converges on
-            # "queue pending → next scan re-indexes". Doing it after the
-            # drop leaves a window where a crash yields empty tables with
-            # a fully-`done` queue: nothing re-indexes, the schema guard
-            # passes, and the deployment comes up silently empty — the
-            # exact state this command exists to avoid.
-            cleared = await md_change_state_repo.reset_all()
-            typer.echo(f"reset {cleared} cascade queue row(s)")
-            dropped = await drop_business_tables()
+        async with _runtime(
+            settings, verify=False, ensure=False, exclusive=True
+        ) as ops:
+            result = await ops.cascade_rebuild()
+            typer.echo(f"reset {result.ledger_rows_reset} cascade queue row(s)")
+            dropped = result.dropped_tables
             typer.echo(
                 f"dropped {len(dropped)} LanceDB table(s): "
                 f"{', '.join(dropped) or '(none)'}"
             )
-            # Recreate the tables (current schema) + FTS indexes.
-            await ensure_business_indexes()
-            # Re-scan + drain: re-embed and re-insert every md entry.
-            orchestrator = _build_orchestrator()
-            processed = await orchestrator.drain_fully()
-            # Attest the model that just produced every one of those vectors.
-            # The create path cannot carry it: a table built from a pydantic
-            # model has no field metadata, so without this line the rebuilt
-            # index comes up unattested and the next start recommends the
-            # rebuild that was just done.
-            if get_embedding_capability().available:
-                await write_embedding_model(load_settings().embedding.model or "")
-            typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
+            typer.echo(f"rebuild complete — re-indexed {result.processed} md file(s)")
 
     try:
         asyncio.run(_run())
@@ -648,22 +557,43 @@ def rebuild(
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
-def _resolve_relative(p: Path) -> str:
+def _build_application(settings: Settings) -> Application:
+    """Build the application, or exit 3 when ``[llm]`` is not configured.
+
+    The CLI builds the same application as the server, and that refuses to
+    assemble without an extraction LLM. The error already names the toml
+    section to edit; a traceback would bury it.
+    """
+    try:
+        return build_application(settings)
+    except LLMNotConfiguredError as exc:
+        typer.echo(
+            f"error: {exc}\n"
+            "  every cascade command builds the same application as the "
+            "server, which needs an\n"
+            "  extraction LLM; configure it, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=3) from None
+
+
+async def _root_is_free(settings: Settings) -> bool:
+    """Whether no server (or exclusive CLI phase) holds this memory root."""
+    async with _build_application(settings) as application:
+        return application.ops.ome_lock_is_free()
+
+
+def _resolve_relative(ops: OpsService, p: Path) -> str:
     """Translate an absolute / relative path arg into the memory-root rel form.
 
     The state table stores paths relative to memory root, so the CLI
-    must match that convention before calling :meth:`force_enqueue`.
+    must match that convention before force-enqueueing.
     Outside-the-root inputs surface as an error in the caller.
     """
-    memory_root = MemoryRoot.resolve()
-    absolute = p.expanduser().resolve()
     try:
-        rel = absolute.relative_to(memory_root.root)
+        return ops.relative_to_root(p)
     except ValueError as exc:
-        raise typer.BadParameter(
-            f"path {p!s} is not under memory root {memory_root.root!s}"
-        ) from exc
-    return rel.as_posix()
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _print_failed_table(rows: list) -> None:  # type: ignore[type-arg]

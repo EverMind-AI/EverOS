@@ -8,12 +8,13 @@ while a file whose rows were lost comes back.
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+from .conftest import hermetic_env
 
 PROFILE_MD = textwrap.dedent(
     """\
@@ -33,28 +34,13 @@ PROFILE_MD = textwrap.dedent(
 )
 
 
-def _hermetic_env() -> dict[str, str]:
-    env = {
-        key: value for key, value in os.environ.items() if not key.startswith("EVEROS_")
-    }
-    env["EVEROS_LLM__API_KEY"] = ""
-    env["EVEROS_EMBEDDING__API_KEY"] = ""
-    env["EVEROS_RERANK__API_KEY"] = ""
-    # CI runners export FORCE_COLOR; Typer then splits option names with
-    # escape sequences, which the substring assertions below must not see.
-    env.pop("FORCE_COLOR", None)
-    env["NO_COLOR"] = "1"
-    env["TERM"] = "dumb"
-    return env
-
-
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "everos.entrypoints.cli.main", *argv],
         capture_output=True,
         text=True,
         check=False,
-        env=_hermetic_env(),
+        env=hermetic_env(plain_output=True),
     )
 
 

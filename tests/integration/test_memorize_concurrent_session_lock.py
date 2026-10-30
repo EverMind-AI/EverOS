@@ -1,7 +1,7 @@
 """Concurrent /add on one session must not lose messages (regression).
 
 White-box integration test for the per-session lock added in
-``everos.service._session_lock``.
+``everos.service.memory._session_locks``.
 
 Bug class
 ---------
@@ -22,8 +22,8 @@ message_id is **either** in some memcell's ``message_ids_json`` **or**
 in the surviving ``unprocessed_buffer`` rows. Nothing silently vanishes.
 
 This is a white-box integration test (not e2e): it bypasses HTTP, calls
-``memorize()`` directly, but inspects sqlite tables to assert internal
-state. Uses ``FakeLLMClient`` to avoid real LLM latency and to control
+``MemoryService.add()`` directly, but inspects sqlite tables to assert
+internal state. Uses ``FakeLLMClient`` to avoid real LLM latency and to control
 boundary decisions deterministically.
 """
 
@@ -39,83 +39,53 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 from sqlalchemy import text
-from sqlmodel import SQLModel
 
-from everos.core.persistence import MemoryRoot
-from everos.service.memorize import memorize
+from everos.infra.persistence import MemoryRoot
+from everos.service import (
+    MemorizeResult,
+    MemoryService,
+    build_application,
+)
+from tests.fakes import make_providers, memorize_llm
+from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
 # Fake LLM that splits each call into one memcell + 0-tail (force extract)
 # ---------------------------------------------------------------------------
 
+_under_test: dict[str, MemoryService] = {}
+"""The memory facade of the application the ``memorize_env`` fixture built."""
 
-def _boundary_response(boundaries: list[int]) -> str:
-    return json.dumps(
-        {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
+
+async def memorize(payload: dict[str, Any]) -> MemorizeResult:
+    """One inline ``MemoryService.add`` of the application under test."""
+    result = await _under_test["memory"].add(
+        payload, request_id="test", async_mode=False, defer_extraction=False
     )
+    assert isinstance(result, MemorizeResult), result
+    return result
 
 
-def _episode_response(title: str = "T", content: str = "B") -> str:
-    return json.dumps({"title": title, "content": content})
-
-
-def _make_extract_all_llm() -> FakeLLMClient:
-    """Boundary returns single boundary at end → entire merged → 1 cell, tail=[]."""
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            # Always cut: the boundary indices are relative to merged input;
-            # an empty list means "no cut, hold". A single [N] means "cut
-            # after index N", i.e. everything before goes into one cell.
-            # We use a sentinel large index to force boundary to take all.
-            return ChatResponse(content=_boundary_response([999]), model="fake")
-        return ChatResponse(content=_episode_response(), model="fake")
-
-    return FakeLLMClient(handler=handler)
-
-
-# ---------------------------------------------------------------------------
-# Fixture — mirrors test_memorize_integration's pattern but without OME / strategies
-# (the lock bug lives at the boundary stage; downstream strategies are
-# irrelevant to this race).
-# ---------------------------------------------------------------------------
+def _cut_before_last(window: int) -> list[int]:
+    """Close everything but the last message; a non-final call keeps a tail."""
+    return [window - 1] if window > 1 else []
 
 
 @pytest_asyncio.fixture
 async def memorize_env_locked(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[Callable[..., AsyncMock]]:
     monkeypatch.setattr(
         MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    client_mod = importlib.import_module("everos.component.llm.client")
-    lock_mod = importlib.import_module("everos.service._session_lock")
-
-    # Reset memorize singletons + session lock registry.
-    for attr in (
-        "_episode_writer",
-        "_prompt_loader",
-        "_user_pipeline",
-        "_agent_pipeline",
-        "_ome_engine",
-    ):
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
-    lock_mod._reset_for_tests()
 
     started: dict[str, Any] = {"engine": None}
 
@@ -127,13 +97,7 @@ async def memorize_env_locked(
 
         load_settings.cache_clear()
 
-        monkeypatch.setattr(client_mod, "_llm_client", fake_llm)
-
-        from everos.infra.persistence.sqlite import get_engine
-
-        db_engine = get_engine()
-        async with db_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        await storage.create_schema()
 
         # Silence OME strategy extractors (we only care about the boundary +
         # memcell + buffer cycle; downstream strategies are a separate story).
@@ -150,7 +114,13 @@ async def memorize_env_locked(
             lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
         )
 
-        engine = svc._get_engine()
+        settings = load_settings()
+        application = build_application(
+            settings,
+            providers=make_providers(llm=fake_llm),
+        )
+        _under_test["memory"] = application.memory
+        engine = application._engine
         await engine.start()
         started["engine"] = engine
 
@@ -158,9 +128,6 @@ async def memorize_env_locked(
 
     if started["engine"] is not None:
         await started["engine"].stop()
-    from everos.infra.persistence.sqlite import dispose_engine
-
-    await dispose_engine()
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +144,9 @@ def _msg(idx: int, sender: str, ts: int) -> dict[str, Any]:
     }
 
 
-async def _collect_buffer_message_ids(session_id: str) -> set[str]:
-    from everos.infra.persistence.sqlite import get_engine
+async def _collect_buffer_message_ids(storage: Storage, session_id: str) -> set[str]:
 
-    eng = get_engine()
+    eng = storage.database.engine
     async with eng.connect() as conn:
         result = await conn.execute(
             text("SELECT message_id FROM unprocessed_buffer WHERE session_id = :s"),
@@ -189,10 +155,9 @@ async def _collect_buffer_message_ids(session_id: str) -> set[str]:
         return {row[0] for row in result.fetchall()}
 
 
-async def _collect_memcell_message_ids(session_id: str) -> set[str]:
-    from everos.infra.persistence.sqlite import get_engine
+async def _collect_memcell_message_ids(storage: Storage, session_id: str) -> set[str]:
 
-    eng = get_engine()
+    eng = storage.database.engine
     async with eng.connect() as conn:
         result = await conn.execute(
             text("SELECT message_ids_json FROM memcell WHERE session_id = :s"),
@@ -210,11 +175,11 @@ async def _collect_memcell_message_ids(session_id: str) -> set[str]:
 
 
 async def test_concurrent_adds_same_session_no_message_loss(
-    memorize_env_locked: Callable[..., AsyncMock],
+    memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Two concurrent /add on one session: every input message must end up
     either in a memcell's message_ids OR in the surviving buffer."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     session_id = "s_concurrent"
 
@@ -227,8 +192,8 @@ async def test_concurrent_adds_same_session_no_message_loss(
         memorize({"session_id": session_id, "messages": batch_b}),
     )
 
-    buffered = await _collect_buffer_message_ids(session_id)
-    in_cells = await _collect_memcell_message_ids(session_id)
+    buffered = await _collect_buffer_message_ids(storage, session_id)
+    in_cells = await _collect_memcell_message_ids(storage, session_id)
     covered = buffered | in_cells
 
     # The id format is ``m_<session>_<ts_ms>_<idx>`` — we can derive
@@ -246,10 +211,10 @@ async def test_concurrent_adds_same_session_no_message_loss(
 
 
 async def test_concurrent_adds_serial_when_locked(
-    memorize_env_locked: Callable[..., AsyncMock],
+    memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Same as above but explicitly stress with 4 concurrent batches."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     session_id = "s_stress"
 
@@ -267,8 +232,8 @@ async def test_concurrent_adds_serial_when_locked(
         *(memorize({"session_id": session_id, "messages": batch}) for batch in batches)
     )
 
-    buffered = await _collect_buffer_message_ids(session_id)
-    in_cells = await _collect_memcell_message_ids(session_id)
+    buffered = await _collect_buffer_message_ids(storage, session_id)
+    in_cells = await _collect_memcell_message_ids(storage, session_id)
     covered = buffered | in_cells
 
     expected = n_batches * batch_size
@@ -280,10 +245,10 @@ async def test_concurrent_adds_serial_when_locked(
 
 
 async def test_different_sessions_run_in_parallel(
-    memorize_env_locked: Callable[..., AsyncMock],
+    memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Cross-session calls share no lock — must not serialise."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     def _msgs(sid: str) -> list[dict[str, Any]]:
         return [_msg(i, sid, 1_700_000_000_000 + i * 1000) for i in range(3)]
@@ -295,7 +260,7 @@ async def test_different_sessions_run_in_parallel(
     )
 
     for sid in ("s_a", "s_b", "s_c"):
-        buffered = await _collect_buffer_message_ids(sid)
-        in_cells = await _collect_memcell_message_ids(sid)
+        buffered = await _collect_buffer_message_ids(storage, sid)
+        in_cells = await _collect_memcell_message_ids(storage, sid)
         covered = buffered | in_cells
         assert len(covered) == 3, f"session {sid}: got {len(covered)}, want 3"

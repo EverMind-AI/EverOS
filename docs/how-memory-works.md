@@ -95,7 +95,7 @@ visually distinct from a user-named one).
     [Operating it](#operating-it)).
 
 The path manager is
-[`MemoryRoot`](../src/everos/core/persistence/memory_root.py); every path
+[`MemoryRoot`](../src/everos/infra/persistence/memory_root.py); every path
 above is a property on it. `MemoryRoot.ensure()` creates the runtime dirs
 (`.index/{sqlite,lancedb}/`, `.tmp/`); user-visible dirs appear on first
 write. Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
@@ -116,7 +116,7 @@ index catches up asynchronously.
                       │                             │
                       │              ┌──────────────┴───────────────┐
                       │              ▼                              ▼
-                      │   UserMemoryPipeline (sync)      AgentMemoryPipeline (fire-and-forget)
+                      │   UserMemoryPipeline (sync)      AgentMemoryPipeline (events only)
                       │   writes episode .md NOW          emits AgentPipelineStarted
                       ▼              │                              │
    (response returns once md is on disk)                           │
@@ -138,6 +138,18 @@ index catches up asynchronously.
   on this call). See [api.md](api.md).
 - **`/flush`** forces the boundary now (one extraction LLM call), used at
   the end of a chat/agent run.
+- **Boundary detection** (`memory/extract/boundary/BoundaryDetection`)
+  asks the model, in one call over the buffered window, where finished
+  episodes end. It also judges whether the trailing segment is already a
+  complete episode: if so, that segment is closed and extracted on the same
+  `/add`; if it is still open (the conversation may go on), it stays
+  buffered until a later `/add` cuts it or `/flush` closes it. An unusable
+  reply is tried three times; a session whose calls keep failing three
+  times in a row has its buffer moved to a `quarantine` track so the
+  session can continue.
+- Deployments can append requirements to the boundary, episode, profile
+  and reflection prompts with
+  [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
   `extracted`, the episode file is already on disk.
 - Everything else (atomic facts, foresight, profile, agent cases/skills)
@@ -207,7 +219,10 @@ and write their markdown when ready:
 - `extract_foresight` — anticipatory notes
 - `extract_user_profile` — the aggregated `user.md`
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
-  substantive enough; thin trajectories are skipped by design)
+  substantive enough; thin trajectories are skipped by design, and the
+  `agent_case_skipped` log line says which check skipped them). With
+  `[agent_memory] case_gate_enabled`, an LLM judgement of whether the work
+  was completed correctly decides instead
 - `extract_agent_skill` — clusters related cases into a named skill
 - `trigger_profile_clustering` — triggers user profile clustering
 - `trigger_skill_clustering` — triggers agent skill clustering

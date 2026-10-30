@@ -6,8 +6,9 @@ import datetime as _dt
 
 import pytest
 from everalgo.rank.fusion import cosine_to_lr_score
-from everalgo.types import Candidate, FactCandidate
+from everalgo.types import Candidate
 
+from everos.memory.search._candidates import FactCandidate
 from everos.memory.search.hierarchy import (
     build_ep_to_fact_parents,
     heap_expand,

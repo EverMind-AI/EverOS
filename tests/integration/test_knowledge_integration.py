@@ -17,42 +17,36 @@ search retrieval works against the indexed data.
 from __future__ import annotations
 
 import asyncio
+import functools
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
-from sqlmodel import SQLModel
 
 from everos.component.embedding import EmbeddingProvider
+from everos.component.parser import aparse_file
 from everos.component.rerank import RerankResult
 from everos.component.tokenizer import build_tokenizer
-from everos.core.persistence import MemoryRoot
+from everos.config import load_settings
+from everos.core.errors import ExtractionEmptyError
+from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.factories import build_indexes
 from everos.infra.persistence.lancedb import (
     KnowledgeTopic,
-    dispose_connection,
-    ensure_business_indexes,
 )
-from everos.infra.persistence.lancedb.lancedb_manager import get_table
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore
 from everos.infra.persistence.sqlite import (
     DocumentUpsertPayload,
-    dispose_engine,
-    get_engine,
-    knowledge_document_repo,
-    knowledge_topic_sqlite_repo,
-    md_change_state_repo,
+    SqliteKnowledgeCatalog,
 )
-from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
-from everos.service.knowledge import (
-    ExtractionEmptyError,
-    create_document,
-    delete_document,
-    patch_document,
-    replace_document,
-    search_knowledge,
-)
+from everos.memory.search.recall import KnowledgeTopicRecaller, RecallerDeps
+from everos.service.knowledge import KnowledgeService
+from tests.fakes.storage import Storage
 from tests.helpers.knowledge_md import find_doc_dir, read_document_md, read_topic_mds
 
 # ---------------------------------------------------------------------------
@@ -149,18 +143,27 @@ def _make_memories(
 # ---------------------------------------------------------------------------
 
 
+_PROVIDERS: dict[str, Any] = {}
+"""The providers this test's application has: what :func:`_build_orchestrator`
+hands the cascade and what :func:`_knowledge` builds the facade over."""
+
+
+@pytest.fixture(autouse=True)
+def _unconfigured_providers() -> None:
+    _PROVIDERS.update(embedding=None, reranker=None)
+
+
 @pytest.fixture(autouse=True)
 def _reset_lancedb_write_locks() -> None:
     """Drop per-table asyncio.Lock objects between tests."""
-    from everos.core.persistence.lancedb.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 
 
 @pytest.fixture
 async def cascade_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[MemoryRoot]:
     """Boot sqlite + lancedb against a tmp memory_root; dispose at teardown."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
@@ -168,46 +171,32 @@ async def cascade_runtime(
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
 
-    await dispose_connection()
-    await dispose_engine()
-
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await ensure_business_indexes()
+    await storage.create_schema()
+    await storage.index.ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.resolve()
-
-    await dispose_connection()
-    await dispose_engine()
+    yield storage.root
 
 
 def _build_orchestrator(
-    monkeypatch: pytest.MonkeyPatch,
+    storage: Storage,
     memory_root: MemoryRoot,
     embedder: _StubEmbedder,
     *,
     scan_interval: float = 60.0,
 ) -> CascadeOrchestrator:
-    """Factory for a tight-polling cascade orchestrator.
+    """Factory for a tight-polling cascade orchestrator over ``embedder``.
 
-    ``KnowledgeTopicHandler`` fetches the embedder lazily via
-    ``get_embedding_capability()`` rather than through the orchestrator
-    — patch the process-wide singleton so cascade never hits the fake
-    network target set up by ``cascade_runtime``.
+    The stub keeps cascade off the fake network target set up by
+    ``cascade_runtime``; the knowledge facade gets the same providers.
     """
-    import everos.component.embedding.accessor as acc
-    import everos.component.rerank.accessor as rerank_acc
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.rerank import RerankCapability
-
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
-    reranker = _StubReranker()
-    monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=reranker))
+    _PROVIDERS.update(embedding=embedder, reranker=_StubReranker())
     return CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=embedder,
         config=CascadeConfig(
             scan_interval_seconds=scan_interval,
             worker_batch_size=20,
@@ -218,24 +207,49 @@ def _build_orchestrator(
     )
 
 
-async def _wait_drain(*, deadline: float = 20.0) -> None:
+def _knowledge(storage: Storage, extractor: Any = None) -> KnowledgeService:
+    """The knowledge facade over the providers the test configured.
+
+    Embedding and rerank are the ones :func:`_build_orchestrator` installed,
+    read at call time.
+    """
+    settings = load_settings()
+    return KnowledgeService(
+        store=MarkdownKnowledgeStore(storage.root),
+        catalog=SqliteKnowledgeCatalog(
+            storage.sqlite.knowledge_document, storage.sqlite.knowledge_topic
+        ),
+        extractor=extractor,
+        embedding=_PROVIDERS["embedding"],
+        reranker=_PROVIDERS["reranker"],
+        recaller=KnowledgeTopicRecaller(
+            RecallerDeps(tokenizer=build_tokenizer()),
+            build_indexes(storage.index).knowledge_topic,
+        ),
+        search_config=settings.knowledge.search,
+        parse_file=functools.partial(aparse_file, llm=None),
+    )
+
+
+async def _wait_drain(storage: Storage, *, deadline: float = 20.0) -> None:
     """Poll until the cascade queue has no pending items."""
     async with asyncio.timeout(deadline):
         while True:
-            summary = await md_change_state_repo.queue_summary()
+            summary = await storage.sqlite.md_change_state.queue_summary()
             if summary.pending == 0:
                 return
             await asyncio.sleep(0.05)
 
 
 async def _wait_lance_rows(
+    storage: Storage,
     doc_id: str,
     expected: int,
     *,
     deadline: float = 20.0,
 ) -> None:
     """Poll until LanceDB has exactly *expected* rows for *doc_id*."""
-    table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+    table = await storage.lance.table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
     async with asyncio.timeout(deadline):
         while True:
             count = await table.count_rows(
@@ -247,6 +261,7 @@ async def _wait_lance_rows(
 
 
 async def _create_test_document(
+    storage: Storage,
     memory_root: MemoryRoot,
     *,
     doc_id: str = "d_test12345678",
@@ -257,13 +272,11 @@ async def _create_test_document(
     """Convenience: create a document using the standard 3-node fixture."""
     memories = _make_memories(doc_id, category_id)
     extractor = _build_mock_extractor(memories)
-    knowledge_dir = memory_root.knowledge_dir(app_id, project_id)
-
-    result = await create_document(
-        extractor=extractor,
+    result = await _knowledge(storage, extractor).create_document(
         parsed=ParsedContent(text="Full document text about the Olympics."),
         title="Olympics Plan",
-        knowledge_dir=knowledge_dir,
+        app_id=app_id,
+        project_id=project_id,
         doc_id=doc_id,
         category_id=category_id,
     )
@@ -276,26 +289,25 @@ async def _create_test_document(
 
 
 async def test_create_document_end_to_end(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Full pipeline: create -> md -> cascade -> SQLite + LanceDB."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_test12345678"
-        result = await _create_test_document(memory_root, doc_id=doc_id)
+        result = await _create_test_document(storage, memory_root, doc_id=doc_id)
         assert result.doc_id == doc_id
         assert result.category_id == "Sports"
         assert result.topic_count == 2
 
         # Wait for cascade to process all files.
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # -- Assert md files --
         knowledge_dir = memory_root.knowledge_dir()
@@ -308,13 +320,13 @@ async def test_create_document_end_to_end(
         assert any("Venue" in f for f in topic_files)
 
         # -- Assert SQLite: knowledge_documents --
-        doc_row = await knowledge_document_repo.get_by_doc_id(doc_id)
+        doc_row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
         assert doc_row is not None
         assert doc_row.title == "Olympics Plan"
         assert doc_row.category_id == "Sports"
 
         # -- Assert SQLite: knowledge_topics --
-        topic_rows = await knowledge_topic_sqlite_repo.get_topics_by_doc_id(
+        topic_rows = await storage.sqlite.knowledge_topic.get_topics_by_doc_id(
             doc_id,
         )
         assert len(topic_rows) == 2
@@ -323,7 +335,7 @@ async def test_create_document_end_to_end(
         assert "Venue" in topic_names
 
         # -- Assert LanceDB: knowledge_topic --
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+        table = await storage.lance.table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
         lance_count = await table.count_rows(
             filter=f"doc_id = '{doc_id}'",
         )
@@ -369,23 +381,22 @@ async def test_create_document_end_to_end(
 
 
 async def test_search_finds_ingested_topic(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Keyword search finds topics after cascade indexing."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_search001"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
-        result = await search_knowledge(
+        result = await _knowledge(storage).search_knowledge(
             query="budget",
             method="keyword",
             top_k=10,
@@ -402,24 +413,23 @@ async def test_search_finds_ingested_topic(
 
 
 async def test_search_include_content(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """include_content flag controls whether content is populated."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_content01"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Without content.
-        r_no = await search_knowledge(
+        r_no = await _knowledge(storage).search_knowledge(
             query="budget",
             method="keyword",
             top_k=10,
@@ -429,7 +439,7 @@ async def test_search_include_content(
         assert r_no.hits[0].content is None
 
         # With content.
-        r_yes = await search_knowledge(
+        r_yes = await _knowledge(storage).search_knowledge(
             query="budget",
             method="keyword",
             top_k=10,
@@ -444,23 +454,22 @@ async def test_search_include_content(
 
 
 async def test_search_score_threshold_filters(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """score_threshold filters out low-scoring results."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_thresh01"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
-        r_none = await search_knowledge(
+        r_none = await _knowledge(storage).search_knowledge(
             query="budget",
             method="keyword",
             top_k=10,
@@ -468,7 +477,7 @@ async def test_search_score_threshold_filters(
         )
         assert r_none.hits
 
-        r_high = await search_knowledge(
+        r_high = await _knowledge(storage).search_knowledge(
             query="budget",
             method="keyword",
             top_k=10,
@@ -481,13 +490,12 @@ async def test_search_score_threshold_filters(
 
 
 async def test_search_app_project_isolation(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Documents in different app/project scopes are isolated in search."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -498,11 +506,11 @@ async def test_search_app_project_isolation(
         # Create doc A in (app1, proj1).
         memories_a = _make_memories(doc_a)
         ext_a = _build_mock_extractor(memories_a)
-        await create_document(
-            extractor=ext_a,
+        await _knowledge(storage, ext_a).create_document(
             parsed=ParsedContent(text="Doc A about Olympics."),
             title="Olympics Plan",
-            knowledge_dir=memory_root.knowledge_dir("app1", "proj1"),
+            app_id="app1",
+            project_id="proj1",
             doc_id=doc_a,
             category_id="Sports",
         )
@@ -533,21 +541,21 @@ async def test_search_app_project_isolation(
             ),
         ]
         ext_b = _build_mock_extractor(memories_b)
-        await create_document(
-            extractor=ext_b,
+        await _knowledge(storage, ext_b).create_document(
             parsed=ParsedContent(text="Doc B about quantum computing."),
             title="Quantum Computing",
-            knowledge_dir=memory_root.knowledge_dir("app2", "proj2"),
+            app_id="app2",
+            project_id="proj2",
             doc_id=doc_b,
             category_id="Technology",
         )
 
-        await _wait_lance_rows(doc_a, expected=2, deadline=20.0)
-        await _wait_lance_rows(doc_b, expected=1, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_a, expected=2, deadline=20.0)
+        await _wait_lance_rows(storage, doc_b, expected=1, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Search in (app1, proj1) scope.
-        r1 = await search_knowledge(
+        r1 = await _knowledge(storage).search_knowledge(
             query="budget stadium qubit",
             method="keyword",
             top_k=10,
@@ -559,7 +567,7 @@ async def test_search_app_project_isolation(
             assert doc_b not in r1_doc_ids, "app1/proj1 must not see doc B"
 
         # Search in (app2, proj2) scope.
-        r2 = await search_knowledge(
+        r2 = await _knowledge(storage).search_knowledge(
             query="budget stadium qubit",
             method="keyword",
             top_k=10,
@@ -580,8 +588,7 @@ async def test_search_app_project_isolation(
 
 
 async def test_delete_document_end_to_end(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Manual directory removal + scanner detects deletion -> cleanup.
 
@@ -593,7 +600,7 @@ async def test_delete_document_end_to_end(
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
-        monkeypatch,
+        storage,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -603,19 +610,19 @@ async def test_delete_document_end_to_end(
 
     try:
         doc_id = "d_del0000001"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Confirm pre-delete state.
-        assert await knowledge_document_repo.get_by_doc_id(doc_id) is not None
-        topic_count_before = await knowledge_topic_sqlite_repo.count_by_doc_id(
+        assert await storage.sqlite.knowledge_document.get_by_doc_id(doc_id) is not None
+        topic_count_before = await storage.sqlite.knowledge_topic.count_by_doc_id(
             doc_id,
         )
         assert topic_count_before == 2
 
         # Service-level delete reports correct counts.
-        del_result = await delete_document(
+        del_result = await _knowledge(storage).delete_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -632,18 +639,18 @@ async def test_delete_document_end_to_end(
 
         # Wait for cascade scanner to detect + process deletions.
         # LanceDB topic rows should be cleared first.
-        await _wait_lance_rows(doc_id, expected=0, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=0, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # LanceDB: no topic rows.
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+        table = await storage.lance.table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
         lance_count = await table.count_rows(
             filter=f"doc_id = '{doc_id}'",
         )
         assert lance_count == 0
 
         # SQLite: topic rows gone.
-        topic_count_after = await knowledge_topic_sqlite_repo.count_by_doc_id(
+        topic_count_after = await storage.sqlite.knowledge_topic.count_by_doc_id(
             doc_id,
         )
         assert topic_count_after == 0
@@ -653,19 +660,18 @@ async def test_delete_document_end_to_end(
         # processed before topic files).  Wait for the retry.
         async with asyncio.timeout(15.0):
             while True:
-                row = await knowledge_document_repo.get_by_doc_id(doc_id)
+                row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
                 if row is None:
                     break
                 await asyncio.sleep(0.2)
-        assert await knowledge_document_repo.get_by_doc_id(doc_id) is None
+        assert await storage.sqlite.knowledge_document.get_by_doc_id(doc_id) is None
 
     finally:
         await orchestrator.stop()
 
 
 async def test_delete_document_cleans_up_after_downgrade(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Tier 3 → Tier 1 downgrade must not strand knowledge state.
 
@@ -682,20 +688,14 @@ async def test_delete_document_cleans_up_after_downgrade(
 
     The fix registers both knowledge handlers unconditionally. This
     test seeds a document with both capabilities available, simulates
-    a full downgrade by pointing both accessor singletons at
-    ``provider=None``, calls ``delete_document`` and asserts the
-    entire md + SQLite + LanceDB state clears and no permanent
-    failures accrue.
+    a full downgrade by taking both providers away, calls
+    ``delete_document`` and asserts the entire md + SQLite + LanceDB
+    state clears and no permanent failures accrue.
     """
-    import everos.component.embedding.accessor as embed_acc
-    import everos.component.rerank.accessor as rerank_acc
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.rerank import RerankCapability
-
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
-        monkeypatch,
+        storage,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -706,27 +706,23 @@ async def test_delete_document_cleans_up_after_downgrade(
     try:
         # ── Tier 3 seed: capabilities available, full index. ────────
         doc_id = "d_downgrd001"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
-        assert await knowledge_document_repo.get_by_doc_id(doc_id) is not None
-        assert await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id) == 2
+        assert await storage.sqlite.knowledge_document.get_by_doc_id(doc_id) is not None
+        assert await storage.sqlite.knowledge_topic.count_by_doc_id(doc_id) == 2
 
         # ── Simulate downgrade: both capabilities unavailable. ──────
-        # Point the process-wide singletons the handlers read at
-        # ``provider=None``. ``embed_or_none`` returns ``None`` and
-        # ``handle_deleted`` never touches embed/rerank at all.
-        monkeypatch.setattr(
-            embed_acc, "_capability", EmbeddingCapability(provider=None)
-        )
-        monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=None))
+        # The facade loses both providers; ``handle_deleted`` never
+        # touches embed/rerank at all.
+        _PROVIDERS.update(embedding=None, reranker=None)
 
         # ── Delete through the service (bypass HTTP for test speed).
         # ``delete_document`` rmtree's the md dir; scanner picks up
         # the missing files and enqueues ``deleted`` rows for both
         # kinds; worker must drain them cleanly.
-        del_result = await delete_document(
+        del_result = await _knowledge(storage).delete_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -739,30 +735,30 @@ async def test_delete_document_cleans_up_after_downgrade(
         assert not doc_dir.exists(), "delete_document should have removed the md dir"
 
         # ── Wait for cascade to drain the deletes. ──────────────────
-        await _wait_lance_rows(doc_id, expected=0, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=0, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # ── LanceDB clean. ──────────────────────────────────────────
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+        table = await storage.lance.table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
         assert await table.count_rows(filter=f"doc_id = '{doc_id}'") == 0
 
         # ── SQLite topic rows gone. ─────────────────────────────────
-        assert await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id) == 0
+        assert await storage.sqlite.knowledge_topic.count_by_doc_id(doc_id) == 0
 
         # ── SQLite document row gone (may need a scanner retry after
         # topic deletes clear the FK dependency). ───────────────────
         async with asyncio.timeout(15.0):
             while True:
-                row = await knowledge_document_repo.get_by_doc_id(doc_id)
+                row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
                 if row is None:
                     break
                 await asyncio.sleep(0.2)
-        assert await knowledge_document_repo.get_by_doc_id(doc_id) is None
+        assert await storage.sqlite.knowledge_document.get_by_doc_id(doc_id) is None
 
         # ── No permanent failures in md_change_state. ───────────────
         # This is the load-bearing assertion: with the gate in place,
         # every ``deleted`` row would land here as failed_permanent.
-        summary = await md_change_state_repo.queue_summary()
+        summary = await storage.sqlite.md_change_state.queue_summary()
         assert summary.failed_permanent == 0, (
             f"downgrade + delete produced permanent failures: {summary}"
         )
@@ -775,14 +771,13 @@ async def test_delete_document_cleans_up_after_downgrade(
 
 
 async def test_delete_idempotent(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Deleting an already-deleted (or nonexistent) document is a no-op."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
-        monkeypatch,
+        storage,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -792,12 +787,12 @@ async def test_delete_idempotent(
 
     try:
         doc_id = "d_idemp00001"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # First delete (service) + manual rmtree + cascade cleanup.
-        await delete_document(
+        await _knowledge(storage).delete_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -806,11 +801,11 @@ async def test_delete_idempotent(
         doc_dir = knowledge_dir / "Sports" / f"Olympics_Plan_{doc_id}"
         if doc_dir.exists():
             shutil.rmtree(doc_dir)
-        await _wait_lance_rows(doc_id, expected=0, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=0, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Second delete: must not raise, reports 0.
-        result = await delete_document(
+        result = await _knowledge(storage).delete_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -827,14 +822,13 @@ async def test_delete_idempotent(
 
 
 async def test_replace_document_end_to_end(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Replace = delete old + create new with same doc_id."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
-        monkeypatch,
+        storage,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -847,12 +841,12 @@ async def test_replace_document_end_to_end(
         knowledge_dir = memory_root.knowledge_dir()
 
         # V1: 2 topics.
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Delete V1 (service + manual rmtree + cascade cleanup).
-        await delete_document(
+        await _knowledge(storage).delete_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -860,8 +854,8 @@ async def test_replace_document_end_to_end(
         doc_dir_v1 = knowledge_dir / "Sports" / f"Olympics_Plan_{doc_id}"
         if doc_dir_v1.exists():
             shutil.rmtree(doc_dir_v1)
-        await _wait_lance_rows(doc_id, expected=0, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=0, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # V2: 3 topics (same doc_id).
         memories_v2 = [
@@ -913,30 +907,28 @@ async def test_replace_document_end_to_end(
             ),
         ]
         ext_v2 = _build_mock_extractor(memories_v2)
-        await create_document(
-            extractor=ext_v2,
+        await _knowledge(storage, ext_v2).create_document(
             parsed=ParsedContent(text="Updated Olympic document."),
             title="Olympics Plan V2",
-            knowledge_dir=knowledge_dir,
             doc_id=doc_id,
             category_id="Sports",
         )
-        await _wait_lance_rows(doc_id, expected=3, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _wait_lance_rows(storage, doc_id, expected=3, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # SQLite: 1 document row, title changed.
-        doc_row = await knowledge_document_repo.get_by_doc_id(doc_id)
+        doc_row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
         assert doc_row is not None
         assert doc_row.title == "Olympics Plan V2"
 
         # SQLite: 3 topic rows.
-        topic_rows = await knowledge_topic_sqlite_repo.get_topics_by_doc_id(
+        topic_rows = await storage.sqlite.knowledge_topic.get_topics_by_doc_id(
             doc_id,
         )
         assert len(topic_rows) == 3
 
         # LanceDB: 3 rows.
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+        table = await storage.lance.table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
         lance_count = await table.count_rows(
             filter=f"doc_id = '{doc_id}'",
         )
@@ -952,24 +944,23 @@ async def test_replace_document_end_to_end(
 
 
 async def test_patch_title_updates_metadata(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """patch_document updates the title in SQLite without touching topics."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_patch00001"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
         # Patch title.
-        p_result = await patch_document(
+        p_result = await _knowledge(storage).patch_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -978,12 +969,12 @@ async def test_patch_title_updates_metadata(
         assert "title" in p_result.updated_fields
 
         # SQLite: title updated.
-        doc_row = await knowledge_document_repo.get_by_doc_id(doc_id)
+        doc_row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
         assert doc_row is not None
         assert doc_row.title == "New Title"
 
         # SQLite: topic count unchanged.
-        topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
+        topic_count = await storage.sqlite.knowledge_topic.count_by_doc_id(doc_id)
         assert topic_count == 2
 
     finally:
@@ -991,23 +982,22 @@ async def test_patch_title_updates_metadata(
 
 
 async def test_patch_category_updates_sqlite(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """patch_document with category_id updates the document row (SQLite-only MVP)."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
+    orchestrator = _build_orchestrator(storage, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
     try:
         doc_id = "d_patchcat01"
-        await _create_test_document(memory_root, doc_id=doc_id)
-        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
-        await _wait_drain(deadline=20.0)
+        await _create_test_document(storage, memory_root, doc_id=doc_id)
+        await _wait_lance_rows(storage, doc_id, expected=2, deadline=20.0)
+        await _wait_drain(storage, deadline=20.0)
 
-        p_result = await patch_document(
+        p_result = await _knowledge(storage).patch_document(
             doc_id=doc_id,
             app_id="default",
             project_id="default",
@@ -1015,7 +1005,7 @@ async def test_patch_category_updates_sqlite(
         )
         assert "category_id" in p_result.updated_fields
 
-        doc_row = await knowledge_document_repo.get_by_doc_id(doc_id)
+        doc_row = await storage.sqlite.knowledge_document.get_by_doc_id(doc_id)
         assert doc_row is not None
         assert doc_row.category_id == "Technology"
 
@@ -1029,13 +1019,13 @@ async def test_patch_category_updates_sqlite(
 
 
 async def test_get_nonexistent_document_raises(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """get_document for a missing doc_id raises DocumentNotFoundError."""
-    from everos.service.knowledge import DocumentNotFoundError, get_document
+    from everos.core.errors import DocumentNotFoundError
 
     with pytest.raises(DocumentNotFoundError):
-        await get_document(
+        await _knowledge(storage).get_document(
             doc_id="d_nonexistent",
             app_id="default",
             project_id="default",
@@ -1043,23 +1033,12 @@ async def test_get_nonexistent_document_raises(
 
 
 async def test_search_empty_query_returns_empty(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """An empty query string returns empty results (no crash)."""
-    import everos.component.embedding.accessor as embed_acc
-    import everos.component.rerank.accessor as rerank_acc
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.rerank import RerankCapability
+    _PROVIDERS.update(embedding=_StubEmbedder(), reranker=_StubReranker())
 
-    monkeypatch.setattr(
-        embed_acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
-    monkeypatch.setattr(
-        rerank_acc, "_capability", RerankCapability(provider=_StubReranker())
-    )
-
-    result = await search_knowledge(
+    result = await _knowledge(storage).search_knowledge(
         query="",
         method="keyword",
         top_k=10,
@@ -1069,13 +1048,13 @@ async def test_search_empty_query_returns_empty(
 
 
 async def test_patch_nonexistent_raises(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """Patching a non-existent document raises DocumentNotFoundError."""
-    from everos.service.knowledge import DocumentNotFoundError
+    from everos.core.errors import DocumentNotFoundError
 
     with pytest.raises(DocumentNotFoundError):
-        await patch_document(
+        await _knowledge(storage).patch_document(
             doc_id="d_nonexistent",
             app_id="default",
             project_id="default",
@@ -1089,7 +1068,7 @@ async def test_patch_nonexistent_raises(
 
 
 async def test_create_document_empty_result(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """Extractor returning [] raises ExtractionEmptyError; no files created."""
     memory_root = cascade_runtime
@@ -1098,11 +1077,9 @@ async def test_create_document_empty_result(
     extractor = _build_mock_extractor([])
 
     with pytest.raises(ExtractionEmptyError):
-        await create_document(
-            extractor=extractor,
+        await _knowledge(storage, extractor).create_document(
             parsed=ParsedContent(text="Some content"),
             title="Empty Doc",
-            knowledge_dir=knowledge_dir,
             doc_id="d_empty00001",
             category_id="Sports",
         )
@@ -1117,10 +1094,12 @@ async def test_create_document_empty_result(
 # ---------------------------------------------------------------------------
 
 
-async def test_patch_title_updates_md(cascade_runtime: MemoryRoot) -> None:
+async def test_patch_title_updates_md(
+    cascade_runtime: MemoryRoot, storage: Storage
+) -> None:
     """PATCH title must update index.md frontmatter (truth layer)."""
     memory_root = cascade_runtime
-    await _create_test_document(memory_root, doc_id="d_patch_title1")
+    await _create_test_document(storage, memory_root, doc_id="d_patch_title1")
 
     doc_dir = find_doc_dir(memory_root.knowledge_dir(), "d_patch_title1")
     assert doc_dir is not None
@@ -1128,17 +1107,21 @@ async def test_patch_title_updates_md(cascade_runtime: MemoryRoot) -> None:
     old_fm = read_document_md(doc_dir)["frontmatter"]
     assert old_fm["title"] == "Olympics Plan"
 
-    await patch_document("d_patch_title1", "default", "default", title="New Title")
+    await _knowledge(storage).patch_document(
+        "d_patch_title1", "default", "default", title="New Title"
+    )
 
     new_fm = read_document_md(doc_dir)["frontmatter"]
     assert new_fm["title"] == "New Title"
 
 
-async def test_patch_category_moves_directory(cascade_runtime: MemoryRoot) -> None:
+async def test_patch_category_moves_directory(
+    cascade_runtime: MemoryRoot, storage: Storage
+) -> None:
     """PATCH category_id must move the document directory to the new category."""
     memory_root = cascade_runtime
     await _create_test_document(
-        memory_root, doc_id="d_patch_cat01", category_id="Sports"
+        storage, memory_root, doc_id="d_patch_cat01", category_id="Sports"
     )
 
     knowledge_dir = memory_root.knowledge_dir()
@@ -1146,7 +1129,9 @@ async def test_patch_category_moves_directory(cascade_runtime: MemoryRoot) -> No
     assert old_dir is not None
     assert "Sports" in str(old_dir)
 
-    await patch_document("d_patch_cat01", "default", "default", category_id="Finance")
+    await _knowledge(storage).patch_document(
+        "d_patch_cat01", "default", "default", category_id="Finance"
+    )
 
     new_dir = find_doc_dir(knowledge_dir, "d_patch_cat01")
     assert new_dir is not None, (
@@ -1159,7 +1144,7 @@ async def test_patch_category_moves_directory(cascade_runtime: MemoryRoot) -> No
 
 
 async def test_replace_failure_preserves_old_document(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """replace_document restores the original md directory when extraction fails.
 
@@ -1167,14 +1152,14 @@ async def test_replace_failure_preserves_old_document(
     """
     memory_root = cascade_runtime
     doc_id = "d_replace_fail"
-    result = await _create_test_document(memory_root, doc_id=doc_id)
+    result = await _create_test_document(storage, memory_root, doc_id=doc_id)
 
     knowledge_dir = memory_root.knowledge_dir()
     doc_dir = find_doc_dir(knowledge_dir, doc_id)
     assert doc_dir is not None, "Setup: original document directory must exist"
 
     # replace_document checks SQLite before proceeding; simulate cascade sync.
-    await knowledge_document_repo.upsert_from_handler(
+    await storage.sqlite.knowledge_document.upsert_from_handler(
         DocumentUpsertPayload(
             doc_id=doc_id,
             app_id="default",
@@ -1192,19 +1177,19 @@ async def test_replace_failure_preserves_old_document(
     failing_extractor.aextract.return_value = []
 
     with pytest.raises(ExtractionEmptyError):
-        await replace_document(
-            extractor=failing_extractor,
+        await _knowledge(storage, failing_extractor).replace_document(
             parsed=ParsedContent(text=""),
             title="Should Fail",
             doc_id=doc_id,
-            knowledge_dir=knowledge_dir,
         )
 
     # After failure, the original md directory must be restored.
     assert doc_dir.exists(), "Original md must survive a failed PUT replacement"
 
 
-async def test_dirname_collision_different_docs(cascade_runtime: MemoryRoot) -> None:
+async def test_dirname_collision_different_docs(
+    cascade_runtime: MemoryRoot, storage: Storage
+) -> None:
     """Two docs with titles that sanitize to the same dirname must not collide."""
     memory_root = cascade_runtime
     knowledge_dir = memory_root.knowledge_dir()
@@ -1213,11 +1198,9 @@ async def test_dirname_collision_different_docs(cascade_runtime: MemoryRoot) -> 
     memories1 = _make_memories("d_collision01", "Sports")
     memories1[0] = memories1[0].model_copy(update={"topic": "Hello World!"})
     ext1 = _build_mock_extractor(memories1)
-    await create_document(
-        extractor=ext1,
+    await _knowledge(storage, ext1).create_document(
         parsed=ParsedContent(text="doc1"),
         title="Hello World!",
-        knowledge_dir=knowledge_dir,
         doc_id="d_collision01",
         category_id="Sports",
     )
@@ -1225,11 +1208,9 @@ async def test_dirname_collision_different_docs(cascade_runtime: MemoryRoot) -> 
     memories2 = _make_memories("d_collision02", "Sports")
     memories2[0] = memories2[0].model_copy(update={"topic": "Hello World?"})
     ext2 = _build_mock_extractor(memories2)
-    await create_document(
-        extractor=ext2,
+    await _knowledge(storage, ext2).create_document(
         parsed=ParsedContent(text="doc2"),
         title="Hello World?",
-        knowledge_dir=knowledge_dir,
         doc_id="d_collision02",
         category_id="Sports",
     )

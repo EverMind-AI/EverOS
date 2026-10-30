@@ -18,6 +18,7 @@ from everos.core.errors import (
     EmbeddingServiceError,
     ExtractionEmptyError,
     FilterError,
+    LLMNotConfiguredError,
     LLMServiceError,
     MultimodalNotEnabledError,
     PathTraversalError,
@@ -31,6 +32,9 @@ from everos.entrypoints.api.exception_handlers import register_handlers
 # ---------------------------------------------------------------------------
 # Fixture: minimal app with one route per exception type
 # ---------------------------------------------------------------------------
+
+
+_LLM_NOT_CONFIGURED_MESSAGE = "LLM api_key is not set. Edit everos.toml section [llm]."
 
 
 def _make_app() -> FastAPI:
@@ -85,6 +89,10 @@ def _make_app() -> FastAPI:
     @app.get("/raise/queue-saturated")
     async def _queue_saturated() -> None:
         raise QueueSaturatedError("memorize queue saturated for session s1")
+
+    @app.get("/raise/llm-not-configured")
+    async def _llm_not_configured() -> None:
+        raise LLMNotConfiguredError(_LLM_NOT_CONFIGURED_MESSAGE)
 
     @app.get("/raise/runtime")
     async def _runtime() -> None:
@@ -247,6 +255,16 @@ async def test_llm_service_error_routes_to_503(client: AsyncClient) -> None:
     data = resp.json()
     assert data["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
     _assert_envelope(data, path="/raise/llm")
+
+
+async def test_llm_not_configured_returns_422(client: AsyncClient) -> None:
+    """LLMNotConfiguredError (a RuntimeError) → 422, not the 500 catch-all."""
+    resp = await client.get("/raise/llm-not-configured")
+    assert resp.status_code == 422
+    data = resp.json()
+    assert data["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
+    assert data["error"]["message"] == _LLM_NOT_CONFIGURED_MESSAGE
+    _assert_envelope(data, path="/raise/llm-not-configured")
 
 
 # ---------------------------------------------------------------------------

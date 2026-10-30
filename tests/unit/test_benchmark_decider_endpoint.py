@@ -165,7 +165,7 @@ def test_a_run_with_no_multiround_route_is_not_probed(
 def test_an_inherited_endpoint_is_still_probed(monkeypatch: pytest.MonkeyPatch) -> None:
     """`[decider].model` with no decider URL is a valid runtime config, and was skipped.
 
-    `get_decider_llm_client()` falls back to the backbone's endpoint field by field, so
+    `resolve_decider_config()` falls back to the backbone's endpoint field by field, so
     this shape runs -- and when that endpoint does not serve the named model, every
     decider call fails inside the benchmark instead of before its first question. The
     old gate required both fields to be set explicitly and returned silently otherwise,

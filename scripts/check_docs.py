@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
-SKIP_DIRS = {".git", "node_modules", ".venv", ".uv-cache"}
 USE_CASE_TABLES = {
     Path("README.md"): "## Use Cases",
     Path("use-cases/README.md"): "## Use Cases",
@@ -19,11 +19,9 @@ ENV_TEMPLATE = Path("src/everos/templates/env.template")
 
 
 def _markdown_files() -> list[Path]:
-    return sorted(
-        path
-        for path in Path(".").rglob("*.md")
-        if not any(part in SKIP_DIRS for part in path.parts)
-    )
+    """Tracked Markdown only: local scratch (worktrees, notes) is not the docs."""
+    out = subprocess.check_output(["git", "ls-files", "*.md"], text=True)
+    return sorted(Path(line) for line in out.splitlines() if Path(line).is_file())
 
 
 def _check_active_relative_links() -> list[str]:

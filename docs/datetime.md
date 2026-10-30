@@ -59,7 +59,7 @@ at the boundary.
 
 ## Helper reference
 
-All helpers live in [`everos.component.utils.datetime`](../src/everos/component/utils/datetime.py).
+All helpers live in [`everos.core.utils.datetime`](../src/everos/core/utils/datetime.py).
 
 ### Storage rail
 
@@ -91,8 +91,8 @@ All helpers live in [`everos.component.utils.datetime`](../src/everos/component/
 ### SQLite tables
 
 ```python
-from everos.component.utils.datetime import UtcDatetime, get_utc_now
-from everos.core.persistence.sqlite import BaseTable, Field
+from everos.core.utils.datetime import UtcDatetime, get_utc_now
+from everos.infra.persistence.sqlite import BaseTable, Field
 
 class MyRow(BaseTable, table=True):
     happened_at: UtcDatetime = Field(default_factory=get_utc_now)
@@ -106,7 +106,7 @@ normalised to UTC before persistence.
 SQLModel's ORM hydrate path (rows from `select(...)`) **bypasses**
 the Pydantic validator — SQLAlchemy assigns column values straight
 to instance attributes. To close that gap,
-[core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py)
+[infra/persistence/sqlite/_base/base.py](../src/everos/infra/persistence/sqlite/_base/base.py)
 defines a `TypeDecorator` column type, `UtcDateTimeColumn`, whose
 `process_result_value` re-attaches `tzinfo=UTC` on read (and
 `process_bind_param` normalises to UTC on write). Net effect:
@@ -122,16 +122,14 @@ validator **and** the load-time hook for free.
 ```python
 import datetime as _dt
 
-class MyLanceRow(BaseLanceTable):
+class MyIndexRow(IndexRecord):
     ts: _dt.datetime   # automatically tz=UTC in the Arrow schema
 ```
 
-LanceDB's Pydantic → PyArrow converter does not understand
-`typing.Annotated` metadata; using `UtcDatetime` as the annotation
-would raise `TypeError: Converting Pydantic type to Arrow Type`.
-Instead, `BaseLanceTable.to_arrow_schema()` walks the inferred schema
-and rewrites **every** naive `timestamp[us]` column to
-`timestamp[us, tz=UTC]`. PyArrow then:
+Index records are backend-neutral: a `datetime` field becomes the neutral
+`datetime` kind (`index.schema_for`), and the LanceDB backend maps that kind
+to `timestamp[us, tz=UTC]`, always (`lancedb.base.arrow_schema_for`). A
+record has no way to ask for another zone. PyArrow then:
 
 * **on write** — `astimezone(UTC)` any aware input automatically.
 * **on read** — returns aware UTC datetimes (not naive).
@@ -139,11 +137,6 @@ and rewrites **every** naive `timestamp[us]` column to
 No caller-side coercion needed, no per-table declaration. The
 response shapers only run `to_display_tz(...)` to convert UTC to the
 configured display zone.
-
-If a future schema genuinely needs a naive datetime column (project
-convention says storage is always UTC, so this would be unusual),
-override `to_arrow_schema` on that subclass and skip the patch for
-that one column.
 
 ### OME events / in-memory state
 
@@ -155,9 +148,9 @@ event payload.
 
 | Backend | Defense | Where |
 |---|---|---|
-| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py) |
-| **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites **every** `timestamp[us]` column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [core/persistence/lancedb/base.py](../src/everos/core/persistence/lancedb/base.py) |
-| **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `component/utils/datetime` | wired into `make lint` |
+| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/_base/base.py](../src/everos/infra/persistence/sqlite/_base/base.py) |
+| **LanceDB** | `arrow_schema_for()` maps **every** datetime column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/lancedb/_base/arrow.py](../src/everos/infra/persistence/lancedb/_base/arrow.py) |
+| **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `core/utils/datetime` | wired into `make lint` |
 
 These defenses replace what used to be an "every consumer must call
 `ensure_utc()`" shotgun discipline. With both in place, callers never
@@ -235,7 +228,7 @@ clear:
 
 ```python
 import pytest
-from everos.component.utils import datetime as dt_module
+from everos.core.utils import datetime as dt_module
 from everos.config import load_settings
 
 @pytest.fixture(autouse=True)

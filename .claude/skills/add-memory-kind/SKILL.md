@@ -57,7 +57,7 @@ directly.
 
 ## 3. Markdown daily-log: 4 steps
 
-### 3.1 Frontmatter schema — `infra/persistence/markdown/mds/<name>.py`
+### 3.1 Frontmatter schema — `infra/persistence/markdown/_mds/<name>.py`
 
 ```python
 """Episode daily-log frontmatter."""
@@ -67,7 +67,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar, Literal
 
-from everos.core.persistence.markdown import UserScopedFrontmatter
+from everos.infra.persistence.markdown import UserScopedFrontmatter
 
 
 class UserEpisodeDailyFrontmatter(UserScopedFrontmatter):
@@ -94,7 +94,7 @@ lookup is unambiguous.
 from .episode import UserEpisodeDailyFrontmatter as UserEpisodeDailyFrontmatter
 ```
 
-### 3.3 Business writer — `infra/persistence/markdown/writers/<name>.py`
+### 3.3 Business writer — `infra/persistence/markdown/_writers/<name>.py`
 
 ```python
 """Episode appender."""
@@ -103,7 +103,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from everos.core.persistence import MarkdownReader
+from everos.infra.persistence.markdown import MarkdownReader
 
 from ..mds import UserEpisodeDailyFrontmatter
 from .base import BaseDailyWriter
@@ -129,7 +129,7 @@ from .episode import UserEpisodeAppender as UserEpisodeAppender
 ### Done — usage
 
 ```python
-from everos.infra.persistence.markdown.writers import UserEpisodeAppender
+from everos.infra.persistence.markdown._writers import UserEpisodeAppender
 
 appender = UserEpisodeAppender(memory_root)
 eid = appender.append("u_jason", "I went to the doctor today.")
@@ -143,10 +143,10 @@ eid = appender.append("u_jason", "I went to the doctor today.")
 
 Skip this section if the kind doesn't need structured state beyond markdown.
 
-### 4.1 Schema — `infra/persistence/sqlite/tables/<name>.py`
+### 4.1 Schema — `infra/persistence/sqlite/_tables/<name>.py`
 
 ```python
-from everos.core.persistence.sqlite import BaseTable, Field
+from everos.infra.persistence.sqlite import BaseTable, Field
 
 
 class EpisodeState(BaseTable, table=True):
@@ -166,32 +166,34 @@ class EpisodeState(BaseTable, table=True):
 from .episode import EpisodeState as EpisodeState
 ```
 
-### 4.3 Repo — `infra/persistence/sqlite/repos/<name>.py`
+### 4.3 Repo — `infra/persistence/sqlite/_repos/<name>.py`
 
 ```python
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from everos.infra.persistence.sqlite._base.repository import RepoBase
 
-from everos.core.persistence.sqlite import RepoBase
-
-from ..sqlite_manager import get_session_factory
 from ..tables import EpisodeState
 
 
-class _EpisodeStateRepo(RepoBase[EpisodeState]):
+class EpisodeStateRepo(RepoBase[EpisodeState]):
+    """Rows of ``episode_state``."""
+
     model = EpisodeState
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
-
-
-episode_state_repo = _EpisodeStateRepo()
 ```
 
-### 4.4 Re-export — `repos/__init__.py`
+The session factory comes in through `RepoBase.__init__`. Do **not** create
+a module-level instance: `make check-singletons` rejects one, and the
+repository would be bound to no database.
+
+### 4.4 Re-export + wire — `repos/__init__.py`, `repositories.py`
 
 ```python
-from .episode import episode_state_repo as episode_state_repo
+# repos/__init__.py
+from .episode import EpisodeStateRepo as EpisodeStateRepo
 ```
+
+Add a field to `SqliteRepos` (`sqlite/repositories.py`) and build it in
+`SqliteRepos.over(database)`; the bootstrap hands that bundle to whatever
+needs the table.
 
 ---
 
@@ -204,7 +206,7 @@ Skip this section if the kind doesn't need vector / BM25 / hybrid retrieval.
 ```python
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable, Vector
+from everos.infra.persistence.records import BaseLanceTable, Vector
 
 
 class EpisodeIndex(BaseLanceTable):
@@ -235,36 +237,32 @@ match your embedding dimension.
 from .episode import EpisodeIndex as EpisodeIndex
 ```
 
-### 5.3 Repo — `infra/persistence/lancedb/repos/<name>.py`
+### 5.3 Repo — `infra/persistence/lancedb/_repos/<name>.py`
 
 ```python
-from lancedb import AsyncTable
+from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
-from everos.core.persistence.lancedb import LanceRepoBase
-from everos.infra.persistence.records import EpisodeIndex
-
-from ..lancedb_manager import get_table
+from ...records.episode import EpisodeIndex
 
 
 class _EpisodeIndexRepo(LanceRepoBase[EpisodeIndex]):
     schema = EpisodeIndex
-
-    async def _table_lookup(self) -> AsyncTable:
-        return await get_table(self.schema.TABLE_NAME, self.schema)
-
-
-episode_index_repo = _EpisodeIndexRepo()
 ```
 
-Business code writes through the `everos.infra.persistence.index` facade:
+The table comes from the `LanceDbConnection` passed as `source=`; no
+module-level instance (`make check-singletons` rejects one).
+
 `upsert(records)` merges on the declared key and is the only write; look a
 row up with `find_one_where(primary_key(app_id, project_id, row_id))`.
 
-### 5.4 Re-export — `repos/__init__.py`
+### 5.4 Wire — `index/repositories.py` + each backend
 
-```python
-from .episode import episode_index_repo as episode_index_repo
-```
+Add the record to `BUSINESS_SCHEMAS` and a field to `IndexRepositories`
+(`infra/persistence/index/repositories.py`), then build the repository in
+`LanceIndexBackend.__init__` (`_EpisodeIndexRepo(source=connection)`) and in
+`MilvusIndexBackend.__init__`. Business code reaches it as
+`index.repositories.<field>`, through the `DerivedIndex` the bootstrap
+builds.
 
 ---
 
@@ -290,8 +288,8 @@ the scope mixin fields).
 - [ ] `make test` — existing manager / lifespan / writer tests still pass
 - [ ] When the kind crosses **multiple** layers:
   - [ ] markdown entry id is the join key for the sqlite / lancedb rows
-  - [ ] business code reads only via the repo singleton (no raw engine
-        access in service / memory)
+  - [ ] business code reads only via the injected repository (no raw
+        engine access in service / memory)
   - [ ] cascade daemon (when it lands) can rebuild sqlite / lancedb
         from md alone — keep md as the truth
 
@@ -302,9 +300,9 @@ Tests by layer:
 | Markdown frontmatter schema | `tests/unit/test_infra/test_markdown/test_mds/` |
 | Markdown business appender | `tests/unit/test_infra/test_markdown/test_writers/` |
 | SQLite RepoBase logic | `tests/unit/test_core/test_persistence/test_sqlite/` |
-| SQLite manager / lifespan | `tests/unit/test_infra/test_sqlite/` |
+| SQLite database object | `tests/unit/test_infra/test_sqlite/` |
 | LanceDB LanceRepoBase logic | `tests/unit/test_core/test_persistence/test_lancedb/` |
-| LanceDB manager / lifespan | `tests/unit/test_infra/test_lancedb/` |
+| LanceDB connection object | `tests/unit/test_infra/test_lancedb/` |
 
 ## 8. Common pitfalls
 
@@ -312,11 +310,10 @@ Tests by layer:
 |---|---|---|
 | Forgot `ENTRY_ID_PREFIX` / `DIR_NAME` / `FILE_PREFIX` on a daily-log schema | `BaseDailyWriter.__init__` raises `TypeError` | Add all three ClassVars |
 | Same `ENTRY_ID_PREFIX` on user + agent variants | `MemoryLayout.locate_for_entry` collision error | Use distinct prefixes (e.g. `umc` vs `amc`) |
-| Imported `RepoBase` from `infra.persistence.sqlite` | `ImportError` | Lives in `core.persistence.sqlite` (moved earlier) |
 | Skipped one of the four files (schema / writer / table / repo) | One side silently absent | Re-export both/all from each `__init__.py` |
 | `Vector(N)` mismatched with embedding dim | LanceDB raises on insert | Make `N` exactly match the model output |
-| Imported `MemoryLayout` from a writer (infra) | `import-linter` fails (`infra → memory` reverse dep) | Use `MemoryRoot` (in core) and let the schema's ClassVars drive paths |
-| Hand-rolling `datetime.now()` instead of `today_with_timezone()` | Day-boundary drift across timezones | Always go through `everos.component.utils.datetime` |
+| Imported `MemoryLayout` from a writer (infra) | `import-linter` fails (`infra → memory` reverse dep) | Use `MemoryRoot` (in `infra.persistence`) and let the schema's ClassVars drive paths |
+| Hand-rolling `datetime.now()` instead of `today_with_timezone()` | Day-boundary drift across timezones | Always go through `everos.core.utils.datetime` |
 
 ## Background
 

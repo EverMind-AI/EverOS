@@ -63,7 +63,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 > `.lock` anchor for the `memory_root_lock` primitive; there is no
 > `.cascade.log` / `.manifest.json`.)
 
-The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
+The path manager is [`MemoryRoot`](../src/everos/infra/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
 runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`); the
 user-visible dirs are *not* pre-created — they appear on first write.
@@ -85,9 +85,9 @@ Each business memory kind picks one of three on-disk patterns:
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced) | overwrite the file | user profile |
 
 Markdown IO primitives live in
-[`core/persistence/markdown/`](../src/everos/core/persistence/markdown/);
+[`infra/persistence/markdown/_base/`](../src/everos/infra/persistence/markdown/_base/);
 business-aware writers live in
-[`infra/persistence/markdown/writers/`](../src/everos/infra/persistence/markdown/writers/)
+[`infra/persistence/markdown/_writers/`](../src/everos/infra/persistence/markdown/_writers/)
 and pick the right strategy via a base class.
 
 For a step-by-step recipe to add a new memory kind, see the
@@ -119,7 +119,7 @@ carried by the `<app>/<project>` path segments and recovered by the
 cascade path parser. The frontmatter only holds the file-level owner
 (`user_id` / `agent_id`) and `track`.
 
-The chassis lives in [`core/persistence/markdown/frontmatter.py`](../src/everos/core/persistence/markdown/frontmatter.py)
+The chassis lives in [`infra/persistence/markdown/_base/frontmatter.py`](../src/everos/infra/persistence/markdown/_base/frontmatter.py)
 (Pydantic v2):
 
 ```
@@ -163,7 +163,7 @@ e.g. `ep_20260601_00000001`:
 | `<YYYYMMDD>` | The daily-log file's date bucket |
 | `NNNNNNNN` | Per-file sequence, 8-digit zero-padded, restarts at `00000001` each day per scope |
 
-Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/persistence/markdown/entries.py)
+Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/infra/persistence/markdown/_base/entries.py)
 (`EntryId.parse / format / next_for`).
 
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
@@ -183,7 +183,7 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 │   └── <kind>.lance/      default derived index backend
 ```
 
-- **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
+- **SQLite** ([`infra/persistence/sqlite/_tables/`](../src/everos/infra/persistence/sqlite/_tables/))
   holds only system / coordination tables — `md_change_state` (cascade
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
   `conversation_status`, `cluster`, `knowledge`, `reflection_report`, `memorize_inbox` (the `async_mode` queue) — **not**
@@ -222,13 +222,13 @@ appends an entry block → atomic write back. The caller passes a full
 this primitive is **schema-agnostic** — field-level semantics
 (`entry_count` / `last_appended_at`) are a business writer's job
 (see `BaseDailyWriter._frontmatter_updates` in
-[`infra/persistence/markdown/writers/base.py`](../src/everos/infra/persistence/markdown/writers/base.py)).
+[`infra/persistence/markdown/_writers/base.py`](../src/everos/infra/persistence/markdown/_writers/base.py)).
 
 ## 7. References
 
 - Skill: [`/add-memory-kind`](../.claude/skills/add-memory-kind/SKILL.md)
 - Code:
-  - [`core/persistence/memory_root.py`](../src/everos/core/persistence/memory_root.py)
-  - [`core/persistence/markdown/`](../src/everos/core/persistence/markdown/)
+  - [`infra/persistence/memory_root.py`](../src/everos/infra/persistence/memory_root.py)
+  - [`infra/persistence/markdown/_base/`](../src/everos/infra/persistence/markdown/_base/)
   - [`infra/persistence/{markdown,sqlite,lancedb,milvus,index}/`](../src/everos/infra/persistence/)
-  - [`memory/cascade/`](../src/everos/memory/cascade/) (md → derived index sync)
+  - [`infra/cascade/`](../src/everos/infra/cascade/) (md → derived index sync)

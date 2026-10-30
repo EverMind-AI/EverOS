@@ -1,12 +1,11 @@
-"""Milvus repo singletons for EverOS derived index tables."""
+"""Milvus repositories for EverOS derived index tables, one per table."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
-from everos.component.utils.datetime import from_timestamp
-from everos.infra.persistence.predicate import all_of, eq, gt, is_null, primary_key
+from everos.core.utils.datetime import from_timestamp
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
@@ -16,6 +15,7 @@ from everos.infra.persistence.records import (
     KnowledgeTopic,
     UserProfile,
 )
+from everos.memory.ports.query import all_of, eq, gt, is_null, primary_key
 
 from .repository import MilvusRepoBase
 
@@ -65,7 +65,7 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
         raw = await self._scan_raw(
             predicate, include_vectors=True, max_rows=limit or 20_000
         )
-        rows = [self._model_from_milvus(row) for row in raw]
+        rows = [self._codec.to_model(row) for row in raw]
         rows.sort(key=lambda row: row.timestamp)
         if columns is None:
             return rows
@@ -139,33 +139,3 @@ class _UserProfileRepo(MilvusRepoBase[UserProfile]):
 
 class _KnowledgeTopicRepo(MilvusRepoBase[KnowledgeTopic]):
     schema = KnowledgeTopic
-
-
-episode_repo = _EpisodeRepo()
-atomic_fact_repo = _AtomicFactRepo()
-foresight_repo = _ForesightRepo()
-agent_case_repo = _AgentCaseRepo()
-agent_skill_repo = _AgentSkillRepo()
-user_profile_repo = _UserProfileRepo()
-knowledge_topic_repo = _KnowledgeTopicRepo()
-
-ALL_REPOS = (
-    episode_repo,
-    atomic_fact_repo,
-    foresight_repo,
-    agent_case_repo,
-    agent_skill_repo,
-    user_profile_repo,
-    knowledge_topic_repo,
-)
-
-__all__ = [
-    "ALL_REPOS",
-    "agent_case_repo",
-    "agent_skill_repo",
-    "atomic_fact_repo",
-    "episode_repo",
-    "foresight_repo",
-    "knowledge_topic_repo",
-    "user_profile_repo",
-]

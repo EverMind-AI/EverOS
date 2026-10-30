@@ -129,6 +129,9 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
+| `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
+| `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
+| `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
 
 ### `[multimodal]`
 
@@ -243,7 +246,7 @@ unaffected: nothing is probed, compared, or recorded.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `"agent"` | Conversation mode: `chat` (user-memory only) or `agent` (user + agent memory). Requires restart. |
-| `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per memorize() invocation. |
+| `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per add() / flush() invocation. |
 
 ### `[memorize.async_queue]`
 
@@ -264,12 +267,44 @@ joins it only behind its session's backlog)
 | `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
 | `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
 
+### `[agent_memory]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `case_gate_enabled` | bool | `false` | Put everalgo's correctness gate in front of agent-case extraction: the extraction LLM judges whether the work in a conversation was completed correctly (one extra call per conversation up to 50k tokens; longer ones are admitted without a call), and only admitted conversations become cases. An admitted case drives skill extraction whatever its quality score. Off: cases are admitted by the complexity and value filters. Requires restart. |
+
 ### `[clustering]`
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `threshold` | float | `0.65` | Cosine similarity threshold for clustering (0–1). |
 | `time_window_days` | float | `7.0` | Max age gap between cluster members. |
+
+### `[cascade]`
+
+The cascade projects the markdown truth into the search index (see
+[cascade_runbook.md](cascade_runbook.md)). Requires restart.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Run the cascade (watcher + scanner + worker) in the server. Off: md edits never become searchable — only for runs that never search, or that drive `everos cascade sync` themselves. |
+| `watcher_enabled` | bool | `true` | Run the filesystem watcher. Off: the scanner alone picks up md edits, one `scan_interval_seconds` later. For a host whose inotify watch limit is exhausted (the server would otherwise die at startup with `Errno 28`); unlike `enabled = false`, md still reaches the index. |
+| `optimize_heartbeat_seconds` | float | `60.0` | Idle sweep offering every kind to the optimizer, so an unindexed tail left by a crash is merged without new writes. |
+| `optimize_prune_interval_seconds` | float | `300.0` | How often superseded dataset versions are reclaimed. |
+| `optimize_prune_retention_seconds` | float | `60.0` | Versions replaced longer ago than this become eligible for deletion. |
+| `optimize_rebuild_interval_seconds` | float | `43200.0` | Full index rebuild per kind (12 h), collapsing the index fragments every optimize grows. |
+| `scan_interval_seconds` | float | `30.0` | How often the scanner walks the memory root for changes the watcher missed; on a mount without filesystem events this is the edit-to-searchable latency. |
+
+### `[ome]`
+
+Engine-wide tunables of the Offline Memory Engine. Distinct from
+[`ome.toml`](#ometoml--strategy-configuration), which overrides individual
+strategies and is hot-reloaded; these require a restart.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_concurrent_runs` | int | `20` | Cap on concurrent strategy runs. Each slot mostly waits on a remote extraction call, so a bulk ingest can afford far more. |
+| `run_timeout_seconds` | float | `1800.0` | Wall-clock ceiling on one strategy attempt — a deadlock backstop, not a latency target; too low kills slow-but-healthy extractions. `0` disables it. |
 
 ### `[knowledge]`
 
@@ -287,6 +322,12 @@ joins it only behind its session's backlog)
 | `lambda` | float | `0.1` | Interpolation weight. |
 | `top_k_cap` | int | `100` | Hard cap on returned results. |
 
+### `[logging]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `level` | str | `"INFO"` | Console log level (`DEBUG` / `INFO` / `WARNING` / `ERROR`). `everos server start --log-level` and `EVEROS_LOG_LEVEL` override it for the server; interactive commands (`cascade`, `init`, `config`, `demo`) log `WARNING`, or `INFO` with `--verbose`, whatever it says. Requires restart. |
+
 ## Troubleshooting
 
 Use `everos config show` to inspect the effective configuration:
@@ -301,6 +342,17 @@ This prints:
 - Which config files were found
 - All settings sections with their effective values
 - API keys are masked in output
+
+### First start downloads the token-counting encoding
+
+The algorithm library counts tokens with tiktoken's `o200k_base` encoding.
+tiktoken downloads it (about 1.7 MB) the first time a machine uses it and
+caches it in `TIKTOKEN_CACHE_DIR` (default: a `data-gym-cache` folder under
+the temp directory). `everos server start` loads the encoding before it
+opens any storage, so a host that cannot download it stops at startup with
+`TokenizerAssetError` instead of failing the first agent `/add`. For an
+offline host, copy the cache folder from a machine that has it and point
+`TIKTOKEN_CACHE_DIR` at the copy.
 
 ## Advanced: Container Deployment
 
@@ -335,3 +387,20 @@ Examples:
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
+
+
+### Multi-round search configuration reads
+
+Multi-round search uses an explicit configuration source. Base `[decider]`
+settings retain the application settings cache; changing ordinary settings
+requires the existing cache invalidation/reload path. Legacy `EVEROS_LLMMR_*`
+overrides still take precedence and are read on each configuration-source call.
+Blank overrides are ignored; malformed numeric overrides log a warning and
+retain the configured value. `EVEROS_LLMMR_TRACE_DUMP` is also read dynamically.
+
+The source is consulted at the existing loop, candidate-rendering, decider and
+final-selection boundaries. It is not a startup snapshot or a uniform
+per-request snapshot. Application assembly passes the readers explicitly;
+standalone search and decider calls retain their existing environment-backed
+behavior when the optional reader arguments are omitted. This internal change
+does not change configuration defaults or retry behavior.

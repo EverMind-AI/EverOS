@@ -15,7 +15,6 @@ e2e suite (with seeded rows and 200 assertions) lives in
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -23,33 +22,27 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.lancedb import lancedb_manager
-
-# ``everos.service.__init__`` re-exports ``get`` shadowing the
-# submodule. Reach the real module via importlib so we can reset its
-# ``_manager`` lazy singleton.
-get_service_mod = import_module("everos.service.get")
+from everos.service import build_application
+from tests.fakes import make_providers
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture
 async def client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; resets get-path singletons per test."""
+    """FastAPI app over a fresh, unstarted application per test."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    get_service_mod._manager = None
-
-    app = create_app(lifespan_providers=[])
+    app = create_app(
+        application=build_application(load_settings(), providers=make_providers())
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await lancedb_manager.dispose_connection()
+    await storage.lance.close()
     load_settings.cache_clear()
 
 

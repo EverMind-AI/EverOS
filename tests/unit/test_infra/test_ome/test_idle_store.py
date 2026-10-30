@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.utils.datetime import get_now_with_timezone
+from everos.core.utils.datetime import get_now_with_timezone
 from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.storage import OMEStorage
 

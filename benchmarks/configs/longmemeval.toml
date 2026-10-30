@@ -42,8 +42,8 @@ trace = true                            # export the retrieval trace
 
 [retrieval_env]                                   # exported to the EverOS servers this harness starts
 EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"              # decider reads full episode text instead of summaries
-EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
-                                        # the 30s scanner covers the same ground
+EVEROS_CASCADE__WATCHER_ENABLED = "false"  # inotify is exhausted by the IDE on this host;
+                                            # the 30s scanner covers the same ground
 # --- ANSWER ----------------------------------------------------------------
 [answer]
 model = "google/gemini-3.6-flash"

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.exceptions import (
     EmitNotDeclaredError,
     OMEError,
     StartupValidationError,
 )
+from everos.memory.ports import Event
 
 
-class _UnknownEvent(BaseEvent):
+class _UnknownEvent(Event):
     pass
 
 

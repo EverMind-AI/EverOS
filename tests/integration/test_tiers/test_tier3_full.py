@@ -9,11 +9,9 @@ refactor and is skipped per the task brief).
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from everalgo.rank.protocols import AgenticDecision
-from everalgo.types import KnowledgeMemory
 from httpx import AsyncClient
 
 from .conftest import (
@@ -102,44 +100,14 @@ async def test_agent_hybrid_cross_encoder_lane_succeeds(
 # ---------------------------------------------------------------------------
 
 
-def _make_extractor_stub() -> AsyncMock:
-    memories = [
-        KnowledgeMemory(
-            doc_id="d_tier3stub01",
-            topic_index=0,
-            topic="Hiking Guide",
-            summary="Overview of mountain hiking trails.",
-            content="",
-            depth=0,
-            category_id="Outdoors",
-            topic_path="Hiking Guide",
-        ),
-        KnowledgeMemory(
-            doc_id="d_tier3stub01",
-            topic_index=1,
-            topic="Trail Safety",
-            summary="Safety tips for mountain hikers.",
-            content="Always carry water and check the weather forecast.",
-            depth=1,
-            parent_index=0,
-            children_index=[],
-            topic_path="Hiking Guide > Trail Safety",
-            category_id="Outdoors",
-        ),
-    ]
-    extractor = AsyncMock()
-    extractor.aextract.return_value = memories
-    return extractor
-
-
 async def test_knowledge_upload_and_search_succeed(
     tier3_runtime: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from everos.entrypoints.api.routes import knowledge as knowledge_routes
+    """Upload -> extract -> cascade -> keyword search, on the canned model.
 
-    monkeypatch.setattr(
-        knowledge_routes, "_build_extractor", lambda: _make_extractor_stub()
-    )
+    The tier model answers topic extraction from
+    ``tests/fakes/llm_scripts/knowledge`` (one "Trail Safety" topic).
+    """
     # Multimodal parsing is orthogonal to this refactor (brief: "skip
     # unless spec demands") -- force the plain UTF-8 decode path so a
     # real everos[multimodal] install in this environment doesn't pull
@@ -175,7 +143,7 @@ async def test_health_reports_tier3_capabilities(tier3_runtime: AsyncClient) -> 
     body = resp.json()
 
     caps = body["capabilities"]
-    assert caps["llm"] is True
+    assert "llm" not in caps
     assert caps["embed"] is True
     assert caps["rerank"] is True
 

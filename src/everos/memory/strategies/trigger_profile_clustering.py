@@ -14,35 +14,26 @@ import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.clustering import cluster_by_geometry
 
-from everos.component.embedding import get_embedding_capability
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.sqlite import cluster_repo, mint_cluster_id
 from everos.memory._partition_locks import get_partition_lock
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
+from everos.memory.mappers import cluster as cluster_mapper
+from everos.memory.models import mint_cluster_id
+from everos.memory.ports import ClusterStore, Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
 
 
-@offline_strategy(
-    name="trigger_profile_clustering",
-    trigger=Immediate(on=[EpisodeExtracted]),
-    emits=[ProfileClusterUpdated],
-    applies_to=lambda e: e.source == "pipeline",
-    max_retries=2,
-)
 async def trigger_profile_clustering(
-    event: EpisodeExtracted, ctx: StrategyContext
-) -> None:
-    # Body-guard: capability is checked here for defensive degradation.
-    # When embedding is unavailable we cannot vectorise the episode, so
-    # the strategy silently no-ops — no work, no owner lock, no OME
-    # retry pressure. Tier upgrades require a server restart; this
-    # guard is not a hot-reload mechanism, it just keeps dispatch clean
-    # when capability was absent at engine start.
+    event: EpisodeExtracted, deps: MemoryDeps
+) -> list[Event]:
+    """Fold the episode into its owner's clusters and announce the cluster."""
+    # Body-guard: without an embedding provider (Tier 1) the episode
+    # cannot be vectorised, so the strategy silently no-ops — no work, no
+    # owner lock, no OME retry pressure. Tier upgrades require a server
+    # restart; this guard is not a hot-reload mechanism.
     #
     # Log level is intentionally ``debug`` here (and at the three sibling
     # body-guards in ``trigger_skill_clustering``, ``extract_agent_skill``,
@@ -59,14 +50,20 @@ async def trigger_profile_clustering(
     # is ``WARNING`` (which suppresses stdout but not the sink). ``debug``
     # keeps this per-event signal cheap and opt-in via ``--verbose`` for
     # diagnosing why a strategy isn't running.
-    if not get_embedding_capability().available:
+    if deps.embedding is None:
         logger.debug(
             "strategy_gated_off_embedding_unavailable",
             strategy_name="trigger_profile_clustering",
             owner_id=event.owner_id,
         )
-        return
+        return []
 
+    scope = Scope(
+        app_id=event.app_id,
+        project_id=event.project_id,
+        owner_id=event.owner_id,
+        owner_type="user",
+    )
     # Serialise on owner_id: the strategy reads the user's full cluster
     # set, picks merge target by geometry, then upserts — concurrent runs
     # on the same owner_id would race the read → decide → write cycle.
@@ -76,28 +73,21 @@ async def trigger_profile_clustering(
     partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
     async with get_partition_lock("trigger_profile_clustering", partition):
         # 1. Embed the episode_text into a vector.
-        # ``.require()`` is defensive: the body-guard above already
-        # returned when the capability was missing, so this cannot raise
-        # in the guarded path. Routing through the capability keeps a
-        # single shared provider (one client, one semaphore) per process.
-        embedder = get_embedding_capability().require()
-        vector_list = await embedder.embed(event.episode_text)
+        vector_list = await deps.embedding.embed(event.episode_text)
         vector = np.asarray(vector_list, dtype=np.float32)
 
         # 2. Load this user's existing user-memory clusters (scoped to space).
-        existing = await cluster_repo.list_for_owner(
-            event.owner_id,
-            "user_memory",
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
+        existing = [
+            cluster_mapper.to_algo(c)
+            for c in await deps.stores.cluster.list_for_owner(scope, "user_memory")
+        ]
 
         # OME delivers at least once: a replay of this event (a crash after
         # the upsert, a retry after the emit failed) must not fold the episode
         # in a second time -- the cluster's count and centroid would drift
         # and extract_user_profile's gate reads that count. An episode already
         # among the owner's members is left where it is; the downstream event
-        # is still emitted so a run lost with the crash is not lost for good.
+        # is still returned so a run lost with the crash is not lost for good.
         existing_ids = {c.id for c in existing}
         already = next(
             (c for c in existing if event.episode_entry_id in c.members), None
@@ -110,19 +100,11 @@ async def trigger_profile_clustering(
                 cluster_id=already.id,
             )
         else:
-            to_save = await _fold_in(event, vector, existing)
-        # 6. Emit ProfileClusterUpdated → downstream extract_user_profile.
+            to_save = await _fold_in(
+                event, vector, existing, deps.stores.cluster, scope
+            )
         assert to_save.id is not None  # both branches above set id
 
-        await ctx.emit(
-            ProfileClusterUpdated(
-                memcell_id=event.memcell_id,
-                cluster_id=to_save.id,
-                owner_id=event.owner_id,
-                app_id=event.app_id,
-                project_id=event.project_id,
-            )
-        )
     logger.info(
         "profile_cluster_updated",
         memcell_id=event.memcell_id,
@@ -132,10 +114,25 @@ async def trigger_profile_clustering(
         replayed=already is not None,
         cluster_count=to_save.count,
     )
+    # 6. Announce the cluster → downstream extract_user_profile.
+    return [
+        ProfileClusterUpdated(
+            memcell_id=event.memcell_id,
+            cluster_id=to_save.id,
+            owner_id=event.owner_id,
+            app_id=event.app_id,
+            project_id=event.project_id,
+            language=event.language,
+        )
+    ]
 
 
 async def _fold_in(
-    event: EpisodeExtracted, vector: np.ndarray, existing: list[AlgoCluster]
+    event: EpisodeExtracted,
+    vector: np.ndarray,
+    existing: list[AlgoCluster],
+    clusters: ClusterStore,
+    scope: Scope,
 ) -> AlgoCluster:
     """Merge the episode into the owner's clusters (or start one) and persist."""
     # 3. Build a size-1 cluster for the new episode.
@@ -161,15 +158,18 @@ async def _fold_in(
     )
     to_save = merged if merged is not None else new_cluster
 
-    # 5. Persist the (possibly-merged) cluster back to SQLite.
-    await cluster_repo.upsert_with_members(
-        to_save,
-        owner_id=event.owner_id,
-        owner_type="user",
-        kind="user_memory",
-        member_type="episode",
-        app_id=event.app_id,
-        project_id=event.project_id,
+    # 5. Persist the (possibly-merged) cluster.
+    await clusters.upsert(
+        scope, "user_memory", cluster_mapper.from_algo(to_save), member_type="episode"
     )
-
     return to_save
+
+
+TRIGGER_PROFILE_CLUSTERING_SPEC = StrategySpec(
+    name="trigger_profile_clustering",
+    fn=trigger_profile_clustering,
+    trigger=Immediate(on=[EpisodeExtracted]),
+    emits=frozenset({ProfileClusterUpdated}),
+    applies_to=lambda e, _deps: e.source == "pipeline",
+    max_retries=2,
+)

@@ -44,8 +44,8 @@ google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitte
 
 [retrieval_env]                         # exported to the EverOS servers this harness starts
 EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
-EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
-                                        # the 30s scanner covers the same ground
+EVEROS_CASCADE__WATCHER_ENABLED = "false"  # inotify is exhausted by the IDE on this host;
+                                            # the 30s scanner covers the same ground
 # --- ANSWER ----------------------------------------------------------------
 # clash -> v5 routing, the reference's best-scoring arm: 71.75% against 66.56% for
 # the plain official prompt, and the only one of its sixteen configurations that

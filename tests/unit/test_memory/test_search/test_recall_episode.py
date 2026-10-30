@@ -1,387 +1,140 @@
-"""Unit tests for ``EpisodeRecaller.fetch_all_for_owner`` and ``fetch_by_entry_ids``."""
+"""Unit tests for :class:`EpisodeRecaller`: index hits -> candidates + records."""
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.predicate import eq
+from everos.memory.ports import eq
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.recall.episode import EpisodeRecaller
 
+from ._records import ScriptedIndex, hit, stored_episode
 
-def _make_row(
-    ep_id: str,
-    mc_id: str,
-    *,
-    parent_type: str = "memcell",
-    entry_id: str = "",
-) -> dict[str, Any]:
-    """Build a minimal episode LanceDB row dict for test fixtures."""
-    return {
-        "id": ep_id,
-        "owner_id": "alice",
-        "owner_type": "user",
-        "session_id": "sess_1",
-        "timestamp": 1000000,
-        "sender_ids": ["alice"],
-        "subject": f"subj {ep_id}",
-        "summary": f"summary {ep_id}",
-        "episode": f"body {ep_id}",
-        "parent_id": mc_id,
-        "parent_type": parent_type,
-        "entry_id": entry_id or ep_id,
-    }
+_ALICE = eq("owner_id", "alice")
 
 
-def _mock_table(rows: list[dict[str, Any]]) -> MagicMock:
-    tbl = MagicMock()
-    tbl.query.return_value.where.return_value.to_list = AsyncMock(return_value=rows)
-    return tbl
-
-
-def _mock_records(rows: list[dict[str, Any]]) -> list[MagicMock]:
-    records: list[MagicMock] = []
-    for row in rows:
-        record = MagicMock()
-        record.model_dump.return_value = row
-        records.append(record)
-    return records
-
-
-_ALICE_WHERE = eq("owner_id", "alice")
-
-
-@pytest.fixture()
-def recaller() -> EpisodeRecaller:
+def _recaller(
+    index: ScriptedIndex, *, terms: list[str] | None = None
+) -> EpisodeRecaller:
     tok = MagicMock(spec=Tokenizer)
-    tok.tokenize.return_value = ["hi"]
-    return EpisodeRecaller(RecallerDeps(tokenizer=tok))
+    tok.tokenize.return_value = ["hi"] if terms is None else terms
+    return EpisodeRecaller(RecallerDeps(tokenizer=tok), index)  # type: ignore[arg-type]
 
 
-async def test_fetch_all_for_owner_returns_entry_id_keyed_candidates(
-    recaller: EpisodeRecaller,
-) -> None:
-    """id must equal entry_id so acluster_retrieve membership works."""
-    rows = [
-        _make_row("ep_1", "mc_1"),
-        _make_row("ep_2", "mc_2"),
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
-        new_callable=AsyncMock,
-        return_value=_mock_records(rows),
-    ):
-        result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
+async def test_sparse_recall_maps_hits_to_candidates_and_records() -> None:
+    ep = stored_episode("ep_1")
+    recaller = _recaller(ScriptedIndex(sparse=[hit(ep, 3.5)]))
 
-    assert len(result) == 2
-    ids = {c.id for c in result}
-    assert ids == {"ep_1", "ep_2"}, "id must be entry_id"
+    result = await recaller.sparse_recall("hi", _ALICE, limit=5)
+
+    (cand,) = result.candidates
+    assert cand.id == ep.ref.id
+    assert cand.score == 3.5 and cand.source == "keyword"
+    assert result.stored_by_id == {ep.ref.id: ep}
 
 
-async def test_fetch_all_for_owner_stores_episode_id_in_metadata(
-    recaller: EpisodeRecaller,
-) -> None:
-    """metadata['episode_id'] carries the real LanceDB episode id for final shaping."""
-    rows = [_make_row("ep_abc", "mc_xyz")]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
-        new_callable=AsyncMock,
-        return_value=_mock_records(rows),
-    ):
-        result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
+async def test_candidate_metadata_holds_algorithm_fields_only() -> None:
+    """The record rides beside the candidate, never inside its metadata."""
+    ep = stored_episode("ep_1")
+    recaller = _recaller(ScriptedIndex(dense=[hit(ep, 0.9)]))
 
-    assert result[0].metadata["episode_id"] == "ep_abc"
-    assert result[0].metadata["parent_id"] == "mc_xyz"
+    (cand,) = (await recaller.dense_recall([0.1], _ALICE, limit=5)).candidates
+
+    assert cand.metadata["entry_id"] == "ep_1"
+    assert cand.metadata["episode"] == "body ep_1"
+    assert cand.metadata["timestamp"] == ep.item.timestamp
+    assert all(not hasattr(v, "ref") for v in cand.metadata.values())
 
 
-async def test_fetch_all_for_owner_skips_rows_without_entry_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Rows without entry_id are silently skipped."""
-    rows = [
-        {
-            "id": "ep_bad",
-            "owner_id": "alice",
-            "owner_type": "user",
-            "session_id": "s",
-            "timestamp": 1,
-            "sender_ids": [],
-            "subject": "",
-            "summary": "",
-            "episode": "",
-            "parent_id": "mc_x",
-        },
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
-        new_callable=AsyncMock,
-        return_value=_mock_records(rows),
-    ):
-        result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
-
-    assert result == []
+async def test_a_missing_score_maps_to_zero() -> None:
+    recaller = _recaller(ScriptedIndex(sparse=[hit(stored_episode("ep_1"), None)]))
+    (cand,) = (await recaller.sparse_recall("hi", _ALICE, limit=5)).candidates
+    assert cand.score == 0.0
 
 
-async def test_fetch_all_for_owner_merged_episode_uses_entry_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Merged episodes (parent_type=cluster) must use entry_id as Candidate.id.
+async def test_empty_query_and_empty_vector_skip_the_index() -> None:
+    index = ScriptedIndex(sparse=[hit(stored_episode("ep_1"), 1.0)])
+    recaller = _recaller(index, terms=[])
 
-    This ensures acluster_retrieve membership matching works for
-    member_type=episode cluster members whose member_id is the episode's
-    entry_id, not the cluster_id stored in parent_id.
-    """
-    rows = [
-        _make_row(
-            "ep_merged",
-            "cluster_abc",
-            parent_type="cluster",
-            entry_id="entry_xyz",
-        ),
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
-        new_callable=AsyncMock,
-        return_value=_mock_records(rows),
-    ):
-        result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
-
-    assert len(result) == 1
-    assert result[0].id == "entry_xyz", "merged episode id must be entry_id"
-    assert result[0].metadata["episode_id"] == "ep_merged"
+    assert (await recaller.sparse_recall("", _ALICE, limit=5)).candidates == []
+    assert (await recaller.dense_recall([], _ALICE, limit=5)).candidates == []
+    assert (await recaller.dense_recall_subject([], _ALICE, limit=5)).candidates == []
+    assert index.calls == []
 
 
-async def test_fetch_all_for_owner_mixed_regular_and_merged(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Mixed rows: both regular and merged episodes key by entry_id."""
-    rows = [
-        _make_row("ep_regular", "mc_1"),
-        _make_row(
-            "ep_merged",
-            "cluster_99",
-            parent_type="cluster",
-            entry_id="entry_42",
-        ),
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
-        new_callable=AsyncMock,
-        return_value=_mock_records(rows),
-    ):
-        result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
-
-    assert len(result) == 2
-    ids = {c.id for c in result}
-    assert ids == {"ep_regular", "entry_42"}
-
-
-async def test_fetch_by_entry_ids_returns_candidates(
-    recaller: EpisodeRecaller,
-) -> None:
-    """fetch_by_entry_ids queries by entry_id and returns valid candidates."""
-    rows = [
-        _make_row(
-            "ep_merged",
-            "cluster_abc",
-            parent_type="cluster",
-            entry_id="entry_xyz",
-        ),
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
-        new_callable=AsyncMock,
-        return_value=rows,
-    ):
-        result = await recaller.fetch_by_entry_ids(["entry_xyz"], _ALICE_WHERE)
-
-    assert len(result) == 1
-    assert result[0].id == "ep_merged"
-
-
-async def test_fetch_by_entry_ids_empty_input_returns_empty(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Empty entry_ids list short-circuits without querying."""
-    result = await recaller.fetch_by_entry_ids([], _ALICE_WHERE)
-    assert result == []
-
-
-def _mock_bm25_table(rows: list[dict[str, Any]]) -> MagicMock:
-    tbl = MagicMock()
-    chain = tbl.query.return_value.nearest_to_text.return_value
-    chain.where.return_value.limit.return_value.to_list = AsyncMock(return_value=rows)
-    return tbl
-
-
-def _mock_ann_table(rows: list[dict[str, Any]]) -> MagicMock:
-    tbl = MagicMock()
-    q = tbl.query.return_value
-    col = q.nearest_to.return_value.column.return_value
-    chain = col.distance_type.return_value
-    chain.where.return_value.limit.return_value.to_list = AsyncMock(return_value=rows)
-    return tbl
-
-
-async def test_sparse_recall_as_child_injects_parent_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """sparse_recall_as_child adds parent_id=entry_id to each candidate's metadata."""
-    rows = [
-        {**_make_row("ep_1", "mc_1", entry_id="entry_1"), "_score": 1.0},
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.sparse_search",
-        new_callable=AsyncMock,
-        return_value=rows,
-    ):
-        result = await recaller.sparse_recall_as_child("hello", _ALICE_WHERE, limit=10)
-
-    assert len(result) == 1
-    assert result[0].metadata["parent_id"] == "entry_1"
-
-
-async def test_sparse_recall_as_child_falls_back_to_id_when_no_entry_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """When entry_id is absent in metadata, parent_id falls back to candidate id."""
-    row = {
-        "id": "ep_2",
-        "owner_id": "alice",
-        "owner_type": "user",
-        "session_id": "s",
-        "timestamp": 1,
-        "sender_ids": [],
-        "subject": "",
-        "summary": "",
-        "episode": "body",
-        "parent_id": "mc_x",
-        "_score": 0.5,
-    }
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.sparse_search",
-        new_callable=AsyncMock,
-        return_value=[row],
-    ):
-        result = await recaller.sparse_recall_as_child("hello", _ALICE_WHERE, limit=10)
-
-    assert len(result) == 1
-    cand = result[0]
-    assert cand.metadata["parent_id"] == cand.id
-
-
-async def test_sparse_recall_as_child_empty_query_returns_empty(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Empty query token list short-circuits; no table call needed."""
-    recaller._deps.tokenizer.tokenize.return_value = []
-    result = await recaller.sparse_recall_as_child("", _ALICE_WHERE, limit=10)
-    assert result == []
-
-
-async def test_dense_recall_as_child_injects_parent_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """dense_recall_as_child adds parent_id=entry_id to each candidate's metadata."""
-    rows = [
-        {**_make_row("ep_3", "mc_3", entry_id="entry_3"), "_distance": 0.1},
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
-        new_callable=AsyncMock,
-        return_value=rows,
-    ):
-        result = await recaller.dense_recall_as_child(
-            [0.1] * 1024, _ALICE_WHERE, limit=10
-        )
-
-    assert len(result) == 1
-    assert result[0].metadata["parent_id"] == "entry_3"
-
-
-async def test_dense_recall_as_child_empty_vector_returns_empty(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Empty vector short-circuits without querying."""
-    result = await recaller.dense_recall_as_child([], _ALICE_WHERE, limit=10)
-    assert result == []
-
-
-def _mock_subject_ann_table(rows: list[dict[str, Any]]) -> MagicMock:
-    """Mock for subject_vector ANN chain."""
-    tbl = MagicMock()
-    q = tbl.query.return_value
-    col = q.nearest_to.return_value.column.return_value
-    dist = col.distance_type.return_value
-    dist.where.return_value.limit.return_value.to_list = AsyncMock(
-        return_value=rows,
+@pytest.mark.parametrize(
+    "method",
+    [
+        "sparse_recall_as_child",
+        "dense_recall_as_child",
+        "dense_recall_subject_as_child",
+    ],
+)
+async def test_child_recalls_tag_parent_id_with_the_entry_id(method: str) -> None:
+    ep = stored_episode("ep_7", parent_id="mc_9")
+    index = ScriptedIndex(
+        sparse=[hit(ep, 1.0)], dense=[hit(ep, 0.5)], subject=[hit(ep, 0.4)]
     )
-    return tbl
+    recaller = _recaller(index)
+    query: object = "hi" if method.startswith("sparse") else [0.1]
+
+    result = await getattr(recaller, method)(query, _ALICE, limit=5)
+
+    (cand,) = result.candidates
+    assert cand.metadata["parent_id"] == "ep_7"
+    assert result.stored_by_id[cand.id] is ep
 
 
-async def test_dense_recall_subject_returns_subject_vector_source(
-    recaller: EpisodeRecaller,
-) -> None:
-    """dense_recall_subject returns source='vector'."""
-    rows = [
-        {**_make_row("ep_s1", "mc_s1", entry_id="entry_s1"), "_distance": 0.2},
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
-        new_callable=AsyncMock,
-        return_value=rows,
-    ) as dense_search:
-        result = await recaller.dense_recall_subject(
-            [0.1] * 1024, _ALICE_WHERE, limit=10
-        )
+async def test_dense_recall_subject_uses_the_subject_search() -> None:
+    ep = stored_episode("ep_1")
+    index = ScriptedIndex(subject=[hit(ep, 0.8)])
 
-    assert len(result) == 1
-    assert result[0].source == "vector"
-    assert result[0].score == pytest.approx(0.8)
-    dense_search.assert_awaited_once_with(
-        [0.1] * 1024,
-        _ALICE_WHERE,
-        limit=10,
-        vector_field="subject_vector",
+    result = await _recaller(index).dense_recall_subject([0.1], _ALICE, limit=3)
+
+    assert [c.score for c in result.candidates] == [pytest.approx(0.8)]
+    assert result.candidates[0].source == "vector"
+    assert [c[0] for c in index.calls] == ["subject"]
+
+
+async def test_fetch_all_for_owner_keys_by_entry_id() -> None:
+    """Cluster members are entry ids, so the corpus is keyed by them."""
+    regular = stored_episode("ep_1")
+    merged = stored_episode("ep_9", parent_id="cl_1", parent_type="cluster")
+    index = ScriptedIndex(found=[hit(regular), hit(merged)])
+
+    result = await _recaller(index).fetch_all_for_owner(_ALICE)
+
+    assert [c.id for c in result.candidates] == ["ep_1", "ep_9"]
+    assert result.stored_by_id["ep_9"] is merged
+    assert index.calls[0][3] is None, "the whole partition is needed"
+
+
+async def test_fetch_parents_keys_by_entry_id_and_filters_on_it() -> None:
+    ep = stored_episode("ep_3")
+    index = ScriptedIndex(found=[hit(ep)])
+
+    result = await _recaller(index).fetch_parents(["ep_3"], _ALICE)
+
+    assert [c.id for c in result.candidates] == ["ep_3"]
+    assert result.stored_by_id["ep_3"] is ep
+    assert index.calls[0][3] == 1
+
+
+async def test_fetch_by_entry_ids_keys_by_global_id() -> None:
+    ep = stored_episode("ep_3")
+    result = await _recaller(ScriptedIndex(found=[hit(ep)])).fetch_by_entry_ids(
+        ["ep_3"], _ALICE
     )
+    assert [c.id for c in result.candidates] == [ep.ref.id]
 
 
-async def test_dense_recall_subject_empty_vector_returns_empty(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Empty vector short-circuits without querying."""
-    result = await recaller.dense_recall_subject([], _ALICE_WHERE, limit=10)
-    assert result == []
+async def test_fetches_with_no_ids_skip_the_index() -> None:
+    index = ScriptedIndex(found=[hit(stored_episode("ep_1"))])
+    recaller = _recaller(index)
 
-
-async def test_dense_recall_subject_as_child_injects_parent_id(
-    recaller: EpisodeRecaller,
-) -> None:
-    """dense_recall_subject_as_child adds parent_id=entry_id to metadata."""
-    rows = [
-        {**_make_row("ep_s2", "mc_s2", entry_id="entry_s2"), "_distance": 0.15},
-    ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
-        new_callable=AsyncMock,
-        return_value=rows,
-    ):
-        result = await recaller.dense_recall_subject_as_child(
-            [0.1] * 1024, _ALICE_WHERE, limit=10
-        )
-
-    assert len(result) == 1
-    assert result[0].metadata["parent_id"] == "entry_s2"
-    assert result[0].source == "vector"
-
-
-async def test_dense_recall_subject_as_child_empty_vector_returns_empty(
-    recaller: EpisodeRecaller,
-) -> None:
-    """Empty vector short-circuits without querying."""
-    result = await recaller.dense_recall_subject_as_child([], _ALICE_WHERE, limit=10)
-    assert result == []
+    assert (await recaller.fetch_parents([], _ALICE)).candidates == []
+    assert (await recaller.fetch_by_entry_ids([], _ALICE)).candidates == []
+    assert index.calls == []

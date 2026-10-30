@@ -2,57 +2,49 @@
 
 Covers the agent branches that ``test_memorize_integration.py`` skips:
 
-- :mod:`service.memorize` agent dispatch (asyncio.gather of user + agent
-  pipelines)
-- :mod:`service._boundary` agent-mode detection via
-  :class:`everalgo.agent_memory.AgentBoundaryDetector`
+- :class:`everos.service.MemoryService` agent dispatch (user + agent
+  pipelines per cell)
+- :class:`everos.memory.extract.boundary.BoundaryDetection` in agent mode
+  (tool rows kept in the cells, hidden from the model)
 - :mod:`memory.extract.pipeline.agent_memory.AgentMemoryPipeline` end-to-end
 
 Self-contained: the chat-baseline file keeps its fixture local, so we
 copy the minimum scaffolding rather than refactor it into a shared
-conftest.
+conftest. The model is :func:`tests.fakes.memorize_llm`, which answers the
+agent-track operators from their canned scripts, so the OME strategies run
+for real.
 """
 
 from __future__ import annotations
 
-import importlib
+import asyncio
 import json
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
-from sqlmodel import SQLModel
+from everalgo.testing import FakeLLMClient
 
-from everos.core.persistence import MemoryRoot
-from everos.service.memorize import MemorizeResult, memorize
+from everos.infra.ome.records import RunStatus
+from everos.infra.persistence import MemoryRoot
+from everos.service import (
+    MemorizeResult,
+    build_application,
+)
+from tests.fakes import agent_trajectory_messages, make_providers, memorize_llm
+from tests.fakes.storage import Storage
+
+_under_test: dict[str, Any] = {}
+"""The memory facade (``memory``) and OME engine (``engine``) of the
+application the ``memorize_env`` fixture built."""
 
 
-def _boundary_response(boundaries: list[int]) -> str:
-    return json.dumps(
-        {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    )
-
-
-def _make_fake_llm(boundary_responses: list[list[int]] | None = None) -> FakeLLMClient:
-    queue: list[list[int]] = list(boundary_responses or [])
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = queue.pop(0) if queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        return ChatResponse(
-            content=json.dumps({"title": "T", "content": "B"}), model="fake"
-        )
-
-    return FakeLLMClient(handler=handler)
+async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
+    """The inline add step (``MemoryService._memorize``) under test."""
+    return await _under_test["memory"]._memorize(payload, **kwargs)
 
 
 def _msg(
@@ -99,32 +91,15 @@ def _memcell_rows(tmp_path: Path) -> list[sqlite3.Row]:
 
 @pytest_asyncio.fixture
 async def memorize_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[Callable[..., Any]]:
     """Same shape as the chat-baseline fixture; ``mode`` defaults to ``agent``."""
     monkeypatch.setattr(
         MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
-
-    svc = importlib.import_module("everos.service.memorize")
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-    client_mod = importlib.import_module("everos.component.llm.client")
-
-    for attr in (
-        "_episode_writer",
-        "_prompt_loader",
-        "_user_pipeline",
-        "_agent_pipeline",
-        "_ome_engine",
-    ):
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
     started: dict[str, Any] = {"engine": None}
 
@@ -137,30 +112,16 @@ async def memorize_env(
 
         load_settings.cache_clear()
 
-        monkeypatch.setattr(client_mod, "_llm_client", fake_llm)
+        await storage.create_schema()
 
-        from everos.infra.persistence.sqlite import dispose_engine, get_engine
-
-        db_engine = get_engine()
-        async with db_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        started["dispose"] = dispose_engine
-
-        # Silence OME strategies so agent_case / atomic / foresight don't
-        # try real extraction logic during these tests.
-        noop = AsyncMock(return_value=[])
-        for mod in (af_mod, fs_mod, ac_mod):
-            extractor_attr = next(
-                (n for n in dir(mod) if n.endswith("Extractor")), None
-            )
-            if extractor_attr:
-                monkeypatch.setattr(
-                    mod,
-                    extractor_attr,
-                    lambda *a, **k: type("M", (), {"aextract": noop})(),
-                )
-
-        engine = svc._get_engine()
+        settings = load_settings()
+        application = build_application(
+            settings,
+            providers=make_providers(llm=fake_llm),
+        )
+        _under_test["memory"] = application.memory
+        engine = application._engine
+        _under_test["engine"] = engine
         await engine.start()
         started["engine"] = engine
 
@@ -168,8 +129,6 @@ async def memorize_env(
 
     if started.get("engine") is not None:
         await started["engine"].stop()
-    if started.get("dispose") is not None:
-        await started["dispose"]()
 
 
 # ── Tests ────────────────────────────────────────────────────────────
@@ -179,7 +138,7 @@ async def test_agent_mode_two_user_assistant_msgs(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Agent mode happy path: one cell, both user + agent pipelines fire."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     result = await memorize(
@@ -204,7 +163,7 @@ async def test_agent_mode_preserves_tool_items(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Agent mode keeps ``role=tool`` rows inside the cell (chat mode drops them)."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     payload = {
@@ -247,7 +206,7 @@ async def test_agent_mode_dispatch_no_double_insert(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Dual pipeline dispatch must not double-insert the memcell row."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     await memorize(
@@ -267,3 +226,35 @@ async def test_agent_mode_dispatch_no_double_insert(
     assert len(rows) == 1  # boundary stage owns the ledger
     payload = json.loads(rows[0]["payload_json"])
     assert len(payload["items"]) == 4
+
+
+async def test_agent_mode_files_the_trajectory_as_an_agent_case(
+    tmp_path: Path, memorize_env: Callable[..., Any]
+) -> None:
+    """A closed tool trajectory becomes an agent case of its assistant sender."""
+    await memorize_env(mode="agent", fake_llm=memorize_llm([[]]))
+
+    result = await memorize(
+        {"session_id": "test_agent_case", "messages": agent_trajectory_messages()},
+        is_final=True,
+    )
+    assert result.status == "extracted"
+
+    engine = _under_test["engine"]
+    runs: list = []
+    for _ in range(100):
+        runs = await engine.list_runs("extract_agent_case", status=RunStatus.SUCCESS)
+        if runs:
+            break
+        await asyncio.sleep(0.1)
+    assert runs, "expected a SUCCESS run of extract_agent_case"
+
+    (case_md,) = _case_files(tmp_path, "agent_42")
+    assert "Fix the flaky date parsing test" in case_md
+
+
+def _case_files(root: Path, agent_id: str) -> list[str]:
+    return [
+        p.read_text(encoding="utf-8")
+        for p in root.glob(f"**/agents/{agent_id}/.cases/*.md")
+    ]

@@ -15,23 +15,22 @@ make ci                    # full CI: lint + test + integration
 
 ## Architecture
 
-DDD 5 layers + cross-cutting:
+DDD layers with domain-owned ports, plus cross-cutting:
 
 ```
-entrypoints  →  service  →  memory  →  infra
-                              ↓
-                        component / core / config
+entrypoints  →  service  →  memory  ←  infra
+cross-cutting, usable by every layer: core / component / config
 ```
 
-- `entrypoints/` — cli + api (Presentation)
-- `service/` — use case orchestration (memorize / retrieve / evolve / manage)
-- `memory/` — domain (extract + search + cascade + prompt_slots + models)
-- `infra/` — storage adapters (markdown + sqlite + lancedb)
-- `component/` — injectable providers (llm / embedding / config / utils)
-- `core/` — runtime base (observability / lifespan / context)
-- `config/` — configuration data (Settings + default.toml)
+- `entrypoints/` — cli + api (incl. HTTP middleware) + tui (protocol translation only)
+- `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `KnowledgeService` / `OpsService` facades
+- `memory/` — domain (models + ports + extract + search + strategies + reflection + custom_instructions)
+- `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb + milvus) + the cascade and OME engines
+- `component/` — injectable providers (llm / embedding / rerank / parser / tokenizer)
+- `core/` — runtime base (errors / observability / context / utils.datetime)
+- `config/` — configuration data (Settings + default.toml + custom_instructions)
 
-**Dependency rule**: `entrypoints → service → memory → infra`. Single-direction, enforced by `import-linter`.
+**Dependency rule**: `entrypoints → service → memory ← infra`; entry points import only `service` (plus `core` / `config`). Enforced by `import-linter`.
 
 Detailed: [docs/architecture.md](docs/architecture.md).
 
@@ -41,7 +40,7 @@ Detailed: [docs/architecture.md](docs/architecture.md).
 - **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`, `/release`
 - **Project-level decisions** in [docs/](docs/) (low-frequency, human-judgment-required)
 - **Language policy**: the project targets a global audience — docs and code are English; CJK appears only in test fixtures and locale-suffixed mirrors. Scanned by `make check-cjk`.
-- **Datetime discipline**: never call `datetime.now()` / `time.time()` directly — use `everos.component.utils.datetime`. Enforced by `make check-datetime`.
+- **Datetime discipline**: never call `datetime.now()` / `time.time()` directly — use `everos.core.utils.datetime`. Enforced by `make check-datetime`.
 
 Contributor engineering reference — build, test, CI gates, branch & commit conventions: [docs/engineering.md](docs/engineering.md).
 

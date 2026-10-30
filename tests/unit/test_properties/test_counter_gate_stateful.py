@@ -45,14 +45,15 @@ from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
-from everos.component.utils.datetime import get_utc_now
-from everos.infra.ome import BaseEvent, Immediate, offline_strategy
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._dispatch.dispatcher import EventDispatcher
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._stores import counter as counter_mod
 from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.storage import OMEStorage
-from everos.infra.ome.gates import Counter
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Counter, Event, Immediate
+from tests.helpers.ome import ome_strategy
 
 settings.register_profile(
     "ci",
@@ -79,49 +80,53 @@ def event(label: str) -> None:
         _hypothesis_event(label)
 
 
-class _Ev(BaseEvent):
+class _Ev(Event):
     user: str | None = None
     flag: bool = True
 
 
-@offline_strategy(
+@ome_strategy(
     name="per_user",
     trigger=Immediate(on=[_Ev]),
     emits=[],
     gate=Counter(threshold=3, cooldown_seconds=0, event_field="user"),
 )
-async def _per_user(event: BaseEvent, ctx: Any) -> None:
+async def _per_user(event: Event, deps: MemoryDeps) -> list[Event]:
     pass
+    return []
 
 
-@offline_strategy(
+@ome_strategy(
     name="cooled",
     trigger=Immediate(on=[_Ev]),
     emits=[],
     gate=Counter(threshold=2, cooldown_seconds=60),
 )
-async def _cooled(event: BaseEvent, ctx: Any) -> None:
+async def _cooled(event: Event, deps: MemoryDeps) -> list[Event]:
     pass
+    return []
 
 
-@offline_strategy(
+@ome_strategy(
     name="flagged",
     trigger=Immediate(on=[_Ev]),
     emits=[],
     applies_to="flag",
 )
-async def _flagged(event: BaseEvent, ctx: Any) -> None:
+async def _flagged(event: Event, deps: MemoryDeps) -> list[Event]:
     pass
+    return []
 
 
-@offline_strategy(
+@ome_strategy(
     name="disabled",
     trigger=Immediate(on=[_Ev]),
     emits=[],
     enabled=False,
 )
-async def _disabled(event: BaseEvent, ctx: Any) -> None:
+async def _disabled(event: Event, deps: MemoryDeps) -> list[Event]:
     pass
+    return []
 
 
 class _Clock:

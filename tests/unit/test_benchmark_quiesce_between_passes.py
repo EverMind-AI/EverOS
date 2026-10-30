@@ -61,7 +61,7 @@ def test_quiesces_every_server_not_just_the_first() -> None:
 def test_503_is_already_read_only_not_a_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Expected when the fleet was started with EVEROS_DISABLE_CASCADE — that
+    """Expected when the fleet was started with the cascade disabled — that
     server never had a projection running, so there is nothing to freeze."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(run, "EverosClient", lambda url: _Client(url, status=503, body={}))

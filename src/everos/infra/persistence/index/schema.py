@@ -4,6 +4,10 @@ The record models remain the source of truth for logical fields. This module
 normalizes their supported types into a small backend-neutral vocabulary and
 fails loudly when a new field has no portable representation. Physical limits
 and index options remain adapter responsibilities.
+
+The vector width is not part of a record: a column is declared
+``DenseVector`` and :func:`schema_for` gives it the ``dim`` the caller passes
+-- ``[embedding] dim``, handed down by the application bootstrap.
 """
 
 from __future__ import annotations
@@ -13,6 +17,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
 from typing import Any, get_args, get_origin
+
+from pydantic.fields import FieldInfo
+
+from ..records import is_vector_field
 
 _DEFAULT_STRING_LENGTH = 65_535
 _ID_LENGTH = 512
@@ -68,13 +76,20 @@ class IndexSchema:
 
 
 @cache
-def schema_for(model: type[Any]) -> IndexSchema:
-    """Build and validate the portable logical schema for ``model``."""
+def schema_for(model: type[Any], *, dim: int) -> IndexSchema:
+    """Build and validate the portable logical schema for ``model``.
+
+    Args:
+        model: The record model (an ``IndexRecord`` subclass).
+        dim: Width every ``DenseVector`` column gets.
+    """
+    if dim < 1:
+        raise ValueError(f"vector dimension must be positive, got {dim}")
     table_name = _class_var(model, "TABLE_NAME")
     bm25_fields = tuple(_class_var(model, "BM25_FIELDS"))
     primary_key = tuple(_class_var(model, "PRIMARY_KEY"))
     fields = tuple(
-        _normalize_field(name, model_field.annotation)
+        _normalize_field(name, model_field, dim)
         for name, model_field in model.model_fields.items()
     )
     declared = {field.name for field in fields}
@@ -92,13 +107,19 @@ def schema_for(model: type[Any]) -> IndexSchema:
     return IndexSchema(table_name, model, fields, bm25_fields, primary_key)
 
 
-def _normalize_field(name: str, annotation: Any) -> IndexField:
+def _normalize_field(name: str, model_field: FieldInfo, dim: int) -> IndexField:
+    annotation = model_field.annotation
     args = get_args(annotation)
     optional = type(None) in args
     candidates = tuple(arg for arg in args if arg is not type(None)) if optional else ()
     value_type = candidates[0] if len(candidates) == 1 else annotation
 
-    if value_type is str:
+    if is_vector_field(model_field):
+        kind = IndexFieldKind.DENSE_VECTOR
+        max_length = None
+        max_capacity = None
+        dimension = dim
+    elif value_type is str:
         kind = IndexFieldKind.STRING
         max_length = _ID_LENGTH if name == "id" else _DEFAULT_STRING_LENGTH
         max_capacity = None
@@ -124,17 +145,9 @@ def _normalize_field(name: str, annotation: Any) -> IndexField:
         max_capacity = _ARRAY_CAPACITY
         dimension = None
     else:
-        dimension = getattr(value_type, "dim", None)
-        if callable(dimension):
-            dimension = dimension()
-        if not isinstance(dimension, int) or dimension <= 0:
-            raise ValueError(
-                f"derived-index field {name!r} has no portable type mapping: "
-                f"{annotation!r}"
-            )
-        kind = IndexFieldKind.DENSE_VECTOR
-        max_length = None
-        max_capacity = None
+        raise ValueError(
+            f"derived-index field {name!r} has no portable type mapping: {annotation!r}"
+        )
 
     return IndexField(
         name=name,

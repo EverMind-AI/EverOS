@@ -35,7 +35,6 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 from hypothesis import HealthCheck, currently_in_test_context, settings
 from hypothesis import event as _hypothesis_event
@@ -44,32 +43,25 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, 
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
-import everos.component.embedding.accessor as acc
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
+from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.config import LanceDBSettings, SqliteSettings
 from everos.core.errors import EmbeddingServiceError
-from everos.core.persistence import (
-    MarkdownReader,
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
-from everos.core.persistence.lancedb import LanceRepoBase, open_lancedb_connection
-from everos.core.persistence.markdown import entries as ent
-from everos.core.persistence.markdown import frontmatter as fm
-from everos.infra.persistence.index import Episode
-from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
-from everos.infra.persistence.markdown import EpisodeWriter
-from everos.infra.persistence.predicate import eq
-from everos.infra.persistence.sqlite.repos.md_change_state import _MdChangeStateRepo
-from everos.infra.persistence.sqlite.tables import MdChangeState
-from everos.memory.cascade import scanner as scanner_mod
-from everos.memory.cascade import worker as worker_mod
-from everos.memory.cascade.handlers import HandlerDeps
-from everos.memory.cascade.handlers.episode import EpisodeHandler
-from everos.memory.cascade.scanner import CascadeScanner
-from everos.memory.cascade.worker import CascadeWorker
+from everos.infra.cascade._projections.episode import EpisodeHandler
+from everos.infra.cascade._worker import CascadeWorker
+from everos.infra.cascade.scanner import CascadeScanner
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
+from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
+from everos.infra.persistence.markdown._base import entries as ent
+from everos.infra.persistence.markdown._base import frontmatter as fm
+from everos.infra.persistence.records import Episode
+from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
+from everos.infra.persistence.sqlite._repos.md_change_state import MdChangeStateRepo
+from everos.infra.persistence.sqlite._tables import MdChangeState
+from everos.memory.ports.query import eq
+from tests.fakes import TEST_DIM, arrow_schema, handler_deps, index_repositories
 
 settings.register_profile(
     "ci",
@@ -135,26 +127,22 @@ class CascadeProjectionMachine(RuleBasedStateMachine):
         self.engine = create_system_engine(self.root.system_db, SqliteSettings())
         self.factory = create_session_factory(self.engine)
         self.run(self._create_tables())
-        self.state_repo = _MdChangeStateRepo(session_factory=self.factory)
+        self.state_repo = MdChangeStateRepo(session_factory=self.factory)
         # The chassis' lock pool is bound to the loop that first used it.
         LanceRepoBase._reset_locks_for_tests()
         self.index: _EpisodeRepo = self.run(self._open_index())
         self.embedder = _Embedder()
-        acc._capability = EmbeddingCapability(provider=self.embedder)
-        self._patches = [
-            mock.patch.object(scanner_mod, "md_change_state_repo", self.state_repo),
-            # the scanner's state snapshot opens its own session on the
-            # process-wide factory
-            mock.patch.object(scanner_mod, "get_session_factory", lambda: self.factory),
-            mock.patch.object(worker_mod, "md_change_state_repo", self.state_repo),
-            mock.patch.object(EpisodeHandler, "index_repo", self.index),
-        ]
-        for p in self._patches:
-            p.start()
         self.writer = EpisodeWriter(self.root)
-        self.scanner = CascadeScanner(self.root, scan_interval_seconds=3600.0)
+        self.scanner = CascadeScanner(
+            self.root, self.state_repo, scan_interval_seconds=3600.0
+        )
         self.handler = EpisodeHandler(
-            HandlerDeps(memory_root=self.root, tokenizer=_Tokenizer())
+            handler_deps(
+                memory_root=self.root,
+                tokenizer=_Tokenizer(),
+                index=index_repositories(episode=self.index),
+                embedding=self.embedder,
+            )
         )
         self.worker = self._new_worker()
         # the model: what the files say -> (owner, entry_id) -> content
@@ -166,6 +154,7 @@ class CascadeProjectionMachine(RuleBasedStateMachine):
     def _new_worker(self) -> CascadeWorker:
         return CascadeWorker(
             {"episode": self.handler},
+            self.state_repo,
             batch_size=10,
             handler_concurrency=2,
             max_retry=1,
@@ -182,15 +171,15 @@ class CascadeProjectionMachine(RuleBasedStateMachine):
 
     async def _open_index(self) -> _EpisodeRepo:
         conn = await open_lancedb_connection(self.root.lancedb_dir, LanceDBSettings())
-        table = await conn.create_table(Episode.TABLE_NAME, schema=Episode)
-        return _EpisodeRepo(table=table)
+        table = await conn.create_table(
+            Episode.TABLE_NAME, schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
+        return _EpisodeRepo(table=table, dim=TEST_DIM)
 
     def run(self, coro: Any) -> Any:
         return self.loop.run_until_complete(coro)
 
     def teardown(self) -> None:
-        for p in self._patches:
-            p.stop()
         self.run(self.engine.dispose())
         self.loop.close()
         shutil.rmtree(self.tmp, ignore_errors=True)

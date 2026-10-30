@@ -1,8 +1,8 @@
 """Cascade-health surfacing on ``GET /health``.
 
-The route reads the running :class:`CascadeOrchestrator` off
-``app.state.lifespan_data["cascade"]`` (stashed by the cascade
-lifespan). These tests inject an autospec orchestrator so the route
+The route reads the running :class:`CascadeOrchestrator` through
+``application.ops.cascade_health()``. These tests inject an autospec
+orchestrator into a real ``OpsService`` so the route
 logic is exercised without booting sqlite / lancedb / the worker.
 Cascade degradation is surfaced *only* here (a readiness signal), never
 on the write DTOs — a degraded projection does not change what ``/add``
@@ -17,7 +17,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.routes.health import router as health_router
-from everos.memory.cascade import CascadeHealth, CascadeOrchestrator
+from everos.infra.cascade import CascadeHealth, CascadeOrchestrator
+from tests.fakes import make_application
+from tests.fakes.application import make_ops
 
 
 def _healthy() -> CascadeHealth:
@@ -79,7 +81,7 @@ def _orch(health: CascadeHealth) -> mock.MagicMock:
 def _client(orch: object | None) -> AsyncClient:
     app = FastAPI()
     app.include_router(health_router)
-    app.state.lifespan_data = {"cascade": orch} if orch is not None else {}
+    app.state.application = make_application(ops=make_ops(cascade=orch))
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

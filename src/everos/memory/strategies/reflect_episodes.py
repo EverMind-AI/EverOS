@@ -1,105 +1,76 @@
 """reflect_episodes Cron strategy — nightly Reflection consolidation.
 
 Triggered by a cron schedule (default: ``0 2 * * 1``). Enumerates all
-distinct owner scopes from the cluster table and runs the
-:class:`ReflectionOrchestrator` for each. Configuration lives in
-``[reflection]`` of ``config/default.toml``.
+distinct owner scopes from the cluster store and runs the
+:class:`ReflectionOrchestrator` for each, returning one
+``EpisodeExtracted(source="reflection")`` per merged cluster. The merge is
+finished by :mod:`.finish_reflection` once the merged episode's atomic
+facts exist. Configuration lives in ``[reflection]`` of
+``config/default.toml``.
 
-The strategy is a thin entry point: it constructs the orchestrator with
-production singletons and iterates over owners. All business logic
-lives in :mod:`everos.memory.reflection.orchestrator`.
+The strategy is a thin entry point; all business logic lives in
+:mod:`everos.memory.reflection.orchestrator`.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.llm import get_llm_client
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.events import CronTick
-from everos.infra.ome.triggers import Cron
-from everos.infra.persistence.index import (
-    atomic_fact_repo,
-    episode_repo,
-)
-from everos.infra.persistence.markdown import EpisodeWriter
-from everos.infra.persistence.sqlite import (
-    cluster_repo,
-    reflection_report_repo,
-)
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
+from everos.memory.ports import Cron, CronTick, Event, StrategySpec
 from everos.memory.reflection import ReflectionOrchestrator
 
 logger = get_logger(__name__)
 
-_episode_writer: EpisodeWriter | None = None
 
-
-def _get_episode_writer() -> EpisodeWriter:
-    """Return the lazily-initialised EpisodeWriter singleton."""
-    global _episode_writer
-    if _episode_writer is None:
-        _episode_writer = EpisodeWriter(root=MemoryRoot.resolve())
-    return _episode_writer
-
-
-@offline_strategy(
-    name="reflect_episodes",
-    trigger=Cron(expr="0 2 * * 1"),
-    emits=[EpisodeExtracted],
-    enabled=False,
-    max_retries=1,
-)
-async def reflect_episodes(event: CronTick, ctx: StrategyContext) -> None:
-    """Run Reflection for all owner scopes.
+async def reflect_episodes(event: CronTick, deps: MemoryDeps) -> list[Event]:
+    """Merge the eligible clusters of every owner scope.
 
     Args:
         event: Cron tick event (unused; triggers the scheduled run).
-        ctx: OME strategy context for emit and logging.
+        deps: Stores, indexes and providers the merge works through.
+
+    Returns:
+        One ``EpisodeExtracted`` per merged cluster.
     """
-    # Body-guard: capability is checked here for defensive degradation.
-    # Reflection re-embeds merged narratives, so it cannot run without
-    # an embedder — silently no-op instead of raising deep inside the
-    # orchestrator. Tier upgrades require a server restart; this guard
-    # is not a hot-reload mechanism.
+    # Body-guard: Reflection re-embeds merged narratives (in its finishing
+    # step), so it cannot run without an embedder — silently no-op instead
+    # of raising deep inside the orchestrator. Tier upgrades require a
+    # server restart; this guard is not a hot-reload mechanism.
     #
     # ``debug`` level (not ``info``) is intentional; see the body-guard
     # in :func:`everos.memory.strategies.trigger_profile_clustering` for
     # the shared rationale (PR #361 round-3 review #8).
-    if not get_embedding_capability().available:
+    if deps.embedding is None:
         logger.debug(
             "strategy_gated_off_embedding_unavailable",
             strategy_name="reflect_episodes",
         )
-        return
+        return []
 
     # Deferred: avoid pulling LLM libs at module import time.
     from everalgo.user_memory import EpisodeReflector
 
     orchestrator = ReflectionOrchestrator(
-        cluster_repo=cluster_repo,
-        episode_store=episode_repo,
-        atomic_fact_store=atomic_fact_repo,
-        episode_writer=_get_episode_writer(),
-        report_repo=reflection_report_repo,
-        reflector=EpisodeReflector(llm=get_llm_client()),
-        embedder=get_embedding_capability().require(),
+        cluster_store=deps.stores.cluster,
+        episode_store=deps.stores.episode,
+        episode_index=deps.indexes.episode,
+        report_store=deps.stores.reflection_report,
+        reflector=EpisodeReflector(llm=deps.llm),
+        custom_instructions=deps.instructions.load("reflect"),
     )
+    owners = await deps.stores.cluster.list_distinct_owners()
+    merged = await asyncio.gather(*(orchestrator.run(scope=scope) for scope in owners))
+    return [event for per_owner in merged for event in per_owner]
 
-    owners = await cluster_repo.list_distinct_owners()
-    await asyncio.gather(
-        *(
-            orchestrator.run(
-                ctx=ctx,
-                owner_id=owner_id,
-                owner_type=owner_type,
-                app_id=app_id,
-                project_id=project_id,
-            )
-            for owner_id, owner_type, app_id, project_id in owners
-        )
-    )
+
+REFLECT_EPISODES_SPEC = StrategySpec(
+    name="reflect_episodes",
+    fn=reflect_episodes,
+    trigger=Cron(expr="0 2 * * 1"),
+    emits=frozenset({EpisodeExtracted}),
+    enabled=False,
+    max_retries=1,
+)

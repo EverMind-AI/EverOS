@@ -48,9 +48,9 @@ def _build_schema() -> dict:
     # ``create_app``) sees the override above.
     from everos.entrypoints.api.app import create_app
 
-    # Pass an empty lifespan list so we don't pull up SQLite / LanceDB /
-    # OME — the schema is computed from static route declarations alone.
-    app = create_app(lifespan_providers=[])
+    # The lifespan never runs here, so nothing is built or started (no
+    # SQLite / index / OME) — the schema comes from route declarations alone.
+    app = create_app()
     return app.openapi()
 
 

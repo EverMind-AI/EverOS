@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from everos.component.utils.datetime import from_iso_format, from_timestamp
+from everos.core.utils.datetime import from_iso_format, from_timestamp
 from everos.infra.persistence.index import (
     All,
     AnyOf,

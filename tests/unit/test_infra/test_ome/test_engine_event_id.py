@@ -4,27 +4,30 @@ from __future__ import annotations
 
 import pytest
 
-from everos.infra.ome import BaseEvent, Immediate, RunStatus, offline_strategy
-from everos.infra.ome.testing import StrategyTestHarness
+from everos.infra.ome import RunStatus
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Event, Immediate
+from tests.fakes import make_deps
+from tests.helpers.ome import StrategyTestHarness, strategy_spec
 
 
-class _Ping(BaseEvent):
+class _Ping(Event):
     """Test event."""
 
 
-@offline_strategy(
+@strategy_spec(
     name="echo",
     trigger=Immediate(on=[_Ping]),
     emits=[],
 )
-async def _echo_strategy(event: BaseEvent, ctx: object) -> None:
-    pass
+async def _echo_strategy(event: Event, deps: MemoryDeps) -> list[Event]:
+    return []
 
 
 @pytest.mark.asyncio
 async def test_list_runs_by_event_id() -> None:
     async with StrategyTestHarness() as h:
-        h.register(_echo_strategy)
+        h.register(_echo_strategy, make_deps())
         await h.start()
         ping = _Ping()
         await h.emit(ping)
@@ -38,7 +41,7 @@ async def test_list_runs_by_event_id() -> None:
 @pytest.mark.asyncio
 async def test_wait_for_event_returns_on_success() -> None:
     async with StrategyTestHarness() as h:
-        h.register(_echo_strategy)
+        h.register(_echo_strategy, make_deps())
         await h.start()
         ping = _Ping()
         await h.emit(ping)
@@ -50,30 +53,30 @@ async def test_wait_for_event_returns_on_success() -> None:
 @pytest.mark.asyncio
 async def test_wait_for_event_times_out_on_no_runs() -> None:
     async with StrategyTestHarness() as h:
-        h.register(_echo_strategy)
+        h.register(_echo_strategy, make_deps())
         await h.start()
         with pytest.raises(TimeoutError):
             await h._engine.wait_for_event("nonexistent_event", timeout=0.3)
 
 
-class _Boom(BaseEvent):
+class _Boom(Event):
     """Event that triggers a failing strategy."""
 
 
-@offline_strategy(
+@strategy_spec(
     name="fail_strategy",
     trigger=Immediate(on=[_Boom]),
     emits=[],
     max_retries=0,
 )
-async def _fail_strategy(event: BaseEvent, ctx: object) -> None:
+async def _fail_strategy(event: Event, deps: MemoryDeps) -> list[Event]:
     raise RuntimeError("intentional failure")
 
 
 @pytest.mark.asyncio
 async def test_wait_for_event_returns_on_terminal_failure() -> None:
     async with StrategyTestHarness() as h:
-        h.register(_fail_strategy)
+        h.register(_fail_strategy, make_deps())
         await h.start()
         boom = _Boom()
         await h.emit(boom)
@@ -82,24 +85,25 @@ async def test_wait_for_event_returns_on_terminal_failure() -> None:
         assert runs[0].status == RunStatus.DEAD_LETTER
 
 
-class _Flaky(BaseEvent):
+class _Flaky(Event):
     """Event whose strategy fails once, then succeeds."""
 
 
 _flaky_calls: dict[str, int] = {}
 
 
-@offline_strategy(
+@strategy_spec(
     name="flaky_strategy",
     trigger=Immediate(on=[_Flaky]),
     emits=[],
     max_retries=1,
 )
-async def _flaky_strategy(event: BaseEvent, ctx: object) -> None:
+async def _flaky_strategy(event: Event, deps: MemoryDeps) -> list[Event]:
     n = _flaky_calls.get(event.event_id, 0) + 1
     _flaky_calls[event.event_id] = n
     if n == 1:
         raise RuntimeError("first attempt fails")
+    return []
 
 
 @pytest.mark.asyncio
@@ -109,7 +113,7 @@ async def test_wait_for_event_waits_out_a_pending_retry() -> None:
     ``wait_for_event`` must not report that as the event's outcome."""
     async with StrategyTestHarness() as h:
         h._engine._config.retry_backoff_base_seconds = 0.3  # a real backoff window
-        h.register(_flaky_strategy)
+        h.register(_flaky_strategy, make_deps())
         await h.start()
         flaky = _Flaky()
         await h.emit(flaky)

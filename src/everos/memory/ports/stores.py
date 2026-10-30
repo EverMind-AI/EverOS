@@ -1,0 +1,487 @@
+"""Write-side storage ports: the truth (markdown) and the system state (SQLite).
+
+Each protocol is what the domain needs from one kind of record, in domain
+types only. Infra adapters implement them; the domain never sees a file
+format, a row model, or a path.
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "LOST_STATUS_WRITE",
+    "REPLAYS_EXHAUSTED_PREFIX",
+    "AgentCaseStore",
+    "AgentSkillStore",
+    "AtomicFactStore",
+    "ClusterStore",
+    "EpisodeStore",
+    "ForesightStore",
+    "KnowledgeCatalog",
+    "KnowledgeStore",
+    "MemcellStore",
+    "MemorizeInboxStore",
+    "ProfileStore",
+    "ReflectionReportStore",
+    "SessionBufferStore",
+    "WrittenDocument",
+]
+
+import datetime as dt
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
+
+from everos.memory.models import (
+    AgentCase,
+    AgentSkill,
+    AtomicFact,
+    CanonicalMessage,
+    Cluster,
+    ClusterKind,
+    ClusterMemberType,
+    Episode,
+    Foresight,
+    KnowledgeCategory,
+    KnowledgeDocument,
+    KnowledgeMemory,
+    KnowledgeTopic,
+    MemCell,
+    MemcellRecord,
+    MemorizeTask,
+    Profile,
+    ReflectionReport,
+)
+from everos.memory.ports.query import (
+    MemoryRef,
+    Page,
+    PageResult,
+    Scope,
+    SessionKey,
+    Stored,
+)
+
+# ── User-track daily logs ────────────────────────────────────────────────
+
+
+@runtime_checkable
+class EpisodeStore(Protocol):
+    """Episode truth: append-only daily logs per owner."""
+
+    async def append(self, scope: Scope, episode: Episode) -> MemoryRef: ...
+
+    async def append_many(
+        self, scope: Scope, episodes: Sequence[Episode]
+    ) -> list[MemoryRef]: ...
+
+    async def deprecate(
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
+    ) -> None:
+        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
+
+        The adapter groups references for storage; failures propagate after any
+        earlier writes, without an all-or-nothing guarantee.
+        """
+        ...
+
+
+@runtime_checkable
+class AtomicFactStore(Protocol):
+    """Atomic-fact truth: append-only daily logs per owner."""
+
+    async def append_many(
+        self, scope: Scope, facts: Sequence[AtomicFact]
+    ) -> list[MemoryRef]: ...
+
+    async def deprecate(
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
+    ) -> None:
+        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
+
+        The adapter groups references for storage; failures propagate after any
+        earlier writes, without an all-or-nothing guarantee.
+        """
+        ...
+
+
+@runtime_checkable
+class ForesightStore(Protocol):
+    """Foresight truth: append-only daily logs per owner."""
+
+    async def append_many(
+        self, scope: Scope, items: Sequence[Foresight]
+    ) -> list[MemoryRef]: ...
+
+
+@runtime_checkable
+class ProfileStore(Protocol):
+    """The single profile document of one user."""
+
+    async def read(self, scope: Scope) -> Profile | None: ...
+
+    async def write(self, scope: Scope, profile: Profile) -> MemoryRef: ...
+
+
+# ── Agent track ──────────────────────────────────────────────────────────
+
+
+@runtime_checkable
+class AgentCaseStore(Protocol):
+    """Agent-case truth: append-only daily logs per agent."""
+
+    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef: ...
+
+
+@runtime_checkable
+class AgentSkillStore(Protocol):
+    """One document per agent skill, addressed by its name.
+
+    A skill's ``MemoryRef.entry_id`` is the storage-safe form of its name.
+    """
+
+    async def list_by_cluster(
+        self, scope: Scope, cluster_id: str
+    ) -> list[Stored[AgentSkill]]: ...
+
+    async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef: ...
+
+    async def delete(self, scope: Scope, skill_name: str) -> bool: ...
+
+
+# ── Conversation state ───────────────────────────────────────────────────
+
+
+@runtime_checkable
+class SessionBufferStore(Protocol):
+    """Messages received but not yet cut into memcells, per session."""
+
+    async def list(self, session: SessionKey) -> list[CanonicalMessage]: ...
+
+    async def replace(
+        self, session: SessionKey, messages: Sequence[CanonicalMessage]
+    ) -> None: ...
+
+    async def quarantine(
+        self, session: SessionKey, extra: Sequence[CanonicalMessage]
+    ) -> int:
+        """Set the buffer (plus ``extra``) aside; return how many moved."""
+        ...
+
+    async def touch_last_message(
+        self, session: SessionKey, ts: dt.datetime
+    ) -> None: ...
+
+    async def touch_last_memcell(
+        self, session: SessionKey, ts: dt.datetime
+    ) -> None: ...
+
+
+@runtime_checkable
+class MemcellStore(Protocol):
+    """Boundary-detected conversation slices."""
+
+    async def insert_many(
+        self, session: SessionKey, records: Sequence[MemcellRecord]
+    ) -> None: ...
+
+    async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]: ...
+
+    async def mark_case_extracted(
+        self,
+        memcell_id: str,
+        *,
+        skip_reason: str | None,
+        skip_detail: Mapping[str, Any],
+    ) -> None:
+        """Record that agent-case extraction ran for a memcell, and why it
+        produced nothing if it did not.
+
+        "Extracted" means the extraction ran to completion, not that it
+        produced a case: ``skip_reason`` is ``None`` exactly when a case came
+        out. A gated trajectory is a successful run with no output, so this
+        stamp is the only place its reason survives. An unknown
+        ``memcell_id`` is a no-op.
+        """
+        ...
+
+
+# ── Clusters ─────────────────────────────────────────────────────────────
+
+
+@runtime_checkable
+class ClusterStore(Protocol):
+    """Clusters of related memories and their membership."""
+
+    async def list_for_owner(self, scope: Scope, kind: ClusterKind) -> list[Cluster]:
+        """Every cluster of one kind the owner has, each with its members."""
+        ...
+
+    async def get(self, cluster_id: str) -> Cluster | None:
+        """One cluster with its members, or ``None`` when it does not exist."""
+        ...
+
+    async def upsert(
+        self,
+        scope: Scope,
+        kind: ClusterKind,
+        cluster: Cluster,
+        *,
+        member_type: ClusterMemberType,
+    ) -> None:
+        """Record a clustering decision: the snapshot plus any new members."""
+        ...
+
+    async def find_cluster_for_member(
+        self, scope: Scope, member_type: ClusterMemberType, member_id: str
+    ) -> str | None:
+        """The cluster a memory already belongs to, or ``None``."""
+        ...
+
+    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
+        """``(member_id, member_type)`` pairs in the order they joined."""
+        ...
+
+    async def replace_members(
+        self,
+        cluster_id: str,
+        *,
+        removed: Collection[str],
+        added: str,
+        member_type: ClusterMemberType,
+        centroid: Sequence[float],
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        """Fold ``removed`` members into the merged memory ``added``.
+
+        The cluster's snapshot (centroid, count, latest timestamp, preview)
+        is restamped in the same step, so membership and snapshot never
+        disagree.
+        """
+        ...
+
+    async def list_distinct_owners(self) -> list[Scope]:
+        """Every owner that has at least one cluster."""
+        ...
+
+
+# ── Operational state ────────────────────────────────────────────────────
+
+
+LOST_STATUS_WRITE = "status write lost; outcome unknown"
+"""``last_error`` an inbox store writes on a row whose status write was lost."""
+REPLAYS_EXHAUSTED_PREFIX = "replayed "
+"""``last_error`` prefix an inbox store writes on a row it stopped replaying."""
+
+
+@runtime_checkable
+class MemorizeInboxStore(Protocol):
+    """Durable queue of accepted asynchronous memorize requests."""
+
+    async def enqueue(
+        self,
+        session: SessionKey,
+        *,
+        request_id: str,
+        is_final: bool,
+        defer_extraction: bool,
+        payload_json: str,
+        message_count: int,
+    ) -> MemorizeTask: ...
+
+    async def claim_next(
+        self, *, exclude_sessions: Collection[SessionKey] = ()
+    ) -> MemorizeTask | None:
+        """Move the oldest queued task outside ``exclude_sessions`` to processing."""
+        ...
+
+    async def mark(
+        self,
+        task_id: int,
+        *,
+        status: str,
+        attempt: int | None = None,
+        last_error: str | None = None,
+        payload_json: str | None = None,
+    ) -> None: ...
+
+    async def count_pending(self, session: SessionKey | None = None) -> int: ...
+
+    async def count_status(self, status: str) -> int: ...
+
+    async def fail_abandoned(self, *, exclude_ids: Collection[int] = ()) -> int: ...
+
+    async def requeue_processing(self, *, max_replays: int = 3) -> tuple[int, int]:
+        """Requeue tasks left processing; return ``(requeued, given_up)``."""
+        ...
+
+    async def oldest_pending_at(self) -> dt.datetime | None: ...
+
+    async def list_tasks(
+        self,
+        *,
+        session: SessionKey | None = None,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> PageResult[MemorizeTask]: ...
+
+    async def get_task(self, request_id: str) -> MemorizeTask | None: ...
+
+    async def purge_expired(self, *, before: dt.datetime) -> tuple[int, int]:
+        """Delete finished and stale tasks; return ``(deleted, never_delivered)``."""
+        ...
+
+
+@runtime_checkable
+class ReflectionReportStore(Protocol):
+    """Audit trail of Reflection merges."""
+
+    async def create(self, report: ReflectionReport) -> None: ...
+
+    async def reflected_cluster_ids(self, scope: Scope) -> set[str]: ...
+
+
+# ── Knowledge base ───────────────────────────────────────────────────────
+#
+# Knowledge is project-level: records are addressed by ``(app_id,
+# project_id)`` and their own ids, never by an owner ``Scope``.
+
+
+@dataclass(frozen=True)
+class WrittenDocument:
+    """Where a knowledge document landed -- the storage side of its identity.
+
+    The domain ``KnowledgeDocument`` carries no path; the store finds a
+    document by its id, and this value object hands the location to whoever
+    keeps a record of it (the catalog), as ``MemoryRef`` does for owner
+    memories.
+
+    Attributes:
+        location: The document's directory, as an absolute path.
+        md_path: The document's ``index.md``, relative to the memory root.
+        original_file_path: The stored copy of the uploaded file, when one
+            exists.
+    """
+
+    location: str
+    md_path: str
+    original_file_path: str | None
+
+
+@runtime_checkable
+class KnowledgeStore(Protocol):
+    """Knowledge truth: one markdown directory per document, plus the taxonomy.
+
+    Every file-system detail of the knowledge tree lives behind this port:
+    directory layout, frontmatter, the uploaded originals, the backup a
+    replacement keeps until it succeeds.
+    """
+
+    async def categories(self, app_id: str, project_id: str) -> list[KnowledgeCategory]:
+        """The project's taxonomy, created with its defaults on first use."""
+        ...
+
+    async def write_document(
+        self,
+        app_id: str,
+        project_id: str,
+        memories: Sequence[KnowledgeMemory],
+        *,
+        source_name: str | None,
+        source_type: str | None,
+        original: bytes | None,
+    ) -> WrittenDocument:
+        """Write a document's topic tree, keeping ``original`` under its name.
+
+        Raises:
+            InvalidInputError: ``source_name`` cannot hold ``original``.
+            PathTraversalError: ``source_name`` would escape the document.
+        """
+        ...
+
+    async def replace_document(
+        self,
+        previous: KnowledgeDocument,
+        memories: Sequence[KnowledgeMemory],
+        *,
+        source_name: str | None,
+        source_type: str | None,
+        original: bytes | None,
+    ) -> WrittenDocument:
+        """Write over ``previous``; on any failure its files come back."""
+        ...
+
+    async def delete_document(self, app_id: str, project_id: str, doc_id: str) -> int:
+        """Remove every directory of ``doc_id``; returns the topic files removed."""
+        ...
+
+    async def read_document(
+        self, app_id: str, project_id: str, doc_id: str
+    ) -> KnowledgeDocument | None:
+        """The document as its ``index.md`` records it; ``None`` when absent."""
+        ...
+
+    async def update_document(
+        self, document: KnowledgeDocument, *, previous_category_id: str
+    ) -> WrittenDocument:
+        """Write ``document``'s title / category to its markdown.
+
+        A category other than ``previous_category_id`` moves the directory.
+
+        Returns:
+            Where the document is afterwards.
+
+        Raises:
+            DocumentNotFoundError: The document is not on disk.
+            PathTraversalError: The category would leave the knowledge tree.
+        """
+        ...
+
+    async def original_file(self, document: KnowledgeDocument) -> str | None:
+        """Absolute path of the stored upload, when it exists."""
+        ...
+
+
+@runtime_checkable
+class KnowledgeCatalog(Protocol):
+    """Knowledge state: the document and topic records the cascade keeps.
+
+    Reads serve the document / topic APIs and search; the one write records a
+    metadata patch at once instead of waiting for the cascade.
+    """
+
+    async def get_document(self, doc_id: str) -> KnowledgeDocument | None: ...
+
+    async def get_documents(
+        self, doc_ids: Collection[str]
+    ) -> list[KnowledgeDocument]: ...
+
+    async def document_exists(self, doc_id: str) -> bool: ...
+
+    async def list_documents(
+        self,
+        app_id: str,
+        project_id: str,
+        *,
+        category_id: str | None,
+        page: Page,
+    ) -> PageResult[KnowledgeDocument]:
+        """``page.sort_by`` is ``created_at``, ``updated_at`` or ``title``."""
+        ...
+
+    async def count_by_category(
+        self, app_id: str, project_id: str
+    ) -> dict[str, int]: ...
+
+    async def record_document(
+        self, document: KnowledgeDocument, *, md_path: str
+    ) -> None:
+        """Insert or update ``document``, stored at ``md_path`` (its ``index.md``)."""
+        ...
+
+    async def get_topics(self, topic_ids: Sequence[str]) -> list[KnowledgeTopic]: ...
+
+    async def topics_of(self, doc_id: str) -> list[KnowledgeTopic]: ...
+
+    async def count_topics(self, doc_id: str) -> int: ...

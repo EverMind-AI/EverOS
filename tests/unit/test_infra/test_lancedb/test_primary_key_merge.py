@@ -10,17 +10,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
+import pyarrow as pa
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import LanceDBSettings
-from everos.core.persistence import BaseLanceTable, LanceRepoBase, MemoryRoot
-from everos.core.persistence.lancedb import open_lancedb_connection
-from everos.infra.persistence.index import KnowledgeTopic, primary_key
-from everos.infra.persistence.lancedb import LanceIndexContract
+from everos.core.utils.datetime import get_utc_now
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.index import primary_key
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
+    LanceRepoBase,
+    open_lancedb_connection,
+)
+from everos.infra.persistence.records import IndexRecord, KnowledgeTopic
+from tests.fakes import TEST_DIM, arrow_schema
 
 
-class _Scoped(BaseLanceTable):
+class _Scoped(IndexRecord):
     TABLE_NAME: ClassVar[str] = "_scoped"
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
     id: str
@@ -33,7 +39,7 @@ class _ScopedRepo(LanceIndexContract[_Scoped], LanceRepoBase[_Scoped]):
     schema = _Scoped
 
 
-class _Undeclared(BaseLanceTable):
+class _Undeclared(IndexRecord):
     TABLE_NAME: ClassVar[str] = "_undeclared"
     id: str
 
@@ -53,8 +59,14 @@ async def _repo(tmp_path: Path, schema, repo_cls):  # type: ignore[no-untyped-de
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table(schema.TABLE_NAME, schema=schema)
-    return repo_cls(table=table)
+    # ``_Undeclared`` has no neutral schema to derive from: that is the point.
+    arrow = (
+        pa.schema([pa.field("id", pa.string(), nullable=False)])
+        if schema is _Undeclared
+        else arrow_schema(schema, dim=TEST_DIM)
+    )
+    table = await conn.create_table(schema.TABLE_NAME, schema=arrow)
+    return repo_cls(table=table, dim=TEST_DIM)
 
 
 async def test_same_id_in_two_projects_keeps_two_rows(tmp_path: Path) -> None:

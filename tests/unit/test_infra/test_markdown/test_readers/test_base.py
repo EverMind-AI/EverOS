@@ -12,15 +12,15 @@ from typing import ClassVar, Literal
 
 import pytest
 
-from everos.core.persistence import (
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
     EntryId,
-    MemoryRoot,
     StructuredEntry,
     UserScopedFrontmatter,
     render_structured_entry,
 )
-from everos.infra.persistence.markdown.readers import BaseDailyReader
-from everos.infra.persistence.markdown.writers import BaseDailyWriter
+from everos.infra.persistence.markdown._readers import BaseDailyReader
+from everos.infra.persistence.markdown._writers import BaseDailyWriter
 
 
 class _DemoFrontmatter(UserScopedFrontmatter):

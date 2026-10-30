@@ -1,4 +1,4 @@
-"""Tests for :class:`_MdChangeStateRepo` — cascade work-queue persistence.
+"""Tests for :class:`MdChangeStateRepo` — cascade work-queue persistence.
 
 Builds a fresh tmp-file SQLite engine per test (the in-memory ``sqlite``
 driver can't share schema across concurrent connections), wires a
@@ -26,18 +26,15 @@ import pytest
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
-from everos.infra.persistence.sqlite.repos.md_change_state import (
-    _MdChangeStateRepo,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
+from everos.infra.persistence.sqlite._repos.md_change_state import (
+    MdChangeStateRepo,
 )
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> _MdChangeStateRepo:
+async def repo(tmp_path: Path) -> MdChangeStateRepo:
     """Per-test repo wired to a fresh tmp SQLite DB with schema applied."""
     mr = MemoryRoot(tmp_path)
     mr.ensure()
@@ -45,13 +42,13 @@ async def repo(tmp_path: Path) -> _MdChangeStateRepo:
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return _MdChangeStateRepo(session_factory=factory)
+    return MdChangeStateRepo(session_factory=factory)
 
 
 # ── upsert ──────────────────────────────────────────────────────────────
 
 
-async def test_upsert_assigns_monotonic_lsn(repo: _MdChangeStateRepo) -> None:
+async def test_upsert_assigns_monotonic_lsn(repo: MdChangeStateRepo) -> None:
     """Two distinct paths get strictly increasing LSNs."""
     lsn_a = await repo.upsert(
         "users/u/episodes/episode-2026-05-12.md",
@@ -70,7 +67,7 @@ async def test_upsert_assigns_monotonic_lsn(repo: _MdChangeStateRepo) -> None:
 
 
 async def test_upsert_same_path_bumps_lsn_and_resets_retry(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Re-enqueueing the same path bumps LSN and clears prior failure state."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -97,7 +94,7 @@ async def test_upsert_same_path_bumps_lsn_and_resets_retry(
 
 
 async def test_upsert_preserves_retry_count_for_failed_stable_mtime(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Scanner re-enqueue of a failed row with unchanged mtime keeps retry_count."""
     path = "users/u/episodes/ep.md"
@@ -116,7 +113,7 @@ async def test_upsert_preserves_retry_count_for_failed_stable_mtime(
 
 
 async def test_upsert_resets_retry_count_on_mtime_change(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """User edited the md (mtime changed) — start fresh."""
     path = "users/u/episodes/ep.md"
@@ -136,7 +133,7 @@ async def test_upsert_resets_retry_count_on_mtime_change(
 
 
 async def test_force_enqueue_resurrects_done_row(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """`cascade sync --path` re-enqueues even a row that already landed."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -153,7 +150,7 @@ async def test_force_enqueue_resurrects_done_row(
 
 
 async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Every row comes back pending with its recorded mtime, so the scanner
     does not queue each file a second time for a changed mtime — and with a
@@ -187,7 +184,7 @@ async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
 
 
 async def test_list_all_returns_every_status_in_lsn_order(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """`cascade sync --force-all` must see done, failed and pending rows alike."""
     done = "users/u/episodes/episode-2026-05-12.md"
@@ -211,7 +208,7 @@ async def test_list_all_returns_every_status_in_lsn_order(
 
 
 async def test_claim_one_returns_row_when_pending(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     path = "users/u/episodes/episode-2026-05-12.md"
     await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
@@ -223,7 +220,7 @@ async def test_claim_one_returns_row_when_pending(
 
 
 async def test_claim_one_returns_none_when_already_processing(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Second claim of the same row returns None — claim is one-shot."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -235,7 +232,7 @@ async def test_claim_one_returns_none_when_already_processing(
 
 
 async def test_claim_one_race_only_one_winner(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Three concurrent claims on the same row: exactly one wins."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -253,7 +250,7 @@ async def test_claim_one_race_only_one_winner(
 
 
 async def test_claim_pending_batch_returns_in_lsn_order(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     paths = [f"users/u/episodes/e-{i}.md" for i in range(3)]
     for p in paths:
@@ -265,7 +262,7 @@ async def test_claim_pending_batch_returns_in_lsn_order(
 
 
 async def test_claim_pending_batch_skips_already_claimed(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Already-processing rows are not re-claimed."""
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
@@ -277,7 +274,7 @@ async def test_claim_pending_batch_skips_already_claimed(
 
 
 async def test_claim_pending_batch_zero_limit_returns_empty(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
     assert await repo.claim_pending_batch(limit=0) == []
@@ -287,7 +284,7 @@ async def test_claim_pending_batch_zero_limit_returns_empty(
 
 
 async def test_mark_done_transitions_processing_to_done(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """``processing → done`` lands a clean terminal row (no error fields)."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -303,7 +300,7 @@ async def test_mark_done_transitions_processing_to_done(
 
 
 async def test_mark_failed_records_retryable_flag(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     path = "users/u/episodes/episode-2026-05-12.md"
     await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
@@ -334,7 +331,7 @@ async def test_mark_failed_records_retryable_flag(
 
 
 async def test_mark_done_noop_when_row_reverted_to_pending(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Concurrent upsert during processing → mark_done must not overwrite it."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -358,7 +355,7 @@ async def test_mark_done_noop_when_row_reverted_to_pending(
 
 
 async def test_mark_failed_noop_when_row_reverted_to_pending(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Concurrent upsert during processing → mark_failed must not overwrite it."""
     path = "users/u/episodes/episode-2026-05-12.md"
@@ -379,7 +376,7 @@ async def test_mark_failed_noop_when_row_reverted_to_pending(
 
 
 async def test_mark_done_concurrent_with_upsert_preserves_reenqueue(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """asyncio.gather(upsert, mark_done): final state never loses the upsert.
 
@@ -414,7 +411,7 @@ async def test_mark_done_concurrent_with_upsert_preserves_reenqueue(
 
 
 async def test_reset_retryable_to_pending_moves_only_retryable(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """`cascade fix --apply` semantics: only retryable=TRUE rows move."""
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
@@ -441,7 +438,7 @@ async def test_reset_retryable_to_pending_moves_only_retryable(
 
 
 async def test_reset_retryable_to_pending_zero_when_none_eligible(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
     await repo.claim_one("a.md")
@@ -452,7 +449,7 @@ async def test_reset_retryable_to_pending_zero_when_none_eligible(
 # ── reset_all ───────────────────────────────────────────────────────────
 
 
-async def test_reset_all_clears_every_row(repo: _MdChangeStateRepo) -> None:
+async def test_reset_all_clears_every_row(repo: MdChangeStateRepo) -> None:
     """`cascade rebuild` engine: every row is deleted regardless of status."""
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
     await repo.claim_one("a.md")
@@ -472,14 +469,14 @@ async def test_reset_all_clears_every_row(repo: _MdChangeStateRepo) -> None:
     assert summary.pending == 0 and summary.done == 0
 
 
-async def test_reset_all_zero_on_empty_table(repo: _MdChangeStateRepo) -> None:
+async def test_reset_all_zero_on_empty_table(repo: MdChangeStateRepo) -> None:
     assert await repo.reset_all() == 0
 
 
 # ── list_failed ─────────────────────────────────────────────────────────
 
 
-async def test_list_failed_orders_by_lsn(repo: _MdChangeStateRepo) -> None:
+async def test_list_failed_orders_by_lsn(repo: MdChangeStateRepo) -> None:
     for path in ("a.md", "b.md", "c.md"):
         await repo.upsert(path, kind="episode", change_type="added", mtime=0.0)
     await repo.claim_one("a.md")
@@ -495,7 +492,7 @@ async def test_list_failed_orders_by_lsn(repo: _MdChangeStateRepo) -> None:
 
 
 async def test_queue_summary_aggregates_all_states(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     # Pending: 2 (one rolled through processing)
     await repo.upsert("p1.md", kind="episode", change_type="added", mtime=0.0)
@@ -524,7 +521,7 @@ async def test_queue_summary_aggregates_all_states(
     assert summary.last_processed_lsn == 5
 
 
-async def test_queue_summary_empty_table(repo: _MdChangeStateRepo) -> None:
+async def test_queue_summary_empty_table(repo: MdChangeStateRepo) -> None:
     summary = await repo.queue_summary()
     assert summary == _empty_summary()
 
@@ -546,7 +543,7 @@ def _empty_summary() -> object:
 
 
 async def test_recover_orphan_processing_resets_stale_rows(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Crash recovery: every ``processing`` row goes back to ``pending``."""
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
@@ -567,7 +564,7 @@ async def test_recover_orphan_processing_resets_stale_rows(
 
 
 async def test_recover_orphan_processing_zero_when_clean(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """No rows in ``processing`` → returns 0, leaves the rest alone."""
     await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
@@ -580,7 +577,7 @@ async def test_recover_orphan_processing_zero_when_clean(
 
 
 async def test_recover_orphan_processing_only_touches_processing_rows(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Pending / done / failed rows are untouched."""
     await repo.upsert("p.md", kind="episode", change_type="added", mtime=0.0)
@@ -608,7 +605,7 @@ async def test_recover_orphan_processing_only_touches_processing_rows(
 # ── Partial indexes (smoke) ─────────────────────────────────────────────
 
 
-async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
+async def test_partial_indexes_are_created(repo: MdChangeStateRepo) -> None:
     """The three partial / mtime indexes from the schema land in sqlite_master."""
     async with repo.session_factory() as s:
         from sqlalchemy import text
@@ -627,7 +624,7 @@ async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
 
 
 async def test_count_done_live_sources_excludes_completed_deletes(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """A finished delete is ``done`` but left nothing indexable behind.
 
@@ -657,7 +654,7 @@ async def test_count_done_live_sources_excludes_completed_deletes(
 
 
 async def test_count_done_live_sources_ignores_unfinished_work(
-    repo: _MdChangeStateRepo,
+    repo: MdChangeStateRepo,
 ) -> None:
     """Only completed rows count: a pending add has not produced a row yet."""
     await repo.upsert(

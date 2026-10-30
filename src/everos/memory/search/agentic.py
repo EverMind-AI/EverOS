@@ -11,17 +11,16 @@ Implements the cluster main path from ``benchmarks/common/stages/search.py``
 Hyperparameters match benchmark ``config.py`` defaults and are frozen as
 module-level constants — no env/TOML knobs at this layer.
 
-id contract: candidates flowing through the pipeline carry
-``id=memcell_id`` (regular episodes, parent_type=memcell) or
-``id=entry_id`` (merged episodes, parent_type=cluster). The final
-shaping step remaps to ``id=episode_id`` via ``metadata["episode_id"]``
-before calling ``shape_episode_from_candidate``.
+id contract: candidates flowing through the pipeline are episodes keyed
+by ``entry_id`` (the MaxSim parent fetch and the cluster corpus both key
+that way, matching ``Cluster.members``). Every record recalled along the
+way is kept by that key, and the shaper builds the DTO -- with the
+episode's global id -- from it.
 """
 
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -31,21 +30,21 @@ from everalgo.rank.hybrid import ahybrid_retrieve
 from everalgo.rank.maxsim import amaxsim_retrieve
 from everalgo.types import Candidate
 
-from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.infra.persistence.index import Predicate
-from everos.infra.persistence.sqlite import cluster_repo
+from everos.memory.mappers import cluster as cluster_mapper
+from everos.memory.models import Episode
+from everos.memory.ports import ClusterStore, Filter, Scope, Stored
 from everos.memory.search.callbacks import build_rerank_fn
-from everos.memory.search.shaper import shape_episode_from_candidate
+from everos.memory.search.recall import RecallResult
+from everos.memory.search.shaper import shape_episodes
 
 from .dto import SearchEpisodeItem
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from everalgo.clustering import Cluster
-    from everalgo.llm.protocols import LLMClient
+    from everalgo.llm import LLMClient
 
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
@@ -81,33 +80,45 @@ async def search_episodes_agentic(
     query: str,
     *,
     owner_id: str,
-    where: Predicate,
+    where: Filter,
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
     atomic_fact_recaller: AtomicFactRecaller,
+    cluster_store: ClusterStore,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchEpisodeItem]:
     """Episode AGENTIC search via cluster-scoped MaxSim — 1:1 with benchmark.
 
     Args:
         query: User search query.
         owner_id: Owner whose memories are searched.
-        where: Pre-compiled LanceDB filter string (owner + any request filters).
+        where: Compiled filter (owner + any request filters).
         episode_recaller: Episode-table sparse + dense + fetch callbacks.
         atomic_fact_recaller: AtomicFact-table sparse + dense callbacks.
+        cluster_store: Source of the owner's user-memory clusters.
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum episodes to return (maps to ``top_n`` in aagentic_retrieve).
+        radius: Cosine floor applied to every dense recall before fusion;
+            ``None`` keeps all.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchEpisodeItem`` objects.
         Empty when no clusters exist or retrieval returns nothing.
     """
+
+    # Every episode recalled on the way, by the entry id the pipeline keys on.
+    episodes_by_entry: dict[str, Stored[Episode]] = {}
+
+    def _keep(result: RecallResult[Episode]) -> list[Candidate]:
+        episodes_by_entry.update(result.stored_by_id)
+        return result.candidates
 
     # 1. Fact-level child retrieve closures (dense + sparse via both tables).
     async def _fact_dense(q: str, k: int) -> list[Candidate]:
@@ -118,36 +129,24 @@ async def search_episodes_agentic(
             atomic_fact_recaller.dense_recall(vec, where, limit=k),
             episode_recaller.dense_recall_subject_as_child(vec, where, limit=k),
         )
-        return fact_results + ep_results
+        return (
+            fact_results.within_radius(radius).candidates
+            + ep_results.within_radius(radius).candidates
+        )
 
     async def _fact_sparse(q: str, k: int) -> list[Candidate]:
         fact_results, ep_results = await asyncio.gather(
             atomic_fact_recaller.sparse_recall(q, where, limit=k),
             episode_recaller.sparse_recall_as_child(q, where, limit=k),
         )
-        return fact_results + ep_results
+        return fact_results.candidates + ep_results.candidates
 
     # 2. parent_fetch: maps entry_ids (from atomic_fact.parent_id) to episodes.
     #    Atomic facts always point to episodes via entry_id regardless of
     #    whether the episode is memcell-based or cluster-merged.
     async def _parent_fetch(parent_ids: list[str]) -> list[Candidate]:
-        episodes = await episode_recaller.fetch_by_entry_ids(parent_ids, where)
-        result: list[Candidate] = []
-        for c in episodes:
-            entry_id = c.metadata.get("entry_id")
-            if not isinstance(entry_id, str):
-                continue
-            result.append(
-                Candidate(
-                    id=entry_id,
-                    score=0.0,
-                    source=c.source,
-                    metadata=_to_everalgo_doc_metadata(
-                        {**c.metadata, "episode_id": c.id}
-                    ),
-                )
-            )
-        return result
+        parents = _keep(await episode_recaller.fetch_parents(parent_ids, where))
+        return [_with_doc_metadata(c) for c in parents]
 
     # 3. MaxSim RetrieveFns: fact vectors/BM25 -> max-pool by memcell -> candidates.
     async def _dense(q: str, k: int) -> list[Candidate]:
@@ -189,16 +188,16 @@ async def search_episodes_agentic(
     #    Reshape metadata to the everalgo doc contract so the sufficiency /
     #    multi-query LLM prompt (rendered by ``_format_docs``) sees the episode
     #    body and a ms-epoch date instead of the memcell id.
-    clusters: list[Cluster] = await cluster_repo.list_for_owner(
-        owner_id,
-        "user_memory",
-        app_id=app_id,
-        project_id=project_id,
+    owner_scope = Scope(
+        app_id=app_id, project_id=project_id, owner_id=owner_id, owner_type="user"
     )
-    raw_all_docs = await episode_recaller.fetch_all_for_owner(where)
-    all_docs: list[Candidate] = [
-        c.model_copy(update={"metadata": _to_everalgo_doc_metadata(c.metadata)})
-        for c in raw_all_docs
+    clusters = [
+        cluster_mapper.to_algo(c)
+        for c in await cluster_store.list_for_owner(owner_scope, "user_memory")
+    ]
+    all_docs = [
+        _with_doc_metadata(c)
+        for c in _keep(await episode_recaller.fetch_all_for_owner(where))
     ]
 
     # 6. cluster_scoped: narrows hybrid_full to top-K cluster member expansions.
@@ -217,7 +216,7 @@ async def search_episodes_agentic(
 
     # 7. Cross-encoder rerank fn (2-arg RerankFn, no internal truncation).
     rerank_fn = build_rerank_fn(
-        reranker, text_field="episode", instruction=_RERANK_INSTRUCTION
+        reranker, text_field="text", instruction=_RERANK_INSTRUCTION
     )
 
     # 8. aagentic_retrieve — benchmark cluster main path.
@@ -239,71 +238,26 @@ async def search_episodes_agentic(
     round_tag = "round1" if decision.is_sufficient else "round2"
     logger.info("agentic_search_decision", round=round_tag, query=query[:80])
 
-    # 9. Shape: remap id from memcell_id -> episode_id, then build DTO.
-    return _shape_results(candidates)
+    # 9. Shape from the recalled records, keyed by entry id like the candidates.
+    return shape_episodes(candidates, episodes_by_entry)
 
 
-def _to_everalgo_doc_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """Bridge recall metadata to the everalgo ``_format_docs`` doc contract.
+def _with_doc_metadata(candidate: Candidate) -> Candidate:
+    """Bridge an episode candidate to the everalgo ``_format_docs`` contract.
 
     ``aagentic_retrieve`` renders Round-1 candidates into the sufficiency /
     multi-query LLM prompt via ``everalgo.rank.agentic._format_docs``, which
     reads ``metadata["episode"]`` as a dict with ``subject`` + ``content``
-    keys and the date from a ms-epoch ``metadata["timestamp"]``. everos
-    episode rows carry the body in ``episode`` (str) and the time in
-    ``timestamp`` (datetime); without this bridge ``_format_docs`` raises
-    ``TypeError``.
-
-    The flat ``episode`` string is also kept as ``text`` for the reranker
-    (which reads a plain string). ``_restore_shaper_metadata`` reverts
-    the restructured metadata before DTO shaping.
+    and the date from a ms-epoch ``metadata["timestamp"]``. The recalled
+    metadata carries the body as a flat ``episode`` string; the flat body is
+    also kept as ``text`` for the cross-encoder.
     """
-    bridged = dict(metadata)
+    metadata: dict[str, Any] = dict(candidate.metadata)
     episode = metadata.get("episode")
     if isinstance(episode, str):
-        bridged["text"] = episode
-        bridged["episode"] = {
+        metadata["text"] = episode
+        metadata["episode"] = {
             "subject": metadata.get("subject", ""),
             "content": episode,
         }
-    timestamp = metadata.get("timestamp")
-    if isinstance(timestamp, _dt.datetime):
-        bridged["timestamp"] = to_timestamp_ms(timestamp)
-    return bridged
-
-
-def _restore_shaper_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """Revert bridged metadata fields before DTO shaping.
-
-    Undoes two transforms from ``_to_everalgo_doc_metadata``:
-    1. ``timestamp``: ms-epoch (int) → ``datetime`` (shaper requires it).
-    2. ``episode``: dict ``{"subject", "content"}`` → flat str (shaper
-       reads ``metadata["episode"]`` as a plain string).
-    """
-    reverted = dict(metadata)
-    timestamp = metadata.get("timestamp")
-    if isinstance(timestamp, (int, float)):
-        reverted["timestamp"] = from_timestamp(timestamp)
-    episode = metadata.get("episode")
-    if isinstance(episode, dict):
-        reverted["episode"] = episode.get("content", "")
-    return reverted
-
-
-def _shape_results(candidates: list[Candidate]) -> list[SearchEpisodeItem]:
-    """Remap candidate id from memcell_id -> episode_id; build the DTO list."""
-    result: list[SearchEpisodeItem] = []
-    for c in candidates:
-        ep_id = c.metadata.get("episode_id")
-        if not isinstance(ep_id, str):
-            continue
-        ep_cand = Candidate(
-            id=ep_id,
-            score=c.score,
-            source=c.source,
-            metadata=_restore_shaper_metadata(c.metadata),
-        )
-        item = shape_episode_from_candidate(ep_cand)
-        if item is not None:
-            result.append(item)
-    return result
+    return candidate.model_copy(update={"metadata": metadata})

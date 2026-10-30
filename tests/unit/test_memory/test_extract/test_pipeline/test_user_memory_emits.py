@@ -1,130 +1,171 @@
+"""``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
+
+The episode operator is real (everalgo ``EpisodeExtractor``); the model
+answers from the user-track canned scripts.
+"""
+
 from __future__ import annotations
 
-import datetime as _dt
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, MemCell
-from everalgo.types import Episode as AlgoEpisode
 
-from everos.core.persistence import EntryId
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
-from everos.memory.extract.pipeline.user_memory import UserMemoryPipeline
-from everos.memory.models import CanonicalMessage
+from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
+from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
+from everos.memory.ports import MemoryRef
+from tests.fakes import (
+    bundled_instructions,
+    memorize_llm,
+    user_track_llm,
+    user_track_script,
+)
+
+_EPISODE = json.loads(user_track_script("episode"))
+
+_REF = MemoryRef(
+    id="u1_ep_20260517_00000001",
+    entry_id="ep_20260517_00000001",
+    md_path="default_app/default_project/users/u1/episodes/episode-2026-05-17.md",
+)
 
 
-def _sample_memcell() -> MemCell:
-    return MemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hello",
-                timestamp=1_700_000_000_000,
-                sender_id="u1",
-            ),
-        ],
+def _message(role: str, sender: str) -> ChatMessage:
+    return ChatMessage(
+        id=f"m_{sender}",
+        role=role,
+        content="hello",
+        timestamp=1_700_000_000_000,
+        sender_id=sender,
+    )
+
+
+def _prepared(*senders: str) -> PreparedCell:
+    cell = MemCell(
+        items=[_message("user", s) for s in senders or ("u1",)],
         timestamp=1_700_000_000_000,
     )
+    return PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=list(senders))
 
 
-class _CapturingEngine:
-    def __init__(self) -> None:
-        self.emitted: list[object] = []
-
-    async def emit(self, event: object) -> None:
-        self.emitted.append(event)
-
-
-async def test_emit_pipeline_started_routes_through_engine() -> None:
-    engine = _CapturingEngine()
-    pipeline = UserMemoryPipeline(
-        episode_writer=MagicMock(),
-        prompt_loader=MagicMock(),
-        llm_client=MagicMock(),
-        engine=engine,
+def _pipeline(llm: object, episode_store: object | None = None) -> UserMemoryPipeline:
+    if episode_store is None:
+        episode_store = MagicMock()
+        episode_store.append = AsyncMock(return_value=_REF)
+    return UserMemoryPipeline(
+        episode_store=episode_store,  # type: ignore[arg-type]  # recording double
+        instructions=bundled_instructions(),
+        llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
 
-    cell = _sample_memcell()
-    await pipeline._emit_pipeline_started(
-        memcell_id="mc_a",
-        session_id="s1",
-        app_id="claude_code",
-        project_id="oss",
-        cell=cell,
+
+_INGESTED = IngestResult(session_id="s1", messages=[])
+
+
+async def test_pipeline_started_leads_the_cell_events() -> None:
+    """``UserPipelineStarted`` is the cell's first event, even when the cell
+    has no user sender to extract an Episode for."""
+    llm = user_track_llm()
+    cell = MemCell(items=[_message("assistant", "agent")], timestamp=1_700_000_000_000)
+    ingested = IngestResult(
+        session_id="s1", app_id="claude_code", project_id="oss", messages=[]
     )
 
-    started = [e for e in engine.emitted if isinstance(e, UserPipelineStarted)]
-    assert len(started) == 1
-    assert started[0].memcell_id == "mc_a"
-    assert started[0].session_id == "s1"
-    assert started[0].app_id == "claude_code"
-    assert started[0].project_id == "oss"
-    assert started[0].memcell is cell
+    outcome = await _pipeline(llm).run_cell(
+        ingested, PreparedCell(cell=cell, memcell_id="mc_a")
+    )
+
+    assert outcome.message_count == 1
+    (started,) = outcome.events
+    assert isinstance(started, UserPipelineStarted)
+    assert (started.memcell_id, started.session_id) == ("mc_a", "s1")
+    assert (started.app_id, started.project_id) == ("claude_code", "oss")
+    assert started.memcell is cell
+    assert llm.call_count == 0
 
 
 async def test_emit_episode_extracted_after_md_write() -> None:
     """Each per-sender Episode write emits EpisodeExtracted with the md entry id."""
-    engine = _CapturingEngine()
-    episode_writer = MagicMock()
-    episode_writer.append_entry = AsyncMock(
-        return_value=EntryId(prefix="ep", date=_dt.date(2026, 5, 17), seq=1)
-    )
-    episode_writer.path_for = MagicMock(
-        return_value="users/u1/episodes/episode-2026-05-17.md"
-    )
-    prompt_loader = MagicMock()
-    prompt_loader.load = MagicMock(return_value="<prompt>")
-    llm_client = MagicMock()
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
 
-    pipeline = UserMemoryPipeline(
-        episode_writer=episode_writer,
-        prompt_loader=prompt_loader,
-        llm_client=llm_client,
-        engine=engine,
+    outcome = await _pipeline(user_track_llm(), episode_store).run_cell(
+        _INGESTED, _prepared("u1")
     )
 
-    cell = _sample_memcell()
-    ingested = IngestResult(
-        session_id="s1",
-        messages=[
-            CanonicalMessage(
-                message_id="m1",
-                session_id="s1",
-                sender_id="u1",
-                role="user",
-                timestamp=_dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.UTC),
-                text="hello",
-            )
-        ],
-    )
-    algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
-    )
-    with patch.object(
-        pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
-    ):
-        outcome = await pipeline.run(
-            ingested=ingested,
-            cells=[cell],
-            memcell_ids=["mc_a"],
-            per_cell_all_senders=[["u1"]],
-        )
+    assert outcome.md_paths == [_REF.md_path]
+    assert isinstance(outcome.events[0], UserPipelineStarted)
+    (extracted,) = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    assert extracted.memcell_id == "mc_a"
+    assert extracted.episode_entry_id == "ep_20260517_00000001"
+    assert extracted.episode_text == _EPISODE["content"]
+    assert extracted.episode_timestamp_ms == 1_700_000_000_000
+    assert (extracted.owner_id, extracted.session_id) == ("u1", "s1")
+    assert extracted.source == "pipeline"
+    (written,) = [call.args[1] for call in episode_store.append.await_args_list]
+    assert written.summary == _EPISODE["summary"]
+    assert written.subject == _EPISODE["title"]
+    assert written.parent_id == "mc_a"
 
-    assert outcome.status == "extracted"
-    extracted = [e for e in engine.emitted if isinstance(e, EpisodeExtracted)]
-    assert len(extracted) == 1
-    assert extracted[0].memcell_id == "mc_a"
-    assert extracted[0].episode_entry_id == "ep_20260517_00000001"
-    assert extracted[0].episode_text == "they said hello"
-    assert extracted[0].episode_timestamp_ms == 1_700_000_000_000
-    assert extracted[0].owner_id == "u1"
-    assert extracted[0].session_id == "s1"
-    assert extracted[0].source == "pipeline"
+
+@pytest.mark.parametrize(
+    ("content", "language"),
+    [
+        ("The user booked a trip to Lisbon for the spring.", "English"),
+        ("用户预订了春天去里斯本的行程。", "Chinese"),
+        ("2026-05-17 12:00", None),
+    ],
+)
+async def test_episode_and_event_carry_the_detected_language(
+    content: str, language: str | None
+) -> None:
+    """The episode's language is detected once and pinned on every copy."""
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    outcome = await _pipeline(
+        memorize_llm(episode_content=content), episode_store
+    ).run_cell(_INGESTED, _prepared("u1", "u2"))
+
+    events = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    written = [call.args[1] for call in episode_store.append.await_args_list]
+    assert [e.language for e in events] == [language, language]
+    assert [ep.language for ep in written] == [language, language]
+
+
+async def test_one_call_fans_out_to_every_user_sender() -> None:
+    llm = user_track_llm()
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    outcome = await _pipeline(llm, episode_store).run_cell(
+        _INGESTED, _prepared("u1", "u2")
+    )
+
+    owners = [e.owner_id for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    assert owners == ["u1", "u2"]
+    assert llm.call_count == 1
+
+
+async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:
+    """A blank reply is unusable: retried, then the cell fails, nothing written."""
+    llm = user_track_llm(episode="episode_blank")
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    with pytest.raises(LLMOutputError):
+        await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1"))
+
+    assert llm.call_count == OUTPUT_ATTEMPTS
+    episode_store.append.assert_not_awaited()
 
 
 async def test_run_emits_extract_and_persist_spans() -> None:
-    """pipeline.run opens an everos.extract generation span (where LLM token
+    """run_cell opens an everos.extract generation span (where LLM token
     usage lands) and an everos.persist.markdown span around the md write."""
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -138,53 +179,13 @@ async def test_run_emits_extract_and_persist_spans() -> None:
         shutdown_tracing,
     )
 
-    engine = _CapturingEngine()
-    episode_writer = MagicMock()
-    episode_writer.append_entry = AsyncMock(
-        return_value=EntryId(prefix="ep", date=_dt.date(2026, 5, 17), seq=1)
-    )
-    episode_writer.path_for = MagicMock(return_value="users/u1/episodes/x.md")
-    prompt_loader = MagicMock()
-    prompt_loader.load = MagicMock(return_value="<prompt>")
-    pipeline = UserMemoryPipeline(
-        episode_writer=episode_writer,
-        prompt_loader=prompt_loader,
-        llm_client=MagicMock(),
-        engine=engine,
-    )
-    cell = _sample_memcell()
-    ingested = IngestResult(
-        session_id="s1",
-        messages=[
-            CanonicalMessage(
-                message_id="m1",
-                session_id="s1",
-                sender_id="u1",
-                role="user",
-                timestamp=_dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.UTC),
-                text="hello",
-            )
-        ],
-    )
-    algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
-    )
-
     exporter = InMemorySpanExporter()
     init_tracing(
         ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
         span_processor=SimpleSpanProcessor(exporter),
     )
     try:
-        with patch.object(
-            pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
-        ):
-            await pipeline.run(
-                ingested=ingested,
-                cells=[cell],
-                memcell_ids=["mc_a"],
-                per_cell_all_senders=[["u1"]],
-            )
+        await _pipeline(user_track_llm()).run_cell(_INGESTED, _prepared("u1"))
         force_flush()
         spans = {s.name: s for s in exporter.get_finished_spans()}
         assert "everos.extract" in spans
@@ -198,7 +199,7 @@ async def test_run_emits_extract_and_persist_spans() -> None:
 
 async def test_extract_persist_capture_content_when_on() -> None:
     """With capture_content on, everos.extract carries the episode text and
-    everos.persist.markdown carries the written .md path; off → neither."""
+    everos.persist.markdown carries the written .md path."""
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,
@@ -212,38 +213,6 @@ async def test_extract_persist_capture_content_when_on() -> None:
         shutdown_tracing,
     )
 
-    engine = _CapturingEngine()
-    episode_writer = MagicMock()
-    episode_writer.append_entry = AsyncMock(
-        return_value=EntryId(prefix="ep", date=_dt.date(2026, 5, 17), seq=1)
-    )
-    episode_writer.path_for = MagicMock(return_value="users/u1/episodes/x.md")
-    prompt_loader = MagicMock()
-    prompt_loader.load = MagicMock(return_value="<prompt>")
-    pipeline = UserMemoryPipeline(
-        episode_writer=episode_writer,
-        prompt_loader=prompt_loader,
-        llm_client=MagicMock(),
-        engine=engine,
-    )
-    cell = _sample_memcell()
-    ingested = IngestResult(
-        session_id="s1",
-        messages=[
-            CanonicalMessage(
-                message_id="m1",
-                session_id="s1",
-                sender_id="u1",
-                role="user",
-                timestamp=_dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.UTC),
-                text="hello",
-            )
-        ],
-    )
-    algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
-    )
-
     exporter = InMemorySpanExporter()
     init_tracing(
         ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
@@ -251,25 +220,18 @@ async def test_extract_persist_capture_content_when_on() -> None:
     )
     set_capture_content(True)
     try:
-        with patch.object(
-            pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
-        ):
-            await pipeline.run(
-                ingested=ingested,
-                cells=[cell],
-                memcell_ids=["mc_a"],
-                per_cell_all_senders=[["u1"]],
-            )
+        await _pipeline(user_track_llm()).run_cell(_INGESTED, _prepared("u1"))
         force_flush()
     finally:
         set_capture_content(False)
         shutdown_tracing()
 
     spans = {s.name: s for s in exporter.get_finished_spans()}
-    assert spans["everos.extract"].attributes["langfuse.observation.output"] == (
-        "they said hello"
+    assert (
+        spans["everos.extract"].attributes["langfuse.observation.output"]
+        == (_EPISODE["content"])
     )
     assert (
         spans["everos.persist.markdown"].attributes["langfuse.observation.output"]
-        == "users/u1/episodes/x.md"
+        == _REF.md_path
     )

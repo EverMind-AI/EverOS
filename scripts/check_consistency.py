@@ -82,7 +82,7 @@ class MonotonicityReport:
 
 async def _scan_monotonicity(corpus: Path) -> list[MonotonicityReport]:
     """Walk all daily-log md files; report id-counter monotonicity per file."""
-    from everos.core.persistence import MarkdownReader
+    from everos.infra.persistence.markdown import MarkdownReader
 
     daily_dirs = ("/episodes/", "/.atomic_facts/", "/.foresights/", "/.agent_cases/")
     reports: list[MonotonicityReport] = []
@@ -214,10 +214,10 @@ async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> in
     """
     import lancedb
 
-    from everos.core.persistence import MarkdownReader
-    from everos.memory.cascade.handlers.atomic_fact import AtomicFactHandler
-    from everos.memory.cascade.handlers.episode import EpisodeHandler
-    from everos.memory.cascade.handlers.foresight import ForesightHandler
+    from everos.infra.cascade._projections.atomic_fact import AtomicFactHandler
+    from everos.infra.cascade._projections.episode import EpisodeHandler
+    from everos.infra.cascade._projections.foresight import ForesightHandler
+    from everos.infra.persistence.markdown import MarkdownReader
     from tests._consistency_assertions import _daily_log_sha_for_entry
 
     db = lancedb.connect(str(corpus / ".index" / "lancedb"))

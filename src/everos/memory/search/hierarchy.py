@@ -14,7 +14,9 @@ import heapq
 from typing import TYPE_CHECKING
 
 from everalgo.rank.fusion import cosine_to_lr_score, lr, rrf
-from everalgo.types import Candidate, FactCandidate, ScoredItem
+from everalgo.types import Candidate, ScoredItem
+
+from everos.memory.search._candidates import FactCandidate
 
 if TYPE_CHECKING:
     from everalgo.rank.weight import LRCoefs

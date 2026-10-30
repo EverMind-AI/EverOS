@@ -11,6 +11,9 @@ the ``from everos.memory import MemCell, Episode`` convenience.
 from __future__ import annotations
 
 import datetime as dt
+import json
+import uuid
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -19,10 +22,14 @@ from everalgo.types import ChatMessage as AlgoMessage
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Foresight as AlgoForesight
 from everalgo.types import MemCell as MemCell
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from everos.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 _Role = Literal["user", "assistant", "tool"]
-_Track = Literal["user_memory", "agent_memory"]
+EpisodeParentType = Literal["memcell", "cluster"]
 
 
 class ToolCall(BaseModel):
@@ -82,15 +89,6 @@ class IngestResult(BaseModel):
     unparsed_non_text_count: int = 0
 
 
-class PipelineOutcome(BaseModel):
-    """Return type of every pipeline's ``run()``."""
-
-    track: _Track
-    status: Literal["accumulated", "extracted", "skipped"]
-    message_count: int
-    extracted_md_paths: list[str] = Field(default_factory=list)
-
-
 class Episode(BaseModel):
     """Domain Episode — algo-emitted business fields + everos context.
 
@@ -102,20 +100,33 @@ class Episode(BaseModel):
     ``<scope_id>_<entry_id_in_md>`` — algo no longer mints an id of its
     own.
 
+    ``summary`` is a short display preview of ``episode`` and is required,
+    as everalgo makes it; an episode stored before it existed reads back
+    with ``""``. ``subject`` is the episode's title.
+
     ``parent_id`` is the source memcell id. The new everalgo types no
     longer carry ``parent_id`` on Episode / Foresight / AtomicFact, so
     everos fills it from the memcell currently being processed (the
-    pipeline knows the id — it created the memcell).
+    pipeline knows the id — it created the memcell). ``parent_type`` is
+    ``"cluster"`` for an episode Reflection merged out of a cluster, in
+    which case ``parent_id`` is that cluster's id.
     """
 
     owner_id: str
     episode: str
+    summary: str
     timestamp: int
+    subject: str = ""
 
     # everos engineering metadata.
     session_id: str | None = None
     sender_ids: list[str] = Field(default_factory=list)
     parent_id: str
+    parent_type: EpisodeParentType = "memcell"
+    language: str | None = None
+    """The ``OutputLanguage`` value the episode is written in, detected from
+    its text; downstream extractions are pinned to it. ``None`` when unknown
+    (an episode stored before it existed, or text with no letters)."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -128,6 +139,7 @@ class Episode(BaseModel):
         session_id: str | None,
         sender_ids: list[str],
         parent_id: str,
+        language: str | None = None,
     ) -> Episode:
         """Build a domain Episode from an algo Episode plus engineering context.
 
@@ -149,6 +161,7 @@ class Episode(BaseModel):
         data["session_id"] = session_id
         data["sender_ids"] = list(sender_ids)
         data["parent_id"] = parent_id
+        data["language"] = language
         return cls.model_validate(data)
 
 
@@ -157,7 +170,7 @@ class AtomicFact(BaseModel):
 
     Composed (not inherited) from :class:`everalgo.types.AtomicFact`. Mirrors
     :class:`Episode`: everos keeps the *semantic* fields algo emits
-    (``owner_id`` / ``fact`` / ``timestamp``) and adds engineering context
+    (``owner_id`` / ``content`` / ``timestamp``) and adds engineering context
     (``session_id`` / ``parent_id``) so md writer + cascade can audit-link
     back to the source episode.
 
@@ -171,7 +184,7 @@ class AtomicFact(BaseModel):
     """
 
     owner_id: str
-    fact: str
+    content: str
     timestamp: int
 
     # everos engineering metadata.
@@ -198,14 +211,8 @@ class AtomicFact(BaseModel):
         rationale for ``parent_id``: algo no longer carries the source
         episode entry_id; caller injects the authoritative value (any
         ``extra='allow'`` smuggled values are dropped).
-
-        The algo type exposes the fact sentence as ``content``; everos's
-        domain field is ``fact``. This boundary is where that rename is
-        bridged (mirrors how :meth:`Episode.from_algo` adapts algo fields
-        into everos's vocabulary).
         """
         data = algo_fact.model_dump(exclude={"parent_id", "owner_id"})
-        data["fact"] = data.pop("content")
         data["owner_id"] = owner_id
         data["session_id"] = session_id
         data["parent_id"] = parent_id
@@ -270,19 +277,16 @@ class Foresight(BaseModel):
 class AgentCase(BaseModel):
     """Domain AgentCase — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.AgentCase`. Mirrors
-    :class:`Episode` / :class:`AtomicFact` / :class:`Foresight`: everos
-    keeps the semantic fields algo emits (``task_intent`` / ``approach`` /
-    ``quality_score`` / ``key_insight`` / ``timestamp``) and adds
-    engineering context (``owner_id`` = agent_id, ``session_id`` /
-    ``parent_id``).
+    Composed (not inherited) from :class:`everalgo.types.AgentCase`; the two
+    convert through :mod:`everos.memory.mappers.agent_case`. everos keeps the
+    semantic fields algo emits (``task_intent`` / ``approach`` /
+    ``quality_score`` / ``key_insight`` / ``timestamp``) and adds engineering
+    context (``owner_id`` = agent_id, ``session_id`` / ``parent_id``).
 
-    ``owner_id`` is supplied by the caller because algo's AgentCase has no
-    ``owner_id`` field — the strategy infers the agent identity from the
-    source MemCell (assistant's ``sender_id``).
-
-    Single output per memcell (algo returns ``[]`` or ``[case]``); no
-    fan-out semantics.
+    ``case_gate`` is the admission decision when the case passed everalgo's
+    correctness gate (``None`` when no gate ran). It travels with the case to
+    skill extraction, which treats an admitted case as worth a skill whatever
+    its quality score; the case markdown does not record it.
     """
 
     owner_id: str
@@ -291,6 +295,7 @@ class AgentCase(BaseModel):
     quality_score: float
     key_insight: str | None = None
     timestamp: int
+    case_gate: dict[str, Any] | None = None
 
     # everos engineering metadata.
     session_id: str
@@ -298,34 +303,334 @@ class AgentCase(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+
+class ExplicitInfoItem(BaseModel):
+    """One fact a source states about the profile's owner.
+
+    Same shape as everalgo's ``ExplicitInfoItem``; extra keys a host attaches
+    ride along.
+
+    Attributes:
+        description: The fact as one short sentence.
+        category: The dimension the fact is filed under.
+        evidence: The source excerpt that grounds it.
+        observed_at: Epoch ms of the source that last established it.
+    """
+
+    description: str
+    category: str | None = None
+    evidence: str | None = None
+    observed_at: int | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ImplicitTraitItem(BaseModel):
+    """One stable pattern inferred about the profile's owner.
+
+    Same shape as everalgo's ``ImplicitTraitItem``; extra keys ride along.
+
+    Attributes:
+        description: The pattern as one short sentence.
+        trait: The trait label it is filed under.
+        basis: The signals the inference rests on.
+        observed_at: Epoch ms of the source that last established it.
+    """
+
+    description: str
+    trait: str | None = None
+    basis: str | None = None
+    observed_at: int | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class Profile(BaseModel):
+    """Domain user profile — one per owner, rewritten on every synthesis.
+
+    An item given as a bare sentence (how early profiles were stored) is the
+    item with only its ``description``. Constructing a profile is strict;
+    reading one back from storage goes through :meth:`from_stored`.
+    """
+
+    owner_id: str
+    summary: str
+    timestamp: int
+    explicit_info: list[ExplicitInfoItem] = Field(default_factory=list)
+    implicit_traits: list[ImplicitTraitItem] = Field(default_factory=list)
+    primary_language: str | None = None
+    """The ``OutputLanguage`` value the profile is written in, frozen by the
+    first extraction that knew it and never changed automatically after."""
+
+    @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod
-    def from_algo(
+    def _sentences_are_items(cls, items: object) -> object:
+        if not isinstance(items, list):
+            return items
+        return [_item_data(i) for i in items]
+
+    @classmethod
+    def from_stored(
         cls,
-        algo_case: AlgoAgentCase,
         *,
         owner_id: str,
-        session_id: str,
-        parent_id: str,
-    ) -> AgentCase:
-        """Build a domain AgentCase from an algo AgentCase plus context.
+        summary: str,
+        timestamp: int,
+        explicit_info: Sequence[object],
+        implicit_traits: Sequence[object],
+        primary_language: str | None = None,
+    ) -> Profile:
+        """A stored profile, without the items that are no longer items.
 
-        ``owner_id`` is caller-supplied (agent_id derived from the source
-        memcell's assistant sender). Algo's ``id`` (a uuid4 hex) is
-        dropped — md writer mints the authoritative entry_id. ``key_insight``
-        normalises algo's ``""`` to ``None`` so the optional KeyInsight
-        section is omitted in md when there's nothing to record.
+        Early profiles could hold an item with no ``description``; one bad
+        item must not fail every read of its profile, nor reach everalgo on
+        the next update. Each such item is dropped with a
+        ``profile_entry_dropped`` warning.
         """
-        data = algo_case.model_dump(exclude={"id", "parent_id", "owner_id"})
-        data["owner_id"] = owner_id
-        data["session_id"] = session_id
-        data["parent_id"] = parent_id
-        if not data.get("key_insight"):
-            data["key_insight"] = None
-        return cls.model_validate(data)
+        return cls(
+            owner_id=owner_id,
+            summary=summary,
+            timestamp=timestamp,
+            explicit_info=_readable_items(ExplicitInfoItem, explicit_info, owner_id),
+            implicit_traits=_readable_items(
+                ImplicitTraitItem, implicit_traits, owner_id
+            ),
+            primary_language=primary_language,
+        )
+
+
+_DROPPED_PREVIEW_CHARS = 80
+
+
+def _item_data(item: object) -> object:
+    """A bare sentence is the item with only its description."""
+    return {"description": item} if isinstance(item, str) else item
+
+
+def _readable_items[ItemT: BaseModel](
+    model: type[ItemT], items: Sequence[object], owner_id: str
+) -> list[ItemT]:
+    kept: list[ItemT] = []
+    for item in items:
+        try:
+            kept.append(model.model_validate(_item_data(item)))
+        except ValidationError:
+            logger.warning(
+                "profile_entry_dropped",
+                owner_id=owner_id,
+                bucket=model.__name__,
+                entry=_preview(item),
+            )
+    return kept
+
+
+def _preview(item: object) -> str:
+    text = (
+        item
+        if isinstance(item, str)
+        else json.dumps(item, ensure_ascii=False, default=str)
+    )
+    return text[:_DROPPED_PREVIEW_CHARS]
+
+
+class AgentSkill(BaseModel):
+    """Domain agent skill — a reusable procedure aggregated from cases.
+
+    Mirrors the fields of everalgo-core 0.6 ``AgentSkill``; stage 3/4
+    converges the two. ``id`` survives a rename, which is how a renamed
+    skill is told apart from a new one.
+    """
+
+    id: str
+    cluster_id: str = ""
+    name: str = ""
+    description: str = ""
+    content: str = ""
+    confidence: float = 0.0
+    maturity_score: float = 0.6
+    source_case_ids: list[str] = Field(default_factory=list)
+
+
+class Cluster(BaseModel):
+    """Domain cluster snapshot — a group of related memories of one owner.
+
+    Mirrors the fields of everalgo-core 0.6 ``clustering.Cluster`` with the
+    centroid as a plain float tuple, so the domain carries no numpy; stage
+    3/4 converges the two.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str | None = None
+    centroid: tuple[float, ...]
+    count: int = 1
+    last_ts: int
+    preview: list[str] = Field(default_factory=list)
+    members: list[str] = Field(default_factory=list)
+
+
+class KnowledgeMemory(BaseModel):
+    """Domain knowledge memory — one node of an extracted topic tree.
+
+    Mirrors everalgo-knowledge ``KnowledgeMemory`` (flattened DFS form; the
+    node at ``topic_index=0`` is the document root and carries the title as
+    ``topic`` and the document summary). :mod:`everos.memory.mappers.knowledge`
+    converts between the two.
+    """
+
+    doc_id: str
+    topic_index: int
+    topic: str
+    summary: str
+    content: str = ""
+    block_refs: list[int] = Field(default_factory=list)
+    depth: int
+    parent_index: int | None = None
+    children_index: list[int] = Field(default_factory=list)
+    topic_path: str
+    content_labels: list[str] = Field(default_factory=list)
+    category_id: str = ""
+
+
+class KnowledgeCategory(BaseModel):
+    """One entry of a project's knowledge taxonomy."""
+
+    id: str
+    description: str = ""
+
+
+class KnowledgeDocument(BaseModel):
+    """Domain knowledge document — the metadata of one uploaded document.
+
+    Identified by ``doc_id`` alone: where its markdown lives is the knowledge
+    store's business (``WrittenDocument`` reports it to the catalog).
+
+    ``created_at`` / ``updated_at`` are set by the catalog that records the
+    document; a document read straight from its markdown has neither.
+    """
+
+    doc_id: str
+    app_id: str
+    project_id: str
+    category_id: str
+    title: str
+    summary: str = ""
+    source_name: str | None = None
+    source_type: str | None = None
+    created_at: dt.datetime | None = None
+    updated_at: dt.datetime | None = None
+
+
+class KnowledgeTopic(BaseModel):
+    """Domain knowledge topic — one node of a document's topic tree.
+
+    Knowledge is project-level, not owned by a user or agent, so the topic
+    carries its own ``app_id`` / ``project_id`` instead of an owner
+    ``Scope``. ``content``, ``content_labels`` and ``children_topic_ids`` are
+    only held by the catalog; a search hit leaves them empty.
+    """
+
+    topic_id: str
+    doc_id: str
+    app_id: str
+    project_id: str
+    category_id: str
+    topic_name: str
+    topic_path: str
+    depth: int
+    summary: str
+    parent_topic_id: str | None = None
+    content: str = ""
+    content_labels: list[str] = Field(default_factory=list)
+    children_topic_ids: list[str] = Field(default_factory=list)
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+ClusterKind = Literal["user_memory", "agent_case"]
+ClusterMemberType = Literal["episode", "case"]
+
+
+def mint_cluster_id() -> str:
+    """Mint a fresh cluster id (``cl_<12hex>``)."""
+    return f"cl_{uuid.uuid4().hex[:12]}"
+
+
+class MemcellRecord(BaseModel):
+    """One boundary-detected slice of a conversation, ready to persist.
+
+    Attributes:
+        memcell_id: everos-minted identifier of the slice.
+        cell: The algorithm-side cell (items + timestamp).
+        raw_type: Source shape of the slice (conversation / agent trace).
+        message_ids: Ids of the buffered messages the slice consumed.
+        sender_ids: Distinct senders in the slice, first-seen order.
+    """
+
+    memcell_id: str
+    cell: MemCell
+    raw_type: str
+    message_ids: list[str]
+    sender_ids: list[str]
+
+
+class MemorizeTask(BaseModel):
+    """One accepted asynchronous memorize request in the durable queue.
+
+    ``id`` orders a session's requests; ``status`` is one of ``queued`` /
+    ``processing`` / ``success`` / ``failed``. ``payload_json`` is emptied
+    once the request is delivered.
+    """
+
+    id: int
+    request_id: str
+    app_id: str
+    project_id: str
+    session_id: str
+    is_final: bool
+    defer_extraction: bool
+    payload_json: str
+    message_count: int
+    status: str
+    attempt: int
+    last_error: str | None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class ReflectionReport(BaseModel):
+    """Audit record of one completed Reflection merge.
+
+    Attributes:
+        id: Report identifier.
+        cluster_id: Cluster that was reflected.
+        owner_id: Owner of the cluster.
+        app_id: Application scope.
+        project_id: Project scope.
+        mode: ``"init"`` or ``"update"``.
+        source_members: ``(member_id, member_type)`` pairs consumed.
+        merged_entry_id: Entry id of the merged episode.
+        deprecated_fact_count: Atomic facts marked deprecated.
+    """
+
+    id: str
+    cluster_id: str
+    owner_id: str
+    app_id: str
+    project_id: str
+    mode: Literal["init", "update"]
+    source_members: list[tuple[str, str]]
+    merged_entry_id: str
+    deprecated_fact_count: int
+
+    @property
+    def source_count(self) -> int:
+        return len(self.source_members)
 
 
 __all__ = [
     "AgentCase",
+    "AgentSkill",
     "AlgoAgentCase",
     "AlgoAtomicFact",
     "AlgoEpisode",
@@ -333,10 +638,20 @@ __all__ = [
     "AlgoMessage",
     "AtomicFact",
     "CanonicalMessage",
+    "Cluster",
+    "ClusterKind",
+    "ClusterMemberType",
     "Episode",
+    "EpisodeParentType",
+    "ExplicitInfoItem",
     "Foresight",
+    "ImplicitTraitItem",
     "IngestResult",
     "MemCell",
-    "PipelineOutcome",
+    "MemcellRecord",
+    "MemorizeTask",
+    "Profile",
+    "ReflectionReport",
     "ToolCall",
+    "mint_cluster_id",
 ]

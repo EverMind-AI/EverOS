@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from everos.component.utils.datetime import get_now_with_timezone, get_utc_now
+from everos.core.utils.datetime import get_now_with_timezone, get_utc_now
 from everos.infra.ome.records import RunRecord, RunStatus, StrategyRouteInfo
 
 

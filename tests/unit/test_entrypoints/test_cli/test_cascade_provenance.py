@@ -24,6 +24,7 @@ from typer.testing import CliRunner
 
 from everos.core.errors import EmbeddingProvenanceError
 from everos.entrypoints.cli.main import app
+from everos.infra.persistence.index import DerivedIndex
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -43,7 +44,9 @@ def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[
 def rejecting_index(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the shared verification refuse, the way a changed model would."""
 
-    async def _refuse(*, may_attest: bool = True) -> None:
+    async def _refuse(
+        _index: object, provenance: object, *, may_attest: bool = True
+    ) -> None:
         raise EmbeddingProvenanceError(
             "embedding configuration does not match this index:\n"
             "  - model: index built with 'nomic-embed-text', config uses "
@@ -51,9 +54,7 @@ def rejecting_index(monkeypatch: pytest.MonkeyPatch) -> None:
             "    Recover with: everos cascade rebuild"
         )
 
-    import everos.entrypoints.cli.commands.cascade as cascade_cmd
-
-    monkeypatch.setattr(cascade_cmd, "verify_configuration", _refuse)
+    monkeypatch.setattr(DerivedIndex, "verify_configuration", _refuse)
 
 
 @pytest.mark.parametrize("command", ["status", "sync"])

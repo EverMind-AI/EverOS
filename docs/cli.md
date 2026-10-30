@@ -69,13 +69,13 @@ everos server start \
 |---|---|---|
 | `--host` | `EVEROS_API__HOST` | `127.0.0.1` (loopback only; binding `0.0.0.0` logs a warning — EverOS ships no auth) |
 | `--port` | `EVEROS_API__PORT` | `8000` |
-| `--log-level` | `EVEROS_LOG_LEVEL` | `INFO` |
+| `--log-level` | `EVEROS_LOG_LEVEL` | `[logging] level` in `everos.toml` (`INFO`) |
 | `--root` | `EVEROS_ROOT` | `~/.everos` |
 | `--reload` | — | off (use in development) |
 
-Lifespan startup wires the storage backends (SQLite engine + LanceDB
-connection) on app boot; see
-[`entrypoints/api/lifespans/`](../src/everos/entrypoints/api/lifespans/).
+App boot builds the application and starts it (SQLite schema, index
+connection, cascade, OME, the memorize queue); see
+[`service/bootstrap.py`](../src/everos/service/bootstrap.py).
 
 ## Configuration via env vars
 
@@ -93,9 +93,13 @@ Pattern: `EVEROS_<SECTION>__<KEY>` (double underscore = nesting). See
 
 ## Logging
 
-`configure_logging` runs at CLI startup and configures `structlog` with
-the resolved log level. All in-process logs (CLI command bodies +
-service / infra layers) flow through the same handler.
+The log level is configuration: `[logging] level` in `everos.toml`
+(`INFO` by default). `everos.service.configure_process` applies it once per
+process -- building the application calls it -- and every in-process log
+(CLI command bodies + service / infra layers) flows through the same
+handler. `server start --log-level` (or `EVEROS_LOG_LEVEL`) overrides the
+configured level for the server; interactive commands (`cascade`, `init`,
+`config`, `demo`) log `WARNING`, or `INFO` with `--verbose`.
 
 ```bash
 everos server start --log-level debug   # see all sql / lance traffic

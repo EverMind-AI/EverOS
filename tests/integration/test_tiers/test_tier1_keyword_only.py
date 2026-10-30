@@ -12,6 +12,8 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
+from everos.service import Application
+
 from .conftest import add_and_flush, episode_rows
 
 # ---------------------------------------------------------------------------
@@ -111,7 +113,7 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
     body = resp.json()
 
     caps = body["capabilities"]
-    assert caps["llm"] is True
+    assert "llm" not in caps
     assert caps["embed"] is False
     assert caps["rerank"] is False
 
@@ -134,45 +136,21 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
 
 async def test_ome_registers_all_strategies_in_tier1(
     tier1_runtime: AsyncClient,
+    tier_application: Application,
 ) -> None:
     """Registration is unconditional; embed-requiring strategies body-guard.
 
     OME's registry is frozen after ``engine.start()`` (scheduler snapshots
     the strategy set for Cron / Idle job creation), so a registration-time
-    gate cannot adapt to a runtime tier upgrade. All eight strategies are
-    registered up-front; the four embed-requiring ones check
-    :func:`get_embedding_capability` at body entry and no-op when the
-    capability is unavailable — see the per-strategy unit tests for that
-    half of the contract.
+    gate cannot adapt to a tier change. Every spec in ``STRATEGY_SPECS`` is
+    registered up-front; the embed-requiring ones return no events when
+    ``deps.embedding`` is ``None`` — see the per-strategy unit tests for
+    that half of the contract.
     """
-    import importlib
-
-    svc = importlib.import_module("everos.service.memorize")
-    engine = svc._get_engine()
+    engine = tier_application._engine
     registered_names = {meta.name for meta in engine._registry.all()}
 
-    from everos.memory.strategies import (
-        extract_agent_case,
-        extract_agent_skill,
-        extract_atomic_facts,
-        extract_foresight,
-        extract_user_profile,
-        reflect_episodes,
-        trigger_profile_clustering,
-        trigger_skill_clustering,
-    )
+    from everos.memory.strategies import STRATEGY_SPECS
 
-    all_strategy_names = {
-        strategy.meta.name
-        for strategy in (
-            extract_atomic_facts,
-            extract_foresight,
-            extract_agent_case,
-            extract_user_profile,
-            trigger_profile_clustering,
-            trigger_skill_clustering,
-            extract_agent_skill,
-            reflect_episodes,
-        )
-    }
+    all_strategy_names = {spec.name for spec in STRATEGY_SPECS}
     assert all_strategy_names <= registered_names

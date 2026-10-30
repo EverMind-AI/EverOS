@@ -7,6 +7,7 @@ KeyboardInterrupt / OSError exit paths.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
@@ -23,6 +24,10 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ig
         if k.startswith("EVEROS_"):
             monkeypatch.delenv(k, raising=False)
     monkeypatch.delenv("EVEROS_LOG_LEVEL", raising=False)
+    # ``server start`` exports its level override; register the variable so
+    # monkeypatch removes it again after the test.
+    monkeypatch.setenv("EVEROS_LOGGING__LEVEL", "")
+    monkeypatch.delenv("EVEROS_LOGGING__LEVEL")
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / "everos.toml").write_text("# test\n")
     from everos.config import load_settings
@@ -100,6 +105,44 @@ def test_start_falls_back_to_env_when_flags_omitted(
     assert isinstance(kwargs, dict)
     assert kwargs["host"] == "10.0.0.1"
     assert kwargs["port"] == 8765
+
+
+def test_start_log_level_flag_sets_the_process_and_uvicorn_level(
+    captured: dict[str, object],
+) -> None:
+    result = CliRunner().invoke(root_app, ["server", "start", "--log-level", "debug"])
+    assert result.exit_code == 0, result.stdout
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["log_level"] == "debug"
+    assert logging.getLogger().level == logging.DEBUG
+    # The app factory reloads settings; it must see the same level.
+    assert os.environ["EVEROS_LOGGING__LEVEL"] == "DEBUG"
+
+
+def test_start_log_level_env_is_honoured(
+    captured: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EVEROS_LOG_LEVEL", "warning")
+    result = CliRunner().invoke(root_app, ["server", "start"])
+    assert result.exit_code == 0, result.stdout
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["log_level"] == "warning"
+    assert logging.getLogger().level == logging.WARNING
+
+
+def test_start_log_level_falls_back_to_the_logging_section(
+    captured: dict[str, object],
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    (tmp_path / "everos.toml").write_text('[logging]\nlevel = "ERROR"\n')
+    result = CliRunner().invoke(root_app, ["server", "start"])
+    assert result.exit_code == 0, result.stdout
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["log_level"] == "error"
+    assert logging.getLogger().level == logging.ERROR
 
 
 def test_start_swallows_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:

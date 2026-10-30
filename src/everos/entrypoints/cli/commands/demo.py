@@ -18,12 +18,11 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli._process import configure_interactive
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
+from everos.entrypoints.tui.demo.theme import EVEROS_GREEN, EVEROS_YELLOW
 from everos.entrypoints.tui.demo.widgets.sphere import (
-    EVEROS_GREEN,
-    EVEROS_YELLOW,
     build_dot_sphere,
     render_dot_sphere_text,
 )
@@ -69,7 +68,7 @@ def register(parent: typer.Typer) -> None:
         ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
-        configure_cli_logging(verbose=verbose)
+        configure_interactive(verbose=verbose)
         if plain or not sys.stdout.isatty():
             _print_plain_demo()
             return
@@ -87,13 +86,20 @@ def register(parent: typer.Typer) -> None:
 def _launch_interactive_demo(
     *, live: bool, server_url: str, user_label: str = "you"
 ) -> None:
-    """Launch the cloud-platform interactive TUI.
+    """Launch the cloud-platform interactive TUI."""
+    _load_run_demo_tui()(
+        **_interactive_session(live=live, server_url=server_url, user_label=user_label)
+    )
+
+
+def _interactive_session(
+    *, live: bool, server_url: str, user_label: str = "you"
+) -> dict[str, object]:
+    """The interactive TUI's arguments: endpoint, a fresh identity, the key.
 
     The default mode talks to the credential-injecting public relay. ``--live``
     bypasses the relay and uses the user's own platform key directly.
     """
-
-    run_demo_tui = _load_run_demo_tui()
     base_url = (
         cloud.resolve_live_base_url(server_url)
         if live
@@ -101,15 +107,14 @@ def _launch_interactive_demo(
     )
     session_id, user_id = cloud.new_demo_identity()
     api_key = cloud.resolve_user_key() if live else cloud.resolve_demo_key()
-
-    run_demo_tui(
-        interactive=True,
-        base_url=base_url,
-        session_id=session_id,
-        user_id=user_id,
-        api_key=api_key,
-        user_label=user_label,
-    )
+    return {
+        "interactive": True,
+        "base_url": base_url,
+        "session_id": session_id,
+        "user_id": user_id,
+        "api_key": api_key,
+        "user_label": user_label,
+    }
 
 
 def _resolve_local_user() -> str:

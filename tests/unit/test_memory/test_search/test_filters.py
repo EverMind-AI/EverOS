@@ -12,7 +12,7 @@ import datetime as dt
 
 import pytest
 
-from everos.component.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp
 from everos.infra.persistence.index import (
     All,
     AnyOf,

@@ -10,10 +10,10 @@ are now registered.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 from httpx import AsyncClient
+
+from everos.service import Application
 
 from .conftest import add_and_flush, episode_rows, seed_atomic_fact_for_episode
 
@@ -133,7 +133,7 @@ async def test_health_reports_tier2_capabilities(tier2_runtime: AsyncClient) -> 
     body = resp.json()
 
     caps = body["capabilities"]
-    assert caps["llm"] is True
+    assert "llm" not in caps
     assert caps["embed"] is True
     assert caps["rerank"] is False
 
@@ -153,33 +153,13 @@ async def test_health_reports_tier2_capabilities(tier2_runtime: AsyncClient) -> 
 
 async def test_ome_registers_embed_dependent_strategies(
     tier2_runtime: AsyncClient,
+    tier_application: Application,
 ) -> None:
-    svc = importlib.import_module("everos.service.memorize")
-    engine = svc._get_engine()
+
+    engine = tier_application._engine
     registered_names = {meta.name for meta in engine._registry.all()}
 
-    from everos.memory.strategies import (
-        extract_agent_case,
-        extract_agent_skill,
-        extract_atomic_facts,
-        extract_foresight,
-        extract_user_profile,
-        reflect_episodes,
-        trigger_profile_clustering,
-        trigger_skill_clustering,
-    )
+    from everos.memory.strategies import STRATEGY_SPECS
 
-    all_strategy_names = {
-        strategy.meta.name
-        for strategy in (
-            extract_atomic_facts,
-            extract_foresight,
-            extract_agent_case,
-            extract_user_profile,
-            trigger_profile_clustering,
-            trigger_skill_clustering,
-            extract_agent_skill,
-            reflect_episodes,
-        )
-    }
+    all_strategy_names = {spec.name for spec in STRATEGY_SPECS}
     assert all_strategy_names <= registered_names

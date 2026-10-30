@@ -60,7 +60,8 @@ stops the watcher; calling it twice is safe, and it returns a bare status body
 `/health`: `capabilities.embed` reports whether the embedding service
 answered a dimension probe **when the process started**, not whether it is
 reachable now -- a service that recovers later keeps reading `false` until
-the next restart.
+the next restart. There is no `capabilities.llm`: the server does not start
+without an extraction LLM, so a running server always has one.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy
@@ -168,7 +169,7 @@ storage. This is the same rule users see when reading rendered output:
 "if you didn't say a zone, we assume your zone."
 
 **For internal architecture.** The storage / display split lives in
-`everos.component.utils.datetime`
+`everos.core.utils.datetime`
 (`get_utc_now` / `ensure_utc` / `UtcDatetime` for storage;
 `get_now_with_timezone` / `to_display_tz` for display). See
 [datetime.md](datetime.md) for the design rationale.
@@ -915,10 +916,12 @@ Default `"hybrid"` is the recommended starting point.
 
 Values of `0` or outside `-1` / `1..100` are rejected with `422`.
 
-**`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`.
-Candidates whose score is below this value are dropped — use it to cut
-a long tail of weak matches. Three-level fallback for the effective
-radius:
+**`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`,
+applied to the **dense (vector) recall before fusion or rerank**:
+candidates whose raw cosine is below it never enter the pool. Every
+method's vector route honours it (`vector`, `hybrid`, `agentic`);
+`keyword` has no cosine and ignores it. Use it to cut a long tail of
+weak matches. Three-level fallback for the effective radius:
 
 1. Caller-supplied `radius` (including the literal `0.0`) always wins.
 2. With `top_k=-1` and no caller-supplied `radius`, a server-side
@@ -1018,6 +1021,7 @@ Agent-track case hit. Returned only when the request uses `agent_id`.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
+| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
 | `agent_id` | `string` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
@@ -1045,7 +1049,7 @@ clustering related cases.
 | `content` | `string` | Full skill body (procedure / playbook text) |
 | `confidence` | `number` | Extraction confidence in `[0, 1]` |
 | `maturity_score` | `number` | Maturity assessed at clustering time, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `agent_case` ids that contributed to this skill |
+| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
 | `score` | `number` | Fused retrieval score for this skill |
 
 #### UnprocessedMessageDTO
@@ -1236,6 +1240,7 @@ Same shape as [SearchAgentCaseItem](#searchagentcaseitem) **minus**
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
+| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
 | `agent_id` | `string` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
@@ -1262,7 +1267,7 @@ Same shape as [SearchAgentSkillItem](#searchagentskillitem) **minus**
 | `content` | `string` | Full skill body |
 | `confidence` | `number` | Extraction confidence in `[0, 1]` |
 | `maturity_score` | `number` | Maturity assessed at clustering, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `agent_case` ids that contributed to this skill |
+| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
 
 #### cURL example
 

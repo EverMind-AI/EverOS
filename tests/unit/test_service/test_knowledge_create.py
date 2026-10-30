@@ -1,24 +1,22 @@
 """Unit tests for :func:`everos.service.knowledge.create_document`.
 
 White-box surfaces: ``KnowledgeExtractor.aextract`` (mocked),
-``KnowledgeWriter.write`` (mocked), ``knowledge_document_repo.doc_id_exists``
+``KnowledgeWriter.write`` (mocked), ``documents.doc_id_exists``
 (mocked), ``ensure_taxonomy`` / ``parse_taxonomy`` (mocked).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
 
-from everos.service.knowledge import (
-    CreateDocumentResult,
-    DuplicateDocumentError,
-    ExtractionEmptyError,
-    create_document,
-)
+from everos.core.errors import DuplicateDocumentError, ExtractionEmptyError
+from everos.infra.persistence import MemoryRoot
+from everos.service.knowledge import CreateDocumentResult
+from tests.fakes import make_knowledge_service
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -59,12 +57,17 @@ def mock_extractor() -> AsyncMock:
 
 @pytest.fixture
 def knowledge_dir(tmp_path: Path) -> Path:
-    return tmp_path / "knowledge"
+    return MemoryRoot(tmp_path).knowledge_dir()
+
+
+def _root_of(knowledge_dir: Path) -> Path:
+    """The memory root a default-scope ``knowledge_dir`` fixture lives under."""
+    return knowledge_dir.parents[2]
 
 
 # ── Shared patch targets ─────────────────────────────────────────────────
 
-_MOD = "everos.service.knowledge"
+_MOD = "everos.infra.persistence.markdown.knowledge_store"
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -75,6 +78,7 @@ async def test_create_document_success(
     knowledge_dir: Path,
 ) -> None:
     """Happy path: extractor returns 3 memories, writer writes, result OK."""
+    mock_repo = MagicMock()
     memories = _make_memories(count=3)
     mock_extractor.aextract.return_value = memories
     doc_dir = knowledge_dir / "Technology" / "test_doc"
@@ -83,16 +87,15 @@ async def test_create_document_success(
         patch(f"{_MOD}.ensure_taxonomy") as mock_ensure,
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
         patch(f"{_MOD}.KnowledgeWriter") as mock_writer_cls,
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_writer_cls.write = AsyncMock(return_value=doc_dir)
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_extractor,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_extractor
+        ).create_document(
             parsed=ParsedContent(text="Some document content"),
             title="Test Doc",
-            knowledge_dir=knowledge_dir,
             doc_id="d_abc123000000",
             source_name="test.pdf",
             source_type="file",
@@ -113,21 +116,23 @@ async def test_create_document_empty_result_raises(
     knowledge_dir: Path,
 ) -> None:
     """Extractor returns empty list -> ExtractionEmptyError."""
+    mock_repo = MagicMock()
     mock_extractor.aextract.return_value = []
 
     with (
         patch(f"{_MOD}.ensure_taxonomy"),
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
         with pytest.raises(ExtractionEmptyError):
-            await create_document(
+            await make_knowledge_service(
+                documents=mock_repo,
+                root=_root_of(knowledge_dir),
                 extractor=mock_extractor,
+            ).create_document(
                 parsed=ParsedContent(text="Empty doc"),
                 title="Empty",
-                knowledge_dir=knowledge_dir,
                 doc_id="d_abc123000000",
             )
 
@@ -137,6 +142,7 @@ async def test_create_document_mints_doc_id(
     knowledge_dir: Path,
 ) -> None:
     """No doc_id provided -> one is minted (starts with 'd_', 14 chars)."""
+    mock_repo = MagicMock()
     memories = _make_memories(count=1, doc_id="d_placeholder0")
     mock_extractor.aextract.return_value = memories
     doc_dir = knowledge_dir / "Technology" / "test_doc"
@@ -145,16 +151,15 @@ async def test_create_document_mints_doc_id(
         patch(f"{_MOD}.ensure_taxonomy"),
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
         patch(f"{_MOD}.KnowledgeWriter") as mock_writer_cls,
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_writer_cls.write = AsyncMock(return_value=doc_dir)
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_extractor,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_extractor
+        ).create_document(
             parsed=ParsedContent(text="Content"),
             title="Title",
-            knowledge_dir=knowledge_dir,
             # doc_id intentionally omitted
         )
 
@@ -167,6 +172,7 @@ async def test_create_document_uses_provided_doc_id(
     knowledge_dir: Path,
 ) -> None:
     """Explicit doc_id='d_existing123' -> passed to extractor, not minted."""
+    mock_repo = MagicMock()
     provided_id = "d_existing123"
     memories = _make_memories(count=1, doc_id=provided_id)
     mock_extractor.aextract.return_value = memories
@@ -176,16 +182,15 @@ async def test_create_document_uses_provided_doc_id(
         patch(f"{_MOD}.ensure_taxonomy"),
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
         patch(f"{_MOD}.KnowledgeWriter") as mock_writer_cls,
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_writer_cls.write = AsyncMock(return_value=doc_dir)
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_extractor,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_extractor
+        ).create_document(
             parsed=ParsedContent(text="Content"),
             title="Title",
-            knowledge_dir=knowledge_dir,
             doc_id=provided_id,
         )
 
@@ -200,6 +205,7 @@ async def test_create_document_empty_category_fallback(
     knowledge_dir: Path,
 ) -> None:
     """Memories with empty category_id -> writer receives 'Others'."""
+    mock_repo = MagicMock()
     memories = _make_memories(count=2, category_id="")
     mock_extractor.aextract.return_value = memories
     doc_dir = knowledge_dir / "Others" / "test_doc"
@@ -208,16 +214,15 @@ async def test_create_document_empty_category_fallback(
         patch(f"{_MOD}.ensure_taxonomy"),
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
         patch(f"{_MOD}.KnowledgeWriter") as mock_writer_cls,
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_writer_cls.write = AsyncMock(return_value=doc_dir)
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_extractor,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_extractor
+        ).create_document(
             parsed=ParsedContent(text="Content"),
             title="Title",
-            knowledge_dir=knowledge_dir,
             doc_id="d_abc123000000",
         )
 
@@ -234,19 +239,21 @@ async def test_create_document_rejects_duplicate_doc_id(
     knowledge_dir: Path,
 ) -> None:
     """Providing an already-existing doc_id raises DuplicateDocumentError."""
+    mock_repo = MagicMock()
     with (
         patch(f"{_MOD}.ensure_taxonomy"),
         patch(f"{_MOD}.parse_taxonomy", return_value=[]),
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=True)
 
         with pytest.raises(DuplicateDocumentError):
-            await create_document(
+            await make_knowledge_service(
+                documents=mock_repo,
+                root=_root_of(knowledge_dir),
                 extractor=mock_extractor,
+            ).create_document(
                 parsed=ParsedContent(text="Content"),
                 title="Title",
-                knowledge_dir=knowledge_dir,
                 doc_id="d_existing123",
             )
 
@@ -256,6 +263,7 @@ async def test_create_document_ensures_taxonomy(
     knowledge_dir: Path,
 ) -> None:
     """ensure_taxonomy called with knowledge_dir."""
+    mock_repo = MagicMock()
     memories = _make_memories(count=1)
     mock_extractor.aextract.return_value = memories
     doc_dir = knowledge_dir / "Technology" / "test_doc"
@@ -264,18 +272,17 @@ async def test_create_document_ensures_taxonomy(
         patch(f"{_MOD}.ensure_taxonomy") as mock_ensure,
         patch(f"{_MOD}.parse_taxonomy", return_value=[]) as mock_parse,
         patch(f"{_MOD}.KnowledgeWriter") as mock_writer_cls,
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_writer_cls.write = AsyncMock(return_value=doc_dir)
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        await create_document(
-            extractor=mock_extractor,
+        await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_extractor
+        ).create_document(
             parsed=ParsedContent(text="Content"),
             title="Title",
-            knowledge_dir=knowledge_dir,
             doc_id="d_abc123000000",
         )
 
     mock_ensure.assert_called_once_with(knowledge_dir)
-    mock_parse.assert_called_once_with(knowledge_dir / ".taxonomy.md")
+    mock_parse.assert_called_once_with(mock_ensure.return_value)

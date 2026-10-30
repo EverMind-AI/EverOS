@@ -16,32 +16,38 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from everos.config import LanceDBSettings, MilvusSettings, load_settings
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.factories import build_derived_index
 from everos.infra.persistence.index import (
-    ALL_REPOS,
+    BUSINESS_SCHEMAS,
     All,
     AnyOf,
-    Episode,
+    DerivedIndex,
     IndexBackend,
     IndexRepository,
     Predicate,
     all_of,
     any_of,
-    drop_business_tables,
-    episode_repo,
     eq,
     primary_key,
-    shutdown,
 )
-from everos.infra.persistence.index.router import RoutedIndexRepository
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
 from everos.infra.persistence.lancedb import (
+    LanceDbConnection,
+    LanceIndexBackend,
     LanceIndexContract,
-    lancedb_manager,
     render_predicate,
 )
-from everos.infra.persistence.lancedb import index_backend as lance_index_backend
-from everos.infra.persistence.milvus import MilvusRepoBase
-from everos.infra.persistence.milvus import index_backend as milvus_index_backend
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
+from everos.infra.persistence.milvus import (
+    MilvusConnection,
+    MilvusIndexBackend,
+    MilvusRepoBase,
+)
+from everos.infra.persistence.milvus.repos import _EpisodeRepo as _MilvusEpisodeRepo
+from everos.infra.persistence.records import Episode
+from tests.fakes import TEST_DIM
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 
@@ -71,15 +77,13 @@ def _milvus_collection_prefix() -> str:
 
 
 @pytest.fixture(params=_behavioural_backends(), ids=lambda b: f"index={b}")
-async def index_backend(
+async def derived(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Route the shared repositories at one backend and clean up after."""
+    """The derived index of one backend over a fresh root; cleaned up after."""
     backend = request.param
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_INDEX__BACKEND", backend)
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
 
     collection_prefix: str | None = None
     if backend == "milvus":
@@ -93,35 +97,24 @@ async def index_backend(
         )
         monkeypatch.setenv("EVEROS_MILVUS__COLLECTION_PREFIX", collection_prefix)
 
-    from everos.config import load_settings
-
     load_settings.cache_clear()
+    index = build_derived_index(load_settings(), MemoryRoot(tmp_path))
     if backend == "milvus":
         assert collection_prefix is not None
-        milvus_episode_repo = next(
-            repo
-            for repo in milvus_index_backend.repositories
-            if repo.table_name == "episode"
-        )
-        assert milvus_episode_repo.collection_name == f"{collection_prefix}_episode"
+        milvus_episode_repo = index.repositories.episode
+        assert milvus_episode_repo.collection_name == f"{collection_prefix}_episode"  # type: ignore[attr-defined]
 
     try:
-        yield backend
+        yield index
     finally:
         try:
             if backend == "milvus":
-                try:
-                    load_settings.cache_clear()
-                finally:
-                    try:
-                        await drop_business_tables()
-                    finally:
-                        await shutdown()
+                await index.drop_business_tables()
         finally:
             try:
-                load_settings.cache_clear()
+                await index.shutdown()
             finally:
-                await lancedb_manager.dispose_connection()
+                load_settings.cache_clear()
 
 
 def test_external_milvus_prefix_is_used_verbatim(
@@ -159,14 +152,31 @@ def _episode(number: int, *, owner_id: str = "owner") -> Episode:
     )
 
 
+def _lance_backend(root: Path) -> IndexBackend:
+    return LanceIndexBackend(
+        LanceDbConnection(MemoryRoot(root), LanceDBSettings()), dim=TEST_DIM
+    )
+
+
+def _milvus_backend(_root: Path) -> IndexBackend:
+    return MilvusIndexBackend(MilvusConnection(MilvusSettings()), dim=TEST_DIM)
+
+
+def _milvus_episode() -> _MilvusEpisodeRepo:
+    """A Milvus episode repository over the configured (unconnected) settings."""
+    return _MilvusEpisodeRepo(MilvusConnection(load_settings().milvus), dim=TEST_DIM)
+
+
 @pytest.mark.parametrize(
-    "backend",
+    "build",
     [
-        pytest.param(lance_index_backend, id="lancedb"),
-        pytest.param(milvus_index_backend, id="milvus"),
+        pytest.param(_lance_backend, id="lancedb"),
+        pytest.param(_milvus_backend, id="milvus"),
     ],
 )
-def test_every_backend_satisfies_the_ports(backend: IndexBackend) -> None:
+def test_every_backend_satisfies_the_ports(
+    build: Callable[[Path], IndexBackend], tmp_path: Path
+) -> None:
     """Both adapters, not just the default one.
 
     This is the only assertion that says the two implementations answer to the
@@ -175,22 +185,24 @@ def test_every_backend_satisfies_the_ports(backend: IndexBackend) -> None:
     would notice. Needs no server: the ports and the registered repository set
     are structural.
     """
+    backend = build(tmp_path)
     assert isinstance(backend, IndexBackend)
-    assert {repo.table_name for repo in backend.repositories} == {
-        repo.table_name for repo in ALL_REPOS
+    repos = backend.repositories.all()
+    assert {repo.table_name for repo in repos} == {
+        schema.TABLE_NAME for schema in BUSINESS_SCHEMAS
     }
-    assert all(isinstance(repo, IndexRepository) for repo in backend.repositories)
+    assert all(isinstance(repo, IndexRepository) for repo in repos)
 
 
 def test_the_registered_repository_set_is_the_seven_business_tables() -> None:
-    assert len({repo.table_name for repo in ALL_REPOS}) == len(ALL_REPOS) == 7
-    assert all(isinstance(repo, IndexRepository) for repo in ALL_REPOS)
+    names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS}
+    assert len(names) == len(BUSINESS_SCHEMAS) == 7
 
 
 def test_all_logical_schemas_are_portable_and_validate_bm25_fields() -> None:
-    for repo in ALL_REPOS:
-        logical = schema_for(repo.schema)
-        assert logical.table_name == repo.table_name
+    for schema in BUSINESS_SCHEMAS:
+        logical = schema_for(schema, dim=TEST_DIM)
+        assert logical.table_name == schema.TABLE_NAME
         declared = {field.name for field in logical.fields}
         assert set(logical.bm25_fields) <= declared
         for field in logical.vector_fields:
@@ -255,39 +267,39 @@ def test_predicate_factories_reject_an_all_none_argument_list(
 
 
 async def test_repository_port_crud_count_and_uncapped_scan(
-    index_backend: str,
+    derived: DerivedIndex,
 ) -> None:
     rows = [_episode(number) for number in range(101)]
-    await episode_repo.upsert(rows)
+    await derived.repositories.episode.upsert(rows)
 
     owner = eq("owner_id", "owner")
-    assert await episode_repo.count() == 101
-    assert await episode_repo.count_where(owner) == 101
-    assert len(await episode_repo.scan(owner)) == 101
+    assert await derived.repositories.episode.count() == 101
+    assert await derived.repositories.episode.count_where(owner) == 101
+    assert len(await derived.repositories.episode.scan(owner)) == 101
 
-    found = await episode_repo.find_one_where(eq("id", rows[0].id))
+    found = await derived.repositories.episode.find_one_where(eq("id", rows[0].id))
     assert found is not None and found.entry_id == rows[0].entry_id
 
-    await episode_repo.update(
+    await derived.repositories.episode.update(
         {"subject": "updated"},
         where=eq("id", rows[0].id),
     )
-    updated = await episode_repo.find_one_where(
+    updated = await derived.repositories.episode.find_one_where(
         primary_key(rows[0].app_id, rows[0].project_id, rows[0].id)
     )
     assert updated is not None and updated.subject == "updated"
 
-    await episode_repo.delete(eq("id", rows[0].id))
-    assert await episode_repo.count_where(owner) == 100
+    await derived.repositories.episode.delete(eq("id", rows[0].id))
+    assert await derived.repositories.episode.count_where(owner) == 100
 
 
 async def test_find_by_owner_entries_projects_requested_columns(
-    index_backend: str,
+    derived: DerivedIndex,
 ) -> None:
     """A ``columns`` projection returns raw dicts holding only those columns."""
-    await episode_repo.upsert([_episode(number) for number in range(3)])
+    await derived.repositories.episode.upsert([_episode(number) for number in range(3)])
 
-    rows = await episode_repo.find_by_owner_entries(
+    rows = await derived.repositories.episode.find_by_owner_entries(
         "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
     )
 
@@ -306,7 +318,6 @@ async def test_find_by_owner_entries_columns_select_before_materializing(
     load trimmed down in Python afterwards -- the point of a storage-level
     projection is that the untrimmed columns never get fetched at all.
     """
-    from everos.infra.persistence.lancedb import episode_repo as lance_episode_repo
 
     calls: list[tuple[str, object]] = []
     fake_rows = [{"entry_id": "ep_0000", "parent_id": "memcell"}]
@@ -336,9 +347,7 @@ async def test_find_by_owner_entries_columns_select_before_materializing(
     find_where_spy = AsyncMock(
         side_effect=AssertionError("columns projection must not fetch full rows")
     )
-    monkeypatch.setattr(
-        lance_episode_repo, "_table", AsyncMock(return_value=_RecordingTable())
-    )
+    lance_episode_repo = _EpisodeRepo(table=_RecordingTable(), dim=TEST_DIM)  # type: ignore[arg-type]
     monkeypatch.setattr(lance_episode_repo, "find_where", find_where_spy)
 
     rows = await lance_episode_repo.find_by_owner_entries(
@@ -357,33 +366,23 @@ async def test_find_by_owner_entries_columns_select_before_materializing(
     assert dict(calls)["select"] == ["entry_id", "parent_id"]
 
 
-async def test_router_forwards_columns_to_milvus_without_type_error(
+async def test_milvus_repo_takes_columns_without_type_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Routing to Milvus with ``columns`` set must not raise ``TypeError``.
+    """The Milvus repository accepts ``columns`` like every other one.
 
     Regression test: a prior change dropped the ``columns`` parameter from
-    ``MilvusRepoBase.find_by_owner_entries`` while the router kept forwarding
-    it unconditionally, so selecting the Milvus backend and requesting a
-    projection raised ``TypeError: find_by_owner_entries() got an unexpected
-    keyword argument 'columns'``.
+    ``MilvusRepoBase.find_by_owner_entries`` while callers kept passing it,
+    so requesting a projection on the Milvus backend raised ``TypeError:
+    find_by_owner_entries() got an unexpected keyword argument 'columns'``.
     """
-    from everos.config import load_settings
-    from everos.infra.persistence import milvus
-
     rows = [_episode(0), _episode(2)]
-    monkeypatch.setattr(milvus.episode_repo, "find_where", AsyncMock(return_value=rows))
-    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
-    load_settings.cache_clear()
-    try:
-        projected = await episode_repo.find_by_owner_entries(
-            "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
-        )
-        typed = await episode_repo.find_by_owner_entries(
-            "owner", ["ep_0000", "ep_0002"]
-        )
-    finally:
-        load_settings.cache_clear()
+    repo = _milvus_episode()
+    monkeypatch.setattr(repo, "find_where", AsyncMock(return_value=rows))
+    projected = await repo.find_by_owner_entries(
+        "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
+    )
+    typed = await repo.find_by_owner_entries("owner", ["ep_0000", "ep_0002"])
 
     assert sorted(projected, key=lambda r: r["entry_id"]) == [
         {"entry_id": "ep_0000", "parent_id": "memcell"},
@@ -394,7 +393,7 @@ async def test_router_forwards_columns_to_milvus_without_type_error(
 
 @pytest.mark.parametrize(
     "owner",
-    [IndexRepository, RoutedIndexRepository, LanceIndexContract, MilvusRepoBase],
+    [IndexRepository, LanceIndexContract, MilvusRepoBase],
 )
 def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
     """Omitting ``columns`` is typed ``list[T]``; a projection is typed dicts."""
@@ -413,7 +412,7 @@ def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
     }
 
 
-async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
+async def test_bulk_reads_can_skip_vector_columns(derived: DerivedIndex) -> None:
     """Cascade diffs and agent-skill / reflection hydration read
     thousands of rows but never touch the vectors; materialising them as
     Python floats cost ~1.2 GB per pass on a 25k-row daily atomic_fact log.
@@ -422,13 +421,15 @@ async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
     for row in rows:
         row.vector = [0.5] * 1024
         row.subject_vector = [0.25] * 1024
-    await episode_repo.upsert(rows)
+    await derived.repositories.episode.upsert(rows)
 
-    full = await episode_repo.find_where(eq("owner_id", "owner"))
+    full = await derived.repositories.episode.find_where(eq("owner_id", "owner"))
     assert all(r.vector is not None for r in full)
 
-    lean = await episode_repo.find_where(eq("owner_id", "owner"), skip_vectors=True)
-    by_owner = await episode_repo.find_by_owner_entries(
+    lean = await derived.repositories.episode.find_where(
+        eq("owner_id", "owner"), skip_vectors=True
+    )
+    by_owner = await derived.repositories.episode.find_by_owner_entries(
         "owner", ["ep_0000", "ep_0002"], skip_vectors=True
     )
 
@@ -440,7 +441,7 @@ async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
 
 
 async def test_writing_back_a_projected_row_destroys_the_stored_vector(
-    index_backend: str,
+    derived: DerivedIndex,
 ) -> None:
     """A row read with ``skip_vectors`` is not a row you may upsert.
 
@@ -459,14 +460,16 @@ async def test_writing_back_a_projected_row_destroys_the_stored_vector(
     row = _episode(0)
     row.vector = [0.5] * 1024
     row.subject_vector = [0.25] * 1024
-    await episode_repo.upsert([row])
+    await derived.repositories.episode.upsert([row])
 
-    lean = await episode_repo.find_where(eq("entry_id", "ep_0000"), skip_vectors=True)
+    lean = await derived.repositories.episode.find_where(
+        eq("entry_id", "ep_0000"), skip_vectors=True
+    )
     assert lean[0].vector is None
 
-    await episode_repo.upsert(lean)
+    await derived.repositories.episode.upsert(lean)
 
-    after = await episode_repo.find_where(eq("entry_id", "ep_0000"))
+    after = await derived.repositories.episode.find_where(eq("entry_id", "ep_0000"))
     assert after[0].vector is None
     assert after[0].subject_vector is None
 
@@ -481,37 +484,30 @@ async def test_milvus_columns_projection_narrows_the_fetch(
     otherwise a caller asking for two scalars still materialises every
     1024-D vector in the result set and drops it one line later.
     """
-    from everos.config import load_settings
-    from everos.infra.persistence import milvus
-
     spy = AsyncMock(return_value=[_episode(0)])
-    monkeypatch.setattr(milvus.episode_repo, "find_where", spy)
-    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
-    load_settings.cache_clear()
-    try:
-        await episode_repo.find_by_owner_entries(
-            "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
-        )
-        scalars_only = spy.call_args.kwargs["skip_vectors"]
+    repo = _milvus_episode()
+    monkeypatch.setattr(repo, "find_where", spy)
+    await repo.find_by_owner_entries(
+        "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
+    )
+    scalars_only = spy.call_args.kwargs["skip_vectors"]
 
-        await episode_repo.find_by_owner_entries(
-            "owner", ["ep_0000"], columns=["entry_id", "vector"]
-        )
-        vector_named = spy.call_args.kwargs["skip_vectors"]
-    finally:
-        load_settings.cache_clear()
+    await repo.find_by_owner_entries(
+        "owner", ["ep_0000"], columns=["entry_id", "vector"]
+    )
+    vector_named = spy.call_args.kwargs["skip_vectors"]
 
     assert scalars_only is True
     assert vector_named is False
 
 
 async def test_repository_maintenance_contract_is_executable(
-    index_backend: str,
+    derived: DerivedIndex,
 ) -> None:
-    await episode_repo.upsert([_episode(1)])
-    await episode_repo.optimize()
-    await episode_repo.prune(dt.timedelta(days=7))
-    await episode_repo.rebuild_indexes()
+    await derived.repositories.episode.upsert([_episode(1)])
+    await derived.repositories.episode.optimize()
+    await derived.repositories.episode.prune(dt.timedelta(days=7))
+    await derived.repositories.episode.rebuild_indexes()
 
 
 def test_contract_has_no_way_around_the_primary_key() -> None:
@@ -519,9 +515,6 @@ def test_contract_has_no_way_around_the_primary_key() -> None:
     assert "by" not in inspect.signature(IndexRepository.upsert).parameters
     assert not hasattr(IndexRepository, "add")
     assert not hasattr(IndexRepository, "get_by_id")
-    for repo in ALL_REPOS:
-        assert not hasattr(repo, "add"), repo.table_name
-        assert not hasattr(repo, "get_by_id"), repo.table_name
 
 
 def test_primary_key_predicate_renders_three_equalities() -> None:

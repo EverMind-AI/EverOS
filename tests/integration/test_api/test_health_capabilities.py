@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytest import mark, param
 
-from everos.component.capabilities import compute_disabled_features
+from everos.service import compute_disabled_features
 
 
 class TestComputeDisabledFeatures:
@@ -13,7 +13,6 @@ class TestComputeDisabledFeatures:
     def test_all_capabilities_available(self) -> None:
         """When all capabilities are available, no features are disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": True,
@@ -27,7 +26,6 @@ class TestComputeDisabledFeatures:
     ) -> None:
         """When embedding unavailable, vector/hybrid/reflection/skill disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": True,
             "multimodal_llm": True,
@@ -46,7 +44,6 @@ class TestComputeDisabledFeatures:
     def test_rerank_unavailable_disables_agentic_search(self) -> None:
         """When rerank is unavailable, agentic_search is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": False,
             "multimodal_llm": True,
@@ -58,7 +55,6 @@ class TestComputeDisabledFeatures:
     def test_both_embed_and_rerank_missing_disables_knowledge(self) -> None:
         """When both embed and rerank are missing, knowledge is disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": False,
             "multimodal_llm": True,
@@ -70,7 +66,6 @@ class TestComputeDisabledFeatures:
     def test_multimodal_and_parser_missing_disables_multimodal_upload(self) -> None:
         """When multimodal_llm is unavailable, multimodal_upload is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": False,
@@ -82,7 +77,6 @@ class TestComputeDisabledFeatures:
     def test_parser_missing_disables_multimodal_upload(self) -> None:
         """When parser is unavailable, multimodal_upload is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": True,
@@ -94,7 +88,6 @@ class TestComputeDisabledFeatures:
     def test_tier1_only_llm(self) -> None:
         """Tier 1 (LLM only): many features are disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": False,
             "multimodal_llm": False,
@@ -118,7 +111,6 @@ class TestComputeDisabledFeatures:
         [
             param(
                 {
-                    "llm": True,
                     "embed": True,
                     "rerank": True,
                     "multimodal_llm": True,
@@ -129,7 +121,6 @@ class TestComputeDisabledFeatures:
             ),
             param(
                 {
-                    "llm": True,
                     "embed": False,
                     "rerank": True,
                     "multimodal_llm": True,
@@ -146,7 +137,6 @@ class TestComputeDisabledFeatures:
             ),
             param(
                 {
-                    "llm": True,
                     "embed": True,
                     "rerank": False,
                     "multimodal_llm": True,
@@ -169,12 +159,17 @@ class TestComputeDisabledFeatures:
 
 @mark.asyncio
 async def test_health_endpoint_includes_capabilities() -> None:
-    """GET /health returns capabilities dict with all 5 provider fields."""
+    """GET /health returns the four provider flags; there is no llm flag."""
     from httpx import ASGITransport, AsyncClient
 
+    from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
+    from everos.service import build_application
+    from tests.fakes import make_providers
 
-    app = create_app()
+    app = create_app(
+        application=build_application(load_settings(), providers=make_providers())
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport) as client:
         response = await client.get("http://testserver/health")
@@ -189,7 +184,7 @@ async def test_health_endpoint_includes_capabilities() -> None:
 
     caps = data["capabilities"]
     assert isinstance(caps, dict)
-    assert "llm" in caps
+    assert "llm" not in caps
     assert "embed" in caps
     assert "rerank" in caps
     assert "multimodal_llm" in caps
@@ -277,54 +272,29 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     """
     from httpx import ASGITransport, AsyncClient
 
-    from everos.component import embedding, multimodal
-    from everos.component import rerank as rerank_mod
-    from everos.component.parser import _core as parser_core
     from everos.entrypoints.api.app import create_app
+    from everos.service import Capabilities
+    from tests.fakes import make_application
 
-    class _StubCapability:
-        def __init__(self, available: bool) -> None:
-            self.available = available
-
-    monkeypatch.setattr(
-        embedding, "get_embedding_capability", lambda: _StubCapability(embed)
+    application = make_application(
+        capabilities=Capabilities(
+            embedding=embed,
+            rerank=rerank,
+            multimodal_llm=multimodal_llm,
+            parser=parser,
+            index_backend="lancedb",
+        )
     )
-    monkeypatch.setattr(
-        rerank_mod, "get_rerank_capability", lambda: _StubCapability(rerank)
-    )
-    monkeypatch.setattr(
-        multimodal,
-        "get_multimodal_llm_capability",
-        lambda: _StubCapability(multimodal_llm),
-    )
-    monkeypatch.setattr(parser_core, "parser_available", lambda: parser)
-
-    # The health route imports the accessors at module load; patch there
-    # too so the values it actually reads honour the monkeypatch.
-    from everos.entrypoints.api.routes import health as health_route
-
-    # `embed` is the one capability the route does NOT read from an accessor:
+    # `embed` is the one capability the route does NOT read from the snapshot:
     # it reports whether the startup dimension probe got an answer, because
     # "a provider could be constructed" is true even against a dead service
     # (issue #434). But the same payload's `disabled_features` stays on the
     # capability -- it promises what the engine will refuse, and every
     # engine-side gate still asks that. A real deployment derives both from
     # one configuration, so a simulated tier has to set both.
-    monkeypatch.setattr(health_route, "last_probe", lambda: 1024 if embed else None)
-    monkeypatch.setattr(
-        health_route, "get_embedding_capability", lambda: _StubCapability(embed)
-    )
-    monkeypatch.setattr(
-        health_route, "get_rerank_capability", lambda: _StubCapability(rerank)
-    )
-    monkeypatch.setattr(
-        health_route,
-        "get_multimodal_llm_capability",
-        lambda: _StubCapability(multimodal_llm),
-    )
-    monkeypatch.setattr(health_route, "parser_available", lambda: parser)
+    application.ops.probed = embed
 
-    app = create_app()
+    app = create_app(application=application)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport) as client:
         response = await client.get("http://testserver/health")

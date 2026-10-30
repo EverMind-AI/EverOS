@@ -34,7 +34,6 @@ the whole suite cleanly without paying the ingest cost.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from pathlib import Path
@@ -49,17 +48,6 @@ from sqlalchemy import text
 # populated). Search is a read-only path, so no copy is needed — the
 # fixture just sets ``EVEROS_ROOT`` to that directory.
 _REUSE_ENV = "EVEROS_REUSE_CORPUS"
-
-# Memorize-service module-level lazy singletons; reset between phases so
-# stale clients / engines don't leak from ingest into per-test lifespans.
-_MEMORIZE_SINGLETONS: tuple[str, ...] = (
-    "_episode_writer",
-    "_prompt_loader",
-    "_user_pipeline",
-    "_agent_pipeline",
-    "_ome_engine",
-)
-
 
 # ── Session-scoped MonkeyPatch ─────────────────────────────────────────
 
@@ -83,26 +71,16 @@ def _session_monkeypatch() -> Generator[pytest.MonkeyPatch, None, None]:
 
 
 def _reset_memorize_singletons(mp: pytest.MonkeyPatch) -> None:
-    """Null out memorize/strategy/LLM-client lazy singletons.
+    """Drop cached settings.
 
     Called once before ingest (so the freshly-set ``EVEROS_ROOT``
     actually wins) and once per test (so the session corpus's lifespan
-    sees clean caches).
+    sees clean caches). Every lifespan builds its own application, so
+    there is no service-level state to reset.
     """
     from everos.config import load_settings
 
     load_settings.cache_clear()
-
-    svc = importlib.import_module("everos.service.memorize")
-    client_mod = importlib.import_module("everos.component.llm.client")
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-
-    for attr in _MEMORIZE_SINGLETONS:
-        mp.setattr(svc, attr, None, raising=False)
-    mp.setattr(client_mod, "_llm_client", None, raising=False)
-    mp.setattr(af_mod, "_writer", None, raising=False)
-    mp.setattr(fs_mod, "_writer", None, raising=False)
 
 
 # ── Session corpus: ingest once ────────────────────────────────────────
@@ -189,19 +167,23 @@ async def _ingest(memory_root: Path, long_conversation: dict) -> None:
         )
         resp.raise_for_status()
 
-        await _poll_cascade_drained(deadline_seconds=600.0)
+        await _poll_cascade_drained(memory_root, deadline_seconds=600.0)
 
 
-async def _poll_cascade_drained(*, deadline_seconds: float) -> None:
+async def _poll_cascade_drained(memory_root: Path, *, deadline_seconds: float) -> None:
     """Block until ``md_change_state.pending == 0`` or deadline."""
-    from everos.infra.persistence.sqlite import md_change_state_repo
+    from tests.fakes import open_storage_view
 
-    async with asyncio.timeout(deadline_seconds):
-        while True:
-            summary = await md_change_state_repo.queue_summary()
-            if summary.pending == 0:
-                return
-            await asyncio.sleep(0.5)
+    view = open_storage_view(memory_root)
+    try:
+        async with asyncio.timeout(deadline_seconds):
+            while True:
+                summary = await view.sqlite.md_change_state.queue_summary()
+                if summary.pending == 0:
+                    return
+                await asyncio.sleep(0.5)
+    finally:
+        await view.aclose()
 
 
 # ── Per-test client against the session corpus ─────────────────────────
@@ -221,29 +203,7 @@ async def search_client(
     monkeypatch.setenv("EVEROS_ROOT", str(_ingested_memory_root))
     _reset_memorize_singletons(monkeypatch)
 
-    # The search service has its own module-level singletons; reset
-    # those too so re-attach is clean.
-    search_svc = importlib.import_module("everos.service.search")
-    for attr in ("_manager", "_llm_client", "_llm_resolved"):
-        if hasattr(search_svc, attr):
-            monkeypatch.setattr(
-                search_svc,
-                attr,
-                None if not attr.endswith("_resolved") else False,
-                raising=False,
-            )
-
-    # Embedding / rerank now route through the process-wide capability
-    # accessors (``everos.component.{embedding,rerank}.accessor``) instead
-    # of module-level singletons on ``everos.service.search`` — reset those
-    # singletons directly so re-attach is clean. (Also covered by the
-    # autouse fixtures in ``tests/conftest.py``; kept here for locality with
-    # the rest of this fixture's singleton reset.)
-    import everos.component.embedding.accessor as embedding_acc
-    import everos.component.rerank.accessor as rerank_acc
-
-    monkeypatch.setattr(embedding_acc, "_capability", None, raising=False)
-    monkeypatch.setattr(rerank_acc, "_capability", None, raising=False)
+    # The lifespan builds a fresh application, providers included.
 
     from everos.entrypoints.api.app import create_app
 
@@ -260,15 +220,18 @@ async def search_client(
 
 
 @pytest.fixture
-def memcell_count() -> Callable[[], Awaitable[int]]:
+def memcell_count(_ingested_memory_root: Path) -> Callable[[], Awaitable[int]]:
     """Return an async callable: ``await memcell_count() -> int``."""
 
     async def _count() -> int:
-        from everos.infra.persistence.sqlite import get_engine
+        from tests.fakes import open_storage_view
 
-        engine = get_engine()
-        async with engine.connect() as conn:
-            result = await conn.execute(text("SELECT COUNT(*) FROM memcell"))
-            return int(result.scalar() or 0)
+        view = open_storage_view(_ingested_memory_root)
+        try:
+            async with view.database.engine.connect() as conn:
+                result = await conn.execute(text("SELECT COUNT(*) FROM memcell"))
+                return int(result.scalar() or 0)
+        finally:
+            await view.aclose()
 
     return _count

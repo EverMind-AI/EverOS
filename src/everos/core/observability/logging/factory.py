@@ -1,9 +1,10 @@
 """structlog logger factory.
 
 Provides ``get_logger(__name__)`` for module-level logger acquisition.
-``configure_logging()`` is called once at process startup (run.py / lifespan)
-to set up the structlog processor chain and route stdlib logging through
-the same formatter so output stays uniform regardless of the caller.
+``configure_logging`` is called by the application bootstrap
+(``everos.service.configure_process``) to set up the structlog processor
+chain and route stdlib logging through the same formatter so output stays
+uniform regardless of the caller.
 
 The configuration follows structlog's official "Foreign Log Integration"
 recipe: a single ``ProcessorFormatter`` renders both everos's own
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import AbstractContextManager
 from typing import Any
 
 import structlog
@@ -30,6 +32,15 @@ import structlog
 def get_logger(name: str) -> Any:
     """Return a structlog logger bound to the given module name."""
     return structlog.get_logger(name)
+
+
+def bound_log_context(**fields: Any) -> AbstractContextManager[None]:
+    """Add ``fields`` to every log event inside the ``with`` block.
+
+    Bound through context variables, so the fields follow the current task
+    and are restored to their previous values on exit.
+    """
+    return structlog.contextvars.bound_contextvars(**fields)  # type: ignore[return-value]  # structlog types it as a Generator; @contextmanager wraps it at runtime
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -72,7 +83,10 @@ def configure_logging(level: str = "INFO") -> None:
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
+        # Not cached: a cached logger keeps the level and processors of the
+        # configuration it first ran under, so a later call (a CLI command
+        # changing the level, a test capturing logs) would not reach it.
+        cache_logger_on_first_use=False,
     )
 
     # The single formatter shared by both pipelines:

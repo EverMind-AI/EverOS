@@ -25,10 +25,9 @@ from watchfiles import awatch
 
 from everos.core.observability.logging import get_logger
 from everos.infra.ome._dispatch.registry import StrategyRegistry
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome.config import StrategyOverride, TomlRoot
-from everos.infra.ome.decorator import StrategyMeta
-from everos.infra.ome.gates import Counter
-from everos.infra.ome.triggers import Cron, Idle, Trigger
+from everos.memory.ports import Counter, Cron, Idle, Trigger
 
 if TYPE_CHECKING:
     from everos.infra.ome.engine import OfflineEngine

@@ -7,19 +7,16 @@ deliberate KV-by-owner lookup: given ``owner_id``, return at most one
 field on the response — the DTO's optional ``score`` is reserved for
 a future query-aware lookup.
 
-The cascade keeps ``UserProfile`` rows in sync with
-``users/<user_id>/user.md``; this recaller just reads the row and
-unpacks the json-encoded buckets back into the DTO's
-``profile_data`` mapping (mirrors enterprise's profile DTO shape).
+The cascade keeps the profile index in sync with
+``users/<user_id>/user.md``; this recaller reads the stored profile and
+lays it out as the DTO's ``profile_data`` mapping (mirrors enterprise's
+profile DTO shape).
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index import primary_key, user_profile_repo
+from everos.memory.ports import ProfileIndex, Scope
 
 from ..dto import SearchProfileItem
 
@@ -27,7 +24,14 @@ logger = get_logger(__name__)
 
 
 class ProfileRecaller:
-    """Fetch the owner's profile row from LanceDB, return at most one item."""
+    """Fetch the owner's profile from the profile index, return at most one item.
+
+    Args:
+        index: The profile index port.
+    """
+
+    def __init__(self, index: ProfileIndex) -> None:
+        self._index = index
 
     async def fetch(
         self, owner_id: str, *, app_id: str, project_id: str
@@ -40,42 +44,32 @@ class ProfileRecaller:
         """
         if not owner_id:
             return []
-        row = await user_profile_repo.find_one_where(
-            primary_key(app_id, project_id, owner_id)
+        stored = await self._index.get(
+            Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=owner_id,
+                owner_type="user",
+            )
         )
-        if row is None:
+        if stored is None:
             logger.debug("profile_fetch_miss", owner_id=owner_id)
             return []
-        profile_data: dict[str, Any] = {
-            "summary": row.summary,
-            "explicit_info": _load_json(row.explicit_info_json),
-            "implicit_traits": _load_json(row.implicit_traits_json),
-            "profile_timestamp_ms": row.profile_timestamp_ms,
-        }
+        profile = stored.item
         return [
             SearchProfileItem(
-                id=row.id,
-                user_id=row.owner_id,
-                app_id=row.app_id,
-                project_id=row.project_id,
-                profile_data=profile_data,
+                id=stored.ref.id,
+                user_id=profile.owner_id,
+                app_id=stored.scope.app_id,
+                project_id=stored.scope.project_id,
+                profile_data={
+                    "summary": profile.summary,
+                    "explicit_info": [i.model_dump() for i in profile.explicit_info],
+                    "implicit_traits": [
+                        i.model_dump() for i in profile.implicit_traits
+                    ],
+                    "profile_timestamp_ms": profile.timestamp,
+                },
                 score=None,
             )
         ]
-
-
-def _load_json(text: str) -> Any:
-    """Decode a json-encoded frontmatter bucket.
-
-    Returns ``[]`` on empty / malformed input so a row with a stale
-    encoding doesn't blow up the search response. A real decode error
-    is logged once at debug; cascade will rewrite the column on the
-    next reconcile.
-    """
-    if not text:
-        return []
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        logger.debug("profile_json_decode_failed", payload_head=text[:80])
-        return []

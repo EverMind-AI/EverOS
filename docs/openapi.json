@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.5.1"
+    "version": "1.6.0"
   },
   "paths": {
     "/health": {
@@ -2828,6 +2828,10 @@
             "type": "string",
             "title": "Id"
           },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -2879,6 +2883,7 @@
         "type": "object",
         "required": [
           "id",
+          "entry_id",
           "agent_id",
           "session_id",
           "task_intent",
@@ -3250,10 +3255,6 @@
       },
       "HealthCapabilities": {
         "properties": {
-          "llm": {
-            "type": "boolean",
-            "title": "Llm"
-          },
           "embed": {
             "type": "boolean",
             "title": "Embed",
@@ -3274,14 +3275,13 @@
         },
         "type": "object",
         "required": [
-          "llm",
           "embed",
           "rerank",
           "multimodal_llm",
           "parser"
         ],
         "title": "HealthCapabilities",
-        "description": "Availability flags for the five capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+        "description": "Availability flags for the four capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
       },
       "HealthResponse": {
         "properties": {
@@ -3730,6 +3730,10 @@
             "type": "string",
             "title": "Id"
           },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -3785,6 +3789,7 @@
         "type": "object",
         "required": [
           "id",
+          "entry_id",
           "agent_id",
           "session_id",
           "task_intent",

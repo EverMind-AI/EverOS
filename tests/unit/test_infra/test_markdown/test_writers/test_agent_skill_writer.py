@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,
     AgentSkillReader,
     AgentSkillWriter,
+    MarkdownReader,
 )
 
 

@@ -7,6 +7,477 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-28
+
+**One place builds the application.** Providers, storage adapters, the OME
+engine, the cascade and the domain objects are now assembled once, by
+`everos.service.build_application(settings)`, and the HTTP server and the CLI
+both use the resulting `Application` through three facades:
+`MemoryService`, `KnowledgeService` and `OpsService`.
+
+### Added
+
+- **An optional correctness gate for agent cases** (`[agent_memory]
+  case_gate_enabled`, default `false`). On, the extraction LLM judges
+  whether the work in an agent conversation was completed correctly (one
+  extra call per conversation up to 50k tokens; longer ones are admitted
+  without a call), and only admitted conversations become cases, instead of
+  the complexity and value filters deciding. An admitted case drives skill
+  extraction whatever its quality score. The judge is
+  `everos.component.llm.LLMCaseJudge`.
+- **The log level is configuration** (`[logging] level`, default `"INFO"`).
+  `everos.service.configure_process(settings)` sets up logging, tracing and
+  metrics once per process; `build_application` calls it, and the CLI no
+  longer configures logging itself. `server start --log-level` and
+  `EVEROS_LOG_LEVEL` still override the level for the server, and
+  interactive commands still log `WARNING` (`INFO` with `--verbose`).
+- **One language decision per cell, pinned downstream.** The episode is
+  still written in whatever language the model picks from the conversation;
+  that language is then detected from the episode text by Unicode script
+  (`everos.core.utils.language.detect_output_language`, one of everalgo's
+  `OutputLanguage` values) and carried on the episode and its
+  `EpisodeExtracted` / `ProfileClusterUpdated` events. Atomic facts are
+  extracted in it, and a profile is written in it and then frozen: the
+  first profile extraction that knows the language stores it as
+  `primary_language` in `user.md`, and later extractions keep that value
+  even when an episode arrives in another language (changing it is a manual
+  edit). Episode entries gain an inline `language` field. Both are left out
+  while unknown, so episode logs and `user.md` written before this release
+  read back with no language and extraction falls back to everalgo's own
+  inference. The search index, the API and `/get` are unchanged.
+
+### Changed
+
+- **Internal module layout: one convention across `infra` and `service`.**
+  Every `infra` subpackage now keeps its implementation in private
+  directories behind its `__init__` facade (`cascade/_projections`,
+  `cascade/_worker`, `markdown/_base|_mds|_readers|_writers`,
+  `sqlite/_base|_repos|_tables`, `lancedb/_base|_repos`, matching `ome`);
+  the backfill steps live in `service/ops/backfill/`; the index port
+  package no longer re-exports the record tables, which are imported from
+  `everos.infra.persistence.records`. Public facades are unchanged, and
+  `import-linter` now forbids the outer layers from reaching into
+  `everos.infra.cascade.**` as it already did for `persistence`. Logger
+  names follow module paths, so a log filter on a renamed module (for
+  example `everos.infra.persistence.sqlite.repos.*`) needs the `_repos`
+  spelling.
+- **`IndexRepository.find_by_owner` is removed.** It read rows by
+  `owner_id` across every `(app_id, project_id)` scope; nothing called it
+  (#480). Scoped reads go through `find_where` with an explicit filter or
+  `find_by_owner_entries`.
+- **The cascade and OME engine switches are settings.** `[cascade]
+  enabled` and `[cascade] watcher_enabled` replace the
+  `EVEROS_DISABLE_CASCADE` and `EVEROS_DISABLE_CASCADE_WATCHER` environment
+  variables, and the new `[ome]` section's `max_concurrent_runs` and
+  `run_timeout_seconds` (`0` disables the ceiling) replace
+  `EVEROS_OME_MAX_CONCURRENT_RUNS` and `EVEROS_OME_RUN_TIMEOUT_SECONDS`.
+  The old variables are no longer read; set the keys in `everos.toml`
+  instead.
+- **Building the application requires `[llm]`.** `build_providers` (and so
+  `build_application`) raises `LLMNotConfiguredError` when `[llm]` has no
+  `api_key` or `base_url`, instead of building without an extraction LLM
+  and leaving the server's start to refuse. The server still refuses to
+  start, now at assembly; every `everos cascade …` command builds the same
+  application, so those commands also need a configured `[llm]` and exit
+  with code 3 and the toml section to edit when it is missing. Python
+  callers that passed `Providers(llm=None, …)` must pass a client.
+- **`GET /health` no longer reports `capabilities.llm`.** It was always
+  `true` -- a server without an extraction LLM does not start -- so it is
+  removed; clients that read it should drop the check. `Capabilities.llm` /
+  `.decider` and `ProviderStatus.llm` are removed from `everos.service` for
+  the same reason.
+- **`everos.component.config` is renamed to `everos.component.yaml_loader`.**
+  The package name no longer collides with `everos.config`. Update imports to
+  `from everos.component.yaml_loader import YamlConfigLoader`; the class name
+  is unchanged.
+- **`MemoryService` write use cases are `add` and `flush`.**
+  `MemoryService.submit_add` / `submit_flush` are now `add` / `flush`, the
+  names the HTTP API uses; the inline `memorize()` / `flush()` steps are
+  private. Python callers of the facade update the two names; HTTP clients
+  are unaffected.
+- **Local parser input handling lives in the parser component.** Application
+  assembly supplies the raw-file builder to ingestion, and ingestion no longer
+  falls back to a built-in one. `everos.memory.extract.parser.mapping` is
+  removed; import `build_raw_file`, `read_file_uri` and `to_raw_file` from
+  `everos.component.parser`; `build_raw_file` and `read_file_uri` now require
+  a `settings_source` instead of falling back to `load_settings`. URI checks,
+  allowlist rules, size checks and error behavior are preserved. The `file_uri_hydrated` log event is now emitted by
+  the `everos.component.parser.input` logger; update log filters that matched
+  the old module name.
+- **Multi-round search receives explicit configuration readers.** Application
+  assembly supplies tuning and trace-path readers, and `SearchManager`,
+  `LLMRoundDecider` and `search_episodes_llm_multiround` now require them
+  instead of falling back to a built-in reader. The existing settings cache,
+  legacy environment overrides and per-call read timing are preserved. Retry
+  defaults and execution rules are unchanged by this refactor. The
+  `llm_multiround_bad_env_override` log event is now emitted by the
+  `everos.config.search_runtime` logger; update log filters that matched the
+  old module name.
+- **Reflection delegates file grouping to the Markdown stores.** Retirement
+  keeps the existing file order, partial-write failure behavior and report
+  counts. The unreleased `EpisodeStore.deprecate` and
+  `AtomicFactStore.deprecate` contracts now accept ordered `entries` and a
+  `replaced_by` ID instead of a per-file replacement mapping.
+- **Index synchronization and vector backfill share embedding rules.**
+  Episode, atomic fact, foresight, agent case, agent skill and knowledge topic
+  projections now use the same source-text and vector-column declarations.
+  Backfill keeps its existing partial-failure recovery and historical text
+  normalization behavior; no data migration is required.
+- **An agent memcell that produces no case now records why.** everalgo
+  0.6 extracts an agent case only from a closed trajectory (a user request
+  through to the assistant's final answer); when boundary detection leaves
+  an unclosed slice -- typically by cutting just before the final answer --
+  that slice yields no case. The extraction outcome is now persisted on the
+  `memcell` row: `case_extracted_at`, `case_skip_reason` (`NULL` exactly
+  when a case was produced; otherwise everalgo's skip reason, or
+  `no_agent_sender`) and `case_skip_detail_json`. Existing `system.db`
+  files gain the three columns automatically at startup.
+- **`everos.service.memorize_queue` is gone.** The `async_mode` queue now
+  lives in the `MemoryService` package; `TaskItem`, `TaskPage`,
+  `QueueHealth` and `TASK_STATUSES` are imported from `everos.service` (or
+  `everos.service.memory`).
+- **Entry points import only the service.** A new import-linter contract
+  (`entrypoints-forbidden`) keeps `everos.entrypoints` off `everos.memory`,
+  `everos.infra`, `everos.component` and `everalgo`; request / response
+  DTOs (`GetRequest`, `SearchRequest`, ...) are re-exported by
+  `everos.service`.
+- **`everos.memory.ports.ClusterStore` speaks in cluster operations.** The
+  port shrinks from eleven methods to seven: `add_member`, `remove_members`
+  and `update_metadata` become one `replace_members(cluster_id, *, removed,
+  added, member_type, centroid, count, last_ts, preview)`, which swaps the
+  members and restamps the cluster in a single SQLite transaction (before,
+  a crash between the three calls could leave the membership and the
+  snapshot disagreeing). `list_ids_and_member_counts` and `count` are gone:
+  read `len(cluster.members)` from `list_for_owner`. Custom `ClusterStore`
+  implementations need the same change.
+- **`everos.entrypoints.api.utils` is now `everos.entrypoints.api.dependencies`**
+  (internal): it holds the FastAPI request dependencies (`application`,
+  `extract_request_id`), named as FastAPI's project layout names them.
+- **`session_lock_timeout_seconds` sits under `[memorize]` in the shipped
+  `default.toml`** (it had landed under `[knowledge.search]`, where it was
+  ignored). The value, and so the behaviour, is unchanged.
+- **Timings are constructor arguments instead of module constants to patch.**
+  `LanceRepoBase` takes `timeouts=LanceTimeouts(...)` (and `sweep_husks=`),
+  `LanceIndexBackend` takes `schemas=`, `CascadeWorker` takes
+  `maintenance_task_timeout_seconds` / `rebuild_conflict_backoffs_seconds` /
+  `loop_restart_backoffs_seconds` / `on_unrecoverable`, `CascadeConfig` gains
+  `drain_idle_limit_seconds`, `memory_root_lock` takes `poll_interval_seconds`,
+  and `MemorizeQueueWorker` takes `stop_grace_seconds` / `mark_retry_seconds`.
+  Every default is the previous constant. The lance husk sweep is public as
+  `remove_empty_index_dirs`.
+- **`everos.service.memory` is a package** (the facade stays importable from
+  the same path). The process-wide session-lock registry
+  (`everos.service._session_lock`) is gone: each `MemoryService` owns its
+  per-session locks.
+- **The operator, upload and queueing rules moved from the HTTP routes and
+  the CLI into the service facades.** `OpsService.health()` assembles the
+  `/health` payload (a failed probe still reads as an unhealthy block, never
+  a 500); `OpsService.list_tasks` validates `status` and caps `page_size` at
+  100; `MemoryService.submit_add` / `submit_flush` decide between running
+  inline and queueing (`Queued` when queued); `KnowledgeService.create_from_upload`
+  / `replace_from_upload` check the size, pick UTF-8 or the parser and
+  extract, and `KnowledgeService.require_search_providers` is the
+  embedding + rerank gate. HTTP status codes and bodies are unchanged.
+  `everos.component.capabilities` is removed; `compute_disabled_features` is
+  exported from `everos.service`.
+- **Backfill is part of `OpsService`.** `everos.service.backfill` is removed.
+  `OpsService.backfill(phase, auto_yes=, presenter=, summary=)` runs one
+  phase or `"all"`, stops on a missing provider, a running server or a
+  declined prompt, and returns a `BackfillOutcome`; each phase's result
+  lands in the caller's `BackfillSummary`. Its collaborators are injected as
+  one `BackfillDeps`, so the service layer no longer imports `infra`.
+  `BackfillPresenter` gains `phase_started(phase)`; `BackfillPhase` is gone
+  (the CLI keeps its own phase copy). The public result types are
+  `VectorsPhaseResult`, `ClustersPhaseResult` and `SkillsPhaseResult`.
+- **`Application` closes its storage whether or not it was started**, and
+  `aclose()` is idempotent; `async with build_application(settings) as app:`
+  closes on exit. The CLI uses it for every command.
+- **`MemoryRootLockedError` (`everos.core.errors`) is what callers catch
+  when another process holds the memory root.** The OME engine's
+  `EngineLockHeldError` is a subclass; `everos.infra.ome.OmeLock` takes the
+  same lock from outside a running engine.
+- **The datetime helpers moved to `everos.core.utils.datetime`.**
+  `everos.component.utils` is removed; import `get_utc_now`,
+  `to_display_tz`, `UtcDatetime` and the other two-zone helpers from
+  `everos.core.utils.datetime` instead. They are stateless tools every layer
+  uses, the HTTP and CLI entry points included, so they live with the other
+  cross-cutting runtime code.
+- **The service layer's module-level functions are gone.** `everos.service`
+  no longer exports `memorize`, `search`, `get`, `get_task`, `list_tasks` or
+  the knowledge functions (`create_document`, `search_knowledge`, ...); build
+  an `Application` and call `application.memory.*`, `application.knowledge.*`
+  or `application.ops.*`. `everos.service.memorize`, `.search`, `.get` and
+  the `everos.core.lifespan` / `everos.entrypoints.api.lifespans` packages
+  are removed. `create_app()` takes `settings` or a pre-built `application`
+  instead of `lifespan_providers`.
+- **The process-wide provider accessors are gone.**
+  `everos.component.llm.get_llm_client` / `get_decider_llm_client` /
+  `get_multimodal_llm_client`, `everos.component.embedding.get_embedding_capability`
+  and `EmbeddingCapability`, `everos.component.rerank.get_rerank_capability` and
+  `RerankCapability`, and the `everos.component.multimodal` package are removed.
+  Take providers from `everos.service.build_providers(settings)` (a provider
+  that is not configured is `None`) or build one with the component factories;
+  `resolve_decider_config` now requires its `settings` argument.
+  `everos.component.parser.aparse_file` takes the multimodal LLM as `llm=`.
+  `missing_config_error` moved from `everos.component.utils.config_hints` to
+  `everos.config`. `set_metrics_registry` / `reset_metrics_registry` are
+  replaced by `configure_metrics(registry)`.
+- **The storage singletons are gone.** The module-level repository
+  instances (`episode_repo`, `atomic_fact_repo`, ..., `md_change_state_repo`,
+  `cluster_repo`, `knowledge_document_repo`, ...), the engine / connection
+  accessors (`everos.infra.persistence.sqlite.get_engine` /
+  `get_session_factory` / `dispose_engine`,
+  `everos.infra.persistence.lancedb.get_table` / `get_connection` /
+  `dispose_connection`, the Milvus `get_client` / `dispose_connection`) and the
+  index facade functions (`startup`, `shutdown`, `ensure_business_indexes`,
+  `drop_business_tables`, `read_embedding_model`, ...) are removed, together
+  with `everos.infra.persistence.index.router` and the `lancedb.indexes` /
+  `milvus.indexes` modules. Storage is now a set of objects built over one
+  memory root: `SqliteDatabase` + `SqliteRepos.over(database)`,
+  `LanceDbConnection` / `MilvusConnection`, and the `DerivedIndex` returned by
+  `everos.infra.persistence.factories.build_derived_index(settings, root)`,
+  whose `repositories` replace the old index instances. The SQLite repository
+  classes are public (`ClusterRepo`, `MdChangeStateRepo`, ...; the knowledge
+  topic row repository is `KnowledgeTopicRowRepo`) and take their session
+  factory in the constructor. `CascadeOrchestrator`, `CascadeAdmin`,
+  `CascadeScanner`, `CascadeWatcher`, `CascadeWorker`, `HandlerDeps` and
+  `KnowledgeService` take the storage they use as constructor arguments, and
+  `KindSpec.index_repo` is removed (a handler's repository comes from
+  `HandlerDeps.index`).
+- **One embedding provider per process.** The cascade handlers and the startup
+  provenance check use the application's embedding provider instead of
+  building a second one, so `[embedding] max_concurrent` is no longer doubled
+  in practice.
+- **`OMEConfig.jobstore_path` is required.** The engine no longer resolves the
+  memory root on its own; the application passes `<root>/.index/sqlite/ome.db`.
+- **Backfill logs under `everos.service.backfill`** (was
+  `everos.memory.cascade._backfill`); update log filters keyed on the old name.
+- **A merged episode with an empty subject no longer writes an empty
+  `### Subject` section** to its markdown.
+- **A profile JSON column that does not decode to a list reads as empty**
+  instead of being passed through as-is.
+- **Reflection runs in two steps.** `reflect_episodes` writes the merged
+  episode; the new `finish_reflection` strategy deprecates the source episodes
+  once the merged episode's atomic facts exist. If fact extraction for the
+  merged episode dead-letters, the sources now stay searchable (they used to
+  be deprecated anyway), and the old 120 s wait is gone.
+- **`UserPipelineStarted` is published after its cell's episode is extracted**
+  (it used to be published before any cell ran). Its only subscriber,
+  `extract_foresight`, ships disabled.
+- **Prompt slots are replaced by custom instructions.**
+  `config/prompt_slots/*.yaml` (`enabled` + `template`, a whole replacement
+  prompt) and `everos.memory.prompt_slots.PromptLoader` are removed. The
+  user-memory operators now take `custom_instructions=`, appended after
+  their bundled rules: configure them in
+  `config/custom_instructions/<operator>.yaml` (`enabled` + `instructions`)
+  for `boundary_detection`, `episode_extract`, `profile_extract` and
+  `reflect`, read by `everos.memory.custom_instructions.CustomInstructions`.
+  See [docs/custom_instructions.md](docs/custom_instructions.md).
+- **Boundary detection is a domain object.** `everos.service._boundary` is
+  replaced by `everos.memory.extract.boundary.BoundaryDetection`, which
+  `MemoryService` receives instead of `llm` / `prompt_loader`. Both modes now
+  run `everalgo.boundary.adetect_boundaries` (agent mode keeps tool rows in
+  the cells and now honours `[boundary_detection]` hard limits too). When
+  the model judges the trailing segment of a non-final call complete
+  (`tail_complete`), that segment is closed into a last cell and extracted
+  at once; a segment it judges open, or one no model judged, waits in the
+  buffer for the next batch or `/flush`.
+- **An unusable model reply is `everalgo.llm.LLMOutputError`**, no longer a
+  `ValueError`. Boundary detection and episode extraction try it three times
+  (`everos.memory.extract.llm_retry`, the one host-side retry), with no
+  backoff (episode extraction used to sleep 1 s and 2 s between attempts).
+  The session quarantine counts calls that end in `LLMOutputError` (after
+  its retries) or in a `ValueError` -- a message everalgo refuses
+  (`InvalidInputError`) or a row that maps to no conversation item, such as
+  an orphan tool result -- which is never retried; other errors propagate
+  uncounted.
+- **`Episode.summary` is required** (everalgo 0.9 writes one for every
+  episode and every merge) and `Episode.subject` defaults to `""`; episodes
+  indexed before either existed read back as `""`. `AtomicFact.fact` is
+  renamed `AtomicFact.content`. `Profile.explicit_info` /
+  `implicit_traits` hold `ExplicitInfoItem` / `ImplicitTraitItem` (same
+  shape as everalgo's); a profile item stored as a bare sentence reads back
+  as an item with only its `description`. A stored item with no
+  `description` is dropped when the profile is read (`/get`, `/search`'s
+  profile, the next profile update), with a `profile_entry_dropped`
+  warning; writing a profile stays strict. `/get` and `/search` return every
+  profile item with all four keys (`description`, `category` / `trait`,
+  `evidence` / `basis`, `observed_at`), the ones a stored item lacks as
+  `null` -- an additive change.
+- **Agent memory says why it stayed empty.** A memcell that yields no agent
+  case logs `agent_case_skipped` with everalgo's `reason` (for example
+  `too_few_tool_rounds`, `filter_rejected`) and its `detail`; a skill run
+  logs `agent_skill_skipped` for a case below the quality floor and
+  `agent_skill_op_dropped` for each operation the model proposed that was
+  dropped. The case quality floor before skill clustering is everalgo's
+  `should_extract_skill` instead of a copy of its threshold.
+  `AgentCase.from_algo` moved to `everos.memory.mappers.agent_case`.
+- **The multi-round retrieval decider speaks the everalgo LLM contract.**
+  `method="llm_multiround"` asks its decider with
+  `achat(..., response_format=...)`, so a reply must be the
+  `{"core": [<int>...], "next_queries": [<str>...]}` object exactly (the
+  provider retries an invalid one); a reply with prose around the JSON or
+  string indices is no longer accepted, and fails the attempt instead. The
+  trace field `decider.tokens` is `null` for the prompted decider (token
+  usage is reported by the LLM call observer).
+- **Index searches return domain records.** `memory.ports.IndexHit` (a row
+  read by column name) is replaced by `SearchHit[T]` (its `stored` record and `score`), and
+  knowledge-topic searches return `ScoredKnowledgeTopic`. Recall hands the
+  rank algorithms everalgo `Candidate`s whose `metadata` holds only the
+  fields an algorithm reads, with the stored records alongside
+  (`RecallResult.stored_by_id`); responses are built from those records.
+  An LLM rerank (`enable_llm_rerank=true`) no longer sees index-only columns
+  such as `md_path`, `content_sha256` or the `*_tokens` columns in its
+  candidate JSON. `everos.memory` no longer re-exports the `Algo*` aliases
+  of everalgo's types.
+- **The knowledge service works through two ports.** `KnowledgeService`
+  takes a `KnowledgeStore` (markdown documents, taxonomy, uploaded
+  originals; `MarkdownKnowledgeStore`) and a `KnowledgeCatalog` (the
+  document / topic records; `SqliteKnowledgeCatalog`) instead of a memory
+  root and two repositories. Replacing a document now extracts its topics
+  before touching the old files. `LLMNotConfiguredError` lives in
+  `everos.core.errors` (still importable from `everos.component.llm`).
+- **`everos.service.knowledge` is a package** (the facade and its result
+  types stay importable from the same path). The unused
+  `KnowledgeService.parse_file` method is removed. Error types are no longer
+  reachable through the module: import them from `everos.core.errors`.
+- **`KnowledgeDocument` carries no storage path.** The `md_path` field is
+  removed; the knowledge store finds a document by its id.
+  `KnowledgeStore.delete_document` no longer takes `md_path`,
+  `KnowledgeStore.update_document` returns a `WrittenDocument` (which now
+  also carries `md_path`, the document's `index.md` relative to the memory
+  root), and `KnowledgeCatalog.record_document` takes that `md_path` as a
+  keyword. API responses are unchanged.
+- **A request that needs a model while `[llm]` (or `[multimodal]`) is not
+  configured answers 422 `PROVIDER_NOT_CONFIGURED`** instead of 500
+  `INTERNAL_ERROR`.
+- **Vector backfill's row work moved into the index package.** The vectors
+  phase's row-level events (`cascade_backfill_row_*`,
+  `cascade_backfill_batch_*`, `cascade_backfill_table_*`, ...) are now emitted
+  by the `everos.infra.persistence.index.vector_backfill` logger instead of
+  `everos.service.backfill`; update log filters that matched the old name.
+  `BackfillDeps` takes a `vectors` backfill object in place of its
+  `tokenizer` and `prune_retention` fields.
+- **The vector width is read from `[embedding] dim` once, by the
+  application, and nowhere else.** The index record classes no longer read
+  the configuration while they are imported; they mark their embedding
+  columns (`DenseVector`) without a width, and each backend builds its tables
+  at the width the application hands it (`schema_for(model, dim=...)`,
+  `LanceIndexBackend(connection, dim=...)`, `MilvusIndexBackend(connection,
+  dim=...)`). The startup error "the index record classes were built for
+  dim=... but configuration reports dim=..." can no longer occur, and the CLI
+  no longer pre-scans `--root` before parsing its arguments. A table built at
+  another width is still refused at startup, as schema drift. For code that
+  imports the persistence package: `everos.infra.persistence.records` no
+  longer exports `LanceModel` / `Vector`, `BaseLanceTable` is now
+  `IndexRecord` (a plain pydantic model with no `to_arrow_schema`), and the
+  LanceDB Arrow schema comes from
+  `everos.infra.persistence.lancedb.base.arrow_schema_for`.
+
+### Removed
+
+- **`everos.infra.ome.testing` is no longer shipped.** `StrategyTestHarness`
+  was a test fixture; it now lives in the repository's own test helpers.
+
+### Fixed
+
+- **The agentic episode search reranks on the episode text.** Its
+  cross-encoder read `metadata["episode"]`, which the bridge to everalgo's
+  prompt format had already turned into a `{"subject", "content"}` dict, so
+  every passage was that dict's Python repr; it now reads the plain body.
+  `method="agentic"` scores change accordingly (a fix, not a regression).
+- **Agent skill clustering failed on the 2026-10-13 everalgo line.**
+  `trigger_skill_clustering` awaited `cluster_by_llm`, which is now a
+  blocking bridge that refuses to run inside the event loop, so no case was
+  clustered and no skill extracted; it now awaits `acluster_by_llm`.
+
+### Upgrade
+
+One command, then a restart:
+
+```bash
+uv pip install -U everos      # or: pip install -U everos
+```
+
+(`'everos[multimodal]'` if that extra was installed.) The everalgo packages
+are pinned exactly, so they move to the new contract line with it, with no
+pre-release flag. The first start after upgrading migrates `system.db` on
+its own (see below); Markdown, the index and the OME jobstore are untouched.
+
+Four things a running deployment may have to change by hand; each is also
+described under *Changed* above:
+
+| If you | Then |
+|---|---|
+| set `EVEROS_DISABLE_CASCADE`, `EVEROS_DISABLE_CASCADE_WATCHER`, `EVEROS_OME_MAX_CONCURRENT_RUNS` or `EVEROS_OME_RUN_TIMEOUT_SECONDS` | move the values to `[cascade] enabled` / `watcher_enabled` and `[ome] max_concurrent_runs` / `run_timeout_seconds` in `everos.toml`; the variables are no longer read, so an unmoved `EVEROS_DISABLE_CASCADE` silently turns the cascade back on |
+| run `everos cascade …` on a root with no `[llm]` section | add `[llm]`; building the application now requires it, and the command exits 3 with the file to edit |
+| read `capabilities.llm` from `GET /health` | read `status` or `cascade.healthy` instead; the field is gone |
+| replaced a prompt template through the old prompt slots | move the requirements your template added to `config/custom_instructions/<operator>.yaml` (details below); the template itself is no longer loaded |
+
+Extraction output changes with the everalgo line: episodes, facts and
+profiles are produced by the new prompts, and a profile's language is
+frozen from its first extraction after the upgrade. No action is needed;
+a different style in new entries is expected, not a fault.
+
+Code that imports `everos.service.memorize` / `search` / `get` or calls
+`create_app(lifespan_providers=...)` must switch to `build_application` and
+the facades.
+
+A deployment that customised a prompt slot must move it: keep only the
+requirements the custom template added on top of the default prompt and put
+them in `config/custom_instructions/<operator>.yaml` as `instructions:`
+(the bundled prompt itself can no longer be replaced). Markdown and the
+index schema are unchanged. The SQLite `memcell` table gains three nullable
+columns (`case_extracted_at`, `case_skip_reason`, `case_skip_detail_json`);
+the first start after upgrading adds them to an existing `system.db` on its
+own (logged as `sqlite_column_added`), so there is nothing to run by hand.
+
+This release pins the everalgo packages to one contract line, six of them
+release candidates: `everalgo-core 0.6.0`, `everalgo-boundary 0.4.1`,
+`everalgo-user-memory 0.9.0rc4`, `everalgo-agent-memory 0.6.0rc3`,
+`everalgo-rank 0.5.0rc3`, `everalgo-knowledge 0.3.0rc2`,
+`everalgo-clustering 0.3.0rc2` and, with the `multimodal` extra,
+`everalgo-parser 0.3.0rc2`. The pins are exact (`==`), so `pip install
+everos` resolves them without any pre-release flag; upgrade them together,
+never one at a time.
+
+### Fixed
+
+- **The case→skill bridge matches again.** On HYBRID + LLM-rerank agent
+  searches the bridge looked up skills by the matched cases' index row ids
+  (`<agent_id>_ac_…`), while a skill's `source_case_ids` holds the md-side
+  entry ids (`ac_…`), so no skill was ever bridged in (#478). The bridge is
+  now keyed by entry id, and `SearchAgentCaseItem` exposes `entry_id` so a
+  client can join cases to skills the same way.
+- **The first agent `/add` no longer downloads tiktoken's encoding.** The
+  algorithm library counts tokens with `o200k_base`, which tiktoken fetches
+  on first use; a fresh deployment paid for that download inside the first
+  agent write and answered a generic 500 when it failed (#277). The server
+  now warms the encoding at startup, before any storage is opened, and a
+  host that cannot load it fails to start with `TokenizerAssetError` naming
+  the cause and the `TIKTOKEN_CACHE_DIR` pre-cache option.
+- **OME crash recovery resumes every run of the previous process.** It
+  used to skip RUNNING rows younger than 30 minutes on the theory that
+  APScheduler might still own them; it never does (a one-shot job leaves
+  the jobstore when it is submitted), so a run cut short by a restart
+  inside that window was lost for good (#540). The engine holds the
+  jobstore lock before it recovers, so every RUNNING row is a crash:
+  all of them are marked CRASHED and re-enqueued.
+  `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
+  user-facing setting.
+- **`radius` is a pre-fusion cosine floor on every vector route.** It was
+  applied to the dense pool of `vector` and `hybrid` searches but also
+  passed into the ranker's input, which never read it, and the `agentic`
+  routes ignored it entirely (#394). The dead ranker field is gone and
+  the agentic dense recalls (cases, skills, episode facts) now apply the
+  same floor; the API reference states the semantics.
+- **A file restored with its old mtime is indexed again.** When the
+  cascade worker found an enqueued file gone it folded the row into a
+  deletion but left it saying `done / added`, so a scan that later saw
+  the file back with the same mtime took it for indexed (#541). The
+  worker now records the applied change (`deleted`), and the reconciler
+  re-emits a present file whose row says `deleted` whatever its mtime.
+
 ## [1.5.1] - 2026-10-22
 
 **Hybrid and vector search keep up with 10 requests a second out of the box.**

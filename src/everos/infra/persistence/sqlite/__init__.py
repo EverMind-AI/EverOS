@@ -1,96 +1,111 @@
 """SQLite business persistence layer.
 
-Sits on top of :mod:`everos.core.persistence.sqlite` (engine + sessions +
+Sits on top of :mod:`._base` (engine + sessions +
 ``BaseTable`` + ``RepoBase``) and provides:
 
-    * lazy process-wide engine + session-factory singletons
-      (:mod:`.sqlite_manager`)
-    * concrete table schemas under :mod:`.tables`
-    * concrete repository singletons under :mod:`.repos`
+    * :class:`SqliteDatabase` -- the engine and session factory of one
+      ``system.db`` (:mod:`.sqlite_manager`)
+    * concrete table schemas under :mod:`._tables`
+    * concrete repositories under :mod:`._repos`, and :class:`SqliteRepos`
+      to build all of them over one database
 
 External usage::
 
-    from everos.infra.persistence.sqlite import (
-        get_engine, get_session_factory, dispose_engine,
-        # business tables / repos are re-exported here too —
-        # callers MUST go through this top-level package because
-        # ``infra.persistence.sqlite.**`` (sub-packages) are forbidden
-        # to ``service`` / ``memory`` / ``entrypoints`` by import-linter.
-        UnprocessedBuffer, Memcell, ConversationStatus,
-        KnowledgeDocumentRow, KnowledgeTopicRow,
-        unprocessed_buffer_repo, memcell_repo, conversation_status_repo,
-        knowledge_document_repo, knowledge_topic_sqlite_repo,
-    )
+    from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 
-The :class:`SqliteLifespanProvider` runs ``SQLModel.metadata.create_all``
-on app startup and ``dispose_engine`` on shutdown, so business code does
-not need to manage either.
+    database = SqliteDatabase(root, settings.sqlite)
+    repos = SqliteRepos.over(database)
+
+Callers MUST go through this top-level package: ``infra.persistence.sqlite.**``
+(sub-packages) are forbidden to ``service`` / ``memory`` / ``entrypoints`` by
+import-linter. The application start creates the schema and disposes the
+database on shutdown.
 """
 
-# Importing ``tables`` registers every business SQLModel in
-# ``SQLModel.metadata`` so ``SqliteLifespanProvider.startup`` can
+# Importing ``_tables`` registers every business SQLModel in
+# ``SQLModel.metadata`` so the application start can
 # ``create_all`` without callers having to import each model module.
-from . import tables as tables
-from .repos import LOST_STATUS_WRITE as LOST_STATUS_WRITE
-from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
-from .repos import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
-from .repos import DocumentListPage as DocumentListPage
-from .repos import DocumentUpsertPayload as DocumentUpsertPayload
-from .repos import QueueSummary as QueueSummary
-from .repos import TopicUpsertPayload as TopicUpsertPayload
-from .repos import cluster_repo as cluster_repo
-from .repos import conversation_status_repo as conversation_status_repo
-from .repos import knowledge_document_repo as knowledge_document_repo
-from .repos import knowledge_topic_sqlite_repo as knowledge_topic_sqlite_repo
-from .repos import md_change_state_repo as md_change_state_repo
-from .repos import memcell_repo as memcell_repo
-from .repos import memorize_inbox_repo as memorize_inbox_repo
-from .repos import mint_cluster_id as mint_cluster_id
-from .repos import reflection_report_repo as reflection_report_repo
-from .repos import unprocessed_buffer_repo as unprocessed_buffer_repo
-from .sqlite_manager import dispose_engine as dispose_engine
-from .sqlite_manager import get_engine as get_engine
-from .sqlite_manager import get_session_factory as get_session_factory
-from .tables import Cluster as Cluster
-from .tables import ClusterMember as ClusterMember
-from .tables import ConversationStatus as ConversationStatus
-from .tables import KnowledgeDocumentRow as KnowledgeDocumentRow
-from .tables import KnowledgeTopicRow as KnowledgeTopicRow
-from .tables import MdChangeState as MdChangeState
-from .tables import Memcell as Memcell
-from .tables import MemorizeInbox as MemorizeInbox
-from .tables import ReflectionReport as ReflectionReport
-from .tables import UnprocessedBuffer as UnprocessedBuffer
+from . import _tables as _tables
+from ._base import BaseTable as BaseTable
+from ._base import Field as Field
+from ._base import Relationship as Relationship
+from ._base import RepoBase as RepoBase
+from ._base import SQLModel as SQLModel
+from ._base import create_session_factory as create_session_factory
+from ._base import create_system_engine as create_system_engine
+from ._base import session_scope as session_scope
+from ._repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
+from ._repos import ClusterRepo as ClusterRepo
+from ._repos import ConversationStatusRepo as ConversationStatusRepo
+from ._repos import DocumentListPage as DocumentListPage
+from ._repos import DocumentUpsertPayload as DocumentUpsertPayload
+from ._repos import KnowledgeDocumentRepo as KnowledgeDocumentRepo
+from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
+from ._repos import MdChangeStateRepo as MdChangeStateRepo
+from ._repos import MemcellRepo as MemcellRepo
+from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
+from ._repos import QueueSummary as QueueSummary
+from ._repos import ReflectionReportRepo as ReflectionReportRepo
+from ._repos import TopicUpsertPayload as TopicUpsertPayload
+from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
+from ._tables import Cluster as Cluster
+from ._tables import ClusterMember as ClusterMember
+from ._tables import ConversationStatus as ConversationStatus
+from ._tables import KnowledgeDocumentRow as KnowledgeDocumentRow
+from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
+from ._tables import MdChangeState as MdChangeState
+from ._tables import Memcell as Memcell
+from ._tables import MemorizeInbox as MemorizeInbox
+from ._tables import ReflectionReport as ReflectionReport
+from ._tables import UnprocessedBuffer as UnprocessedBuffer
+from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
+from .repositories import SqliteRepos as SqliteRepos
+from .sqlite_manager import SqliteDatabase as SqliteDatabase
+from .stores import SqliteClusterStore as SqliteClusterStore
+from .stores import SqliteMemcellStore as SqliteMemcellStore
+from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
+from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
+from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 
 __all__ = [
-    "LOST_STATUS_WRITE",
     "MTIME_TOLERANCE_SECONDS",
-    "REPLAYS_EXHAUSTED_PREFIX",
+    "BaseTable",
     "Cluster",
     "ClusterMember",
+    "ClusterRepo",
     "ConversationStatus",
+    "ConversationStatusRepo",
     "DocumentListPage",
     "DocumentUpsertPayload",
+    "Field",
+    "KnowledgeDocumentRepo",
     "KnowledgeDocumentRow",
     "KnowledgeTopicRow",
+    "KnowledgeTopicRowRepo",
     "MdChangeState",
+    "MdChangeStateRepo",
     "Memcell",
+    "MemcellRepo",
     "MemorizeInbox",
+    "MemorizeInboxRepo",
     "QueueSummary",
     "ReflectionReport",
+    "ReflectionReportRepo",
+    "Relationship",
+    "RepoBase",
+    "SQLModel",
+    "SqliteClusterStore",
+    "SqliteDatabase",
+    "SqliteKnowledgeCatalog",
+    "SqliteMemcellStore",
+    "SqliteMemorizeInboxStore",
+    "SqliteReflectionReportStore",
+    "SqliteRepos",
+    "SqliteSessionBufferStore",
     "TopicUpsertPayload",
     "UnprocessedBuffer",
-    "cluster_repo",
-    "conversation_status_repo",
-    "dispose_engine",
-    "get_engine",
-    "get_session_factory",
-    "knowledge_document_repo",
-    "knowledge_topic_sqlite_repo",
-    "md_change_state_repo",
-    "memcell_repo",
-    "memorize_inbox_repo",
-    "mint_cluster_id",
-    "reflection_report_repo",
-    "unprocessed_buffer_repo",
+    "UnprocessedBufferRepo",
+    "create_session_factory",
+    "create_system_engine",
+    "session_scope",
 ]

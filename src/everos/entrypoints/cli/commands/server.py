@@ -8,14 +8,16 @@ factory.
 
 from __future__ import annotations
 
-import logging
 import os
 import sys
 
 import typer
 import uvicorn
 
+from everos.config import load_settings
 from everos.config.settings import resolve_root
+from everos.core.observability.logging import get_logger
+from everos.service import configure_process
 
 app = typer.Typer(
     name="server",
@@ -68,7 +70,7 @@ def start(
     log_level: str | None = typer.Option(
         None,
         "--log-level",
-        help="Log level (env: EVEROS_LOG_LEVEL, default: INFO)",
+        help="Log level (env: EVEROS_LOG_LEVEL; default: logging.level, INFO)",
     ),
 ) -> None:
     """Start the HTTP API server."""
@@ -86,19 +88,19 @@ def start(
         )
         raise typer.Exit(code=1)
 
-    from everos.config import load_settings
+    level_override = log_level or os.getenv("EVEROS_LOG_LEVEL")
+    if level_override:
+        # The app factory loads its own settings (in a fresh process under
+        # --reload), so the override travels the way --root does: as env.
+        os.environ["EVEROS_LOGGING__LEVEL"] = level_override.upper()
 
     settings = load_settings()
+    configure_process(settings)
 
     host_resolved = host or settings.api.host
     port_resolved = port if port is not None else settings.api.port
-    log_level_resolved = (log_level or os.getenv("EVEROS_LOG_LEVEL", "INFO")).upper()
 
-    from everos.core.observability.logging import configure_logging
-
-    configure_logging(level=log_level_resolved)
-
-    bootstrap_logger = logging.getLogger("everos.cli.server")
+    bootstrap_logger = get_logger("everos.cli.server")
     bootstrap_logger.info("starting everos on %s:%d", host_resolved, port_resolved)
     bootstrap_logger.info(
         "once up, MCP clients connect with: uvx everos-mcp, "
@@ -119,7 +121,7 @@ def start(
             port=port_resolved,
             reload=reload,
             factory=True,
-            log_level=log_level_resolved.lower(),
+            log_level=settings.logging.level.lower(),
             log_config=None,
         )
     except KeyboardInterrupt:

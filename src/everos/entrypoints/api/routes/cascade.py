@@ -25,9 +25,9 @@ empty context handed to the answer model, and a scored zero.
 
 The fix is not a longer window -- that only moves the race. It is to notice that
 a read-only phase creates no new fragments, so there is nothing for optimize or
-prune to do, and the whole subsystem is pure risk. ``EVEROS_DISABLE_CASCADE``
+prune to do, and the whole subsystem is pure risk. ``[cascade] enabled = false``
 already covers a process that starts read-only; this covers the process that
-writes first and *becomes* read-only, which an env var read once at startup
+writes first and *becomes* read-only, which a setting read once at startup
 cannot express.
 
 Quiesce is deliberately one-way. Restart the process to get the projection back.
@@ -35,41 +35,16 @@ Quiesce is deliberately one-way. Restart the process to get the projection back.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
 
-from everos.core.observability.logging import get_logger
-from everos.entrypoints.api.utils import cascade_orchestrator
-
-logger = get_logger(__name__)
+from everos.entrypoints.api.dependencies import ApplicationDep
+from everos.entrypoints.api.schemas import QuiesceResponse
 
 router = APIRouter(prefix="/cascade", tags=["cascade"])
 
 
-class QuiesceResponse(BaseModel):
-    """What the final drain accomplished, and what it left behind.
-
-    ``pending_before`` is the queue depth on arrival: a caller that expected the
-    projection to be up to date can assert it was 0 and learn otherwise. Anything
-    above 0 in ``pending_after`` means the drain could not finish -- the index is
-    NOT a complete projection of the markdown, and searching it will silently
-    under-recall.
-    """
-
-    quiesced: bool
-    """False when the subsystem was already stopped or never started; the call
-    is idempotent, so this is information rather than an error."""
-    drained: int
-    """Rows the final scan + drain cycle processed."""
-    pending_before: int
-    pending_after: int
-    failed_permanent: int
-    """Files that need ``cascade fix``; a data-quality backlog, not a drain
-    failure. Reported so a caller can see that some markdown never made it."""
-
-
 @router.post("/quiesce", response_model=QuiesceResponse)
-async def quiesce(request: Request) -> QuiesceResponse:
+async def quiesce(app: ApplicationDep) -> QuiesceResponse:
     """Drain the projection queue, then stop watcher + scanner + worker.
 
     Returns when the index is a complete projection of the markdown on disk and
@@ -79,45 +54,20 @@ async def quiesce(request: Request) -> QuiesceResponse:
 
     Idempotent -- a second call reports ``quiesced=false`` rather than failing.
     """
-    orch = cascade_orchestrator(request)
-    if orch is None:
+    result = await app.ops.cascade_quiesce()
+    if result is None:
         raise HTTPException(
             status_code=503,
             detail=(
                 "cascade subsystem is not running; nothing to quiesce "
-                "(disabled via EVEROS_DISABLE_CASCADE, or this app was built "
-                "without the cascade lifespan)"
+                "(disabled via [cascade] enabled = false, or the application "
+                "was not started)"
             ),
-        )
-
-    before = await orch.queue_summary()
-    # Drain BEFORE stopping. `drain_fully` is a full scan + drain to empty, so it
-    # also picks up markdown the watcher never saw -- which matters here because
-    # the watcher is the half most likely to be off (inotify watches are a
-    # per-user kernel resource a shared host can exhaust) -- and it does not stop
-    # at the worker's per-drain bound, which the ledger an upgrade re-queues can
-    # exceed.
-    drained = await orch.drain_fully()
-    await orch.stop()
-    after = await orch.queue_summary()
-
-    logger.info(
-        "cascade_quiesced",
-        drained=drained,
-        pending_before=before.pending,
-        pending_after=after.pending,
-        failed_permanent=after.failed_permanent,
-    )
-    if after.pending:
-        logger.warning(
-            "cascade_quiesce_left_pending",
-            pending=after.pending,
-            reason="index is not a complete projection of the markdown",
         )
     return QuiesceResponse(
         quiesced=True,
-        drained=drained,
-        pending_before=before.pending,
-        pending_after=after.pending,
-        failed_permanent=after.failed_permanent,
+        drained=result.drained,
+        pending_before=result.pending_before,
+        pending_after=result.pending_after,
+        failed_permanent=result.failed_permanent,
     )

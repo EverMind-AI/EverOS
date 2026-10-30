@@ -8,27 +8,34 @@ import pytest
 from pymilvus import DataType, FunctionType
 
 from everos.config import load_settings
-from everos.infra.persistence.index import (
-    Episode,
-    IndexRepository,
-    episode_repo,
-    foresight_repo,
-    is_null,
-    user_profile_repo,
-)
+from everos.infra.persistence.index import IndexRepositories, IndexRepository, is_null
 from everos.infra.persistence.index.schema import schema_for
-from everos.infra.persistence.milvus import repository
+from everos.infra.persistence.milvus import (
+    MilvusConnection,
+    MilvusIndexBackend,
+    repository,
+)
+from everos.infra.persistence.milvus import _codec as codec
+from everos.infra.persistence.milvus import _layout as layout
 from everos.infra.persistence.milvus.milvus_manager import (
     MilvusConfigurationError,
     MilvusSchemaMismatchError,
     _resolve_uri,
 )
 from everos.infra.persistence.milvus.predicate import render_predicate
-from everos.infra.persistence.milvus.repos import ALL_REPOS
 from everos.infra.persistence.milvus.repository import (
     MilvusRepoBase,
     MilvusValueLimitError,
 )
+from everos.infra.persistence.records import Episode
+from tests.fakes import TEST_DIM
+
+
+def _milvus() -> IndexRepositories:
+    """Milvus repositories over the configured settings; nothing connects."""
+    return MilvusIndexBackend(
+        MilvusConnection(load_settings().milvus), dim=TEST_DIM
+    ).repositories
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +59,7 @@ def _describe_response(milvus_repo, *, always_params: bool = False):  # type: ig
     while ``to_dict`` omits it when empty — ``always_params`` covers that one
     known difference between the two serializations.
     """
-    schema = milvus_repo._build_collection_schema().to_dict()
+    schema = milvus_repo._layout.build_schema().to_dict()
     fields = [dict(f) for f in schema["fields"]]
     for field in fields:
         params = field.get("params") or {}
@@ -99,10 +106,10 @@ def _patch_describe(monkeypatch, response, *, indexes=None):  # type: ignore[no-
         def describe_index(self, name: str, index_name: str):  # type: ignore[no-untyped-def]
             return index_descriptions.get(index_name)
 
-    async def _fake_get_client():  # type: ignore[no-untyped-def]
+    async def _fake_get_client(_connection):  # type: ignore[no-untyped-def]
         return _FakeClient()
 
-    monkeypatch.setattr(repository, "get_client", _fake_get_client)
+    monkeypatch.setattr(MilvusConnection, "client", _fake_get_client)
 
 
 def _episode(**overrides):  # type: ignore[no-untyped-def]
@@ -141,13 +148,13 @@ def test_remote_uri_is_required_and_local_paths_are_rejected() -> None:
 
 
 def test_neutral_schema_tracks_every_model_field_and_dense_vector() -> None:
-    schema = schema_for(Episode)
+    schema = schema_for(Episode, dim=TEST_DIM)
     assert {field.name for field in schema.fields} == set(Episode.model_fields)
     assert [field.name for field in schema.vector_fields] == [
         "vector",
         "subject_vector",
     ]
-    assert all(isinstance(repo, IndexRepository) for repo in ALL_REPOS)
+    assert all(isinstance(repo, IndexRepository) for repo in _milvus().all())
 
 
 def test_null_vector_predicate_targets_presence_marker() -> None:
@@ -158,14 +165,14 @@ def test_null_vector_predicate_targets_presence_marker() -> None:
 
 
 def test_record_conversion_stores_every_dense_vector_with_presence() -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
-    record = milvus_repo._to_milvus_record(_episode())
+    milvus_repo = _milvus().episode
+    record = milvus_repo._codec.to_record(_episode())
     assert len(record["vector"]) == 1024
     assert len(record["subject_vector"]) == 1024
     assert record["vector__present"] is True
     assert record["subject_vector__present"] is True
 
-    missing = milvus_repo._to_milvus_record(_episode(subject_vector=None))
+    missing = milvus_repo._codec.to_record(_episode(subject_vector=None))
     assert missing["subject_vector__present"] is False
     assert missing["subject_vector"] == [0.0] * 1024
 
@@ -178,49 +185,51 @@ def test_datetime_round_trip_is_exact_below_the_ms_heuristic() -> None:
     raises ``ValueError: year ... is out of range`` on the way out. The
     physical datetime column has to bypass that heuristic entirely.
     """
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     for moment in (
         dt.datetime(1970, 1, 2, tzinfo=dt.UTC),
         dt.datetime(1999, 1, 1, tzinfo=dt.UTC),
         dt.datetime(2001, 9, 8, tzinfo=dt.UTC),
         dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
     ):
-        stored = milvus_repo._to_milvus_record(_episode(timestamp=moment))
+        stored = milvus_repo._codec.to_record(_episode(timestamp=moment))
         assert "timestamp_ms" in stored
-        restored = milvus_repo._restore_row(stored)
+        restored = milvus_repo._codec.restore_row(stored)
         assert restored["timestamp"] == moment, f"round-trip broke at {moment}"
 
 
 def test_update_fetch_preserves_dummy_vector_for_scalar_only_tables() -> None:
-    milvus_repo = user_profile_repo._repo()  # type: ignore[attr-defined]
-    assert "_everos_dummy_vector" in milvus_repo._output_fields(include_vectors=True)
-    assert "_everos_dummy_vector" not in milvus_repo._output_fields(
+    milvus_repo = _milvus().user_profile
+    assert "_everos_dummy_vector" in milvus_repo._layout.output_fields(
+        include_vectors=True
+    )
+    assert "_everos_dummy_vector" not in milvus_repo._layout.output_fields(
         include_vectors=False
     )
 
 
 def test_record_conversion_reports_varchar_array_and_vector_limits() -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     with pytest.raises(MilvusValueLimitError, match=r"episode is .* UTF-8 bytes"):
-        milvus_repo._to_milvus_record(_episode(episode="x" * 65_536))
+        milvus_repo._codec.to_record(_episode(episode="x" * 65_536))
     with pytest.raises(MilvusValueLimitError, match="sender_ids has 257 items"):
-        milvus_repo._to_milvus_record(_episode(sender_ids=["u"] * 257))
+        milvus_repo._codec.to_record(_episode(sender_ids=["u"] * 257))
     with pytest.raises(MilvusValueLimitError, match="dimension 2"):
-        milvus_repo._validate_vector(
+        milvus_repo._codec.validate_vector(
             milvus_repo.index_schema.field("vector"),
             [1.0, 0.0],
         )
 
 
 def test_server_score_normalization() -> None:
-    assert repository._cosine_distance_from_milvus(0.75) == pytest.approx(0.25)
-    assert repository._bm25_score_from_distance(1.5) == pytest.approx(1.5)
+    assert codec.cosine_distance_from_milvus(0.75) == pytest.approx(0.25)
+    assert codec.bm25_score_from_distance(1.5) == pytest.approx(1.5)
 
 
 async def test_collection_metadata_is_cached_after_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
 
     class _FakeClient:
         has_calls = 0
@@ -242,10 +251,10 @@ async def test_collection_metadata_is_cached_after_startup(
 
     client = _FakeClient()
 
-    async def _fake_get_client():  # type: ignore[no-untyped-def]
+    async def _fake_get_client(_connection):  # type: ignore[no-untyped-def]
         return client
 
-    monkeypatch.setattr(repository, "get_client", _fake_get_client)
+    monkeypatch.setattr(MilvusConnection, "client", _fake_get_client)
     await milvus_repo.ensure_collection()
     await milvus_repo.ensure_collection()
     assert client.has_calls == 1
@@ -265,7 +274,7 @@ async def test_verify_accepts_every_collection_it_would_create(
     name-only check it replaces, so every table is verified against the exact
     schema this adapter would have created for it.
     """
-    for repo in ALL_REPOS:
+    for repo in _milvus().all():
         _patch_describe(
             monkeypatch, _describe_response(repo, always_params=always_params)
         )
@@ -274,7 +283,7 @@ async def test_verify_accepts_every_collection_it_would_create(
 
 async def test_verify_rejects_datatype_drift(monkeypatch: pytest.MonkeyPatch) -> None:
     """Same field name, wrong physical type — the case a name check waves through."""
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
         if field["name"] == "timestamp_ms":
@@ -288,7 +297,7 @@ async def test_verify_rejects_datatype_drift(monkeypatch: pytest.MonkeyPatch) ->
 async def test_verify_rejects_vector_dimension_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
         if field["name"] == "vector":
@@ -305,7 +314,7 @@ async def test_verify_rejects_primary_and_nullable_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``describe_collection`` omits both flags when false, so absence is exact."""
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
         if field["name"] == "__pk":
@@ -325,7 +334,7 @@ async def test_verify_rejects_missing_or_disabled_bm25_input_analyzer(
     monkeypatch: pytest.MonkeyPatch,
     reported: object,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
         if field["name"] == "episode_tokens":
@@ -354,7 +363,7 @@ async def test_verify_rejects_bm25_function_mapping_drift(
     attribute: str,
     replacement: object,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     response["functions"][0][attribute] = replacement
     _patch_describe(monkeypatch, response)
@@ -369,7 +378,7 @@ async def test_verify_rejects_bm25_function_mapping_drift(
 async def test_verify_rejects_missing_and_stale_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     response["fields"] = [f for f in response["fields"] if f["name"] != "subject"]
     response["fields"].append({"name": "left_over", "type": DataType.VARCHAR})
@@ -389,7 +398,7 @@ async def test_verify_treats_limit_drift_as_advisory(
     Blocking here would turn a server-side normalization we cannot predict into
     an outage; the datatype and dimension checks carry the load instead.
     """
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
         if field["name"] == "subject":
@@ -398,7 +407,7 @@ async def test_verify_treats_limit_drift_as_advisory(
 
     warnings: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        repository.logger,
+        layout.logger,
         "warning",
         lambda event, **kw: warnings.append((event, kw)),
     )
@@ -413,14 +422,14 @@ async def test_verify_treats_limit_drift_as_advisory(
 @pytest.mark.parametrize(
     ("repo_factory", "field_name", "metric"),
     [
-        (lambda: episode_repo._repo(), "vector", "L2"),  # type: ignore[attr-defined]
+        (lambda: _milvus().episode, "vector", "L2"),  # type: ignore[attr-defined]
         (
-            lambda: episode_repo._repo(),  # type: ignore[attr-defined]
+            lambda: _milvus().episode,  # type: ignore[attr-defined]
             "episode_tokens__sparse",
             "COSINE",
         ),
         (
-            lambda: user_profile_repo._repo(),  # type: ignore[attr-defined]
+            lambda: _milvus().user_profile,  # type: ignore[attr-defined]
             "_everos_dummy_vector",
             None,
         ),
@@ -454,7 +463,7 @@ async def test_verify_rejects_missing_or_wrong_vector_index(
 async def test_verify_rejects_duplicate_same_metric_vector_indexes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     indexes = _index_descriptions(response)
     original = next(
@@ -478,7 +487,7 @@ async def test_verify_rejects_duplicate_same_metric_vector_indexes(
 async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     response = _describe_response(milvus_repo)
     indexes = _index_descriptions(response)
     for description in indexes.values():
@@ -503,7 +512,7 @@ async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
 
 
 # Written out by hand on purpose. _describe_response() builds its fake server
-# reply from _build_collection_schema(), which shares _physical_fields() with
+# reply from CollectionLayout.build_schema(), which shares physical_fields() with
 # the verifier — so those tests can only prove that creation and verification
 # agree with *each other*, never that either matches what we intend. This
 # literal is the independent statement of intent: a slip in _physical_for
@@ -551,8 +560,8 @@ def _flag(field) -> str:  # type: ignore[no-untyped-def]
 
 def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
     """Pin the physical column list against a hand-written expectation."""
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
-    actual = milvus_repo._physical_fields()
+    milvus_repo = _milvus().episode
+    actual = milvus_repo._layout.physical_fields()
 
     assert [f.name for f in actual] == [row[0] for row in _EPISODE_PHYSICAL]
     for field, row in zip(actual, _EPISODE_PHYSICAL, strict=True):
@@ -572,8 +581,8 @@ def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
 
 def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     """Milvus needs at least one vector column, so scalar-only tables fake one."""
-    milvus_repo = user_profile_repo._repo()  # type: ignore[attr-defined]
-    actual = {f.name: f for f in milvus_repo._physical_fields()}
+    milvus_repo = _milvus().user_profile
+    actual = {f.name: f for f in milvus_repo._layout.physical_fields()}
 
     assert "_everos_dummy_vector" in actual
     assert actual["_everos_dummy_vector"].datatype is DataType.FLOAT_VECTOR
@@ -594,11 +603,11 @@ def test_nullable_bm25_input_is_declared_not_null() -> None:
     logical field is optional. Episode and user_profile cannot cover this
     interaction, so it is asserted where it actually occurs.
     """
-    logical = schema_for(foresight_repo.schema)
+    logical = _milvus().foresight.index_schema
     assert logical.field("evidence_tokens").nullable is True
     assert "evidence_tokens" in logical.bm25_fields
 
-    physical = {f.name: f for f in foresight_repo._repo()._physical_fields()}  # type: ignore[attr-defined]
+    physical = {f.name: f for f in _milvus().foresight._layout.physical_fields()}  # type: ignore[attr-defined]
     assert physical["evidence_tokens"].nullable is False
     assert physical["evidence_tokens"].enable_analyzer is True
     # "evidence" is the same optional text without the analyzer attached, so
@@ -616,7 +625,7 @@ async def test_search_topk_is_clamped_to_the_milvus_window(
     ``MilvusException code=1100``. The adapter absorbs the difference so no
     caller has to learn one engine's limit.
     """
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = _milvus().episode
     seen: dict[str, int] = {}
 
     class _FakeClient:
@@ -636,10 +645,10 @@ async def test_search_topk_is_clamped_to_the_milvus_window(
             seen["limit"] = kw["limit"]
             return [[]]
 
-    async def _fake_get_client():  # type: ignore[no-untyped-def]
+    async def _fake_get_client(_connection):  # type: ignore[no-untyped-def]
         return _FakeClient()
 
-    monkeypatch.setattr(repository, "get_client", _fake_get_client)
+    monkeypatch.setattr(MilvusConnection, "client", _fake_get_client)
 
     await milvus_repo.dense_search([0.1] * 1024, None, limit=100_000)
     assert seen["limit"] == repository._SEARCH_TOPK_MAX

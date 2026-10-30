@@ -2,16 +2,13 @@
 
 Soft-dependency embedding mode lets cascade handlers write rows with
 ``vector=None`` when no embedding provider is configured. Each business
-table's ``vector`` field annotation must therefore include ``None`` in its
-type union (``Vector(_DIM) | None``), not just the bare vector type.
+table's ``vector`` field must therefore be declared ``DenseVector | None``.
 
-The pydantic-level annotation check alone is not sufficient: LanceDB's
+The neutral schema check alone is not sufficient: LanceDB's
 ``alter_columns`` (see ``migrate_table_schemas`` in
-``everos.infra.persistence.lancedb``) operates on the **pyarrow** schema,
-not the pydantic one. This module also asserts
-``to_arrow_schema().field("vector").nullable`` directly, so a regression
-in the Pydantic->PyArrow conversion (e.g. LanceDB's converter failing to
-carry ``| None`` through) is caught here rather than only surfacing as a
+``everos.infra.persistence.lancedb``) operates on the **Arrow** schema. This
+module also asserts the derived Arrow field is nullable, so a regression in
+the neutral -> Arrow mapping is caught here rather than only surfacing as a
 migration failure at startup.
 """
 
@@ -19,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from everos.infra.persistence.index import schema_for
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
@@ -27,76 +25,38 @@ from everos.infra.persistence.records import (
     Foresight,
     KnowledgeTopic,
 )
+from tests.fakes import TEST_DIM, arrow_schema
 
-
-def _vector_field_type(cls, field_name: str = "vector"):
-    """Return the resolved annotation of a Vector field."""
-    return cls.model_fields[field_name].annotation
-
-
-def test_episode_vector_nullable():
-    """Verify: vector: Vector(_DIM) | None"""
-    ann = str(_vector_field_type(Episode))
-    assert "None" in ann
-
-
-def test_episode_subject_vector_nullable():
-    """Verify: subject_vector: Vector(_DIM) | None"""
-    ann = str(_vector_field_type(Episode, "subject_vector"))
-    assert "None" in ann
-
-
-def test_atomic_fact_vector_nullable():
-    ann = str(_vector_field_type(AtomicFact))
-    assert "None" in ann
-
-
-def test_foresight_vector_nullable():
-    ann = str(_vector_field_type(Foresight))
-    assert "None" in ann
-
-
-def test_agent_case_vector_nullable():
-    ann = str(_vector_field_type(AgentCase))
-    assert "None" in ann
-
-
-def test_agent_skill_vector_nullable():
-    ann = str(_vector_field_type(AgentSkill))
-    assert "None" in ann
-
-
-def test_knowledge_topic_vector_nullable():
-    ann = str(_vector_field_type(KnowledgeTopic))
-    assert "None" in ann
-
-
-def test_dim_unchanged():
-    """_DIM stays at 1024 across all table modules — only nullability moves."""
-    from everos.infra.persistence.records import agent_case as m1
-    from everos.infra.persistence.records import agent_skill as m2
-    from everos.infra.persistence.records import atomic_fact as m3
-    from everos.infra.persistence.records import episode as m4
-    from everos.infra.persistence.records import foresight as m5
-    from everos.infra.persistence.records import knowledge_topic as m6
-
-    for module in (m1, m2, m3, m4, m5, m6):
-        assert module._DIM == 1024
+_VECTOR_COLUMNS = [
+    (Episode, "vector"),
+    (Episode, "subject_vector"),
+    (AtomicFact, "vector"),
+    (Foresight, "vector"),
+    (AgentCase, "vector"),
+    (AgentSkill, "vector"),
+    (KnowledgeTopic, "vector"),
+]
 
 
 @pytest.mark.parametrize(
-    "cls",
-    [Episode, AtomicFact, Foresight, AgentCase, AgentSkill, KnowledgeTopic],
+    ("cls", "column"), _VECTOR_COLUMNS, ids=lambda v: getattr(v, "__name__", v)
 )
-def test_vector_nullable_at_pyarrow_layer(cls):
-    """``alter_columns`` (the migration primitive) operates on the pyarrow
+def test_vector_is_declared_nullable(cls: type, column: str) -> None:
+    field = schema_for(cls, dim=TEST_DIM).field(column)
+    assert field.nullable is True
+    assert field.dimension == TEST_DIM
+
+
+@pytest.mark.parametrize(
+    ("cls", "column"), _VECTOR_COLUMNS, ids=lambda v: getattr(v, "__name__", v)
+)
+def test_vector_nullable_at_pyarrow_layer(cls: type, column: str) -> None:
+    """``alter_columns`` (the migration primitive) operates on the Arrow
     schema, not the pydantic annotation — assert nullability there too."""
-    arrow_schema = cls.to_arrow_schema()
-    assert arrow_schema.field("vector").nullable is True
+    assert arrow_schema(cls).field(column).nullable is True
 
 
-def test_episode_subject_vector_nullable_at_pyarrow_layer():
-    """``subject_vector`` was already nullable pre-refactor and is not part
-    of the v2 migration; confirm the pyarrow schema still agrees."""
-    arrow_schema = Episode.to_arrow_schema()
-    assert arrow_schema.field("subject_vector").nullable is True
+def test_width_is_whatever_the_caller_configures() -> None:
+    """The records carry no width: the same class yields any ``dim``."""
+    assert arrow_schema(Episode, dim=768).field("vector").type.list_size == 768
+    assert arrow_schema(Episode, dim=3072).field("vector").type.list_size == 3072

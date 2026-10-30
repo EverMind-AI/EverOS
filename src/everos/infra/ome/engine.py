@@ -2,163 +2,64 @@
 
 Manages strategy registration, start-stop lifecycle, event dispatch, and
 scheduling of Cron and Idle triggers via APScheduler. Enforces single-engine
-guard via portalocker for concurrent access safety.
+guard through :class:`~everos.infra.ome.lock.OmeLock`.
+
+Collaborators: the APScheduler boundary (job building and the persisted entry
+callbacks) is :mod:`everos.infra.ome._dispatch.scheduling`; in-flight run
+accounting is :class:`~everos.infra.ome._dispatch.in_flight.InFlightRuns`; the
+in-strategy call guard is
+:func:`~everos.infra.ome._dispatch._state.refuse_inside_strategy`.
 """
 
 from __future__ import annotations
 
+__all__ = ["OfflineEngine"]
+
 import asyncio
-import functools
-import inspect
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
-import portalocker
-from apscheduler.executors.asyncio import AsyncIOExecutor
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import current_traceparent
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._background.config_reloader import ConfigReloader
 from everos.infra.ome._background.crash_recovery import scan_and_resume
 from everos.infra.ome._background.idle_scanner import IdleScanner
-from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
+from everos.infra.ome._dispatch import scheduling
+from everos.infra.ome._dispatch._state import refuse_inside_strategy
 from everos.infra.ome._dispatch.dispatcher import EventDispatcher
+from everos.infra.ome._dispatch.in_flight import InFlightRuns
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._dispatch.runner import Runner
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.decorator import Strategy, StrategyMeta
-from everos.infra.ome.events import BaseEvent, CronTick, ManualTick, resolve_topic
+from everos.infra.ome.events import resolve_topic
 from everos.infra.ome.exceptions import (
-    EngineCallFromStrategyError,
-    EngineLockHeldError,
     OMEError,
 )
-from everos.infra.ome.records import RunRecord, RunStatus, StrategyRouteInfo
-from everos.infra.ome.triggers import Cron, Idle
+from everos.infra.ome.lock import OmeLock
+from everos.infra.ome.records import (
+    RunRecord,
+    RunStatus,
+    StrategyRouteInfo,
+    runs_settled,
+)
+from everos.memory.ports import Event, Idle, ManualTick
 
 logger = get_logger(__name__)
 
-_ENGINES: dict[str, OfflineEngine] = {}
-
-
-def _refuse_inside_strategy(method: Any) -> Any:
-    """Raise :class:`EngineCallFromStrategyError` when called from a strategy.
-
-    Strategies must interact with the engine only via the ``(event, ctx)``
-    parameters Runner provides; direct calls bypass the declared
-    ``emits=[...]`` contract enforced by ``ctx.emit``. Wraps sync and async
-    methods alike.
-    """
-    if inspect.iscoroutinefunction(method):
-
-        @functools.wraps(method)
-        async def async_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-            current = _CURRENT_STRATEGY.get()
-            if current is not None:
-                raise EngineCallFromStrategyError(
-                    strategy=current.name, method=method.__name__
-                )
-            return await method(self, *args, **kwargs)
-
-        return async_wrapper
-
-    @functools.wraps(method)
-    def sync_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        current = _CURRENT_STRATEGY.get()
-        if current is not None:
-            raise EngineCallFromStrategyError(
-                strategy=current.name, method=method.__name__
-            )
-        return method(self, *args, **kwargs)
-
-    return sync_wrapper
-
-
-async def _runner_entry(
-    engine_id: str,
-    strategy_name: str,
-    run_id: str,
-    event_topic: str,
-    event_payload: str,
-    max_retries_snapshot: int,
-    traceparent: str = "",
-) -> None:
-    """Module-level APS jobstore callback for a single run.
-
-    Looks the engine up by id and hands off to
-    :meth:`OfflineEngine.dispatch_run`. Pickle-safe (no closures, no
-    bound methods captured into APS jobstore args). ``traceparent`` defaults
-    to "" so crash-recovered jobs enqueued before this field existed still
-    unpack (they simply root their own trace).
-    """
-    engine = _ENGINES.get(engine_id)
-    if engine is None:
-        logger.error(
-            "no_engine_for_runner",
-            engine_id=engine_id,
-            run_id=run_id,
-        )
-        return
-    await engine.dispatch_run(
-        strategy_name=strategy_name,
-        run_id=run_id,
-        event_topic=event_topic,
-        event_payload=event_payload,
-        max_retries_snapshot=max_retries_snapshot,
-        traceparent=traceparent,
-    )
-
-
-async def _cron_entry(engine_id: str, strategy_name: str) -> None:
-    """Module-level APS jobstore callback for Cron triggers.
-
-    Looks the engine up by id and emits ``CronTick`` so the event flows
-    back through the standard dispatch pipeline.
-
-    Clears ``_CURRENT_STRATEGY`` because APScheduler may inherit the
-    context from a running strategy task, which would trip the
-    ``_guard_no_strategy_call`` check on ``engine.emit()``.
-    """
-    _CURRENT_STRATEGY.set(None)
-    engine = _ENGINES.get(engine_id)
-    if engine is None:
-        logger.error(
-            "no_engine_for_cron",
-            engine_id=engine_id,
-            strategy_name=strategy_name,
-        )
-        return
-    await engine.emit(CronTick(strategy_name=strategy_name))
-
-
-async def _idle_entry(engine_id: str, strategy_name: str) -> None:
-    """Module-level APS jobstore callback for Idle IntervalTriggers.
-
-    Looks the engine up by id and hands off to
-    :meth:`OfflineEngine.run_idle_scan`. Clears ``_CURRENT_STRATEGY``
-    for the same reason as :func:`_cron_entry`.
-    """
-    _CURRENT_STRATEGY.set(None)
-    engine = _ENGINES.get(engine_id)
-    if engine is None:
-        logger.error(
-            "no_engine_for_idle",
-            engine_id=engine_id,
-            strategy_name=strategy_name,
-        )
-        return
-    await engine.run_idle_scan(strategy_name)
+# APScheduler persists a job's callable as ``<module>:<qualname>``; jobs written
+# before the entry functions moved name this module, so they stay resolvable
+# here, or the scheduler drops such a job (a lost run) when it restores it.
+_runner_entry = scheduling.runner_entry
+_cron_entry = scheduling.cron_entry
+_idle_entry = scheduling.idle_entry
 
 
 class OfflineEngine:
@@ -176,7 +77,7 @@ class OfflineEngine:
 
     Single-process invariant: a file lock on
     ``<jobstore_path>.lock`` guarantees at most one engine per jobstore
-    at any time (cross-process safe via ``portalocker``).
+    at any time (cross-process safe; the lock is :class:`OmeLock`).
     """
 
     def __init__(
@@ -187,7 +88,7 @@ class OfflineEngine:
         self._config = config
         self._registry = StrategyRegistry()
         self._storage = OMEStorage(db_path=config.jobstore_path)
-        self._lock_handle: Any = None
+        self._lock = OmeLock(config.jobstore_path)
         self._started = False
         self._on_dead_letter: Callable[[RunRecord], None] | None = None
 
@@ -201,26 +102,17 @@ class OfflineEngine:
         self._engine_id = uuid4().hex
         self._scheduler: AsyncIOScheduler | None = None
         self._config_reloader: ConfigReloader | None = None
+        self._in_flight = InFlightRuns(self._engine_id)
 
-        # In-flight strategy-run accounting. Incremented at the moment a
-        # run is enqueued onto APS (so callers that emit-then-wait observe
-        # a non-zero count immediately), decremented in dispatch_run's
-        # finally. APS 3.x AsyncIOExecutor.shutdown(wait=True) does NOT
-        # honor wait for async coroutines (see apscheduler/executors/
-        # asyncio.py:24); this counter is how stop() / drain() learn the
-        # engine is genuinely idle.
-        self._active_runs = 0
-        self._idle_event: asyncio.Event | None = None
-
-    def register(self, strategy: Strategy) -> None:
-        """Register a :class:`Strategy` returned by ``@offline_strategy``.
+    def register(self, strategy: StrategyMeta) -> None:
+        """Register a strategy built by ``to_ome_strategy``.
 
         Must be called before :meth:`start`; registering after start raises
         :class:`OMEError` because the scheduler has already snapshotted
         the strategy set for Cron / Idle job creation.
 
         Args:
-            strategy: A Strategy instance produced by the decorator.
+            strategy: The adapted strategy.
 
         Raises:
             OMEError: If the engine has already started.
@@ -229,7 +121,7 @@ class OfflineEngine:
             raise OMEError("register: cannot register after start()")
         self._registry.register(strategy)
 
-    @_refuse_inside_strategy
+    @refuse_inside_strategy
     def reschedule_cron_job(self, name: str, expr: str) -> None:
         """Reschedule a Cron strategy's APScheduler job to a new crontab.
 
@@ -240,20 +132,14 @@ class OfflineEngine:
         """
         if self._scheduler is None:
             raise OMEError("reschedule_cron_job: engine not started")
-        self._scheduler.reschedule_job(
-            job_id=f"cron::{name}",
-            trigger=CronTrigger.from_crontab(expr),
-        )
+        scheduling.reschedule_cron_job(self._scheduler, name, expr)
 
-    @_refuse_inside_strategy
+    @refuse_inside_strategy
     def reschedule_idle_job(self, name: str, scan_interval_seconds: int) -> None:
         """Reschedule an Idle strategy's APScheduler scan job to a new interval."""
         if self._scheduler is None:
             raise OMEError("reschedule_idle_job: engine not started")
-        self._scheduler.reschedule_job(
-            job_id=f"idle::{name}",
-            trigger=IntervalTrigger(seconds=scan_interval_seconds),
-        )
+        scheduling.reschedule_idle_job(self._scheduler, name, scan_interval_seconds)
 
     def on_dead_letter(self, callback: Callable[[RunRecord], None]) -> None:
         """Register a callback invoked after a run is marked DEAD_LETTER.
@@ -276,24 +162,27 @@ class OfflineEngine:
 
         Idempotent: a second call while running is a no-op. On failure,
         every partially-initialised resource (lock, scheduler thread,
-        :data:`_ENGINES` slot, config reloader) is rolled back so a retry
+        :data:`scheduling.ENGINES` slot, config reloader) is rolled back so a retry
         starts from a clean state.
         """
         if self._started:
             return
         await self._storage.init()
-        self._acquire_lock()
+        self._lock.acquire()
         try:
             await self._storage.hold_open()
             self._registry.validate()
             self._init_components()
-            self._idle_event = asyncio.Event()
-            self._idle_event.set()
-            self._launch_scheduler()
-            _ENGINES[self._engine_id] = self
+            self._in_flight.arm()
+            self._scheduler = scheduling.launch_scheduler(
+                self._config.aps_jobstore_path
+            )
+            scheduling.ENGINES[self._engine_id] = self
             if self._config.crash_recovery_enabled:
                 await self._run_crash_recovery()
-            self._register_scheduled_jobs()
+            scheduling.add_trigger_jobs(
+                self._scheduler, self._engine_id, self._registry.all()
+            )
             self._start_config_reloader()
             self._started = True
         except Exception:
@@ -322,29 +211,8 @@ class OfflineEngine:
             emit_hook=self._dispatch_event,
             config=self._config,
             on_dead_letter=self._on_dead_letter,
-            engine=self,
         )
         self._idle_store = IdleStore(storage=self._storage)
-
-    def _launch_scheduler(self) -> None:
-        """Wire up AsyncIOScheduler + SQLAlchemyJobStore and start it.
-
-        The APS jobstore lives in its own SQLite file
-        (``aps_jobstore_path``) so APS's sync SQLAlchemy writes never
-        contend with OME's async aiosqlite writes for the same file lock
-        — both writers had previously raced on a single ``ome.db`` and
-        manifested as flaky ``SQLITE_BUSY: database is locked`` during
-        concurrent strategy dispatch.
-        """
-        self._scheduler = AsyncIOScheduler(
-            jobstores={
-                "default": SQLAlchemyJobStore(
-                    url=f"sqlite:///{self._config.aps_jobstore_path}",
-                ),
-            },
-            executors={"default": AsyncIOExecutor()},
-        )
-        self._scheduler.start()
 
     async def _run_crash_recovery(self) -> None:
         """Scan ``run_record`` for stale RUNNING rows and re-enqueue them.
@@ -356,14 +224,13 @@ class OfflineEngine:
         server's stale rows into their own scheduler, whose registry
         doesn't contain those strategy names.
 
-        Treats rows whose ``started_at`` is older than
-        ``crash_recovery_timeout_seconds`` as crashes from a previous
-        engine session: they are marked CRASHED and re-added to APS with
-        a fresh ``run_id`` reusing the original event payload.
+        Every RUNNING row is a crash of a previous engine session -- this
+        engine holds the jobstore lock, so none of them can still be live
+        -- and is marked CRASHED and re-added to APS with a fresh
+        ``run_id`` reusing the original event payload.
         """
         await scan_and_resume(
             run_record_store=self._run_record_store,
-            timeout_seconds=self._config.crash_recovery_timeout_seconds,
             add_job=self._enqueue_recovery_job,
         )
 
@@ -382,51 +249,20 @@ class OfflineEngine:
         will reach :meth:`dispatch_run` like any other, so the +1/-1
         pair must wrap the ``add_job`` call here too.
         """
-        self._on_run_enqueued()
+        self._in_flight.enqueued()
         try:
-            self._scheduler.add_job(
-                _runner_entry,
-                trigger="date",
-                run_date=get_utc_now(),
-                args=[
-                    self._engine_id,
-                    name,
-                    run_id,
-                    event_topic,
-                    event_payload,
-                    max_retries,
-                ],
-                id=run_id,
-                replace_existing=False,
-                misfire_grace_time=None,  # type: ignore[arg-type]  # APS accepts None ("no expiry"); stub omits it (apscheduler/job.py:213)
+            scheduling.add_run_job(
+                self._scheduler,
+                engine_id=self._engine_id,
+                strategy_name=name,
+                run_id=run_id,
+                event_topic=event_topic,
+                event_payload=event_payload,
+                max_retries=max_retries,
             )
         except Exception:
-            self._on_run_completed()
+            self._in_flight.completed()
             raise
-
-    def _register_scheduled_jobs(self) -> None:
-        """Add Cron / Idle APS jobs for every strategy with such a trigger.
-
-        Immediate-trigger strategies have nothing scheduled here — they
-        fire only when their declared event class is dispatched.
-        """
-        for meta in self._registry.all():
-            if isinstance(meta.trigger, Cron):
-                self._scheduler.add_job(
-                    _cron_entry,
-                    trigger=CronTrigger.from_crontab(meta.trigger.expr),
-                    args=[self._engine_id, meta.name],
-                    id=f"cron::{meta.name}",
-                    replace_existing=True,
-                )
-            elif isinstance(meta.trigger, Idle):
-                self._scheduler.add_job(
-                    _idle_entry,
-                    trigger=IntervalTrigger(seconds=meta.trigger.scan_interval_seconds),
-                    args=[self._engine_id, meta.name],
-                    id=f"idle::{meta.name}",
-                    replace_existing=True,
-                )
 
     def _start_config_reloader(self) -> None:
         """Start :class:`ConfigReloader` iff ``config_watch`` is on and a
@@ -445,7 +281,7 @@ class OfflineEngine:
         """Reverse-order cleanup of whatever :meth:`start` had already
         wired up before the failure: stop reloader, drain in-flight runs
         (best-effort, short timeout — startup failure shouldn't block on
-        recovery jobs), shut the scheduler, drop ``_ENGINES`` slot, and
+        recovery jobs), shut the scheduler, drop the ``scheduling.ENGINES`` slot, and
         release the file lock.
 
         Same ``wait_idle → shutdown(wait=False)`` order as :meth:`stop`
@@ -463,11 +299,10 @@ class OfflineEngine:
                 self._scheduler.shutdown(wait=False)
             finally:
                 self._scheduler = None
-        _ENGINES.pop(self._engine_id, None)
+        scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._release_lock()
-        self._idle_event = None
-        self._active_runs = 0
+        self._lock.release()
+        self._in_flight.disarm()
 
     async def wait_idle(self, *, timeout: float = 30.0) -> bool:  # noqa: ASYNC109
         """Block until every in-flight strategy run has settled.
@@ -485,18 +320,12 @@ class OfflineEngine:
         "all jobs really completed" has to drain through this counter,
         not the scheduler.
         """
-        if self._idle_event is None:
-            return self._active_runs == 0
-        try:
-            await asyncio.wait_for(self._idle_event.wait(), timeout=timeout)
-            return True
-        except TimeoutError:
-            return False
+        return await self._in_flight.wait_idle(timeout=timeout)
 
     async def stop(self) -> None:
         """Shut the engine down gracefully: stop the config reloader, drain
         in-flight strategy runs, shut the scheduler, drop the global
-        ``_ENGINES`` slot, and release the jobstore lock.
+        ``scheduling.ENGINES`` slot, and release the jobstore lock.
 
         Idempotent: calling stop on an already-stopped engine is a no-op.
 
@@ -507,7 +336,7 @@ class OfflineEngine:
           dispatch including jobs already enqueued (see
           ``apscheduler/schedulers/base.py:pause``: "prevent the scheduler
           from waking up to do job processing"). Each such job already
-          owns a +1 in ``_active_runs`` from :meth:`_enqueue_run`, so
+          owns a +1 in the in-flight count from :meth:`_enqueue_run`, so
           freezing dispatch deadlocks :meth:`wait_idle`.
 
         - We cannot use ``shutdown(wait=True)``: APS 3.x
@@ -521,7 +350,7 @@ class OfflineEngine:
         counter), then ``shutdown(wait=False)`` (drops the executor cleanly
         because there is nothing left in flight).
 
-        ``_ENGINES`` is popped only after the drain so ``_runner_entry``
+        ``scheduling.ENGINES`` is popped only after the drain so ``runner_entry``
         can still find this engine via its id while finishing the last
         few jobs.
         """
@@ -536,55 +365,32 @@ class OfflineEngine:
                 logger.warning(
                     "ome_stop_drain_timeout",
                     engine_id=self._engine_id,
-                    active_runs=self._active_runs,
+                    active_runs=self._in_flight.active,
                 )
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
-        _ENGINES.pop(self._engine_id, None)
+        scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._release_lock()
+        self._lock.release()
         self._started = False
-        self._idle_event = None
-        self._active_runs = 0
+        self._in_flight.disarm()
 
-    def _acquire_lock(self) -> None:
-        lock_path = Path(str(self._config.jobstore_path) + ".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(lock_path, "a+")  # noqa: SIM115
-        try:
-            portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-        except portalocker.LockException as e:
-            handle.close()
-            raise EngineLockHeldError(
-                f"another OfflineEngine instance already holds {lock_path}"
-            ) from e
-        self._lock_handle = handle
-
-    def _release_lock(self) -> None:
-        if self._lock_handle is not None:
-            try:
-                portalocker.unlock(self._lock_handle)
-            finally:
-                self._lock_handle.close()
-                self._lock_handle = None
-
-    @_refuse_inside_strategy
-    async def emit(self, event: BaseEvent) -> None:
+    @refuse_inside_strategy
+    async def emit(self, event: Event) -> None:
         """Public engine event entry point.
 
-        Strategies must NOT call this directly; use ``ctx.emit`` instead.
-        The :func:`_refuse_inside_strategy` guard raises
-        :class:`EngineCallFromStrategyError` on in-strategy calls — only
-        ``ctx.emit`` enforces the strategy's declared ``emits=[...]``
-        contract.
+        Strategies must NOT call this directly: they return their follow-up
+        events. The :func:`refuse_inside_strategy` guard raises
+        :class:`EngineCallFromStrategyError` on in-strategy calls — only the
+        run context enforces the strategy's declared ``emits``.
         """
         await self._dispatch_event(event)
 
-    async def _dispatch_event(self, event: BaseEvent) -> None:
+    async def _dispatch_event(self, event: Event) -> None:
         """Internal: actually run an event through dispatch.
 
-        Used by Runner's ``emit_hook`` so ``ctx.emit`` flows through
-        dispatch without tripping the public-method guard.
+        Used by Runner's ``emit_hook`` so a strategy's returned events flow
+        through dispatch without tripping the public-method guard.
         """
         if not self._started:
             raise OMEError("emit: engine not started")
@@ -611,14 +417,14 @@ class OfflineEngine:
         for meta, run_id in routes:
             self._enqueue_run(meta, event, run_id)
 
-    @_refuse_inside_strategy
+    @refuse_inside_strategy
     async def trigger_manual(
         self,
         name: str,
         *,
-        event: BaseEvent | None = None,
+        event: Event | None = None,
         force: bool = False,
-    ) -> tuple[BaseEvent, list[tuple[StrategyMeta, str]]]:
+    ) -> tuple[Event, list[tuple[StrategyMeta, str]]]:
         """Manually trigger one strategy.
 
         - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``;
@@ -652,14 +458,14 @@ class OfflineEngine:
             self._enqueue_run(meta, event, run_id)
         return event, routes
 
-    def _enqueue_run(self, meta: StrategyMeta, event: BaseEvent, run_id: str) -> None:
+    def _enqueue_run(self, meta: StrategyMeta, event: Event, run_id: str) -> None:
         """Add a one-shot APScheduler job that hands the event to Runner.
 
         Computes ``max_retries_snapshot`` from meta or engine default and
         packages a pickle-safe args tuple — the dispatch tail shared by
         ``_dispatch_event``, ``trigger_manual``, and crash recovery.
 
-        Counter ``self._active_runs`` is bumped *before* ``add_job`` so a
+        The in-flight count is bumped *before* ``add_job`` so a
         caller that ``emit`` s then immediately ``wait_idle`` s observes a
         non-zero count; the matching decrement lives in
         :meth:`dispatch_run` (which is guaranteed to run for every job
@@ -676,54 +482,21 @@ class OfflineEngine:
         # runs synchronously in the caller's task, so its span is still active.
         # Carried as a pickle-safe string across the APScheduler boundary.
         traceparent = current_traceparent() or ""
-        self._on_run_enqueued()
+        self._in_flight.enqueued()
         try:
-            self._scheduler.add_job(
-                _runner_entry,
-                trigger="date",
-                run_date=get_utc_now(),
-                args=[
-                    self._engine_id,
-                    meta.name,
-                    run_id,
-                    event_topic,
-                    event.model_dump_json(),
-                    max_retries_snapshot,
-                    traceparent,
-                ],
-                id=run_id,
-                replace_existing=False,
-                misfire_grace_time=None,  # type: ignore[arg-type]  # APS accepts None ("no expiry"); stub omits it (apscheduler/job.py:213)
+            scheduling.add_run_job(
+                self._scheduler,
+                engine_id=self._engine_id,
+                strategy_name=meta.name,
+                run_id=run_id,
+                event_topic=event_topic,
+                event_payload=event.model_dump_json(),
+                max_retries=max_retries_snapshot,
+                traceparent=traceparent,
             )
         except Exception:
-            self._on_run_completed()
+            self._in_flight.completed()
             raise
-
-    def _on_run_enqueued(self) -> None:
-        """Bump in-flight count and mark the engine non-idle."""
-        self._active_runs += 1
-        if self._idle_event is not None:
-            self._idle_event.clear()
-
-    def _on_run_completed(self) -> None:
-        """Drop in-flight count; mark the engine idle if the count hit zero.
-
-        Never lets the counter dip below zero — that would mask a bookkeeping
-        bug rather than fix it, and a stuck-clear idle_event would deadlock
-        ``wait_idle``.
-        """
-        if self._active_runs <= 0:
-            logger.error(
-                "active_runs_underflow",
-                engine_id=self._engine_id,
-            )
-            self._active_runs = 0
-            if self._idle_event is not None:
-                self._idle_event.set()
-            return
-        self._active_runs -= 1
-        if self._active_runs == 0 and self._idle_event is not None:
-            self._idle_event.set()
 
     async def dispatch_run(
         self,
@@ -737,14 +510,14 @@ class OfflineEngine:
     ) -> None:
         """APS jobstore callback target for one strategy run.
 
-        Public because the module-level :func:`_runner_entry` callback
+        Public because the module-level ``runner_entry`` callback
         must cross the pickle boundary — a bound method on ``self`` is
         not picklable into the APS jobstore. Not part of the
         strategy-author API; intended to be called only by
-        ``_runner_entry`` (and crash recovery). Not guarded with
-        ``_refuse_inside_strategy`` because APS executors may inherit
-        the calling task's ContextVar — a strategy that ``ctx.emit``s
-        and triggers a cascade would falsely trip the guard here.
+        ``runner_entry`` (and crash recovery). Not guarded with
+        ``refuse_inside_strategy`` because APS executors may inherit
+        the calling task's ContextVar — a strategy whose returned events
+        trigger a cascade would falsely trip the guard here.
 
         Closes the +1 the matching enqueue path opened, in ``finally``
         so cancellation, retries, and crashes all release the count.
@@ -761,7 +534,7 @@ class OfflineEngine:
                 traceparent=traceparent,
             )
         finally:
-            self._on_run_completed()
+            self._in_flight.completed()
 
     async def run_idle_scan(self, strategy_name: str) -> None:
         """APS IntervalTrigger callback target for one Idle strategy.
@@ -788,8 +561,8 @@ class OfflineEngine:
         )
         await scanner.scan_once()
 
-    @_refuse_inside_strategy
-    async def inspect_dispatch(self, event: BaseEvent) -> list[StrategyRouteInfo]:
+    @refuse_inside_strategy
+    async def inspect_dispatch(self, event: Event) -> list[StrategyRouteInfo]:
         """Return per-strategy routing info for event (read-only).
 
         Calls the dispatcher in inspect mode (no counter mutation).
@@ -798,7 +571,7 @@ class OfflineEngine:
             raise OMEError("inspect_dispatch: engine not started")
         return await self._dispatcher.inspect(event)
 
-    @_refuse_inside_strategy
+    @refuse_inside_strategy
     async def list_runs(
         self,
         strategy_name: str,
@@ -829,7 +602,7 @@ class OfflineEngine:
             limit=limit,
         )
 
-    @_refuse_inside_strategy
+    @refuse_inside_strategy
     async def get_run_status(self, run_id: str) -> RunRecord | None:
         """Fetch a single run record by ``run_id``.
 
@@ -849,12 +622,11 @@ class OfflineEngine:
     async def list_runs_by_event_id(self, event_id: str) -> list[RunRecord]:
         """Return all run records triggered by ``event_id``.
 
-        Not guarded by ``_refuse_inside_strategy`` — designed to be
-        called from inside a strategy (e.g. Reflection waiting for
-        downstream extraction runs).
+        Not guarded by ``refuse_inside_strategy``: a read-only query
+        that cannot bypass the emit contract.
 
         Args:
-            event_id: The ``BaseEvent.event_id`` of the triggering event.
+            event_id: The ``Event.event_id`` of the triggering event.
 
         Returns:
             All ``RunRecord`` instances whose ``event_id`` matches,
@@ -867,42 +639,6 @@ class OfflineEngine:
             raise OMEError("list_runs_by_event_id: engine not started")
         return await self._run_record_store.list_by_event_id(event_id)
 
-    _TERMINAL_STATUSES = frozenset(
-        {
-            RunStatus.SUCCESS,
-            RunStatus.DEAD_LETTER,
-            RunStatus.CRASHED,
-        }
-    )
-
-    @classmethod
-    def _event_settled(cls, runs: list[RunRecord]) -> bool:
-        """Whether every strategy's attempt chain for one event has ended.
-
-        Each attempt is its own row, so the chain's state is its newest
-        row: ``RUNNING`` or ``FAILED`` (retry pending) means more to come,
-        the terminal statuses mean the chain is over. Earlier ``FAILED``
-        rows stay in the table after their retry and must not hold the
-        wait open.
-        """
-        newest: dict[str, RunRecord] = {}
-        for r in runs:
-            cur = newest.get(r.strategy_name)
-            if cur is None or (r.started_at, r.attempt) > (cur.started_at, cur.attempt):
-                newest[r.strategy_name] = r
-        return all(r.status in cls._TERMINAL_STATUSES for r in newest.values())
-
-    """Statuses after which no further run follows for the same attempt chain.
-
-    ``FAILED`` is not one of them: the runner writes it *before* the backoff
-    sleep and gives the retry a fresh ``run_id``, so an event whose only row
-    is ``FAILED`` has a retry pending (a failure with no retry left is
-    written as ``DEAD_LETTER``). Treating it as terminal let
-    :meth:`wait_for_event` return during the backoff window with the retry
-    still to run -- Reflection, which waits on it before deprecating, would
-    have acted on an outcome that was not final.
-    """
-
     async def wait_for_event(
         self,
         event_id: str,
@@ -912,12 +648,11 @@ class OfflineEngine:
     ) -> list[RunRecord]:
         """Poll until all runs triggered by ``event_id`` reach a terminal status.
 
-        Not guarded by ``_refuse_inside_strategy`` — designed to be
-        called from inside a strategy (e.g. Reflection waiting for
-        downstream extraction runs to complete before deprecating).
+        Not guarded by ``refuse_inside_strategy``: a read-only query
+        that cannot bypass the emit contract.
 
         Args:
-            event_id: The ``BaseEvent.event_id`` of the triggering event.
+            event_id: The ``Event.event_id`` of the triggering event.
             timeout: Maximum seconds to wait before raising ``TimeoutError``.
             poll_interval: Seconds between polls.
 
@@ -925,7 +660,7 @@ class OfflineEngine:
             All ``RunRecord`` instances for ``event_id`` once every run
             has reached a terminal status (SUCCESS / DEAD_LETTER /
             CRASHED; a FAILED row is a retry pending, see
-            ``_TERMINAL_STATUSES``). A fan-out sibling whose job has not
+            ``records.TERMINAL_STATUSES``). A fan-out sibling whose job has not
             started yet has no row, so the set can still grow in that
             window; callers that need an exact count must know it from
             the dispatch.
@@ -939,7 +674,7 @@ class OfflineEngine:
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
             runs = await self._run_record_store.list_by_event_id(event_id)
-            if runs and self._event_settled(runs):
+            if runs and runs_settled(runs):
                 return runs
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:

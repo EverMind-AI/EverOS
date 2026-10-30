@@ -6,18 +6,11 @@ as StartupValidationError instead of being silently ignored.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated, Self
 
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from everos.core.persistence.memory_root import MemoryRoot
-
-
-def _default_jobstore_path() -> Path:
-    return MemoryRoot.resolve().ome_db
 
 
 class CounterOverride(BaseModel):
@@ -66,40 +59,6 @@ class StrategyOverride(BaseModel):
         return self
 
 
-def _env_int(name: str, default: int) -> int:
-    """Read a positive int from the environment, ignoring anything unparseable.
-
-    A malformed value must not take the process down at import time; the field's own
-    ``gt=0`` still rejects a parsed non-positive number.
-    """
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float | None) -> float | None:
-    """Read a timeout (seconds) from the environment; ``"0"`` / ``"off"`` disable it.
-
-    Same tolerance as :func:`_env_int` -- a malformed value falls back to the
-    default rather than failing at import. An explicit zero or ``off`` maps to
-    ``None`` so an operator can turn the ceiling off without editing code.
-    """
-    raw = os.getenv(name, "").strip().lower()
-    if not raw:
-        return default
-    if raw in {"0", "off", "none", "false"}:
-        return None
-    try:
-        parsed = float(raw)
-    except ValueError:
-        return default
-    return parsed if parsed > 0 else None
-
-
 class TomlRoot(BaseModel):
     """Top-level TOML schema for ome.toml."""
 
@@ -114,10 +73,9 @@ class OMEConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jobstore_path: Path = Field(
-        default_factory=_default_jobstore_path,
         description="SQLite DB path holding OME's own state (run records, "
-        "counter store, idle store). Defaults to "
-        "``MemoryRoot.resolve().ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
+        "counter store, idle store). The application passes the memory "
+        "root's ``ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
     )
     aps_jobstore_path: Path | None = Field(
         default=None,
@@ -130,44 +88,40 @@ class OMEConfig(BaseModel):
     max_concurrent_runs: Annotated[
         int,
         Field(
-            default_factory=lambda: _env_int("EVEROS_OME_MAX_CONCURRENT_RUNS", 20),
             gt=0,
             description="Engine-wide cap on concurrent strategy invocations "
-            "(asyncio.Semaphore in Runner). Override with "
-            "EVEROS_OME_MAX_CONCURRENT_RUNS. The default suits an interactive "
+            "(asyncio.Semaphore in Runner). The application passes "
+            "``[ome] max_concurrent_runs``. The default suits an interactive "
             "install; a bulk ingest of many conversations is throttled by it long "
             "before the machine is, since each slot spends almost all its time "
             "waiting on a remote extraction call rather than using CPU.",
         ),
-    ]
+    ] = 20
     run_timeout_seconds: Annotated[
         float | None,
         Field(
-            default_factory=lambda: _env_float(
-                "EVEROS_OME_RUN_TIMEOUT_SECONDS", 1800.0
-            ),
             description="Wall-clock ceiling on one strategy attempt; None "
-            "disables it. Override with EVEROS_OME_RUN_TIMEOUT_SECONDS "
-            "(0/off disables). Without a ceiling, a coroutine parked on an "
+            "disables it. The application passes ``[ome] run_timeout_seconds``. "
+            "Without a ceiling, a coroutine parked on an "
             "await that carries no deadline of its own -- an asyncio.Lock held "
             "by another stuck coroutine, a connection-pool wait -- keeps its "
             "max_concurrent_runs slot forever: it never raises, so it never "
             "retries, and its record stays RUNNING. Enough of them and the "
             "engine runs nothing at all, observed with 60 of 64 slots parked on "
             "one lock, starving every other strategy for 6.7 hours until it was "
-            "killed by hand. crash_recovery_timeout_seconds does not cover this "
-            "-- it reclaims orphans from a PREVIOUS process, not live coroutines "
-            "in this one. The 30-minute default is a deadlock backstop, not a "
+            "killed by hand. Crash recovery does not cover this -- it reclaims "
+            "orphans from a PREVIOUS process at startup, not live coroutines in "
+            "this one. The 30-minute default is a deadlock backstop, not a "
             "latency target; killing slow-but-healthy work would trade a stall "
             "for lost extractions.",
         ),
-    ]
+    ] = 1800.0
     max_retries: Annotated[
         int,
         Field(
             ge=0,
             description="Default retry budget per run, overridable via "
-            "@offline_strategy(max_retries=...) or StrategyOverride.max_retries. "
+            "StrategySpec(max_retries=...) or StrategyOverride.max_retries. "
             "0 disables retries.",
         ),
     ] = 1
@@ -208,25 +162,17 @@ class OMEConfig(BaseModel):
             "entries are pruned on insert.",
         ),
     ] = 1000
-    crash_recovery_timeout_seconds: Annotated[
-        int,
-        Field(
-            gt=0,
-            description="A run lingering in RUNNING longer than this is "
-            "treated as crashed, marked CRASHED, and re-enqueued with a "
-            "fresh run_id.",
-        ),
-    ] = 1800
     crash_recovery_enabled: bool = Field(
         default=True,
         description=(
             "Run ``OfflineEngine._run_crash_recovery`` on ``engine.start()``. "
             "Default ``True`` — the primary server engine "
-            "(``service.memorize._get_engine``) needs to resume its own "
+            "(built by ``service.bootstrap``) needs to resume its own "
             "prior sessions' RUNNING work after a crash / restart. "
             "Set to ``False`` for one-shot engines that share the jobstore "
-            "path (e.g. ``memory.cascade._backfill._build_cluster_engine`` "
-            "and ``_build_skill_engine``). Those engines register only the "
+            "path (e.g. backfill's replay engines, built by "
+            "``everos.service.bootstrap.build_replay_engine``). Those "
+            "engines register only the "
             "Phase 2/3 subset of strategies; if they ran crash recovery on "
             "startup they would re-enqueue the server's stale RUNNING rows "
             "into their own APS scheduler, whose registry doesn't know "

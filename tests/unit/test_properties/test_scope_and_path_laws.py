@@ -35,14 +35,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from everos.core.persistence import memory_root as mr
-from everos.core.persistence.markdown.path_safety import sanitize_dirname
-from everos.entrypoints.api.routes.memorize import (
+from everos.entrypoints.api.schemas.ids import (
     _reject_path_traversal,
     _reject_reserved_scope_dir,
 )
-from everos.infra.persistence.markdown.mds.agent_skill import AgentSkillFrontmatter
-from everos.memory.cascade.handlers._common import content_sha256
+from everos.infra.cascade._projections._common import content_sha256
+from everos.infra.persistence import memory_root as mr
+from everos.infra.persistence.markdown._base.path_safety import sanitize_dirname
+from everos.infra.persistence.markdown._mds.agent_skill import AgentSkillFrontmatter
 
 _candidate_ids = st.text("abcXYZ019_.@+-", min_size=1, max_size=20)
 

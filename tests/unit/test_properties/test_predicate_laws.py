@@ -1,7 +1,7 @@
 """Laws of the backend-neutral predicate tree and its two renderers.
 
 Every filter the search and delete paths send to LanceDB or Milvus is built
-from ``everos.infra.persistence.predicate`` and rendered by one adapter. A
+from ``everos.memory.ports.query`` and rendered by one adapter. A
 wrong rendering is a wrong result set, and on ``delete`` a wrong row set.
 
 1. ``all_of`` / ``any_of`` flatten their own kind, drop ``None`` and reject
@@ -27,9 +27,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from everos.infra.persistence import predicate as pr
-from everos.infra.persistence.lancedb.repos import _contract as lance
+from everos.infra.persistence.lancedb._repos import _contract as lance
 from everos.infra.persistence.milvus import predicate as milvus
+from everos.memory.ports import query as pr
 
 _field = st.from_regex(r"[A-Za-z_][A-Za-z0-9_]{0,10}", fullmatch=True)
 _text = st.text(max_size=30)
@@ -56,7 +56,7 @@ def _leaf(
     )
 
 
-def _trees(leaf: st.SearchStrategy[pr.Predicate]) -> st.SearchStrategy[pr.Predicate]:
+def _trees(leaf: st.SearchStrategy[pr.Filter]) -> st.SearchStrategy[pr.Filter]:
     return st.recursive(
         leaf,
         lambda inner: st.one_of(
@@ -72,7 +72,7 @@ any_tree = _trees(_leaf(_field, _scalar))
 
 @given(xs=st.lists(st.one_of(st.none(), any_tree), max_size=5))
 def test_all_of_and_any_of_flatten_drop_none_and_reject_empty(
-    xs: list[pr.Predicate | None],
+    xs: list[pr.Filter | None],
 ) -> None:
     present = [x for x in xs if x is not None]
     for factory, group in ((pr.all_of, pr.All), (pr.any_of, pr.AnyOf)):
@@ -82,7 +82,7 @@ def test_all_of_and_any_of_flatten_drop_none_and_reject_empty(
             continue
         got = factory(*xs)
         assert isinstance(got, group)
-        want: list[pr.Predicate] = []
+        want: list[pr.Filter] = []
         for x in present:
             want.extend(x.children if isinstance(x, group) else [x])
         assert list(got.children) == want
@@ -123,7 +123,7 @@ def _balanced(text: str) -> bool:
 
 
 @given(tree=any_tree)
-def test_renderers_are_total_and_balanced(tree: pr.Predicate) -> None:
+def test_renderers_are_total_and_balanced(tree: pr.Filter) -> None:
     for render in (lance.render_predicate, milvus.render_predicate):
         out = render(tree)
         assert out and _balanced(out)
@@ -144,10 +144,10 @@ _ROWS = [
 _COLS = {"name": "str", "n": "int", "x": "float", "flag": "bool"}
 
 
-def _typed_leaf() -> st.SearchStrategy[pr.Predicate]:
+def _typed_leaf() -> st.SearchStrategy[pr.Filter]:
     def leaf_for(
         col: str, values: st.SearchStrategy[Any]
-    ) -> st.SearchStrategy[pr.Predicate]:
+    ) -> st.SearchStrategy[pr.Filter]:
         f = st.just(col)
         return st.one_of(
             st.builds(pr.eq, f, values),
@@ -165,7 +165,7 @@ def _typed_leaf() -> st.SearchStrategy[pr.Predicate]:
     )
 
 
-def _holds(pred: pr.Predicate, row: dict[str, Any]) -> bool:
+def _holds(pred: pr.Filter, row: dict[str, Any]) -> bool:
     if isinstance(pred, pr.Comparison):
         v = row[pred.field]
         ops = {
@@ -201,7 +201,7 @@ def lance_table(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-un
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_rendered_filter_selects_the_rows_the_predicate_selects(
-    tree: pr.Predicate, lance_table: Any
+    tree: pr.Filter, lance_table: Any
 ) -> None:
     where = lance.render_predicate(tree)
     got = sorted(r["n"] for r in lance_table.search().where(where).limit(100).to_list())

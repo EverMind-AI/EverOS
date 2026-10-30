@@ -12,7 +12,7 @@
 
 [memory]
 # Effective timezone for date buckets and timestamps. Drives
-# component.utils.datetime; this is the SOLE source — OS `TZ` is not
+# core.utils.datetime; this is the SOLE source — OS `TZ` is not
 # read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
 timezone = "UTC"
 
@@ -72,6 +72,15 @@ collection_prefix = "everos"
 model = "openai/gpt-4.1-mini"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
+# How the reply format is requested: "json_schema" (strict schema, default),
+# "json_object" (JSON mode) or "prompt_only" (prompt alone). Not every endpoint
+# accepts a strict schema -- on OpenRouter, sending one can reroute the request.
+# response_format_mode = "json_schema"
+# Extra attempts of the identical request after a reply that fails validation.
+# invalid_reply_retries = 1
+# Deadline of one request in seconds. Raise it for slow self-hosted endpoints;
+# one extraction call may take up to (invalid_reply_retries + 1) x this.
+# timeout_seconds = 60.0
 
 # LLM for the multi-round retrieval decider. Separate from [llm] because the jobs
 # differ: [llm] extracts memories during ingestion, this one decides -- inside the search
@@ -94,6 +103,10 @@ base_url = "https://openrouter.ai/api/v1"
 model = ""
 api_key = ""
 base_url = ""
+# See [llm]. response_format_mode follows the model: with `model` empty it is
+# inherited from [llm] along with it.
+# response_format_mode = "json_schema"
+# invalid_reply_retries = 1
 
 # Multi-round loop tuning. Every one of these is a real field, so `everos config`
 # prints it and a TOML can set it; the legacy EVEROS_LLMMR_* env names still take
@@ -119,6 +132,9 @@ model = "google/gemini-3.8-flash"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
 max_concurrency = 4
+# See [llm].
+# response_format_mode = "json_schema"
+# invalid_reply_retries = 1
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.
@@ -163,17 +179,25 @@ batch_size      = 10
 max_concurrent  = 5
 
 [boundary_detection]
-# Passed through to ``everalgo.BoundaryDetector.adetect``.
+# Passed through to ``everalgo.boundary.adetect_boundaries``: leading cells
+# are cut without the model until the rest fits under both limits.
 hard_token_limit = 65536
 hard_msg_limit = 500
 
 [memorize]
-# Conversation mode. Selects the boundary detector and which pipelines run:
-#   "chat"  -> BoundaryDetector       + user_memory only
-#   "agent" -> AgentBoundaryDetector  + user_memory + agent_memory
+# Conversation mode. Selects what boundary detection sees and which pipelines run:
+#   "chat"  -> tool rows dropped               + user_memory only
+#   "agent" -> tool rows kept in the cells     + user_memory + agent_memory
 # A single service process serves one mode at a time; switching mode
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
+# Maximum wall-clock for one add() / flush() invocation while holding the
+# per-session lock. On timeout the outer asyncio.timeout cancels the call
+# and the lock auto-releases so subsequent concurrent /add on the same
+# session aren't deadlocked. Covers boundary LLM + memcell writes +
+# synchronous portion of pipeline dispatch.
+# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
+session_lock_timeout_seconds = 360.0
 
 [memorize.async_queue]
 # Queue behind ``async_mode=true`` on /add (a /flush joins it only behind its
@@ -202,6 +226,14 @@ max_replays = 3
 # Rows (any status) are deleted this many hours after they were created.
 row_retention_hours = 168.0
 
+[agent_memory]
+# Put everalgo's correctness gate in front of agent-case extraction: the
+# extraction LLM judges whether the work in a conversation was completed
+# correctly (one extra call per conversation), and only admitted ones become
+# cases. Off -> cases are admitted by the complexity and value filters.
+# Needs a restart. Override via EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED.
+case_gate_enabled = false
+
 [knowledge]
 # Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
 # uploads are rejected with HTTP 422 before parsing/extraction. Note: the
@@ -218,14 +250,6 @@ lambda = 0.1
 mass_top_m = 50
 top_k_cap = 100
 
-# Maximum wall-clock for one memorize() invocation while holding the
-# per-session lock. On timeout the outer asyncio.timeout cancels the call
-# and the lock auto-releases so subsequent concurrent /add on the same
-# session aren't deadlocked. Covers boundary LLM + memcell writes +
-# synchronous portion of pipeline dispatch.
-# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
-session_lock_timeout_seconds = 360.0
-
 [clustering]
 # Geometry-clustering: cosine similarity threshold and time window.
 # Episodes older than ``time_window_days`` from the newest cluster
@@ -236,6 +260,15 @@ time_window_days = 7.0
 
 
 [cascade]
+# Run the cascade (watcher + scanner + worker) that projects md into the index.
+# Off -> md edits never become searchable; only for runs that never search or
+# that drive `everos cascade sync` themselves.
+enabled = true
+# Run the filesystem watcher. Off -> the scanner alone picks up md edits, one
+# scan_interval_seconds later. Use it on a host whose inotify watch limit is
+# exhausted (the server would otherwise die at startup with Errno 28); unlike
+# enabled = false, md still reaches the index.
+watcher_enabled = true
 # Maintenance cadences (seconds). Deadlines that bound a hung call are not
 # here on purpose — they live next to the code they guard and are sized from
 # measurement, not preference.
@@ -251,6 +284,22 @@ optimize_rebuild_interval_seconds = 43200.0
 # WSL2 or a container) this is the edit-to-searchable latency. Every sweep also
 # stats every md file, which over a slow mount is the cost of a short interval.
 scan_interval_seconds = 30.0
+
+[ome]
+# Offline memory engine tunables. Not to be confused with <memory-root>/ome.toml,
+# which overrides individual strategies (enabled / gate / cron).
+# Engine-wide cap on concurrent strategy runs. Each slot mostly waits on a
+# remote extraction call, so a bulk ingest can afford far more than this.
+max_concurrent_runs = 20
+# Wall-clock ceiling (seconds) on one strategy attempt: a deadlock backstop,
+# not a latency target -- too low kills slow-but-healthy extractions. 0 disables.
+run_timeout_seconds = 1800.0
+
+[logging]
+# Console log level: DEBUG | INFO | WARNING | ERROR. `everos server start
+# --log-level` (or EVEROS_LOG_LEVEL) overrides it for the server; interactive
+# commands (cascade / init / config / demo) log WARNING, INFO with --verbose.
+level = "INFO"
 
 [observability]
 # OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral

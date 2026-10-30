@@ -5,21 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-from prometheus_client import CollectorRegistry
+from prometheus_client import REGISTRY, CollectorRegistry
 
-from everos.core.observability.metrics import (
-    Gauge,
-    reset_metrics_registry,
-    set_metrics_registry,
-)
+from everos.core.observability.metrics import Gauge, configure_metrics
 
 
 @pytest.fixture(autouse=True)
 def isolated_registry() -> Iterator[None]:
-    """Swap in a fresh registry so test names don't clash with prod metrics."""
-    set_metrics_registry(CollectorRegistry())
+    """Configure a fresh registry so test names don't clash with prod metrics."""
+    configure_metrics(CollectorRegistry())
     yield
-    reset_metrics_registry()
+    configure_metrics(REGISTRY)
 
 
 def _value(gauge: Gauge, **labels: str) -> float:

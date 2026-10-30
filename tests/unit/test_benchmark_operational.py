@@ -452,13 +452,13 @@ def test_the_fleet_moves_to_another_port_block_after_losing_a_race(
     root.mkdir()
     attempts: list[int] = []
 
-    def _fail_once(self: Any) -> None:
-        attempts.append(self._first_port)
-        if len(attempts) == 1:
-            raise run_mod._PortRaceLostError("child exited at bind")
+    class _LosesOnce(run_mod._ServerFleet):
+        def _start_once(self) -> None:
+            attempts.append(self._first_port)
+            if len(attempts) == 1:
+                raise run_mod._PortRaceLostError("child exited at bind")
 
-    monkeypatch.setattr(run_mod._ServerFleet, "_start_once", _fail_once)
-    fleet = run_mod._ServerFleet(1, root, first_port=9400)
+    fleet = _LosesOnce(1, root, first_port=9400)
     monkeypatch.setattr(fleet, "stop", lambda: None)
     fleet.start()
     assert len(attempts) == 2, f"did not retry: {attempts}"
@@ -473,12 +473,12 @@ def test_the_fleet_gives_up_after_enough_lost_races(
     root.mkdir()
     tried: list[int] = []
 
-    def _always_lose(self: Any) -> None:
-        tried.append(self._first_port)
-        raise run_mod._PortRaceLostError("child exited at bind")
+    class _AlwaysLoses(run_mod._ServerFleet):
+        def _start_once(self) -> None:
+            tried.append(self._first_port)
+            raise run_mod._PortRaceLostError("child exited at bind")
 
-    monkeypatch.setattr(run_mod._ServerFleet, "_start_once", _always_lose)
-    fleet = run_mod._ServerFleet(1, root, first_port=9400)
+    fleet = _AlwaysLoses(1, root, first_port=9400)
     monkeypatch.setattr(fleet, "stop", lambda: None)
     with pytest.raises(RuntimeError, match="could not claim a free port block"):
         fleet.start(attempts=3)

@@ -6,24 +6,42 @@ import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import pytest
+from everalgo.agent_memory import CaseExtractionResult
 from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 
-from everos.core.persistence import MemoryRoot
-from everos.infra.ome.testing import FakeStrategyContext
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AtomicFactReader,
     ForesightReader,
+    MarkdownAgentCaseStore,
+    MarkdownAtomicFactStore,
+    MarkdownForesightStore,
 )
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AgentPipelineStarted,
     EpisodeExtracted,
     UserPipelineStarted,
 )
-from everos.memory.strategies.extract_agent_case import extract_agent_case
-from everos.memory.strategies.extract_atomic_facts import extract_atomic_facts
-from everos.memory.strategies.extract_foresight import extract_foresight
+from everos.memory.strategies import (
+    extract_agent_case,
+    extract_atomic_facts,
+    extract_foresight,
+)
+from tests.fakes import make_deps, make_stores
+
+
+def _markdown_deps(tmp_path: Path) -> MemoryDeps:
+    """Deps whose daily-log stores write real markdown under ``tmp_path``."""
+    root = MemoryRoot(root=tmp_path)
+    return make_deps(
+        stores=make_stores(
+            atomic_fact=MarkdownAtomicFactStore(root),
+            foresight=MarkdownForesightStore(root),
+            agent_case=MarkdownAgentCaseStore(root),
+        )
+    )
 
 
 def _episode_event_for(owner: str) -> EpisodeExtracted:
@@ -84,16 +102,7 @@ def _agent_event() -> AgentPipelineStarted:
 
 async def test_atomic_facts_round_trip(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib
-
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
 
     facts = [
         AtomicFact(
@@ -110,15 +119,13 @@ async def test_atomic_facts_round_trip(
 
     with (
         patch(
-            "everos.memory.strategies.extract_atomic_facts.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
         ) as mock_ext,
     ):
         mock_ext.return_value.aextract_from_text = AsyncMock(return_value=facts)
-        await extract_atomic_facts(_episode_event_for("u_alice"), FakeStrategyContext())
+        await extract_atomic_facts(
+            _episode_event_for("u_alice"), _markdown_deps(tmp_path)
+        )
 
     reader = AtomicFactReader(root=MemoryRoot(root=tmp_path))
     path = reader.path_for("u_alice")
@@ -130,16 +137,7 @@ async def test_atomic_facts_round_trip(
 
 async def test_foresights_round_trip(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib
-
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
     foresights = [
         Foresight(
@@ -152,15 +150,11 @@ async def test_foresights_round_trip(
 
     with (
         patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_foresight.ForesightExtractor"
         ) as mock_ext,
     ):
         mock_ext.return_value.aextract = AsyncMock(return_value=foresights)
-        await extract_foresight(_event_for("u_alice"), FakeStrategyContext())
+        await extract_foresight(_event_for("u_alice"), _markdown_deps(tmp_path))
 
     reader = ForesightReader(root=MemoryRoot(root=tmp_path))
     path = reader.path_for("u_alice")
@@ -172,16 +166,7 @@ async def test_foresights_round_trip(
 
 async def test_agent_case_round_trip(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib
-
-    ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(ac_mod, "_writer", None, raising=False)
 
     cases = [
         AgentCase(
@@ -196,15 +181,13 @@ async def test_agent_case_round_trip(
 
     with (
         patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
         ) as mock_ext,
     ):
-        mock_ext.return_value.aextract = AsyncMock(return_value=cases)
-        await extract_agent_case(_agent_event(), FakeStrategyContext())
+        mock_ext.return_value.aextract_with_reason = AsyncMock(
+            return_value=CaseExtractionResult(cases, None, {})
+        )
+        await extract_agent_case(_agent_event(), _markdown_deps(tmp_path))
 
     reader = AgentCaseReader(root=MemoryRoot(root=tmp_path))
     path = reader.path_for("agent_42")

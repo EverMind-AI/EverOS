@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci verify-parity clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime check-singletons openapi check-openapi format test integration package cov ci verify-parity clean
 
 help:
 	@echo "Targets:"
@@ -13,7 +13,8 @@ help:
 	@echo "  check-deprecated-names Block deprecated product names"
 	@echo "  check-github-docs Block legacy/internal branch-model residue in contributor docs"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
-	@echo "  check-datetime Scan for code that bypasses component/utils/datetime (HARD gate, run via lint)"
+	@echo "  check-datetime Scan for code that bypasses core/utils/datetime (HARD gate, run via lint)"
+	@echo "  check-singletons Scan src/ for module-level singletons (HARD gate, run via lint)"
 	@echo "  openapi       Regenerate docs/openapi.json from the FastAPI app"
 	@echo "  check-openapi Verify docs/openapi.json matches app.openapi() (HARD gate, run via lint)"
 	@echo "  format        Format src/tests with ruff"
@@ -44,6 +45,7 @@ lint:
 	uv run python scripts/check_deprecated_names.py
 	uv run python scripts/check_github_contributor_docs.py
 	uv run python scripts/check_datetime_discipline.py
+	uv run python scripts/check_singletons.py
 	uv run python scripts/dump_openapi.py --check
 
 docs-check:
@@ -87,10 +89,16 @@ check-cjk:
 
 # Datetime two-zone discipline scanner (see .claude/rules/datetime-handling.md).
 # Wired into `lint` (and therefore `ci`) as a HARD gate — any code that
-# bypasses ``component/utils/datetime`` (raw ``datetime.now()``,
+# bypasses ``core/utils/datetime`` (raw ``datetime.now()``,
 # ``time.time()``, naked ``datetime(...)`` constructor, etc.) fails the build.
 check-datetime:
 	uv run python scripts/check_datetime_discipline.py
+
+# Singleton gate (wired into `lint`, HARD). The application bootstrap builds
+# and injects every provider and connection; a module-level lazy slot, a
+# no-argument `get_*()` accessor or an import-time `*_repo` instance fails it.
+check-singletons:
+	uv run python scripts/check_singletons.py
 
 # OpenAPI schema export — produce docs/openapi.json from the FastAPI app.
 # Run this after touching any HTTP route / DTO; commit the result.

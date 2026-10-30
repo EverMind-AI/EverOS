@@ -20,9 +20,13 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from everos.infra.persistence.sqlite import MdChangeStateRepo
 
 # Load .env BEFORE any everos import so settings are correct.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -331,6 +335,7 @@ async def ingest(client: httpx.AsyncClient) -> dict:
 
 
 async def wait_cascade(
+    memory_root: Path,
     *,
     expected_md_paths: int = 8,
     stable_checks: int = 5,
@@ -352,12 +357,33 @@ async def wait_cascade(
        polls (separated by 1s sleep). This guards against a transient
        empty queue while a strategy is still mid-write.
     """
-    from everos.infra.persistence.sqlite import md_change_state_repo
+    from everos.config import load_settings
+    from everos.infra.persistence import MemoryRoot
+    from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 
+    database = SqliteDatabase(MemoryRoot(memory_root), load_settings().sqlite)
+    try:
+        return await _wait_stably_drained(
+            SqliteRepos.over(database).md_change_state,
+            expected_md_paths=expected_md_paths,
+            stable_checks=stable_checks,
+            deadline_seconds=deadline_seconds,
+        )
+    finally:
+        await database.dispose()
+
+
+async def _wait_stably_drained(
+    ledger: MdChangeStateRepo,
+    *,
+    expected_md_paths: int,
+    stable_checks: int,
+    deadline_seconds: float,
+) -> dict:
     consecutive_zero = 0
     async with asyncio.timeout(deadline_seconds):
         while True:
-            sm = await md_change_state_repo.queue_summary()
+            sm = await ledger.queue_summary()
             total_rows = (
                 sm.pending + sm.done + sm.failed_retryable + sm.failed_permanent
             )
@@ -378,25 +404,23 @@ async def wait_cascade(
 
 async def inspect_artifacts(memory_root: Path) -> dict:
     """Read md files + LanceDB counts after cascade drain."""
-    from everos.infra.persistence.lancedb import (
-        atomic_fact_repo,
-        dispose_connection,
-        episode_repo,
-        foresight_repo,
-        get_connection,
-        user_profile_repo,
-        verify_business_schemas,
-    )
+    from everos.config import load_settings
+    from everos.infra.persistence import MemoryRoot
+    from everos.infra.persistence.factories import build_derived_index
 
-    await get_connection()
-    await verify_business_schemas()
-    counts = {
-        "episode_rows": await episode_repo.count(),
-        "atomic_fact_rows": await atomic_fact_repo.count(),
-        "foresight_rows": await foresight_repo.count(),
-        "user_profile_rows": await user_profile_repo.count(),
-    }
-    await dispose_connection()
+    index = build_derived_index(load_settings(), MemoryRoot(memory_root))
+    repos = index.repositories
+    try:
+        await index.connect()
+        await index.verify_business_schemas()
+        counts = {
+            "episode_rows": await repos.episode.count(),
+            "atomic_fact_rows": await repos.atomic_fact.count(),
+            "foresight_rows": await repos.foresight.count(),
+            "user_profile_rows": await repos.user_profile.count(),
+        }
+    finally:
+        await index.shutdown()
 
     md_files: list[str] = []
     users_dir = memory_root / "default_app" / "default_project" / "users"
@@ -632,7 +656,7 @@ async def main() -> None:
         print(f"      batches={ingest_summary['batches']}")
 
         print("[3/6] waiting for cascade drain ...")
-        cascade_summary = await wait_cascade()
+        cascade_summary = await wait_cascade(CORPUS_ROOT)
         print(f"      drained: {cascade_summary}")
 
         print("[4/6] inspecting on-disk artifacts ...")

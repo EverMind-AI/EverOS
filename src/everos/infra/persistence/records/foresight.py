@@ -1,6 +1,6 @@
-"""LanceDB ``foresight`` table schema.
+"""Derived-index ``foresight`` record.
 
-Field set for the foresight LanceDB row. Each row carries a
+Field set for the foresight index row. Each row carries a
 forward-looking inference about the user (intent window, planned
 action, projected need); ``start_time`` / ``end_time`` describe the
 window the foresight applies to.
@@ -11,16 +11,14 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable, Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from ._dim import configured_dim
 from ._parent_type import ParentType
+from .vector import DenseVector
 
-_DIM = configured_dim()
 
-
-class Foresight(BaseLanceTable):
-    """One foresight record indexed in LanceDB."""
+class Foresight(IndexRecord):
+    """One foresight record in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "foresight"
     BM25_FIELDS: ClassVar[list[str]] = ["foresight_tokens", "evidence_tokens"]
@@ -79,4 +77,4 @@ class Foresight(BaseLanceTable):
     (owner_id / session_id / timestamp / parent_id / sender_ids) is NOT
     in the hash. See :attr:`ForesightHandler.content_change_keys`."""
 
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
+    vector: DenseVector | None = None

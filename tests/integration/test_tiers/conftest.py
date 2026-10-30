@@ -3,7 +3,7 @@
 Three runtime fixtures build the real FastAPI app (``create_app()`` with
 the full lifespan stack: LLM -> SQLite -> LanceDB -> Cascade -> OME)
 against a per-test ``EVEROS_ROOT``, differing only in which capability
-singletons (embedding / rerank) are wired to a working stub provider:
+providers (embedding / rerank) are wired to a working stub provider:
 
 - ``tier1_runtime`` — LLM only. embed/rerank both unavailable.
 - ``tier2_runtime`` — LLM + embed. rerank unavailable.
@@ -17,20 +17,17 @@ Every fixture yields a ready ``httpx.AsyncClient`` wired to the app via
 
 LLM stubbing notes:
 
-- ``everos.component.llm.client._llm_client`` is the process-wide
-  singleton every OME strategy + the memorize pipeline read through
-  ``get_llm_client()``. Pre-seeding it with a ``FakeLLMClient`` before
-  the lifespan starts means ``LLMLifespanProvider.startup`` (which calls
-  ``get_llm_client()``) sees the fake immediately and never touches
-  settings.
-- ``everos.service.search`` builds its **own** LLM client straight from
-  settings (bypassing the singleton above), only to satisfy the
+- The application is built over ``Providers`` whose ``llm`` is a
+  ``FakeLLMClient``: every OME strategy, the memorize pipeline and the
+  search manager receive it, and ``Application.start`` sees an LLM and
+  never touches settings.
+- Search holds that same LLM only to satisfy the
   ``enable_llm_rerank=True`` non-None guard in
   ``SearchManager._validate_components``. That LLM is never actually
   invoked in this suite: ``everalgo.rank.rerank._basic_arank`` only
   calls the LLM when ``enable_rerank and scored`` — and these tests
   never seed agent_case/agent_skill data, so ``scored`` is always empty.
-  A placeholder ``FakeLLMClient(responses=[])`` is therefore sufficient;
+  The memorize fake therefore serves search too;
   if that assumption ever breaks, the fake raises loudly instead of
   silently degrading the test.
 """
@@ -38,24 +35,24 @@ LLM stubbing notes:
 from __future__ import annotations
 
 import asyncio
-import importlib
-import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
-from everos.component.rerank import RerankCapability, RerankResult
+from everos.component.embedding import EmbeddingProvider
+from everos.component.rerank import RerankResult
+from tests.fakes import StorageView, make_providers, memorize_llm, open_storage_view
+
+if TYPE_CHECKING:
+    from everos.service import Application
 
 # ---------------------------------------------------------------------------
 # Stub providers
@@ -96,80 +93,38 @@ class StubReranker:
 # ---------------------------------------------------------------------------
 
 
-def _boundary_response(boundaries: list[int]) -> str:
-    payload = {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    return json.dumps(payload)
-
-
-def _episode_response(title: str = "Test Subject", content: str = "Test body") -> str:
-    return json.dumps({"title": title, "content": content})
-
-
-def make_fake_llm(
-    boundary_responses: list[list[int]] | None = None,
-    *,
-    episode_title: str = "Hiking",
-    episode_content: str = "Alice loves hiking in the mountains every weekend.",
-) -> FakeLLMClient:
-    """Build a ``FakeLLMClient`` that dispatches by prompt fingerprint.
-
-    Mirrors ``tests/integration/test_memorize_integration.py``'s
-    ``_make_fake_llm``: pops one ``boundaries=...`` entry per boundary
-    prompt seen, every episode prompt gets the same canned
-    ``{title, content}``. Any other prompt (atomic facts / foresight /
-    profile / agent case background strategies) also falls through to
-    the episode-shaped response; those strategies run as OME background
-    jobs that log-and-continue on a parse failure, so they never affect
-    the HTTP response under test.
-    """
-    boundary_queue: list[list[int]] = list(boundary_responses or [])
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = boundary_queue.pop(0) if boundary_queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        return ChatResponse(
-            content=_episode_response(episode_title, episode_content),
-            model="fake",
-        )
-
-    return FakeLLMClient(handler=handler)
+def make_fake_llm() -> FakeLLMClient:
+    """The memorize-path model: no boundary cut before a flush, a "Hiking"
+    episode, no atomic facts (the suites seed the facts they count), and
+    canned replies for the other user-track operators."""
+    return memorize_llm(
+        episode_title="Hiking",
+        episode_content="Alice loves hiking in the mountains every weekend.",
+        atomic_facts="atomic_facts_empty",
+    )
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton reset (mirrors tests/e2e/conftest.py)
+# The running tier application and its storage
 # ---------------------------------------------------------------------------
 
-_MEMORIZE_SINGLETONS: tuple[str, ...] = (
-    "_episode_writer",
-    "_prompt_loader",
-    "_user_pipeline",
-    "_agent_pipeline",
-    "_ome_engine",
-)
 
-_STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("everos.memory.strategies.extract_atomic_facts", ("_writer",)),
-    ("everos.memory.strategies.extract_foresight", ("_writer",)),
-    ("everos.memory.strategies.extract_user_profile", ("_writer", "_reader")),
-    ("everos.memory.strategies.extract_agent_case", ("_writer",)),
-    ("everos.memory.strategies.extract_agent_skill", ("_writer",)),
-)
+_RUNNING: dict[str, Application] = {}
+"""The application the current tier runtime started."""
+
+_STORAGE: dict[str, StorageView] = {}
+"""The read-back view on the current tier runtime's storage."""
 
 
-def _reset_strategy_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
-    for mod_name, attrs in _STRATEGY_SINGLETONS:
-        mod = importlib.import_module(mod_name)
-        for attr in attrs:
-            monkeypatch.setattr(mod, attr, None, raising=False)
+def tier_storage() -> StorageView:
+    """The view on the storage the running tier application writes."""
+    return _STORAGE["view"]
 
 
-def _reset_search_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
-    search_svc = importlib.import_module("everos.service.search")
-    monkeypatch.setattr(search_svc, "_manager", None, raising=False)
-    monkeypatch.setattr(search_svc, "_llm_client", None, raising=False)
-    monkeypatch.setattr(search_svc, "_llm_resolved", False, raising=False)
+@pytest.fixture
+def tier_application() -> Application:
+    """The :class:`Application` behind the tier runtime the test requested."""
+    return _RUNNING["application"]
 
 
 # ---------------------------------------------------------------------------
@@ -216,13 +171,15 @@ async def index_backend(
 
     if backend == "milvus":
         from everos.config import load_settings
-        from everos.infra.persistence.index import drop_business_tables, shutdown
+        from everos.infra.persistence import MemoryRoot
+        from everos.infra.persistence.factories import build_derived_index
 
         load_settings.cache_clear()
+        index = build_derived_index(load_settings(), MemoryRoot.resolve())
         try:
-            await drop_business_tables()
+            await index.drop_business_tables()
         finally:
-            await shutdown()
+            await index.shutdown()
 
 
 @asynccontextmanager
@@ -235,6 +192,9 @@ async def _tier_client(
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
+    # The test seeds and reads rows through its own connection (see
+    # ``tier_storage``); every LanceDB read must see the latest version.
+    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
 
     from everos.config import load_settings
 
@@ -243,58 +203,45 @@ async def _tier_client(
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    svc = importlib.import_module("everos.service.memorize")
-    for attr in _MEMORIZE_SINGLETONS:
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    _reset_strategy_singletons(monkeypatch)
-    _reset_search_singletons(monkeypatch)
-
-    client_mod = importlib.import_module("everos.component.llm.client")
-    monkeypatch.setattr(client_mod, "_llm_client", make_fake_llm(), raising=False)
-
-    embed_acc = importlib.import_module("everos.component.embedding.accessor")
-    rerank_acc = importlib.import_module("everos.component.rerank.accessor")
     stub_embedder = StubEmbedder() if embed_available else None
     stub_reranker = StubReranker() if rerank_available else None
-    monkeypatch.setattr(
-        embed_acc, "_capability", EmbeddingCapability(provider=stub_embedder)
-    )
     # `/health`'s `embed` reports the startup dimension probe, not whether a
     # provider could be constructed -- that was the half of issue #434 that
     # read `true` against a dead service. The probe builds its own provider
     # from settings (it has to: the installed one truncates to its own `dim`,
     # which would hide a model wider than the column), so it needs a stand-in
-    # here just like the LLM, the embedder and the reranker above. Patching
-    # the probe rather than its recorded result, because startup re-runs it.
-    provenance = importlib.import_module("everos.infra.persistence.index._provenance")
+    # here just like the LLM, the embedder and the reranker. Patching the
+    # probe rather than its recorded result, because startup re-runs it.
+    from everos.infra.persistence.index import EmbeddingProvenance
 
-    async def _stub_probe() -> int | None:
+    async def _stub_probe(self: EmbeddingProvenance) -> int | None:
         return StubEmbedder.dim if embed_available else None
 
-    monkeypatch.setattr(
-        provenance, "probe_embedding_dimension", _stub_probe, raising=False
-    )
-    monkeypatch.setattr(
-        rerank_acc, "_capability", RerankCapability(provider=stub_reranker)
-    )
-
-    # service.search's independent LLM lazy-build -- see module docstring.
-    search_svc = importlib.import_module("everos.service.search")
-    monkeypatch.setattr(
-        search_svc, "_llm_client", FakeLLMClient(responses=[]), raising=False
-    )
-    monkeypatch.setattr(search_svc, "_llm_resolved", True, raising=False)
+    monkeypatch.setattr(EmbeddingProvenance, "probe_dimension", _stub_probe)
 
     from everos.entrypoints.api.app import create_app
+    from everos.service import build_application
 
-    app = create_app()
+    settings = load_settings()
+    providers = make_providers(
+        llm=make_fake_llm(),
+        embedding=stub_embedder,
+        rerank=stub_reranker,
+    )
+    application = build_application(settings, providers=providers)
+    _RUNNING["application"] = application
+    app = create_app(application=application)
     transport = httpx.ASGITransport(app=app)
 
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
-    ):
-        yield client
+    _STORAGE["view"] = open_storage_view(tmp_path, settings)
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+        ):
+            yield client
+    finally:
+        await _STORAGE.pop("view").aclose()
 
 
 @pytest_asyncio.fixture
@@ -352,7 +299,7 @@ async def _poll(
 async def cascade_progress() -> AsyncIterator[Callable[..., Awaitable[None]]]:
     """Track cascade queue progress across a block of writes.
 
-    Snapshots ``md_change_state_repo.queue_summary()`` on entry and
+    Snapshots the cascade ledger's ``queue_summary()`` on entry and
     yields a ``wait(deadline_seconds=...)`` callable that blocks until
     the queue has both drained (``pending == 0``) *and* actually
     advanced past the snapshot (``done + failed`` grew by at least one
@@ -365,16 +312,15 @@ async def cascade_progress() -> AsyncIterator[Callable[..., Awaitable[None]]]:
     was ever processed. Requiring forward progress past a pre-write
     snapshot closes that race.
     """
-    from everos.infra.persistence.sqlite import md_change_state_repo
-
-    baseline = await md_change_state_repo.queue_summary()
+    ledger = tier_storage().sqlite.md_change_state
+    baseline = await ledger.queue_summary()
     baseline_total = (
         baseline.done + baseline.failed_retryable + baseline.failed_permanent
     )
 
     async def _wait(*, deadline_seconds: float = 40.0, min_processed: int = 1) -> None:
         async def _progressed() -> bool:
-            summary = await md_change_state_repo.queue_summary()
+            summary = await ledger.queue_summary()
             total = summary.done + summary.failed_retryable + summary.failed_permanent
             return summary.pending == 0 and (total - baseline_total) >= min_processed
 
@@ -448,12 +394,12 @@ async def seed_atomic_fact_for_episode(
     """
     import hashlib
 
-    from everos.component.utils.datetime import get_utc_now
-    from everos.infra.persistence.index import AtomicFact, atomic_fact_repo
+    from everos.core.utils.datetime import get_utc_now
+    from everos.infra.persistence.records import AtomicFact
 
     entry_id = f"af_seed_{episode_row['entry_id']}"
     owner_id = episode_row["owner_id"]
-    await atomic_fact_repo.upsert(
+    await tier_storage().repos.atomic_fact.upsert(
         [
             AtomicFact(
                 id=f"{owner_id}_{entry_id}",
@@ -508,7 +454,7 @@ async def episode_rows(owner_id: str) -> list[dict[str, Any]]:
     on how a particular engine stores it, so they read through the same port
     the application uses.
     """
-    from everos.infra.persistence.index import episode_repo, eq
+    from everos.infra.persistence.index import eq
 
-    rows = await episode_repo.scan(eq("owner_id", owner_id))
+    rows = await tier_storage().repos.episode.scan(eq("owner_id", owner_id))
     return [row.model_dump(mode="python") for row in rows]

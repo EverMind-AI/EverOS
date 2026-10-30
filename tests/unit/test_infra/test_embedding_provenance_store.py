@@ -13,29 +13,18 @@ existing deployment adopting this field keeps its rows and column types.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import lancedb as lance
-from everos.infra.persistence.lancedb import lancedb_manager
 from everos.infra.persistence.records.episode import Episode
+from tests.fakes import TEST_DIM, arrow_schema
+from tests.fakes.storage import Storage
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
-
-@pytest.fixture(autouse=True)
-async def _isolated_index(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[None]:
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    yield
-    await lancedb_manager.dispose_connection()
+    pass
 
 
 def _episode_row(entry_id: str) -> dict[str, object]:
@@ -45,7 +34,7 @@ def _episode_row(entry_id: str) -> dict[str, object]:
     the product actually writes, and the first version of this helper was
     missing four required fields.
     """
-    width = Episode.to_arrow_schema().field("vector").type.list_size
+    width = TEST_DIM
     episode = Episode.model_validate(
         {
             "id": f"u1_{entry_id}",
@@ -65,43 +54,41 @@ def _episode_row(entry_id: str) -> dict[str, object]:
     return episode.model_dump()
 
 
-async def test_unattested_index_reads_none() -> None:
+async def test_unattested_index_reads_none(storage: Storage) -> None:
     """A fresh index has no record, and that is not an error (C10/P5)."""
-    assert await lance.index_backend.read_embedding_model() is None
+    assert await storage.backend.read_embedding_model() is None
 
 
-async def test_roundtrip_survives_a_new_connection() -> None:
-    await lance.index_backend.write_embedding_model("fake-768")
-    await lancedb_manager.dispose_connection()
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    assert await lance.index_backend.read_embedding_model() == "fake-768"
+async def test_roundtrip_survives_a_new_connection(storage: Storage) -> None:
+    await storage.backend.write_embedding_model("fake-768")
+    await storage.lance.close()
+    assert await storage.backend.read_embedding_model() == "fake-768"
 
 
-async def test_attesting_does_not_rewrite_data() -> None:
+async def test_attesting_does_not_rewrite_data(storage: Storage) -> None:
     """Row count and column type must not move — this is the upgrade path."""
-    table = await lancedb_manager.get_table(Episode.TABLE_NAME, Episode)
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     await table.add([_episode_row("e0")])
     rows_before = await table.count_rows()
     type_before = (await table.schema()).field("vector").type
 
-    await lance.index_backend.write_embedding_model("fake-768")
+    await storage.backend.write_embedding_model("fake-768")
 
     assert await table.count_rows() == rows_before
     assert (await table.schema()).field("vector").type == type_before
 
 
-async def test_record_survives_writes_and_optimize() -> None:
+async def test_record_survives_writes_and_optimize(storage: Storage) -> None:
     """Routine maintenance must not drop the attestation (A13)."""
-    await lance.index_backend.write_embedding_model("fake-768")
-    table = await lancedb_manager.get_table(Episode.TABLE_NAME, Episode)
+    await storage.backend.write_embedding_model("fake-768")
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     for index in range(3):
         await table.add([_episode_row(f"e{index}")])
     await table.optimize()
-    assert await lance.index_backend.read_embedding_model() == "fake-768"
+    assert await storage.backend.read_embedding_model() == "fake-768"
 
 
-async def test_record_hangs_on_the_episode_vector_column() -> None:
+async def test_record_hangs_on_the_episode_vector_column(storage: Storage) -> None:
     """Pin *which* column carries it, by reading the table instead of the accessor.
 
     Going back through ``read_embedding_model`` cannot see this: reader and
@@ -110,8 +97,8 @@ async def test_record_hangs_on_the_episode_vector_column() -> None:
     only on episodes, so attaching it there would make the attestation
     invisible to a deployment that never wrote one.
     """
-    await lance.index_backend.write_embedding_model("fake-768")
-    table = await lancedb_manager.get_table(Episode.TABLE_NAME, Episode)
+    await storage.backend.write_embedding_model("fake-768")
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     schema = await table.schema()
 
     on_vector = schema.field("vector").metadata or {}
@@ -119,10 +106,10 @@ async def test_record_hangs_on_the_episode_vector_column() -> None:
     assert not (schema.field("subject_vector").metadata or {})
 
 
-async def test_rewriting_replaces_the_previous_model() -> None:
-    await lance.index_backend.write_embedding_model("fake-768")
-    await lance.index_backend.write_embedding_model("fake-1536")
-    assert await lance.index_backend.read_embedding_model() == "fake-1536"
+async def test_rewriting_replaces_the_previous_model(storage: Storage) -> None:
+    await storage.backend.write_embedding_model("fake-768")
+    await storage.backend.write_embedding_model("fake-1536")
+    assert await storage.backend.read_embedding_model() == "fake-1536"
 
 
 def test_both_backends_use_the_one_key() -> None:

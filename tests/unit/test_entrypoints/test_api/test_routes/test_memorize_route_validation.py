@@ -19,20 +19,21 @@ from pydantic import ValidationError
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.entrypoints.api.routes.memorize import (
+from everos.entrypoints.api.schemas import (
     MemorizeAddRequest,
     MessageItemDTO,
 )
+from tests.fakes import make_application
 
 
 @pytest.fixture
 async def client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; nothing past DTO validation is reached."""
+    """FastAPI app over a stub application; nothing past DTO validation is reached."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application())
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -84,7 +85,7 @@ def test_message_item_accepts_path_safe_sender_id(good_sender_id: str) -> None:
 
 
 def test_message_item_rejects_tool_role_without_call_id() -> None:
-    # An orphan tool row used to travel to ``_boundary`` and 500 from
+    # An orphan tool row used to travel to boundary detection and 500 from
     # inside extraction; it is refused at the DTO now.
     with pytest.raises(ValidationError, match="tool_call_id"):
         MessageItemDTO(

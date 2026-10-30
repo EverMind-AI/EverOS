@@ -14,8 +14,10 @@ from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
 from everos.core.observability.logging import get_logger
+from everos.memory.models import AgentSkill
 from everos.memory.search.callbacks import build_skill_rerank_fn
-from everos.memory.search.shaper import shape_agent_skill_from_candidate
+from everos.memory.search.recall import RecallResult, merge_stored
+from everos.memory.search.shaper import shape_agent_skills
 
 from .dto import SearchAgentSkillItem
 
@@ -28,8 +30,8 @@ logger = get_logger(__name__)
 async def search_agent_skills_hybrid(
     query: str,
     *,
-    sparse: list[Candidate],
-    dense: list[Candidate],
+    sparse: RecallResult[AgentSkill],
+    dense: RecallResult[AgentSkill],
     reranker: RerankProvider,
     top_k: int,
 ) -> list[SearchAgentSkillItem]:
@@ -37,17 +39,17 @@ async def search_agent_skills_hybrid(
 
     Args:
         query: User search query.
-        sparse: BM25 recall candidates for the skill table.
-        dense: Vector ANN recall candidates for the skill table.
+        sparse: BM25 recall over the skill index.
+        dense: Vector ANN recall over the skill index.
         reranker: Cross-encoder rerank provider (not LLM-based).
         top_k: Maximum skills to return after rerank.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentSkillItem`` objects.
     """
-    fused = _fuse(sparse, dense)
+    fused = _fuse(sparse.candidates, dense.candidates)
     reranked = await _cross_encoder_rerank(query, fused, reranker, top_k)
-    return _shape_results(reranked)
+    return shape_agent_skills(reranked, merge_stored(sparse, dense))
 
 
 # ── Pipeline steps ────────────────────────────────────────────────────────
@@ -70,13 +72,3 @@ async def _cross_encoder_rerank(
     rerank_fn = build_skill_rerank_fn(reranker)
     reranked = await rerank_fn(query, candidates)
     return reranked[:top_k]
-
-
-def _shape_results(candidates: list[Candidate]) -> list[SearchAgentSkillItem]:
-    """Shape each Candidate into a SearchAgentSkillItem, dropping malformed rows."""
-    return [
-        item
-        for c in candidates
-        for item in [shape_agent_skill_from_candidate(c)]
-        if item is not None
-    ]

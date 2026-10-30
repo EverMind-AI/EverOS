@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from everos.config import missing_config_error
+
 
 class ErrorCode(StrEnum):
     """Machine-readable error codes returned in the API error envelope.
@@ -189,6 +191,14 @@ class VectorStoreBusyError(ExternalServiceError):
     """
 
 
+class MemoryRootLockedError(InfrastructureError):
+    """Another process holds this memory root's exclusive lock.
+
+    A running ``everos server`` (or an exclusive CLI command) holds it; the
+    caller stops that process first or tries again later.
+    """
+
+
 class LLMServiceError(ExternalServiceError):
     """The configured LLM provider returned an error or timed out."""
 
@@ -220,6 +230,15 @@ class MultimodalNotEnabledError(CapabilityError):
 
     Raised when the ``everos[multimodal]`` extra is not installed, or when
     a required system dependency (LibreOffice for Office documents) is absent.
+    """
+
+
+class TokenizerAssetError(CapabilityError):
+    """The token-counting encoding the algorithm library needs is unavailable.
+
+    Raised at startup when tiktoken's ``o200k_base`` encoding can neither be
+    read from its cache nor downloaded (offline host, TLS interception).
+    Admin action: allow the one-time download, or ship the cached file.
     """
 
 
@@ -291,11 +310,6 @@ class ProviderNotConfiguredError(ConfigurationError):
         feature: str | None = None,
         alternative_hint: str | None = None,
     ) -> None:
-        # Lazy import: `config_hints` -> `core.persistence` -> `core.persistence
-        # .markdown.writer` imports `PathTraversalError` from this module, so a
-        # module-level import here would be circular.
-        from everos.component.utils.config_hints import missing_config_error
-
         self.provider = provider
         self.feature = feature
         self.alternative_hint = alternative_hint
@@ -316,3 +330,14 @@ class ProviderNotConfiguredError(ConfigurationError):
 # Renamed in v0.2 — old names kept for external consumers.
 DocumentAlreadyExistsError = DuplicateDocumentError
 ValidationError = InvalidInputError
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised when an LLM section is missing ``api_key`` or ``base_url``.
+
+    A ``RuntimeError`` rather than an ``AppError``: it is raised while the
+    application is assembled and by use cases that need a model. The HTTP
+    API answers it with 422 ``PROVIDER_NOT_CONFIGURED``, like
+    :class:`ProviderNotConfiguredError`. It lives here so a use case can
+    raise it without depending on the LLM provider package.
+    """

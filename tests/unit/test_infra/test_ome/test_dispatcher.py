@@ -9,21 +9,19 @@ from everos.infra.ome._dispatch.dispatcher import EventDispatcher
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.storage import OMEStorage
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.events import BaseEvent, CronTick, ManualTick
-from everos.infra.ome.gates import Counter
-from everos.infra.ome.triggers import Cron, Immediate
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Counter, Cron, CronTick, Event, Immediate, ManualTick
+from tests.helpers.ome import ome_strategy
 
 
-class _E(BaseEvent):
+class _E(Event):
     user_id: str
 
 
 def _make_strategy(name: str, **kw):
-    @offline_strategy(name=name, trigger=Immediate(on=[_E]), emits=[], **kw)
-    async def _f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name=name, trigger=Immediate(on=[_E]), emits=[], **kw)
+    async def _f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return _f
 
@@ -70,7 +68,7 @@ async def test_dispatch_applies_to_string(
 async def test_dispatch_applies_to_callable(
     dispatcher: EventDispatcher,
 ) -> None:
-    def is_paid(e: _E) -> bool:
+    def is_paid(e: _E, _deps: MemoryDeps) -> bool:
         return e.user_id.startswith("paid_")
 
     dispatcher._registry.register(_make_strategy("s", applies_to=is_paid))
@@ -104,9 +102,9 @@ async def test_inspect_returns_route_info(
 
 
 def _make_cron_strategy(name: str):
-    @offline_strategy(name=name, trigger=Cron(expr="0 * * * *"), emits=[])
-    async def _f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name=name, trigger=Cron(expr="0 * * * *"), emits=[])
+    async def _f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return _f
 
@@ -189,9 +187,9 @@ async def test_dispatch_manual_tick_reaches_a_cron_strategy(
     # ``POST /ome/trigger {"name": "reflect_episodes", "force": true}`` is the
     # documented way to run a scheduled job now; CronTick and ManualTick carry
     # the same single field, so the handler is safe.
-    @offline_strategy(name="weekly", trigger=Cron(expr="0 2 * * 1"), emits=[])
-    async def _weekly(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="weekly", trigger=Cron(expr="0 2 * * 1"), emits=[])
+    async def _weekly(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     dispatcher._registry.register(_weekly)
     routes = await dispatcher.dispatch(
@@ -217,7 +215,7 @@ async def test_dispatch_isolates_faulty_applies_to_callable(
     the fan-out for siblings subscribed to the same event class.
     """
 
-    def _boom(_e: _E) -> bool:
+    def _boom(_e: _E, _deps: MemoryDeps) -> bool:
         raise RuntimeError("applies_to is buggy")
 
     dispatcher._registry.register(_make_strategy("s_buggy", applies_to=_boom))
@@ -233,7 +231,7 @@ async def test_dispatch_isolates_faulty_applies_to_callable(
 async def test_inspect_isolates_faulty_applies_to_callable(
     dispatcher: EventDispatcher,
 ) -> None:
-    def _boom(_e: _E) -> bool:
+    def _boom(_e: _E, _deps: MemoryDeps) -> bool:
         raise RuntimeError("applies_to is buggy")
 
     dispatcher._registry.register(_make_strategy("s_buggy", applies_to=_boom))

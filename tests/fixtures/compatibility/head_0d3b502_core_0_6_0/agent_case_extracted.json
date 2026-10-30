@@ -1,0 +1,10 @@
+{
+  "event_id": "frozen-agent-case-event",
+  "ts": "2023-11-14T22:13:20Z",
+  "memcell_id": "mc-frozen",
+  "case_entry_id": "case-frozen",
+  "task_intent": "cook risotto",
+  "quality_score": 0.8,
+  "case_timestamp_ms": 1700000000123,
+  "agent_id": "agent-frozen"
+}

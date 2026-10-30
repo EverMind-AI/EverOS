@@ -46,15 +46,14 @@ from typing import Any
 
 import anyio
 
-from everos.core.persistence import MarkdownReader
-from everos.core.persistence.markdown.entries import StructuredEntry
-from everos.infra.persistence.index import eq, primary_key
-from everos.infra.persistence.markdown import AgentSkillFrontmatter
-from everos.memory.cascade.handlers._common import content_sha256, resolve_scope
-from everos.memory.cascade.handlers._daily_log_base import BaseDailyLogHandler
-from everos.memory.cascade.handlers.agent_skill import AgentSkillHandler
-from everos.memory.cascade.handlers.user_profile import UserProfileHandler
-from everos.memory.cascade.registry import KIND_REGISTRY, KindSpec
+from everos.infra.cascade._projections._common import content_sha256, resolve_scope
+from everos.infra.cascade._projections._daily_log_base import BaseDailyLogHandler
+from everos.infra.cascade._projections.agent_skill import AgentSkillHandler
+from everos.infra.cascade._projections.user_profile import UserProfileHandler
+from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec
+from everos.infra.persistence.index import IndexRepositories, eq, primary_key
+from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader
+from everos.infra.persistence.markdown._base.entries import StructuredEntry
 
 # stdlib logging (not structlog) so pytest --log-cli-level=INFO picks
 # this up live without -s. Project rule 18 (use get_logger) covers src/
@@ -83,6 +82,7 @@ class KindConsistencyStats:
 
 async def assert_md_lance_strict_consistent(
     memory_root: Path,
+    index: IndexRepositories,
     *,
     expect_at_least: dict[str, int] | None = None,
 ) -> dict[str, KindConsistencyStats]:
@@ -100,6 +100,7 @@ async def assert_md_lance_strict_consistent(
         memory_root: Absolute path to the memory root directory
             (e.g. the value of ``EVEROS_ROOT`` /
             ``MemoryRoot.root``).
+        index: The derived-index repositories to compare against.
         expect_at_least: Optional ``{kind_name: min_md_files}`` map.
             Raises ``AssertionError`` if a listed kind has fewer md
             files than the threshold — the caller's hook to assert
@@ -117,12 +118,14 @@ async def assert_md_lance_strict_consistent(
         md_paths = sorted(
             p.relative_to(root).as_posix() for p in root.glob(spec.path_glob())
         )
+        repo = index.for_schema(spec.index_schema) if spec.index_schema else None
         if spec.handler_factory is UserProfileHandler:
-            entry_total, lance_total = await _check_user_profile(spec, root, md_paths)
+            check = _check_user_profile
         elif spec.handler_factory is AgentSkillHandler:
-            entry_total, lance_total = await _check_agent_skill(spec, root, md_paths)
+            check = _check_agent_skill
         else:
-            entry_total, lance_total = await _check_daily_log(spec, root, md_paths)
+            check = _check_daily_log
+        entry_total, lance_total = await check(spec, repo, root, md_paths)
 
         report = KindConsistencyStats(
             kind=spec.name,
@@ -189,7 +192,7 @@ def _daily_log_sha_for_entry(
 
 
 async def _check_daily_log(
-    spec: KindSpec, root: Path, md_paths: list[str]
+    spec: KindSpec, repo: Any, root: Path, md_paths: list[str]
 ) -> tuple[int, int]:
     md_entry_total = 0
     lance_row_total = 0
@@ -202,9 +205,7 @@ async def _check_daily_log(
             )
             for entry in parsed.entries
         }
-        lance_rows = await spec.index_repo.find_where(
-            eq("md_path", md_path), limit=10_000
-        )
+        lance_rows = await repo.find_where(eq("md_path", md_path), limit=10_000)
         lance_sha_by_id = {r.entry_id: r.content_sha256 for r in lance_rows}
         if md_sha_by_id != lance_sha_by_id:
             raise AssertionError(
@@ -222,7 +223,7 @@ async def _check_daily_log(
 
 
 async def _check_user_profile(
-    spec: KindSpec, root: Path, md_paths: list[str]
+    spec: KindSpec, repo: Any, root: Path, md_paths: list[str]
 ) -> tuple[int, int]:
     """Mirror :meth:`UserProfileHandler.handle_added_or_modified` digest."""
     seen_ids: set[str] = set()
@@ -248,9 +249,7 @@ async def _check_user_profile(
             }
         )
         app_id, project_id = resolve_scope(md_path)
-        lance_row = await spec.index_repo.find_one_where(
-            primary_key(app_id, project_id, owner_id)
-        )
+        lance_row = await repo.find_one_where(primary_key(app_id, project_id, owner_id))
         if lance_row is None:
             raise AssertionError(
                 f"user_profile row missing for owner {owner_id!r} @ {md_path}"
@@ -279,7 +278,7 @@ async def _check_user_profile(
 
 
 async def _check_agent_skill(
-    spec: KindSpec, root: Path, md_paths: list[str]
+    spec: KindSpec, repo: Any, root: Path, md_paths: list[str]
 ) -> tuple[int, int]:
     """Mirror :meth:`AgentSkillHandler.handle_added_or_modified` digest."""
     for md_path in md_paths:
@@ -311,9 +310,7 @@ async def _check_agent_skill(
             }
         )
         app_id, project_id = resolve_scope(md_path)
-        lance_row = await spec.index_repo.find_one_where(
-            primary_key(app_id, project_id, skill_id)
-        )
+        lance_row = await repo.find_one_where(primary_key(app_id, project_id, skill_id))
         if lance_row is None:
             raise AssertionError(
                 f"agent_skill row missing for skill {skill_id!r} @ {md_path}"

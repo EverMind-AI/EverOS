@@ -33,14 +33,23 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from everos.component.utils.datetime import get_utc_now
-from everos.config import load_settings
-from everos.entrypoints.cli.commands import _backfill_cmd as backfill_cmd
+from everos.config import Settings, load_settings
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands import cascade as cascade_mod
-from everos.entrypoints.cli.commands._backfill_cmd import PHASES, run_backfill
-from everos.infra.persistence.lancedb import Episode, dispose_connection, episode_repo
-from everos.memory.cascade import BackfillPhase
-from everos.memory.cascade import _backfill as backfill_mod
+from everos.entrypoints.cli.commands._backfill import (
+    PHASE_COPY,
+    TyperPresenter,
+    run_backfill,
+)
+from everos.infra.persistence.lancedb import Episode
+from everos.service import (
+    BACKFILL_PHASES,
+    Application,
+    OpsService,
+    build_application,
+)
+from tests.fakes import FakeEmbeddingProvider, make_providers
+from tests.fakes.storage import Storage
 
 # rich (via typer) injects ANSI escapes into help output when it thinks
 # the terminal supports colour; on CI those escapes chop `--phase` into
@@ -55,7 +64,7 @@ def _strip_ansi(text: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated_lancedb_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> Iterator[None]:
     """The ``"vectors"`` phase now opens real LanceDB tables to scan for
     ``vector IS NULL`` rows — isolate every test under a tmp memory root
@@ -66,45 +75,42 @@ def _isolated_lancedb_root(
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    asyncio.run(dispose_connection())
+    asyncio.run(storage.lance.close())
     yield
-    asyncio.run(dispose_connection())
+    asyncio.run(storage.lance.close())
 
 
-class _StubAvailableCapability:
-    """Round-2 finding #5 moved capability preflight to BEFORE every
-    phase's collection scan (including the ``total == 0`` early
-    return). Tests that used to reach the "nothing to backfill" green
-    path with the default (unavailable) capability would now
-    short-circuit to exit 2. Presenting an available capability
-    everywhere in this file preserves the scaffold-contract intent —
-    these tests never care about the embedding branch.
+def _build_with_embedding(settings: Settings) -> Application:
+    """The real application, with an embedding provider configured.
+
+    Every phase preflights the embedding provider BEFORE its collection
+    scan (including the ``total == 0`` early return), so tests that reach
+    the "nothing to backfill" green path need one; these tests never run a
+    real embed batch -- the phase bodies scan an empty backlog and return
+    before touching the provider.
     """
-
-    available = True
-
-    def require(self):
-        # None of these tests actually run a real embed batch — the
-        # phase bodies scan an empty backlog and return before touching
-        # the provider. Returning ``None`` keeps the mock cheap.
-        return None
+    providers = make_providers(embedding=FakeEmbeddingProvider())
+    return build_application(settings, providers=providers)
 
 
 @pytest.fixture(autouse=True)
 def _preflight_capability_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the embedding capability to available so every phase's
-    round-2 preflight passes and control reaches the scaffold code
-    these tests actually exercise."""
-    monkeypatch.setattr(
-        backfill_mod, "get_embedding_capability", lambda: _StubAvailableCapability()
-    )
+    """Every application this file builds -- here or through the CLI --
+    has embedding available, so every phase's preflight passes and control
+    reaches the scaffold code these tests actually exercise."""
+    monkeypatch.setattr(cascade_mod, "build_application", _build_with_embedding)
 
 
-async def _seed_one_unbackfilled_episode() -> None:
+@pytest.fixture
+def ops() -> OpsService:
+    return _build_with_embedding(load_settings()).ops
+
+
+async def _seed_one_unbackfilled_episode(storage: Storage) -> None:
     """One ``vector IS NULL`` row so a declined-confirmation test actually
     reaches the confirm prompt instead of short-circuiting on "nothing to
     backfill"."""
-    await episode_repo.add(
+    await storage.repos.episode.add(
         [
             Episode(
                 id="u1_ep1",
@@ -137,14 +143,15 @@ def test_backfill_invalid_phase_rejected() -> None:
     assert result.exit_code != 0
 
 
-def test_phases_slugs_match_cli_choices() -> None:
-    assert [p.slug for p in PHASES] == ["vectors", "clusters", "skills"]
+def test_every_phase_has_its_header_copy() -> None:
+    assert list(PHASE_COPY) == list(BACKFILL_PHASES)
 
 
 async def test_run_backfill_single_phase_runs_only_that_phase(
+    ops: OpsService,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = await run_backfill(phase="clusters", auto_yes=True)
+    code = await run_backfill(ops, phase="clusters", auto_yes=True)
     out = capsys.readouterr().out
     assert code == 0
     assert "Phase 2" in out
@@ -153,9 +160,10 @@ async def test_run_backfill_single_phase_runs_only_that_phase(
 
 
 async def test_run_backfill_all_runs_every_phase(
+    ops: OpsService,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = await run_backfill(phase="all", auto_yes=True)
+    code = await run_backfill(ops, phase="all", auto_yes=True)
     out = capsys.readouterr().out
     assert code == 0
     assert "Phase 1" in out
@@ -164,18 +172,19 @@ async def test_run_backfill_all_runs_every_phase(
 
 
 async def test_run_backfill_yes_skips_confirmation(
+    ops: OpsService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _boom(*_args: object, **_kwargs: object) -> bool:
         raise AssertionError("typer.confirm must not be called when auto_yes=True")
 
     monkeypatch.setattr(typer, "confirm", _boom)
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(ops, phase="vectors", auto_yes=True)
     assert code == 0
 
 
 async def test_run_backfill_abort_returns_one(
-    monkeypatch: pytest.MonkeyPatch,
+    ops: OpsService, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """User declines the y/N prompt → exit 1 (aborted).
 
@@ -187,53 +196,54 @@ async def test_run_backfill_abort_returns_one(
     ``test_backfill_preflight.py`` because these tests live under
     ``test_entrypoints/`` and don't pull that fixture in.
     """
-    await _seed_one_unbackfilled_episode()
-
-    class _AvailableCapability:
-        available = True
-
-        def require(self):
-            raise AssertionError(
-                "require() should not run: the test declines the confirm "
-                "prompt before the phase body ever asks for the provider."
-            )
-
-    monkeypatch.setattr(
-        backfill_mod, "get_embedding_capability", lambda: _AvailableCapability()
-    )
+    await _seed_one_unbackfilled_episode(storage)
     monkeypatch.setattr(typer, "confirm", lambda *a, **k: False)
-    code = await run_backfill(phase="vectors", auto_yes=False)
+    code = await run_backfill(ops, phase="vectors", auto_yes=False)
     assert code == 1
 
 
-async def test_run_backfill_unexpected_error_returns_two(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _raise(*_args: object, **_kwargs: object) -> None:
+class _BrokenOps:
+    """An ops facade whose backfill fails with an unexpected error."""
+
+    async def backfill(self, *_args: object, **_kwargs: object) -> None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(backfill_cmd, "_print_phase_header", _raise)
-    code = await run_backfill(phase="vectors", auto_yes=True)
+
+async def test_run_backfill_unexpected_error_returns_two(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = await run_backfill(_BrokenOps(), phase="vectors", auto_yes=True)  # type: ignore[arg-type]
+
     assert code == 2
+    assert "Backfill failed — see logs for details." in capsys.readouterr().out
 
 
-def test_confirm_auto_yes_short_circuits(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_confirm_auto_yes_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _boom(*_args: object, **_kwargs: object) -> bool:
         raise AssertionError("must not prompt when auto_yes=True")
 
     monkeypatch.setattr(typer, "confirm", _boom)
-    assert backfill_cmd._confirm("anything", auto_yes=True) is True
+    assert await TyperPresenter().confirm("anything", auto_yes=True) is True
 
 
-def test_confirm_delegates_to_typer_when_not_auto_yes(
+async def test_confirm_delegates_to_typer_when_not_auto_yes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(typer, "confirm", lambda *a, **k: True)
-    assert backfill_cmd._confirm("anything", auto_yes=False) is True
+    prompts: list[str] = []
+
+    def _answer(prompt: str, **_kwargs: object) -> bool:
+        prompts.append(prompt)
+        return True
+
+    monkeypatch.setattr(typer, "confirm", _answer)
+    assert await TyperPresenter().confirm("anything", auto_yes=False) is True
+    assert prompts == ["Proceed with: anything"]
 
 
 def test_backfill_cli_abort_via_n_returns_exit_code_one(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """CLI-driven abort mirror of :func:`test_run_backfill_abort_returns_one`.
 
@@ -241,17 +251,7 @@ def test_backfill_cli_abort_via_n_returns_exit_code_one(
     the test must present an available capability or the "n" input
     never reaches ``_confirm``.
     """
-    asyncio.run(_seed_one_unbackfilled_episode())
-
-    class _AvailableCapability:
-        available = True
-
-        def require(self):
-            raise AssertionError("require() should not run in an abort test")
-
-    monkeypatch.setattr(
-        backfill_mod, "get_embedding_capability", lambda: _AvailableCapability()
-    )
+    asyncio.run(_seed_one_unbackfilled_episode(storage))
     result = CliRunner().invoke(
         cascade_mod.app, ["backfill", "--phase", "vectors"], input="n\n"
     )
@@ -264,10 +264,3 @@ def test_backfill_cli_yes_flag_auto_confirms() -> None:
     )
     assert result.exit_code == 0
     assert "Phase 2" in result.stdout
-
-
-def test_backfill_phase_dataclass_is_frozen() -> None:
-    phase = PHASES[0]
-    assert isinstance(phase, BackfillPhase)
-    with pytest.raises(Exception):  # noqa: B017 — dataclasses.FrozenInstanceError
-        phase.number = 99  # type: ignore[misc]

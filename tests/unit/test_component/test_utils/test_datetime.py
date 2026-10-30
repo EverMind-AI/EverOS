@@ -7,8 +7,9 @@ import os
 
 import pytest
 
-from everos.component.utils import datetime as dt_module
-from everos.component.utils.datetime import (
+from everos.config import load_settings
+from everos.core.utils import datetime as dt_module
+from everos.core.utils.datetime import (
     UtcDatetime,
     ensure_utc,
     from_iso_format,
@@ -21,7 +22,8 @@ from everos.component.utils.datetime import (
     to_timestamp_ms,
     today_with_timezone,
 )
-from everos.config import load_settings
+from tests.fakes import TEST_DIM, arrow_schema
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture(autouse=True)
@@ -412,8 +414,7 @@ def test_pydantic_isoformat_renders_utc_as_z_suffix() -> None:
 
 
 def test_sqlite_round_trip_under_shanghai_display_tz(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """End-to-end: write under Shanghai → read → row is aware UTC.
 
@@ -429,18 +430,13 @@ def test_sqlite_round_trip_under_shanghai_display_tz(
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
 
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        sqlite_manager,
-        unprocessed_buffer_repo,
     )
 
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
-
     async def _run() -> None:
-        engine = sqlite_manager.get_engine()
+        engine = storage.database.engine
         async with engine.begin() as conn:
             await conn.run_sync(_SQLModel.metadata.create_all)
 
@@ -455,8 +451,10 @@ def test_sqlite_round_trip_under_shanghai_display_tz(
             content_items_json=_json.dumps([{"type": "text", "text": "x"}]),
             text="x",
         )
-        await unprocessed_buffer_repo.replace("s_rt", "memorize", [row])
-        rows = await unprocessed_buffer_repo.list_for_track("s_rt", "memorize")
+        await storage.sqlite.unprocessed_buffer.replace("s_rt", "memorize", [row])
+        rows = await storage.sqlite.unprocessed_buffer.list_for_track(
+            "s_rt", "memorize"
+        )
         assert rows[0].timestamp.tzinfo is dt.UTC, (
             "SQLAlchemy load event hook must attach UTC; "
             f"got tzinfo={rows[0].timestamp.tzinfo!r}"
@@ -464,66 +462,19 @@ def test_sqlite_round_trip_under_shanghai_display_tz(
         assert rows[0].timestamp == target
         # BaseTable.created_at / updated_at inherit the hook too.
         assert rows[0].created_at.tzinfo is dt.UTC
-        await sqlite_manager.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
-def test_lancedb_schema_overrides_subclass_declared_non_utc_tz() -> None:
-    """A subclass that tries to declare ``tz=America/New_York`` is forced to UTC.
-
-    Project convention: storage is always UTC. The
-    :meth:`BaseLanceTable.to_arrow_schema` rewrite ignores whatever tz a
-    subclass attempts to set and replaces it with ``tz=UTC``. This pins
-    that no future schema can quietly opt out of the discipline.
-    """
-    from typing import ClassVar as _ClassVar
-
-    import pyarrow as pa
-
-    from everos.core.persistence.lancedb import BaseLanceTable
-
-    class _MisbehavingSchema(BaseLanceTable):
-        TABLE_NAME: _ClassVar[str] = "_misbehaving"
-        id: str
-        ts: dt.datetime
-
-        @classmethod
-        def to_arrow_schema(cls):  # type: ignore[no-untyped-def]
-            # Subclass tries to sneak a non-UTC tz onto the column …
-            base = pa.schema(
-                [
-                    pa.field("id", pa.string(), nullable=False),
-                    pa.field(
-                        "ts", pa.timestamp("us", tz="America/New_York"), nullable=False
-                    ),
-                ]
-            )
-            # … and pipes it through BaseLanceTable's coercion. We expect
-            # the coercion to override NY → UTC.
-            return pa.schema(
-                [
-                    pa.field(f.name, pa.timestamp("us", tz="UTC"), nullable=f.nullable)
-                    if pa.types.is_timestamp(f.type)
-                    else f
-                    for f in base
-                ]
-            )
-
-    schema = _MisbehavingSchema.to_arrow_schema()
-    ts_field = schema.field("ts")
-    assert getattr(ts_field.type, "tz", None) == "UTC", (
-        f"non-UTC subclass tz must be coerced to UTC; got {ts_field.type}"
-    )
-
-
 def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
-    """Every datetime column on a BaseLanceTable subclass gets tz=UTC auto-applied.
+    """Every datetime column on an IndexRecord subclass is stored tz=UTC.
 
-    Pins the **zero-configuration** contract: subclasses just declare
-    ``ts: datetime`` and ``BaseLanceTable.to_arrow_schema`` rewrites
-    every naive ``timestamp[us]`` to ``timestamp[us, tz=UTC]``. No
-    per-table opt-in declaration is required.
+    Pins the **zero-configuration** contract: records just declare
+    ``ts: datetime`` and the LanceDB mapping of the neutral ``datetime``
+    kind (``arrow_schema_for``) is always ``timestamp[us, tz=UTC]``. A
+    record has no way to declare another zone: the neutral schema carries
+    none, so no future table can quietly opt out of the discipline.
     """
     import pyarrow as pa
 
@@ -534,7 +485,7 @@ def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
     from everos.infra.persistence.records.user_profile import UserProfile
 
     for cls in (Episode, AtomicFact, AgentCase, Foresight, UserProfile):
-        schema = cls.to_arrow_schema()
+        schema = arrow_schema(cls)
         ts_fields = [f for f in schema if pa.types.is_timestamp(f.type)]
         assert ts_fields, f"{cls.__name__} has no timestamp fields (unexpected)"
         for field in ts_fields:
@@ -579,8 +530,7 @@ def test_sorting_multiple_datetimes_consistent_after_tz_switch(
 
 
 def test_reverse_tz_switch_utc_to_shanghai_no_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Write under UTC display, read under Shanghai display → same instant.
 
@@ -596,19 +546,15 @@ def test_reverse_tz_switch_utc_to_shanghai_no_drift(
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
 
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        sqlite_manager,
-        unprocessed_buffer_repo,
     )
 
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
     target = dt.datetime(2026, 5, 29, 6, tzinfo=dt.UTC)
 
     async def _write_under_utc() -> None:
-        engine = sqlite_manager.get_engine()
+        engine = storage.database.engine
         async with engine.begin() as conn:
             await conn.run_sync(_SQLModel.metadata.create_all)
         row = UnprocessedBuffer(
@@ -621,8 +567,8 @@ def test_reverse_tz_switch_utc_to_shanghai_no_drift(
             content_items_json=_json.dumps([{"type": "text", "text": "x"}]),
             text="x",
         )
-        await unprocessed_buffer_repo.replace("s_rev", "memorize", [row])
-        await sqlite_manager.dispose_engine()
+        await storage.sqlite.unprocessed_buffer.replace("s_rev", "memorize", [row])
+        await storage.database.dispose()
 
     asyncio.run(_write_under_utc())
 
@@ -630,11 +576,11 @@ def test_reverse_tz_switch_utc_to_shanghai_no_drift(
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "Asia/Shanghai")
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
 
     async def _read_under_shanghai() -> None:
-        rows = await unprocessed_buffer_repo.list_for_track("s_rev", "memorize")
+        rows = await storage.sqlite.unprocessed_buffer.list_for_track(
+            "s_rev", "memorize"
+        )
         assert len(rows) == 1
         # storage is UTC — read back equals what we wrote
         assert rows[0].timestamp == target
@@ -642,12 +588,12 @@ def test_reverse_tz_switch_utc_to_shanghai_no_drift(
         rendered = to_display_tz(rows[0].timestamp)
         assert rendered.hour == 14
         assert rendered.utcoffset() == dt.timedelta(hours=8)
-        await sqlite_manager.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_read_under_shanghai())
 
 
-def test_from_timestamp_ms_round_trip_through_ensure_utc() -> None:
+def test_from_timestamp_ms_round_trip_through_ensure_utc(storage: Storage) -> None:
     """ms epoch → from_timestamp → ensure_utc must preserve the UTC instant.
 
     The ``/add`` request body declares timestamps as Unix epoch ms; this
@@ -662,8 +608,7 @@ def test_from_timestamp_ms_round_trip_through_ensure_utc() -> None:
 
 
 def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """SQLAlchemy ``before_insert`` mapper event converts aware Shanghai → UTC.
 
@@ -671,7 +616,7 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
     ``SQLModel(table=True)`` classes skip Pydantic ``AfterValidator``,
     so the :data:`UtcDatetime` annotation by itself is **inert** at
     construction. The mapper event registered in
-    :mod:`everos.core.persistence.sqlite.base` is what guarantees the
+    :mod:`everos.infra.persistence.sqlite._base.base` is what guarantees the
     on-disk SQLite text is UTC bytes, not display-tz bytes.
 
     Test path: write a row whose ``timestamp`` is aware Shanghai 14:00,
@@ -690,20 +635,16 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
 
     from sqlalchemy import text as _sql_text
 
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
-    from everos.core.persistence.sqlite import session_scope
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        get_session_factory,
-        sqlite_manager,
+        session_scope,
     )
 
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
     aware_sh = dt.datetime(2026, 5, 29, 14, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     async def _run() -> None:
-        engine = sqlite_manager.get_engine()
+        engine = storage.database.engine
         async with engine.begin() as conn:
             await conn.run_sync(_SQLModel.metadata.create_all)
 
@@ -724,7 +665,7 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
             "test invariant: construction did NOT normalise"
         )
 
-        async with session_scope(get_session_factory()) as session:
+        async with session_scope(storage.database.session_factory) as session:
             session.add(row)
             await session.commit()
 
@@ -745,7 +686,7 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
         )
         assert "14:00:00" not in raw
 
-        await sqlite_manager.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
@@ -776,8 +717,7 @@ def test_ensure_utc_and_display_tz_chained_through_none() -> None:
 
 
 def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Every ``BaseTable`` subclass with a ``UtcDatetime`` column gets UTC on read.
 
@@ -802,23 +742,19 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
 
     from sqlmodel import select
 
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
-    from everos.core.persistence.sqlite import session_scope
     from everos.infra.persistence.sqlite import (
         ConversationStatus,
         MdChangeState,
         Memcell,
         UnprocessedBuffer,
-        get_session_factory,
-        sqlite_manager,
+        session_scope,
     )
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
 
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
     target = dt.datetime(2026, 5, 29, 6, tzinfo=dt.UTC)
 
     async def _run() -> None:
-        engine = sqlite_manager.get_engine()
+        engine = storage.database.engine
         async with engine.begin() as conn:
             await conn.run_sync(_SQLModel.metadata.create_all)
 
@@ -859,12 +795,12 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
             ),
         ]
 
-        async with session_scope(get_session_factory()) as session:
+        async with session_scope(storage.database.session_factory) as session:
             for row in rows:
                 session.add(row)
             await session.commit()
 
-        async with session_scope(get_session_factory()) as session:
+        async with session_scope(storage.database.session_factory) as session:
             ub = (await session.execute(select(UnprocessedBuffer))).scalar_one()
             mc = (await session.execute(select(Memcell))).scalar_one()
             cs = (await session.execute(select(ConversationStatus))).scalar_one()
@@ -899,7 +835,7 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
         assert mcs.last_attempt_at.tzinfo is dt.UTC
         assert mcs.last_attempt_at == target
 
-        await sqlite_manager.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
@@ -910,7 +846,7 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
 # ``before_update``), which ONLY fire on the ORM unit-of-work flush
 # path. Core SQL statements (``session.execute(insert(...).values())``,
 # ``update(...).values()``, ``delete(...)``, bulk operations) bypass
-# them — and md_change_state_repo uses Core statements pervasively.
+# them — and storage.sqlite.md_change_state uses Core statements pervasively.
 #
 # The fix is :class:`UtcDateTimeColumn`, a SQLAlchemy ``TypeDecorator``
 # whose ``process_bind_param`` runs on **every** bind parameter
@@ -919,52 +855,48 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
 
 
 def _build_engine_for_test(monkeypatch, tmp_path, tz: str = "Asia/Shanghai"):
-    """Common setup: tmp memory root + tz + fresh engine."""
+    """Common setup: tmp memory root + display tz."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", tz)
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
 
-    from everos.infra.persistence.sqlite import sqlite_manager
 
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
-    return sqlite_manager
+async def _create_schema(storage: Storage) -> None:
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
 
-
-async def _create_schema(sqlite_manager) -> None:
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
-
-    engine = sqlite_manager.get_engine()
+    engine = storage.database.engine
     async with engine.begin() as conn:
         await conn.run_sync(_SQLModel.metadata.create_all)
 
 
-async def _probe_raw_text(sqlite_manager, sql: str) -> str | None:
+async def _probe_raw_text(storage: Storage, sql: str) -> str | None:
     """Read a single column via raw SQL — bypasses ORM hydrate hooks."""
     from sqlalchemy import text as _sql_text
 
-    engine = sqlite_manager.get_engine()
+    engine = storage.database.engine
     async with engine.connect() as conn:
         return (await conn.execute(_sql_text(sql))).scalar()
 
 
 def test_typedec_covers_orm_session_add(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """ORM ``session.add`` write path: aware Shanghai → UTC bytes on disk."""
     import asyncio
     from zoneinfo import ZoneInfo
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path)
+    _build_engine_for_test(monkeypatch, tmp_path)
     aware_sh = dt.datetime(2026, 5, 29, 14, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add(
                 MdChangeState(
                     md_path="p_orm",
@@ -977,17 +909,17 @@ def test_typedec_covers_orm_session_add(
             )
             await s.commit()
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_orm'",
         )
         assert raw and "06:00" in raw and "14:00" not in raw
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_covers_core_insert_values(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Core ``insert(Model).values(...)`` bypasses ORM but TypeDecorator catches it."""
     import asyncio
@@ -995,15 +927,17 @@ def test_typedec_covers_core_insert_values(
 
     from sqlalchemy import insert
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path)
+    _build_engine_for_test(monkeypatch, tmp_path)
     aware_sh = dt.datetime(2026, 5, 29, 14, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             await s.execute(
                 insert(MdChangeState).values(
                     md_path="p_core_ins",
@@ -1016,36 +950,38 @@ def test_typedec_covers_core_insert_values(
             )
             await s.commit()
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_core_ins'",
         )
         assert raw and "06:00" in raw and "14:00" not in raw
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_covers_core_update_values(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Core ``update(Model).where(...).values(...)`` — the path
-    md_change_state_repo uses pervasively. TypeDecorator must catch it.
+    storage.sqlite.md_change_state uses pervasively. TypeDecorator must catch it.
     """
     import asyncio
     from zoneinfo import ZoneInfo
 
     from sqlalchemy import update
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path)
+    _build_engine_for_test(monkeypatch, tmp_path)
     aware_sh = dt.datetime(2026, 5, 29, 14, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     async def _run() -> None:
-        await _create_schema(sm)
+        await _create_schema(storage)
         # Seed a row first
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             s.add(
                 MdChangeState(
                     md_path="p_upd",
@@ -1057,7 +993,7 @@ def test_typedec_covers_core_update_values(
             )
             await s.commit()
         # Now Core update with aware non-UTC datetime
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             await s.execute(
                 update(MdChangeState)
                 .where(MdChangeState.md_path == "p_upd")
@@ -1065,30 +1001,32 @@ def test_typedec_covers_core_update_values(
             )
             await s.commit()
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_upd'",
         )
         assert raw and "06:00" in raw and "14:00" not in raw
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_aware_utc_input_is_idempotent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap a: aware UTC input round-trips unchanged."""
     import asyncio
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path)
+    _build_engine_for_test(monkeypatch, tmp_path)
     aware_utc = dt.datetime(2026, 5, 29, 6, tzinfo=dt.UTC)
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add(
                 MdChangeState(
                     md_path="p_utc",
@@ -1102,27 +1040,27 @@ def test_typedec_aware_utc_input_is_idempotent(
             await s.commit()
         # Raw bytes
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_utc'",
         )
         assert raw and "06:00" in raw
         # Read-back
         from sqlmodel import select
 
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             row = (
                 await s.execute(
                     select(MdChangeState).where(MdChangeState.md_path == "p_utc")
                 )
             ).scalar_one()
         assert row.last_attempt_at == aware_utc
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_naive_input_treated_as_utc(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap b: naive datetime input → assumed already-UTC, NOT display-tz.
 
@@ -1132,15 +1070,17 @@ def test_typedec_naive_input_treated_as_utc(
     """
     import asyncio
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path)
+    _build_engine_for_test(monkeypatch, tmp_path)
     naive = dt.datetime(2026, 5, 29, 14)  # no tzinfo
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add(
                 MdChangeState(
                     md_path="p_naive",
@@ -1153,34 +1093,36 @@ def test_typedec_naive_input_treated_as_utc(
             )
             await s.commit()
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_naive'",
         )
         # naive 14:00 → stored 14:00 (assumed UTC), NOT 06:00 (which would
         # mean we re-interpreted naive as Shanghai-local)
         assert raw and "14:00" in raw, f"naive should land as 14:00 UTC; got {raw!r}"
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_microsecond_precision_preserved(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap d: microsecond field survives the round trip."""
     import asyncio
 
     from sqlmodel import select
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path, tz="UTC")
+    _build_engine_for_test(monkeypatch, tmp_path, tz="UTC")
     with_micros = dt.datetime(2026, 5, 29, 6, 0, 0, 123_456, tzinfo=dt.UTC)
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add(
                 MdChangeState(
                     md_path="p_us",
@@ -1192,7 +1134,7 @@ def test_typedec_microsecond_precision_preserved(
                 )
             )
             await s.commit()
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             row = (
                 await s.execute(
                     select(MdChangeState).where(MdChangeState.md_path == "p_us")
@@ -1200,29 +1142,31 @@ def test_typedec_microsecond_precision_preserved(
             ).scalar_one()
         assert row.last_attempt_at.microsecond == 123_456
         assert row.last_attempt_at == with_micros
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_extreme_dates_round_trip(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap f: 1970 and 2099 epoch endpoints round-trip without overflow."""
     import asyncio
 
     from sqlmodel import select
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path, tz="UTC")
+    _build_engine_for_test(monkeypatch, tmp_path, tz="UTC")
     epoch_start = dt.datetime(1970, 1, 1, 0, 0, 0, tzinfo=dt.UTC)
     far_future = dt.datetime(2099, 12, 31, 23, 59, 59, tzinfo=dt.UTC)
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add_all(
                 [
                     MdChangeState(
@@ -1244,7 +1188,7 @@ def test_typedec_extreme_dates_round_trip(
                 ]
             )
             await s.commit()
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             r1 = (
                 await s.execute(
                     select(MdChangeState).where(MdChangeState.md_path == "p_1970")
@@ -1257,13 +1201,13 @@ def test_typedec_extreme_dates_round_trip(
             ).scalar_one()
         assert r1.last_attempt_at == epoch_start
         assert r2.last_attempt_at == far_future
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_dst_boundary_round_trip(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap g: a Shanghai-input instant that straddles US DST boundary preserves UTC.
 
@@ -1276,18 +1220,20 @@ def test_typedec_dst_boundary_round_trip(
 
     from sqlmodel import select
 
-    from everos.core.persistence.sqlite import session_scope
-    from everos.infra.persistence.sqlite import MdChangeState, get_session_factory
+    from everos.infra.persistence.sqlite import (
+        MdChangeState,
+        session_scope,
+    )
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path, tz="Asia/Shanghai")
+    _build_engine_for_test(monkeypatch, tmp_path, tz="Asia/Shanghai")
     # US DST starts 2026-03-08 (2am local → 3am local). Pick an instant
     # straddling the boundary in NY tz.
     pre_dst = dt.datetime(2026, 3, 8, 6, 30, tzinfo=ZoneInfo("America/New_York"))
     post_dst = dt.datetime(2026, 3, 8, 7, 30, tzinfo=ZoneInfo("America/New_York"))
 
     async def _run() -> None:
-        await _create_schema(sm)
-        async with session_scope(get_session_factory()) as s:
+        await _create_schema(storage)
+        async with session_scope(storage.database.session_factory) as s:
             s.add_all(
                 [
                     MdChangeState(
@@ -1309,7 +1255,7 @@ def test_typedec_dst_boundary_round_trip(
                 ]
             )
             await s.commit()
-        async with session_scope(get_session_factory()) as s:
+        async with session_scope(storage.database.session_factory) as s:
             r1 = (
                 await s.execute(
                     select(MdChangeState).where(MdChangeState.md_path == "p_pre")
@@ -1324,13 +1270,13 @@ def test_typedec_dst_boundary_round_trip(
         # any tz transformation including DST shifts.
         assert r1.last_attempt_at == pre_dst
         assert r2.last_attempt_at == post_dst
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
 
 def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path, storage: Storage
 ) -> None:
     """Gap h: pin the **known limit**: pure raw SQL with literal strings
     bypasses the column type entirely. If a future contributor writes
@@ -1345,13 +1291,13 @@ def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
 
     from sqlalchemy import text as _sql_text
 
-    sm = _build_engine_for_test(monkeypatch, tmp_path, tz="Asia/Shanghai")
+    _build_engine_for_test(monkeypatch, tmp_path, tz="Asia/Shanghai")
 
     async def _run() -> None:
-        await _create_schema(sm)
+        await _create_schema(storage)
         # Raw SQL with a literal Shanghai 14:00 string — no bind param
         # goes through TypeDecorator, so the literal lands as-is.
-        engine = sm.get_engine()
+        engine = storage.database.engine
         async with engine.begin() as conn:
             await conn.execute(
                 _sql_text(
@@ -1369,7 +1315,7 @@ def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
             )
 
         raw = await _probe_raw_text(
-            sm,
+            storage,
             "SELECT last_attempt_at FROM md_change_state WHERE md_path='p_raw'",
         )
         # Confirms the LIMIT: raw literal stored as-is, no normalisation.
@@ -1378,7 +1324,7 @@ def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
             "TypeDecorator. This is a documented limit; "
             "scripts/check_datetime_discipline.py forbids new bypasses."
         )
-        await sm.dispose_engine()
+        await storage.database.dispose()
 
     asyncio.run(_run())
 
@@ -1388,7 +1334,7 @@ def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
 # LanceDB has fewer write APIs: ``table.add`` (the main one),
 # ``table.merge_insert``, and ``table.update``. All of them ultimately go
 # through PyArrow which uses the Arrow schema to coerce input. The
-# ``BaseLanceTable.to_arrow_schema`` rewrite that stamps ``tz=UTC`` is
+# ``arrow_schema_for`` mapping that stamps ``tz=UTC`` is
 # therefore active on every write path. Pin this explicitly.
 
 
@@ -1406,7 +1352,9 @@ def test_lance_table_add_normalises_aware_non_utc() -> None:
 
     async def _run() -> None:
         conn = await lancedb.connect_async(tempfile.mkdtemp())
-        table = await conn.create_table("ep", schema=Episode)
+        table = await conn.create_table(
+            "ep", schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
         row = Episode(
             id="alice_ep_1",
             entry_id="ep_1",
@@ -1422,7 +1370,7 @@ def test_lance_table_add_normalises_aware_non_utc() -> None:
             content_sha256="abc",
             vector=[0.0] * 1024,
         )
-        await table.add([row])
+        await table.add([row.model_dump()])
         rows = await table.query().to_list()
         assert rows[0]["timestamp"].tzinfo is not None
         # 14:00 +08:00 = 06:00 UTC
@@ -1445,7 +1393,9 @@ def test_lance_table_naive_input_is_assumed_utc() -> None:
 
     async def _run() -> None:
         conn = await lancedb.connect_async(tempfile.mkdtemp())
-        table = await conn.create_table("ep", schema=Episode)
+        table = await conn.create_table(
+            "ep", schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
         row = Episode(
             id="x_1",
             entry_id="ep_1",
@@ -1461,7 +1411,7 @@ def test_lance_table_naive_input_is_assumed_utc() -> None:
             content_sha256="x",
             vector=[0.0] * 1024,
         )
-        await table.add([row])
+        await table.add([row.model_dump()])
         rows = await table.query().to_list()
         # naive 14:00 → assumed UTC 14:00 on disk → read back aware UTC 14:00
         assert rows[0]["timestamp"].hour == 14

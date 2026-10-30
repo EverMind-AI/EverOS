@@ -10,8 +10,8 @@ Three values cover the current provenance graph:
 * :attr:`ParentType.CLUSTER` — used by merged episodes produced by the
   Reflection consolidation mechanism.
 
-LanceDB's pydantic-to-arrow conversion does not accept ``Enum`` field
-annotations, so table schemas declare
+The backend-neutral index schema (``schema_for``) has no ``Enum`` kind,
+so records declare
 ``parent_type: str = ParentType.MEMCELL.value`` and reference the enum
 only at the default-value level.
 """

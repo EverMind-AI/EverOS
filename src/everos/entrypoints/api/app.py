@@ -2,22 +2,25 @@
 
 Wires CORS + the project's middleware stack + global exception handler +
 lifespan, and registers the public routes (``/health``, ``/metrics``).
+
+The lifespan owns one :class:`~everos.service.Application`: it starts it on
+startup, keeps it on ``app.state.application`` (the only object routes read,
+via :func:`everos.entrypoints.api.dependencies.application`) and closes it on
+shutdown.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from everos.core.lifespan import (
-    LifespanProvider,
-    MetricsLifespanProvider,
-    TracingLifespanProvider,
-    build_lifespan,
-)
-from everos.core.middleware import (
+from everos.config import Settings, load_settings
+from everos.core.observability.logging import get_logger
+from everos.entrypoints.api.middleware import (
     DEFAULT_CORS_ALLOW_CREDENTIALS,
     DEFAULT_CORS_ALLOW_HEADERS,
     DEFAULT_CORS_ALLOW_METHODS,
@@ -26,19 +29,9 @@ from everos.core.middleware import (
     PrometheusMiddleware,
     RequestIdMiddleware,
 )
-from everos.core.observability.logging import get_logger
+from everos.service import Application, build_application
 
 from .exception_handlers import register_handlers
-from .lifespans import (
-    CascadeLifespanProvider,
-    LanceDBLifespanProvider,
-    LLMLifespanProvider,
-    MemorizeLifespanProvider,
-    MemorizeQueueLifespanProvider,
-    OmeLifespanProvider,
-    ParserLifespanProvider,
-    SqliteLifespanProvider,
-)
 from .routes import (
     cascade,
     get,
@@ -60,45 +53,41 @@ def _docs_enabled() -> bool:
 
 
 def create_app(
+    settings: Settings | None = None,
     *,
+    application: Application | None = None,
     cors_origins: list[str] | None = None,
     cors_allow_credentials: bool = DEFAULT_CORS_ALLOW_CREDENTIALS,
     cors_allow_methods: list[str] | None = None,
     cors_allow_headers: list[str] | None = None,
-    lifespan_providers: list[LifespanProvider] | None = None,
 ) -> FastAPI:
     """Build the FastAPI application instance.
 
     Args:
+        settings: Settings to build the :class:`Application` from when none is
+            injected; ``None`` loads them when the lifespan starts.
+        application: A pre-built application (tests inject one assembled
+            over fakes). It is reachable by routes at once, and the lifespan
+            starts and closes it like one it built itself.
         cors_origins: Allowed CORS origins (default: ``["*"]``).
         cors_allow_credentials: Whether to allow credentials (default: True).
         cors_allow_methods: Allowed CORS methods (default: ``["*"]``).
         cors_allow_headers: Allowed CORS headers (default: ``["*"]``).
-        lifespan_providers: Optional list of LifespanProvider; defaults to
-            ``[TracingLifespanProvider(), MetricsLifespanProvider(),
-            LLMLifespanProvider(), ParserLifespanProvider(),
-            SqliteLifespanProvider(), LanceDBLifespanProvider(),
-            CascadeLifespanProvider(), MemorizeQueueLifespanProvider(),
-            OmeLifespanProvider(), MemorizeLifespanProvider()]``.
 
     Returns:
         FastAPI: Configured application instance.
     """
     enable_docs = _docs_enabled()
 
-    if lifespan_providers is None:
-        lifespan_providers = [
-            TracingLifespanProvider(),
-            MetricsLifespanProvider(),
-            LLMLifespanProvider(),
-            ParserLifespanProvider(),
-            SqliteLifespanProvider(),
-            LanceDBLifespanProvider(),
-            CascadeLifespanProvider(),
-            MemorizeQueueLifespanProvider(),
-            OmeLifespanProvider(),
-            MemorizeLifespanProvider(),
-        ]
+    @asynccontextmanager
+    async def lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
+        built = application or build_application(settings or load_settings())
+        fastapi_app.state.application = built
+        try:
+            await built.start()
+            yield
+        finally:
+            await built.aclose()
 
     from everos import __version__
 
@@ -106,11 +95,14 @@ def create_app(
         title="everos",
         version=__version__,
         description="md-first memory extraction framework",
-        lifespan=build_lifespan(lifespan_providers),
+        lifespan=lifespan,
         docs_url="/docs" if enable_docs else None,
         redoc_url="/redoc" if enable_docs else None,
         openapi_url="/openapi.json" if enable_docs else None,
     )
+
+    if application is not None:
+        app.state.application = application
 
     # Exception handlers
     register_handlers(app)

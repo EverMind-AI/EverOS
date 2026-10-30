@@ -1,0 +1,14 @@
+{
+  "operations": [
+    {
+      "action": "add",
+      "type": "explicit_info",
+      "data": {
+        "evidence": "Alice: I'd like to see the cherry blossoms.",
+        "description": "Wants to see the cherry blossoms in Kyoto.",
+        "category": "travel"
+      }
+    }
+  ],
+  "update_note": "Added the cherry-blossom wish."
+}

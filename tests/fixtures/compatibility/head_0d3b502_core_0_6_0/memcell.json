@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "kind": "text",
+      "id": "message-frozen",
+      "role": "user",
+      "content": "Preserve this archived message.",
+      "timestamp": 1700000000123,
+      "sender_id": "user-frozen"
+    },
+    {
+      "kind": "tool_result",
+      "tool_call_id": "tool-call-frozen",
+      "content": "Archived tool output.",
+      "timestamp": 1700000000456
+    }
+  ],
+  "timestamp": 1700000000456
+}

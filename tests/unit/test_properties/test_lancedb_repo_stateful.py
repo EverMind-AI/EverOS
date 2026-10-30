@@ -39,13 +39,14 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from everos.config import LanceDBSettings
-from everos.core.persistence import MemoryRoot
-from everos.core.persistence.lancedb import (
-    BaseLanceTable,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
     LanceRepoBase,
     open_lancedb_connection,
 )
-from everos.infra.persistence.lancedb import LanceIndexContract
+from everos.infra.persistence.records import IndexRecord
+from tests.fakes import TEST_DIM, arrow_schema
 
 settings.register_profile(
     "ci",
@@ -73,7 +74,7 @@ def event(label: str) -> None:
         _hypothesis_event(label)
 
 
-class _Row(BaseLanceTable):
+class _Row(IndexRecord):
     TABLE_NAME: ClassVar[str] = "_laws_rows"
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
     id: str
@@ -110,8 +111,10 @@ class LanceRepoMachine(RuleBasedStateMachine):
         mr = MemoryRoot(self.tmp)
         mr.ensure()
         conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-        table = await conn.create_table(_Row.TABLE_NAME, schema=_Row)
-        return _Repo(table=table)
+        table = await conn.create_table(
+            _Row.TABLE_NAME, schema=arrow_schema(_Row, dim=TEST_DIM)
+        )
+        return _Repo(table=table, dim=TEST_DIM)
 
     def run(self, coro: Any) -> Any:
         return self.loop.run_until_complete(coro)

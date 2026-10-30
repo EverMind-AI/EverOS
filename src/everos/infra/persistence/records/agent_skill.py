@@ -1,6 +1,6 @@
-"""LanceDB ``agent_skill`` table schema.
+"""Derived-index ``agent_skill`` record.
 
-Field set for the agent-skill LanceDB row. AgentSkill is a *named
+Field set for the agent-skill index row. AgentSkill is a *named
 entity* rather than a daily-log entry — PK is ``<owner_id>_<skill_name>``
 (no date / seq), and same agent + same name is the same row (upsert).
 
@@ -12,15 +12,13 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable, Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from ._dim import configured_dim
-
-_DIM = configured_dim()
+from .vector import DenseVector
 
 
-class AgentSkill(BaseLanceTable):
-    """One agent skill indexed in LanceDB."""
+class AgentSkill(IndexRecord):
+    """One agent skill in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "agent_skill"
     BM25_FIELDS: ClassVar[list[str]] = ["description_tokens", "content_tokens"]
@@ -81,4 +79,4 @@ class AgentSkill(BaseLanceTable):
     changed (e.g. the watcher fires for unrelated stat updates). See
     :attr:`AgentSkillHandler.content_change_keys`."""
 
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
+    vector: DenseVector | None = None

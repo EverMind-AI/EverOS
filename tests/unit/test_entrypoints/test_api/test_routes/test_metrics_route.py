@@ -24,6 +24,7 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
+from tests.fakes import make_application
 
 # ``prometheus_client.parser`` strips the ``_total`` counter suffix from
 # the *family* name but leaves *sample* names intact.
@@ -36,11 +37,11 @@ async def client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; middleware stack is wired by ``create_app``."""
+    """FastAPI app over a stub application; ``create_app`` wires the middleware."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application())
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

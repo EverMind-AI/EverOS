@@ -1,4 +1,9 @@
-"""Milvus connection and collection management for the derived index."""
+"""The Milvus connection of the derived index, and collection naming.
+
+:class:`MilvusConnection` is built by the application bootstrap and handed to
+the Milvus backend and its repositories; nothing reaches for a global client.
+Building it opens nothing -- the client connects on first use.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +11,11 @@ import re
 
 from pymilvus import MilvusClient
 
-from everos.config import MilvusSettings, load_settings
+from everos.config import MilvusSettings
 from everos.core.errors import ConfigurationError, IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-_client: MilvusClient | None = None
 
 
 class MilvusSchemaMismatchError(IndexSchemaMismatchError):
@@ -23,10 +26,9 @@ class MilvusConfigurationError(ConfigurationError):
     """Raised when the remote Milvus profile is incomplete or invalid."""
 
 
-def collection_name(table_name: str, settings: MilvusSettings | None = None) -> str:
+def collection_name(table_name: str, settings: MilvusSettings) -> str:
     """Return the configured Milvus collection name for an EverOS table."""
-    cfg = settings or load_settings().milvus
-    prefix = _sanitize_name_part(cfg.collection_prefix)
+    prefix = _sanitize_name_part(settings.collection_prefix)
     base = _sanitize_name_part(table_name)
     name = f"{prefix}_{base}" if prefix else base
     if not re.match(r"^[A-Za-z_]", name):
@@ -34,34 +36,44 @@ def collection_name(table_name: str, settings: MilvusSettings | None = None) -> 
     return name
 
 
-async def get_client() -> MilvusClient:
-    """Return the process-wide MilvusClient, creating it lazily."""
-    global _client
-    if _client is None:
-        settings = load_settings().milvus
-        uri = _resolve_uri(settings)
-        token = _secret(settings.token)
-        db_name = settings.db_name or ""
-        _client = MilvusClient(uri=uri, token=token, db_name=db_name)
-        logger.info(
-            "milvus_connection_opened",
-            uri=uri,
-            db_name=db_name or None,
-            consistency_level=settings.consistency_level,
-        )
-    return _client
+class MilvusConnection:
+    """The client of one remote Milvus deployment.
 
+    Args:
+        settings: The ``[milvus]`` section.
+    """
 
-async def dispose_connection() -> None:
-    """Close the process-wide Milvus client."""
-    global _client
-    if _client is not None:
-        _client.close()
-        _client = None
-        logger.info("milvus_connection_closed")
-    from .repository import MilvusRepoBase
+    def __init__(self, settings: MilvusSettings) -> None:
+        self._settings = settings
+        self._client: MilvusClient | None = None
 
-    MilvusRepoBase._reset_collection_cache()
+    @property
+    def settings(self) -> MilvusSettings:
+        """The ``[milvus]`` section this connection was built from."""
+        return self._settings
+
+    async def client(self) -> MilvusClient:
+        """Return the client, creating it on first use."""
+        if self._client is None:
+            uri = _resolve_uri(self._settings)
+            db_name = self._settings.db_name or ""
+            self._client = MilvusClient(
+                uri=uri, token=_secret(self._settings.token), db_name=db_name
+            )
+            logger.info(
+                "milvus_connection_opened",
+                uri=uri,
+                db_name=db_name or None,
+                consistency_level=self._settings.consistency_level,
+            )
+        return self._client
+
+    async def close(self) -> None:
+        """Close the client. Idempotent."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+            logger.info("milvus_connection_closed")
 
 
 def _resolve_uri(settings: MilvusSettings) -> str:
@@ -98,8 +110,7 @@ def _sanitize_name_part(value: str) -> str:
 
 __all__ = [
     "MilvusConfigurationError",
+    "MilvusConnection",
     "MilvusSchemaMismatchError",
     "collection_name",
-    "dispose_connection",
-    "get_client",
 ]

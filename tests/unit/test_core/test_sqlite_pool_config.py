@@ -25,7 +25,7 @@ import pytest
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from everos.config.settings import SqliteSettings
-from everos.core.persistence.sqlite.engine import create_system_engine
+from everos.infra.persistence.sqlite._base.engine import create_system_engine
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ async def test_saturation_is_logged_so_the_condition_is_visible(
     """
     from sqlalchemy import text
 
-    import everos.core.persistence.sqlite.engine as mod
+    import everos.infra.persistence.sqlite._base.engine as mod
 
     seen: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -151,7 +151,7 @@ async def test_a_healthy_pool_stays_quiet(
     """
     from sqlalchemy import text
 
-    import everos.core.persistence.sqlite.engine as mod
+    import everos.infra.persistence.sqlite._base.engine as mod
 
     seen: list[dict[str, object]] = []
     monkeypatch.setattr(

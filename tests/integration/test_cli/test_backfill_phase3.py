@@ -1,22 +1,22 @@
 """Integration test for ``everos cascade backfill --phase skills``.
 
 Exercises the real Phase 3 scan + synthetic-event-emission + cascade-sync
-path (see ``memory.cascade._backfill._run_phase_skills``): Phase 2's
-throwaway engine (``_build_cluster_engine``, Task 22) registers
+path (the ops facade's skills phase): Phase 2's
+throwaway replay engine (Task 22) registers
 ``trigger_skill_clustering`` but never ``extract_agent_skill``, so every
 ``SkillClusterUpdated`` it emits during clustering has no listener and is
 dropped. Phase 3 walks every agent-case cluster
-(``cluster_repo.list_distinct_owners`` + ``list_for_owner``) and replays
+(``storage_view.sqlite.cluster.list_distinct_owners`` + ``list_for_owner``) and replays
 one ``SkillClusterUpdated`` per clustered case through a second throwaway
 engine that DOES register ``extract_agent_skill``, then runs a one-shot
 cascade sync (``CascadeOrchestrator.sync_once``) so the freshly-written
 ``SKILL.md`` lands in LanceDB before the phase reports its skill count.
 
-Only ``AgentSkillExtractor`` (the LLM call) and ``get_llm_client`` are
+Only ``AgentSkillExtractor`` (the LLM call) and the LLM client are
 mocked — everything else (cluster lookup, agent-case lookup, the
 markdown writer, and the cascade scan/handler/embed round trip) is real,
 so ``test_skills_phase_grows_agent_skill_count`` is a genuine end-to-end
-proof that Phase 3 leaves ``agent_skill_repo.count()`` already grown,
+proof that Phase 3 leaves ``storage_view.repos.agent_skill.count()`` already grown,
 not just eventually-consistent.
 
 Covers: empty DB (nothing to backfill, no engine touched), declined
@@ -31,29 +31,26 @@ import hashlib
 import importlib
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
+from everalgo.agent_memory import OpOutcome, SkillExtractionResult
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
-from everos.component.utils.datetime import get_utc_now
+from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.core.utils.datetime import get_utc_now
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.lancedb import (
     AgentCase,
-    agent_case_repo,
-    agent_skill_repo,
-    dispose_connection,
 )
-from everos.infra.persistence.sqlite import (
-    cluster_repo,
-    mint_cluster_id,
-    sqlite_manager,
-)
-from everos.memory.cascade import _backfill as backfill_mod
+from everos.memory.models import mint_cluster_id
+from everos.service import OpsService, build_application
+from tests.fakes import make_providers
+from tests.fakes.storage import StorageView
 
 _DIM = 1024
 
@@ -68,11 +65,15 @@ class _StubEmbedder(EmbeddingProvider):
         return [[float(len(t) % 7)] * self.dim for t in texts]
 
 
+_PROVIDERS: dict[str, Any] = {"embedding": None}
+"""The embedder the test configured; ``_ops()`` builds the app over it."""
+
+
 @pytest.fixture
 async def backfill_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[Path]:
-    """Tmp memory root + stub embedder + isolated sqlite engine.
+    """Tmp memory root + stub embedder.
 
     Phase 3 touches LanceDB (agent_case / agent_skill), sqlite (cluster
     tables + md_change_state), and the real filesystem (SKILL.md write +
@@ -82,26 +83,10 @@ async def backfill_runtime(
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    await dispose_connection()
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
-    monkeypatch.setattr(sqlite_manager, "_engine", None, raising=False)
-    monkeypatch.setattr(sqlite_manager, "_session_factory", None, raising=False)
 
-    import everos.component.embedding.accessor as acc
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
-
-    skill_mod = importlib.import_module("everos.memory.strategies.extract_agent_skill")
-    monkeypatch.setattr(skill_mod, "_writer", None, raising=False)
+    _PROVIDERS["embedding"] = _StubEmbedder()
 
     yield tmp_path
-
-    await dispose_connection()
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
 
 
 @pytest.fixture
@@ -110,7 +95,7 @@ def stub_llm_extraction(
 ) -> Iterator[list[AlgoAgentSkill]]:
     """Mock the one non-deterministic seam: the LLM-backed extractor.
 
-    Everything downstream of ``AgentSkillExtractor.aextract`` (writer,
+    Everything downstream of ``AgentSkillExtractor.aextract_with_reason`` (writer,
     cascade scan, embed, LanceDB upsert) stays real.
     """
     emitted = [
@@ -125,18 +110,36 @@ def stub_llm_extraction(
             source_case_ids=["ac1"],
         )
     ]
-    # ``strategies/__init__.py`` re-exports the decorated ``Strategy``
-    # object under this same dotted name, shadowing the submodule as a
-    # package attribute — ``importlib.import_module`` (not
-    # ``import ... as``) is required to reach the actual module and
-    # patch its module-level references (mirrors
-    # ``test_ome_strategies_integration.test_real_offline_engine_grows_
-    # cluster_count``).
+    # ``strategies/__init__.py`` re-exports the strategy function under this
+    # same dotted name, shadowing the submodule as a package attribute —
+    # ``importlib.import_module`` (not ``import ... as``) reaches the module.
+    # The backfill engine's LLM comes from ``_ops`` (a configured-looking
+    # client is what lets the strategy run at all).
     skill_mod = importlib.import_module("everos.memory.strategies.extract_agent_skill")
-    monkeypatch.setattr(skill_mod, "get_llm_client", lambda: object())
     with patch.object(skill_mod, "AgentSkillExtractor") as mock_extractor_cls:
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=emitted)
+        mock_extractor_cls.return_value.aextract_with_reason = AsyncMock(
+            return_value=SkillExtractionResult(
+                None, {}, [OpOutcome(0, skill, None, {}) for skill in emitted]
+            )
+        )
         yield emitted
+
+
+def _ops() -> OpsService:
+    """The ops facade over the embedding provider the test configured.
+
+    The phases read their embedding provider from the application; tests
+    here pick it in ``_PROVIDERS``, so the application is built over
+    whatever that holds when the phase runs.
+    """
+    settings = load_settings()
+    providers = make_providers(
+        embedding=_PROVIDERS["embedding"],
+        # The backfill engine binds its LLM when it builds the strategy
+        # deps; a configured-looking client is what lets skills run at all.
+        llm=object(),  # type: ignore[arg-type]
+    )
+    return build_application(settings, providers=providers).ops
 
 
 def _agent_case(entry_id: str, *, agent_id: str = "agent1") -> AgentCase:
@@ -159,9 +162,11 @@ def _agent_case(entry_id: str, *, agent_id: str = "agent1") -> AgentCase:
     )
 
 
-async def _seed_cluster(*, agent_id: str = "agent1", case_entry_id: str = "ac1") -> str:
+async def _seed_cluster(
+    storage_view: StorageView, *, agent_id: str = "agent1", case_entry_id: str = "ac1"
+) -> str:
     """Seed the sqlite ``cluster`` + ``cluster_member`` pair Phase 3 scans."""
-    await backfill_mod._ensure_cluster_schema()
+    await storage_view.create_schema()
     cluster_id = mint_cluster_id()
     algo_cluster = AlgoCluster(
         id=cluster_id,
@@ -171,7 +176,7 @@ async def _seed_cluster(*, agent_id: str = "agent1", case_entry_id: str = "ac1")
         preview=[f"task intent {case_entry_id}"],
         members=[case_entry_id],
     )
-    await cluster_repo.upsert_with_members(
+    await storage_view.sqlite.cluster.upsert_with_members(
         algo_cluster,
         owner_id=agent_id,
         owner_type="agent",
@@ -184,74 +189,75 @@ async def _seed_cluster(*, agent_id: str = "agent1", case_entry_id: str = "ac1")
 async def test_empty_db_reports_nothing_to_backfill(
     backfill_runtime: Path,
     capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
-    await backfill_mod._ensure_cluster_schema()
+    await storage_view.create_schema()
 
-    code = await run_backfill(phase="skills", auto_yes=True)
+    code = await run_backfill(_ops(), phase="skills", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
     assert "Nothing to backfill" in out
-    assert await agent_skill_repo.count() == 0
+    assert await storage_view.repos.agent_skill.count() == 0
 
 
 async def test_declined_confirmation_writes_nothing_and_exits_one(
-    backfill_runtime: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> None:
-    await agent_case_repo.add([_agent_case("ac1")])
-    await _seed_cluster()
+    await storage_view.repos.agent_case.add([_agent_case("ac1")])
+    await _seed_cluster(storage_view)
     monkeypatch.setattr("typer.confirm", lambda *a, **k: False)
 
-    code = await run_backfill(phase="skills", auto_yes=False)
+    code = await run_backfill(_ops(), phase="skills", auto_yes=False)
 
     assert code == 1
-    assert await agent_skill_repo.count() == 0
+    assert await storage_view.repos.agent_skill.count() == 0
 
 
 async def test_missing_embedding_capability_returns_exit_two(
-    backfill_runtime: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> None:
     """Mirrors Phase 1 / Phase 2's own guard: no embedding provider means
     ``extract_agent_skill``'s own top-K cosine ranking (and the cascade
     handler's re-embed on write-back) can't run, so the phase fails
     clean with exit 2 rather than emitting events into a broken pipeline."""
-    import everos.component.embedding.accessor as acc
 
-    await agent_case_repo.add([_agent_case("ac1")])
-    await _seed_cluster()
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=None))
+    await storage_view.repos.agent_case.add([_agent_case("ac1")])
+    await _seed_cluster(storage_view)
+    _PROVIDERS["embedding"] = None
 
-    code = await run_backfill(phase="skills", auto_yes=True)
+    code = await run_backfill(_ops(), phase="skills", auto_yes=True)
 
     assert code == 2
-    assert await agent_skill_repo.count() == 0
+    assert await storage_view.repos.agent_skill.count() == 0
 
 
 async def test_skills_phase_grows_agent_skill_count(
     backfill_runtime: Path,
     stub_llm_extraction: list[AlgoAgentSkill],
     capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
     """End-to-end: cluster with no skill yet → Phase 3 replays the event
     the clustering pass never got a listener for → real ``SKILL.md``
-    write → real cascade sync → ``agent_skill_repo.count()`` grows."""
-    await agent_case_repo.add([_agent_case("ac1")])
-    await _seed_cluster()
+    write → real cascade sync → ``storage_view.repos.agent_skill.count()`` grows."""
+    await storage_view.repos.agent_case.add([_agent_case("ac1")])
+    await _seed_cluster(storage_view)
 
-    skills_before = await agent_skill_repo.count()
+    skills_before = await storage_view.repos.agent_skill.count()
     assert skills_before == 0
 
-    code = await run_backfill(phase="skills", auto_yes=True)
+    code = await run_backfill(_ops(), phase="skills", auto_yes=True)
     out = capsys.readouterr().out
 
-    skills_after = await agent_skill_repo.count()
+    skills_after = await storage_view.repos.agent_skill.count()
     assert code == 0
     assert skills_after == skills_before + 1
     assert "phase 3 complete" in out
 
-    rows = await agent_skill_repo.find_where("owner_id = 'agent1'", limit=10)
+    rows = await storage_view.repos.agent_skill.find_where(
+        "owner_id = 'agent1'", limit=10
+    )
     assert len(rows) == 1
     assert rows[0].name == "summarise_doc"
     assert rows[0].cluster_id is not None
