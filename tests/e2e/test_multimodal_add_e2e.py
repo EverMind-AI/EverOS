@@ -16,7 +16,10 @@ absent.
 
 White-box surface: reads the ``text`` column of ``unprocessed_buffer``
 (the derived text the ingest stage produced from the parsed content) to
-assert the parsed payload actually flowed into the buffer.
+assert the parsed payload actually flowed into the write path. The
+session's memcell payloads are read too: the boundary closes a segment the
+model judges complete into a cell at once, so a single parsed message may
+already have left the buffer by the time ``/add`` returns.
 """
 
 from __future__ import annotations
@@ -35,17 +38,27 @@ pytest.importorskip("everalgo.parser")
 pytestmark = pytest.mark.live_llm
 
 
-async def _buffer_text(storage_view: StorageView, session_id: str) -> str:
-    """Concatenated derived ``text`` of all buffer rows for a session."""
+async def _ingested_text(storage_view: StorageView, session_id: str) -> str:
+    """Derived text of a session's buffer rows and memcell payloads, joined.
 
+    A parsed message sits in ``unprocessed_buffer`` until the boundary cuts
+    it; a segment the model judges complete is cut at once, so the text may
+    already be in a memcell's ``payload_json`` when ``/add`` returns.
+    """
     async with storage_view.database.engine.connect() as conn:
-        rows = (
+        buffered = (
             await conn.execute(
                 sql_text("SELECT text FROM unprocessed_buffer WHERE session_id = :sid"),
                 {"sid": session_id},
             )
         ).all()
-    return "\n".join(str(r[0]) for r in rows)
+        cells = (
+            await conn.execute(
+                sql_text("SELECT payload_json FROM memcell WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).all()
+    return "\n".join(str(r[0]) for r in [*buffered, *cells])
 
 
 async def test_add_html_base64_parsed_into_buffer(
@@ -80,7 +93,7 @@ async def test_add_html_base64_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(storage_view, sid)
+    buffered = await _ingested_text(storage_view, sid)
     assert "9.9.9" in buffered
 
 
@@ -105,14 +118,14 @@ async def test_add_html_https_uri_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(storage_view, sid)
+    buffered = await _ingested_text(storage_view, sid)
     # example.com's markup is not a stable fixture: the <h1>Example Domain</h1>
     # that used to sit in its body is gone (2026-10), leaving that string only
     # in <title>, which the body-text parser does not emit. Assert what this
     # test is actually for -- the page was fetched, dispatched to the HTML
     # parser, and its text reached the buffer -- not one sentence of someone
     # else's copy.
-    assert buffered.strip(), "nothing landed in the buffer"
+    assert buffered.strip(), "nothing landed in the buffer or a memcell"
     assert "[HTML]" in buffered, (
         f"payload not dispatched to the HTML parser: {buffered!r}"
     )
@@ -148,5 +161,5 @@ async def test_add_html_file_uri_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(storage_view, sid)
+    buffered = await _ingested_text(storage_view, sid)
     assert "9.9.9" in buffered
