@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Field, SQLModel
 
 from everos.config import SqliteSettings
+from everos.core.errors import DatabaseBusyError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     create_session_factory,
@@ -74,5 +77,47 @@ async def test_session_scope_rolls_back_on_exception(
             ).fetchone()
             assert count is not None
             assert count[0] == 0
+    finally:
+        await engine.dispose()
+
+
+async def test_session_scope_maps_lock_contention_to_database_busy(
+    memory_root: MemoryRoot,
+) -> None:
+    """A real ``BEGIN IMMEDIATE`` lock becomes DatabaseBusyError, not a 500."""
+    engine = create_system_engine(
+        memory_root.system_db, SqliteSettings(busy_timeout_ms=0)
+    )
+    factory = create_session_factory(engine)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
+        blocker = sqlite3.connect(memory_root.system_db, timeout=0)
+        blocker.execute("BEGIN IMMEDIATE")
+        try:
+            with pytest.raises(DatabaseBusyError):
+                async with session_scope(factory) as s:
+                    s.add(_Sample(note="blocked"))
+                    await s.commit()
+        finally:
+            blocker.rollback()
+            blocker.close()
+    finally:
+        await engine.dispose()
+
+
+async def test_session_scope_leaves_other_operational_errors_unchanged(
+    memory_root: MemoryRoot,
+) -> None:
+    engine = create_system_engine(memory_root.system_db, SqliteSettings())
+    factory = create_session_factory(engine)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
+        with pytest.raises(OperationalError):
+            async with session_scope(factory) as s:
+                await s.execute(text("SELECT * FROM _missing_session_scope_table"))
     finally:
         await engine.dispose()

@@ -245,6 +245,7 @@ parsing the human-readable `message` field.
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
+| `DATABASE_BUSY` | `503` | **Yes** | SQLite's write lock was held past `[sqlite].busy_timeout_ms`; the transaction rolled back and the response carries `Retry-After` |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
 | `INTERNAL_ERROR` | `500` | No | Unhandled exception (internal details are logged, never leaked) |
