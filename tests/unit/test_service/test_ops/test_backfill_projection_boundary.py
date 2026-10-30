@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[4]
-_MODULE = "everos.service.ops._backfill_vectors"
+_MODULE = "everos.service.ops.backfill._vectors"
 
 
 def _runtime_infra_imports(source: str) -> list[str]:
@@ -63,7 +63,7 @@ def _runtime_infra_imports(source: str) -> list[str]:
 
 
 def test_vectors_phase_has_no_runtime_infra_import() -> None:
-    source = _ROOT / "src/everos/service/ops/_backfill_vectors.py"
+    source = _ROOT / "src/everos/service/ops/backfill/_vectors.py"
     assert _runtime_infra_imports(source.read_text()) == []
 
 
@@ -76,7 +76,7 @@ def test_import_linter_carries_no_backfill_exception() -> None:
     )
     assert "everos.infra" in contract["forbidden_modules"]
     assert [
-        item for item in contract["ignore_imports"] if "_backfill_vectors" in item
+        item for item in contract["ignore_imports"] if "service.ops.backfill" in item
     ] == []
 
 
@@ -88,7 +88,7 @@ def test_import_linter_carries_no_backfill_exception() -> None:
         "from everos.infra.persistence.index import *",
         "from everos.infra import persistence",
         "import everos.infra.persistence.index as index",
-        "from ...infra.persistence.index import DerivedIndex",
+        "from ....infra.persistence.index import DerivedIndex",
         "if TYPE_CHECKING:\n    pass\nelse:\n"
         "    from everos.infra.persistence.index import DerivedIndex",
     ],
@@ -102,7 +102,7 @@ def test_checker_rejects_runtime_infra_imports(statement: str) -> None:
     [
         "if TYPE_CHECKING:\n"
         "    from everos.infra.persistence.index import VectorBackfill",
-        "from everos.service.ops._backfill import BackfillDeps",
+        "from everos.service.ops.backfill._deps import BackfillDeps",
         "from everos.memory.ports import Filter",
     ],
 )

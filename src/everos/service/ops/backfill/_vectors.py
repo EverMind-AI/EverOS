@@ -16,7 +16,8 @@ import anyio
 import anyio.to_thread
 
 from everos.core.errors import ProviderNotConfiguredError
-from everos.service.ops._backfill import (
+
+from ._deps import (
     BackfillDeps,
     BackfillPresenter,
     VectorsPhaseResult,

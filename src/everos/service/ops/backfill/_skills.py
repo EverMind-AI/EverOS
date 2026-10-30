@@ -22,7 +22,8 @@ from everos.core.errors import MemoryRootLockedError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.memory.events import SkillClusterUpdated
 from everos.memory.strategies import EXTRACT_AGENT_SKILL_SPEC
-from everos.service.ops._backfill import (
+
+from ._deps import (
     BACKFILL_LOGGER,
     BackfillDeps,
     BackfillPresenter,

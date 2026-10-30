@@ -25,7 +25,7 @@ from everos.infra.persistence.markdown import MarkdownAgentSkillStore
 from everos.infra.persistence.sqlite import SqliteClusterStore
 from everos.memory.ports import Scope
 from everos.service import BackfillDeps
-from everos.service.ops._backfill_skills import _scan_skill_source
+from everos.service.ops.backfill._skills import _scan_skill_source
 from tests.fakes import backfill_deps
 
 

@@ -8,7 +8,7 @@ embedding, three phases upgrade them, in order:
 - ``clusters`` -- build clusters on the newly embedded episodes / cases;
 - ``skills``   -- extract agent skills from the clustered cases.
 
-Each phase is a private step module of the ops facade; this module holds
+Each phase is a private module of this package; this module holds
 what they share. Presentation is the caller's: every phase reports progress
 and asks for confirmation through a :class:`BackfillPresenter`, which the
 CLI implements with typer and tests with a recording stub.

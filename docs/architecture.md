@@ -295,7 +295,7 @@ The application layer has two jobs, kept in separate modules:
   health probe reads as, when a backfill run stops. A facade that outgrows
   one module becomes a package with the facade class in `__init__` and the
   use-case steps in private modules (`service/memory/`, `service/ops/`,
-  `service/knowledge/` — backfill's three phases are `service/ops/_backfill_*`).
+  `service/knowledge/` — backfill's three phases are `service/ops/backfill/`).
 
 Entry points hold the one `Application`: the HTTP lifespan builds and starts it
 (`app.state.application`), routes call its facades, and a CLI command builds it

@@ -11,7 +11,7 @@ Presentation stays with the caller: the CLI prints and picks exit codes,
 the routes shape response DTOs. Every method delegates to a private step
 module -- ``_cascade`` (the server starts the orchestrator, a CLI command
 drives it one pass at a time), ``_health``, ``_ome``, ``_tasks`` and
-``_backfill_run`` (backfill's three phases, in order) -- which holds the
+the ``backfill`` package (its three phases, in order) -- which holds the
 rules those surfaces used to carry.
 """
 
@@ -44,17 +44,6 @@ __all__ = [
 from typing import TYPE_CHECKING
 
 from . import _cascade, _ome, _tasks
-from ._backfill import BACKFILL_PHASES as BACKFILL_PHASES
-from ._backfill import BackfillDeps as BackfillDeps
-from ._backfill import BackfillOutcome as BackfillOutcome
-from ._backfill import BackfillPresenter as BackfillPresenter
-from ._backfill import BackfillSummary as BackfillSummary
-from ._backfill import ClustersPhaseResult as ClustersPhaseResult
-from ._backfill import NullBackfillPresenter as NullBackfillPresenter
-from ._backfill import SkillsPhaseResult as SkillsPhaseResult
-from ._backfill import VectorsPhaseResult as VectorsPhaseResult
-from ._backfill import format_tokens as format_tokens
-from ._backfill_run import run_backfill
 from ._health import QueueHealthProbe, health_report, no_queue
 from ._health import compute_disabled_features as compute_disabled_features
 from ._models import Capabilities as Capabilities
@@ -66,6 +55,17 @@ from ._models import OmeTriggerResult as OmeTriggerResult
 from ._models import ProviderStatus as ProviderStatus
 from ._models import QuiesceResult as QuiesceResult
 from ._models import RebuildResult as RebuildResult
+from .backfill import BACKFILL_PHASES as BACKFILL_PHASES
+from .backfill import BackfillDeps as BackfillDeps
+from .backfill import BackfillOutcome as BackfillOutcome
+from .backfill import BackfillPresenter as BackfillPresenter
+from .backfill import BackfillSummary as BackfillSummary
+from .backfill import ClustersPhaseResult as ClustersPhaseResult
+from .backfill import NullBackfillPresenter as NullBackfillPresenter
+from .backfill import SkillsPhaseResult as SkillsPhaseResult
+from .backfill import VectorsPhaseResult as VectorsPhaseResult
+from .backfill import format_tokens as format_tokens
+from .backfill import run_backfill
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager

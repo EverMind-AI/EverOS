@@ -28,7 +28,7 @@ from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite import SqliteClusterStore
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
 from everos.service import NullBackfillPresenter
-from everos.service.ops._backfill_clusters import _emit_synthetic_events
+from everos.service.ops.backfill._clusters import _emit_synthetic_events
 from tests.fakes import backfill_deps
 
 

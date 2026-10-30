@@ -27,7 +27,8 @@ from everos.memory.strategies import (
     TRIGGER_PROFILE_CLUSTERING_SPEC,
     TRIGGER_SKILL_CLUSTERING_SPEC,
 )
-from everos.service.ops._backfill import (
+
+from ._deps import (
     BACKFILL_LOGGER,
     BackfillDeps,
     BackfillPresenter,

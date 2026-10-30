@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from everos.memory.models import Cluster
 from everos.memory.ports import Scope
-from everos.service.ops._backfill_clusters import _count_clusters
+from everos.service.ops.backfill._clusters import _count_clusters
 from tests.fakes import InMemoryClusterStore
 
 
