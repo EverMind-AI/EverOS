@@ -40,7 +40,7 @@ import pytest
 from lancedb import AsyncTable
 
 from everos.infra.persistence.index import schema_for
-from everos.infra.persistence.lancedb.base import ensure_fts_indexes
+from everos.infra.persistence.lancedb._base import ensure_fts_indexes
 from everos.infra.persistence.records import IndexRecord
 from tests.fakes import TEST_DIM, arrow_schema
 

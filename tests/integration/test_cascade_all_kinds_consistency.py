@@ -51,7 +51,7 @@ from tests.fakes.storage import Storage
 @pytest.fixture(autouse=True)
 def _reset_lancedb_write_locks() -> None:
     """ClassVar lock pool reset; see test_repository.py for rationale."""
-    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 

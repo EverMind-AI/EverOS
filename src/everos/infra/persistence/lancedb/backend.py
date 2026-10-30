@@ -42,16 +42,16 @@ from ..records import (
     IndexRecord,
     KnowledgeTopic,
 )
-from .base import indexes
-from .base.arrow import arrow_schema_for
+from ._base import indexes
+from ._base.arrow import arrow_schema_for
+from ._repos.agent_case import _AgentCaseRepo
+from ._repos.agent_skill import _AgentSkillRepo
+from ._repos.atomic_fact import _AtomicFactRepo
+from ._repos.episode import _EpisodeRepo
+from ._repos.foresight import _ForesightRepo
+from ._repos.knowledge_topic import _KnowledgeTopicRepo
+from ._repos.user_profile import _UserProfileRepo
 from .lancedb_manager import LanceDbConnection
-from .repos.agent_case import _AgentCaseRepo
-from .repos.agent_skill import _AgentSkillRepo
-from .repos.atomic_fact import _AtomicFactRepo
-from .repos.episode import _EpisodeRepo
-from .repos.foresight import _ForesightRepo
-from .repos.knowledge_topic import _KnowledgeTopicRepo
-from .repos.user_profile import _UserProfileRepo
 
 logger = get_logger(__name__)
 

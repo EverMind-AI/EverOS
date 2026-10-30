@@ -39,7 +39,7 @@ from everos.infra.persistence.lancedb import (
     LanceIndexContract,
     render_predicate,
 )
-from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.milvus import (
     MilvusConnection,
     MilvusIndexBackend,

@@ -52,7 +52,7 @@ from everos.infra.cascade._worker import CascadeWorker
 from everos.infra.cascade.scanner import CascadeScanner
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
-from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
 from everos.infra.persistence.markdown._base import entries as ent
 from everos.infra.persistence.markdown._base import frontmatter as fm

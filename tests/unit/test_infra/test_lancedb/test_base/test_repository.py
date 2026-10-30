@@ -34,7 +34,7 @@ from everos.infra.persistence.lancedb import (
     LanceTimeouts,
     open_lancedb_connection,
 )
-from everos.infra.persistence.lancedb.base import (
+from everos.infra.persistence.lancedb._base import (
     LanceDailyLogRepoBase,
     ensure_fts_indexes,
 )
@@ -885,7 +885,7 @@ def test_write_budgets_are_sized_from_measurements_not_guesses() -> None:
     hundreds of seconds would mean minutes of blocked writers before anything
     is reported, which is what this whole change exists to prevent.
     """
-    from everos.infra.persistence.lancedb.base.repository import (
+    from everos.infra.persistence.lancedb._base.repository import (
         _PRUNE_TIMEOUT_SECONDS,
         _REBUILD_TIMEOUT_SECONDS,
         _WRITE_TIMEOUT_SECONDS,
@@ -914,7 +914,7 @@ def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
     from everos.infra.cascade._worker import (
         DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
     )
-    from everos.infra.persistence.lancedb.base.repository import _PRUNE_TIMEOUT_SECONDS
+    from everos.infra.persistence.lancedb._base.repository import _PRUNE_TIMEOUT_SECONDS
 
     assert _PRUNE_TIMEOUT_SECONDS < DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS / 2, (
         "prune timeout must leave a real write window before the next beat"
@@ -960,7 +960,7 @@ def test_read_budget_is_generous_enough_never_to_fire_on_a_healthy_read() -> Non
     ~62ms over 117k rows. The budget must stay far above any real scan so it
     cannot turn a large-but-working table into a stream of failures.
     """
-    from everos.infra.persistence.lancedb.base.repository import _READ_TIMEOUT_SECONDS
+    from everos.infra.persistence.lancedb._base.repository import _READ_TIMEOUT_SECONDS
 
     measured_seconds_per_117k_rows = 0.062
     assert measured_seconds_per_117k_rows * 500 <= _READ_TIMEOUT_SECONDS, (
@@ -1090,7 +1090,7 @@ async def test_husk_sweep_only_takes_dead_empty_old_dirs(tmp_path: Path) -> None
     13061 dirs in one soak run, 98% empty. Sweeping them is ours to do, which
     means the refusals are what needs pinning down.
     """
-    from everos.infra.persistence.lancedb.base.repository import _HUSK_MIN_AGE_SECONDS
+    from everos.infra.persistence.lancedb._base.repository import _HUSK_MIN_AGE_SECONDS
 
     indices = tmp_path / "_indices"
     old = _HUSK_MIN_AGE_SECONDS * 2
@@ -1137,7 +1137,7 @@ def test_husk_age_gate_matches_lance_own_threshold() -> None:
     than lance itself. An earlier version used 300s — our own invention, and the
     reason the sweep was not defensible.
     """
-    from everos.infra.persistence.lancedb.base.repository import _HUSK_MIN_AGE_SECONDS
+    from everos.infra.persistence.lancedb._base.repository import _HUSK_MIN_AGE_SECONDS
 
     assert _HUSK_MIN_AGE_SECONDS == 7 * 24 * 60 * 60.0
 

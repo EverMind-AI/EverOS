@@ -18,7 +18,7 @@ from lancedb import AsyncConnection, AsyncTable
 
 from everos.config import LanceDBSettings
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb.base.connection import open_lancedb_connection
+from everos.infra.persistence.lancedb._base.connection import open_lancedb_connection
 from everos.infra.persistence.memory_root import MemoryRoot
 
 logger = get_logger(__name__)

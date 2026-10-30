@@ -11,7 +11,7 @@ import pytest
 
 from everos.core.errors import VectorStoreBusyError
 from everos.infra.persistence.lancedb import LanceRepoBase
-from everos.infra.persistence.lancedb.base import repository as repo_mod
+from everos.infra.persistence.lancedb._base import repository as repo_mod
 from everos.infra.persistence.records import IndexRecord
 from tests.fakes import TEST_DIM, UnusedPort
 

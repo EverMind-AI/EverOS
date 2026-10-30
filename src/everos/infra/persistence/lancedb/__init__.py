@@ -1,12 +1,12 @@
 """LanceDB business persistence layer.
 
-Sits on top of :mod:`.base` (connection factory, ``LanceRepoBase``, the
+Sits on top of :mod:`._base` (connection factory, ``LanceRepoBase``, the
 Arrow schema derivation and the FTS / vector index upkeep) and the neutral
 record declarations of :mod:`everos.infra.persistence.records`, and provides:
 
     * :class:`LanceDbConnection` -- one memory root's async connection and
       table cache (:mod:`.lancedb_manager`)
-    * concrete repositories under :mod:`.repos`
+    * concrete repositories under :mod:`._repos`
     * :class:`LanceIndexBackend` -- the derived-index backend that builds
       those repositories over a connection and owns schema migration,
       verification and the embedding-model attestation (:mod:`.backend`)
@@ -34,18 +34,18 @@ from ..records import Foresight as Foresight
 from ..records import KnowledgeTopic as KnowledgeTopic
 from ..records import ParentType as ParentType
 from ..records import UserProfile as UserProfile
+from ._base import LanceRepoBase as LanceRepoBase
+from ._base import LanceTimeouts as LanceTimeouts
+from ._base import TableSource as TableSource
+from ._base import open_lancedb_connection as open_lancedb_connection
+from ._repos import LanceIndexContract as LanceIndexContract
+from ._repos import build_or_query as build_or_query
+from ._repos import render_predicate as render_predicate
 from .backend import BUSINESS_SCHEMAS_WITH_VECTOR as BUSINESS_SCHEMAS_WITH_VECTOR
 from .backend import LanceDBMigrationError as LanceDBMigrationError
 from .backend import LanceDBSchemaMismatchError as LanceDBSchemaMismatchError
 from .backend import LanceIndexBackend as LanceIndexBackend
-from .base import LanceRepoBase as LanceRepoBase
-from .base import LanceTimeouts as LanceTimeouts
-from .base import TableSource as TableSource
-from .base import open_lancedb_connection as open_lancedb_connection
 from .lancedb_manager import LanceDbConnection as LanceDbConnection
-from .repos import LanceIndexContract as LanceIndexContract
-from .repos import build_or_query as build_or_query
-from .repos import render_predicate as render_predicate
 
 __all__ = [
     "BUSINESS_SCHEMAS_WITH_VECTOR",

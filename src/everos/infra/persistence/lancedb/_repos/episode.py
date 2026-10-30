@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.lancedb.base.repository import LanceDailyLogRepoBase, _q
+from everos.infra.persistence.lancedb._base.repository import LanceDailyLogRepoBase, _q
 
 from ...records.episode import Episode
 from ._contract import LanceIndexContract

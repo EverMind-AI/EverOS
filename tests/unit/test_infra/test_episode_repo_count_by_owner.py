@@ -21,7 +21,7 @@ import pytest
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import open_lancedb_connection
-from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.records.episode import Episode
 from tests.fakes import TEST_DIM, arrow_schema
 

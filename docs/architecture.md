@@ -155,9 +155,9 @@ width is deployment configuration: `build_derived_index` hands
 `settings.embedding.dim` to the backend, and `index.schema_for(model, dim=...)`
 turns a record into the neutral `IndexSchema` at that width. Each backend
 derives its physical schema from `IndexSchema` alone -- LanceDB its Arrow
-schema (`lancedb/base/arrow.py`), Milvus its collection layout
+schema (`lancedb/_base/arrow.py`), Milvus its collection layout
 (`milvus/_layout.py`) -- and builds its own indexes in its own package
-(LanceDB's FTS and IVF upkeep is `lancedb/base/indexes.py`).
+(LanceDB's FTS and IVF upkeep is `lancedb/_base/indexes.py`).
 
 Why: with the width baked into the record classes, they had to read the
 configuration while being imported, a second configuration reader that could

@@ -39,7 +39,7 @@ def _reset_lancedb_write_locks() -> None:
     unit-test fixture in test_repository.py. Without this, the second
     test in this module hits "Lock bound to a different event loop"
     because LanceRepoBase stashes locks in a ClassVar dict."""
-    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 

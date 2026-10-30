@@ -27,7 +27,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from everos.infra.persistence.lancedb.repos import _contract as lance
+from everos.infra.persistence.lancedb._repos import _contract as lance
 from everos.infra.persistence.milvus import predicate as milvus
 from everos.memory.ports import query as pr
 

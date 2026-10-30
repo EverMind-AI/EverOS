@@ -149,7 +149,7 @@ event payload.
 | Backend | Defense | Where |
 |---|---|---|
 | **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/_base/base.py](../src/everos/infra/persistence/sqlite/_base/base.py) |
-| **LanceDB** | `arrow_schema_for()` maps **every** datetime column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/lancedb/base/arrow.py](../src/everos/infra/persistence/lancedb/base/arrow.py) |
+| **LanceDB** | `arrow_schema_for()` maps **every** datetime column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/lancedb/_base/arrow.py](../src/everos/infra/persistence/lancedb/_base/arrow.py) |
 | **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `core/utils/datetime` | wired into `make lint` |
 
 These defenses replace what used to be an "every consumer must call

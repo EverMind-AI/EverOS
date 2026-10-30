@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.infra.persistence.lancedb.base import indexes
+from everos.infra.persistence.lancedb._base import indexes
 from tests.fakes.storage import Storage
 
 

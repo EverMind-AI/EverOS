@@ -70,7 +70,7 @@ def _reset_table_write_locks() -> None:
     The Milvus hook is behind an import guard because pymilvus is an optional
     extra and the suite has to run without it.
     """
-    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
     try:

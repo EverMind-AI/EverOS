@@ -156,7 +156,7 @@ def _unconfigured_providers() -> None:
 @pytest.fixture(autouse=True)
 def _reset_lancedb_write_locks() -> None:
     """Drop per-table asyncio.Lock objects between tests."""
-    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 

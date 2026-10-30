@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
 from ...records.user_profile import UserProfile
 from ._contract import LanceIndexContract

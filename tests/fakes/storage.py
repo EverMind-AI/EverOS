@@ -47,7 +47,7 @@ from everos.infra.persistence.index import (
     schema_for,
 )
 from everos.infra.persistence.lancedb import LanceDbConnection, LanceIndexBackend
-from everos.infra.persistence.lancedb.base import arrow_schema_for
+from everos.infra.persistence.lancedb._base import arrow_schema_for
 from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 
 from .stores import UnusedPort

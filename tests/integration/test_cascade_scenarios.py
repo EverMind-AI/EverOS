@@ -54,7 +54,7 @@ def _reset_lancedb_write_locks() -> None:
     bound to a different event loop". Mirrors the unit-test fixture in
     test_repository.py.
     """
-    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 

@@ -18,8 +18,8 @@ import pytest
 from lancedb import AsyncTable
 
 from everos.infra.persistence.index import schema_for
-from everos.infra.persistence.lancedb.base import indexes
-from everos.infra.persistence.lancedb.base.indexes import (
+from everos.infra.persistence.lancedb._base import indexes
+from everos.infra.persistence.lancedb._base.indexes import (
     VECTOR_QUERY_NPROBES,
     ensure_vector_indexes,
 )

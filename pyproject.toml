@@ -374,7 +374,7 @@ ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repositories",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
-    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb._repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.backend",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._mds",
@@ -403,7 +403,7 @@ ignore_imports = [
     # ``records`` re-exports the base table it shares with every backend.
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._base",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._base",
-    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.base",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb._base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",
     "everos.infra.persistence.records -> everos.infra.persistence.records.base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.vector",

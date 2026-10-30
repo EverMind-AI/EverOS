@@ -23,7 +23,7 @@ from everos.infra.persistence.index.schema import (
     IndexSchema,
 )
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
-from everos.infra.persistence.lancedb.base import arrow_schema_for
+from everos.infra.persistence.lancedb._base import arrow_schema_for
 from everos.infra.persistence.records import DenseVector, IndexRecord
 from tests.fakes import arrow_schema
 

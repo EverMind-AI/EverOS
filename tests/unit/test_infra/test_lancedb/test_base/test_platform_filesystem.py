@@ -25,8 +25,8 @@ import pytest
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
-from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
-from everos.infra.persistence.lancedb.base.repository import (
+from everos.infra.persistence.lancedb._base import LanceDailyLogRepoBase
+from everos.infra.persistence.lancedb._base.repository import (
     _HUSK_MIN_AGE_SECONDS,
     remove_empty_index_dirs,
 )

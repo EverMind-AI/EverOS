@@ -237,10 +237,10 @@ match your embedding dimension.
 from .episode import EpisodeIndex as EpisodeIndex
 ```
 
-### 5.3 Repo — `infra/persistence/lancedb/repos/<name>.py`
+### 5.3 Repo — `infra/persistence/lancedb/_repos/<name>.py`
 
 ```python
-from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
 from ...records.episode import EpisodeIndex
 

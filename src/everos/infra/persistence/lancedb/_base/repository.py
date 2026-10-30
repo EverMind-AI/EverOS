@@ -30,8 +30,8 @@ from everos.infra.persistence.index.schema import (
     IndexSchema,
     schema_for,
 )
-from everos.infra.persistence.lancedb.base import indexes
-from everos.infra.persistence.lancedb.base.arrow import arrow_schema_for
+from everos.infra.persistence.lancedb._base import indexes
+from everos.infra.persistence.lancedb._base.arrow import arrow_schema_for
 from everos.infra.persistence.records import IndexRecord
 
 logger = get_logger(__name__)

@@ -7,7 +7,7 @@ External usage (generic CRUD repository base):
     from everos.infra.persistence.lancedb import LanceRepoBase
 
 External usage (FTS / vector index upkeep over a table declaration):
-    from everos.infra.persistence.lancedb.base import ensure_fts_indexes
+    from everos.infra.persistence.lancedb._base import ensure_fts_indexes
 
 The record declarations (``IndexRecord`` and its subclasses) live in
 :mod:`everos.infra.persistence.records` and name no backend. Turning their
