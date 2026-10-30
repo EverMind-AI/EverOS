@@ -78,6 +78,9 @@ base_url = "https://openrouter.ai/api/v1"
 # response_format_mode = "json_schema"
 # Extra attempts of the identical request after a reply that fails validation.
 # invalid_reply_retries = 1
+# Deadline of one request in seconds. Raise it for slow self-hosted endpoints;
+# one extraction call may take up to (invalid_reply_retries + 1) x this.
+# timeout_seconds = 60.0
 
 # LLM for the multi-round retrieval decider. Separate from [llm] because the jobs
 # differ: [llm] extracts memories during ingestion, this one decides -- inside the search
