@@ -393,9 +393,35 @@ both use the resulting `Application` through three facades:
 
 ### Upgrade
 
+One command, then a restart:
+
+```bash
+uv pip install -U everos      # or: pip install -U everos
+```
+
+(`'everos[multimodal]'` if that extra was installed.) The everalgo packages
+are pinned exactly, so they move to the new contract line with it, with no
+pre-release flag. The first start after upgrading migrates `system.db` on
+its own (see below); Markdown, the index and the OME jobstore are untouched.
+
+Four things a running deployment may have to change by hand; each is also
+described under *Changed* above:
+
+| If you | Then |
+|---|---|
+| set `EVEROS_DISABLE_CASCADE`, `EVEROS_DISABLE_CASCADE_WATCHER`, `EVEROS_OME_MAX_CONCURRENT_RUNS` or `EVEROS_OME_RUN_TIMEOUT_SECONDS` | move the values to `[cascade] enabled` / `watcher_enabled` and `[ome] max_concurrent_runs` / `run_timeout_seconds` in `everos.toml`; the variables are no longer read, so an unmoved `EVEROS_DISABLE_CASCADE` silently turns the cascade back on |
+| run `everos cascade …` on a root with no `[llm]` section | add `[llm]`; building the application now requires it, and the command exits 3 with the file to edit |
+| read `capabilities.llm` from `GET /health` | read `status` or `cascade.healthy` instead; the field is gone |
+| replaced a prompt template through the old prompt slots | move the requirements your template added to `config/custom_instructions/<operator>.yaml` (details below); the template itself is no longer loaded |
+
+Extraction output changes with the everalgo line: episodes, facts and
+profiles are produced by the new prompts, and a profile's language is
+frozen from its first extraction after the upgrade. No action is needed;
+a different style in new entries is expected, not a fault.
+
 Code that imports `everos.service.memorize` / `search` / `get` or calls
 `create_app(lifespan_providers=...)` must switch to `build_application` and
-the facades. Nothing on disk changes.
+the facades.
 
 A deployment that customised a prompt slot must move it: keep only the
 requirements the custom template added on top of the default prompt and put
