@@ -35,6 +35,7 @@ class ErrorCode(StrEnum):
     BAD_REQUEST = "BAD_REQUEST"
     UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
     EXTERNAL_SERVICE_UNAVAILABLE = "EXTERNAL_SERVICE_UNAVAILABLE"
+    DATABASE_BUSY = "DATABASE_BUSY"
     CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -169,6 +170,15 @@ class InfrastructureError(AppError):
 
 class StorageError(InfrastructureError):
     """A markdown or SQLite persistence operation failed."""
+
+
+class DatabaseBusyError(StorageError):
+    """SQLite's write lock was held past ``[sqlite].busy_timeout_ms``.
+
+    The transaction was rolled back and nothing was committed. This is
+    transient: the caller can retry the same request after the backoff in
+    the API's ``Retry-After`` header.
+    """
 
 
 class VectorStoreError(InfrastructureError):
