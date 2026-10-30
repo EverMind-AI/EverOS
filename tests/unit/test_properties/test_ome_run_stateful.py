@@ -251,12 +251,12 @@ class OmeRunMachine(RuleBasedStateMachine):
 
     @rule(plan=st.sampled_from(PLANS))
     def crash_and_restart(self, plan: str) -> None:
-        """A process died mid-run: its RUNNING row is older than the recovery
-        timeout. On restart the row is CRASHED and the event re-enqueued."""
+        """A process died mid-run and left a RUNNING row, seconds old. On
+        restart the row is CRASHED and the event re-enqueued (#540: age is
+        no longer a condition)."""
         job = _Job(plan=plan)
         stale_run_id = f"stale-{job.event_id}"
-        cutoff = self.engine._config.crash_recovery_timeout_seconds
-        self.run(self._insert_stale_running(job, stale_run_id, 2 * cutoff))
+        self.run(self._insert_stale_running(job, stale_run_id, 1.0))
         self.expected[job.event_id] = [(C, 0), *CHAIN[plan]]
         self.plan_of[job.event_id] = plan
         self.trace.append(f"crash {plan} {job.event_id[:8]}")

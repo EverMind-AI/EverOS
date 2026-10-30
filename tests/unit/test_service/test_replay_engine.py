@@ -80,9 +80,9 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
         max_retries_snapshot=1,
         event_id="evt_stale",
     )
-    # Rewind ``started_at`` past ``crash_recovery_timeout_seconds`` so
-    # that IF crash recovery had run, this row would be swept — making
-    # the "row untouched" assertion meaningful.
+    # Age the row anyway: crash recovery sweeps every RUNNING row, so the
+    # "row untouched" assertion below holds only because the replay engine
+    # opts out of recovery, not because the row is too young.
     async with storage.connect() as conn:
         rewind = to_iso_format(get_now_with_timezone() - timedelta(hours=2))
         await conn.execute(

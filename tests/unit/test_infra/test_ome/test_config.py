@@ -23,7 +23,6 @@ def test_ome_config_defaults(tmp_path: Path) -> None:
     assert c.max_concurrent_runs == 20
     assert c.max_retries == 1
     assert c.max_records_per_strategy == 1000
-    assert c.crash_recovery_timeout_seconds == 1800
     assert c.config_path is None
     assert c.config_watch is True
     assert c.config_watch_debounce_ms == 1600

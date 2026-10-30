@@ -227,14 +227,13 @@ class OfflineEngine:
         server's stale rows into their own scheduler, whose registry
         doesn't contain those strategy names.
 
-        Treats rows whose ``started_at`` is older than
-        ``crash_recovery_timeout_seconds`` as crashes from a previous
-        engine session: they are marked CRASHED and re-added to APS with
-        a fresh ``run_id`` reusing the original event payload.
+        Every RUNNING row is a crash of a previous engine session -- this
+        engine holds the jobstore lock, so none of them can still be live
+        -- and is marked CRASHED and re-added to APS with a fresh
+        ``run_id`` reusing the original event payload.
         """
         await scan_and_resume(
             run_record_store=self._run_record_store,
-            timeout_seconds=self._config.crash_recovery_timeout_seconds,
             add_job=self._enqueue_recovery_job,
         )
 

@@ -413,7 +413,15 @@ never one at a time.
   now warms the encoding at startup, before any storage is opened, and a
   host that cannot load it fails to start with `TokenizerAssetError` naming
   the cause and the `TIKTOKEN_CACHE_DIR` pre-cache option.
-
+- **OME crash recovery resumes every run of the previous process.** It
+  used to skip RUNNING rows younger than 30 minutes on the theory that
+  APScheduler might still own them; it never does (a one-shot job leaves
+  the jobstore when it is submitted), so a run cut short by a restart
+  inside that window was lost for good (#540). The engine holds the
+  jobstore lock before it recovers, so every RUNNING row is a crash:
+  all of them are marked CRASHED and re-enqueued.
+  `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
+  user-facing setting.
 
 ## [1.5.1] - 2026-10-22
 

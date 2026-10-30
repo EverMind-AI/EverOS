@@ -109,9 +109,9 @@ class OMEConfig(BaseModel):
             "retries, and its record stays RUNNING. Enough of them and the "
             "engine runs nothing at all, observed with 60 of 64 slots parked on "
             "one lock, starving every other strategy for 6.7 hours until it was "
-            "killed by hand. crash_recovery_timeout_seconds does not cover this "
-            "-- it reclaims orphans from a PREVIOUS process, not live coroutines "
-            "in this one. The 30-minute default is a deadlock backstop, not a "
+            "killed by hand. Crash recovery does not cover this -- it reclaims "
+            "orphans from a PREVIOUS process at startup, not live coroutines in "
+            "this one. The 30-minute default is a deadlock backstop, not a "
             "latency target; killing slow-but-healthy work would trade a stall "
             "for lost extractions.",
         ),
@@ -162,15 +162,6 @@ class OMEConfig(BaseModel):
             "entries are pruned on insert.",
         ),
     ] = 1000
-    crash_recovery_timeout_seconds: Annotated[
-        int,
-        Field(
-            gt=0,
-            description="A run lingering in RUNNING longer than this is "
-            "treated as crashed, marked CRASHED, and re-enqueued with a "
-            "fresh run_id.",
-        ),
-    ] = 1800
     crash_recovery_enabled: bool = Field(
         default=True,
         description=(

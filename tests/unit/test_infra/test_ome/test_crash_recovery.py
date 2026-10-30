@@ -20,7 +20,7 @@ async def rec_store(tmp_path: Path) -> RunRecordStore:
 
 
 @pytest.mark.asyncio
-async def test_marks_old_running_as_crashed(rec_store: RunRecordStore) -> None:
+async def test_marks_running_as_crashed_and_resumes(rec_store: RunRecordStore) -> None:
     await rec_store.mark_running(
         run_id="r_old",
         strategy_name="s",
@@ -45,7 +45,6 @@ async def test_marks_old_running_as_crashed(rec_store: RunRecordStore) -> None:
 
     await scan_and_resume(
         run_record_store=rec_store,
-        timeout_seconds=1800,
         add_job=add_job_hook,
     )
 
@@ -61,7 +60,13 @@ async def test_marks_old_running_as_crashed(rec_store: RunRecordStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_recent_running_skipped(rec_store: RunRecordStore) -> None:
+async def test_fresh_running_row_is_recovered_too(rec_store: RunRecordStore) -> None:
+    """A row written seconds before the crash is as dead as an old one (#540).
+
+    ``start`` holds the jobstore lock, so no run of a previous process can
+    still be alive; an age filter here only lost the runs cut short by a
+    restart within the window.
+    """
     await rec_store.mark_running(
         run_id="r_fresh",
         strategy_name="s",
@@ -76,32 +81,10 @@ async def test_recent_running_skipped(rec_store: RunRecordStore) -> None:
     async def add_job_hook(*args, **kw):
         resumed.append(args)
 
-    await scan_and_resume(
-        run_record_store=rec_store,
-        timeout_seconds=1800,
-        add_job=add_job_hook,
-    )
+    await scan_and_resume(run_record_store=rec_store, add_job=add_job_hook)
     rec = await rec_store.get("r_fresh")
-    assert rec.status == RunStatus.RUNNING
-    assert resumed == []
-
-
-@pytest.mark.parametrize("bad_timeout", [0, -1])
-@pytest.mark.asyncio
-async def test_scan_and_resume_non_positive_timeout_raises(
-    rec_store: RunRecordStore, bad_timeout: int
-) -> None:
-    """N6: non-positive timeout must fail fast rather than silently no-op."""
-
-    async def _noop_add_job(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    with pytest.raises(ValueError, match=r"timeout_seconds must be > 0"):
-        await scan_and_resume(
-            run_record_store=rec_store,
-            timeout_seconds=bad_timeout,
-            add_job=_noop_add_job,
-        )
+    assert rec.status == RunStatus.CRASHED
+    assert len(resumed) == 1
 
 
 @pytest.mark.asyncio
@@ -141,7 +124,6 @@ async def test_add_job_failure_does_not_abort_loop(
 
     await scan_and_resume(
         run_record_store=rec_store,
-        timeout_seconds=1800,
         add_job=flaky_add_job,
     )
 
