@@ -85,9 +85,9 @@ Each business memory kind picks one of three on-disk patterns:
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced) | overwrite the file | user profile |
 
 Markdown IO primitives live in
-[`infra/persistence/markdown/base/`](../src/everos/infra/persistence/markdown/base/);
+[`infra/persistence/markdown/_base/`](../src/everos/infra/persistence/markdown/_base/);
 business-aware writers live in
-[`infra/persistence/markdown/writers/`](../src/everos/infra/persistence/markdown/writers/)
+[`infra/persistence/markdown/_writers/`](../src/everos/infra/persistence/markdown/_writers/)
 and pick the right strategy via a base class.
 
 For a step-by-step recipe to add a new memory kind, see the
@@ -119,7 +119,7 @@ carried by the `<app>/<project>` path segments and recovered by the
 cascade path parser. The frontmatter only holds the file-level owner
 (`user_id` / `agent_id`) and `track`.
 
-The chassis lives in [`infra/persistence/markdown/base/frontmatter.py`](../src/everos/infra/persistence/markdown/base/frontmatter.py)
+The chassis lives in [`infra/persistence/markdown/_base/frontmatter.py`](../src/everos/infra/persistence/markdown/_base/frontmatter.py)
 (Pydantic v2):
 
 ```
@@ -163,7 +163,7 @@ e.g. `ep_20260601_00000001`:
 | `<YYYYMMDD>` | The daily-log file's date bucket |
 | `NNNNNNNN` | Per-file sequence, 8-digit zero-padded, restarts at `00000001` each day per scope |
 
-Implementation: [`infra/persistence/markdown/base/entries.py`](../src/everos/infra/persistence/markdown/base/entries.py)
+Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/infra/persistence/markdown/_base/entries.py)
 (`EntryId.parse / format / next_for`).
 
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
@@ -222,13 +222,13 @@ appends an entry block → atomic write back. The caller passes a full
 this primitive is **schema-agnostic** — field-level semantics
 (`entry_count` / `last_appended_at`) are a business writer's job
 (see `BaseDailyWriter._frontmatter_updates` in
-[`infra/persistence/markdown/writers/base.py`](../src/everos/infra/persistence/markdown/writers/base.py)).
+[`infra/persistence/markdown/_writers/base.py`](../src/everos/infra/persistence/markdown/_writers/base.py)).
 
 ## 7. References
 
 - Skill: [`/add-memory-kind`](../.claude/skills/add-memory-kind/SKILL.md)
 - Code:
   - [`infra/persistence/memory_root.py`](../src/everos/infra/persistence/memory_root.py)
-  - [`infra/persistence/markdown/base/`](../src/everos/infra/persistence/markdown/base/)
+  - [`infra/persistence/markdown/_base/`](../src/everos/infra/persistence/markdown/_base/)
   - [`infra/persistence/{markdown,sqlite,lancedb,milvus,index}/`](../src/everos/infra/persistence/)
   - [`infra/cascade/`](../src/everos/infra/cascade/) (md → derived index sync)

@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import UserScopedFrontmatter
-from everos.infra.persistence.markdown.readers import ProfileReader
-from everos.infra.persistence.markdown.writers import ProfileWriter
+from everos.infra.persistence.markdown._readers import ProfileReader
+from everos.infra.persistence.markdown._writers import ProfileWriter
 
 
 class _UserProfileFM(UserScopedFrontmatter):

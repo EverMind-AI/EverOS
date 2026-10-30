@@ -37,8 +37,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from everos.infra.persistence.markdown.base.frontmatter import BaseFrontmatter
-from everos.infra.persistence.markdown.base.writer import MarkdownWriter
+from everos.infra.persistence.markdown._base.frontmatter import BaseFrontmatter
+from everos.infra.persistence.markdown._base.writer import MarkdownWriter
 from everos.infra.persistence.memory_root import MemoryRoot
 
 

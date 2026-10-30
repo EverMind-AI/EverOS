@@ -335,7 +335,7 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
     would falsely resolve owner B's episode ``ep_20260517_00000001`` to
     owner A's cluster (or vice versa) whenever ``entry_id`` collided —
     which is by design for entry_id (see
-    ``infra/persistence/markdown/base/entries.py``: entry_id is per-owner
+    ``infra/persistence/markdown/_base/entries.py``: entry_id is per-owner
     unique, cross-owner uniqueness comes from the composite
     ``<owner>_<entry_id>`` at the storage layer).
     """

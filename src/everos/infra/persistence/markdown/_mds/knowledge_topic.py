@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from everos.infra.persistence.markdown.base.frontmatter import (
+from everos.infra.persistence.markdown._base.frontmatter import (
     BaseFrontmatter,
     KnowledgeScopedMixin,
     KnowledgeTopicPathMixin,

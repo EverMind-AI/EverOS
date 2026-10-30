@@ -1,7 +1,7 @@
 """Helpers shared by every daily-log handler.
 
 The inline-block parsers undo
-:func:`everos.infra.persistence.markdown.base.entries._render_value` —
+:func:`everos.infra.persistence.markdown._base.entries._render_value` —
 the writer stringifies values with ``str()`` (and list / tuple as
 ``[a, b, c]``), so callers that need a typed value back must reverse
 the rendering here. Each helper raises ``ValueError`` on malformed
@@ -106,7 +106,7 @@ def require_float(raw: str | None, *, field: str) -> float:
 def parse_inline_list(raw: str) -> list[str]:
     """Parse ``"[a, b, c]"`` back into ``["a", "b", "c"]``.
 
-    Mirrors :func:`everos.infra.persistence.markdown.base.entries._render_value`
+    Mirrors :func:`everos.infra.persistence.markdown._base.entries._render_value`
     output shape (list / tuple inline values). Empty / malformed
     payloads yield an empty list — the writer never emits literal
     commas inside ids, so simple split-on-comma is safe.

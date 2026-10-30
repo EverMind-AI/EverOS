@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown.base import writer as writer_mod
-from everos.infra.persistence.markdown.base.writer import MarkdownWriter
+from everos.infra.persistence.markdown._base import writer as writer_mod
+from everos.infra.persistence.markdown._base.writer import MarkdownWriter
 
 
 class _Refusing:

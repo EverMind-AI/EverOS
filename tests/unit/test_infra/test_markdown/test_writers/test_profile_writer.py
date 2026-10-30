@@ -14,7 +14,7 @@ from everos.infra.persistence.markdown import (
     MarkdownReader,
     UserScopedFrontmatter,
 )
-from everos.infra.persistence.markdown.writers import ProfileWriter
+from everos.infra.persistence.markdown._writers import ProfileWriter
 
 
 class _UserProfileFM(UserScopedFrontmatter):

@@ -2,7 +2,7 @@
 
 Each business record kind that is stored as markdown gets a concrete
 frontmatter class here, subclassing one of the chassis classes from
-:mod:`everos.infra.persistence.markdown.base`:
+:mod:`everos.infra.persistence.markdown._base`:
 
     * :class:`UserScopedFrontmatter` for user-track records
     * :class:`AgentScopedFrontmatter` for agent-track records

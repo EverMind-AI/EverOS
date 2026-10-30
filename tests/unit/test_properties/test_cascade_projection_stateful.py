@@ -54,8 +54,8 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
 from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
 from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
-from everos.infra.persistence.markdown.base import entries as ent
-from everos.infra.persistence.markdown.base import frontmatter as fm
+from everos.infra.persistence.markdown._base import entries as ent
+from everos.infra.persistence.markdown._base import frontmatter as fm
 from everos.infra.persistence.records import Episode
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
 from everos.infra.persistence.sqlite.repos.md_change_state import MdChangeStateRepo

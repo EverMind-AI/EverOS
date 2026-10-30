@@ -116,7 +116,7 @@ class ClusterRepo(RepoBase[Cluster]):
 
         ``member_id`` (e.g. episode ``entry_id`` like
         ``ep_20260517_00000001``) is only per-owner unique — see
-        ``infra/persistence/markdown/base/entries.py``: "Cross-user uniqueness
+        ``infra/persistence/markdown/_base/entries.py``: "Cross-user uniqueness
         is handled at the database layer via a composite
         ``<user_id>_<entry_id>`` field; it is not encoded into the
         EntryId string itself." Without the scope filter, two owners

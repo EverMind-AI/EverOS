@@ -16,7 +16,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 
-from everos.infra.persistence.markdown.base.frontmatter import (
+from everos.infra.persistence.markdown._base.frontmatter import (
     ProfilePathMixin,
     UserScopedFrontmatter,
 )

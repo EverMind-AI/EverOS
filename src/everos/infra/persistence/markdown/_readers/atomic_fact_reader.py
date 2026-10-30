@@ -7,7 +7,7 @@ from pathlib import Path
 
 from everos.infra.persistence.memory_root import MemoryRoot
 
-from ..mds import AtomicFactDailyFrontmatter
+from .._mds import AtomicFactDailyFrontmatter
 from .base import BaseDailyReader
 
 

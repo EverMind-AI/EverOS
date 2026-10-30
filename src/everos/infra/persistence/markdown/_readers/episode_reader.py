@@ -12,7 +12,7 @@ from pathlib import Path
 
 from everos.infra.persistence.memory_root import MemoryRoot
 
-from ..mds import EpisodeDailyFrontmatter
+from .._mds import EpisodeDailyFrontmatter
 from .base import BaseDailyReader
 
 

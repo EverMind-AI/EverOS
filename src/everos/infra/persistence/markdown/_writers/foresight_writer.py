@@ -1,11 +1,11 @@
-"""AtomicFact daily-log writer — md is the SoT for atomic facts.
+"""Foresight daily-log writer — md is the SoT for foresights.
 
-Caller hands pre-built ``inline`` (``owner_id`` / ``session_id`` /
-``timestamp`` / ``parent_id`` / ``sender_ids``) plus the single
-``Fact`` section. The chassis manages the in-file ``entry_id`` sequence
-(``af_<YYYYMMDD>_<NNNN>``). ``append_entry`` / ``append_entries`` come
-from :class:`BaseDailyWriter`; this subclass only declares the schema
-and the per-schema frontmatter / counter hooks.
+Inline carries the audit / scope + time-window fields (``owner_id`` /
+``session_id`` / ``timestamp`` / ``parent_id`` / ``sender_ids`` plus
+optional ``start_time`` / ``end_time`` / ``duration_days``). Sections
+carry the BM25-indexed content: ``Foresight`` (required, primary
+field) and optional ``Evidence`` (secondary BM25 field).
+``append_entry`` / ``append_entries`` come from :class:`BaseDailyWriter`.
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ from everos.core.utils.datetime import (
     to_iso_format,
 )
 
-from ..mds import AtomicFactDailyFrontmatter
+from .._mds import ForesightDailyFrontmatter
 from .base import BaseDailyWriter
 
 
-class AtomicFactWriter(BaseDailyWriter):
-    """Daily-log writer for the AtomicFact schema (md = SoT)."""
+class ForesightWriter(BaseDailyWriter):
+    """Daily-log writer for the Foresight schema (md = SoT)."""
 
-    schema = AtomicFactDailyFrontmatter
+    schema = ForesightDailyFrontmatter
 
     def _frontmatter_updates(
         self,
@@ -37,9 +37,9 @@ class AtomicFactWriter(BaseDailyWriter):
         next_count: int,
     ) -> Mapping[str, Any] | None:
         return {
-            "id": f"atomic_fact_log_{scope_id}_{date.isoformat()}",
-            "type": "atomic_fact_daily",
-            "file_type": "atomic_fact_daily",
+            "id": f"foresight_log_{scope_id}_{date.isoformat()}",
+            "type": "foresight_daily",
+            "file_type": "foresight_daily",
             "schema_version": 1,
             "user_id": scope_id,
             "track": "user",

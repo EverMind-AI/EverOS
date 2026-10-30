@@ -60,7 +60,7 @@ async def test_write_cleans_up_temp_on_failure(tmp_path: Path) -> None:
     boom = OSError("simulated rename failure")
     with (
         patch(
-            "everos.infra.persistence.markdown.base.writer.os.replace",
+            "everos.infra.persistence.markdown._base.writer.os.replace",
             side_effect=boom,
         ),
         pytest.raises(OSError, match="simulated"),

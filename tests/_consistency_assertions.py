@@ -53,7 +53,7 @@ from everos.infra.cascade._projections.user_profile import UserProfileHandler
 from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec
 from everos.infra.persistence.index import IndexRepositories, eq, primary_key
 from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader
-from everos.infra.persistence.markdown.base.entries import StructuredEntry
+from everos.infra.persistence.markdown._base.entries import StructuredEntry
 
 # stdlib logging (not structlog) so pytest --log-cli-level=INFO picks
 # this up live without -s. Project rule 18 (use get_logger) covers src/

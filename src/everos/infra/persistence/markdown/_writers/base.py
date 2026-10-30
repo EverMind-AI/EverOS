@@ -33,13 +33,13 @@ import anyio
 
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import today_with_timezone
-from everos.infra.persistence.markdown.base.entries import (
+from everos.infra.persistence.markdown._base.entries import (
     EntryId,
     render_structured_entry,
 )
-from everos.infra.persistence.markdown.base.frontmatter import BaseFrontmatter
-from everos.infra.persistence.markdown.base.reader import MarkdownReader
-from everos.infra.persistence.markdown.base.writer import MarkdownWriter
+from everos.infra.persistence.markdown._base.frontmatter import BaseFrontmatter
+from everos.infra.persistence.markdown._base.reader import MarkdownReader
+from everos.infra.persistence.markdown._base.writer import MarkdownWriter
 from everos.infra.persistence.memory_root import MemoryRoot
 
 logger = get_logger(__name__)

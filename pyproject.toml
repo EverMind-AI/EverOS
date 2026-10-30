@@ -377,9 +377,9 @@ ignore_imports = [
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.backend",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._mds",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._writers",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._readers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
@@ -401,7 +401,7 @@ ignore_imports = [
     # Persistence primitives moved out of ``core`` (stage 2a): each storage
     # subpackage facade re-exports its own ``base`` primitives, and
     # ``records`` re-exports the base table it shares with every backend.
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.base",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._base",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.base",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",

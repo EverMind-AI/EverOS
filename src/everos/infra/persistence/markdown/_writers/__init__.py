@@ -16,7 +16,7 @@ here:
 
 External usage::
 
-    from everos.infra.persistence.markdown.writers import (
+    from everos.infra.persistence.markdown._writers import (
         BaseDailyWriter,
         EpisodeWriter,
         AgentSkillWriter,

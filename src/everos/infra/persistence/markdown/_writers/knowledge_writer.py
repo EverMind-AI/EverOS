@@ -34,7 +34,7 @@ import anyio
 import yaml
 
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.markdown.base.path_safety import sanitize_dirname
+from everos.infra.persistence.markdown._base.path_safety import sanitize_dirname
 from everos.memory.models import KnowledgeMemory
 
 logger = get_logger(__name__)

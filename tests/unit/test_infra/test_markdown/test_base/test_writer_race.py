@@ -25,7 +25,7 @@ import pytest
 
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import EntryId, MarkdownWriter
-from everos.infra.persistence.markdown.writers.atomic_fact_writer import (
+from everos.infra.persistence.markdown._writers.atomic_fact_writer import (
     AtomicFactWriter,
 )
 

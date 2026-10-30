@@ -54,10 +54,10 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, 
 
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import MarkdownReader
-from everos.infra.persistence.markdown.base import entries as ent
-from everos.infra.persistence.markdown.base import frontmatter as fm
-from everos.infra.persistence.markdown.base.writer import MarkdownWriter
-from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
+from everos.infra.persistence.markdown._base import entries as ent
+from everos.infra.persistence.markdown._base import frontmatter as fm
+from everos.infra.persistence.markdown._base.writer import MarkdownWriter
+from everos.infra.persistence.markdown._writers.episode_writer import EpisodeWriter
 
 settings.register_profile(
     "ci",

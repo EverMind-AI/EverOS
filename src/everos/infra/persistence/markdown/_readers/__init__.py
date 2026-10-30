@@ -22,7 +22,7 @@ prompt-budget or cross-record queries goes through sqlite/lancedb
 
 External usage::
 
-    from everos.infra.persistence.markdown.readers import (
+    from everos.infra.persistence.markdown._readers import (
         BaseDailyReader,
         EpisodeReader,
         AgentSkillReader,

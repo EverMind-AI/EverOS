@@ -19,8 +19,8 @@ from everos.infra.persistence.markdown import (
     UserScopedFrontmatter,
     render_structured_entry,
 )
-from everos.infra.persistence.markdown.readers import BaseDailyReader
-from everos.infra.persistence.markdown.writers import BaseDailyWriter
+from everos.infra.persistence.markdown._readers import BaseDailyReader
+from everos.infra.persistence.markdown._writers import BaseDailyWriter
 
 
 class _DemoFrontmatter(UserScopedFrontmatter):

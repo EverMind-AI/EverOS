@@ -34,15 +34,15 @@ from typing import ClassVar
 import anyio
 
 from everos.core.utils.datetime import today_with_timezone
-from everos.infra.persistence.markdown.base.entries import (
+from everos.infra.persistence.markdown._base.entries import (
     Entry,
     EntryId,
     StructuredEntry,
     find_entry,
 )
-from everos.infra.persistence.markdown.base.frontmatter import BaseFrontmatter
-from everos.infra.persistence.markdown.base.parsed import ParsedMarkdown
-from everos.infra.persistence.markdown.base.reader import MarkdownReader
+from everos.infra.persistence.markdown._base.frontmatter import BaseFrontmatter
+from everos.infra.persistence.markdown._base.parsed import ParsedMarkdown
+from everos.infra.persistence.markdown._base.reader import MarkdownReader
 from everos.infra.persistence.memory_root import MemoryRoot
 
 

@@ -20,7 +20,7 @@ Two complementary surfaces live here:
    which fix the *absolute-readonly* fields (``id`` / ``type`` /
    ``schema_version``) plus scope (``user_id`` / ``agent_id`` +
    ``track``). Every business frontmatter schema in
-   ``infra/persistence/markdown/mds/`` subclasses one of these.
+   ``infra/persistence/markdown/_mds/`` subclasses one of these.
 
 Concrete business schemas (``UserMemcellDailyFrontmatter``,
 ``SkillFrontmatter``, …) live in ``infra``; they add per-record

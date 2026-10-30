@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from everos.infra.persistence.markdown.base.frontmatter import (
+from everos.infra.persistence.markdown._base.frontmatter import (
     BaseFrontmatter,
     KnowledgeDocumentPathMixin,
     KnowledgeScopedMixin,

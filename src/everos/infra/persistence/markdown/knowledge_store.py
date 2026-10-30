@@ -43,9 +43,9 @@ from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import KnowledgeCategory, KnowledgeDocument, KnowledgeMemory
 from everos.memory.ports import WrittenDocument
 
-from .base import dump_frontmatter, parse_frontmatter, sanitize_dirname
-from .readers import ensure_taxonomy, parse_taxonomy
-from .writers import KnowledgeWriter
+from ._base import dump_frontmatter, parse_frontmatter, sanitize_dirname
+from ._readers import ensure_taxonomy, parse_taxonomy
+from ._writers import KnowledgeWriter
 
 logger = get_logger(__name__)
 

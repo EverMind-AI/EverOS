@@ -22,7 +22,7 @@ from everos.core.utils.datetime import (
     to_iso_format,
 )
 
-from ..mds import EpisodeDailyFrontmatter
+from .._mds import EpisodeDailyFrontmatter
 from .base import BaseDailyWriter
 
 

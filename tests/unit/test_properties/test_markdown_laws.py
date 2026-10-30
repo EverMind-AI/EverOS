@@ -37,8 +37,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from everos.infra.cascade._projections._common import parse_inline_list
-from everos.infra.persistence.markdown.base import entries as ent
-from everos.infra.persistence.markdown.base import frontmatter as fm
+from everos.infra.persistence.markdown._base import entries as ent
+from everos.infra.persistence.markdown._base import frontmatter as fm
 
 _ID_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 _line = st.text(st.characters(exclude_categories=("Cc", "Cs", "Zl", "Zp")), max_size=40)

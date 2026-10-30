@@ -57,7 +57,7 @@ directly.
 
 ## 3. Markdown daily-log: 4 steps
 
-### 3.1 Frontmatter schema — `infra/persistence/markdown/mds/<name>.py`
+### 3.1 Frontmatter schema — `infra/persistence/markdown/_mds/<name>.py`
 
 ```python
 """Episode daily-log frontmatter."""
@@ -94,7 +94,7 @@ lookup is unambiguous.
 from .episode import UserEpisodeDailyFrontmatter as UserEpisodeDailyFrontmatter
 ```
 
-### 3.3 Business writer — `infra/persistence/markdown/writers/<name>.py`
+### 3.3 Business writer — `infra/persistence/markdown/_writers/<name>.py`
 
 ```python
 """Episode appender."""
@@ -129,7 +129,7 @@ from .episode import UserEpisodeAppender as UserEpisodeAppender
 ### Done — usage
 
 ```python
-from everos.infra.persistence.markdown.writers import UserEpisodeAppender
+from everos.infra.persistence.markdown._writers import UserEpisodeAppender
 
 appender = UserEpisodeAppender(memory_root)
 eid = appender.append("u_jason", "I went to the doctor today.")

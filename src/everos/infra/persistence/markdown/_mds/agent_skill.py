@@ -21,7 +21,7 @@ from typing import ClassVar, Literal
 
 from pydantic import field_validator
 
-from everos.infra.persistence.markdown.base.frontmatter import (
+from everos.infra.persistence.markdown._base.frontmatter import (
     AgentScopedFrontmatter,
     SkillPathMixin,
 )
