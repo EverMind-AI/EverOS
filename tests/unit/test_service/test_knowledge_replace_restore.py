@@ -28,7 +28,7 @@ from everalgo.types import KnowledgeMemory, ParsedContent
 
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.sqlite.tables.knowledge import KnowledgeDocumentRow
+from everos.infra.persistence.sqlite._tables.knowledge import KnowledgeDocumentRow
 from tests.fakes import make_knowledge_service
 
 DOC_ID = "d_abc123000000"

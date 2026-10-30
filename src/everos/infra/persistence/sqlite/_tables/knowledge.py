@@ -14,7 +14,7 @@ from __future__ import annotations
 from sqlalchemy import Index
 from sqlmodel import Field
 
-from everos.infra.persistence.sqlite.base.base import BaseTable
+from everos.infra.persistence.sqlite._base.base import BaseTable
 
 
 class KnowledgeDocumentRow(BaseTable, table=True):

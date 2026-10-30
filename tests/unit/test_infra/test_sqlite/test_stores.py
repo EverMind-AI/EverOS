@@ -27,16 +27,16 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.cluster import ClusterRepo
-from everos.infra.persistence.sqlite.repos.conversation_status import (
+from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
+from everos.infra.persistence.sqlite._repos.conversation_status import (
     ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
-from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
-from everos.infra.persistence.sqlite.repos.reflection_report import (
+from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._repos.memorize_inbox import MemorizeInboxRepo
+from everos.infra.persistence.sqlite._repos.reflection_report import (
     ReflectionReportRepo,
 )
-from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
+from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
 from everos.memory.models import (

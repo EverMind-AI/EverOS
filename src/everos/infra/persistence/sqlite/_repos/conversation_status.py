@@ -9,10 +9,10 @@ import datetime as dt
 
 from sqlalchemy import select
 
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables import ConversationStatus
+from .._tables import ConversationStatus
 
 
 class ConversationStatusRepo(RepoBase[ConversationStatus]):

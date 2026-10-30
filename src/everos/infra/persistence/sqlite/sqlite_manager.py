@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from everos.config import SqliteSettings
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.memory_root import MemoryRoot
-from everos.infra.persistence.sqlite.base.engine import create_system_engine
-from everos.infra.persistence.sqlite.base.session import create_session_factory
+from everos.infra.persistence.sqlite._base.engine import create_system_engine
+from everos.infra.persistence.sqlite._base.session import create_session_factory
 from everos.infra.persistence.sqlite.schema import create_schema
 
 logger = get_logger(__name__)

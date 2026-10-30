@@ -143,7 +143,7 @@ eid = appender.append("u_jason", "I went to the doctor today.")
 
 Skip this section if the kind doesn't need structured state beyond markdown.
 
-### 4.1 Schema — `infra/persistence/sqlite/tables/<name>.py`
+### 4.1 Schema — `infra/persistence/sqlite/_tables/<name>.py`
 
 ```python
 from everos.infra.persistence.sqlite import BaseTable, Field
@@ -166,10 +166,10 @@ class EpisodeState(BaseTable, table=True):
 from .episode import EpisodeState as EpisodeState
 ```
 
-### 4.3 Repo — `infra/persistence/sqlite/repos/<name>.py`
+### 4.3 Repo — `infra/persistence/sqlite/_repos/<name>.py`
 
 ```python
-from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.repository import RepoBase
 
 from ..tables import EpisodeState
 

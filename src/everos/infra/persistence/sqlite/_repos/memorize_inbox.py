@@ -21,11 +21,11 @@ from collections.abc import Collection
 
 from sqlalchemy import delete, func, select, update
 
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 from everos.memory.ports import LOST_STATUS_WRITE, REPLAYS_EXHAUSTED_PREFIX
 
-from ..tables import MemorizeInbox
+from .._tables import MemorizeInbox
 
 PENDING_STATUSES: tuple[str, ...] = ("queued", "processing")
 

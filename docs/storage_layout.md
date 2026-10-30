@@ -183,7 +183,7 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
 │   └── <kind>.lance/      default derived index backend
 ```
 
-- **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
+- **SQLite** ([`infra/persistence/sqlite/_tables/`](../src/everos/infra/persistence/sqlite/_tables/))
   holds only system / coordination tables — `md_change_state` (cascade
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
   `conversation_status`, `cluster`, `knowledge`, `reflection_report`, `memorize_inbox` (the `async_mode` queue) — **not**

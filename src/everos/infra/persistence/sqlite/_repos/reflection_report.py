@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables import ReflectionReport
+from .._tables import ReflectionReport
 
 
 class ReflectionReportRepo(RepoBase[ReflectionReport]):

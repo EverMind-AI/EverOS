@@ -16,7 +16,7 @@ from sqlalchemy import Index, text
 from sqlmodel import Field
 
 from everos.core.utils.datetime import UtcDatetime, get_utc_now
-from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
+from everos.infra.persistence.sqlite._base.base import BaseTable, UtcDateTimeColumn
 
 
 class MdChangeState(BaseTable, table=True):

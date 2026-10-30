@@ -616,7 +616,7 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
     ``SQLModel(table=True)`` classes skip Pydantic ``AfterValidator``,
     so the :data:`UtcDatetime` annotation by itself is **inert** at
     construction. The mapper event registered in
-    :mod:`everos.infra.persistence.sqlite.base.base` is what guarantees the
+    :mod:`everos.infra.persistence.sqlite._base.base` is what guarantees the
     on-disk SQLite text is UTC bytes, not display-tz bytes.
 
     Test path: write a row whose ``timestamp`` is aware Shanghai 14:00,

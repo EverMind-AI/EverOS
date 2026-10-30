@@ -162,7 +162,7 @@ async def test_get_document_returns_original_file_path(
     from everos.config import load_settings
     from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.sqlite.tables.knowledge import (
+    from everos.infra.persistence.sqlite._tables.knowledge import (
         KnowledgeDocumentRow,
     )
 
@@ -223,7 +223,7 @@ async def test_get_document_returns_none_for_legacy_doc(
     from everos.config import load_settings
     from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.sqlite.tables.knowledge import (
+    from everos.infra.persistence.sqlite._tables.knowledge import (
         KnowledgeDocumentRow,
     )
 
@@ -273,7 +273,7 @@ async def test_replace_document_writes_new_original(
     """replace_document writes new original file after atomic replacement."""
     mock_repo = MagicMock()
     from everos.core.utils.datetime import get_utc_now
-    from everos.infra.persistence.sqlite.tables.knowledge import (
+    from everos.infra.persistence.sqlite._tables.knowledge import (
         KnowledgeDocumentRow,
     )
 

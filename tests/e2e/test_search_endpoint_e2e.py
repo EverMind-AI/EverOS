@@ -1806,7 +1806,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
     # Step 3: white-box probe — SQLite row comes back UTC-aware.
     #
     # The SQLAlchemy ``load`` event listener registered on ``BaseTable``
-    # (see ``infra/persistence/sqlite/base/base.py``) re-attaches ``tzinfo=UTC``
+    # (see ``infra/persistence/sqlite/_base/base.py``) re-attaches ``tzinfo=UTC``
     # to every ``UtcDatetime`` column after ORM hydrate, so callers never
     # observe a naive datetime — even though SQLite physically strips tz
     # at write time and SQLAlchemy ORM bypasses Pydantic on read.

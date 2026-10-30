@@ -22,8 +22,8 @@ from everos.core.errors import (
 )
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.sqlite.repos.knowledge import DocumentListPage
-from everos.infra.persistence.sqlite.tables.knowledge import (
+from everos.infra.persistence.sqlite._repos.knowledge import DocumentListPage
+from everos.infra.persistence.sqlite._tables.knowledge import (
     KnowledgeDocumentRow,
     KnowledgeTopicRow,
 )

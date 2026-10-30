@@ -106,7 +106,7 @@ normalised to UTC before persistence.
 SQLModel's ORM hydrate path (rows from `select(...)`) **bypasses**
 the Pydantic validator — SQLAlchemy assigns column values straight
 to instance attributes. To close that gap,
-[infra/persistence/sqlite/base/base.py](../src/everos/infra/persistence/sqlite/base/base.py)
+[infra/persistence/sqlite/_base/base.py](../src/everos/infra/persistence/sqlite/_base/base.py)
 defines a `TypeDecorator` column type, `UtcDateTimeColumn`, whose
 `process_result_value` re-attaches `tzinfo=UTC` on read (and
 `process_bind_param` normalises to UTC on write). Net effect:
@@ -148,7 +148,7 @@ event payload.
 
 | Backend | Defense | Where |
 |---|---|---|
-| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/base/base.py](../src/everos/infra/persistence/sqlite/base/base.py) |
+| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/_base/base.py](../src/everos/infra/persistence/sqlite/_base/base.py) |
 | **LanceDB** | `arrow_schema_for()` maps **every** datetime column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/lancedb/base/arrow.py](../src/everos/infra/persistence/lancedb/base/arrow.py) |
 | **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `core/utils/datetime` | wired into `make lint` |
 

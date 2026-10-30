@@ -359,7 +359,7 @@ forbidden_modules = [
 # because the transitive scan walks one hop further into the package.
 #
 # Direct imports from outer layers into a subpackage internal module
-# (e.g. ``from everos.infra.persistence.sqlite.tables import X`` written
+# (e.g. ``from everos.infra.persistence.sqlite._tables import X`` written
 # in ``service`` or ``entrypoints``) remain blocked — that edge is not
 # in this whitelist.
 #
@@ -369,8 +369,8 @@ forbidden_modules = [
 # (TABLE_NAME / BM25_FIELDS / PRIMARY_KEY); it is the one shared schema
 # module inside ``persistence/`` (docs/architecture.md, dependency table).
 ignore_imports = [
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._tables",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._repos",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repositories",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
@@ -402,7 +402,7 @@ ignore_imports = [
     # subpackage facade re-exports its own ``base`` primitives, and
     # ``records`` re-exports the base table it shares with every backend.
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._base",
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.base",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite._base",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",
     "everos.infra.persistence.records -> everos.infra.persistence.records.base",

@@ -12,10 +12,10 @@ from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from everos.core.utils.datetime import get_utc_now
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables.knowledge import KnowledgeDocumentRow, KnowledgeTopicRow
+from .._tables.knowledge import KnowledgeDocumentRow, KnowledgeTopicRow
 
 _SORTABLE_COLUMNS: dict[str, object] = {
     "created_at": KnowledgeDocumentRow.created_at,

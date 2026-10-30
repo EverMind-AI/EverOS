@@ -80,14 +80,14 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.conversation_status import (
+from everos.infra.persistence.sqlite._repos.conversation_status import (
     ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
-from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
+from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
-from everos.infra.persistence.sqlite.tables import (
+from everos.infra.persistence.sqlite._tables import (
     ConversationStatus,
     Memcell,
     UnprocessedBuffer,

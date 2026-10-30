@@ -36,10 +36,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from everos.core.utils.datetime import get_utc_now
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables import MdChangeState
+from .._tables import MdChangeState
 
 MTIME_TOLERANCE_SECONDS = 0.01
 """Absolute mtime delta (seconds) treated as "unchanged".

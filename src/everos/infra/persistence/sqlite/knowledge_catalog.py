@@ -18,9 +18,9 @@ from collections.abc import Collection, Sequence
 from everos.memory.models import KnowledgeDocument, KnowledgeTopic
 from everos.memory.ports import Page, PageResult
 
-from .repos import KnowledgeDocumentRepo, KnowledgeTopicRowRepo
-from .repos.knowledge import DocumentUpsertPayload
-from .tables.knowledge import KnowledgeDocumentRow, KnowledgeTopicRow
+from ._repos import KnowledgeDocumentRepo, KnowledgeTopicRowRepo
+from ._repos.knowledge import DocumentUpsertPayload
+from ._tables.knowledge import KnowledgeDocumentRow, KnowledgeTopicRow
 
 
 class SqliteKnowledgeCatalog:

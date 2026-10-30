@@ -65,14 +65,14 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.conversation_status import (
+from everos.infra.persistence.sqlite._repos.conversation_status import (
     ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
-from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
+from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
-from everos.infra.persistence.sqlite.tables import Memcell
+from everos.infra.persistence.sqlite._tables import Memcell
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.pipeline import CellOutcome

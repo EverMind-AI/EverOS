@@ -20,7 +20,7 @@ from sqlmodel import SQLModel
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.sqlite.repos.md_change_state import QueueSummary
+from everos.infra.persistence.sqlite._repos.md_change_state import QueueSummary
 from tests.fakes.storage import Storage
 
 

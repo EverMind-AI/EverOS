@@ -7,7 +7,7 @@ import json
 import pytest
 
 from everos.infra.persistence.sqlite import SqliteKnowledgeCatalog
-from everos.infra.persistence.sqlite.repos.knowledge import TopicUpsertPayload
+from everos.infra.persistence.sqlite._repos.knowledge import TopicUpsertPayload
 from everos.memory.models import KnowledgeDocument
 from everos.memory.ports import KnowledgeCatalog, Page
 from tests.fakes.storage import Storage

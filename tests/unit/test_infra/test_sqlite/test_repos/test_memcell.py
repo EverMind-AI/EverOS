@@ -26,9 +26,9 @@ from sqlmodel import SQLModel
 from everos.config import SqliteSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
-from everos.infra.persistence.sqlite.repos import memcell as memcell_mod
-from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
-from everos.infra.persistence.sqlite.tables import Memcell
+from everos.infra.persistence.sqlite._repos import memcell as memcell_mod
+from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._tables import Memcell
 
 
 @pytest.fixture

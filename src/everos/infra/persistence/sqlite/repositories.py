@@ -6,7 +6,7 @@ __all__ = ["SqliteRepos"]
 
 from dataclasses import dataclass
 
-from .repos import (
+from ._repos import (
     ClusterRepo,
     ConversationStatusRepo,
     KnowledgeDocumentRepo,

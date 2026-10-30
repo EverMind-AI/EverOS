@@ -13,10 +13,10 @@ import datetime as dt
 
 from sqlalchemy import select, update
 
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables import Memcell
+from .._tables import Memcell
 
 _SQLITE_IN_CHUNK = 500
 """SQL ``IN (?, ?, ...)`` parameter cap for :meth:`MemcellRepo.find_by_ids`.

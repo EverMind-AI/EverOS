@@ -38,7 +38,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import OwnerType, PageResult, Scope, SessionKey
 
-from .repos import (
+from ._repos import (
     ClusterRepo,
     ConversationStatusRepo,
     MemcellRepo,
@@ -46,8 +46,8 @@ from .repos import (
     ReflectionReportRepo,
     UnprocessedBufferRepo,
 )
-from .tables import Memcell, MemorizeInbox, UnprocessedBuffer
-from .tables import ReflectionReport as ReflectionReportRow
+from ._tables import Memcell, MemorizeInbox, UnprocessedBuffer
+from ._tables import ReflectionReport as ReflectionReportRow
 
 _SESSION_TRACK = "memorize"
 """Track of a session's live buffer and its conversation status."""

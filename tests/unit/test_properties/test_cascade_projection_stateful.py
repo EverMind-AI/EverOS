@@ -58,8 +58,8 @@ from everos.infra.persistence.markdown._base import entries as ent
 from everos.infra.persistence.markdown._base import frontmatter as fm
 from everos.infra.persistence.records import Episode
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
-from everos.infra.persistence.sqlite.repos.md_change_state import MdChangeStateRepo
-from everos.infra.persistence.sqlite.tables import MdChangeState
+from everos.infra.persistence.sqlite._repos.md_change_state import MdChangeStateRepo
+from everos.infra.persistence.sqlite._tables import MdChangeState
 from everos.memory.ports.query import eq
 from tests.fakes import TEST_DIM, arrow_schema, handler_deps, index_repositories
 

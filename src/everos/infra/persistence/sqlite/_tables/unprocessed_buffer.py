@@ -11,7 +11,7 @@ from sqlalchemy import Index
 from sqlmodel import Field
 
 from everos.core.utils.datetime import UtcDatetime
-from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
+from everos.infra.persistence.sqlite._base.base import BaseTable, UtcDateTimeColumn
 
 
 class UnprocessedBuffer(BaseTable, table=True):

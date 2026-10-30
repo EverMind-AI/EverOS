@@ -17,10 +17,10 @@ from __future__ import annotations
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from everos.infra.persistence.sqlite.base.repository import RepoBase
-from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.infra.persistence.sqlite._base.repository import RepoBase
+from everos.infra.persistence.sqlite._base.session import session_scope
 
-from ..tables import UnprocessedBuffer
+from .._tables import UnprocessedBuffer
 
 
 class UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):

@@ -45,8 +45,8 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.cluster import ClusterRepo
-from everos.infra.persistence.sqlite.tables import Cluster, ClusterMember
+from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
+from everos.infra.persistence.sqlite._tables import Cluster, ClusterMember
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
 from everos.memory.strategies import (

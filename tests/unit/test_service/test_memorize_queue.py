@@ -39,8 +39,8 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
-from everos.infra.persistence.sqlite.tables import MemorizeInbox
+from everos.infra.persistence.sqlite._repos.memorize_inbox import MemorizeInboxRepo
+from everos.infra.persistence.sqlite._tables import MemorizeInbox
 from everos.service import MemorizeResult
 from everos.service.memory import _queue as mq
 from everos.service.ops import OpsService
