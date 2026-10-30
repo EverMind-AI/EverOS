@@ -37,7 +37,11 @@ type _Handler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
 def _error_response(
-    request: Request, status_code: int, code: ErrorCode, message: str
+    request: Request,
+    status_code: int,
+    code: ErrorCode,
+    message: str,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Build a JSONResponse with the canonical error envelope."""
     body = ErrorResponse(
@@ -49,7 +53,9 @@ def _error_response(
             path=str(request.url.path),
         ),
     )
-    return JSONResponse(status_code=status_code, content=body.model_dump())
+    return JSONResponse(
+        status_code=status_code, content=body.model_dump(), headers=headers
+    )
 
 
 def _exception_fields(exc: Exception) -> Mapping[str, object]:
@@ -72,6 +78,8 @@ class _Rule:
     log: tuple[Literal["warning", "error"], str] | None = None
     """``(level, event)`` of the log line, or ``None`` for no log line."""
     log_fields: Callable[[Exception], Mapping[str, object]] = _exception_fields
+    headers: Mapping[str, str] | None = None
+    """Extra response headers (e.g. ``Retry-After``)."""
 
 
 _ERROR_RULES: Mapping[type[Exception], _Rule] = {
@@ -88,6 +96,15 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     errors.ConflictError: _Rule(409, ErrorCode.CONFLICT),
     errors.ExtractionEmptyError: _Rule(422, ErrorCode.EXTRACTION_EMPTY),
     errors.InvalidInputError: _Rule(422, ErrorCode.INVALID_INPUT),
+    # Transient, retryable: SQLite lock contention has a concrete backoff,
+    # unlike the generic infrastructure bucket.
+    errors.DatabaseBusyError: _Rule(
+        503,
+        ErrorCode.DATABASE_BUSY,
+        message="SQLite is busy; retry the request",
+        log=("warning", "database_busy"),
+        headers={"Retry-After": "1"},
+    ),
     # Transient, retryable.
     errors.InfrastructureError: _Rule(
         503,
@@ -125,7 +142,13 @@ def _rule_handler(rule: _Rule) -> _Handler:
             fields = rule.log_fields(exc)
             getattr(logger, level)(event, path=str(request.url.path), **fields)
         message = str(exc) if rule.message is None else rule.message
-        return _error_response(request, rule.status_code, rule.code, message)
+        return _error_response(
+            request,
+            rule.status_code,
+            rule.code,
+            message,
+            headers=rule.headers,
+        )
 
     return handle
 
