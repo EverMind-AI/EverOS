@@ -166,8 +166,9 @@ def _build_manager(
     called.
 
     ``find`` on the episode index evaluates its filter (the MaxSim parent
-    fetch narrows by entry id); the fact index answers both the fact ANN and
-    the HYBRID fact expansion from ``atomic_fact_dense``.
+    fetch narrows by entry id), and so does the skill index (the case→skill
+    bridge narrows by ``source_case_ids`` membership); the fact index answers
+    both the fact ANN and the HYBRID fact expansion from ``atomic_fact_dense``.
     """
     deps = RecallerDeps(tokenizer=_tokenizer())
     episodes = [*(episode_sparse or []), *(episode_dense or [])]
@@ -198,6 +199,7 @@ def _build_manager(
                 sparse=skill_sparse or [],
                 dense=skill_dense or [],
                 found=skill_by_case or [],
+                filter_found=True,
             ),
         ),
         profile_recaller=_StubProfileRecaller(),  # type: ignore[arg-type]
@@ -701,7 +703,8 @@ async def test_agentic_agent_cases_delegates_to_search_agent_cases_agentic(
 
     fake_cases = [
         SearchAgentCaseItem(
-            id="c_1",
+            id="agent_a_c_1",
+            entry_id="c_1",
             agent_id="agent_a",
             session_id="sess_b",
             timestamp=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
@@ -843,17 +846,20 @@ async def test_agent_hybrid_llm_rerank_dispatches_arank_for_case_then_skill(
 async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The bridge must surface into the skill dispatch: skills resolved
-    by ``fetch_by_case_ids`` are max-pooled into the dense candidates that
-    ``arank`` sees on the second call, while the direct skill recall pool
-    is preserved.
+    """The bridge must surface into the skill dispatch with the ids as they
+    are stored: a case's index row id is ``<agent_id>_<entry_id>`` while a
+    skill's ``source_case_ids`` holds the md-side entry ids, so the bridge
+    has to be fed entry ids (issue #478). The bridged skill is max-pooled
+    into the dense candidates that ``arank`` sees on the second call, while
+    the direct skill recall pool is preserved.
     """
     from everalgo.types import RankOutput, ScoredItem
 
-    case_hit = _case_row("agent_a_c1")
-    case_result = ScoredItem(id="agent_a_c1", score=0.85, item_type="case")
+    case = stored_case("ac_20261009_0001", owner_id="agent_a")
+    assert case.ref.id == "agent_a_ac_20261009_0001"
+    case_result = ScoredItem(id=case.ref.id, score=0.85, item_type="case")
     skill_direct = _skill_row("s_direct")
-    skill_bridged = _skill_row("s_bridged", source_case_ids=["agent_a_c1"])
+    skill_bridged = _skill_row("s_bridged", source_case_ids=["ac_20261009_0001"])
 
     seen_skill_dense: dict[str, list[Any]] = {}
 
@@ -868,7 +874,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     mgr = _build_manager(
         embedding=_StubEmbedding(),
         llm_client=_StubLLM(),
-        case_dense=[case_hit],
+        case_dense=[hit(case, 0.7)],
         skill_sparse=[],
         skill_dense=[skill_direct],
         skill_by_case=[skill_bridged],
@@ -878,7 +884,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     dense_ids = {c.id for c in seen_skill_dense["dense"]}
     # Direct dense recall is preserved AND the case-bridged skill is unioned.
     assert dense_ids == {"s_direct", "s_bridged"}
-    # The bridged skill inherits the matched case's score (0.85 from c1).
+    # The bridged skill inherits the matched case's score (0.85 from the case).
     by_id = {c.id: c for c in seen_skill_dense["dense"]}
     assert by_id["s_bridged"].score == pytest.approx(0.85)
 

@@ -167,6 +167,7 @@ def shape_agent_cases(
         items.append(
             SearchAgentCaseItem(
                 id=stored.ref.id,
+                entry_id=stored.ref.entry_id,
                 agent_id=case.owner_id,
                 app_id=stored.scope.app_id,
                 project_id=stored.scope.project_id,

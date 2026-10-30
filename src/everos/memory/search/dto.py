@@ -205,6 +205,10 @@ class SearchAgentCaseItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
+    entry_id: str
+    """The case's id inside its owner's markdown (``ac_<YYYYMMDD>_<NNNN>``);
+    what a skill's ``source_case_ids`` refers to. ``id`` is the index row key,
+    ``<agent_id>_<entry_id>``."""
     agent_id: str
     app_id: str = "default"
     project_id: str = "default"

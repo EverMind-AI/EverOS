@@ -326,7 +326,7 @@ class SearchManager:
         if _effective_llm_rerank(req):
             cases = await self._search_agent_cases(req, where)
             skills = await self._search_agent_skills(
-                req, where, case_scores={c.id: c.score for c in cases}
+                req, where, case_scores={c.entry_id: c.score for c in cases}
             )
             return cases, skills
 
@@ -518,9 +518,10 @@ class SearchManager:
         *,
         case_scores: Mapping[str, float] | None = None,
     ) -> list[SearchAgentSkillItem]:
-        """Rank agent skills. ``case_scores`` (reranked case id -> score) is
-        supplied only on HYBRID + LLM-rerank to feed the case→skill bridge;
-        ``None`` everywhere else.
+        """Rank agent skills. ``case_scores`` (case entry id -> reranked
+        score) is supplied only on HYBRID + LLM-rerank to feed the case→skill
+        bridge; ``None`` everywhere else. Entry ids, not index row ids: a
+        skill's ``source_case_ids`` holds the md-side entry ids.
         """
         if req.method == SearchMethod.AGENTIC:
             return await search_agent_skills_agentic(

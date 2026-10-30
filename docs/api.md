@@ -1019,6 +1019,7 @@ Agent-track case hit. Returned only when the request uses `agent_id`.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
+| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
 | `agent_id` | `string` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
@@ -1046,7 +1047,7 @@ clustering related cases.
 | `content` | `string` | Full skill body (procedure / playbook text) |
 | `confidence` | `number` | Extraction confidence in `[0, 1]` |
 | `maturity_score` | `number` | Maturity assessed at clustering time, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `agent_case` ids that contributed to this skill |
+| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
 | `score` | `number` | Fused retrieval score for this skill |
 
 #### UnprocessedMessageDTO
@@ -1237,6 +1238,7 @@ Same shape as [SearchAgentCaseItem](#searchagentcaseitem) **minus**
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
+| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
 | `agent_id` | `string` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
@@ -1263,7 +1265,7 @@ Same shape as [SearchAgentSkillItem](#searchagentskillitem) **minus**
 | `content` | `string` | Full skill body |
 | `confidence` | `number` | Extraction confidence in `[0, 1]` |
 | `maturity_score` | `number` | Maturity assessed at clustering, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `agent_case` ids that contributed to this skill |
+| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
 
 #### cURL example
 

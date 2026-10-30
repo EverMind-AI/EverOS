@@ -398,6 +398,16 @@ release candidates: `everalgo-core 0.6.0`, `everalgo-boundary 0.4.1`,
 everos` resolves them without any pre-release flag; upgrade them together,
 never one at a time.
 
+### Fixed
+
+- **The case→skill bridge matches again.** On HYBRID + LLM-rerank agent
+  searches the bridge looked up skills by the matched cases' index row ids
+  (`<agent_id>_ac_…`), while a skill's `source_case_ids` holds the md-side
+  entry ids (`ac_…`), so no skill was ever bridged in (#478). The bridge is
+  now keyed by entry id, and `SearchAgentCaseItem` exposes `entry_id` so a
+  client can join cases to skills the same way.
+
+
 ## [1.5.1] - 2026-10-22
 
 **Hybrid and vector search keep up with 10 requests a second out of the box.**

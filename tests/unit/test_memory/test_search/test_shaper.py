@@ -129,6 +129,7 @@ def test_shape_agent_cases_basic_and_owner_type_check() -> None:
 
     (item,) = items
     assert item.id == case.ref.id and item.agent_id == "agent_1"
+    assert item.entry_id == "ac_1"
     assert item.task_intent == "fix the build" and item.quality_score == 0.8
     assert item.session_id == "sess_a" and item.score == 0.6
 

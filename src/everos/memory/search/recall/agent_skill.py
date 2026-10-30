@@ -69,7 +69,9 @@ class AgentSkillRecaller:
         """Skills learned from the given cases, scored by their best case.
 
         The case->skill bridge: each skill whose ``source_case_ids`` meets
-        ``case_scores`` takes the highest score among those cases. Scores must
+        ``case_scores`` takes the highest score among those cases. The keys
+        are case *entry ids* (``ac_<YYYYMMDD>_<NNNN>``, the shape written to
+        ``source_case_ids``), never the index row ids. Scores must
         be LLM-rerank relevance in ``[0, 1]`` to stay comparable with the
         direct dense pool -- never BM25 / fusion scores. One case can map to
         several skills, so the fetch allows a small fan-out per case.

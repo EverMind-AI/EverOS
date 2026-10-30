@@ -2828,6 +2828,10 @@
             "type": "string",
             "title": "Id"
           },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -2879,6 +2883,7 @@
         "type": "object",
         "required": [
           "id",
+          "entry_id",
           "agent_id",
           "session_id",
           "task_intent",
@@ -3725,6 +3730,10 @@
             "type": "string",
             "title": "Id"
           },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -3780,6 +3789,7 @@
         "type": "object",
         "required": [
           "id",
+          "entry_id",
           "agent_id",
           "session_id",
           "task_intent",
