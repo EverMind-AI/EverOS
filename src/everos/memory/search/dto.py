@@ -93,6 +93,12 @@ class SearchRequest(BaseModel):
     method: SearchMethod = SearchMethod.HYBRID
     top_k: int = -1
     radius: float | None = Field(default=None, ge=0.0, le=1.0)
+    """Cosine floor on dense recall, applied before any fusion or rerank.
+
+    Every method's vector route honours it (VECTOR, HYBRID, AGENTIC);
+    KEYWORD has no cosine and ignores it. ``None`` with ``top_k=-1`` falls
+    back to the server default, see ``_effective_radius``.
+    """
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     """Post-fusion relevance floor for the episode HYBRID path.
 

@@ -101,6 +101,7 @@ async def search_agent_cases_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentCaseItem]:
     """Agent-case AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -112,6 +113,8 @@ async def search_agent_cases_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum cases to return.
+        radius: Cosine floor applied to dense recall before fusion; ``None``
+            keeps all.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentCaseItem`` objects.
@@ -124,6 +127,7 @@ async def search_agent_cases_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
         kind="case",
     )
     return shape_agent_cases(candidates, stored)
@@ -138,6 +142,7 @@ async def search_agent_skills_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentSkillItem]:
     """Agent-skill AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -149,6 +154,8 @@ async def search_agent_skills_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum skills to return.
+        radius: Cosine floor applied to dense recall before fusion; ``None``
+            keeps all.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentSkillItem`` objects.
@@ -161,6 +168,7 @@ async def search_agent_skills_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
         kind="skill",
     )
     return shape_agent_skills(candidates, stored)
@@ -175,6 +183,7 @@ async def _run_agentic_retrieve(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None,
     kind: Literal["case", "skill"],
 ) -> tuple[list[Candidate], Mapping[str, Stored[Any]]]:
     """Shared flat agentic retrieve pipeline for agent memory kinds.
@@ -206,7 +215,8 @@ async def _run_agentic_retrieve(
         vec = await embed_query_fn(q)
         if not vec:
             return []
-        return _keep(await recaller.dense_recall(vec, where, limit=k))
+        hits = await recaller.dense_recall(vec, where, limit=k)
+        return _keep(hits.within_radius(radius))
 
     async def _sparse(q: str, k: int) -> list[Candidate]:
         return _keep(await recaller.sparse_recall(q, where, limit=k))

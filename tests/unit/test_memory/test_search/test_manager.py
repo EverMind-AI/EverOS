@@ -408,6 +408,17 @@ async def test_vector_radius_filter_drops_below_threshold() -> None:
     assert [e.id for e in resp.data.episodes] == ["ep_high"]
 
 
+async def test_hybrid_radius_filters_the_dense_pool_before_fusion() -> None:
+    """``radius`` is a cosine floor on dense recall for every vector route,
+    HYBRID included (#394): a dense-only hit below it never reaches fusion."""
+    mgr = _build_manager(
+        episode_dense=[_episode_row("ep_low", score=0.3), _episode_row("ep_high", 0.9)],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, radius=0.5))
+    assert [e.id for e in resp.data.episodes] == ["ep_high"]
+
+
 async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
     """``top_k=-1`` without an explicit radius gets the project default 0.5.
 

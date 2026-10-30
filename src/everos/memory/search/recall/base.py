@@ -165,14 +165,17 @@ def rank_input(
     sparse: RecallResult[Any],
     dense: RecallResult[Any],
     top_k: int,
-    radius: float | None,
 ) -> RankInput:
-    """The everalgo ``arank`` input for one kind's two recall routes."""
+    """The everalgo ``arank`` input for one kind's two recall routes.
+
+    No ``radius``: the cosine floor is applied to the dense pool before it
+    gets here (``RecallResult.within_radius``), and the ranker fuses scores
+    it could not apply a cosine floor to anyway.
+    """
     return RankInput(
         query=query,
         memory_type=memory_type,  # type: ignore[arg-type]  # ClassVar[str] of a Literal set
         sparse_candidates=sparse.candidates,
         dense_candidates=dense.candidates,
         top_k=top_k,
-        radius=radius,
     )

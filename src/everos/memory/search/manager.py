@@ -384,6 +384,7 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
+                radius=_effective_radius(req),
             )
 
         if req.method == SearchMethod.LLM_MULTIROUND:
@@ -472,6 +473,7 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
+                radius=_effective_radius(req),
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_case")
         enable_rerank = _effective_llm_rerank(req)
@@ -498,7 +500,6 @@ class SearchManager:
                     sparse=sparse,
                     dense=dense,
                     top_k=top_k,
-                    radius=_effective_radius(req),
                 ),
                 config=RankConfig(fusion_mode=fusion_mode)
                 if fusion_mode != "rrf"
@@ -532,6 +533,7 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
+                radius=_effective_radius(req),
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_skill")
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
@@ -575,7 +577,6 @@ class SearchManager:
                         sparse=sparse,
                         dense=dense,
                         top_k=top_k,
-                        radius=_effective_radius(req),
                     ),
                     config=DEFAULT_RANK_CONFIG,
                     llm=self._llm,

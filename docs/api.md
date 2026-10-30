@@ -916,10 +916,12 @@ Default `"hybrid"` is the recommended starting point.
 
 Values of `0` or outside `-1` / `1..100` are rejected with `422`.
 
-**`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`.
-Candidates whose score is below this value are dropped — use it to cut
-a long tail of weak matches. Three-level fallback for the effective
-radius:
+**`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`,
+applied to the **dense (vector) recall before fusion or rerank**:
+candidates whose raw cosine is below it never enter the pool. Every
+method's vector route honours it (`vector`, `hybrid`, `agentic`);
+`keyword` has no cosine and ignores it. Use it to cut a long tail of
+weak matches. Three-level fallback for the effective radius:
 
 1. Caller-supplied `radius` (including the literal `0.0`) always wins.
 2. With `top_k=-1` and no caller-supplied `radius`, a server-side

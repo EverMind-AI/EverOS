@@ -90,6 +90,7 @@ async def search_episodes_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchEpisodeItem]:
     """Episode AGENTIC search via cluster-scoped MaxSim — 1:1 with benchmark.
 
@@ -104,6 +105,8 @@ async def search_episodes_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum episodes to return (maps to ``top_n`` in aagentic_retrieve).
+        radius: Cosine floor applied to every dense recall before fusion;
+            ``None`` keeps all.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchEpisodeItem`` objects.
@@ -126,7 +129,10 @@ async def search_episodes_agentic(
             atomic_fact_recaller.dense_recall(vec, where, limit=k),
             episode_recaller.dense_recall_subject_as_child(vec, where, limit=k),
         )
-        return fact_results.candidates + ep_results.candidates
+        return (
+            fact_results.within_radius(radius).candidates
+            + ep_results.within_radius(radius).candidates
+        )
 
     async def _fact_sparse(q: str, k: int) -> list[Candidate]:
         fact_results, ep_results = await asyncio.gather(

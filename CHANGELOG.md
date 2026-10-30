@@ -426,6 +426,12 @@ never one at a time.
   all of them are marked CRASHED and re-enqueued.
   `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
   user-facing setting.
+- **`radius` is a pre-fusion cosine floor on every vector route.** It was
+  applied to the dense pool of `vector` and `hybrid` searches but also
+  passed into the ranker's input, which never read it, and the `agentic`
+  routes ignored it entirely (#394). The dead ranker field is gone and
+  the agentic dense recalls (cases, skills, episode facts) now apply the
+  same floor; the API reference states the semantics.
 - **A file restored with its old mtime is indexed again.** When the
   cascade worker found an enqueued file gone it folded the row into a
   deletion but left it saying `done / added`, so a scan that later saw

@@ -225,6 +225,35 @@ async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmar
     assert captured["refinement_strategy"] == "multi_query"
 
 
+async def test_agentic_dense_recall_honours_radius() -> None:
+    """The agentic route applies the same pre-fusion cosine floor as the
+    other vector routes (#394): a dense hit below ``radius`` never reaches
+    ``ahybrid_retrieve``, so the base retrieve the agentic loop sees is
+    already cut."""
+    seen: list[str] = []
+
+    async def fake_aagentic(query: str, *, base_retrieve: Any, **_: Any) -> Any:
+        seen.extend(c.id for c in await base_retrieve(query, 10))
+        return [], AgenticDecision(is_multi_round=False)
+
+    recaller = _StubRecaller(
+        dense=[_case_hit("c_low", 0.3), _case_hit("c_high", 0.9)], sparse=[]
+    )
+    with patch("everos.memory.search.agentic_agent.aagentic_retrieve", fake_aagentic):
+        await search_agent_cases_agentic(
+            "q",
+            where="owner_id = 'agent_a' AND owner_type = 'agent'",
+            case_recaller=recaller,
+            embed_query_fn=_fake_embed,
+            reranker=_StubReranker(),
+            llm=FakeLLMClient(responses=[]),
+            top_k=5,
+            radius=0.5,
+        )
+
+    assert seen == ["c_high"]
+
+
 async def test_search_agent_cases_agentic_shapes_result() -> None:
     """Output must be list[SearchAgentCaseItem] built from aagentic_retrieve results."""
     cand = _case_hit("c_1")
