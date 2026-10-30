@@ -34,9 +34,10 @@ the :class:`RerankProvider` contract (one result per document) holds; the
 returned list is sorted score-descending defensively regardless of server
 ordering. ``api_key`` is required — DashScope has no anonymous tier.
 
-Only ``gte-rerank-v2`` is supported by this provider for now.
-``qwen3-rerank`` uses a different endpoint / request shape and should be
-added as a separate branch if EverOS decides to support it later.
+``gte-rerank-v2`` and ``qwen3-rerank`` are supported. Both use the same native
+endpoint and body; ``qwen3-rerank`` additionally takes the task instruction as
+``parameters.instruct`` (local patch 2026-10-02: the intl region has no
+``gte-rerank-v2``).
 """
 
 from __future__ import annotations
@@ -69,7 +70,8 @@ class DashScopeRerankProvider:
     """
 
     _SERVICE_PATH = "/api/v1/services/rerank/text-rerank/text-rerank"
-    _SUPPORTED_MODELS = frozenset({"gte-rerank-v2"})
+    _SUPPORTED_MODELS = frozenset({"gte-rerank-v2", "qwen3-rerank"})
+    _INSTRUCT_MODELS = frozenset({"qwen3-rerank"})
 
     def __init__(
         self,
@@ -84,7 +86,8 @@ class DashScopeRerankProvider:
     ) -> None:
         if model not in self._SUPPORTED_MODELS:
             raise ValueError(
-                f"DashScope rerank currently supports gte-rerank-v2 only; got {model!r}"
+                f"DashScope rerank supports {sorted(self._SUPPORTED_MODELS)}; "
+                f"got {model!r}"
             )
         self._model = model
         self._api_key = api_key
@@ -103,9 +106,8 @@ class DashScopeRerankProvider:
     ) -> list[RerankResult]:
         """Score every document against ``query``; return sorted desc.
 
-        ``instruction`` is accepted for protocol parity but not transmitted:
-        DashScope applies the reranker template server-side, so there is no
-        client-side prompt to fill.
+        ``instruction`` is sent as ``parameters.instruct`` for ``qwen3-rerank``;
+        ``gte-rerank-v2`` takes no instruction, so it is dropped there.
         """
         if not documents:
             return []
@@ -115,7 +117,7 @@ class DashScopeRerankProvider:
             for offset in range(0, len(documents), self._batch_size)
         ]
         chunk_results = await asyncio.gather(
-            *(self._score_chunk(query, docs) for _, docs in chunks)
+            *(self._score_chunk(query, docs, instruction) for _, docs in chunks)
         )
         scored: list[RerankResult] = []
         for (offset, _), partial in zip(chunks, chunk_results, strict=True):
@@ -126,12 +128,18 @@ class DashScopeRerankProvider:
         return scored
 
     async def _score_chunk(
-        self, query: str, documents: list[str]
+        self, query: str, documents: list[str], instruction: str | None = None
     ) -> list[RerankResult]:
+        parameters: dict[str, Any] = {
+            "return_documents": False,
+            "top_n": len(documents),
+        }
+        if instruction and self._model in self._INSTRUCT_MODELS:
+            parameters["instruct"] = instruction
         payload: dict[str, Any] = {
             "model": self._model,
             "input": {"query": query, "documents": documents},
-            "parameters": {"return_documents": False, "top_n": len(documents)},
+            "parameters": parameters,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
