@@ -8,7 +8,9 @@ Each cycle:
 2. For each row, look up the kind's :class:`Handler` and call either
    :meth:`handle_added_or_modified` or :meth:`handle_deleted` based on
    the row's ``change_type``.
-3. On success: ``mark_done``.
+3. On success: ``mark_done`` with the change the handler actually
+   applied (a vanished file folds into a deletion and is recorded as
+   ``deleted``, so the reconciler re-adds it if it comes back).
 4. On :class:`~everos.core.errors.ExternalServiceError`: retry inline
    up to ``MAX_RETRY``; if all attempts fail,
    ``mark_failed(retryable=True)`` — unless the cross-cycle retry
@@ -51,6 +53,7 @@ from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import MdChangeState, MdChangeStateRepo
 
+from ..models import ChangeType
 from ..projections import Handler
 from ._health import CascadeWorkerHealth
 from ._maintenance import IndexMaintainer
@@ -344,6 +347,7 @@ class CascadeWorker:
 
         retry_count = row.retry_count
         last_error: str = ""
+        applied: ChangeType = row.change_type  # type: ignore[assignment]  # str column
         for attempt in range(self._max_retry + 1):
             try:
                 if row.change_type == "deleted":
@@ -356,8 +360,10 @@ class CascadeWorker:
                         # (delete/modify race — cascade delete event may not
                         # arrive if it fires while the row is already in
                         # ``processing``). Fold into a deletion so the row
-                        # completes with ``mark_done`` instead of failing.
+                        # completes with ``mark_done`` instead of failing, and
+                        # record the fold: the row must describe the index.
                         outcome = await handler.handle_deleted(row.md_path)
+                        applied = "deleted"
             except ExternalServiceError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(
@@ -402,12 +408,12 @@ class CascadeWorker:
                 "cascade_worker_processed",
                 md_path=row.md_path,
                 kind=row.kind,
-                change_type=row.change_type,
+                change_type=applied,
                 upserted=outcome.upserted,
                 deleted=outcome.deleted,
                 skipped=outcome.skipped,
             )
-            await self._ledger.mark_done(row.md_path)
+            await self._ledger.mark_done(row.md_path, change_type=applied)
             # Only flag the kind as "touched" when we actually wrote
             # something — skipped rows leave the table untouched, so
             # optimizing would be pure overhead.

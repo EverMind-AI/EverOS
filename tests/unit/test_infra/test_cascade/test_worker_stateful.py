@@ -168,8 +168,8 @@ class CascadeMachine(RuleBasedStateMachine):
         self.trace: list[str] = []
         real_done, real_failed = self.repo.mark_done, self.repo.mark_failed
 
-        async def done_counting(md_path: str) -> None:
-            await real_done(md_path)
+        async def done_counting(md_path: str, **kw: Any) -> None:
+            await real_done(md_path, **kw)
             self.marked.add(md_path)
 
         async def failed_counting(md_path: str, **kw: Any) -> None:
@@ -439,7 +439,7 @@ def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
 
         from everos.infra.persistence.sqlite import session_scope
 
-        async def unguarded_mark_done(md_path: str) -> None:
+        async def unguarded_mark_done(md_path: str, **_: Any) -> None:
             async with session_scope(machine.factory) as s:
                 await s.execute(
                     update(MdChangeState)

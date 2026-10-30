@@ -422,6 +422,12 @@ never one at a time.
   all of them are marked CRASHED and re-enqueued.
   `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
   user-facing setting.
+- **A file restored with its old mtime is indexed again.** When the
+  cascade worker found an enqueued file gone it folded the row into a
+  deletion but left it saying `done / added`, so a scan that later saw
+  the file back with the same mtime took it for indexed (#541). The
+  worker now records the applied change (`deleted`), and the reconciler
+  re-emits a present file whose row says `deleted` whatever its mtime.
 
 ## [1.5.1] - 2026-10-22
 

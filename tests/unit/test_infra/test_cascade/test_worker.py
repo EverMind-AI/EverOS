@@ -55,6 +55,7 @@ class _FakeRepo:
     def __init__(self, batch: list[_Row]) -> None:
         self.batch = list(batch)
         self.done: list[str] = []
+        self.applied: dict[str, str | None] = {}
         self.failed: list[tuple[str, bool, str, int]] = []
 
     async def claim_pending_batch(
@@ -70,8 +71,9 @@ class _FakeRepo:
         items, self.batch = self.batch, []
         return items
 
-    async def mark_done(self, md_path: str) -> None:
+    async def mark_done(self, md_path: str, *, change_type: str | None = None) -> None:
         self.done.append(md_path)
+        self.applied[md_path] = change_type
 
     async def mark_failed(
         self,
@@ -265,7 +267,20 @@ async def test_modified_event_for_vanished_file_is_processed_as_delete(
 
     assert handler.deleted_paths == ["vanished.md"]
     assert patched_repo.done == ["vanished.md"]
+    # The row must say what was applied, not what was enqueued (#541).
+    assert patched_repo.applied["vanished.md"] == "deleted"
     assert patched_repo.failed == []
+
+
+async def test_processed_row_records_the_enqueued_change_when_nothing_folds(
+    patched_repo: _FakeRepo,
+) -> None:
+    patched_repo.batch = [_Row(md_path="a.md", change_type="modified")]
+    w = CascadeWorker({"episode": _OkHandler()}, ledger=patched_repo)
+
+    await w.drain_once()
+
+    assert patched_repo.applied["a.md"] == "modified"
 
 
 async def test_unknown_kind_marks_permanent_without_handler(

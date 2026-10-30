@@ -67,7 +67,7 @@ class _RecordingRepo:
             self.batch_by_kind[k] = []
         return picked
 
-    async def mark_done(self, md_path: str) -> None:
+    async def mark_done(self, md_path: str, **_: object) -> None:
         self.done.append(md_path)
 
     async def mark_failed(

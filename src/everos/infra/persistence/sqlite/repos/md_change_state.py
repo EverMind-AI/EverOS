@@ -293,8 +293,15 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
 
     # ── Worker result reporting ────────────────────────────────────────────
 
-    async def mark_done(self, md_path: str) -> None:
+    async def mark_done(self, md_path: str, *, change_type: str | None = None) -> None:
         """Transition the row to ``done`` after a successful handler run.
+
+        ``change_type`` records what the handler actually applied when it
+        differs from what was enqueued: a row enqueued as ``added`` whose
+        file had vanished by the time the worker read it is folded into a
+        deletion, and the row must say ``deleted`` so the reconciler does
+        not take the next scan's "file present, same mtime" as "already
+        indexed" (#541). ``None`` leaves the enqueued value.
 
         Guarded by ``WHERE status='processing'`` so the call is a no-op
         if a concurrent :meth:`upsert` (watcher / scanner re-enqueue)
@@ -315,6 +322,7 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_attempt_at=now,
                     error=None,
                     retryable=None,
+                    **({} if change_type is None else {"change_type": change_type}),
                 )
             )
             await s.commit()

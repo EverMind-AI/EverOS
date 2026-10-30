@@ -19,6 +19,13 @@ Three categories per 12 doc §5.3:
   drop, daemon restart window), and we need the scanner to recover
   the deletion or LanceDB stays stale.
 
+A path on disk whose prior row says ``deleted`` is re-emitted as
+``modified`` whatever its mtime (``added`` stays reserved for paths with
+no prior row): the worker folds a file that vanished
+before it could read it into a deletion and records that fold, so a
+file restored with its old mtime (``mv`` back, ``rsync -a``) is not
+mistaken for one already indexed (#541).
+
 Paths whose prior state row is ``done`` AND the mtime matches are
 skipped on the add/modify side — the reconcile output stays tight on
 quiet sweeps. The same applies to ``failed`` rows whose ``retryable``
@@ -89,6 +96,17 @@ def reconcile(
                     md_path=item.md_path,
                     kind=item.kind,
                     change_type="added",
+                    mtime=item.mtime,
+                )
+            )
+            continue
+        if prior.change_type == "deleted":
+            # The index holds nothing for this path; the mtime says nothing.
+            decisions.append(
+                ReconcileDecision(
+                    md_path=item.md_path,
+                    kind=item.kind,
+                    change_type="modified",
                     mtime=item.mtime,
                 )
             )

@@ -759,7 +759,7 @@ class _MdRows:
         self.in_flight += len(batch)
         return batch
 
-    async def mark_done(self, md_path: str) -> None:
+    async def mark_done(self, md_path: str, **_: Any) -> None:
         self.in_flight -= 1
 
     async def mark_failed(self, md_path: str, **kw: Any) -> None:

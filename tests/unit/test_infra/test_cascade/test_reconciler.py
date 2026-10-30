@@ -104,6 +104,18 @@ def test_deleted_path_already_done_as_delete_is_skipped() -> None:
     assert decisions == []
 
 
+def test_present_file_after_a_folded_delete_is_re_added_whatever_the_mtime() -> None:
+    """The worker read a vanished file, folded the row into a deletion and
+    recorded it. The file came back with its old mtime (``mv`` back,
+    ``rsync -a``): the index holds nothing, so the matching mtime must not
+    read as "already indexed" (#541)."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="done", change_type="deleted")},
+    )
+    assert [(d.md_path, d.change_type) for d in decisions] == [("a.md", "modified")]
+
+
 def test_done_added_row_with_missing_path_is_recovered_as_deleted() -> None:
     """Watcher missed an unlink (e.g. fseventsd drop / daemon restart).
 
