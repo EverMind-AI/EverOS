@@ -24,8 +24,9 @@ from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade.projections.agent_case import AgentCaseHandler
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.index import AgentCase, Comparison, Predicate
+from everos.infra.persistence.index import Comparison, Predicate
 from everos.infra.persistence.markdown import AgentCaseWriter
+from everos.infra.persistence.records import AgentCase
 from tests.fakes import handler_deps
 
 _AGENT = "a_ops"

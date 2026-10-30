@@ -16,13 +16,13 @@ import pytest
 from everos.config import LanceDBSettings
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.index import KnowledgeTopic, primary_key
+from everos.infra.persistence.index import primary_key
 from everos.infra.persistence.lancedb import (
     LanceIndexContract,
     LanceRepoBase,
     open_lancedb_connection,
 )
-from everos.infra.persistence.records import IndexRecord
+from everos.infra.persistence.records import IndexRecord, KnowledgeTopic
 from tests.fakes import TEST_DIM, arrow_schema
 
 

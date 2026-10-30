@@ -89,7 +89,7 @@ def _episode(
     subject_axis: int,
     timestamp: dt.datetime,
 ):  # type: ignore[no-untyped-def]
-    from everos.infra.persistence.index import Episode
+    from everos.infra.persistence.records import Episode
 
     vector = [0.0] * 1024
     vector[vector_axis] = 1.0
@@ -119,13 +119,8 @@ def _episode(
 async def test_remote_milvus_matches_derived_index_contract(
     storage_view: StorageView,
 ) -> None:
-    from everos.infra.persistence.index import (
-        Episode,
-        UserProfile,
-        eq,
-        is_null,
-        primary_key,
-    )
+    from everos.infra.persistence.index import eq, is_null, primary_key
+    from everos.infra.persistence.records import Episode, UserProfile
     from everos.memory.search import FilterNode
     from everos.memory.search.filters import compile_filters
 
@@ -271,8 +266,8 @@ async def test_episode_only_probe_covers_metadata_search_and_http(
 
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.infra.persistence.index import Episode
     from everos.infra.persistence.milvus import MilvusConnection
+    from everos.infra.persistence.records import Episode
     from everos.memory.search import FilterNode
     from everos.memory.search.filters import compile_filters
     from everos.service import build_application
@@ -589,11 +584,8 @@ async def test_find_topk_relevant_in_cluster_hydrates_own_scope(
     storage_view: StorageView,
 ) -> None:
     """A24: the by-id hydration after dense search stays inside the caller's space."""
-    from everos.infra.persistence.index import (
-        AgentSkill,
-        eq,
-        primary_key,
-    )
+    from everos.infra.persistence.index import eq, primary_key
+    from everos.infra.persistence.records import AgentSkill
 
     def skill(project: str, description: str) -> AgentSkill:
         vector = [0.0] * 1024

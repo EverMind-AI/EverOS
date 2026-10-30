@@ -24,7 +24,8 @@ import pytest
 
 from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill import run_backfill
-from everos.infra.persistence.index import AtomicFact, eq
+from everos.infra.persistence.index import eq
+from everos.infra.persistence.records import AtomicFact
 from tests.fakes import FakeOmeLock, make_backfill_deps, make_ops
 
 from .conftest import (

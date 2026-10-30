@@ -31,12 +31,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import (
-    VECTOR_PROJECTIONS,
-    AgentCase,
-    IndexRepository,
-    ParentType,
-)
+from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
+from everos.infra.persistence.records import AgentCase, ParentType
 
 from ._common import require_float, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry

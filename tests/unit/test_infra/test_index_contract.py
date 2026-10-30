@@ -24,7 +24,6 @@ from everos.infra.persistence.index import (
     All,
     AnyOf,
     DerivedIndex,
-    Episode,
     IndexBackend,
     IndexRepository,
     Predicate,
@@ -47,6 +46,7 @@ from everos.infra.persistence.milvus import (
     MilvusRepoBase,
 )
 from everos.infra.persistence.milvus.repos import _EpisodeRepo as _MilvusEpisodeRepo
+from everos.infra.persistence.records import Episode
 from tests.fakes import TEST_DIM
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")

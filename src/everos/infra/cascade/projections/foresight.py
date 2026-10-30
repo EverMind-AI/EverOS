@@ -31,12 +31,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import (
-    VECTOR_PROJECTIONS,
-    Foresight,
-    IndexRepository,
-    ParentType,
-)
+from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
+from everos.infra.persistence.records import Foresight, ParentType
 
 from ._common import (
     optional_int,

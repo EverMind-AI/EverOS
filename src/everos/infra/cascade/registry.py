@@ -17,15 +17,6 @@ from __future__ import annotations
 import dataclasses
 from pathlib import PurePosixPath
 
-from everos.infra.persistence.index import (
-    AgentCase,
-    AgentSkill,
-    AtomicFact,
-    Episode,
-    Foresight,
-    KnowledgeTopic,
-    UserProfile,
-)
 from everos.infra.persistence.markdown import (
     AgentCaseDailyFrontmatter,
     AgentSkillFrontmatter,
@@ -36,6 +27,15 @@ from everos.infra.persistence.markdown import (
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
     UserProfileFrontmatter,
+)
+from everos.infra.persistence.records import (
+    AgentCase,
+    AgentSkill,
+    AtomicFact,
+    Episode,
+    Foresight,
+    KnowledgeTopic,
+    UserProfile,
 )
 
 from .projections import (

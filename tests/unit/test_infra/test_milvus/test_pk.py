@@ -5,11 +5,12 @@ from __future__ import annotations
 import pytest
 
 from everos.config.settings import MilvusSettings
-from everos.infra.persistence.index import Episode, eq
+from everos.infra.persistence.index import eq
 from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.milvus import MilvusConnection, MilvusIndexBackend
 from everos.infra.persistence.milvus._codec import compose_pk
 from everos.infra.persistence.milvus.repository import MilvusValueLimitError
+from everos.infra.persistence.records import Episode
 from tests.fakes import TEST_DIM
 
 

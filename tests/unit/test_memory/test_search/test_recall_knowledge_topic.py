@@ -18,8 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.index import KnowledgeTopic, all_of, eq
+from everos.infra.persistence.index import all_of, eq
 from everos.infra.persistence.index.adapters import KnowledgeTopicIndexAdapter
+from everos.infra.persistence.records import KnowledgeTopic
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.recall.knowledge_topic import KnowledgeTopicRecaller
 

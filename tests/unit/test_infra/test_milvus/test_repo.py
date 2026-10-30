@@ -8,12 +8,7 @@ import pytest
 from pymilvus import DataType, FunctionType
 
 from everos.config import load_settings
-from everos.infra.persistence.index import (
-    Episode,
-    IndexRepositories,
-    IndexRepository,
-    is_null,
-)
+from everos.infra.persistence.index import IndexRepositories, IndexRepository, is_null
 from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.milvus import (
     MilvusConnection,
@@ -32,6 +27,7 @@ from everos.infra.persistence.milvus.repository import (
     MilvusRepoBase,
     MilvusValueLimitError,
 )
+from everos.infra.persistence.records import Episode
 from tests.fakes import TEST_DIM
 
 

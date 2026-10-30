@@ -1,0 +1,515 @@
+{
+  "source": "hand-authored for EverOS regression; models real mixed traffic",
+  "license": "Apache-2.0 (same as the project)",
+  "everos_session_id": "mixed_assistant_daily",
+  "everos_user_sender_id": "u_liang",
+  "everos_agent_sender_id": "assistant_daily",
+  "everos_tool_sender_id": "tool_runner",
+  "total_messages": 50,
+  "total_batches": 4,
+  "design_notes": {
+    "closure": "every session ends on a plain-text assistant turn (TRAJECTORY_NOT_CLOSED guard)",
+    "tool_rounds": "each session issues >= 3 tool-call rounds (min_tool_call_rounds=3)",
+    "skill_update": "batch 0 and batch 2 are the same weekly-report task, so batch 2 should drive the skill update branch",
+    "clustering": "batch 0->1 is 8 days apart (outside time_window_days=7), batch 1->2 is 6 days (inside)"
+  },
+  "conversion_rules": {
+    "role": "user / assistant / tool",
+    "sender_id": "user -> u_liang, assistant -> assistant_daily, tool -> tool_runner",
+    "timestamp": "session base + idx * 45000ms",
+    "content": "empty string on assistant tool-call-only turns",
+    "tool_calls": "OpenAI Chat Completions shape, on assistant rows",
+    "tool_call_id": "on tool rows"
+  },
+  "batches": [
+    {
+      "batch_index": 0,
+      "label": "工作：会议记录整理成周报",
+      "date": "2026-07-10",
+      "message_count": 16,
+      "messages": [
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "早。我是做支付方向的 PM，上个月刚接手一个跨境结算的新项目，团队七个人，前端两个、后端三个、QA 两个。",
+          "timestamp": 1783674720000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "早上好。跨境结算涉及多币种和合规，需要我帮你把项目信息整理成一份 baseline 文档吗？",
+          "timestamp": 1783674765000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "先不用。帮我把这周的会议记录整理成周报吧，记录都在 notes 目录下。",
+          "timestamp": 1783674810000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w1_01",
+              "type": "function",
+              "function": {
+                "name": "list_files",
+                "arguments": "{\"path\": \"notes/\", \"pattern\": \"2026-07-*.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1783674855000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "notes/2026-07-06-kickoff.md\nnotes/2026-07-08-riskcontrol.md\nnotes/2026-07-09-vendor.md",
+          "tool_call_id": "call_w1_01",
+          "timestamp": 1783674900000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w1_02",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"notes/2026-07-06-kickoff.md\"}"
+              }
+            },
+            {
+              "id": "call_w1_03",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"notes/2026-07-08-riskcontrol.md\"}"
+              }
+            },
+            {
+              "id": "call_w1_04",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"notes/2026-07-09-vendor.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1783674945000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 跨境结算 Kickoff\n- 一期范围锁定：香港、新加坡两个通道\n- 里程碑：8/15 联调，9/1 灰度\n- 风险：新加坡持牌方合同还没签",
+          "tool_call_id": "call_w1_02",
+          "timestamp": 1783674990000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 风控评审\n- 反洗钱规则需接入第三方名单库\n- 单笔限额初定 5 万美元\n- 待办：法务确认新加坡本地留存要求",
+          "tool_call_id": "call_w1_03",
+          "timestamp": 1783675035000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 供应商对接\n- 通道方 A 报价 0.35%，B 报价 0.42% 但结算 T+1\n- 倾向 A，需再压一轮价",
+          "tool_call_id": "call_w1_04",
+          "timestamp": 1783675080000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w1_05",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"reports/2026-W27.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1783675125000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 第 27 周周报\n## 进展\n- 通道选型启动\n## 风险\n- 无\n## 下周计划\n- 完成 kickoff",
+          "tool_call_id": "call_w1_05",
+          "timestamp": 1783675170000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w1_06",
+              "type": "function",
+              "function": {
+                "name": "write_file",
+                "arguments": "{\"path\": \"reports/2026-W28.md\", \"content\": \"# 第 28 周周报\\n## 进展\\n...\\n## 风险\\n...\\n## 下周计划\\n...\"}"
+              }
+            }
+          ],
+          "timestamp": 1783675215000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "written: reports/2026-W28.md (1.4 KB)",
+          "tool_call_id": "call_w1_06",
+          "timestamp": 1783675260000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "周报已生成，写到 reports/2026-W28.md。三条主线：\n1. 一期范围锁定香港、新加坡双通道，里程碑 8/15 联调、9/1 灰度；\n2. 风控确定单笔限额 5 万美元，反洗钱名单库待接入；\n3. 通道方倾向 A（0.35%），建议再压一轮价。\n两个阻塞项我单独标了：新加坡持牌方合同未签、法务未确认本地数据留存要求。",
+          "timestamp": 1783675305000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "可以。我习惯周五下午写周报，以后到点提醒我一下。另外我这人不爱看长文档，能 bullet point 就别写段落。",
+          "timestamp": 1783675350000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "记下了：每周五下午提醒你写周报，输出尽量用列表而不是大段文字。",
+          "timestamp": 1783675395000
+        }
+      ]
+    },
+    {
+      "batch_index": 1,
+      "label": "闲聊：无工具调用（只应产出 user 记忆）",
+      "date": "2026-07-13",
+      "message_count": 8,
+      "messages": [
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "问个事，跨境结算的对账一般是 T+1 还是 T+0？我们通道方给的是 T+1，财务有点意见。",
+          "timestamp": 1783978800000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "两种都有，取决于通道方的清算安排：T+0 需要预置备付金垫资，成本更高；T+1 是行业更普遍的做法。财务在意的通常是资金占用天数，可以让通道方给一份 settlement cut-off time 说明，很多时候 T+1 的实际到账比想象的早。",
+          "timestamp": 1783978845000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "ValueError: max() arg is an empty sequence\n  File \"/app/settle/reconcile.py\", line 88, in latest_batch\n    return max(b.closed_at for b in batches)\n  reconcile_daily(batches=[], cutoff=None)",
+          "timestamp": 1783978890000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "`batches` 是空序列时 `max()` 就会这样抛。给它一个 default 就行：`max((b.closed_at for b in batches), default=None)`，然后在调用方处理 None。空批次在对账里通常意味着当天没有清算，属于正常状态而不是异常，所以别用 try/except 吞掉。",
+          "timestamp": 1783978935000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "makes sense. btw is `settlement cut-off time` the standard term? our vendor doc writes it as `cutoff`, 我怕对外文档不一致。",
+          "timestamp": 1783978980000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "行业文档里两种拼法都有，ISO 20022 相关材料多用 `cut-off time`，供应商合同里写 `cutoff` 也不算错。对外统一成一种就行，建议跟合同保持一致。",
+          "timestamp": 1783979025000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "懂了，我让后端改。周末我要陪孩子去打疫苗，周一再看。",
+          "timestamp": 1783979070000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "好，周一见。疫苗那天要是想起来什么随时说。",
+          "timestamp": 1783979115000
+        }
+      ]
+    },
+    {
+      "batch_index": 2,
+      "label": "生活：规划家庭旅行",
+      "date": "2026-07-22",
+      "message_count": 11,
+      "messages": [
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "国庆后想带我爸妈去京都看红叶，我爸膝盖不好走不了太多路，帮我看看行程怎么安排。",
+          "timestamp": 1784752200000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_t2_01",
+              "type": "function",
+              "function": {
+                "name": "web_search",
+                "arguments": "{\"query\": \"京都 红叶 2026 最佳观赏期\"}"
+              }
+            },
+            {
+              "id": "call_t2_02",
+              "type": "function",
+              "function": {
+                "name": "web_search",
+                "arguments": "{\"query\": \"京都 轮椅友好 寺院 无障碍\"}"
+              }
+            }
+          ],
+          "timestamp": 1784752245000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "多个来源：京都红叶见顷通常在 11 月中下旬；东福寺、永观堂 11/20 前后进入盛期；10 月上旬仅高海拔的大原、贵船略有转色。",
+          "tool_call_id": "call_t2_01",
+          "timestamp": 1784752290000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "天龙寺、平安神宫神苑地面平整，坡道较少；清水寺、伏见稻荷台阶多不推荐；岚山嵯峨野小火车有无障碍车厢需提前预约。",
+          "tool_call_id": "call_t2_02",
+          "timestamp": 1784752335000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_t2_03",
+              "type": "function",
+              "function": {
+                "name": "calendar_list",
+                "arguments": "{\"start\": \"2026-10-01\", \"end\": \"2026-10-31\"}"
+              }
+            }
+          ],
+          "timestamp": 1784752380000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "10/12-10/14 跨境结算联调复盘（全天）\n10/23 季度述职\n其余工作日无全天日程",
+          "tool_call_id": "call_t2_03",
+          "timestamp": 1784752425000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_t2_04",
+              "type": "function",
+              "function": {
+                "name": "write_file",
+                "arguments": "{\"path\": \"trips/2026-10-kyoto.md\", \"content\": \"# 京都 5 日（适老版）\\n- 10/16 出发...\\n\"}"
+              }
+            }
+          ],
+          "timestamp": 1784752470000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "written: trips/2026-10-kyoto.md (0.9 KB)",
+          "tool_call_id": "call_t2_04",
+          "timestamp": 1784752515000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "行程草案存到 trips/2026-10-kyoto.md 了，按你爸的情况做了三处调整：\n- 时间选 10/16-10/20，避开你 10/12 复盘和 10/23 述职；\n- 只安排天龙寺、平安神宫这类地面平整的点，清水寺和伏见稻荷台阶太多，去掉了；\n- 嵯峨野小火车有无障碍车厢，但要提前预约，我标成待办了。\n有个取舍要提醒你：10 月中旬红叶还没到盛期，真要看红叶得 11 月下旬，那时你有述职。",
+          "timestamp": 1784752560000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "红叶看不到就算了，主要是陪老人出去走走。我妈信佛，寺院多安排两个。",
+          "timestamp": 1784752605000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "明白，那按「陪伴优先」来排，寺院给你加到四个，都挑地面平整的。",
+          "timestamp": 1784752650000
+        }
+      ]
+    },
+    {
+      "batch_index": 3,
+      "label": "工作：再次整理周报（同类任务）",
+      "date": "2026-07-24",
+      "message_count": 15,
+      "messages": [
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "又到周五了，这周的周报麻烦你，还是老规矩。",
+          "timestamp": 1784909100000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w3_00",
+              "type": "function",
+              "function": {
+                "name": "list_files",
+                "arguments": "{\"path\": \"notes/\", \"pattern\": \"2026-07-2*.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1784909145000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "notes/2026-07-20-sync.md",
+          "tool_call_id": "call_w3_00",
+          "timestamp": 1784909190000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "notes/ 下这周只翻到 07-20 的同步纪要一份，法务和议价那两场会的记录没找到。是还没归档，还是放到别的地方了？",
+          "timestamp": 1784909235000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "哦对，这周的我按周归到 notes/2026-w30/ 下面了，忘了跟你说。",
+          "timestamp": 1784909280000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w3_01",
+              "type": "function",
+              "function": {
+                "name": "list_files",
+                "arguments": "{\"path\": \"notes/2026-w30/\", \"pattern\": \"*.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1784909325000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "notes/2026-w30/2026-07-22-legal.md\nnotes/2026-w30/2026-07-23-pricing.md",
+          "tool_call_id": "call_w3_01",
+          "timestamp": 1784909370000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w3_02",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"notes/2026-w30/2026-07-22-legal.md\"}"
+              }
+            },
+            {
+              "id": "call_w3_03",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"notes/2026-w30/2026-07-23-pricing.md\"}"
+              }
+            }
+          ],
+          "timestamp": 1784909415000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 法务同步\n- 新加坡本地留存要求确认：交易数据需境内留存 5 年\n- 持牌方合同已签，比计划晚 9 天",
+          "tool_call_id": "call_w3_02",
+          "timestamp": 1784909460000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "# 二轮议价\n- 通道方 A 让步到 0.31%，但要求年度保底量\n- 财务认为保底量风险可接受",
+          "tool_call_id": "call_w3_03",
+          "timestamp": 1784909505000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_w3_04",
+              "type": "function",
+              "function": {
+                "name": "write_file",
+                "arguments": "{\"path\": \"reports/2026-W30.md\", \"content\": \"# 第 30 周周报\\n## 进展\\n...\\n\"}"
+              }
+            }
+          ],
+          "timestamp": 1784909550000
+        },
+        {
+          "sender_id": "tool_runner",
+          "role": "tool",
+          "content": "written: reports/2026-W30.md (1.2 KB)",
+          "tool_call_id": "call_w3_04",
+          "timestamp": 1784909595000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "第 30 周周报好了，在 reports/2026-W30.md：\n- 上周两个阻塞项都解了：持牌方合同已签（晚 9 天），法务确认数据境内留存 5 年；\n- 通道方 A 议价到 0.31%，代价是年度保底量，财务判断风险可接受；\n- 合同晚 9 天，8/15 联调里程碑有压力，建议下周同步一次排期。\n另外记一下：你这周改成按周目录归档了，下次我直接去 notes/<周次>/ 找。",
+          "timestamp": 1784909640000
+        },
+        {
+          "sender_id": "u_liang",
+          "role": "user",
+          "content": "排期这事我来推。你把「合同晚了 9 天」这个风险记着，下次述职我要用。",
+          "timestamp": 1784909685000
+        },
+        {
+          "sender_id": "assistant_daily",
+          "role": "assistant",
+          "content": "记下了，述职材料里我会把这条列进风险回顾。",
+          "timestamp": 1784909730000
+        }
+      ]
+    }
+  ]
+}

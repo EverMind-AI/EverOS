@@ -26,8 +26,9 @@ from __future__ import annotations
 import json
 from typing import Any, ClassVar
 
-from everos.infra.persistence.index import IndexRepository, UserProfile, primary_key
+from everos.infra.persistence.index import IndexRepository, primary_key
 from everos.infra.persistence.markdown import MarkdownReader
+from everos.infra.persistence.records import UserProfile
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256

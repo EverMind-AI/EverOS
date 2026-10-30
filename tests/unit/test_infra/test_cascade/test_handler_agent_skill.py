@@ -20,16 +20,9 @@ from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade.projections import AgentSkillHandler
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.index import (
-    AgentSkill,
-    All,
-    Comparison,
-    Predicate,
-    all_of,
-    eq,
-    ne,
-)
+from everos.infra.persistence.index import All, Comparison, Predicate, all_of, eq, ne
 from everos.infra.persistence.markdown import AgentSkillWriter
+from everos.infra.persistence.records import AgentSkill
 from tests.fakes import handler_deps, index_repositories
 
 

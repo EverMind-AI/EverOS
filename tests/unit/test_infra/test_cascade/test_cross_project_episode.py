@@ -19,13 +19,14 @@ from everos.component.tokenizer import Tokenizer
 from everos.config import LanceDBSettings
 from everos.infra.cascade.projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.index import Episode, all_of, eq
+from everos.infra.persistence.index import all_of, eq
 from everos.infra.persistence.lancedb import (
     LanceIndexContract,
     LanceRepoBase,
     open_lancedb_connection,
 )
 from everos.infra.persistence.markdown import EpisodeWriter
+from everos.infra.persistence.records import Episode
 from tests.fakes import TEST_DIM, arrow_schema, handler_deps
 
 

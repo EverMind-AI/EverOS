@@ -24,12 +24,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import (
-    VECTOR_PROJECTIONS,
-    AtomicFact,
-    IndexRepository,
-    ParentType,
-)
+from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
+from everos.infra.persistence.records import AtomicFact, ParentType
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry

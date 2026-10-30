@@ -22,12 +22,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.index import (
-    AgentCase,
-    AgentSkill,
-    Episode,
-    UserProfile,
-)
+from everos.infra.persistence.records import AgentCase, AgentSkill, Episode, UserProfile
 from everos.service import build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import StorageView

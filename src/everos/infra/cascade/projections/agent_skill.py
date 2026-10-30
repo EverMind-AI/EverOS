@@ -42,7 +42,6 @@ import anyio
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
     VECTOR_PROJECTIONS,
-    AgentSkill,
     IndexRepository,
     all_of,
     eq,
@@ -50,6 +49,7 @@ from everos.infra.persistence.index import (
     primary_key,
 )
 from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader
+from everos.infra.persistence.records import AgentSkill
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256

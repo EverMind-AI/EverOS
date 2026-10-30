@@ -10,14 +10,6 @@ ports, so callers do not branch on physical storage: the application builds one
 
 from __future__ import annotations
 
-from ..records import AgentCase as AgentCase
-from ..records import AgentSkill as AgentSkill
-from ..records import AtomicFact as AtomicFact
-from ..records import Episode as Episode
-from ..records import Foresight as Foresight
-from ..records import KnowledgeTopic as KnowledgeTopic
-from ..records import ParentType as ParentType
-from ..records import UserProfile as UserProfile
 from ._provenance import EmbeddingProvenance as EmbeddingProvenance
 from .derived_index import DerivedIndex as DerivedIndex
 from .derived_index import check_primary_keys as check_primary_keys
@@ -65,20 +57,15 @@ from .vector_projection import VectorProjection as VectorProjection
 __all__ = [
     "BUSINESS_SCHEMAS",
     "VECTOR_PROJECTIONS",
-    "AgentCase",
-    "AgentSkill",
     "AgentSkillIndexRepository",
     "All",
     "AnyOf",
-    "AtomicFact",
     "Comparison",
     "Contains",
     "DerivedIndex",
     "EmbeddingProvenance",
-    "Episode",
     "EpisodeIndexRepository",
     "Filter",
-    "Foresight",
     "In",
     "IndexBackend",
     "IndexField",
@@ -88,13 +75,10 @@ __all__ = [
     "IndexRepository",
     "IndexSchema",
     "IsNull",
-    "KnowledgeTopic",
-    "ParentType",
     "Predicate",
     "ProgressCallback",
     "ProjectionVectorBackfill",
     "Scalar",
-    "UserProfile",
     "VectorBackfill",
     "VectorBackfillCounts",
     "VectorBacklog",

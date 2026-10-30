@@ -39,10 +39,10 @@ from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.index import (
     VECTOR_PROJECTIONS,
     IndexRepository,
-    KnowledgeTopic,
     primary_key,
 )
 from everos.infra.persistence.markdown import MarkdownReader, ParsedMarkdown
+from everos.infra.persistence.records import KnowledgeTopic
 from everos.infra.persistence.sqlite import TopicUpsertPayload
 
 from ..models import HandlerOutcome

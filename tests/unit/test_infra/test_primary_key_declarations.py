@@ -7,18 +7,18 @@ from typing import ClassVar
 
 import pytest
 
-from everos.infra.persistence.index import (
+from everos.infra.persistence.index import check_primary_keys
+from everos.infra.persistence.index.schema import schema_for
+from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
     AtomicFact,
     Episode,
     Foresight,
+    IndexRecord,
     KnowledgeTopic,
     UserProfile,
-    check_primary_keys,
 )
-from everos.infra.persistence.index.schema import schema_for
-from everos.infra.persistence.records import IndexRecord
 from tests.fakes import TEST_DIM
 
 BUSINESS_TABLES = (

@@ -373,7 +373,6 @@ ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repositories",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
-    "everos.infra.persistence.index -> everos.infra.persistence.records",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.backend",
@@ -407,6 +406,15 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",
     "everos.infra.persistence.records -> everos.infra.persistence.records.base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.vector",
+    "everos.infra.persistence.records -> everos.infra.persistence.records._parent_type",
+    "everos.infra.persistence.records -> everos.infra.persistence.records._provenance_key",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_case",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_skill",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.atomic_fact",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.episode",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.foresight",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.knowledge_topic",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
 ]
 
 [[tool.importlinter.contracts]]
