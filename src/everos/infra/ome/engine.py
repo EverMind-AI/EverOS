@@ -2,7 +2,7 @@
 
 Manages strategy registration, start-stop lifecycle, event dispatch, and
 scheduling of Cron and Idle triggers via APScheduler. Enforces single-engine
-guard via portalocker for concurrent access safety.
+guard through :class:`~everos.infra.ome.lock.OmeLock`.
 
 Collaborators: the APScheduler boundary (job building and the persisted entry
 callbacks) is :mod:`everos.infra.ome._dispatch.scheduling`; in-flight run
@@ -17,11 +17,8 @@ __all__ = ["OfflineEngine"]
 
 import asyncio
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
-import portalocker
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from everos.core.observability.logging import get_logger
@@ -44,9 +41,9 @@ from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.events import resolve_topic
 from everos.infra.ome.exceptions import (
-    EngineLockHeldError,
     OMEError,
 )
+from everos.infra.ome.lock import OmeLock
 from everos.infra.ome.records import (
     RunRecord,
     RunStatus,
@@ -80,7 +77,7 @@ class OfflineEngine:
 
     Single-process invariant: a file lock on
     ``<jobstore_path>.lock`` guarantees at most one engine per jobstore
-    at any time (cross-process safe via ``portalocker``).
+    at any time (cross-process safe; the lock is :class:`OmeLock`).
     """
 
     def __init__(
@@ -91,7 +88,7 @@ class OfflineEngine:
         self._config = config
         self._registry = StrategyRegistry()
         self._storage = OMEStorage(db_path=config.jobstore_path)
-        self._lock_handle: Any = None
+        self._lock = OmeLock(config.jobstore_path)
         self._started = False
         self._on_dead_letter: Callable[[RunRecord], None] | None = None
 
@@ -171,7 +168,7 @@ class OfflineEngine:
         if self._started:
             return
         await self._storage.init()
-        self._acquire_lock()
+        self._lock.acquire()
         try:
             await self._storage.hold_open()
             self._registry.validate()
@@ -304,7 +301,7 @@ class OfflineEngine:
                 self._scheduler = None
         scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._release_lock()
+        self._lock.release()
         self._in_flight.disarm()
 
     async def wait_idle(self, *, timeout: float = 30.0) -> bool:  # noqa: ASYNC109
@@ -374,30 +371,9 @@ class OfflineEngine:
             self._scheduler = None
         scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._release_lock()
+        self._lock.release()
         self._started = False
         self._in_flight.disarm()
-
-    def _acquire_lock(self) -> None:
-        lock_path = Path(str(self._config.jobstore_path) + ".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(lock_path, "a+")  # noqa: SIM115
-        try:
-            portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-        except portalocker.LockException as e:
-            handle.close()
-            raise EngineLockHeldError(
-                f"another OfflineEngine instance already holds {lock_path}"
-            ) from e
-        self._lock_handle = handle
-
-    def _release_lock(self) -> None:
-        if self._lock_handle is not None:
-            try:
-                portalocker.unlock(self._lock_handle)
-            finally:
-                self._lock_handle.close()
-                self._lock_handle = None
 
     @refuse_inside_strategy
     async def emit(self, event: Event) -> None:

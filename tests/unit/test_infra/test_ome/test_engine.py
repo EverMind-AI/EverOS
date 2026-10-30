@@ -509,7 +509,7 @@ async def test_start_failure_cleans_up_engines_and_scheduler(
     assert engine._engine_id not in scheduling.ENGINES
     assert engine._scheduler is None
     assert engine._started is False
-    assert engine._lock_handle is None
+    assert engine._lock.held is False
 
     monkeypatch.undo()
     engine2 = OfflineEngine(config=cfg)
