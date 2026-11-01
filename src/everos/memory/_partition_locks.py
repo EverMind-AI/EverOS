@@ -56,6 +56,16 @@ def get_partition_lock(strategy_name: str, partition_key: str) -> asyncio.Lock:
     )
 
 
+def get_cluster_row_lock(app_id: str, project_id: str, cluster_id: str) -> asyncio.Lock:
+    """Return the lock serialising writes to one cluster row.
+
+    Clustering (upsert) and reflection deprecation (replace_members) write the
+    same row under different strategy locks, so the contended resource is the
+    row: both paths share this lock keyed by the data instead.
+    """
+    return get_partition_lock("cluster", f"{app_id}:{project_id}:{cluster_id}")
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every registered lock pool.
 

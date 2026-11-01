@@ -16,7 +16,7 @@ from everalgo.clustering import cluster_by_geometry
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory._partition_locks import get_cluster_row_lock, get_partition_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.mappers import cluster as cluster_mapper
@@ -156,12 +156,40 @@ async def _fold_in(
         threshold=settings.clustering.threshold,
         time_window_days=settings.clustering.time_window_days,
     )
-    to_save = merged if merged is not None else new_cluster
+    if merged is None:
+        # A freshly minted id has no row to race; persist the new cluster.
+        await clusters.upsert(
+            scope,
+            "user_memory",
+            cluster_mapper.from_algo(new_cluster),
+            member_type="episode",
+        )
+        return new_cluster
 
-    # 5. Persist the (possibly-merged) cluster.
-    await clusters.upsert(
-        scope, "user_memory", cluster_mapper.from_algo(to_save), member_type="episode"
-    )
+    assert merged.id is not None  # cluster_by_geometry passes the existing id through
+    # Serialise on the row, not the strategy: reflection's deprecation rewrites
+    # the same row under its own strategy lock. Re-read it under the shared row
+    # lock and re-run geometry so a merge that landed after list_for_owner is
+    # folded into instead of overwritten by this stale snapshot.
+    async with get_cluster_row_lock(scope.app_id, scope.project_id, merged.id):
+        fresh = await clusters.get(merged.id)
+        if fresh is None:
+            to_save = new_cluster
+        else:
+            remerged = cluster_by_geometry(
+                new_cluster,
+                [cluster_mapper.to_algo(fresh)],
+                threshold=settings.clustering.threshold,
+                time_window_days=settings.clustering.time_window_days,
+            )
+            to_save = remerged if remerged is not None else new_cluster
+        # 5. Persist the (possibly-merged) cluster.
+        await clusters.upsert(
+            scope,
+            "user_memory",
+            cluster_mapper.from_algo(to_save),
+            member_type="episode",
+        )
     return to_save
 
 

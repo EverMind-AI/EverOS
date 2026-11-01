@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 from everos.core.errors import AppError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory._partition_locks import get_cluster_row_lock, get_partition_lock
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
@@ -455,7 +455,15 @@ class ReflectionFinisher:
         """
         partition = f"{scope.app_id}:{scope.project_id}:{context.cluster_id}"
         try:
-            async with get_partition_lock("reflection_deprecate", partition):
+            # Deprecation rewrites the same cluster row clustering upserts; the
+            # data-keyed lock keeps the two strategies out of each other's
+            # read-modify-write window.
+            async with (
+                get_partition_lock("reflection_deprecate", partition),
+                get_cluster_row_lock(
+                    scope.app_id, scope.project_id, context.cluster_id
+                ),
+            ):
                 return await self._execute_deprecation(
                     scope=scope, merged_entry_id=merged_entry_id, context=context
                 )
