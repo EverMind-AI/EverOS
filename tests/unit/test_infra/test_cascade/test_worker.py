@@ -8,6 +8,8 @@ without touching the real handler / lancedb stack:
   ``retryable=TRUE``.
 - Any other exception marks ``retryable=FALSE`` immediately.
 - Successful handler ⇒ ``mark_done``.
+- A terminal write that raises once is retried, so the row still leaves
+  ``processing`` (#548).
 - Unknown kind ⇒ ``mark_failed(retryable=False)``.
 
 A second group covers the per-kind throttle + trailing-edge
@@ -345,6 +347,100 @@ async def test_external_service_error_at_budget_edge_demotes_in_place(
         "budget exhausted during inline retries → demote in place, "
         "do not require another scanner cycle to hit retryable=False"
     )
+
+
+class _FlakyTerminalWriteRepo(_FakeRepo):
+    """Fails the first ``mark_done`` / ``mark_failed`` call, then succeeds.
+
+    Models one transient SQLite lock (``database is locked``) on the terminal
+    write — the failure that used to strand a row in ``processing`` (#548).
+    """
+
+    def __init__(self, batch: list[_Row], *, failing: str, failures: int = 1) -> None:
+        super().__init__(batch)
+        self._failing = failing
+        self._remaining = failures
+        self.attempts: list[str] = []
+
+    def _maybe_fail(self, transition: str) -> None:
+        self.attempts.append(transition)
+        if transition == self._failing and self._remaining > 0:
+            self._remaining -= 1
+            raise RuntimeError("database is locked")
+
+    async def mark_done(self, md_path: str, *, change_type: str | None = None) -> None:
+        self._maybe_fail("done")
+        await super().mark_done(md_path, change_type=change_type)
+
+    async def mark_failed(
+        self,
+        md_path: str,
+        *,
+        retryable: bool,
+        error: str,
+        new_retry_count: int,
+    ) -> None:
+        self._maybe_fail("failed")
+        await super().mark_failed(
+            md_path,
+            retryable=retryable,
+            error=error,
+            new_retry_count=new_retry_count,
+        )
+
+
+async def test_transient_mark_done_failure_is_retried() -> None:
+    """A successful handler must still get its row out of ``processing``.
+
+    A single ``database is locked`` on ``mark_done`` used to escape
+    ``_process_one``, so the row stayed ``processing`` until a restart (#548).
+    """
+    repo = _FlakyTerminalWriteRepo([_Row(md_path="a.md")], failing="done")
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=repo)
+
+    await w.drain_once()
+
+    assert repo.done == ["a.md"]
+    assert repo.failed == []
+    assert repo.attempts == ["done", "done"], "the terminal write is retried"
+
+
+async def test_transient_mark_failed_failure_is_retried() -> None:
+    """A failed handler run must still record the failure, not strand the row.
+
+    ``mark_failed`` is what surfaces the row to ``cascade fix``; losing it used
+    to leave the row ``processing`` with the error invisible (#548).
+    """
+    repo = _FlakyTerminalWriteRepo([_Row(md_path="a.md")], failing="failed")
+    w = CascadeWorker(
+        {"episode": _BareExceptionHandler()}, retry_backoff_seconds=0, ledger=repo
+    )
+
+    await w.drain_once()
+
+    assert repo.done == []
+    assert len(repo.failed) == 1
+    path, retryable, error, _retry = repo.failed[0]
+    assert path == "a.md"
+    assert retryable is False
+    assert "unexpected boom" in error
+    assert repo.attempts == ["failed", "failed"], "the terminal write is retried"
+
+
+async def test_terminal_write_retry_is_bounded() -> None:
+    """A persistent terminal-write failure still surfaces as a drain failure.
+
+    Retrying forever would park a handler slot; after
+    ``TERMINAL_WRITE_ATTEMPTS`` the original exception propagates as before.
+    """
+    repo = _FlakyTerminalWriteRepo([_Row(md_path="a.md")], failing="done", failures=10)
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=repo)
+
+    with pytest.raises(RuntimeError, match="database is locked"):
+        await w.drain_once()
+
+    assert len(repo.attempts) == tuning.TERMINAL_WRITE_ATTEMPTS
+    assert repo.done == []
 
 
 async def test_drain_until_empty_loops_until_no_batch(
