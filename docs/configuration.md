@@ -247,6 +247,7 @@ unaffected: nothing is probed, compared, or recorded.
 |---|---|---|---|
 | `mode` | string | `"agent"` | Conversation mode: `chat` (user-memory only) or `agent` (user + agent memory). Requires restart. |
 | `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per add() / flush() invocation. |
+| `delete_wait_seconds` | float | `10.0` | How long a `/delete` by `session_id` waits for an add() in progress on that session; past it the deletion answers `503 SESSION_BUSY` and deletes nothing. |
 
 ### `[memorize.async_queue]`
 
@@ -294,6 +295,7 @@ The cascade projects the markdown truth into the search index (see
 | `optimize_prune_retention_seconds` | float | `60.0` | Versions replaced longer ago than this become eligible for deletion. |
 | `optimize_rebuild_interval_seconds` | float | `43200.0` | Full index rebuild per kind (12 h), collapsing the index fragments every optimize grows. |
 | `scan_interval_seconds` | float | `30.0` | How often the scanner walks the memory root for changes the watcher missed; on a mount without filesystem events this is the edit-to-searchable latency. |
+| `delete_fence_warn_entries` | int | `100000` | A memory deletion keeps the index rows it removed from being written back by cascade runs that started before it, until those runs end; holding more entries than this logs `memory_delete_fence_large` (some run is not ending). Gauges: `everos_memory_delete_fence_entries`, `everos_memory_delete_fence_runs`. |
 
 ### `[ome]`
 

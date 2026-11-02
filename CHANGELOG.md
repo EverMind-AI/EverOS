@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Memory deletion.** Two endpoints aligned with the Cloud API, and the
+machinery that keeps a deleted memory from coming back.
+
+### Added
+
+- **`POST /api/v2/memory/delete`** ([#483](https://github.com/EverMind-AI/EverOS/issues/483)):
+  delete by `user_id` / `agent_id`, by `session_id`, or one owner's session;
+  answers `{"filters": [...], "count": N}`. A session still being memorized
+  answers `503 SESSION_BUSY` and nothing is deleted. everos-mcp's
+  `forget_session` now works against a self-hosted server.
+- **`POST /api/v2/memory/delete_by_ids`**: delete episodes by memory id, with
+  what Reflection merged into them, their atomic facts and their cluster
+  membership.
+- Configuration: `[memorize] delete_wait_seconds` (default `10`),
+  `[cascade] delete_fence_warn_entries` (default `100000`).
+- Metrics: `everos_lock_wait_seconds` / `everos_lock_hold_seconds` (by lock
+  kind), `everos_lock_table_entries`, `everos_memory_delete_fence_entries` /
+  `_runs`.
+
+### Changed
+
+- Every markdown write of a memory owner holds that owner's lock and first
+  checks that what it was derived from still exists; a write whose source was
+  deleted is skipped and logged as `memory_write_skipped_source_gone`.
+- User clustering and the Reflection finish embed before taking their locks.
+- A succeeded OME run no longer keeps the triggering event (the conversation
+  text) in `ome.db`; failed and dead-letter runs keep it for diagnosis.
+- `/get` lists an episode Reflection merged from several sessions with
+  `"session_id": null` instead of failing the page.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME

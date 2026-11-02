@@ -33,6 +33,8 @@ business semantics the raw spec does not carry.
   - [GET /api/v2/tasks](#get-apiv2tasks)
   - [POST /api/v2/memory/search](#post-apiv2memorysearch)
   - [POST /api/v2/memory/get](#post-apiv2memoryget)
+  - [POST /api/v2/memory/delete](#post-apiv2memorydelete)
+  - [POST /api/v2/memory/delete_by_ids](#post-apiv2memorydelete_by_ids)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
@@ -241,6 +243,7 @@ parsing the human-readable `message` field.
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
+| `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
@@ -1209,7 +1212,7 @@ sub-facts).
 | `user_id` | `string \| null` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
-| `session_id` | `string` | Originating session |
+| `session_id` | `string \| null` | Originating session; `null` for an episode Reflection merged from several sessions |
 | `timestamp` | `string` | ISO-8601 with timezone offset, identical to `/search` (both go through the same `from_iso_format` path) — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
 | `summary` | `string` | Short summary |
@@ -1311,6 +1314,128 @@ Response (real capture):
     }
 }
 ```
+
+### POST /api/v2/memory/delete
+
+Deletes memories by owner, by session, or one owner's memories of a
+session. Aligned with the Cloud endpoint; everos-mcp's `forget_session`
+calls it with only `session_id`.
+
+#### Request body
+
+| Field | Type | Required | Default | Constraints |
+|---|---|---|---|---|
+| `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
+| `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
+| `user_id` | `string \| null` | see below | `null` | path-safe (same rule as `sender_id`) |
+| `agent_id` | `string \| null` | see below | `null` | path-safe; not together with `user_id` |
+| `session_id` | `string \| null` | see below | `null` | `1..128` chars |
+
+At least one of `user_id`, `agent_id`, `session_id` must be set, and
+`user_id` and `agent_id` are mutually exclusive; anything else (including
+an unknown field) is `422`.
+
+#### What each scope deletes
+
+| Request sets | Memories deleted | Conversation state (buffers, memcells, session status) | Clusters, Reflection reports |
+|---|---|---|---|
+| `session_id` | every owner's episodes, atomic facts, foresights and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
+| `user_id` | everything of the user, `user.md` included | kept | the user's clusters and reports deleted |
+| `user_id` + `session_id` | the user's episodes, atomic facts and foresights of the session | kept | kept |
+| `agent_id` | every case and skill of the agent | kept | the agent's case clusters deleted |
+| `agent_id` + `session_id` | the agent's cases of the session | kept | kept |
+
+#### Response
+
+```json
+{
+  "request_id": "<32-char hex>",
+  "data": { "filters": ["session_id"], "count": 7 }
+}
+```
+
+`filters` names the scope fields the request set. `count` is the number
+of memories removed from markdown: daily-log entries, plus one per skill
+and one for `user.md` when a whole owner is deleted. Sending the same
+request again answers `count: 0`.
+
+#### Errors specific to this endpoint
+
+| Status | `error.code` | When | What the client does |
+|---|---|---|---|
+| `503` | `SESSION_BUSY` | Only `session_id` was set and the session still has queued or running `async_mode` work, or an `/add` held the session for longer than `[memorize] delete_wait_seconds` (default 10 s). Message: `"... nothing was deleted, retry later"` | retry later |
+| `500` | `INTERNAL_ERROR` | The deletion failed after it had started (disk full, a file it could not rewrite). Message: `"deletion incomplete; retry the same request"` | send the same request again; it finishes the job |
+
+#### Guarantees, and what is not guaranteed
+
+- **A deleted memory does not come back** from work that was already in
+  flight when the request was sent -- an extraction, a fact extraction, a
+  Reflection merge -- for a deletion by `session_id` alone and for
+  `delete_by_ids`. With an owner in the request (`user_id` /
+  `agent_id`, with or without `session_id`) this holds for the markdown
+  but not for writes the owner has in flight at that moment.
+- **The index follows the markdown.** Index rows are removed before the
+  `200`, and the cascade is kept from writing them back. One window
+  remains: a projection that read the file before the deletion can write
+  a row back and delete it again right after (usually milliseconds; up
+  to the 15 s write-lock bound and one retry when the table is busy).
+  When an index table cannot be reached, the deletion still answers
+  `200` (the markdown is the truth), logs
+  `memory_delete_index_erase_failed`, and queues the files again; the
+  cascade removes the rows when the backend is back, within its retry
+  budget. After a longer outage, `everos cascade rebuild` restores the
+  index from markdown.
+- **Not guaranteed:** totals and summaries already derived from deleted
+  memories (a profile, a cluster's preview, a skill) are not rewritten by
+  a session deletion; bytes of a deleted file may remain on disk until
+  the filesystem reuses them; a Reflection-merged episode is kept when
+  only one of its sources is deleted.
+- **Known gap.** A `session_id`-only deletion that fails after deleting
+  the session's memcells (`500`, or a crash), followed by a new `/add` on
+  the same session before the resend, can leave entries of the earlier
+  memcells' other owners in place; deleting with `user_id` +
+  `session_id` for those owners removes them.
+
+### POST /api/v2/memory/delete_by_ids
+
+Deletes single episodes by memory id, with everything made from them.
+Aligned with the Cloud endpoint.
+
+#### Request body
+
+| Field | Type | Required | Default | Constraints |
+|---|---|---|---|---|
+| `memory_type` | `"episode"` | yes | — | only episodes |
+| `memory_ids` | `string[]` | yes | — | `1..50` ids `<owner_id>_ep_<YYYYMMDD>_<n>`; path-safe owner; a real date |
+| `reason` | `{ "code", "note" }` \| `null` | no | `null` | `code` ∈ `hallucination`, `outdated`, `wrong_subject`, `wrong_time`, `redundant`, `missing`, `privacy`, `style`, `other`; `note` ≤ 256 chars |
+| `app_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
+| `project_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
+
+One malformed id rejects the whole request (`422`, nothing deleted).
+Duplicate ids are deleted once; ids that match nothing are skipped (no
+`404`); sending the same request again is harmless.
+
+#### What it deletes
+
+For each id: the episode; every episode Reflection merged into it,
+transitively; the atomic facts of all of those; their membership in their
+cluster (the cluster's count, latest timestamp and preview follow the
+remaining members; a cluster left empty is deleted); and their index rows.
+Deleting one source of a merged episode keeps the merged episode.
+
+#### Response
+
+```json
+{
+  "request_id": "<32-char hex>",
+  "data": { "memory_type": "episode", "success": true }
+}
+```
+
+The log line `memory_delete_by_ids` records the reason code and which ids
+were found and which skipped; it never records `note` or any memory text.
+Errors are those of [/delete](#post-apiv2memorydelete) (`422`; `500`
+"deletion incomplete; retry the same request").
 
 ### POST /api/v2/ome/trigger
 
