@@ -20,7 +20,6 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import AtomicFactsExtracted, EpisodeExtracted
 from everos.memory.models import AtomicFact
 from everos.memory.ports import (
-    NO_SOURCE_CHECK,
     Event,
     Immediate,
     Scope,
@@ -53,9 +52,22 @@ async def extract_atomic_facts(
         for af in algo_facts
     ]
 
-    # 3. Write all facts in one batched append.
+    # 3. Write all facts in one batched append, if the episode they were
+    #    read from still exists: in md (a single-id deletion removes it
+    #    there) and, for a pipeline episode, its memcell (a session deletion
+    #    removes that first, before it reaches this owner's files). A
+    #    Reflection event carries the merged episode's id as ``memcell_id``.
+    scope = _scope(event)
+
+    async def sources_alive() -> bool:
+        if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
+            return False
+        if event.source == "reflection":
+            return True
+        return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
+
     refs = await deps.stores.atomic_fact.append_many(
-        _scope(event), facts, only_if=NO_SOURCE_CHECK
+        scope, facts, only_if=sources_alive
     )
 
     logger.info(

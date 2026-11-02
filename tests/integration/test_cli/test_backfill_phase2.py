@@ -45,7 +45,12 @@ from everos.infra.persistence.lancedb import (
     AgentCase,
     Episode,
 )
+from everos.infra.persistence.markdown import MarkdownEpisodeStore
+from everos.infra.persistence.sqlite import SqliteMemcellStore
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
+from everos.memory.models import Episode as DomainEpisode
+from everos.memory.models import MemCell, MemcellRecord
+from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, SessionKey
 from everos.service import OpsService, build_application
 from tests.fakes import (
     ScriptedReplayEngine,
@@ -138,6 +143,44 @@ def _episode(entry_id: str, *, owner_id: str = "u1") -> Episode:
         content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
         vector=[0.1] * _DIM,
     )
+
+
+async def _write_pipeline_episodes(view: StorageView, *, count: int) -> list[MemoryRef]:
+    """Write ``count`` episodes of u1 to md, each with its memcell row."""
+    store = MarkdownEpisodeStore(view.root)
+    memcells = SqliteMemcellStore(view.sqlite.memcell)
+    refs: list[MemoryRef] = []
+    for i in range(count):
+        ref = await store.append(
+            Scope(
+                app_id="default", project_id="default", owner_id="u1", owner_type="user"
+            ),
+            DomainEpisode(
+                owner_id="u1",
+                episode=f"episode body {i}",
+                timestamp=1_700_000_000_000 + i,
+                subject="s",
+                summary="s",
+                session_id="s1",
+                parent_id="pending",
+            ),
+            only_if=NO_SOURCE_CHECK,
+        )
+        assert ref is not None
+        await memcells.insert_many(
+            SessionKey(app_id="default", project_id="default", session_id="s1"),
+            [
+                MemcellRecord(
+                    memcell_id=f"mc_{ref.entry_id}",
+                    cell=MemCell(items=[], timestamp=1_700_000_000_000 + i),
+                    raw_type="conversation",
+                    message_ids=[],
+                    sender_ids=["u1"],
+                )
+            ],
+        )
+        refs.append(ref)
+    return refs
 
 
 def _agent_case(entry_id: str, *, agent_id: str = "agent1") -> AgentCase:
@@ -293,11 +336,19 @@ async def test_real_offline_engine_grows_cluster_count(
     needs an LLM) never
     fires, keeping this test LLM-free.
     """
-    await storage_view.repos.episode.add([_episode(f"ep{i}") for i in range(5)])
-
     # ``run_backfill`` itself creates the ``cluster`` table lazily — create
     # it here too so the "before" count can be taken without racing that.
     await storage_view.create_schema()
+    # The episodes exist the way the pipeline leaves them: in md, with their
+    # memcell rows, and projected into the index. Clustering re-checks the
+    # first two (a deleted episode must not be clustered back in).
+    refs = await _write_pipeline_episodes(storage_view, count=5)
+    await storage_view.repos.episode.add(
+        [
+            _episode(ref.entry_id).model_copy(update={"md_path": ref.md_path})
+            for ref in refs
+        ]
+    )
     clusters_before = await storage_view.sqlite.cluster.count()
     assert clusters_before == 0
 

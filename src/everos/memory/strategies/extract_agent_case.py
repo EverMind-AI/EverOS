@@ -51,7 +51,6 @@ from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
 from everos.memory.mappers import agent_case as agent_case_mapper
 from everos.memory.models import MemCell
 from everos.memory.ports import (
-    NO_SOURCE_CHECK,
     Event,
     Immediate,
     Scope,
@@ -150,7 +149,11 @@ async def _file_case(
         owner_id=agent_id,
         owner_type="agent",
     )
-    ref = await deps.stores.agent_case.append(scope, case, only_if=NO_SOURCE_CHECK)
+
+    async def memcell_alive() -> bool:  # a session deletion removes it first
+        return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
+
+    ref = await deps.stores.agent_case.append(scope, case, only_if=memcell_alive)
     if ref is None:
         return None
     return AgentCaseExtracted(

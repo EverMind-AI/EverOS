@@ -38,12 +38,27 @@ from everos.infra.persistence.markdown import (
 )
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
+    SqliteMemcellStore,
     SqliteReflectionReportStore,
 )
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted
-from everos.memory.models import AtomicFact, Episode, ReflectionReport
-from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, all_of, eq, is_null
+from everos.memory.models import (
+    AtomicFact,
+    Episode,
+    MemCell,
+    MemcellRecord,
+    ReflectionReport,
+)
+from everos.memory.ports import (
+    NO_SOURCE_CHECK,
+    MemoryRef,
+    Scope,
+    SessionKey,
+    all_of,
+    eq,
+    is_null,
+)
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from tests.fakes import user_track_script
 from tests.fakes.storage import Storage, handler_deps
@@ -104,10 +119,12 @@ class _World:
         }
         clusters = SqliteClusterStore(storage.sqlite.cluster)
         reports = SqliteReflectionReportStore(storage.sqlite.reflection_report)
+        self.memcells = SqliteMemcellStore(storage.sqlite.memcell)
         self.orchestrator = ReflectionOrchestrator(
             cluster_store=clusters,
             episode_store=self.episodes,
             episode_index=EpisodeIndexAdapter(storage.repos.episode),
+            memcell_store=self.memcells,
             report_store=reports,
             reflector=EpisodeReflector(llm=reflector_llm),
         )
@@ -148,6 +165,22 @@ class _World:
             for i in range(n)
         ]
         refs = await self.episodes.append_many(SCOPE, episodes, only_if=NO_SOURCE_CHECK)
+        # Each episode's memcell exists, as after a real /add.
+        await self.memcells.insert_many(
+            SessionKey(
+                app_id=SCOPE.app_id, project_id=SCOPE.project_id, session_id="s_test"
+            ),
+            [
+                MemcellRecord(
+                    memcell_id=ep.parent_id,
+                    cell=MemCell(items=[], timestamp=ep.timestamp),
+                    raw_type="conversation",
+                    message_ids=[],
+                    sender_ids=[OWNER],
+                )
+                for ep in episodes
+            ],
+        )
         await self.facts.append_many(
             SCOPE,
             [

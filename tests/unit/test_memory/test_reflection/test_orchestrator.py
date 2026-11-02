@@ -120,12 +120,14 @@ class _Ports:
     report_store: MagicMock
     reflector: MagicMock
     embedder: MagicMock
+    memcell_store: MagicMock
 
     def orchestrator(self) -> ReflectionOrchestrator:
         return ReflectionOrchestrator(
             cluster_store=self.cluster_store,
             episode_store=self.episode_store,
             episode_index=self.episode_index,
+            memcell_store=self.memcell_store,
             report_store=self.report_store,
             reflector=self.reflector,
         )
@@ -143,7 +145,13 @@ class _Ports:
 
 @pytest.fixture
 def ports() -> _Ports:
-    return _Ports(*(MagicMock() for _ in range(8)))
+    ports = _Ports(*(MagicMock() for _ in range(9)))
+    # Nothing was deleted: every source is still in md, every memcell exists.
+    ports.episode_store.exists = AsyncMock(side_effect=lambda _scope, ids: set(ids))
+    ports.memcell_store.find_by_ids = AsyncMock(
+        side_effect=lambda ids: [object()] * len(ids)
+    )
+    return ports
 
 
 def _arm_cluster_flow(
@@ -182,6 +190,11 @@ def _arm_cluster_flow(
     ports.cluster_store.replace_members = AsyncMock()
     ports.embedder.embed = AsyncMock(return_value=[0.1] * 1024)
     ports.report_store.create = AsyncMock()
+
+
+async def _unchanged() -> bool:
+    """A source check that passes: nothing was deleted."""
+    return True
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────
@@ -261,6 +274,7 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
         scope=scope,
         parent_ids={"ep_20260601_0001"},
         merged_entry_id="ep_20260614_0001",
+        only_if=_unchanged,
     )
 
     assert marked == 3
@@ -285,7 +299,7 @@ async def test_deprecate_facts_without_parents_reads_nothing(ports: _Ports) -> N
     ports.atomic_fact_index.find = AsyncMock()
 
     marked = await ports.finisher()._deprecate_facts(
-        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m"
+        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m", only_if=_unchanged
     )
 
     assert marked == 0
@@ -302,6 +316,7 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
             owner_id=None, episode="merged text", subject="topic", timestamp=0
         ),
         last_ts=1_780_272_000_000,
+        only_if=_unchanged,
     )
 
     assert entry_id == "ep_m"
@@ -556,6 +571,7 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
         episodes=[selected, missing, selected, unrelated],
         to_deprecate={"mc_1"},
         merged_entry_id="ep_m",
+        only_if=_unchanged,
     )
     assert marked == 2
     ports.episode_store.deprecate.assert_awaited_once_with(
@@ -567,7 +583,10 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
     ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "")])
     assert (
         await finisher._deprecate_facts(
-            scope=_SCOPE, parent_ids={"ep_1"}, merged_entry_id="ep_m"
+            scope=_SCOPE,
+            parent_ids={"ep_1"},
+            merged_entry_id="ep_m",
+            only_if=_unchanged,
         )
         == 1
     )

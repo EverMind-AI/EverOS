@@ -134,6 +134,14 @@ class EpisodeStore(Protocol):
         """
         ...
 
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        """The ``entry_ids`` still in the owner's files, merged or not.
+
+        Reads the files without the owner lock, so a source check running
+        under it may call this.
+        """
+        ...
+
 
 @runtime_checkable
 class AtomicFactStore(Protocol):

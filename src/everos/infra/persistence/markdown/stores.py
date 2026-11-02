@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -207,6 +207,26 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         return await self._deprecate(
             scope, entries=entries, replaced_by=replaced_by, only_if=only_if
         )
+
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        wanted: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in entry_ids:
+            try:
+                day = EntryId.parse(entry_id).date
+            except ValueError:
+                continue  # not an id this store ever minted
+            path = self._writer.path_for(
+                scope.owner_id, day, app_id=scope.app_id, project_id=scope.project_id
+            )
+            wanted[path].add(entry_id)
+        found: set[str] = set()
+        for path, ids in wanted.items():
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            found |= ids & {entry.id for entry in parsed.entries}
+        return found
 
 
 class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):

@@ -155,6 +155,23 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             entries=entries, replaced_by=replaced_by, only_if=only_if
         )
 
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        wanted = set(entry_ids)
+        return {
+            s.ref.entry_id
+            for s in self.records
+            if s.scope == scope and s.ref.entry_id in wanted
+        }
+
+    def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
+        """Put an episode under a chosen entry id (as if read from md)."""
+        ref = MemoryRef(
+            id=f"{scope.owner_id}_{entry_id}",
+            entry_id=entry_id,
+            md_path=f"{scope.owner_type}s/{scope.owner_id}/episodes/2026-01-01.md",
+        )
+        self.records.append(Stored(ref=ref, scope=scope, item=episode))
+
 
 class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
     def __init__(self) -> None:

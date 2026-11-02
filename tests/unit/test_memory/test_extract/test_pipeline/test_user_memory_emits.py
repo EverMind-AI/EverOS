@@ -24,6 +24,7 @@ from tests.fakes import (
     user_track_llm,
     user_track_script,
 )
+from tests.fakes.stores import InMemoryEpisodeStore, InMemoryMemcellStore
 
 _EPISODE = json.loads(user_track_script("episode"))
 
@@ -52,12 +53,21 @@ def _prepared(*senders: str) -> PreparedCell:
     return PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=list(senders))
 
 
-def _pipeline(llm: object, episode_store: object | None = None) -> UserMemoryPipeline:
+def _pipeline(
+    llm: object,
+    episode_store: object | None = None,
+    *,
+    memcell_exists: bool = True,
+) -> UserMemoryPipeline:
     if episode_store is None:
         episode_store = MagicMock()
         episode_store.append = AsyncMock(return_value=_REF)
+    memcells = InMemoryMemcellStore()
+    if memcell_exists:
+        memcells.seed("mc_a", _prepared().cell)
     return UserMemoryPipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
+        memcell_store=memcells,
         instructions=bundled_instructions(),
         llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
@@ -235,3 +245,30 @@ async def test_extract_persist_capture_content_when_on() -> None:
         spans["everos.persist.markdown"].attributes["langfuse.observation.output"]
         == _REF.md_path
     )
+
+
+async def test_add_returns_ok_and_emits_nothing_when_memcell_gone() -> None:
+    """A23: a session deletion removed the memcell while the episode was being
+    extracted. The cell still succeeds, writes no episode and announces none,
+    so no downstream extraction starts from a deleted conversation."""
+    episodes = InMemoryEpisodeStore()
+
+    outcome = await _pipeline(
+        user_track_llm(), episodes, memcell_exists=False
+    ).run_cell(_INGESTED, _prepared("u1"))
+
+    assert episodes.records == []
+    assert outcome.md_paths == []
+    assert [type(e) for e in outcome.events] == [UserPipelineStarted]
+
+
+async def test_episode_written_when_memcell_exists() -> None:
+    """Positive control for the test above: same cell, memcell present."""
+    episodes = InMemoryEpisodeStore()
+
+    outcome = await _pipeline(user_track_llm(), episodes).run_cell(
+        _INGESTED, _prepared("u1")
+    )
+
+    assert len(episodes.records) == 1
+    assert [type(e) for e in outcome.events] == [UserPipelineStarted, EpisodeExtracted]

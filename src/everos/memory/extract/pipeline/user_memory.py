@@ -26,7 +26,7 @@ from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
-from everos.memory.ports import NO_SOURCE_CHECK, EpisodeStore, Event, MemoryRef, Scope
+from everos.memory.ports import EpisodeStore, Event, MemcellStore, MemoryRef, Scope
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -37,6 +37,8 @@ class UserMemoryPipeline:
 
     Args:
         episode_store: Where extracted episodes are written.
+        memcell_store: Whether the cell still exists when its episodes are
+            written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
         llm_client: LLM for extraction.
     """
@@ -44,11 +46,13 @@ class UserMemoryPipeline:
     def __init__(
         self,
         episode_store: EpisodeStore,
+        memcell_store: MemcellStore,
         instructions: CustomInstructions,
         llm_client: LLMClient,
     ) -> None:
         self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
+        self._memcell_store = memcell_store
         self._instructions = instructions
 
     async def run_cell(
@@ -87,7 +91,7 @@ class UserMemoryPipeline:
                     parent_id=memcell_id,
                     language=language,
                 )
-                ref = await self._persist(ingested, ep)
+                ref = await self._persist(ingested, ep, memcell_id)
                 if ref is None:
                     continue
                 md_paths.append(ref.md_path)
@@ -147,11 +151,18 @@ class UserMemoryPipeline:
             capture_output(extract_span, algo_ep.episode)
         return algo_ep
 
-    async def _persist(self, ingested: IngestResult, ep: Episode) -> MemoryRef | None:
+    async def _persist(
+        self, ingested: IngestResult, ep: Episode, memcell_id: str
+    ) -> MemoryRef | None:
         """Write one episode under its owner and trace the write.
 
-        ``None`` when the store skipped the write (its ``only_if`` failed).
+        ``None`` when the store skipped the write: the memcell was deleted
+        (by a session deletion) while the episode was being extracted.
         """
+
+        async def memcell_alive() -> bool:
+            return bool(await self._memcell_store.find_by_ids([memcell_id]))
+
         with memory_span(
             "everos.persist.markdown",
             observation_type="span",
@@ -170,7 +181,7 @@ class UserMemoryPipeline:
                     owner_type="user",
                 ),
                 ep,
-                only_if=NO_SOURCE_CHECK,
+                only_if=memcell_alive,
             )
             if ref is None:
                 return None

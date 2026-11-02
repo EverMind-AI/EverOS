@@ -72,6 +72,18 @@ async def trigger_profile_clustering(
     # different space's run must not serialise on (or merge into) this one.
     partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
     async with get_partition_lock("trigger_profile_clustering", partition):
+        # 0. The episode may have been deleted since it was extracted. A
+        #    single-id deletion removes it from md first and then clears it
+        #    from its cluster under this same lock, so checking here keeps a
+        #    run queued behind that deletion from adding it back.
+        if not await _sources_alive(event, scope, deps):
+            logger.info(
+                "profile_cluster_skipped_source_gone",
+                episode_entry_id=event.episode_entry_id,
+                owner_id=event.owner_id,
+            )
+            return []
+
         # 1. Embed the episode_text into a vector.
         vector_list = await deps.embedding.embed(event.episode_text)
         vector = np.asarray(vector_list, dtype=np.float32)
@@ -125,6 +137,15 @@ async def trigger_profile_clustering(
             language=event.language,
         )
     ]
+
+
+async def _sources_alive(
+    event: EpisodeExtracted, scope: Scope, deps: MemoryDeps
+) -> bool:
+    """The episode is still in md and its memcell still exists."""
+    if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
+        return False
+    return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
 
 
 async def _fold_in(

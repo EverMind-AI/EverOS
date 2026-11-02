@@ -35,21 +35,23 @@ if TYPE_CHECKING:
     from everos.component.embedding import EmbeddingProvider
 
 from everos.core.errors import AppError
+from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
-    NO_SOURCE_CHECK,
     AtomicFactIndex,
     AtomicFactStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
     Filter,
+    MemcellStore,
     ReflectionReportStore,
     Scope,
+    SourceCheck,
     Stored,
     all_of,
     eq,
@@ -73,6 +75,7 @@ class ReflectionOrchestrator:
         cluster_store: Clusters and their membership.
         episode_store: Episode truth (merged episode write).
         episode_index: Episode reads (members, orphans).
+        memcell_store: Whether a source episode's memcell still exists.
         report_store: Reflection audit trail (which clusters were merged).
         reflector: Algorithm-side EpisodeReflector (areflect).
         custom_instructions: Appended to the reflector's rules; ``None`` for none.
@@ -84,6 +87,7 @@ class ReflectionOrchestrator:
         cluster_store: ClusterStore,
         episode_store: EpisodeStore,
         episode_index: EpisodeIndex,
+        memcell_store: MemcellStore,
         report_store: ReflectionReportStore,
         reflector: EpisodeReflector,
         custom_instructions: str | None = None,
@@ -91,6 +95,7 @@ class ReflectionOrchestrator:
         self._cluster_store = cluster_store
         self._episode_store = episode_store
         self._episode_index = episode_index
+        self._memcell_store = memcell_store
         self._report_store = report_store
         self._reflector = reflector
         self._custom_instructions = custom_instructions
@@ -208,12 +213,17 @@ class ReflectionOrchestrator:
         if algo_result is None:
             return None
 
+        unchanged = await self._sources_alive(scope=scope, episodes=episodes)
+        if unchanged is None:
+            logger.info("reflection_merge_skipped_source_gone", cluster_id=cluster_id)
+            return None
         last_ts = max(ep.item.timestamp for ep in episodes)
         merged_entry_id = await self._write_merged_episode(
             cluster_id=cluster_id,
             scope=scope,
             algo_result=algo_result,
             last_ts=last_ts,
+            only_if=unchanged,
         )
         if merged_entry_id is None:
             return None
@@ -297,6 +307,7 @@ class ReflectionOrchestrator:
         scope: Scope,
         algo_result: AlgoEpisode,
         last_ts: int,
+        only_if: SourceCheck,
     ) -> str | None:
         """Write the merged episode to markdown; return its entry id.
 
@@ -312,10 +323,42 @@ class ReflectionOrchestrator:
             parent_id=cluster_id,
             parent_type="cluster",
         )
-        refs = await self._episode_store.append_many(
-            scope, [merged], only_if=NO_SOURCE_CHECK
-        )
+        refs = await self._episode_store.append_many(scope, [merged], only_if=only_if)
         return refs[0].entry_id if refs else None
+
+    async def _sources_alive(
+        self, *, scope: Scope, episodes: list[StoredEpisode]
+    ) -> SourceCheck | None:
+        """Check that every episode sent to the model still exists.
+
+        Each must still be in md and, if it came from a memcell, that memcell
+        must still exist. Returns the check the locked write runs (no
+        deletion has touched the owner's files since), or ``None`` when a
+        source is already gone.
+
+        The owner's delete counter is read *before* the files: a deletion
+        that rewrites them after this read bumps it, so the locked write
+        sees the change. Read after the files, the counter would already
+        include that deletion and the write would go through.
+        """
+        key = owner_key(
+            scope.app_id, scope.project_id, scope.owner_type, scope.owner_id
+        )
+        seen = LOCKS.delete_count(key)
+        entry_ids = {ep.ref.entry_id for ep in episodes}
+        if await self._episode_store.exists(scope, entry_ids) != entry_ids:
+            return None
+        memcell_ids = sorted(
+            {ep.item.parent_id for ep in episodes if ep.item.parent_type == "memcell"}
+        )
+        found = await self._memcell_store.find_by_ids(memcell_ids)
+        if len(found) != len(memcell_ids):
+            return None
+
+        async def unchanged() -> bool:
+            return LOCKS.delete_count(key) == seen
+
+        return unchanged
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -491,17 +534,36 @@ class ReflectionFinisher:
         to_deprecate = await self._resolve_deprecation_targets(
             cluster_id=context.cluster_id, original_members=context.source_members
         )
+        # A source deleted since the merge gets no mark: it is gone, and a
+        # mark would point a deleted entry at M.
+        sources = {ep.entry_id for ep in context.episodes}
+        gone = sources - await self._episode_store.exists(scope, sources)
+        to_deprecate -= gone
         if not to_deprecate:
             return None
 
+        async def merged_alive() -> bool:  # a deletion of M must win
+            return bool(await self._episode_store.exists(scope, [merged_entry_id]))
+
         dep_ep = await self._deprecate_episodes(
             scope=scope,
-            episodes=context.episodes,
+            episodes=[ep for ep in context.episodes if ep.entry_id not in gone],
             to_deprecate=to_deprecate,
             merged_entry_id=merged_entry_id,
+            only_if=merged_alive,
         )
+        if dep_ep is None:
+            logger.info(
+                "reflection_finish_skipped_merged_gone",
+                cluster_id=context.cluster_id,
+                merged_entry_id=merged_entry_id,
+            )
+            return None
         dep_fact = await self._deprecate_facts(
-            scope=scope, parent_ids=to_deprecate, merged_entry_id=merged_entry_id
+            scope=scope,
+            parent_ids=to_deprecate,
+            merged_entry_id=merged_entry_id,
+            only_if=merged_alive,
         )
         await self._update_cluster_after_merge(
             context=context,
@@ -548,11 +610,12 @@ class ReflectionFinisher:
         episodes: list[ReflectedEpisode],
         to_deprecate: set[str],
         merged_entry_id: str,
-    ) -> int:
+        only_if: SourceCheck,
+    ) -> int | None:
         """Retire the selected episode references through the truth store.
 
         Returns:
-            Number of episodes marked.
+            Number of episodes marked; ``None`` when ``only_if`` failed.
         """
         entries = [
             (ep.md_path, ep.entry_id)
@@ -560,17 +623,19 @@ class ReflectionFinisher:
             if ep.md_path
             and (ep.parent_id in to_deprecate or ep.entry_id in to_deprecate)
         ]
-        if entries:
-            await self._episode_store.deprecate(
-                scope,
-                entries=entries,
-                replaced_by=merged_entry_id,
-                only_if=NO_SOURCE_CHECK,
-            )
+        if entries and not await self._episode_store.deprecate(
+            scope, entries=entries, replaced_by=merged_entry_id, only_if=only_if
+        ):
+            return None
         return len(entries)
 
     async def _deprecate_facts(
-        self, *, scope: Scope, parent_ids: Collection[str], merged_entry_id: str
+        self,
+        *,
+        scope: Scope,
+        parent_ids: Collection[str],
+        merged_entry_id: str,
+        only_if: SourceCheck,
     ) -> int:
         """Mark the live atomic facts of deprecated episodes in their md files.
 
@@ -597,10 +662,7 @@ class ReflectionFinisher:
         ]
         if entries:
             await self._atomic_fact_store.deprecate(
-                scope,
-                entries=entries,
-                replaced_by=merged_entry_id,
-                only_if=NO_SOURCE_CHECK,
+                scope, entries=entries, replaced_by=merged_entry_id, only_if=only_if
             )
         return len(hits)
 

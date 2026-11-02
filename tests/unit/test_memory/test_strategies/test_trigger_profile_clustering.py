@@ -16,6 +16,7 @@ import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 
 from everos.memory._partition_locks import _reset_for_tests
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
 from everos.memory.ports import Scope
@@ -23,7 +24,7 @@ from everos.memory.strategies import (
     TRIGGER_PROFILE_CLUSTERING_SPEC,
     trigger_profile_clustering,
 )
-from tests.fakes import InMemoryClusterStore, make_deps, make_stores
+from tests.fakes import InMemoryClusterStore, make_deps, make_stores, seed_sources
 
 _MODULE = "everos.memory.strategies.trigger_profile_clustering"
 _ALICE = Scope(
@@ -58,6 +59,21 @@ def _event(
     )
 
 
+def _with_episode(
+    deps: MemoryDeps,
+    *,
+    owner_id: str = "u_alice",
+    episode_entry_id: str = "ep_20260517_0001",
+) -> MemoryDeps:
+    """The episode the event announces is in md and its memcell exists."""
+    return seed_sources(
+        deps,
+        memcell_id="mc_aaaaaaaaaaa1",
+        episode_entry_id=episode_entry_id,
+        owner_id=owner_id,
+    )
+
+
 def test_spec() -> None:
     spec = TRIGGER_PROFILE_CLUSTERING_SPEC
     assert spec.name == "trigger_profile_clustering"
@@ -69,7 +85,7 @@ def test_spec() -> None:
 
 async def test_creates_new_cluster_when_no_existing() -> None:
     """Empty existing → cluster_by_geometry returns None → new cluster persisted."""
-    deps = make_deps()
+    deps = _with_episode(make_deps())
     with (
         patch(
             f"{_MODULE}.cluster_by_geometry", new=MagicMock(return_value=None)
@@ -105,7 +121,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
 
 async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     """algo returns merged Cluster → persisted under the existing id."""
-    deps = make_deps()
+    deps = _with_episode(make_deps())
     deps.stores.cluster.seed(
         _ALICE,
         "user_memory",
@@ -170,6 +186,8 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
     """Drive two trigger_profile_clustering runs and record entry/exit order."""
     log: list[str] = []
     deps = make_deps(stores=make_stores(cluster=_SlowClusterStore(log)))
+    for owner, entry_id in ((owner_a, "ep_run_a"), (owner_b, "ep_run_b")):
+        _with_episode(deps, owner_id=owner, episode_entry_id=entry_id)
     with patch(f"{_MODULE}.cluster_by_geometry", new=MagicMock(return_value=None)):
         await asyncio.gather(
             trigger_profile_clustering(

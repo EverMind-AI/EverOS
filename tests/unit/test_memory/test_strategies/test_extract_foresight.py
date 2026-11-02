@@ -16,7 +16,7 @@ from everalgo.types import (
 
 from everos.memory.events import UserPipelineStarted
 from everos.memory.strategies import EXTRACT_FORESIGHT_SPEC, extract_foresight
-from tests.fakes import make_deps
+from tests.fakes import make_deps, seed_sources
 
 _EXTRACTOR = "everos.memory.strategies.extract_foresight.ForesightExtractor"
 
@@ -76,7 +76,7 @@ def test_spec() -> None:
 
 async def test_extracts_per_sender() -> None:
     """Per-sender extraction (like Episode, unlike AtomicFact's fan-out)."""
-    deps = make_deps()
+    deps = seed_sources(make_deps(), memcell_id="mc_a")
     with (
         patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
@@ -143,7 +143,7 @@ async def test_writes_every_foresight_of_a_sender_in_one_batch() -> None:
             timestamp=1_700_000_000_000,
         ),
     )
-    deps = make_deps()
+    deps = seed_sources(make_deps(), memcell_id="mc_a")
     with patch(_EXTRACTOR) as mock_cls:
         mock_cls.return_value.aextract = AsyncMock(return_value=foresights)
         await extract_foresight(event, deps)
@@ -263,3 +263,18 @@ async def test_tool_calls_do_not_crash_the_sender_scan(
         for call in mock_cls.return_value.aextract.await_args_list
     ]
     assert called_senders == expected_senders
+
+
+async def test_foresight_dropped_when_memcell_gone() -> None:
+    """Spec 1 §5.2: a session deletion removed the memcell first."""
+    deps = make_deps()  # no memcell: the conversation was deleted
+    with patch(_EXTRACTOR) as mock_cls:
+        mock_cls.return_value.aextract = AsyncMock(
+            side_effect=[
+                [_foresight("u_alice", "trip to tokyo")],
+                [_foresight("u_bob", "buy plane tickets")],
+            ]
+        )
+        await extract_foresight(_event(), deps)
+
+    assert deps.stores.foresight.records == []  # type: ignore[attr-defined]

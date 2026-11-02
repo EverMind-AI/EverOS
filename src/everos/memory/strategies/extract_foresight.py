@@ -54,7 +54,6 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import UserPipelineStarted
 from everos.memory.models import Foresight
 from everos.memory.ports import (
-    NO_SOURCE_CHECK,
     Event,
     Immediate,
     Scope,
@@ -98,7 +97,11 @@ async def extract_foresight(
     for fs in foresights:
         by_owner[fs.owner_id].append(fs)
 
-    # 4. Write each owner's full list with one batched append.
+    # 4. Write each owner's full list with one batched append, while the
+    #    memcell still exists (a session deletion removes it first).
+    async def memcell_alive() -> bool:
+        return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
+
     for owner_id, items in by_owner.items():
         scope = Scope(
             app_id=event.app_id,
@@ -106,7 +109,7 @@ async def extract_foresight(
             owner_id=owner_id,
             owner_type="user",
         )
-        await deps.stores.foresight.append_many(scope, items, only_if=NO_SOURCE_CHECK)
+        await deps.stores.foresight.append_many(scope, items, only_if=memcell_alive)
 
     logger.info(
         "foresights_extracted",

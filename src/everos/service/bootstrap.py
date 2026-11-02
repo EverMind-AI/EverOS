@@ -506,6 +506,7 @@ def _build_memory_service(
         stores=stores,
         user_pipeline=UserMemoryPipeline(
             episode_store=stores.episode,
+            memcell_store=stores.memcell,
             instructions=deps.instructions,
             llm_client=providers.llm,
         ),

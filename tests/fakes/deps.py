@@ -7,6 +7,7 @@ __all__ = [
     "make_deps",
     "make_indexes",
     "make_stores",
+    "seed_sources",
     "unscripted_llm",
 ]
 
@@ -18,6 +19,8 @@ from everalgo.testing import FakeLLMClient
 
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
+from everos.memory.models import Episode, MemCell
+from everos.memory.ports import Scope
 
 from .embedding import FakeEmbeddingProvider
 from .indexes import (
@@ -113,3 +116,39 @@ def make_deps(
         instructions=instructions or bundled_instructions(),
         case_judge=case_judge,
     )
+
+
+def seed_sources(
+    deps: MemoryDeps,
+    *,
+    memcell_id: str,
+    episode_entry_id: str | None = None,
+    owner_id: str = "u_alice",
+    app_id: str = "default",
+    project_id: str = "default",
+) -> MemoryDeps:
+    """Seed what a derived write checks for: the memcell and, if named, the
+    episode in md (the fake episode store). Returns ``deps`` for chaining.
+
+    In production every derived write has these sources; a fixture that
+    leaves them out describes a deleted conversation, whose writes are
+    skipped.
+    """
+    deps.stores.memcell.seed(memcell_id, MemCell(items=[], timestamp=0))  # type: ignore[attr-defined]
+    if episode_entry_id is not None:
+        scope = Scope(
+            app_id=app_id, project_id=project_id, owner_id=owner_id, owner_type="user"
+        )
+        deps.stores.episode.seed(  # type: ignore[attr-defined]
+            scope,
+            episode_entry_id,
+            Episode(
+                owner_id=owner_id,
+                episode="seeded",
+                timestamp=0,
+                subject="seeded",
+                summary="seeded",
+                parent_id=memcell_id,
+            ),
+        )
+    return deps
