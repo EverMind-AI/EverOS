@@ -16,7 +16,7 @@ from .ids import (
     SessionId,
 )
 
-_EPISODE_ID = re.compile(r"(?P<owner>[a-zA-Z0-9_.@+-]+)_ep_(?P<day>\d{8})_\d+")
+_EPISODE_ID = re.compile(r"(?P<owner>[a-zA-Z0-9_.@+-]{1,128})_ep_(?P<day>\d{8})_\d+")
 
 
 class DeleteRequest(BaseModel):

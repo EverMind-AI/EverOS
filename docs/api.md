@@ -1423,7 +1423,7 @@ Aligned with the Cloud endpoint.
 | Field | Type | Required | Default | Constraints |
 |---|---|---|---|---|
 | `memory_type` | `"episode"` | yes | — | only episodes |
-| `memory_ids` | `string[]` | yes | — | `1..50` ids `<owner_id>_ep_<YYYYMMDD>_<n>`; path-safe owner; a real date |
+| `memory_ids` | `string[]` | yes | — | `1..50` ids `<owner_id>_ep_<YYYYMMDD>_<n>`; path-safe owner of 1..128 characters; a real date |
 | `reason` | `{ "code", "note" }` \| `null` | no | `null` | `code` ∈ `hallucination`, `outdated`, `wrong_subject`, `wrong_time`, `redundant`, `missing`, `privacy`, `style`, `other`; `note` ≤ 256 chars |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |

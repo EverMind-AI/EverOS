@@ -121,6 +121,9 @@ _OK_ID = "u1_ep_20250514_0001"
         {"memory_type": "episode", "memory_ids": [_OK_ID, "a/b_ep_20250514_0001"]},
         {"memory_type": "episode", "memory_ids": [_OK_ID, ".._ep_20250514_0001"]},
         {"memory_type": "episode", "memory_ids": [_OK_ID, "u1_af_20250514_0001"]},
+        # An owner longer than a user_id can be (128) names no stored memory;
+        # past the filesystem's name limit it would fail as "retry" forever.
+        {"memory_type": "episode", "memory_ids": [f"{'a' * 129}_ep_20250514_0001"]},
         {"memory_type": "episode", "memory_ids": [_OK_ID], "reason": {"code": "nope"}},
         {
             "memory_type": "episode",
