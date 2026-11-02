@@ -1,8 +1,9 @@
 """P1: memory deletion against every writer that can race it, in random order.
 
 Real markdown and SQLite stores on a temporary root; the real /add episode
-pipeline, fact extraction, user clustering, Reflection merge and finish, and
-the three narrow deletions (one session, one owner's session, by id). Every
+pipeline, fact extraction, user clustering, Reflection merge and finish,
+profile and skill extraction, and the four deletions (one session, one
+owner's session, a whole user or agent, by id). Every
 store call first yields for a random moment, models and embedders take a
 random time, and the plan adds the environment: the process dying between
 two phases (in-memory state dropped, stores rebuilt over the same files,
@@ -16,6 +17,12 @@ may be mid-change):
   episode of a purged memcell, no fact of a removed episode, no deleted id;
 * I4 -- every entry ever written that is gone was the target of a deletion;
 * J2 -- a returned by-id deletion left none of its targets in a cluster;
+
+before every action as well (a write-back that a later deletion of the same
+scope removes again is seen only between the two):
+
+* no episode of a memcell a returned session deletion purged, and none of
+  the episodes an owner had when a returned whole-owner deletion began;
 
 and continuously, through the lock table's acquire hook and the doubles:
 
@@ -42,9 +49,12 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from everalgo.agent_memory import OpOutcome, SkillExtractionResult
+from everalgo.types import AgentSkill as AlgoAgentSkill
 from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
+from everalgo.types import Profile as AlgoProfile
 from hypothesis import HealthCheck, given, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
@@ -56,15 +66,26 @@ from everos.core.locks import LOCKS
 from everos.infra.persistence.factories import build_stores
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory import IngestResult
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import (
+    EpisodeExtracted,
+    ProfileClusterUpdated,
+    SkillClusterUpdated,
+)
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
-from everos.memory.models import MemcellRecord
+from everos.memory.models import Cluster, MemcellRecord, mint_cluster_id
 from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
-from everos.memory.strategies import extract_atomic_facts, trigger_profile_clustering
+from everos.memory.strategies import (
+    extract_agent_skill,
+    extract_atomic_facts,
+    extract_user_profile,
+    trigger_profile_clustering,
+)
+from everos.memory.strategies.extract_agent_skill import _ClusterMissingError
 from tests.fakes import (
     bundled_instructions,
     make_deps,
+    make_indexes,
     make_memory_service,
     user_track_llm,
 )
@@ -83,12 +104,16 @@ settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 _DEEP = os.environ.get("HYPOTHESIS_PROFILE") == "deep"
 _FACTS = "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
+_PROFILE = "everos.memory.strategies.extract_user_profile.ProfileExtractor"
+_SKILL = "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
 _TS = 1_747_216_800_000
 OWNERS = ("u1", "u2", "u3")
 SEEDED = ("u1", "u2")
 """u3 has no files before the race: its first episode of a session can land
 while a deletion of that session scans -- what the barrier is for."""
 SESSIONS = ("s1", "s2")
+AGENT = "g1"
+"""The one agent: skills only, written into a cluster seeded in phase 0."""
 SEEN: Counter[str] = Counter()
 """Conditions the invariants depend on, counted over the whole module."""
 
@@ -175,6 +200,13 @@ class _World:
     """Deletions sent and not yet answered: what a client resends after death."""
     """Memcells of deviation 7: purged by a failed attempt, the session got a
     new /add before the resend, so the resend did not see their owners."""
+    returned_purged: set[str] = dataclasses.field(default_factory=set)
+    """Memcells purged by a session deletion that then returned."""
+    task_purge: dict[Any, set[str]] = dataclasses.field(default_factory=dict)
+    owner_deleting: set[str] = dataclasses.field(default_factory=set)
+    owner_gone: dict[str, set[str]] = dataclasses.field(default_factory=dict)
+    """Owner -> episodes it had when a whole-owner deletion that returned began."""
+    skill_cluster: str = ""
     memcells: int = 0
     memcell_order: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
     disk: _DiskFull = dataclasses.field(default_factory=lambda: _DiskFull(None))
@@ -201,6 +233,7 @@ class _World:
                 }
                 world.purged |= ids
                 world.last_purge[sid] = ids
+                world.task_purge[asyncio.current_task()] = ids
                 records = await purge.purge(session)
                 failed = world.unfinished.get(sid)
                 if records and failed:
@@ -228,19 +261,25 @@ class _World:
             # A session deletion that stops after its purge -- 500, death, or
             # in the background after the client went away -- leaves memcells
             # whose owners only it knew (deviation 7).
+            sid = scope["session_id"]
+            session_only = (
+                sid is not None
+                and scope["user_id"] is None
+                and scope["agent_id"] is None
+            )
             try:
-                return await delete(**scope)
+                result = await delete(**scope)
             except (DeletionIncompleteError, asyncio.CancelledError):
-                sid = scope["session_id"]
-                if (
-                    sid is not None
-                    and scope["user_id"] is None
-                    and scope["agent_id"] is None
-                ):
+                world.task_purge.pop(asyncio.current_task(), None)
+                if session_only:
                     world.unfinished.setdefault(sid, set()).update(
                         world.last_purge.get(sid, set())
                     )
                 raise
+            purged = world.task_purge.pop(asyncio.current_task(), set())
+            if session_only:
+                world.returned_purged |= purged
+            return result
 
         deleter.delete = recording
 
@@ -273,8 +312,9 @@ def _watch_locks(world: _World) -> None:
         ):
             world.violations.append(f"{wanted} asked for under a SQLite session")
         for k in held_kinds:
-            if k != wanted[0]:
+            if k != wanted[0] and (kind(k), kind(wanted[0])) not in edges:
                 edges.add((kind(k), kind(wanted[0])))
+                _event(f"lock edge: {kind(k)} -> {kind(wanted[0])}")
         if _cyclic(edges):
             world.violations.append(f"lock-order cycle: {sorted(edges)}")
 
@@ -366,7 +406,9 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
         instructions=bundled_instructions(),
         llm_client=llm,
     )
-    await asyncio.sleep(world.rng.random() * 0.004)  # the extraction model
+    # The extraction model; sometimes slow enough for a whole session
+    # deletion to land between the memcell row and the episode write.
+    await asyncio.sleep(world.rng.choice((0.001, 0.004, 0.06)))
     outcome = await pipeline.run_cell(
         IngestResult(session_id=session, messages=[], app_id="a", project_id="p"),
         PreparedCell(cell=cell, memcell_id=memcell_id, sender_ids=list(owners)),
@@ -594,7 +636,69 @@ _ACTIONS = st.one_of(
         st.just("del_owner_session"), st.sampled_from(OWNERS), st.sampled_from(SESSIONS)
     ),
     st.tuples(st.just("del_id"), st.sampled_from(OWNERS)),
+    st.tuples(st.just("del_owner"), st.sampled_from((*OWNERS, AGENT))),
+    st.tuples(st.just("profile"), st.sampled_from(OWNERS)),
+    st.tuples(st.just("skill")),
 )
+
+
+async def _profile(world: _World, owner: str) -> None:
+    """Profile extraction from the owner's clusters: its partition lock, the
+    model under it, then the owner lock for the write."""
+    clusters = await world.stores.cluster.list_for_owner(_scope(owner), "user_memory")
+    if not clusters:
+        return
+    deps = make_deps(
+        stores=world.stores,
+        embedding=_Embedder(world),
+        indexes=make_indexes(episode=_MdIndex(world)),
+    )
+    await extract_user_profile(
+        ProfileClusterUpdated(
+            memcell_id="mc_0",
+            cluster_id=world.rng.choice(clusters).id or "",
+            owner_id=owner,
+            app_id="a",
+            project_id="p",
+        ),
+        deps,
+    )
+    _event("profile: ran")
+
+
+async def _skill(world: _World) -> None:
+    """Skill extraction into the agent's seeded cluster (gone once the agent
+    was deleted: OME would retry, then dead-letter)."""
+    deps = make_deps(stores=world.stores, embedding=_Embedder(world))
+    try:
+        await extract_agent_skill(
+            SkillClusterUpdated(
+                case_entry_id="ac_1",
+                cluster_id=world.skill_cluster,
+                agent_id=AGENT,
+                app_id="a",
+                project_id="p",
+            ),
+            deps,
+        )
+    except _ClusterMissingError:
+        _event("skill: cluster gone")
+        return
+    _event("skill: ran")
+
+
+async def _delete_owner(world: _World, owner: str) -> None:
+    user, agent = (None, owner) if owner == AGENT else (owner, None)
+
+    async def run() -> None:
+        world.owner_deleting.add(owner)
+        before = {e for (o, e) in world.written if o == owner}
+        await world.service.delete(
+            app_id="a", project_id="p", user_id=user, agent_id=agent, session_id=None
+        )
+        world.owner_gone.setdefault(owner, set()).update(before)
+
+    await _settle_deletion(world, run, False, lambda: _event("delete: owner"))
 
 
 def _start(world: _World, action: tuple[Any, ...]) -> Any:
@@ -607,6 +711,9 @@ def _start(world: _World, action: tuple[Any, ...]) -> Any:
         "del_session": _delete_session,
         "del_owner_session": _delete_owner_session,
         "del_id": _delete_by_id,
+        "del_owner": _delete_owner,
+        "profile": _profile,
+        "skill": _skill,
         "resend": lambda w, make, done, session: _settle_deletion(
             w, make, False, done, session
         ),
@@ -618,6 +725,7 @@ async def _phase(
 ) -> None:
     async def delayed(action: tuple[Any, ...]) -> None:
         await asyncio.sleep(world.rng.random() * 0.01)
+        await _no_write_back(world)
         await _start(world, action)
 
     tasks = [asyncio.ensure_future(delayed(a)) for a in actions]
@@ -644,10 +752,14 @@ async def _md_entries(
     episodes: dict[tuple[str, str], dict[str, str]] = {}
     facts: dict[tuple[str, str], str] = {}
     for md in world.root.rglob("*.md"):
-        if ".tmp" in md.parts:
+        if ".tmp" in md.parts or md.parent.name not in ("episodes", ".atomic_facts"):
             continue
         owner = md.parent.parent.name
-        for e in (await MarkdownReader.read(md)).entries:
+        try:
+            doc = await MarkdownReader.read(md)
+        except FileNotFoundError:  # a whole-owner deletion moved it meanwhile
+            continue
+        for e in doc.entries:
             inline = dict(e.as_structured().inline)
             if md.parent.name == "episodes":
                 episodes[(owner, e.id)] = inline
@@ -665,6 +777,13 @@ async def _seed(world: _World) -> None:
     for owner, entry in list(world.written):
         await _cluster(world, owner, entry)
         await _facts(world, owner, entry)
+    world.skill_cluster = mint_cluster_id()
+    await world.stores.cluster.upsert(
+        Scope(app_id="a", project_id="p", owner_id=AGENT, owner_type="agent"),
+        "agent_case",
+        Cluster(id=world.skill_cluster, centroid=(1.0, 0.0, 0.0, 0.0), last_ts=_TS),
+        member_type="case",
+    )
 
 
 def _closure(world: _World, owner: str, target: str) -> set[str]:
@@ -677,8 +796,26 @@ def _closure(world: _World, owner: str, target: str) -> set[str]:
     return out
 
 
+async def _no_write_back(world: _World) -> None:
+    """What a returned session or whole-owner deletion removed is not in md,
+    at any moment (md files are replaced whole, so any moment is readable)."""
+    episodes, _ = await _md_entries(world)
+    for (owner, entry), inline in episodes.items():
+        assert inline.get("parent_id") not in world.returned_purged, (
+            "written back after a session deletion",
+            owner,
+            entry,
+        )
+        assert entry not in world.owner_gone.get(owner, set()), (
+            "written back after an owner deletion",
+            owner,
+            entry,
+        )
+
+
 async def _check(world: _World) -> None:
     assert not world.violations, world.violations
+    await _no_write_back(world)
     episodes, facts = await _md_entries(world)
     # I1a: no episode of a purged memcell; no fact of a missing episode.
     for (owner, entry), inline in episodes.items():
@@ -707,9 +844,10 @@ async def _check(world: _World) -> None:
             memcell in world.purged
             or (owner, session) in world.owner_sessions
             or (owner, entry) in by_id
+            or owner in world.owner_deleting
         ), ("an episode vanished with no deletion", owner, entry)
     for (owner, fact), parent in world.facts.items():
-        if (owner, fact) not in facts:
+        if (owner, fact) not in facts and owner not in world.owner_deleting:
             assert (owner, parent) not in episodes or world.written[(owner, parent)][
                 1
             ] in world.purged, (
@@ -735,7 +873,8 @@ def test_deletions_and_writers_keep_their_invariants(
     crash: float | None,
     disk_full_at: int | None,
 ) -> None:
-    asyncio.run(_run(first, second, seed, crash, disk_full_at))
+    # A10's bound: every run ends within 30 s, or something is stuck.
+    asyncio.run(asyncio.wait_for(_run(first, second, seed, crash, disk_full_at), 30))
 
 
 async def _run(
@@ -753,14 +892,31 @@ async def _run(
         await world.storage.create_schema()
         _watch_locks(world)
         facts = [AlgoAtomicFact(owner_id=None, content="f", timestamp=_TS)]
-        with patch(_FACTS) as extractor_cls:
+        with (
+            patch(_FACTS) as extractor_cls,
+            patch(_PROFILE) as profile_cls,
+            patch(_SKILL) as skill_cls,
+        ):
 
             async def extract(*args: Any, **kwargs: Any) -> list[AlgoAtomicFact]:
                 _no_lock_for_models(world, "fact model")
                 await asyncio.sleep(world.rng.random() * 0.004)
                 return facts
 
+            async def profile(*args: Any, **kwargs: Any) -> AlgoProfile:
+                await asyncio.sleep(world.rng.random() * 0.004)
+                return AlgoProfile(
+                    owner_id=kwargs["sender_id"], summary="p", timestamp=_TS
+                )
+
+            async def skills(*args: Any, **kwargs: Any) -> SkillExtractionResult:
+                await asyncio.sleep(world.rng.random() * 0.004)
+                skill = AlgoAgentSkill(id="k", name="tidy", content="c", confidence=0.5)
+                return SkillExtractionResult(None, {}, [OpOutcome(0, skill, None, {})])
+
             extractor_cls.return_value.aextract_from_text = extract
+            profile_cls.return_value.aextract = profile
+            skill_cls.return_value.aextract_with_reason = skills
             await _seed(world)
             await _phase(world, first, crash)
             if crash is not None:  # restart: nothing in memory survives
@@ -791,6 +947,9 @@ def _conditions_were_reached() -> Iterator[None]:
         needed = [
             "delete: session returned",
             "delete: by id",
+            "delete: owner",
+            "profile: ran",
+            "skill: ran",
             "add: episode skipped, memcell gone",
             "facts: skipped, source gone",
             "reflect: merged",
