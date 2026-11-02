@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -151,7 +152,7 @@ async def test_sweep_finishes_a_deletion_cut_after_the_rename(root: MemoryRoot) 
     assert new.entry_id not in old
 
 
-@pytest.mark.parametrize("owner", ["a∕b", "a%2Fb", "a\\b"])
+@pytest.mark.parametrize("owner", ["a∕b", "a%2Fb"])
 async def test_owner_ids_with_lookalike_separators_stay_literal(
     root: MemoryRoot, owner: str
 ) -> None:
@@ -165,7 +166,10 @@ async def test_owner_ids_with_lookalike_separators_stay_literal(
     assert (root.users_dir("app", "p") / "a" / "user.md").exists()
 
 
-@pytest.mark.parametrize("owner", ["..", "a/../b", ".", "", "../users"])
+@pytest.mark.parametrize(
+    "owner",
+    ["..", "a/../b", ".", "", "../users", *(["a\\b"] if os.sep == "\\" else [])],
+)
 async def test_owner_delete_rejects_escape(root: MemoryRoot, owner: str) -> None:
     """C7: the second line behind the route's id validation."""
     with pytest.raises(PathTraversalError):
