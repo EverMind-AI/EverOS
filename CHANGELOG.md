@@ -36,6 +36,10 @@ machinery that keeps a deleted memory from coming back.
   text) in `ome.db`; failed and dead-letter runs keep it for diagnosis.
 - `/get` lists an episode Reflection merged from several sessions with
   `"session_id": null` instead of failing the page.
+- `/add`, `/flush` and `/memory/delete` refuse a `session_id` with leading or
+  trailing whitespace or a control character (`422`). A daily-log file
+  stores it as one trimmed line, so such an id was read back as another one
+  and could not be matched by a session filter or deleted.
 
 ## [1.6.0] - 2026-10-28
 

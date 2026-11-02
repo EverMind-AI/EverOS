@@ -1392,8 +1392,21 @@ request again answers `count: 0`.
 - **Not guaranteed:** totals and summaries already derived from deleted
   memories (a profile, a cluster's preview, a skill) are not rewritten by
   a session deletion; bytes of a deleted file may remain on disk until
-  the filesystem reuses them; a Reflection-merged episode is kept when
-  only one of its sources is deleted.
+  the filesystem reuses them; a Reflection-merged episode belongs to no
+  session, so a session deletion keeps it even when its sources go
+  (`delete_by_ids` on it removes it with its sources); the conversation
+  text of an OME run that is still queued, failed or was dead-lettered,
+  and of any run recorded before this version, stays in `ome.db` until
+  the run ages out (each strategy keeps its last 1000 runs by default);
+  older LanceDB table versions keep deleted rows until the next prune
+  (`cascade.optimize_prune_interval_seconds`, 5 minutes by default);
+  SQLite keeps deleted rows' bytes in free pages until the database is
+  vacuumed; with `observability.capture_content` on, a trace backend keeps
+  what it was sent. A markdown file open in an editor during the deletion
+  writes the deleted entries back if it is saved afterwards -- close
+  editors first. After a whole-owner deletion, setting the system clock
+  back (or changing the time zone) can give a new entry the id a deleted
+  one had.
 - **Known gap.** A `session_id`-only deletion that fails after deleting
   the session's memcells (`500`, or a crash), followed by a new `/add` on
   the same session before the resend, can leave entries of the earlier
@@ -1417,7 +1430,9 @@ Aligned with the Cloud endpoint.
 
 One malformed id rejects the whole request (`422`, nothing deleted).
 Duplicate ids are deleted once; ids that match nothing are skipped (no
-`404`); sending the same request again is harmless.
+`404`); sending the same request again is harmless. Ids are looked up in
+the request's `app_id` / `project_id` only: the id of a memory in another
+app or project is skipped like one that matches nothing.
 
 #### What it deletes
 
