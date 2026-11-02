@@ -317,7 +317,9 @@ def test_tb7_1_3_merge_in_flight_a_source_goes(refl: Any) -> None:
 
 
 def test_tb7_1_4_merged_facts_in_flight_merged_goes(refl: Any) -> None:
-    """(4) The merged episode's facts are in flight; M goes."""
+    """(4) The merged episode's facts are in flight; M goes. The finish (which
+    marks the sources) comes after those facts, so it never ran: the merge is
+    undone and the sources stay, unmarked (spec 2 R6)."""
     srv = refl
     hits = 0
     for r in range(ROUNDS):
@@ -340,8 +342,12 @@ def test_tb7_1_4_merged_facts_in_flight_merged_goes(refl: Any) -> None:
         rule.release.set()
 
         def check4(o: str = owner, m: str = merged, src: list[str] = ids) -> None:
-            for t in (m, *src):
-                _gone(srv, o, t)
+            _gone(srv, o, m)
+            left = {e["entry_id"]: e["path"] for e in _episodes(srv, o)}
+            assert set(src) <= set(left), ("a source went with M", src, left)
+            for path in set(left.values()):
+                marks = frontmatter(srv.root, path).get("deprecated_entries") or {}
+                assert m not in marks.values(), ("marked by a deleted M", path)
 
         _watch(check4)
         srv.proxy.clear()
