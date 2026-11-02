@@ -97,3 +97,63 @@ async def test_incomplete_is_500_asking_for_the_same_request(
     error = resp.json()["error"]
     assert error["code"] == "INTERNAL_ERROR"
     assert error["message"] == "deletion incomplete; retry the same request"
+
+
+# ── /delete_by_ids ───────────────────────────────────────────────────────
+
+_OK_ID = "u1_ep_20250514_0001"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"memory_type": "atomic_fact", "memory_ids": [_OK_ID]},
+        {"memory_ids": [_OK_ID]},
+        {"memory_type": "episode", "memory_ids": []},
+        {"memory_type": "episode", "memory_ids": [_OK_ID] * 51},
+        {"memory_type": "episode", "memory_ids": [_OK_ID, "_ep_20250514_0001"]},
+        {"memory_type": "episode", "memory_ids": [_OK_ID, "u1_ep_20251399_0001"]},
+        {"memory_type": "episode", "memory_ids": [_OK_ID, "a/b_ep_20250514_0001"]},
+        {"memory_type": "episode", "memory_ids": [_OK_ID, ".._ep_20250514_0001"]},
+        {"memory_type": "episode", "memory_ids": [_OK_ID, "u1_af_20250514_0001"]},
+        {"memory_type": "episode", "memory_ids": [_OK_ID], "reason": {"code": "nope"}},
+        {
+            "memory_type": "episode",
+            "memory_ids": [_OK_ID],
+            "reason": {"code": "other", "note": "x" * 257},
+        },
+        {"memory_type": "episode", "memory_ids": [_OK_ID], "extra": True},
+    ],
+)
+async def test_by_ids_invalid_request_is_422_and_deletes_nothing(
+    client: AsyncClient, memory: StubMemoryService, body: dict[str, Any]
+) -> None:
+    """B1: one bad id rejects the whole request, valid ids included."""
+    resp = await client.post("/api/v2/memory/delete_by_ids", json=body)
+    assert resp.status_code == 422, resp.text
+    memory.delete_by_ids.assert_not_awaited()
+
+
+async def test_by_ids_ok_dedupes_and_answers_cloud_shape(
+    client: AsyncClient, memory: StubMemoryService
+) -> None:
+    other = "u.x@y+z_ep_20240229_0012"  # an owner with dots, @, +; a leap day
+    resp = await client.post(
+        "/api/v1/memory/delete_by_ids",
+        json={
+            "memory_type": "episode",
+            "memory_ids": [_OK_ID, other, _OK_ID],
+            "reason": {"code": "privacy", "note": "n"},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    memory.delete_by_ids.assert_awaited_once_with(
+        app_id="default",
+        project_id="default",
+        memory_type="episode",
+        ids=[_OK_ID, other],
+        reason_code="privacy",
+        note="n",
+    )

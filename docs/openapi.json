@@ -316,6 +316,58 @@
         }
       }
     },
+    "/api/v1/memory/delete_by_ids": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memories By Ids",
+        "description": "Delete episodes by id, with what was merged into them and their facts.\n\nIds that match nothing are skipped (not 404); sending the same request\nagain is harmless.",
+        "operationId": "delete_memories_by_ids_api_v1_memory_delete_by_ids_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteByIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteByIdsResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Deletion incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ome/trigger": {
       "post": {
         "tags": [
@@ -1342,6 +1394,58 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/delete_by_ids": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memories By Ids",
+        "description": "Delete episodes by id, with what was merged into them and their facts.\n\nIds that match nothing are skipped (not 404); sending the same request\nagain is harmless.",
+        "operationId": "delete_memories_by_ids_api_v2_memory_delete_by_ids_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteByIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteByIdsResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Deletion incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2579,6 +2683,114 @@
         ],
         "title": "ContentItemDTO",
         "description": "Content piece (v1 API brief appendix A)."
+      },
+      "DeleteByIdsRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "memory_type": {
+            "type": "string",
+            "const": "episode",
+            "title": "Memory Type"
+          },
+          "memory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Memory Ids"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeleteReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memory_type",
+          "memory_ids"
+        ],
+        "title": "DeleteByIdsRequest",
+        "description": "Episodes to delete, by memory id ``<owner_id>_<entry_id>``.\n\nThe whole request is rejected (422, nothing deleted) if any id is not an\nepisode id of a path-safe owner with a real date."
+      },
+      "DeleteByIdsResponseData": {
+        "properties": {
+          "memory_type": {
+            "type": "string",
+            "const": "episode",
+            "title": "Memory Type",
+            "default": "episode"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "DeleteByIdsResponseData",
+        "description": "``{\"memory_type\": \"episode\", \"success\": true}`` (Cloud's shape)."
+      },
+      "DeleteReason": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "hallucination",
+              "outdated",
+              "wrong_subject",
+              "wrong_time",
+              "redundant",
+              "missing",
+              "privacy",
+              "style",
+              "other"
+            ],
+            "title": "Code"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "DeleteReason",
+        "description": "Why the caller deletes: logged as ``code``; ``note`` is never logged."
       },
       "DeleteRequest": {
         "properties": {
@@ -4616,6 +4828,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[CategoryListResponse]"
+      },
+      "SuccessEnvelope_DeleteByIdsResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeleteByIdsResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[DeleteByIdsResponseData]"
       },
       "SuccessEnvelope_DeleteResponseData_": {
         "properties": {

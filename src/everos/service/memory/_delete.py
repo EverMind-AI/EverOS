@@ -13,6 +13,10 @@ from it, then their index rows.
 * ``user_id`` / ``agent_id`` alone -- the owner's whole directory, its
   clusters and (for a user) its Reflection reports.
 
+``POST /memory/delete_by_ids`` deletes single episodes by memory id, with
+what was merged into them, their facts, and their cluster membership (see
+:meth:`Deleter.delete_by_ids`).
+
 Once anything is deleted, a failure is reported as incomplete (500): the
 same request finishes the job. Index rows are removed last and never fail
 the request (the markdown is gone; the cascade catches up).
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 __all__ = ["DeleteResult", "Deleter"]
 
+import re
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -35,6 +40,7 @@ from everos.core.failpoints import failpoint
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
+from everos.memory.models import Episode
 from everos.memory.ports import MemoryRef, Scope, SessionKey
 
 if TYPE_CHECKING:
@@ -46,6 +52,11 @@ logger = get_logger("everos.service.memory")
 
 _QUEUED = "queued work for this session; nothing was deleted, retry later"
 _LOCKED = "session is busy; nothing was deleted, retry later"
+_MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
+_DETACH_ATTEMPTS = 3
+_PREVIEW_CAP = 5
+"""A cluster's preview length, as everalgo clustering keeps it (``preview_cap``
+default, everalgo-clustering 0.2.1 ``clustering/algorithm.py:41``)."""
 
 type Removed = Mapping[str, Sequence[MemoryRef]]
 """The entries one owner lost, by index table."""
@@ -203,6 +214,143 @@ class Deleter:
         await self._eraser.erase(scope, deletion.refs)
         await self._eraser.erase_owner(scope, tables)
         return deletion.count
+
+    # ── by id ────────────────────────────────────────────────────────────
+
+    async def delete_by_ids(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        memory_type: str,
+        ids: Sequence[str],
+        reason_code: str | None,
+        note: str | None,
+    ) -> None:
+        """Delete episodes by memory id (``<owner_id>_<entry_id>``).
+
+        Per owner, in this order (each step is safe to redo, so the same
+        request finishes a deletion a crash cut short):
+
+        1. the requested entries, under the owner lock -- the barrier: a
+           Reflection finish marks sources only while the merged episode is
+           in md, so none can be marked after this;
+        2. what was merged into them, transitively (read from the merge
+           marks, so it still works on a resend after step 1);
+        3. the atomic facts of all of those;
+        4. those episodes out of their clusters, under the clustering lock;
+        5. the merge marks keyed by them -- last, a resend after 1 needs them;
+        6. their index rows.
+
+        ``note`` is never logged.
+        """
+        if memory_type != "episode":
+            raise ValueError(f"unsupported memory_type {memory_type!r}")
+        by_owner: dict[str, list[str]] = {}
+        for memory_id in dict.fromkeys(ids):
+            owner_id, entry_id = _split_memory_id(memory_id)
+            by_owner.setdefault(owner_id, []).append(entry_id)
+        hit: list[str] = []
+        for owner_id, entry_ids in by_owner.items():
+            scope = Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=owner_id,
+                owner_type="user",
+            )
+            removed = await _incomplete(self._delete_episodes(scope, entry_ids))
+            hit += [f"{owner_id}_{e}" for e in removed]
+        logger.info(
+            "memory_delete_by_ids",
+            app_id=app_id,
+            project_id=project_id,
+            reason=reason_code,
+            hit=hit,
+            skipped=[m for m in dict.fromkeys(ids) if m not in set(hit)],
+        )
+
+    async def _delete_episodes(self, scope: Scope, targets: Sequence[str]) -> list[str]:
+        """Steps 1-6 for one owner; the requested entries that were in md."""
+        episodes, facts = self._stores.episode, self._stores.atomic_fact
+        requested = set(targets)
+        first = await episodes.remove(scope, requested)
+        failpoint("by_ids.after_step1")
+        closure = set(requested)
+        frontier = set(requested)
+        while frontier:
+            frontier = await episodes.merged_into(scope, frontier) - closure
+            closure |= frontier
+        merged = await episodes.remove(scope, closure - requested)
+        fact_refs = await facts.remove_by_parents(scope, closure)
+        failpoint("by_ids.after_step3")
+        await self._detach_from_clusters(scope, closure)
+        await episodes.clear_deprecations(scope, closure)
+        failpoint("by_ids.after_step5")
+        await self._eraser.erase(
+            scope, {"episode": [*first, *merged], "atomic_fact": fact_refs}
+        )
+        return [ref.entry_id for ref in first]
+
+    async def _detach_from_clusters(self, scope: Scope, gone: set[str]) -> None:
+        """Take ``gone`` out of their clusters (and members no longer in md).
+
+        Members and their texts are read without the clustering lock; under
+        it the member list is read again and, if it moved, the round starts
+        over (at most three times, then the md is read under the lock).
+        """
+        clusters = self._stores.cluster
+        cluster_ids: set[str] = set()
+        for entry_id in sorted(gone):
+            found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
+            if found is not None:
+                cluster_ids.add(found)
+        partition = f"{scope.app_id}:{scope.project_id}:{scope.owner_id}"
+        for cluster_id in sorted(cluster_ids):
+            for attempt in range(_DETACH_ATTEMPTS):
+                ids = [m for m, _ in await clusters.members(cluster_id)]
+                alive = await self._alive(scope, ids)
+                async with get_partition_lock("trigger_profile_clustering", partition):
+                    now = [m for m, _ in await clusters.members(cluster_id)]
+                    if now != ids:
+                        if attempt < _DETACH_ATTEMPTS - 1:
+                            continue
+                        ids, alive = now, await self._alive(scope, now)
+                    await self._restamp(cluster_id, ids, alive, gone)
+                break
+
+    async def _alive(self, scope: Scope, ids: Sequence[str]) -> dict[str, Episode]:
+        stored = await self._stores.episode.read_many(scope, ids)
+        return {s.ref.entry_id: s.item for s in stored}
+
+    async def _restamp(
+        self,
+        cluster_id: str,
+        ids: Sequence[str],
+        alive: Mapping[str, Episode],
+        gone: set[str],
+    ) -> None:
+        left = [alive[m] for m in ids if m not in gone and m in alive]
+        clusters = self._stores.cluster
+        if not left:
+            await clusters.delete(cluster_id)
+            return
+        kept = {m for m in ids if m not in gone and m in alive}
+        newest = sorted(left, key=lambda e: e.timestamp)[-_PREVIEW_CAP:]
+        await clusters.detach(
+            cluster_id,
+            [m for m in ids if m not in kept],
+            count=len(left),
+            last_ts=max(e.timestamp for e in left),
+            preview=[e.episode for e in newest],
+        )
+
+
+def _split_memory_id(memory_id: str) -> tuple[str, str]:
+    """``<owner_id>_<entry_id>`` -> ``(owner_id, entry_id)`` (validated upstream)."""
+    match = _MEMORY_ID.fullmatch(memory_id)
+    if match is None:
+        raise ValueError(f"not an episode memory id: {memory_id!r}")
+    return match["owner"], match["entry"]
 
 
 async def _incomplete[T](step: Awaitable[T]) -> T:

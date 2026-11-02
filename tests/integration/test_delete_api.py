@@ -237,3 +237,60 @@ async def test_failpoint_exits_137_and_the_resend_finishes(
     assert resp.json()["data"]["count"] == 1
     assert await _md_ids(storage_view, ref) == set()
     assert await _index_ids(storage_view) == set()
+
+
+async def test_by_ids_deletes_a_merged_episode_and_its_sources(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
+    """B3 / B6 / B10: list a merged episode (no session), delete it by id:
+    it and the sources merged into it leave md, the index and /get."""
+    source = await _seed(storage_view, "u1", "s1")
+    store = MarkdownEpisodeStore(storage_view.root)
+    (merged,) = await store.append_many(
+        _scope("u1"),
+        [
+            Episode(
+                owner_id="u1",
+                episode="what s1 was about",
+                timestamp=_TS,
+                subject="s",
+                summary="s",
+                parent_id="cl_1",
+                parent_type="cluster",
+            )
+        ],
+        only_if=NO_SOURCE_CHECK,
+    )
+    await store.deprecate(
+        _scope("u1"),
+        entries=[(source.md_path, source.entry_id)],
+        replaced_by=merged.entry_id,
+        only_if=NO_SOURCE_CHECK,
+    )
+    row = (await storage_view.repos.episode.scan())[0]
+    await storage_view.repos.episode.upsert(
+        [
+            row.model_copy(
+                update={
+                    "id": merged.id,
+                    "entry_id": merged.entry_id,
+                    "session_id": None,
+                    "parent_type": "cluster",
+                }
+            )
+        ]
+    )
+    listed = await client.post(
+        "/api/v2/memory/get", json={"user_id": "u1", "memory_type": "episode"}
+    )
+    assert {e["session_id"] for e in listed.json()["data"]["episodes"]} == {None, "s1"}
+
+    resp = await client.post(
+        "/api/v2/memory/delete_by_ids",
+        json={"memory_type": "episode", "memory_ids": [merged.id]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    assert await _md_ids(storage_view, source) == set()
+    assert await _index_ids(storage_view) == set()

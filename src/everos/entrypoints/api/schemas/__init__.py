@@ -7,6 +7,8 @@ so renaming one is a breaking change to ``docs/openapi.json``.
 from __future__ import annotations
 
 from .cascade import QuiesceResponse as QuiesceResponse
+from .delete import DeleteByIdsRequest as DeleteByIdsRequest
+from .delete import DeleteByIdsResponseData as DeleteByIdsResponseData
 from .delete import DeleteRequest as DeleteRequest
 from .delete import DeleteResponseData as DeleteResponseData
 from .envelope import ErrorDetail as ErrorDetail
@@ -55,6 +57,8 @@ __all__ = [
     "CategoryDTO",
     "CategoryListResponse",
     "ContentItemDTO",
+    "DeleteByIdsRequest",
+    "DeleteByIdsResponseData",
     "DeleteRequest",
     "DeleteResponseData",
     "DocumentContextDTO",

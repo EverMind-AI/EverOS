@@ -188,6 +188,37 @@ class MemoryService:
             )
             raise
 
+    async def delete_by_ids(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        memory_type: str,
+        ids: list[str],
+        reason_code: str | None,
+        note: str | None,
+    ) -> None:
+        """Delete single memories by id (``/delete_by_ids``), shielded like
+        :meth:`delete`."""
+        task = self._extractions.supervise(
+            self._deleter.delete_by_ids(
+                app_id=app_id,
+                project_id=project_id,
+                memory_type=memory_type,
+                ids=ids,
+                reason_code=reason_code,
+                note=note,
+            ),
+            session_id=None,
+            memcell_ids=[],
+            label="memory_delete_by_ids",
+        )
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning("memory_delete_by_ids_continues_after_cancel")
+            raise
+
     async def finish_interrupted_deletions(self) -> int:
         """Finish whole-owner deletions a crash cut short (startup)."""
         return await self._stores.owner_dir.sweep_trash()

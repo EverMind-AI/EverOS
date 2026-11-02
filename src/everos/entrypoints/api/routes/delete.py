@@ -1,4 +1,4 @@
-"""POST /api/v2/memory/delete — delete memories by owner, session, or both."""
+"""POST /api/v2/memory/delete and /delete_by_ids — delete memories."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from fastapi import APIRouter
 
 from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
 from everos.entrypoints.api.schemas import (
+    DeleteByIdsRequest,
+    DeleteByIdsResponseData,
     DeleteRequest,
     DeleteResponseData,
     ErrorResponse,
@@ -44,3 +46,23 @@ async def delete_memory(
         request_id=request_id,
         data=DeleteResponseData(filters=result.filters, count=result.count),
     )
+
+
+@router.post("/delete_by_ids", responses={500: _RESPONSES[500]})
+async def delete_memories_by_ids(
+    req: DeleteByIdsRequest, app: ApplicationDep, request_id: RequestIdDep
+) -> SuccessEnvelope[DeleteByIdsResponseData]:
+    """Delete episodes by id, with what was merged into them and their facts.
+
+    Ids that match nothing are skipped (not 404); sending the same request
+    again is harmless.
+    """
+    await app.memory.delete_by_ids(
+        app_id=req.app_id,
+        project_id=req.project_id,
+        memory_type=req.memory_type,
+        ids=req.memory_ids,
+        reason_code=req.reason.code if req.reason else None,
+        note=req.reason.note if req.reason else None,
+    )
+    return SuccessEnvelope(request_id=request_id, data=DeleteByIdsResponseData())
