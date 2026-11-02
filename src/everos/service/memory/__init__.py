@@ -6,9 +6,9 @@ One method per use case: :meth:`MemoryService.add` (``/add``),
 request to the ``async_mode`` queue.
 
 The add cycle lives in ``_memorize`` (lock, cut, extract, publish);
-``_extraction`` keeps an extraction alive past a cancelled request,
-``_session_locks`` holds the per-session locks, and ``_queue`` is the
-``async_mode`` worker (steps in ``_queue_steps``, data in ``_queue_models``).
+``_extraction`` keeps an extraction alive past a cancelled request, and
+``_queue`` is the ``async_mode`` worker (steps in ``_queue_steps``, data in
+``_queue_models``).
 Everything is injected by :func:`everos.service.build_application`; the
 service owns only those two background collaborators (extraction supervisor,
 queue worker) and their lifecycle (:meth:`~MemoryService.start` /
@@ -45,7 +45,6 @@ from ._queue_models import QueueHealth as QueueHealth
 from ._queue_models import TaskItem as TaskItem
 from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
-from ._session_locks import SessionLocks
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -107,7 +106,6 @@ class MemoryService:
             user_pipeline=user_pipeline,
             agent_pipeline=agent_pipeline,
             bus=bus,
-            locks=SessionLocks(),
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
         )

@@ -3,51 +3,30 @@
 The helper is the foundation under every strategy that performs a
 read → modify → write on shared state; its own behaviour (lock reuse,
 strategy isolation, FIFO serialisation, parallel keys) is exercised
-here, in isolation from any business strategy.
+here, in isolation from any business strategy. Every call returns a fresh
+context manager over the same lock, so lock identity is not observable; the
+tests pin behaviour instead.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from everos.memory._partition_locks import (
-    _pools,
-    _reset_for_tests,
-    get_partition_lock,
-)
+from everos.memory._partition_locks import get_partition_lock
 
-# No local reset fixture: ``tests/conftest.py`` clears the pool around
-# every test in the suite. A second, file-local reset would mask the
-# very contract the two isolation tests at the bottom pin.
+# No local reset fixture: ``tests/conftest.py`` resets ``LOCKS`` around
+# every test (pinned in ``tests/unit/test_core/test_locks.py``).
 
 
-def test_same_strategy_same_key_returns_identical_lock() -> None:
-    """Repeat lookups must reuse the lock (otherwise serialisation breaks)."""
-    a = get_partition_lock("strategy_x", "k1")
-    b = get_partition_lock("strategy_x", "k1")
-    assert a is b
+async def test_different_strategies_share_no_locks_for_identical_key() -> None:
+    """Strategy namespaces are independent — same key string is two locks.
 
-
-def test_same_strategy_different_keys_return_distinct_locks() -> None:
-    """Different partition keys must not block each other."""
-    assert get_partition_lock("strategy_x", "k1") is not get_partition_lock(
-        "strategy_x", "k2"
-    )
-
-
-def test_different_strategies_share_no_locks_for_identical_key() -> None:
-    """Strategy namespaces are independent — same key string is two locks."""
-    assert get_partition_lock("strategy_x", "k1") is not get_partition_lock(
-        "strategy_y", "k1"
-    )
-
-
-def test_reset_for_tests_drops_every_lock() -> None:
-    """After reset the registry is empty; the next lookup returns a fresh lock."""
-    before = get_partition_lock("strategy_x", "k1")
-    _reset_for_tests()
-    after = get_partition_lock("strategy_x", "k1")
-    assert before is not after
+    Were they one lock, the nested acquire would wait on itself forever.
+    """
+    async with asyncio.timeout(1):
+        async with get_partition_lock("strategy_x", "k1"):
+            async with get_partition_lock("strategy_y", "k1"):
+                pass
 
 
 async def test_same_key_serialises_concurrent_acquirers() -> None:
@@ -121,29 +100,3 @@ async def test_concurrent_acquirers_fifo_fairness() -> None:
     await asyncio.gather(task_holder, task_a, task_b)
 
     assert log == ["leave:holder", "enter:a", "enter:b"]
-
-
-# ── Cross-test isolation ────────────────────────────────────────────────
-#
-# The pool is a module global that never evicts, which is right for a
-# single-loop production process and wrong across tests: pytest-asyncio
-# hands each test its own event loop, so a lock carried over from an
-# earlier test is bound to a loop that is already closed. Reusing it
-# raises ``RuntimeError: ... is bound to a different event loop`` deep
-# inside a strategy body, where it surfaces as a dead-lettered OME run
-# rather than a test error. ``tests/conftest.py`` clears the pool around
-# every test; these two pin that, in order — the first dirties the pool,
-# the second asserts it did not survive.
-
-
-def test_dirty_the_partition_lock_pool() -> None:
-    get_partition_lock("isolation_probe", "k")
-    assert "isolation_probe" in _pools
-
-
-def test_partition_lock_pool_starts_empty_in_every_test() -> None:
-    assert _pools == {}, (
-        "a previous test's locks survived into this one — the pool is not "
-        "being reset between tests, so a strategy can acquire a lock bound "
-        "to a closed event loop"
-    )

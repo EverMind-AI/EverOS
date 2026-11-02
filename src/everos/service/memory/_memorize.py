@@ -24,13 +24,13 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
 from everos.core.context import resolve_request_id
+from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._models import MemorizeResult
-from everos.service.memory._session_locks import SessionLocks
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -59,7 +59,6 @@ class Memorizer:
         user_pipeline: The user-memory track, run on every cell.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
-        locks: The per-session locks.
         extractions: Keeps extractions alive past a cancelled request.
         raw_file_builder: Host file hydration capability for ingestion.
     """
@@ -73,7 +72,6 @@ class Memorizer:
         user_pipeline: Pipeline,
         agent_pipeline: Pipeline,
         bus: EventBus,
-        locks: SessionLocks,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
     ) -> None:
@@ -84,7 +82,6 @@ class Memorizer:
         self._user_pipeline = user_pipeline
         self._agent_pipeline = agent_pipeline
         self._bus = bus
-        self._locks = locks
         self._extractions = extractions
 
     async def run(
@@ -105,10 +102,12 @@ class Memorizer:
                 Intended for clients that batch work and call ``/flush`` on
                 idle or thresholds.
 
-        Concurrency: serialised per ``(app_id, project_id, session_id)`` via
-        :class:`SessionLocks`. The lock
-        spans the read-merge-boundary-write cycle so concurrent /add calls
-        on the same session cannot lose-update each other's tail.
+        Concurrency: serialised per ``(app_id, project_id, session_id)`` on
+        the ``"session"`` lock of :data:`everos.core.locks.LOCKS`. The lock
+        spans the read-merge-boundary-write cycle: two unserialised calls
+        would both read the same buffer rows, cut their own slice, and the
+        later buffer write would drop the earlier call's tail messages
+        (they never reached a memcell either).
 
         ``settings.memorize.session_lock_timeout_seconds`` bounds the two
         places a call can hang while something else waits on the lock: the
@@ -150,18 +149,13 @@ class Memorizer:
                 f"{payload.get('project_id', 'default')}\x1f{session_id}"
             )
             timeout_s = self._settings.memorize.session_lock_timeout_seconds
-            lock = self._locks.get(lock_key)
-            async with asyncio.timeout(timeout_s):
-                await lock.acquire()
-            try:
+            async with LOCKS.hold("session", lock_key, max_wait=timeout_s):
                 prepared = await self._cut(
                     payload,
                     mode=mode,
                     is_final=is_final,
                     defer_extraction=defer_extraction,
                 )
-            finally:
-                lock.release()
             if isinstance(prepared, MemorizeResult):
                 return prepared
             ingested, boundary = prepared

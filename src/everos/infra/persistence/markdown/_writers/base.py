@@ -158,7 +158,7 @@ class BaseDailyWriter:
         if not items:
             return []
 
-        async with self._writer.lock_for(path):
+        async with self._writer.locked(path):
             base_count = await self._current_count(path)
             eids = [
                 EntryId.next_for(self.schema.ENTRY_ID_PREFIX, bucket, base_count + i)
@@ -220,7 +220,7 @@ class BaseDailyWriter:
         bucket = date or today_with_timezone()
         path = self._resolve_path(scope_id, bucket, app_id, project_id)
 
-        async with self._writer.lock_for(path):
+        async with self._writer.locked(path):
             count = await self._current_count(path)
             eid = EntryId.next_for(self.schema.ENTRY_ID_PREFIX, bucket, count)
 
