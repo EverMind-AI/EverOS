@@ -13,10 +13,13 @@ Every storage dependency is a mock of its port. Tests verify:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
+import structlog.testing
 
+from everos.core.locks import LOCKS
 from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
@@ -591,3 +594,79 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
         == 1
     )
     ports.atomic_fact_store.deprecate.assert_not_awaited()
+
+
+# ── Finish under deletions (memory delete, spec 1 §5.5, spec 2 R7) ───────
+
+
+def _arm_finish(ports: _Ports) -> tuple[Stored[Episode], Stored[Episode]]:
+    ep1 = _stored_episode(entry_id="ep_1", parent_id="mc_1", md_path="a.md")
+    ep2 = _stored_episode(entry_id="ep_2", parent_id="mc_2", md_path="b.md")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_abc",
+        members=[("ep_1", "episode"), ("ep_2", "episode")],
+        episodes=[ep1, ep2],
+        merged_entry_id="ep_m",
+    )
+    return ep1, ep2
+
+
+async def test_finish_embeds_before_taking_any_lock(ports: _Ports) -> None:
+    """A11: the centroid embedding runs under no lock at all."""
+    ep1, ep2 = _arm_finish(ports)
+    held_while_embedding: list[frozenset[tuple[str, str]]] = []
+
+    async def embed(text: str) -> list[float]:
+        held_while_embedding.append(LOCKS.held())
+        return [0.1] * 1024
+
+    ports.embedder.embed = AsyncMock(side_effect=embed)
+
+    report = await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+    )
+
+    assert report is not None
+    assert held_while_embedding == [frozenset()]
+
+
+async def test_finish_swaps_cluster_under_the_clustering_lock(ports: _Ports) -> None:
+    """Spec 2 R7: the member swap holds the lock a single-id deletion takes."""
+    ep1, ep2 = _arm_finish(ports)
+    held_while_swapping: list[frozenset[tuple[str, str]]] = []
+    ports.cluster_store.replace_members = AsyncMock(
+        side_effect=lambda *a, **k: held_while_swapping.append(LOCKS.held())
+    )
+
+    await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+    )
+
+    (held,) = held_while_swapping
+    assert ("partition:trigger_profile_clustering", "default:default:u_alice") in held
+
+
+async def test_finish_skips_swap_when_merged_gone(ports: _Ports) -> None:
+    """Spec 2 R7: M was deleted after the marks, before the swap.
+
+    The marks still happened (M was there under the owner lock); the cluster
+    must not gain M as a member.
+    """
+    ep1, ep2 = _arm_finish(ports)
+
+    async def exists(_scope: Scope, ids: Any) -> set[str]:
+        ids = set(ids)
+        if ports.episode_store.deprecate.await_count:  # a deletion of M ran
+            ids.discard("ep_m")
+        return ids
+
+    ports.episode_store.exists = AsyncMock(side_effect=exists)
+    with structlog.testing.capture_logs() as logs:
+        await ports.finisher().finish(
+            scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+        )
+
+    ports.episode_store.deprecate.assert_awaited_once()
+    ports.cluster_store.replace_members.assert_not_awaited()
+    assert any(e["event"] == "reflection_finish_skipped_merged_gone" for e in logs)

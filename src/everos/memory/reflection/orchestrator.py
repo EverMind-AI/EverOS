@@ -25,7 +25,7 @@ See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -497,16 +497,22 @@ class ReflectionFinisher:
         """Deprecate the replaced members and move the cluster onto the merge.
 
         Runs under a per-cluster partition lock; errors are logged, not
-        raised, like every other per-cluster Reflection failure.
+        raised, like every other per-cluster Reflection failure. The merged
+        episode's centroid is embedded first, under no lock: a failed
+        embedding leaves everything as it was.
 
         Returns:
             The report on success, ``None`` on failure or an empty diff.
         """
         partition = f"{scope.app_id}:{scope.project_id}:{context.cluster_id}"
         try:
+            centroid = await self._embedder.embed(context.merged_episode)
             async with get_partition_lock("reflection_deprecate", partition):
                 return await self._execute_deprecation(
-                    scope=scope, merged_entry_id=merged_entry_id, context=context
+                    scope=scope,
+                    merged_entry_id=merged_entry_id,
+                    context=context,
+                    centroid=centroid,
                 )
         except AppError:
             logger.warning(
@@ -524,7 +530,12 @@ class ReflectionFinisher:
             return None
 
     async def _execute_deprecation(
-        self, *, scope: Scope, merged_entry_id: str, context: ReflectionContext
+        self,
+        *,
+        scope: Scope,
+        merged_entry_id: str,
+        context: ReflectionContext,
+        centroid: Sequence[float],
     ) -> ReflectionReport | None:
         """Run the deprecation steps inside the partition lock.
 
@@ -566,9 +577,11 @@ class ReflectionFinisher:
             only_if=merged_alive,
         )
         await self._update_cluster_after_merge(
+            scope=scope,
             context=context,
             to_deprecate=to_deprecate,
             merged_entry_id=merged_entry_id,
+            centroid=centroid,
         )
         report = ReflectionReport(
             id=uuid.uuid4().hex,
@@ -669,22 +682,38 @@ class ReflectionFinisher:
     async def _update_cluster_after_merge(
         self,
         *,
+        scope: Scope,
         context: ReflectionContext,
         to_deprecate: set[str],
         merged_entry_id: str,
+        centroid: Sequence[float],
     ) -> None:
-        """Fold the deprecated members into the merged episode."""
-        centroid = await self._embedder.embed(context.merged_episode)
-        await self._cluster_store.replace_members(
-            context.cluster_id,
-            removed=to_deprecate,
-            added=merged_entry_id,
-            member_type="episode",
-            centroid=centroid,
-            count=1,
-            last_ts=context.last_ts,
-            preview=[context.merged_episode[:_PREVIEW_CHARS]],
-        )
+        """Fold the deprecated members into the merged episode.
+
+        Under the owner's clustering lock -- the one a single-id deletion
+        takes to take members out of a cluster -- and only while the merged
+        episode still exists: once a deletion removed it, adding it as a
+        member would leave the cluster pointing at nothing.
+        """
+        partition = f"{scope.app_id}:{scope.project_id}:{scope.owner_id}"
+        async with get_partition_lock("trigger_profile_clustering", partition):
+            if not await self._episode_store.exists(scope, [merged_entry_id]):
+                logger.info(
+                    "reflection_finish_skipped_merged_gone",
+                    cluster_id=context.cluster_id,
+                    merged_entry_id=merged_entry_id,
+                )
+                return
+            await self._cluster_store.replace_members(
+                context.cluster_id,
+                removed=to_deprecate,
+                added=merged_entry_id,
+                member_type="episode",
+                centroid=centroid,
+                count=1,
+                last_ts=context.last_ts,
+                preview=[context.merged_episode[:_PREVIEW_CHARS]],
+            )
 
 
 def _owner_filter(scope: Scope) -> Filter:
