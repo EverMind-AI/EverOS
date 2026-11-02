@@ -9,10 +9,17 @@ Removing the mechanism turns the test red.
 
 Model sources: ``DeleteMd.tla`` / ``Fence.tla`` and their ``MD_Abl_*`` /
 ``Fence_*`` configs (kept with the design notes, not in this repository).
+Replayed elsewhere: ``MD_Naive_BD`` and ``MD_Abl_SDClearsKeys`` in
+``tests/unit/test_infra/test_markdown/test_deletion.py``;
+``MD_Abl_ClosureFirst`` and ``MD_Abl_ClearKeysEarly`` in
+``tests/unit/test_service/test_delete_by_ids.py``; ``Fence_Naive`` and
+``Fence_SpecV2`` in ``tests/unit/test_infra/test_cascade/`` (the fence
+permutations, the projection's recheck, the eraser's requeue).
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Collection
 from dataclasses import replace
 from pathlib import Path
@@ -316,3 +323,69 @@ async def test_clustering_skips_episode_deleted_before_lock(root: MemoryRoot) ->
 
     assert events == []
     assert await deps.stores.cluster.list_for_owner(_USER, "user_memory") == []
+
+
+async def test_write_in_flight_at_purge_is_caught_by_the_barrier(
+    root: MemoryRoot, storage: Any
+) -> None:
+    """MD_Naive_SD / spec 1 R2: an /add episode write passed its source check
+    and holds the owner lock when the session deletion purges the memcell and
+    scans. The barrier makes the scan wait for that write, so it is found
+    and removed; without it the scan sees nothing and the write lands after.
+    """
+    from everos.infra.persistence.factories import build_stores
+    from everos.memory.models import MemcellRecord
+    from everos.memory.ports import SessionKey
+
+    await storage.create_schema()
+    stores = build_stores(storage.root, storage.sqlite)
+    key = SessionKey(app_id="app", project_id="proj", session_id="s1")
+    await stores.memcell.insert_many(
+        key,
+        [
+            MemcellRecord(
+                memcell_id="mc_1",
+                cell=_cell(),
+                raw_type="conversation",
+                message_ids=[],
+                sender_ids=["u1"],
+            )
+        ],
+    )
+    checked, release = asyncio.Event(), asyncio.Event()
+
+    async def memcell_alive_then_slow_disk() -> bool:
+        alive = bool(await stores.memcell.find_by_ids(["mc_1"]))
+        checked.set()
+        await release.wait()  # the write itself is slow
+        return alive
+
+    write = asyncio.create_task(
+        stores.episode.append(
+            _USER,
+            Episode(
+                owner_id="u1",
+                episode="late",
+                timestamp=_TS,
+                subject="s",
+                summary="s",
+                session_id="s1",
+                parent_id="mc_1",
+            ),
+            only_if=memcell_alive_then_slow_disk,
+        )
+    )
+    await checked.wait()
+    await stores.session_purge.purge(key)  # the deletion's first step
+    deletion = asyncio.create_task(stores.episode.remove_session(_USER, "s1"))
+    await asyncio.sleep(0.05)  # the deletion reaches its scan (or the barrier)
+    release.set()
+    await write
+    await deletion
+
+    left = [
+        entry.id
+        for f in (root.root / "app").rglob("episodes/*.md")
+        for entry in (await MarkdownReader.read(f)).entries
+    ]
+    assert left == [], "the in-flight write landed after the deletion's scan"
