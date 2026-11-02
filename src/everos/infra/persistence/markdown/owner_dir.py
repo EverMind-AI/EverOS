@@ -59,6 +59,8 @@ class MarkdownOwnerDirStore:
 
     def __init__(self, root: MemoryRoot) -> None:
         self._root = root
+        self._emptying: set[Path] = set()
+        """Trash folders a deletion is inventorying and removing right now."""
         self._md = MarkdownWriter(root)
         self._logs: dict[str, dict[str, BaseDailyWriter]] = {
             "user": {
@@ -74,46 +76,89 @@ class MarkdownOwnerDirStore:
         key = owner_lock(scope)
         trash = self._root.tmp_dir / f"{_TRASH_PREFIX}{uuid.uuid4().hex}"
         async with LOCKS.hold("owner", key):
-            if not await anyio.Path(owner_dir).is_dir():
+            # An attempt that failed after its rename left the directory in
+            # the trash: this one, the same request again, finishes it.
+            moved = [
+                t
+                for t, held in self._trash_folders()
+                if held == scope and t not in self._emptying
+            ]
+            for earlier in moved:
+                await self._keep_today_counters(scope, earlier / _MOVED)
+            if await anyio.Path(owner_dir).is_dir():
+                await self._move(scope, owner_dir, trash)
+                moved.append(trash)
+            if not moved:
                 return OwnerDirDeletion(refs={}, count=0)
-            await anyio.Path(trash).mkdir(parents=True)
-            await anyio.Path(trash / _MANIFEST).write_text(
-                json.dumps(
-                    {
-                        "app_id": scope.app_id,
-                        "project_id": scope.project_id,
-                        "owner_type": scope.owner_type,
-                        "owner_id": scope.owner_id,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            await anyio.Path(owner_dir).rename(trash / _MOVED)
-            failpoint("delete_owner.after_rename")
-            await self._keep_today_counters(scope, trash / _MOVED)
-            failpoint("delete_owner.after_restore")
             LOCKS.bump_delete_count(key)
-        deletion = await self._inventory(scope, trash / _MOVED)
-        await anyio.to_thread.run_sync(shutil.rmtree, trash)
-        return deletion
+            self._emptying.update(moved)
+        return await self._empty(scope, moved)
 
-    async def sweep_trash(self) -> int:
-        tmp = anyio.Path(self._root.tmp_dir)
-        if not await tmp.is_dir():
-            return 0
-        finished = 0
-        async for folder in tmp.glob(f"{_TRASH_PREFIX}*"):
-            trash = Path(str(folder))
-            moved = trash / _MOVED
+    async def _move(self, scope: Scope, owner_dir: Path, trash: Path) -> None:
+        """Move the owner's directory into ``trash``; today's counters stay."""
+        await anyio.Path(trash).mkdir(parents=True)
+        await anyio.Path(trash / _MANIFEST).write_text(
+            json.dumps(
+                {
+                    "app_id": scope.app_id,
+                    "project_id": scope.project_id,
+                    "owner_type": scope.owner_type,
+                    "owner_id": scope.owner_id,
+                }
+            ),
+            encoding="utf-8",
+        )
+        await anyio.Path(owner_dir).rename(trash / _MOVED)
+        failpoint("delete_owner.after_rename")
+        await self._keep_today_counters(scope, trash / _MOVED)
+        failpoint("delete_owner.after_restore")
+
+    async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
+        """Inventory the trash folders, then remove them."""
+        try:
+            parts = [await self._inventory(scope, t / _MOVED) for t in moved]
+            for trash in moved:
+                await anyio.to_thread.run_sync(shutil.rmtree, trash)
+        finally:
+            self._emptying.difference_update(moved)
+        refs: dict[str, list[MemoryRef]] = {}
+        for part in parts:
+            for table, found in part.refs.items():
+                refs.setdefault(table, []).extend(found)
+        return OwnerDirDeletion(refs=refs, count=sum(p.count for p in parts))
+
+    def _trash_folders(self) -> list[tuple[Path, Scope | None]]:
+        """Every trash folder with the owner it holds (``None``: nothing moved)."""
+        tmp = self._root.tmp_dir
+        if not tmp.is_dir():
+            return []
+        found: list[tuple[Path, Scope | None]] = []
+        for trash in sorted(tmp.glob(f"{_TRASH_PREFIX}*")):
             try:
                 fields = json.loads((trash / _MANIFEST).read_text(encoding="utf-8"))
-                scope = Scope(**fields)
+                scope: Scope | None = Scope(**fields)
             except (OSError, ValueError, TypeError):
                 scope = None  # died before the manifest was written: nothing moved
-            if scope is not None and moved.is_dir():
+            found.append((trash, scope if (trash / _MOVED).is_dir() else None))
+        return found
+
+    async def sweep_trash(self) -> int:
+        finished = 0
+        for trash, scope in self._trash_folders():
+            if scope is not None:
                 async with LOCKS.hold("owner", owner_lock(scope)):
-                    await self._keep_today_counters(scope, moved)
-            await anyio.to_thread.run_sync(shutil.rmtree, trash)
+                    await self._keep_today_counters(scope, trash / _MOVED)
+            try:
+                await anyio.to_thread.run_sync(shutil.rmtree, trash)
+            except OSError as exc:
+                # The counters are back; what is left is only bytes. Starting
+                # matters more: the next sweep (or a resend) removes it.
+                logger.warning(
+                    "memory_delete_trash_sweep_failed",
+                    trash=trash.name,
+                    error=repr(exc)[:200],
+                )
+                continue
             logger.info("memory_delete_trash_swept", trash=trash.name)
             finished += 1
         return finished

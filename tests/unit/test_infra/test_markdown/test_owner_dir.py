@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,6 +22,7 @@ from everos.infra.persistence.markdown import (
     MarkdownProfileStore,
     MarkdownReader,
 )
+from everos.infra.persistence.markdown import owner_dir as owner_dir_module
 from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode, Profile
 from everos.memory.ports import NO_SOURCE_CHECK, Scope
 
@@ -150,6 +154,69 @@ async def test_sweep_finishes_a_deletion_cut_after_the_rename(root: MemoryRoot) 
         _user(), [_episode("after")], only_if=NO_SOURCE_CHECK
     )
     assert new.entry_id not in old
+
+
+def _rmtree_fails(monkeypatch: pytest.MonkeyPatch, times: int) -> None:
+    """The filesystem refuses the trash removal ``times`` times (EACCES)."""
+    real = shutil.rmtree
+    left = [times]
+
+    def rmtree(path: Any, *args: Any, **kwargs: Any) -> None:
+        if left[0]:
+            left[0] -= 1
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        real(path, *args, **kwargs)
+
+    monkeypatch.setattr(owner_dir_module.shutil, "rmtree", rmtree)
+
+
+async def test_resend_finishes_a_deletion_that_failed_after_the_rename(
+    root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A20: the directory went to the trash, then removing the trash failed
+    (500); the same request again reports what was moved and empties it."""
+    old = await _seed_user(root, _user())
+    owners = MarkdownOwnerDirStore(root)
+    _rmtree_fails(monkeypatch, times=1)
+    with pytest.raises(PermissionError):
+        await owners.delete(_user())
+
+    deletion = await owners.delete(_user())
+
+    assert [r.entry_id for r in deletion.refs["episode"]] == old
+    assert deletion.count == 3 + 1 + 1
+    assert not list(root.tmp_dir.glob("delete-*"))
+    (new,) = await MarkdownEpisodeStore(root).append_many(
+        _user(), [_episode("after")], only_if=NO_SOURCE_CHECK
+    )
+    assert new.entry_id not in old
+
+
+async def test_sweep_that_cannot_remove_a_trash_folder_still_starts(
+    root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A trash folder the filesystem will not remove does not stop the
+    start-up: the counter is back, the folder waits for the next sweep."""
+    old = await _seed_user(root, _user())
+    trash = root.tmp_dir / "delete-stuck"
+    trash.mkdir(parents=True)
+    (trash / "scope.json").write_text(
+        json.dumps(
+            {"app_id": "app", "project_id": "p", "owner_type": "user", "owner_id": "u1"}
+        )
+    )
+    (root.users_dir("app", "p") / "u1").rename(trash / "owner")
+    _rmtree_fails(monkeypatch, times=1)
+
+    assert await MarkdownOwnerDirStore(root).sweep_trash() == 0
+
+    assert trash.is_dir()
+    (new,) = await MarkdownEpisodeStore(root).append_many(
+        _user(), [_episode("after")], only_if=NO_SOURCE_CHECK
+    )
+    assert new.entry_id not in old
+    assert await MarkdownOwnerDirStore(root).sweep_trash() == 1
+    assert not trash.exists()
 
 
 @pytest.mark.parametrize("owner", ["a∕b", "a%2Fb"])
