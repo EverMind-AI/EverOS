@@ -85,6 +85,7 @@ def test_t9_1_e1_episode_extraction_in_flight(server: Any) -> None:
     wait_idle(srv.base, srv.root)
     for r in range(1, ROUNDS):
         assert not _entries(srv, f"e1s{r}")
+    print(f"window hit {hits}/{ROUNDS}")
     assert hits >= 20, f"window hit {hits}/{ROUNDS}: not manufactured"
 
 
@@ -115,4 +116,5 @@ def test_t9_1_e2_fact_extraction_in_flight(server: Any) -> None:
     wait_idle(srv.base, srv.root)
     for r in range(1, ROUNDS):
         assert not _entries(srv, f"e2s{r}")
+    print(f"window hit {hits}/{ROUNDS}")
     assert hits >= 20, f"window hit {hits}/{ROUNDS}: not manufactured"

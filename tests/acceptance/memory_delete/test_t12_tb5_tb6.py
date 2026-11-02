@@ -12,7 +12,7 @@ import pytest
 
 from .conftest import chat
 from .observe import frontmatter, lance_ids, md_entries, rows, system_db, wait_converged
-from .seed import TS, seed_world, write_episode
+from .seed import TS, seed_two_rounds, seed_world, write_episode
 
 pytestmark = pytest.mark.acceptance
 
@@ -140,52 +140,29 @@ def _user() -> Any:
 
 def test_tb6_1_two_rounds_of_merges_go_together(make_server: Any) -> None:
     """B6: M2 merged M1 and e3, M1 merged e1 and e2 (different days); deleting
-    M2 by id removes all five and their marks."""
+    M2 by id removes all five, their facts, their marks and M2's cluster
+    membership (the cluster, left empty, goes)."""
     srv = make_server()
-    e1 = write_episode(srv.root, "u1", "2025-10-01", text="e1")
-    e2 = write_episode(srv.root, "u1", "2025-10-02", text="e2")
-    e3 = write_episode(srv.root, "u1", "2025-10-03", text="e3")
-    m1 = write_episode(
-        srv.root,
-        "u1",
-        "2025-10-04",
-        session=None,
-        parent_type="cluster",
-        parent_id="cl",
-        text="m1",
-    )
-    m2 = write_episode(
-        srv.root,
-        "u1",
-        "2025-10-05",
-        session=None,
-        parent_type="cluster",
-        parent_id="cl",
-        text="m2",
-    )
-    import asyncio
-
-    from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.markdown import MarkdownWriter
-
-    files = {e["entry_id"]: e["path"] for e in md_entries(srv.root)}
-    w = MarkdownWriter(MemoryRoot(srv.root))
-    for src, merged in ((e1, m1), (e2, m1), (m1, m2), (e3, m2)):
-        asyncio.run(
-            w.patch_frontmatter(
-                srv.root / files[src], {"deprecated_entries": {src: merged}}
-            )
-        )
+    ids = seed_two_rounds(srv.root)
     srv.start()
     wait_converged(srv.base)
+    before = md_entries(srv.root)
+    assert len([e for e in before if e["kind"] == ".atomic_facts"]) == 5
+    assert rows(system_db(srv.root), "SELECT member_id FROM cluster_member") == [
+        (ids["m2"],)
+    ]
+    assert lance_ids(srv.root, "atomic_fact"), "positive control: facts indexed"
 
-    assert srv.delete_by_ids([f"u1_{m2}"]).status_code == 200
+    assert srv.delete_by_ids([f"u1_{ids['m2']}"]).status_code == 200
 
     assert [e for e in md_entries(srv.root) if e["owner"] == "u1"] == []
-    for path in set(files.values()):
-        assert not frontmatter(srv.root, path).get("deprecated_entries")
+    for path in {e["path"] for e in before}:
+        assert not frontmatter(srv.root, path).get("deprecated_entries"), path
+    assert rows(system_db(srv.root), "SELECT COUNT(*) FROM cluster_member") == [(0,)]
+    assert rows(system_db(srv.root), "SELECT COUNT(*) FROM cluster") == [(0,)]
     wait_converged(srv.base)
-    assert {i for i in lance_ids(srv.root, "episode") if i.startswith("u1_")} == set()
+    for table in ("episode", "atomic_fact"):
+        assert {i for i in lance_ids(srv.root, table) if i.startswith("u1_")} == set()
 
 
 def test_t24_1_b_unwritable_dir_is_500_and_the_resend_finishes(

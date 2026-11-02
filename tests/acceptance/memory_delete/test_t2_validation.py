@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from .conftest import Server, chat
-from .observe import nothing_deleted_snapshot
+from .observe import md_entries, nothing_deleted_snapshot
 
 pytestmark = pytest.mark.acceptance
 
@@ -17,38 +17,42 @@ _DELETE = [
     {"user_id": ".."},
     {"session_id": "s1", "surprise": True},
 ]
-_BY_IDS = [
-    {"memory_type": "atomic_fact", "memory_ids": ["u1_ep_20250101_0001"]},
-    {"memory_type": "episode", "memory_ids": []},
-    {"memory_type": "episode", "memory_ids": ["u1_ep_20250101_0001"] * 51},
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001", "_ep_20250101_0001"],
-    },
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001", "u1_ep_20251399_0001"],
-    },
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001", "a/b_ep_20250101_0001"],
-    },
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001", ".._ep_20250101_0001"],
-    },
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001"],
-        "reason": {"code": "nope"},
-    },
-    {
-        "memory_type": "episode",
-        "memory_ids": ["u1_ep_20250101_0001"],
-        "reason": {"code": "other", "note": "x" * 257},
-    },
-    {"memory_type": "episode", "memory_ids": ["u1_ep_20250101_0001"], "extra": 1},
-]
+
+
+def _by_ids(ok: str) -> list[dict[str, object]]:
+    """Each invalid request carries ``ok``, the id of a stored episode."""
+    return [
+        {"memory_type": "atomic_fact", "memory_ids": [ok]},
+        {"memory_type": "episode", "memory_ids": []},
+        {"memory_type": "episode", "memory_ids": [ok] * 51},
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok, "_ep_20250101_0001"],
+        },
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok, "u1_ep_20251399_0001"],
+        },
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok, "a/b_ep_20250101_0001"],
+        },
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok, ".._ep_20250101_0001"],
+        },
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok],
+            "reason": {"code": "nope"},
+        },
+        {
+            "memory_type": "episode",
+            "memory_ids": [ok],
+            "reason": {"code": "other", "note": "x" * 257},
+        },
+        {"memory_type": "episode", "memory_ids": [ok], "extra": 1},
+    ]
 
 
 def test_t2_1_and_tb1_1_invalid_requests_are_422_and_delete_nothing(
@@ -57,13 +61,12 @@ def test_t2_1_and_tb1_1_invalid_requests_are_422_and_delete_nothing(
     assert server.add("s1", chat("u1", "zebra7")).status_code == 200
     assert server.flush("s1").status_code == 200
     before = nothing_deleted_snapshot(server.root)
-    entries = server.root.rglob("episodes/*.md")
-    assert list(entries), "precondition: something to (not) delete"
+    stored = [e for e in md_entries(server.root) if e["kind"] == "episodes"]
+    assert stored, "precondition: something to (not) delete"
+    by_ids = _by_ids(f"u1_{stored[0]['entry_id']}")
 
     codes = [server.post("/memory/delete", body).status_code for body in _DELETE]
-    codes += [
-        server.post("/memory/delete_by_ids", body).status_code for body in _BY_IDS
-    ]
+    codes += [server.post("/memory/delete_by_ids", body).status_code for body in by_ids]
 
-    assert codes == [422] * (len(_DELETE) + len(_BY_IDS)), codes
+    assert codes == [422] * (len(_DELETE) + len(by_ids)), codes
     assert nothing_deleted_snapshot(server.root) == before

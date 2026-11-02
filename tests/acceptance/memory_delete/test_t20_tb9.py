@@ -15,8 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from .observe import lance_ids, logical_dump, md_tree_hash, wait_converged
-from .seed import TS, write_episode
+from .observe import frontmatter, lance_ids, logical_dump, md_tree_hash, wait_converged
+from .seed import TS, seed_two_rounds, write_episode
 
 pytestmark = pytest.mark.acceptance
 
@@ -83,7 +83,8 @@ def _state(srv: Any) -> tuple[str, Any, set[str]]:
     wait_converged(srv.base, timeout=_CONVERGE_S)
     dump = logical_dump(srv.root)
     dump.pop("memorize_inbox", None)
-    return md_tree_hash(srv.root), dump, lance_ids(srv.root, "episode")
+    index = lance_ids(srv.root, "episode") | lance_ids(srv.root, "atomic_fact")
+    return md_tree_hash(srv.root), dump, index
 
 
 def _crash_then_resend(
@@ -146,52 +147,22 @@ def test_t20_1_index_catches_up_without_a_resend(make_server: Any) -> None:
 def test_t20_1_owner_deletion_finished_by_the_restart(
     make_server: Any, point: str
 ) -> None:
+    from everos.core.utils.datetime import today_with_timezone
+
     srv = make_server()
     _seed_big_session(srv.root)
+    today = today_with_timezone().isoformat()
+    for i in range(3):  # today's file stands at id 3 before the deletion
+        write_episode(srv.root, "u1", today, session="T", text=f"today {i}")
     _crash_then_resend(srv, point, ("/memory/delete", {"user_id": "u1"}))
 
     assert not list((srv.root / ".tmp").glob("delete-*"))
-    today_files = list(
-        (srv.root / "default_app/default_project/users/u1").rglob("*.md")
-    )
-    assert all("<!-- entry:" not in f.read_text() for f in today_files)
-
-
-def _seed_two_rounds(root: Path) -> str:
-    e1 = write_episode(root, "u1", "2025-10-01", text="e1")
-    e2 = write_episode(root, "u1", "2025-10-02", text="e2")
-    e3 = write_episode(root, "u1", "2025-10-03", text="e3")
-    m1 = write_episode(
-        root,
-        "u1",
-        "2025-10-04",
-        session=None,
-        parent_type="cluster",
-        parent_id="c",
-        text="m1",
-    )
-    m2 = write_episode(
-        root,
-        "u1",
-        "2025-10-05",
-        session=None,
-        parent_type="cluster",
-        parent_id="c",
-        text="m2",
-    )
-    from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.markdown import MarkdownWriter
-
-    files = {
-        e: next(p for p in root.rglob("episodes/*.md") if f"entry:{e}" in p.read_text())
-        for e in (e1, e2, e3, m1)
-    }
-    w = MarkdownWriter(MemoryRoot(root))
-    for src, merged in ((e1, m1), (e2, m1), (m1, m2), (e3, m2)):
-        asyncio.run(
-            w.patch_frontmatter(files[src], {"deprecated_entries": {src: merged}})
-        )
-    return m2
+    u1 = srv.root / "default_app/default_project/users/u1"
+    left = sorted(f.relative_to(u1).as_posix() for f in u1.rglob("*.md"))
+    assert left == [f"episodes/episode-{today}.md"], left  # only today's, kept
+    kept = frontmatter(srv.root, f"default_app/default_project/users/u1/{left[0]}")
+    assert kept["entry_count"] == 3, kept
+    assert "<!-- entry:" not in (u1 / left[0]).read_text()
 
 
 @pytest.mark.parametrize(
@@ -201,7 +172,7 @@ def test_tb9_1_by_id_deletion_resent_after_a_crash(
     make_server: Any, point: str
 ) -> None:
     ref = make_server("reference")
-    m2 = _seed_two_rounds(ref.root)
+    m2 = seed_two_rounds(ref.root)["m2"]  # with facts and M2's cluster
     test = make_server("crashed")
     shutil.copytree(ref.root, test.root, dirs_exist_ok=True)
     request = (
@@ -211,8 +182,11 @@ def test_tb9_1_by_id_deletion_resent_after_a_crash(
 
     ref.start()
     wait_converged(ref.base, timeout=_CONVERGE_S)
+    assert _state(ref)[1]["cluster_member"], "positive control: M2 is clustered"
     assert ref.post(*request).status_code == 200
     expected = _state(ref)
+    assert not expected[1]["cluster_member"]
+    assert not {i for i in expected[2] if i.startswith("u1_")}
 
     _crash_then_resend(test, point, request)
     assert test.post(*request).status_code == 200

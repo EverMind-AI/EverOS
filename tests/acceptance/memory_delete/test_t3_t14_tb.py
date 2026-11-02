@@ -68,6 +68,9 @@ def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:
     seeded = seed_world(srv.root)
     srv.start()
     wait_converged(srv.base)
+    a1 = srv.root / "default_app/default_project/agents/a1"
+    skills = [d for d in (a1 / "skills").iterdir() if d.name.startswith("skill_")]
+    assert len(skills) == 2, skills  # counted here, independently of the server
     before = nothing_deleted_snapshot(srv.root)
     for bad in ({"user_id": ".."}, {"user_id": "a/../b"}, {"agent_id": "../users"}):
         assert srv.delete(**bad).status_code == 422
@@ -77,7 +80,8 @@ def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:
     agent = srv.delete(agent_id="a1").json()["data"]
 
     assert user == {"filters": ["user_id"], "count": seeded.count("u1") + 1}
-    assert agent == {"filters": ["agent_id"], "count": seeded.count("a1") + 2}
+    assert agent == {"filters": ["agent_id"], "count": seeded.count("a1") + len(skills)}
+    assert not [p for p in a1.rglob("*") if "skills" in p.parts or p.name == "SKILL.md"]
     left = list((srv.root / _U1).rglob("*"))
     assert all(p.is_dir() or p.suffix == ".md" for p in left)
     assert [e for e in md_entries(srv.root) if e["owner"] in ("u1", "a1")] == []
@@ -91,7 +95,14 @@ def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:
     ]
     owned = {
         i
-        for t in ("episode", "atomic_fact", "agent_case", "user_profile", "agent_skill")
+        for t in (
+            "episode",
+            "atomic_fact",
+            "foresight",
+            "agent_case",
+            "user_profile",
+            "agent_skill",
+        )
         for i in lance_ids(srv.root, t)
         if i.startswith(("u1", "a1"))
     }
@@ -122,6 +133,15 @@ def test_tb2_1_unknown_and_other_project_ids(make_server: Any) -> None:
     assert resp.json()["data"] == {"memory_type": "episode", "success": True}
     entries = {(e["path"].split("/")[1], e["entry_id"]) for e in md_entries(srv.root)}
     assert entries == {("other", there)}
+    # The whole request again: the same answer, nothing else moves.
+    again = srv.delete_by_ids(
+        [f"nobody_{here}", "u1_ep_20240101_0001", "u1_ep_20251001_0099", f"u1_{here}"]
+    )
+    assert again.status_code == 200
+    assert again.json()["data"] == {"memory_type": "episode", "success": True}
+    assert {(e["path"].split("/")[1], e["entry_id"]) for e in md_entries(srv.root)} == {
+        ("other", there)
+    }
 
 
 def test_tb3_1_one_episode_and_its_fact(make_server: Any) -> None:

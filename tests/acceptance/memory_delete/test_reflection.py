@@ -130,6 +130,7 @@ def _watch(check: Callable[[], None], seconds: int = 20) -> None:
 
 
 def _require(hits: int, label: str) -> None:
+    print(f"{label}: window hit {hits}/{ROUNDS}")
     assert hits >= NEEDED, f"{label}: window hit {hits}/{ROUNDS}: not manufactured"
 
 
@@ -368,15 +369,32 @@ def test_t11_1_b_c_deletions_do_not_wait_on_held_embeddings(refl: Any) -> None:
     assert srv.delete_by_ids([f"t11u_{ids[0]}"]).status_code == 200
     assert srv.delete(user_id="t11u").status_code == 200
     assert time.monotonic() - started < bound
+    assert _window_open(srv, rule), "clustering embedding not held through"
     rule.release.set()
     srv.proxy.clear()
 
-    ids = _clustered_pair(srv, "t11v", "manatee3q")
-    assert ids is not None, "no cluster formed: not manufactured"
-    finish = srv.proxy.add(Rule("emb", single_embedding("manatee3q"), "hold", times=1))
-    _reflect(srv)
-    assert srv.proxy.wait_held("emb", timeout=120), "finish embedding not held"
-    started = time.monotonic()
-    assert srv.delete_by_ids([f"t11v_{ids[1]}"]).status_code == 200
-    assert time.monotonic() - started < bound
-    finish.release.set()
+    hit = False
+    for attempt in range(3):
+        owner, token = f"t11v{attempt}", f"manatee3{attempt}q"
+        ids = _clustered_pair(srv, owner, token)
+        if ids is None:
+            continue
+        finish = srv.proxy.add(Rule("emb", single_embedding(token), "hold", times=1))
+        _reflect_in_background(srv)
+        if not srv.proxy.wait_held("emb", timeout=120):
+            finish.release.set()
+            srv.proxy.clear()
+            continue
+        started = time.monotonic()
+        assert srv.delete_by_ids([f"{owner}_{ids[1]}"]).status_code == 200
+        took = time.monotonic() - started
+        held_through = _window_open(srv, finish)
+        finish.release.set()
+        srv.proxy.clear()
+        if not held_through:
+            continue
+        print(f"T11.1 (c): deletion answered in {took:.2f} s with the finish held")
+        assert took < bound
+        hit = True
+        break
+    assert hit, "T11.1 (c): finish embedding never held through: not manufactured"

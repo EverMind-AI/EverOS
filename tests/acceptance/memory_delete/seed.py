@@ -379,3 +379,83 @@ def seed_cluster(
     asyncio.run(rows())
     (root / "ome.toml").write_text("[strategies.reflect_episodes]\nenabled = true\n")
     return ids
+
+
+def write_fact(root: Path, owner: str, day: str, parent_id: str, text: str) -> str:
+    """Append one atomic fact of episode ``parent_id`` to ``day``'s file."""
+    import datetime as dt
+
+    from everos.core.utils.datetime import from_timestamp_ms, to_iso_format
+    from everos.infra.persistence import MemoryRoot
+    from everos.infra.persistence.markdown import AtomicFactWriter
+
+    inline = {
+        "owner_id": owner,
+        "timestamp": to_iso_format(from_timestamp_ms(TS)),
+        "parent_type": "episode",
+        "parent_id": parent_id,
+    }
+    eid = asyncio.run(
+        AtomicFactWriter(MemoryRoot(root)).append_entry(
+            owner,
+            inline=inline,
+            sections={"Fact": text},
+            date=dt.date.fromisoformat(day),
+        )
+    )
+    return eid.format()
+
+
+def seed_two_rounds(root: Path) -> dict[str, str]:
+    """Two rounds of Reflection for u1, as the finisher leaves them: M1 merged
+    e1 and e2, M2 merged M1 and e3 (each on its own day, each with one fact),
+    the merge marks in the episode files' frontmatter, and the cluster now
+    holding M2. Returns the episode and fact ids by name (``e1``, ``f_e1`` ...)."""
+    from everos.infra.persistence import MemoryRoot
+    from everos.infra.persistence.markdown import MarkdownWriter
+
+    ids: dict[str, str] = {}
+    days = {"e1": "2025-10-01", "e2": "2025-10-02", "e3": "2025-10-03"}
+    days |= {"m1": "2025-10-04", "m2": "2025-10-05"}
+    for name, day in days.items():
+        merged = name.startswith("m")
+        ids[name] = write_episode(
+            root,
+            "u1",
+            day,
+            session=None if merged else "s1",
+            parent_type="cluster" if merged else "memcell",
+            parent_id="cl_m" if merged else f"mc_{name}",
+            text=name,
+        )
+        ids[f"f_{name}"] = write_fact(root, "u1", day, ids[name], f"fact of {name}")
+    episodes = root / "default_app/default_project/users/u1/episodes"
+    writer = MarkdownWriter(MemoryRoot(root))
+    for src, merged in (("e1", "m1"), ("e2", "m1"), ("m1", "m2"), ("e3", "m2")):
+        asyncio.run(
+            writer.patch_frontmatter(
+                episodes / f"episode-{days[src]}.md",
+                {"deprecated_entries": {ids[src]: ids[merged]}},
+            )
+        )
+
+    async def cluster() -> None:
+        storage = make_storage(root)
+        await storage.create_schema()
+        stores = build_stores(storage.root, storage.sqlite)
+        await stores.cluster.upsert(
+            user("u1"),
+            "user_memory",
+            Cluster(
+                id="cl_m",
+                centroid=(1.0,) * 4,
+                count=1,
+                last_ts=TS,
+                members=[ids["m2"]],
+            ),
+            member_type="episode",
+        )
+        await storage.aclose()
+
+    asyncio.run(cluster())
+    return ids

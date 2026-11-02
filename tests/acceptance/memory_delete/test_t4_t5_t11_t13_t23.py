@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import math
 import threading
 import time
 from typing import Any
@@ -10,8 +12,17 @@ import httpx
 import pytest
 
 from .conftest import chat
-from .observe import md_entries, nothing_deleted_snapshot, rows, wait_idle
+from .observe import (
+    histogram,
+    md_entries,
+    metrics,
+    nothing_deleted_snapshot,
+    rows,
+    system_db,
+    wait_idle,
+)
 from .proxy import BOUNDARY, EPISODE, Rule, llm_call
+from .seed import write_episode
 
 pytestmark = pytest.mark.acceptance
 
@@ -24,6 +35,19 @@ def _in_background(fn: Any) -> threading.Thread:
 
 def _session_entries(srv: Any, session: str) -> int:
     return sum(1 for e in md_entries(srv.root) if e["session_id"] == session)
+
+
+def _md_ids(srv: Any) -> set[tuple[str, str, str]]:
+    return {(e["owner"], e["kind"], e["entry_id"]) for e in md_entries(srv.root)}
+
+
+def _memcells(srv: Any, session: str) -> set[str]:
+    found = rows(
+        system_db(srv.root),
+        "SELECT memcell_id FROM memcell WHERE session_id = ?",
+        session,
+    )
+    return {m for (m,) in found}
 
 
 def test_t4_1_a_queued_work_is_503_and_nothing_goes(server: Any) -> None:
@@ -56,7 +80,10 @@ def test_t4_1_b_queued_while_waiting_for_the_lock(server: Any) -> None:
     assert srv.add("s1", chat("u1", "puma0")).status_code == 200
     assert srv.flush("s1").status_code == 200
     srv.proxy.add(Rule("llm", llm_call(BOUNDARY, "puma1"), "delay", delay=8))
-    before = nothing_deleted_snapshot(srv.root)
+    wait_idle(srv.base, srv.root)
+    md_before = _md_ids(srv)
+    cells_before = _memcells(srv, "s1")
+    assert md_before and cells_before, "positive control: s1 has entries and memcells"
     adder = _in_background(lambda: srv.add("s1", chat("u1", "puma1")))
     time.sleep(1)  # the add holds the session lock
     result: dict[str, Any] = {}
@@ -71,9 +98,9 @@ def test_t4_1_b_queued_while_waiting_for_the_lock(server: Any) -> None:
 
     assert result["resp"].status_code == 503, result["resp"].text
     assert result["resp"].json()["error"]["code"] == "SESSION_BUSY"
-    # Nothing of s1 was deleted (the delayed add may have added to it).
-    assert _session_entries(srv, "s1") >= 1
-    assert before
+    # Nothing was deleted: the delayed add can only have added to s1.
+    assert md_before <= _md_ids(srv)
+    assert cells_before <= _memcells(srv, "s1")
     # The batch queued while the deletion waited is delivered afterwards.
     task = queued.json()["request_id"]
     deadline = time.monotonic() + 180
@@ -126,37 +153,72 @@ def test_t11_1_a_model_that_never_answers_does_not_hang_a_deletion(server: Any) 
     adder.join(120)
 
 
-def test_t13_1_other_session_of_the_same_owner_loses_nothing(server: Any) -> None:
-    """A13: S2's entries share u1's day file with S's; S is deleted while a
-    stream of S2 adds runs; every S2 entry is there afterwards."""
-    srv = server
+def test_t13_1_other_session_of_the_same_owner_loses_nothing(
+    make_server: Any,
+) -> None:
+    """A13: u1's other sessions keep every entry while session S of u1 is
+    deleted. Their entries share u1's day files with S's. Four more writes are
+    timed into the deletion: their episode extraction replies are held and let
+    go one every 50 ms from the moment the deletion is sent, so each write
+    queues on the owner lock the deletion's rewrite of those files holds.
+    S also has 120 older day files, so the deletion's rewrites (one owner-lock
+    hold per file) span the window instead of finishing before it."""
+    srv = make_server()
+    for d in range(120):
+        day = (dt.date(2025, 1, 1) + dt.timedelta(days=d)).isoformat()
+        write_episode(srv.root, "u1", day, session="S", text=f"old wren {d}")
+    srv.start()
     for i in range(3):
         assert srv.add("S", chat("u1", f"wren{i}", n=1)).status_code == 200
         assert srv.flush("S").status_code == 200
         assert srv.add("S2", chat("u1", f"kite{i}", n=1)).status_code == 200
         assert srv.flush("S2").status_code == 200
+    wait_idle(srv.base, srv.root)
     seeded = {e["entry_id"] for e in md_entries(srv.root) if e["session_id"] == "S2"}
     assert seeded and _session_entries(srv, "S") > 0
-    stop = threading.Event()
 
-    def stream() -> None:
-        i = 0
-        while not stop.is_set():
-            srv.add("S2", chat("u1", f"kite{10 + i}", n=1))
-            srv.flush("S2")
-            i += 1
+    tokens = [f"kitep{i}q" for i in range(4)]
+    rules = [
+        srv.proxy.add(Rule("llm", llm_call(EPISODE, t), "hold_reply", times=1))
+        for t in tokens
+    ]
+    for i, token in enumerate(tokens):
+        _in_background(
+            lambda i=i, t=token: (
+                srv.add(f"S2-{i}", chat("u1", t, n=1)),
+                srv.flush(f"S2-{i}"),
+            )
+        )
+    deadline = time.monotonic() + 180
+    while srv.proxy.held("llm") < len(tokens):
+        assert time.monotonic() < deadline, "writes never held: not manufactured"
+        time.sleep(0.1)
+    before = histogram(metrics(srv.base), "everos_lock_wait_seconds", kind="owner")
+    result: dict[str, Any] = {}
+    deleter = _in_background(
+        lambda: result.setdefault("resp", srv.delete(session_id="S"))
+    )
+    for rule in rules:
+        rule.release.set()
+        time.sleep(0.05)
+    deleter.join(60)
+    srv.proxy.clear()
+    wait_idle(srv.base, srv.root)
+    after = histogram(metrics(srv.base), "everos_lock_wait_seconds", kind="owner")
 
-    writer = _in_background(stream)
-    time.sleep(2)
-    resp = srv.delete(session_id="S")
-    time.sleep(2)
-    stop.set()
-    writer.join(300)
-
-    assert resp.status_code == 200
-    after = {e["entry_id"] for e in md_entries(srv.root) if e["session_id"] == "S2"}
-    assert seeded <= after
+    assert result["resp"].status_code == 200, result["resp"].text
+    entries = md_entries(srv.root)
+    assert seeded <= {e["entry_id"] for e in entries if e["session_id"] == "S2"}
+    for i, token in enumerate(tokens):
+        mine = [e for e in entries if e["session_id"] == f"S2-{i}"]
+        assert any(e["kind"] == "episodes" for e in mine), (token, mine)
     assert _session_entries(srv, "S") == 0
+    # The window: some write waited on the owner lock (the deletion's rewrite).
+    waited = (after.get(math.inf, 0) - before.get(math.inf, 0)) - (
+        after.get(0.001, 0) - before.get(0.001, 0)
+    )
+    print(f"T13.1 owner-lock acquisitions in the window that waited > 1 ms: {waited}")
+    assert waited >= 1, "no write waited on the deletion: not manufactured"
 
 
 def test_t23_1_add_in_flight_when_its_session_is_deleted(server: Any) -> None:
@@ -206,6 +268,7 @@ def test_t23_1_add_in_flight_when_its_session_is_deleted(server: Any) -> None:
             " ORDER BY started_at DESC LIMIT 4",
         )
         srv.proxy.clear()
+    print(f"T23.1 window hit {hits}/20")
     assert hits >= 16, f"window hit {hits}/20: not manufactured"
     srv.stop()
     assert "memory_write_skipped_source_gone" in srv.log_text()

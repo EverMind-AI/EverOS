@@ -47,6 +47,31 @@ def test_t7_1_index_rows_go_with_the_response(server: Any) -> None:
     assert not {e["id"] for e in listed["data"]["episodes"]} & ids
 
 
+def test_tb4_1_by_id_on_lancedb(server: Any) -> None:
+    """B4 on LanceDB (the Milvus half is in test_milvus.py): with the
+    projection stopped, a by-id deletion removes the episode's and its facts'
+    rows before the 200; /search and /get stop returning it."""
+    srv = server
+    assert srv.add("s1", chat("u1", "tapir52")).status_code == 200
+    assert srv.flush("s1").status_code == 200
+    wait_converged(srv.base)
+    ids = _episode_ids(srv, "u1")
+    assert len(ids) == 1, ids  # so every u1 fact is this episode's
+    facts = {i for i in lance_ids(srv.root, "atomic_fact") if i.startswith("u1_")}
+    assert facts, "positive control: the facts are indexed"
+    assert set(_search(srv, "u1", "tapir52")) & ids, "positive control: searchable"
+    assert srv.post("/cascade/quiesce", {}).status_code == 200
+
+    (target,) = ids
+    assert srv.delete_by_ids([target]).status_code == 200
+
+    assert target not in _episode_ids(srv, "u1")
+    assert not lance_ids(srv.root, "atomic_fact") & facts
+    assert target not in set(_search(srv, "u1", "tapir52"))
+    listed = srv.post("/memory/get", {"user_id": "u1", "memory_type": "episode"}).json()
+    assert target not in {e["id"] for e in listed["data"]["episodes"]}
+
+
 def test_t16_1_succeeded_runs_keep_no_conversation_text(server: Any) -> None:
     """A16: every success row of ome.db has an empty event_payload; a run
     killed while RUNNING is replayed after the restart and also ends empty."""
@@ -105,11 +130,18 @@ def test_t19_1_and_t24_1_c_fence_is_used_and_emptied(make_server: Any) -> None:
     for i in range(5):
         assert srv.add("s1", chat("u1", f"ibis{i}x", n=1)).status_code == 200
         assert srv.flush("s1").status_code == 200
+    assert srv.add("s0", chat("u1", "heron0x", n=1)).status_code == 200
+    assert srv.flush("s0").status_code == 200
     wait_converged(srv.base)
     idle = metrics(srv.base)
     assert metric_value(idle, "everos_memory_delete_fence_entries") == 0
-    assert srv.delete(session_id="never").status_code == 200
-    assert metric_value(metrics(srv.base), "everos_memory_delete_fence_entries") == 0
+    # (b) The cascade is idle: a deletion that removes rows keeps none fenced.
+    idle_delete = srv.delete(session_id="s0")
+    assert idle_delete.status_code == 200
+    assert idle_delete.json()["data"]["count"] > 0, "positive control: rows removed"
+    after_idle = metrics(srv.base)
+    assert metric_value(after_idle, "everos_memory_delete_fence_entries") == 0
+    assert metric_value(after_idle, "everos_memory_delete_fence_runs") == 0
 
     hold = srv.proxy.add(Rule("emb", cascade_embedding("ibis9z"), "hold"))
     assert srv.add("s1", chat("u1", "ibis9z", n=1)).status_code == 200
