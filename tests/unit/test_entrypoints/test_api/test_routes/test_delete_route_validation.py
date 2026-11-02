@@ -43,6 +43,10 @@ async def client(memory: StubMemoryService) -> AsyncIterator[AsyncClient]:
         {"user_id": "a%2Fb"},
         {"user_id": ""},
         {"session_id": ""},
+        {"session_id": " s1"},
+        {"session_id": "s1 "},
+        {"session_id": "a\nb"},
+        {"session_id": "a\u2028b"},
         {"session_id": "s", "extra": 1},
         {"session_id": "s", "app_id": "default_app"},
     ],
@@ -50,7 +54,8 @@ async def client(memory: StubMemoryService) -> AsyncIterator[AsyncClient]:
 async def test_invalid_scope_is_422_and_deletes_nothing(
     client: AsyncClient, memory: StubMemoryService, body: dict[str, Any]
 ) -> None:
-    """A2 / RF4: no scope, both owners, a path-like id, an unknown field."""
+    """A2 / RF4: no scope, both owners, a path-like id, an unknown field, a
+    session id markdown cannot hold as given."""
     resp = await client.post("/api/v2/memory/delete", json=body)
     assert resp.status_code == 422, resp.text
     memory.delete.assert_not_awaited()

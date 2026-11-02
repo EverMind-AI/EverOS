@@ -8,7 +8,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId
+from .ids import (
+    PATH_SAFE_CHARSET,
+    AppScopeId,
+    PathSafeId,
+    ProjectScopeId,
+    SessionId,
+)
 
 _EPISODE_ID = re.compile(r"(?P<owner>[a-zA-Z0-9_.@+-]+)_ep_(?P<day>\d{8})_\d+")
 
@@ -30,7 +36,7 @@ class DeleteRequest(BaseModel):
     )
     user_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     agent_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
-    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    session_id: SessionId | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def _one_scope(self) -> DeleteRequest:

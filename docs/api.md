@@ -545,7 +545,7 @@ the `status` field — see [Response body](#response-body) below.
 
 | Field | Type | Required | Default | Constraints |
 |---|---|---|---|---|
-| `session_id` | `string` | yes | — | length 1–128 |
+| `session_id` | `string` | yes | — | length 1–128; one line: no line breaks or other control characters, no leading or trailing whitespace (stored as one trimmed markdown line; anything else would read back as another id) |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | see [ScopeId](#scopeid-app_id-and-project_id) |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | see [ScopeId](#scopeid-app_id-and-project_id) |
 | `messages` | `array<MessageItem>` | yes | — | 1–500 items |
@@ -654,7 +654,7 @@ or agent run to make sure pending context becomes durable memory.
 
 | Field | Type | Required | Default | Constraints |
 |---|---|---|---|---|
-| `session_id` | `string` | yes | — | length 1–128 |
+| `session_id` | `string` | yes | — | length 1–128; one line: no line breaks or other control characters, no leading or trailing whitespace (stored as one trimmed markdown line; anything else would read back as another id) |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
 
@@ -1329,7 +1329,7 @@ calls it with only `session_id`.
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `user_id` | `string \| null` | see below | `null` | path-safe (same rule as `sender_id`) |
 | `agent_id` | `string \| null` | see below | `null` | path-safe; not together with `user_id` |
-| `session_id` | `string \| null` | see below | `null` | `1..128` chars |
+| `session_id` | `string \| null` | see below | `null` | same rule as on `/add` |
 
 At least one of `user_id`, `agent_id`, `session_id` must be set, and
 `user_id` and `agent_id` are mutually exclusive; anything else (including
