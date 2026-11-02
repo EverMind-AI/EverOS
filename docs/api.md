@@ -1395,7 +1395,8 @@ request again answers `count: 0`.
   the filesystem reuses them; a Reflection-merged episode belongs to no
   session, so a session deletion keeps it even when its sources go
   (`delete_by_ids` on it removes it with its sources); the conversation
-  text of an OME run that is still queued, failed or was dead-lettered,
+  text of an OME run that is still queued, failed, was dead-lettered or
+  was cut off by a crash (the restart re-runs it as a new run),
   and of any run recorded before this version, stays in `ome.db` until
   the run ages out (each strategy keeps its last 1000 runs by default);
   older LanceDB table versions keep deleted rows until the next prune
