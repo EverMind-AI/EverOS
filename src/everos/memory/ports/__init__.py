@@ -56,6 +56,7 @@ from .query import ne as ne
 from .query import one_of as one_of
 from .query import primary_key as primary_key
 from .stores import LOST_STATUS_WRITE as LOST_STATUS_WRITE
+from .stores import NO_SOURCE_CHECK as NO_SOURCE_CHECK
 from .stores import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
 from .stores import AgentCaseStore as AgentCaseStore
 from .stores import AgentSkillStore as AgentSkillStore
@@ -67,9 +68,11 @@ from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
+from .stores import NoSourceCheck as NoSourceCheck
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SessionBufferStore as SessionBufferStore
+from .stores import SourceCheck as SourceCheck
 from .stores import WrittenDocument as WrittenDocument
 from .strategy import AppliesTo as AppliesTo
 from .strategy import Counter as Counter
@@ -82,6 +85,7 @@ from .strategy import Trigger as Trigger
 
 __all__ = [
     "LOST_STATUS_WRITE",
+    "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
     "AgentCaseIndex",
     "AgentCaseStore",
@@ -116,6 +120,7 @@ __all__ = [
     "MemcellStore",
     "MemorizeInboxStore",
     "MemoryRef",
+    "NoSourceCheck",
     "OwnerType",
     "Page",
     "PageResult",
@@ -128,6 +133,7 @@ __all__ = [
     "SearchHit",
     "SessionBufferStore",
     "SessionKey",
+    "SourceCheck",
     "Stored",
     "StrategyFn",
     "StrategySpec",

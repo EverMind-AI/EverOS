@@ -13,7 +13,7 @@ Every storage dependency is a mock of its port. Tests verify:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -277,6 +277,7 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
             ("facts/b.md", "af_3"),
         ],
         replaced_by="ep_20260614_0001",
+        only_if=ANY,
     )
 
 
@@ -357,6 +358,7 @@ async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
             (ep2.ref.md_path, "ep_20260601_0002"),
         ],
         replaced_by="ep_20260614_0001",
+        only_if=ANY,
     )
     replace = ports.cluster_store.replace_members.await_args
     assert replace.args == ("cl_abc",)
@@ -487,10 +489,13 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
     )
 
     ports.episode_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("a.md", "ep_1"), ("b.md", "ep_2")], replaced_by="ep_m"
+        _SCOPE,
+        entries=[("a.md", "ep_1"), ("b.md", "ep_2")],
+        replaced_by="ep_m",
+        only_if=ANY,
     )
     ports.atomic_fact_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m"
+        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m", only_if=ANY
     )
     ports.episode_index.update.assert_not_called()
     ports.atomic_fact_index.update.assert_not_called()
@@ -554,7 +559,10 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
     )
     assert marked == 2
     ports.episode_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("a.md", "ep_1"), ("a.md", "ep_1")], replaced_by="ep_m"
+        _SCOPE,
+        entries=[("a.md", "ep_1"), ("a.md", "ep_1")],
+        replaced_by="ep_m",
+        only_if=ANY,
     )
     ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "")])
     assert (

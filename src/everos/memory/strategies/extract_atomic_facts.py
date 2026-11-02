@@ -19,7 +19,13 @@ from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import AtomicFactsExtracted, EpisodeExtracted
 from everos.memory.models import AtomicFact
-from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+from everos.memory.ports import (
+    NO_SOURCE_CHECK,
+    Event,
+    Immediate,
+    Scope,
+    StrategySpec,
+)
 
 logger = get_logger(__name__)
 
@@ -48,8 +54,8 @@ async def extract_atomic_facts(
     ]
 
     # 3. Write all facts in one batched append.
-    refs = (
-        await deps.stores.atomic_fact.append_many(_scope(event), facts) if facts else []
+    refs = await deps.stores.atomic_fact.append_many(
+        _scope(event), facts, only_if=NO_SOURCE_CHECK
     )
 
     logger.info(

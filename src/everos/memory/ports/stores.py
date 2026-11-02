@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "LOST_STATUS_WRITE",
+    "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
     "AgentCaseStore",
     "AgentSkillStore",
@@ -20,16 +21,18 @@ __all__ = [
     "KnowledgeStore",
     "MemcellStore",
     "MemorizeInboxStore",
+    "NoSourceCheck",
     "ProfileStore",
     "ReflectionReportStore",
     "SessionBufferStore",
+    "SourceCheck",
     "WrittenDocument",
 ]
 
 import datetime as dt
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, final, runtime_checkable
 
 from everos.memory.models import (
     AgentCase,
@@ -60,55 +63,119 @@ from everos.memory.ports.query import (
     Stored,
 )
 
+# ── Source checks ────────────────────────────────────────────────────────
+
+type SourceCheck = Callable[[], Awaitable[bool]]
+"""Whether everything a derived write was made from still exists.
+
+The daily-log stores run it under the owner's write lock, right before the
+write, and skip the write when it returns ``False``: a deletion that removed
+a source first and then took the same lock cannot be followed by a write
+derived from that source. It may read markdown and SQLite; it must not take
+the owner lock again (not reentrant), call a model or touch an index.
+"""
+
+
+@final
+class NoSourceCheck:
+    """The ``only_if`` of a write that has no deletable source to check."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NO_SOURCE_CHECK"
+
+
+NO_SOURCE_CHECK: Final = NoSourceCheck()
+
+
 # ── User-track daily logs ────────────────────────────────────────────────
 
 
 @runtime_checkable
 class EpisodeStore(Protocol):
-    """Episode truth: append-only daily logs per owner."""
+    """Episode truth: append-only daily logs per owner.
 
-    async def append(self, scope: Scope, episode: Episode) -> MemoryRef: ...
+    Every write takes ``only_if`` (no default, so no writer can forget it):
+    a skipped write returns ``None`` / an empty list / ``False``.
+    """
+
+    async def append(
+        self,
+        scope: Scope,
+        episode: Episode,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None: ...
 
     async def append_many(
-        self, scope: Scope, episodes: Sequence[Episode]
+        self,
+        scope: Scope,
+        episodes: Sequence[Episode],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
 
         The adapter groups references for storage; failures propagate after any
         earlier writes, without an all-or-nothing guarantee.
+
+        Returns:
+            Whether the references were marked (``False``: ``only_if`` failed).
         """
         ...
 
 
 @runtime_checkable
 class AtomicFactStore(Protocol):
-    """Atomic-fact truth: append-only daily logs per owner."""
+    """Atomic-fact truth: append-only daily logs per owner (``only_if``: above)."""
 
     async def append_many(
-        self, scope: Scope, facts: Sequence[AtomicFact]
+        self,
+        scope: Scope,
+        facts: Sequence[AtomicFact],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
 
         The adapter groups references for storage; failures propagate after any
         earlier writes, without an all-or-nothing guarantee.
+
+        Returns:
+            Whether the references were marked (``False``: ``only_if`` failed).
         """
         ...
 
 
 @runtime_checkable
 class ForesightStore(Protocol):
-    """Foresight truth: append-only daily logs per owner."""
+    """Foresight truth: append-only daily logs per owner (``only_if``: above)."""
 
     async def append_many(
-        self, scope: Scope, items: Sequence[Foresight]
+        self,
+        scope: Scope,
+        items: Sequence[Foresight],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
 
 
@@ -126,9 +193,15 @@ class ProfileStore(Protocol):
 
 @runtime_checkable
 class AgentCaseStore(Protocol):
-    """Agent-case truth: append-only daily logs per agent."""
+    """Agent-case truth: append-only daily logs per agent (``only_if``: above)."""
 
-    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef: ...
+    async def append(
+        self,
+        scope: Scope,
+        case: AgentCase,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None: ...
 
 
 @runtime_checkable

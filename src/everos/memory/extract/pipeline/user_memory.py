@@ -26,7 +26,7 @@ from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
-from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
+from everos.memory.ports import NO_SOURCE_CHECK, EpisodeStore, Event, MemoryRef, Scope
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -88,6 +88,8 @@ class UserMemoryPipeline:
                     language=language,
                 )
                 ref = await self._persist(ingested, ep)
+                if ref is None:
+                    continue
                 md_paths.append(ref.md_path)
                 events.append(
                     EpisodeExtracted(
@@ -145,8 +147,11 @@ class UserMemoryPipeline:
             capture_output(extract_span, algo_ep.episode)
         return algo_ep
 
-    async def _persist(self, ingested: IngestResult, ep: Episode) -> MemoryRef:
-        """Write one episode under its owner and trace the write."""
+    async def _persist(self, ingested: IngestResult, ep: Episode) -> MemoryRef | None:
+        """Write one episode under its owner and trace the write.
+
+        ``None`` when the store skipped the write (its ``only_if`` failed).
+        """
         with memory_span(
             "everos.persist.markdown",
             observation_type="span",
@@ -165,7 +170,10 @@ class UserMemoryPipeline:
                     owner_type="user",
                 ),
                 ep,
+                only_if=NO_SOURCE_CHECK,
             )
+            if ref is None:
+                return None
             # Written .md path, memory-root-relative (only when
             # capture_content is on) — never the host absolute path.
             capture_output(persist_span, ref.md_path)

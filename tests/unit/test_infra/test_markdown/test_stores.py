@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 import structlog.testing
 
+from everos.core.locks import LOCKS, owner_key
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
@@ -27,6 +29,7 @@ from everos.memory.models import (
     Profile,
 )
 from everos.memory.ports import (
+    NO_SOURCE_CHECK,
     AgentCaseStore,
     AgentSkillStore,
     AtomicFactStore,
@@ -66,6 +69,79 @@ async def _entries(root: MemoryRoot, md_path: str) -> dict[str, dict]:
     return result
 
 
+def _episode(**overrides: object) -> Episode:
+    fields: dict[str, object] = {
+        "owner_id": "u1",
+        "episode": "we talked",
+        "timestamp": _TS,
+        "subject": "Chat",
+        "summary": "short",
+        "session_id": "s1",
+        "sender_ids": ["u1"],
+        "parent_id": "mc_1",
+    }
+    return Episode(**(fields | overrides))  # type: ignore[arg-type]
+
+
+async def test_append_skipped_when_source_gone_returns_none_and_writes_nothing(
+    root: MemoryRoot,
+) -> None:
+    async def gone() -> bool:
+        return False
+
+    store = MarkdownEpisodeStore(root)
+    with structlog.testing.capture_logs() as logs:
+        ref = await store.append(_user(), _episode(), only_if=gone)
+        marked = await store.deprecate(
+            _user(), entries=[("x.md", "ep_1")], replaced_by="m", only_if=gone
+        )
+
+    assert ref is None
+    assert marked is False
+    assert not list((root.root / "app").rglob("*.md"))
+    skipped = [e for e in logs if e["event"] == "memory_write_skipped_source_gone"]
+    assert [(e["kind"], e["owner_id"], e["count"]) for e in skipped] == [
+        ("episode", "u1", 1),
+        ("episode", "u1", 1),
+    ]
+    assert "we talked" not in str(skipped)
+
+
+async def test_only_if_runs_inside_owner_lock(root: MemoryRoot) -> None:
+    seen: list[frozenset[tuple[str, str]]] = []
+
+    async def alive() -> bool:
+        seen.append(LOCKS.held())
+        return True
+
+    ref = await MarkdownEpisodeStore(root).append(_user(), _episode(), only_if=alive)
+
+    assert ref is not None
+    assert seen == [frozenset({("owner", owner_key("app", "proj", "user", "u1"))})]
+
+
+async def test_profile_and_skill_writes_hold_the_owner_lock(root: MemoryRoot) -> None:
+    """A whole-owner deletion takes the same lock; these writes must too."""
+    profiles = MarkdownProfileStore(root)
+    skills = MarkdownAgentSkillStore(root)
+    async with LOCKS.hold("owner", owner_key("app", "proj", "user", "u1")):
+        blocked = asyncio.create_task(
+            profiles.write(_user(), Profile(owner_id="u1", summary="s", timestamp=_TS))
+        )
+        await asyncio.sleep(0.05)
+        assert not blocked.done()
+    await blocked
+    async with LOCKS.hold("owner", owner_key("app", "proj", "agent", "a1")):
+        blocked = asyncio.create_task(
+            skills.write(
+                _agent(), AgentSkill(id="sk1", name="k", description="d", content="c")
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not blocked.done()
+    await blocked
+
+
 def test_adapters_satisfy_their_ports(root: MemoryRoot) -> None:
     assert isinstance(MarkdownEpisodeStore(root), EpisodeStore)
     assert isinstance(MarkdownAtomicFactStore(root), AtomicFactStore)
@@ -87,7 +163,9 @@ async def test_episode_append_returns_a_root_relative_ref(root: MemoryRoot) -> N
         parent_id="mc_1",
     )
 
-    ref = await MarkdownEpisodeStore(root).append(_user(), episode)
+    ref = await MarkdownEpisodeStore(root).append(
+        _user(), episode, only_if=NO_SOURCE_CHECK
+    )
 
     assert ref.id == f"u1_{ref.entry_id}"
     assert ref.md_path.startswith("app/proj/users/u1/episodes/")
@@ -116,7 +194,9 @@ async def test_merged_episode_has_cluster_parent_and_no_session(
         parent_type="cluster",
     )
 
-    (ref,) = await MarkdownEpisodeStore(root).append_many(_user(), [merged])
+    (ref,) = await MarkdownEpisodeStore(root).append_many(
+        _user(), [merged], only_if=NO_SOURCE_CHECK
+    )
 
     entry = (await _entries(root, ref.md_path))[ref.entry_id]
     assert entry["inline"]["parent_type"] == "cluster"
@@ -148,6 +228,7 @@ async def test_episode_language_is_an_inline_field_only_when_known(
                 parent_id="mc_2",
             ),
         ],
+        only_if=NO_SOURCE_CHECK,
     )
 
     entries = await _entries(root, known.md_path)
@@ -164,10 +245,14 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
         Episode(
             owner_id="u1", summary="", episode="x", timestamp=_TS, parent_id="mc_1"
         ),
+        only_if=NO_SOURCE_CHECK,
     )
 
     await store.deprecate(
-        _user(), entries=[(ref.md_path, ref.entry_id)], replaced_by="ep_merged"
+        _user(),
+        entries=[(ref.md_path, ref.entry_id)],
+        replaced_by="ep_merged",
+        only_if=NO_SOURCE_CHECK,
     )
 
     parsed = await MarkdownReader.read(root.root / ref.md_path)
@@ -181,9 +266,12 @@ async def test_atomic_facts_append_and_deprecate(root: MemoryRoot) -> None:
         for i in range(2)
     ]
 
-    refs = await store.append_many(_user(), facts)
+    refs = await store.append_many(_user(), facts, only_if=NO_SOURCE_CHECK)
     await store.deprecate(
-        _user(), entries=[(refs[0].md_path, refs[0].entry_id)], replaced_by="ep_m"
+        _user(),
+        entries=[(refs[0].md_path, refs[0].entry_id)],
+        replaced_by="ep_m",
+        only_if=NO_SOURCE_CHECK,
     )
 
     assert len({r.entry_id for r in refs}) == 2
@@ -208,6 +296,7 @@ async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> 
                 parent_id="mc_1",
             )
         ],
+        only_if=NO_SOURCE_CHECK,
     )
     case_ref = await MarkdownAgentCaseStore(root).append(
         _agent(),
@@ -220,6 +309,7 @@ async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> 
             session_id="s1",
             parent_id="mc_1",
         ),
+        only_if=NO_SOURCE_CHECK,
     )
 
     foresight = (await _entries(root, foresight_ref.md_path))[foresight_ref.entry_id]
@@ -395,9 +485,13 @@ async def test_deprecation_groups_in_first_seen_order_and_preserves_partial_writ
     ]
     if fail_path:
         with pytest.raises(OSError, match="injected patch failure"):
-            await store.deprecate(_user(), entries=entries, replaced_by="merged")
+            await store.deprecate(
+                _user(), entries=entries, replaced_by="merged", only_if=NO_SOURCE_CHECK
+            )
     else:
-        await store.deprecate(_user(), entries=entries, replaced_by="merged")
+        await store.deprecate(
+            _user(), entries=entries, replaced_by="merged", only_if=NO_SOURCE_CHECK
+        )
     assert visited == (["a.md", "b.md"] if fail_path else ["a.md", "b.md", "c.md"])
     for name, replaced in (
         ("a.md", {"one": "merged", "three": "merged"}),
@@ -411,5 +505,7 @@ async def test_deprecation_groups_in_first_seen_order_and_preserves_partial_writ
         }
         assert "Body stays." in (root.root / name).read_text()
     visited.clear()
-    await store.deprecate(_user(), entries=[], replaced_by="merged")
+    await store.deprecate(
+        _user(), entries=[], replaced_by="merged", only_if=NO_SOURCE_CHECK
+    )
     assert visited == []

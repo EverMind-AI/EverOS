@@ -43,7 +43,7 @@ from everos.infra.persistence.sqlite import (
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted
 from everos.memory.models import AtomicFact, Episode, ReflectionReport
-from everos.memory.ports import MemoryRef, Scope, all_of, eq, is_null
+from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, all_of, eq, is_null
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from tests.fakes import user_track_script
 from tests.fakes.storage import Storage, handler_deps
@@ -147,7 +147,7 @@ class _World:
             )
             for i in range(n)
         ]
-        refs = await self.episodes.append_many(SCOPE, episodes)
+        refs = await self.episodes.append_many(SCOPE, episodes, only_if=NO_SOURCE_CHECK)
         await self.facts.append_many(
             SCOPE,
             [
@@ -160,6 +160,7 @@ class _World:
                 )
                 for ep, ref in zip(episodes, refs, strict=True)
             ],
+            only_if=NO_SOURCE_CHECK,
         )
         await self.cascade()
         return refs

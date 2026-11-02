@@ -41,6 +41,7 @@ from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
+    NO_SOURCE_CHECK,
     AtomicFactIndex,
     AtomicFactStore,
     ClusterStore,
@@ -214,6 +215,8 @@ class ReflectionOrchestrator:
             algo_result=algo_result,
             last_ts=last_ts,
         )
+        if merged_entry_id is None:
+            return None
         logger.info(
             "reflection_merged",
             cluster_id=cluster_id,
@@ -294,10 +297,11 @@ class ReflectionOrchestrator:
         scope: Scope,
         algo_result: AlgoEpisode,
         last_ts: int,
-    ) -> str:
+    ) -> str | None:
         """Write the merged episode to markdown; return its entry id.
 
         ``session_id`` stays empty: an aggregation product has no session.
+        ``None`` when the store skipped the write (its ``only_if`` failed).
         """
         merged = Episode(
             owner_id=scope.owner_id,
@@ -308,8 +312,10 @@ class ReflectionOrchestrator:
             parent_id=cluster_id,
             parent_type="cluster",
         )
-        (ref,) = await self._episode_store.append_many(scope, [merged])
-        return ref.entry_id
+        refs = await self._episode_store.append_many(
+            scope, [merged], only_if=NO_SOURCE_CHECK
+        )
+        return refs[0].entry_id if refs else None
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -556,7 +562,10 @@ class ReflectionFinisher:
         ]
         if entries:
             await self._episode_store.deprecate(
-                scope, entries=entries, replaced_by=merged_entry_id
+                scope,
+                entries=entries,
+                replaced_by=merged_entry_id,
+                only_if=NO_SOURCE_CHECK,
             )
         return len(entries)
 
@@ -588,7 +597,10 @@ class ReflectionFinisher:
         ]
         if entries:
             await self._atomic_fact_store.deprecate(
-                scope, entries=entries, replaced_by=merged_entry_id
+                scope,
+                entries=entries,
+                replaced_by=merged_entry_id,
+                only_if=NO_SOURCE_CHECK,
             )
         return len(hits)
 

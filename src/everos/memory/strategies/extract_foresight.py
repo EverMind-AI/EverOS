@@ -53,7 +53,13 @@ from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import UserPipelineStarted
 from everos.memory.models import Foresight
-from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+from everos.memory.ports import (
+    NO_SOURCE_CHECK,
+    Event,
+    Immediate,
+    Scope,
+    StrategySpec,
+)
 
 logger = get_logger(__name__)
 
@@ -100,7 +106,7 @@ async def extract_foresight(
             owner_id=owner_id,
             owner_type="user",
         )
-        await deps.stores.foresight.append_many(scope, items)
+        await deps.stores.foresight.append_many(scope, items, only_if=NO_SOURCE_CHECK)
 
     logger.info(
         "foresights_extracted",

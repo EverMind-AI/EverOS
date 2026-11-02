@@ -38,7 +38,14 @@ from everos.memory.models import (
     Profile,
     ReflectionReport,
 )
-from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
+from everos.memory.ports import (
+    MemoryRef,
+    NoSourceCheck,
+    Scope,
+    SessionKey,
+    SourceCheck,
+    Stored,
+)
 
 
 class UnusedPort:
@@ -73,7 +80,14 @@ class _DailyLog[T]:
         """Everything written under ``owner_id``, in write order."""
         return [s.item for s in self.records if s.scope.owner_id == owner_id]
 
-    async def _append_many(self, scope: Scope, items: Sequence[T]) -> list[MemoryRef]:
+    async def _append_many(
+        self,
+        scope: Scope,
+        items: Sequence[T],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        if not items or not await _alive(only_if):
+            return []
         refs = []
         for item in items:
             entry_id = f"{self._prefix}_20260101_{len(self.records) + 1:04d}"
@@ -89,29 +103,57 @@ class _DailyLog[T]:
         return refs
 
     async def _deprecate(
-        self, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        if not await _alive(only_if):
+            return False
         for md_path, entry_id in entries:
             self.deprecated[md_path][entry_id] = replaced_by
+        return True
+
+
+async def _alive(only_if: SourceCheck | NoSourceCheck) -> bool:
+    return isinstance(only_if, NoSourceCheck) or await only_if()
 
 
 class InMemoryEpisodeStore(_DailyLog[Episode]):
     def __init__(self) -> None:
         super().__init__("ep", "episodes")
 
-    async def append(self, scope: Scope, episode: Episode) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [episode])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        episode: Episode,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [episode], only_if)
+        return refs[0] if refs else None
 
     async def append_many(
-        self, scope: Scope, episodes: Sequence[Episode]
+        self,
+        scope: Scope,
+        episodes: Sequence[Episode],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, episodes)
+        return await self._append_many(scope, episodes, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
 
 
 class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
@@ -119,14 +161,25 @@ class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
         super().__init__("af", ".atomic_facts")
 
     async def append_many(
-        self, scope: Scope, facts: Sequence[AtomicFact]
+        self,
+        scope: Scope,
+        facts: Sequence[AtomicFact],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts)
+        return await self._append_many(scope, facts, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
 
 
 class InMemoryForesightStore(_DailyLog[Foresight]):
@@ -134,18 +187,28 @@ class InMemoryForesightStore(_DailyLog[Foresight]):
         super().__init__("fs", ".foresights")
 
     async def append_many(
-        self, scope: Scope, items: Sequence[Foresight]
+        self,
+        scope: Scope,
+        items: Sequence[Foresight],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, items)
+        return await self._append_many(scope, items, only_if)
 
 
 class InMemoryAgentCaseStore(_DailyLog[AgentCase]):
     def __init__(self) -> None:
         super().__init__("ac", ".agent_cases")
 
-    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [case])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        case: AgentCase,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [case], only_if)
+        return refs[0] if refs else None
 
 
 class InMemoryProfileStore:
