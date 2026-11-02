@@ -28,7 +28,7 @@ One process owns one memory root, so the table is process state.
 
 from __future__ import annotations
 
-__all__ = ["LOCKS", "NamedLocks", "owner_key"]
+__all__ = ["LOCKS", "NamedLocks", "owner_key", "session_key"]
 
 import asyncio
 import time
@@ -86,6 +86,11 @@ _table_entries = Gauge(
 def owner_key(app_id: str, project_id: str, owner_type: str, owner_id: str) -> str:
     """The key of one memory owner's write lock and delete counter."""
     return f"{app_id}\x1f{project_id}\x1f{owner_type}\x1f{owner_id}"
+
+
+def session_key(app_id: str, project_id: str, session_id: str) -> str:
+    """The key of one conversation's memorize lock (memorize and deletion)."""
+    return f"{app_id}\x1f{project_id}\x1f{session_id}"
 
 
 class NamedLocks:

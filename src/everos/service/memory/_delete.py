@@ -37,9 +37,9 @@ from everos.core.errors import (
     SessionBusyError,
 )
 from everos.core.failpoints import failpoint
-from everos.core.locks import LOCKS
+from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory import user_cluster_lock
 from everos.memory.models import Episode
 from everos.memory.ports import MemoryRef, Scope, SessionKey
 
@@ -144,7 +144,7 @@ class Deleter:
         inbox = self._stores.memorize_inbox
         if await inbox.count_pending(session):
             raise SessionBusyError(_QUEUED)
-        key = f"{session.app_id}\x1f{session.project_id}\x1f{session.session_id}"
+        key = session_key(session.app_id, session.project_id, session.session_id)
         try:
             async with LOCKS.hold("session", key, max_wait=self._wait):
                 # A request queued while this one waited for the lock.
@@ -202,8 +202,9 @@ class Deleter:
         except Exception as exc:
             raise DeletionIncompleteError(str(exc)) from exc
         if scope.owner_type == "user":
-            partition = f"{scope.app_id}:{scope.project_id}:{scope.owner_id}"
-            async with get_partition_lock("trigger_profile_clustering", partition):
+            async with user_cluster_lock(
+                scope.app_id, scope.project_id, scope.owner_id
+            ):
                 await _incomplete(stores.cluster.delete_for_owner(scope, "user_memory"))
                 await _incomplete(stores.reflection_report.delete_for_owner(scope))
             tables = ["user_profile"]
@@ -304,12 +305,13 @@ class Deleter:
             found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
             if found is not None:
                 cluster_ids.add(found)
-        partition = f"{scope.app_id}:{scope.project_id}:{scope.owner_id}"
         for cluster_id in sorted(cluster_ids):
             for attempt in range(_DETACH_ATTEMPTS):
                 ids = [m for m, _ in await clusters.members(cluster_id)]
                 alive = await self._alive(scope, ids)
-                async with get_partition_lock("trigger_profile_clustering", partition):
+                async with user_cluster_lock(
+                    scope.app_id, scope.project_id, scope.owner_id
+                ):
                     now = [m for m, _ in await clusters.members(cluster_id)]
                     if now != ids:
                         if attempt < _DETACH_ATTEMPTS - 1:

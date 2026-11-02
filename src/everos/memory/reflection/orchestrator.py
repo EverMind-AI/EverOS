@@ -38,7 +38,7 @@ from everos.core.errors import AppError
 from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory._partition_locks import get_partition_lock, user_cluster_lock
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
@@ -695,8 +695,7 @@ class ReflectionFinisher:
         episode still exists: once a deletion removed it, adding it as a
         member would leave the cluster pointing at nothing.
         """
-        partition = f"{scope.app_id}:{scope.project_id}:{scope.owner_id}"
-        async with get_partition_lock("trigger_profile_clustering", partition):
+        async with user_cluster_lock(scope.app_id, scope.project_id, scope.owner_id):
             if not await self._episode_store.exists(scope, [merged_entry_id]):
                 logger.info(
                     "reflection_finish_skipped_merged_gone",

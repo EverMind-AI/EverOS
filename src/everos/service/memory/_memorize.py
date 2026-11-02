@@ -24,7 +24,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
 from everos.core.context import resolve_request_id
-from everos.core.locks import LOCKS
+from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory.extract.ingest import process as ingest_process
@@ -144,9 +144,10 @@ class Memorizer:
             # Buffers and memcells are scoped by app / project, so two sessions
             # that merely share a session_id across projects must not wait on
             # each other (the queue runs them side by side).
-            lock_key = (
-                f"{payload.get('app_id', 'default')}\x1f"
-                f"{payload.get('project_id', 'default')}\x1f{session_id}"
+            lock_key = session_key(
+                payload.get("app_id", "default"),
+                payload.get("project_id", "default"),
+                session_id,
             )
             timeout_s = self._settings.memorize.session_lock_timeout_seconds
             async with LOCKS.hold("session", lock_key, max_wait=timeout_s):

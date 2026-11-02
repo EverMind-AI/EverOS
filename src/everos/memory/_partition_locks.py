@@ -48,6 +48,16 @@ def get_partition_lock(
     return LOCKS.hold(f"partition:{strategy_name}", partition_key)
 
 
+def user_cluster_lock(
+    app_id: str, project_id: str, owner_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one user's clusters holds: profile clustering,
+    Reflection folding members in, and deletion taking them out."""
+    return get_partition_lock(
+        "trigger_profile_clustering", f"{app_id}:{project_id}:{owner_id}"
+    )
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
     LOCKS.reset()
