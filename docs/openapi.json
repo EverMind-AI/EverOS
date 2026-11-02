@@ -261,6 +261,61 @@
         }
       }
     },
+    "/api/v1/memory/delete": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memory",
+        "description": "Delete one owner's memories, one session's, or one owner's of a session.",
+        "operationId": "delete_memory_api_v1_memory_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No scope, or both user_id and agent_id"
+          },
+          "500": {
+            "description": "Deletion incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SESSION_BUSY: the session is still being memorized; nothing was deleted, retry later",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ome/trigger": {
       "post": {
         "tags": [
@@ -1232,6 +1287,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/delete": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memory",
+        "description": "Delete one owner's memories, one session's, or one owner's of a session.",
+        "operationId": "delete_memory_api_v2_memory_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No scope, or both user_id and agent_id"
+          },
+          "500": {
+            "description": "Deletion incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SESSION_BUSY: the session is still being memorized; nothing was deleted, retry later",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2470,6 +2580,91 @@
         "title": "ContentItemDTO",
         "description": "Content piece (v1 API brief appendix A)."
       },
+      "DeleteRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeleteRequest",
+        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id``, ``agent_id`` and ``session_id``; never both\n``user_id`` and ``agent_id``."
+      },
+      "DeleteResponseData": {
+        "properties": {
+          "filters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filters",
+          "count"
+        ],
+        "title": "DeleteResponseData",
+        "description": "What a deletion removed.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Memories removed (entries, plus one per skill and one for the\n        profile when a whole owner is deleted)."
+      },
       "DocumentContextDTO": {
         "properties": {
           "doc_id": {
@@ -2768,6 +2963,73 @@
         ],
         "title": "DocumentPatchResponse",
         "description": "Response for PATCH /documents/{doc_id}."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "NOT_FOUND",
+          "CONFLICT",
+          "INVALID_INPUT",
+          "EXTRACTION_EMPTY",
+          "BAD_REQUEST",
+          "UNSUPPORTED_FORMAT",
+          "EXTERNAL_SERVICE_UNAVAILABLE",
+          "CAPABILITY_UNAVAILABLE",
+          "CONFIGURATION_ERROR",
+          "INTERNAL_ERROR",
+          "PROVIDER_NOT_CONFIGURED",
+          "PAYLOAD_TOO_LARGE",
+          "QUEUE_SATURATED",
+          "SESSION_BUSY"
+        ],
+        "title": "ErrorCode",
+        "description": "Machine-readable error codes returned in the API error envelope.\n\nEach code maps to exactly one HTTP status code. Clients can switch on\nthis value to decide retry / display / routing behaviour without parsing\nthe human-readable ``message`` field."
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "timestamp",
+          "path"
+        ],
+        "title": "ErrorDetail",
+        "description": "Inner ``error`` object in the canonical error envelope."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "description": "Canonical error envelope returned by all error handlers."
       },
       "FilterNode": {
         "properties": {
@@ -4348,6 +4610,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[CategoryListResponse]"
+      },
+      "SuccessEnvelope_DeleteResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeleteResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[DeleteResponseData]"
       },
       "SuccessEnvelope_DocumentCreateResponse_": {
         "properties": {

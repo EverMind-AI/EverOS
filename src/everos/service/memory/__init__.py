@@ -19,6 +19,7 @@ from __future__ import annotations
 
 __all__ = [
     "TASK_STATUSES",
+    "DeleteResult",
     "ExtractionSupervisor",
     "FlushResult",
     "MemorizeResult",
@@ -30,10 +31,14 @@ __all__ = [
     "to_task_item",
 ]
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
+from everos.core.errors import PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
 
+from ._delete import Deleter
+from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
@@ -55,7 +60,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
-    from everos.memory.ports import EventBus
+    from everos.memory.ports import EventBus, IndexEraser
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
 
@@ -80,6 +85,7 @@ class MemoryService:
         search_manager: Answers :meth:`search`.
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
+        index_eraser: Removes deleted memories' index rows (:meth:`delete`).
     """
 
     def __init__(
@@ -95,10 +101,15 @@ class MemoryService:
         search_manager: SearchManager,
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
+        index_eraser: IndexEraser,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
+        self._stores = stores
+        self._deleter = Deleter(
+            stores=stores, eraser=index_eraser, settings=settings.memorize
+        )
         self._memorizer = Memorizer(
             settings=settings,
             boundary=boundary,
@@ -139,6 +150,47 @@ class MemoryService:
     async def get(self, req: GetRequest) -> GetResponse:
         """Paginated listing over the requested ``memory_type``."""
         return await self._get_manager.get(req)
+
+    # ── delete use cases ───────────────────────────────────────────────────
+
+    async def delete(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str | None,
+        agent_id: str | None,
+        session_id: str | None,
+    ) -> DeleteResult:
+        """Delete one scope of memories (``/delete``).
+
+        Runs to completion even if the caller goes away: a deletion cut in
+        half would leave the scope half deleted.
+        """
+        task = self._extractions.supervise(
+            self._deleter.delete(
+                app_id=app_id,
+                project_id=project_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                session_id=session_id,
+            ),
+            session_id=session_id,
+            memcell_ids=[],
+            label="memory_delete",
+            expected=(SessionBusyError, PathTraversalError),
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning(
+                "memory_delete_continues_after_cancel", session_id=session_id
+            )
+            raise
+
+    async def finish_interrupted_deletions(self) -> int:
+        """Finish whole-owner deletions a crash cut short (startup)."""
+        return await self._stores.owner_dir.sweep_trash()
 
     # ── async_mode queue ───────────────────────────────────────────────────
 

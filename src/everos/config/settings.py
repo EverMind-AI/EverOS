@@ -557,14 +557,20 @@ class MemorizeSettings(BaseModel):
     session_id: on timeout the outer ``asyncio.timeout`` cancels the task
     and the lock auto-releases.
 
+    ``delete_wait_seconds`` caps how long a memory deletion of one session
+    waits for that session's memorize lock (an ``add()`` in progress); past
+    it the deletion answers 503 ``SESSION_BUSY`` and deletes nothing.
+
     Env binding:
         EVEROS_MEMORIZE__MODE
         EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS
+        EVEROS_MEMORIZE__DELETE_WAIT_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__*  (see :class:`AsyncQueueSettings`)
     """
 
     mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
+    delete_wait_seconds: float = Field(default=10.0, gt=0)
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
 
 
