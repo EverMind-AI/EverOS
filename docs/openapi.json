@@ -3292,7 +3292,14 @@
             "default": "default"
           },
           "session_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Session Id"
           },
           "timestamp": {
@@ -3330,7 +3337,6 @@
         "required": [
           "id",
           "user_id",
-          "session_id",
           "timestamp",
           "summary",
           "subject",

@@ -133,7 +133,8 @@ class GetEpisodeItem(BaseModel):
     user_id: str | None
     app_id: str = "default"
     project_id: str = "default"
-    session_id: str
+    session_id: str | None = None
+    """``None`` for an episode Reflection merged from several sessions."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
     summary: str
