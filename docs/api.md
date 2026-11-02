@@ -1372,8 +1372,12 @@ request again answers `count: 0`.
   flight when the request was sent -- an extraction, a fact extraction, a
   Reflection merge -- for a deletion by `session_id` alone and for
   `delete_by_ids`. With an owner in the request (`user_id` /
-  `agent_id`, with or without `session_id`) this holds for the markdown
-  but not for writes the owner has in flight at that moment.
+  `agent_id`, with or without `session_id`) it does not hold for work the
+  owner already has in flight: an extraction, a profile update, a skill
+  clustering or skill update that started before the request can write the
+  owner's files again after the `200` -- after a whole-owner deletion,
+  `user.md`, a skill or a cluster can reappear. Stop sending `/add` for
+  the owner and let its extraction settle before deleting with an owner.
 - **The index follows the markdown.** Index rows are removed before the
   `200`, and the cascade is kept from writing them back. One window
   remains: a projection that read the file before the deletion can write
