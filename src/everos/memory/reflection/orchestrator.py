@@ -206,6 +206,18 @@ class ReflectionOrchestrator:
         )
         if not members or not episodes:
             return None
+        # A session deletion keeps cluster rows, so members can name deleted
+        # episodes. A merge needs two new episodes (INIT) or one beside the
+        # merged one (UPDATE); with fewer, wait for the cluster to grow.
+        merged = sum(1 for e in episodes if e.item.parent_type == "cluster")
+        if len(episodes) - merged < (1 if merged else 2):
+            logger.info(
+                "reflection_skipped_too_few_episodes",
+                cluster_id=cluster_id,
+                members=len(members),
+                live=len(episodes),
+            )
+            return None
 
         mode, algo_result = await self._reflect_cluster(
             episodes=episodes, owner_id=scope.owner_id

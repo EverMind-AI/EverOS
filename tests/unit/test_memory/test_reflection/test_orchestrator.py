@@ -417,6 +417,35 @@ async def test_run_update_mode_uses_old_episode(ports: _Ports) -> None:
     assert merged.reflection.mode == "update"
 
 
+@pytest.mark.parametrize("update", [False, True])
+async def test_cluster_with_too_few_live_episodes_is_skipped(
+    ports: _Ports, update: bool
+) -> None:
+    """A session deletion keeps cluster rows: members whose episodes are gone
+    leave fewer than a merge needs (two new ones for INIT, one new one beside
+    the merged episode for UPDATE). The cluster is skipped quietly, every run,
+    instead of reaching the model and failing there."""
+    if update:
+        left = _stored_episode(
+            entry_id="ep_old", parent_id="cl_thin", parent_type="cluster"
+        )
+    else:
+        left = _stored_episode(entry_id="ep_001", parent_id="mc_a")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_thin",
+        members=[(left.ref.entry_id, "episode"), ("ep_deleted", "episode")],
+        episodes=[left],
+        merged_entry_id="ep_m",
+        reflected={"cl_thin"} if update else None,
+    )
+
+    merged = await ports.orchestrator().run(scope=_SCOPE)
+
+    assert merged == []
+    ports.reflector.areflect.assert_not_called()
+
+
 async def test_llm_failure_skips_cluster(ports: _Ports) -> None:
     """Reflector raising an exception skips the cluster, continues."""
     _arm_cluster_flow(
