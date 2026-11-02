@@ -75,6 +75,7 @@ from .stores import OwnerDirStore as OwnerDirStore
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SessionBufferStore as SessionBufferStore
+from .stores import SessionPurgeStore as SessionPurgeStore
 from .stores import SourceCheck as SourceCheck
 from .stores import WrittenDocument as WrittenDocument
 from .strategy import AppliesTo as AppliesTo
@@ -139,6 +140,7 @@ __all__ = [
     "SearchHit",
     "SessionBufferStore",
     "SessionKey",
+    "SessionPurgeStore",
     "SourceCheck",
     "Stored",
     "StrategyFn",

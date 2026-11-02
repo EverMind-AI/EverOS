@@ -438,6 +438,36 @@ class InMemoryClusterStore:
         )
         self.member_types[cluster_id][added] = member_type
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: Collection[str],
+        *,
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        cluster = self.clusters[cluster_id]
+        self.clusters[cluster_id] = cluster.model_copy(
+            update={
+                "members": [m for m in cluster.members if m not in member_ids],
+                "count": count,
+                "last_ts": last_ts,
+                "preview": list(preview),
+            }
+        )
+
+    async def delete(self, cluster_id: str) -> None:
+        self.clusters.pop(cluster_id, None)
+        self.owners.pop(cluster_id, None)
+        self.member_types.pop(cluster_id, None)
+
+    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
+        ids = [cid for cid, owner in self.owners.items() if owner == (scope, kind)]
+        for cid in ids:
+            await self.delete(cid)
+        return len(ids)
+
     async def list_distinct_owners(self) -> list[Scope]:
         return list(dict.fromkeys(scope for scope, _ in self.owners.values()))
 
@@ -458,3 +488,10 @@ class InMemoryReflectionReportStore:
             if (r.owner_id, r.app_id, r.project_id)
             == (scope.owner_id, scope.app_id, scope.project_id)
         }
+
+    async def delete_for_owner(self, scope: Scope) -> int:
+        mine = (scope.owner_id, scope.app_id, scope.project_id)
+        kept = [r for r in self.reports if (r.owner_id, r.app_id, r.project_id) != mine]
+        removed = len(self.reports) - len(kept)
+        self.reports = kept
+        return removed

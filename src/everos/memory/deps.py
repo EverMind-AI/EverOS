@@ -44,6 +44,7 @@ from everos.memory.ports import (
     ProfileStore,
     ReflectionReportStore,
     SessionBufferStore,
+    SessionPurgeStore,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ class Stores:
     memorize_inbox: MemorizeInboxStore
     reflection_report: ReflectionReportStore
     owner_dir: OwnerDirStore
+    session_purge: SessionPurgeStore
 
 
 @dataclass(frozen=True)

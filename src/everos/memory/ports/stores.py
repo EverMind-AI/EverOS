@@ -27,6 +27,7 @@ __all__ = [
     "ProfileStore",
     "ReflectionReportStore",
     "SessionBufferStore",
+    "SessionPurgeStore",
     "SourceCheck",
     "WrittenDocument",
 ]
@@ -433,6 +434,27 @@ class ClusterStore(Protocol):
         """
         ...
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: Collection[str],
+        *,
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        """Remove members and restamp count / last_ts / preview; the
+        centroid stays."""
+        ...
+
+    async def delete(self, cluster_id: str) -> None:
+        """Delete a cluster with its members."""
+        ...
+
+    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
+        """Delete every cluster of the owner of this kind; how many."""
+        ...
+
     async def list_distinct_owners(self) -> list[Scope]:
         """Every owner that has at least one cluster."""
         ...
@@ -513,6 +535,24 @@ class ReflectionReportStore(Protocol):
     async def create(self, report: ReflectionReport) -> None: ...
 
     async def reflected_cluster_ids(self, scope: Scope) -> set[str]: ...
+
+    async def delete_for_owner(self, scope: Scope) -> int:
+        """Delete every report of the owner; how many."""
+        ...
+
+
+@runtime_checkable
+class SessionPurgeStore(Protocol):
+    """A session's conversation state, for deleting the session."""
+
+    async def purge(self, session: SessionKey) -> list[MemcellRecord]:
+        """Delete the session's memcells, buffers and status in one
+        transaction, and blank its failed queued requests' bodies.
+
+        Returns the deleted memcells (their senders name the owners whose
+        memories came from the session).
+        """
+        ...
 
 
 # ── Knowledge base ───────────────────────────────────────────────────────

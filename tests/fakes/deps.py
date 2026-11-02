@@ -76,6 +76,7 @@ def make_stores(**overrides: Any) -> Stores:
         "memorize_inbox": UnusedPort("memorize_inbox"),
         "reflection_report": InMemoryReflectionReportStore(),
         "owner_dir": UnusedPort("owner_dir"),
+        "session_purge": UnusedPort("session_purge"),
     }
     return Stores(**{**fields, **overrides})
 
