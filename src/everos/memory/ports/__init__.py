@@ -70,6 +70,8 @@ from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import NoSourceCheck as NoSourceCheck
+from .stores import OwnerDirDeletion as OwnerDirDeletion
+from .stores import OwnerDirStore as OwnerDirStore
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SessionBufferStore as SessionBufferStore
@@ -123,6 +125,8 @@ __all__ = [
     "MemorizeInboxStore",
     "MemoryRef",
     "NoSourceCheck",
+    "OwnerDirDeletion",
+    "OwnerDirStore",
     "OwnerType",
     "Page",
     "PageResult",

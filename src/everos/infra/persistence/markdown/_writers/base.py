@@ -25,7 +25,7 @@ Subclass usage::
 from __future__ import annotations
 
 import datetime as _dt
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -34,10 +34,15 @@ import anyio
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence.markdown._base.entries import (
+    Entry,
     EntryId,
     render_structured_entry,
+    split_entries,
 )
-from everos.infra.persistence.markdown._base.frontmatter import BaseFrontmatter
+from everos.infra.persistence.markdown._base.frontmatter import (
+    BaseFrontmatter,
+    parse_frontmatter,
+)
 from everos.infra.persistence.markdown._base.reader import MarkdownReader
 from everos.infra.persistence.markdown._base.writer import MarkdownWriter
 from everos.infra.persistence.memory_root import MemoryRoot
@@ -237,6 +242,55 @@ class BaseDailyWriter:
             )
             return eid
 
+    async def remove_entries(
+        self, path: Path, drop: Callable[[Entry], bool]
+    ) -> list[str]:
+        """Rewrite ``path`` without the entries ``drop`` selects; return their ids.
+
+        Under the file's lock, atomically. ``entry_count`` is kept at least
+        the highest sequence the file held before, and a file left with no
+        entries stays (its frontmatter carries the count): the next append
+        must not reuse a removed id. A missing file removes nothing; an
+        entry ``drop`` raises on (an unparsable, hand-edited one) is kept.
+        """
+        async with self._writer.locked(path):
+            try:
+                raw = await anyio.Path(path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return []
+            meta, body = parse_frontmatter(raw)
+            entries = split_entries(body)
+            gone = [entry for entry in entries if _selected(drop, entry)]
+            if not gone:
+                return []
+            highest = max((_seq(entry.id) for entry in entries), default=0)
+            count = meta.get("entry_count", 0)
+            if not isinstance(count, int) or isinstance(count, bool):
+                count = 0
+            meta["entry_count"] = max(count, highest)
+            for entry in reversed(gone):  # offsets stay valid back to front
+                end = entry.end + (body[entry.end : entry.end + 1] == "\n")
+                body = body[: entry.start] + body[end:]
+            await self._writer.write_markdown(path, frontmatter=meta, body=body)
+            return [entry.id for entry in gone]
+
+    async def drop_deprecations(self, path: Path, keys: Collection[str]) -> bool:
+        """Remove ``keys`` from the file's ``deprecated_entries``; whether any was."""
+        async with self._writer.locked(path):
+            try:
+                raw = await anyio.Path(path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return False
+            meta, body = parse_frontmatter(raw)
+            marks = meta.get("deprecated_entries")
+            if not isinstance(marks, dict) or not marks.keys() & set(keys):
+                return False
+            meta["deprecated_entries"] = {
+                k: v for k, v in marks.items() if k not in keys
+            }
+            await self._writer.write_markdown(path, frontmatter=meta, body=body)
+            return True
+
     async def patch_frontmatter(self, path: Path, updates: Mapping[str, Any]) -> None:
         """Merge ``updates`` into the frontmatter of an existing daily-log file.
 
@@ -345,3 +399,17 @@ class BaseDailyWriter:
             / self.schema.DIR_NAME
             / f"{self.schema.FILE_PREFIX}-{date.isoformat()}.md"
         )
+
+
+def _selected(drop: Callable[[Entry], bool], entry: Entry) -> bool:
+    try:
+        return drop(entry)
+    except Exception:  # a hand-edited entry that does not parse stays
+        return False
+
+
+def _seq(entry_id: str) -> int:
+    try:
+        return EntryId.parse(entry_id).seq
+    except ValueError:
+        return 0  # a foreign marker; not part of this writer's sequence

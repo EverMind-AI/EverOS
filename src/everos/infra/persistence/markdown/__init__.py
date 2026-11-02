@@ -76,6 +76,7 @@ from ._writers import ForesightWriter as ForesightWriter
 from ._writers import KnowledgeWriter as KnowledgeWriter
 from ._writers import ProfileWriter as ProfileWriter
 from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
+from .owner_dir import MarkdownOwnerDirStore as MarkdownOwnerDirStore
 from .stores import MarkdownAgentCaseStore as MarkdownAgentCaseStore
 from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
@@ -118,6 +119,7 @@ __all__ = [
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
     "MarkdownKnowledgeStore",
+    "MarkdownOwnerDirStore",
     "MarkdownProfileStore",
     "MarkdownReader",
     "MarkdownWriter",

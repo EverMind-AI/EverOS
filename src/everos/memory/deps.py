@@ -39,6 +39,7 @@ from everos.memory.ports import (
     KnowledgeTopicIndex,
     MemcellStore,
     MemorizeInboxStore,
+    OwnerDirStore,
     ProfileIndex,
     ProfileStore,
     ReflectionReportStore,
@@ -64,6 +65,7 @@ class Stores:
     cluster: ClusterStore
     memorize_inbox: MemorizeInboxStore
     reflection_report: ReflectionReportStore
+    owner_dir: OwnerDirStore
 
 
 @dataclass(frozen=True)

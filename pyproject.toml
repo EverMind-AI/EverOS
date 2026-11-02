@@ -381,6 +381,7 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._readers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.owner_dir",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",

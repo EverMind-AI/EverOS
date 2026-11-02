@@ -115,6 +115,16 @@ class _DailyLog[T]:
             self.deprecated[md_path][entry_id] = replaced_by
         return True
 
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        return self._remove(
+            scope, lambda item: getattr(item, "session_id", None) == session_id
+        )
+
+    def _remove(self, scope: Scope, drop: Any) -> list[MemoryRef]:
+        gone = [s for s in self.records if s.scope == scope and drop(s.item)]
+        self.records = [s for s in self.records if s not in gone]
+        return [s.ref for s in gone]
+
 
 async def _alive(only_if: SourceCheck | NoSourceCheck) -> bool:
     return isinstance(only_if, NoSourceCheck) or await only_if()
@@ -163,6 +173,39 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             if s.scope == scope and s.ref.entry_id in wanted
         }
 
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        wanted = set(entry_ids)
+        return [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+
+    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
+        wanted = set(entry_ids)
+        gone = [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+        self.records = [s for s in self.records if s not in gone]
+        return [s.ref for s in gone]
+
+    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
+        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
+        return {
+            key
+            for md_path, marks in self.deprecated.items()
+            if md_path.startswith(prefix)
+            for key, merged in marks.items()
+            if merged in targets
+        }
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
+        for md_path, marks in self.deprecated.items():
+            if md_path.startswith(prefix):
+                for key in set(keys) & marks.keys():
+                    del marks[key]
+
     def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
         """Put an episode under a chosen entry id (as if read from md)."""
         ref = MemoryRef(
@@ -176,6 +219,12 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
 class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
     def __init__(self) -> None:
         super().__init__("af", ".atomic_facts")
+
+    async def remove_by_parents(
+        self, scope: Scope, parent_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        parents = set(parent_ids)
+        return self._remove(scope, lambda fact: fact.parent_id in parents)
 
     async def append_many(
         self,

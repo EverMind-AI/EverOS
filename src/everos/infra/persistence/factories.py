@@ -32,6 +32,7 @@ from .markdown import (
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownForesightStore,
+    MarkdownOwnerDirStore,
     MarkdownProfileStore,
 )
 from .memory_root import MemoryRoot
@@ -61,6 +62,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         cluster=SqliteClusterStore(sqlite.cluster),
         memorize_inbox=SqliteMemorizeInboxStore(sqlite.memorize_inbox),
         reflection_report=SqliteReflectionReportStore(sqlite.reflection_report),
+        owner_dir=MarkdownOwnerDirStore(root),
     )
 
 

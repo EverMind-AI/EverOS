@@ -22,6 +22,8 @@ __all__ = [
     "MemcellStore",
     "MemorizeInboxStore",
     "NoSourceCheck",
+    "OwnerDirDeletion",
+    "OwnerDirStore",
     "ProfileStore",
     "ReflectionReportStore",
     "SessionBufferStore",
@@ -142,6 +144,32 @@ class EpisodeStore(Protocol):
         """
         ...
 
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        """The episodes of ``entry_ids`` still in md (no lock)."""
+        ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
+
+    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
+        """Remove these entries, each file under the owner lock; their refs."""
+        ...
+
+    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
+        """Entries the owner's files mark as merged into one of ``targets``."""
+        ...
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
+        ...
+
 
 @runtime_checkable
 class AtomicFactStore(Protocol):
@@ -173,6 +201,20 @@ class AtomicFactStore(Protocol):
         """
         ...
 
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
+
+    async def remove_by_parents(
+        self, scope: Scope, parent_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        """Remove the owner's facts of these parent episodes; their refs."""
+        ...
+
 
 @runtime_checkable
 class ForesightStore(Protocol):
@@ -185,6 +227,14 @@ class ForesightStore(Protocol):
         *,
         only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
 
 
 @runtime_checkable
@@ -211,6 +261,14 @@ class AgentCaseStore(Protocol):
         only_if: SourceCheck | NoSourceCheck,
     ) -> MemoryRef | None: ...
 
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
+
 
 @runtime_checkable
 class AgentSkillStore(Protocol):
@@ -226,6 +284,40 @@ class AgentSkillStore(Protocol):
     async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef: ...
 
     async def delete(self, scope: Scope, skill_name: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class OwnerDirDeletion:
+    """What deleting one owner's directory removed.
+
+    Attributes:
+        refs: The daily-log entries, by index table (``episode``,
+            ``atomic_fact``, ``foresight``, ``agent_case``).
+        count: Entries, plus one per skill directory, plus one for
+            ``user.md``.
+    """
+
+    refs: Mapping[str, Sequence[MemoryRef]]
+    count: int
+
+
+@runtime_checkable
+class OwnerDirStore(Protocol):
+    """Whole owner directories: deletion and its crash recovery."""
+
+    async def delete(self, scope: Scope) -> OwnerDirDeletion:
+        """Remove the owner's directory, keeping today's id counters."""
+        ...
+
+    async def sweep_trash(self) -> int:
+        """Finish deletions a crash interrupted; how many it finished."""
+        ...
+
+    async def owners_with_session(
+        self, app_id: str, project_id: str, session_id: str
+    ) -> list[Scope]:
+        """Every user and agent whose files mention ``session_id`` (slow path)."""
+        ...
 
 
 # ── Conversation state ───────────────────────────────────────────────────
