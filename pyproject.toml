@@ -418,6 +418,8 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
     # The cascade facade assembles its public surface from its own modules.
     "everos.infra.cascade -> everos.infra.cascade._worker",
+    "everos.infra.cascade -> everos.infra.cascade._eraser",
+    "everos.infra.cascade -> everos.infra.cascade._fence",
     "everos.infra.cascade -> everos.infra.cascade.admin",
     "everos.infra.cascade -> everos.infra.cascade.orchestrator",
     "everos.infra.cascade -> everos.infra.cascade.registry",

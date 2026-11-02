@@ -299,6 +299,8 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
         "optimize_prune_retention_seconds",
         "optimize_rebuild_interval_seconds",
         "scan_interval_seconds",
+        # A warning threshold, not a deadline: crossing it only logs.
+        "delete_fence_warn_entries",
     }
     assert not any("timeout" in f or "deadline" in f for f in exposed)
 

@@ -386,6 +386,7 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
         "knowledge_documents",
         "knowledge_topics",
         "embedding",
+        "fence",
     } == {f.name for f in HandlerDeps.__dataclass_fields__.values()}
 
 

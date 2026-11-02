@@ -23,6 +23,7 @@ from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
 from .indexes import AtomicFactIndex as AtomicFactIndex
 from .indexes import EpisodeIndex as EpisodeIndex
+from .indexes import IndexEraser as IndexEraser
 from .indexes import KnowledgeTopicIndex as KnowledgeTopicIndex
 from .indexes import ProfileIndex as ProfileIndex
 from .query import All as All
@@ -112,6 +113,7 @@ __all__ = [
     "IdleTick",
     "Immediate",
     "In",
+    "IndexEraser",
     "IsNull",
     "KnowledgeCatalog",
     "KnowledgeStore",

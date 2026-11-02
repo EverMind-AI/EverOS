@@ -72,6 +72,7 @@ from everos.infra.cascade import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
     CascadeAdmin,
     CascadeOrchestrator,
+    DeleteFence,
 )
 from everos.infra.ome import (
     OfflineEngine,
@@ -313,6 +314,7 @@ def build_application(
             settings.embedding, configured=providers.embedding is not None
         ),
     )
+    fence = DeleteFence(warn_entries=settings.cascade.delete_fence_warn_entries)
     cascade = CascadeOrchestrator(
         memory_root=root,
         tokenizer=tokenizer,
@@ -320,6 +322,7 @@ def build_application(
         index=index,
         sqlite=sqlite,
         watcher_enabled=settings.cascade.watcher_enabled,
+        fence=fence,
     )
     memory = _build_memory_service(
         settings, providers, deps, tokenizer, OmeEventBus(engine)

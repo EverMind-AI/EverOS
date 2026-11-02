@@ -20,6 +20,8 @@ The ``_projections/`` and ``_worker/`` packages are internal; reach them only
 through this facade.
 """
 
+from ._eraser import FencedIndexEraser as FencedIndexEraser
+from ._fence import DeleteFence as DeleteFence
 from ._worker import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS as DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,  # noqa: E501 -- an explicit re-export alias cannot wrap
 )
@@ -38,6 +40,8 @@ __all__ = [
     "CascadeConfig",
     "CascadeHealth",
     "CascadeOrchestrator",
+    "DeleteFence",
+    "FencedIndexEraser",
     "KindSpec",
     "match_kind",
 ]
