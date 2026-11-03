@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from everalgo.types import ConversationItem, MemCell
+from everalgo.types import ChatMessage, MemCell
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel, select
 
@@ -76,13 +76,19 @@ def _msg(n: int) -> CanonicalMessage:
 
 def _record(*ids: str) -> MemcellRecord:
     items = [
-        ConversationItem(role="user", content=mid, timestamp=1_700_000_000 + i)
+        ChatMessage(
+            id=mid,
+            role="user",
+            content=mid,
+            sender_id="u",
+            timestamp=1_700_000_000 + i,
+        )
         for i, mid in enumerate(ids)
     ]
     return MemcellRecord(
         memcell_id=f"mc_{''.join(ids)}",
         cell=MemCell(items=items, timestamp=items[-1].timestamp),
-        raw_type="Conversation",
+        raw_type="conversation",
         message_ids=list(ids),
         sender_ids=["u"],
     )
