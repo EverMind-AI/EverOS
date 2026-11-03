@@ -139,14 +139,16 @@ async def test_commit_cut_rolls_back_when_commit_fails(
         async with original(session_factory) as s:
             yield _BoomSession(s)
 
-    with mock.patch.object(stores_mod, "session_scope", boom_scope):
-        with pytest.raises(RuntimeError, match="database is locked"):
-            await store.commit_cut(
-                session,
-                [_record("m1", "m2")],
-                tail=[],
-                last_memcell_ts=dt.datetime(2025, 1, 1, tzinfo=dt.UTC),
-            )
+    with (
+        mock.patch.object(stores_mod, "session_scope", boom_scope),
+        pytest.raises(RuntimeError, match="database is locked"),
+    ):
+        await store.commit_cut(
+            session,
+            [_record("m1", "m2")],
+            tail=[],
+            last_memcell_ts=dt.datetime(2025, 1, 1, tzinfo=dt.UTC),
+        )
 
     assert [m.message_id for m in await store.list(session)] == ["m1", "m2"]
     async with factory() as s:

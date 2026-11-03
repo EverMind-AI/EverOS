@@ -23,6 +23,7 @@ from typing import Any, cast
 
 import numpy as np
 from everalgo.types import MemCell
+from sqlalchemy import delete, select
 
 from everos.core.utils.datetime import from_timestamp, get_utc_now
 from everos.memory.mappers import cluster as cluster_mapper
@@ -37,8 +38,6 @@ from everos.memory.models import (
     ToolCall,
 )
 from everos.memory.ports import OwnerType, PageResult, Scope, SessionKey
-
-from sqlalchemy import delete, select
 
 from ._base.session import session_scope
 from ._repos import (
