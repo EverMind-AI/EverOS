@@ -38,6 +38,9 @@ from everos.memory.models import (
 )
 from everos.memory.ports import OwnerType, PageResult, Scope, SessionKey
 
+from sqlalchemy import delete, select
+
+from ._base.session import session_scope
 from ._repos import (
     ClusterRepo,
     ConversationStatusRepo,
@@ -46,7 +49,7 @@ from ._repos import (
     ReflectionReportRepo,
     UnprocessedBufferRepo,
 )
-from ._tables import Memcell, MemorizeInbox, UnprocessedBuffer
+from ._tables import ConversationStatus, Memcell, MemorizeInbox, UnprocessedBuffer
 from ._tables import ReflectionReport as ReflectionReportRow
 
 _SESSION_TRACK = "memorize"
@@ -67,15 +70,18 @@ class SqliteSessionBufferStore:
     Args:
         buffer_repo: Repository of the ``unprocessed_buffer`` table.
         status_repo: Repository of the ``conversation_status`` table.
+        memcell_repo: Repository of the ``memcell`` table (for atomic cuts).
     """
 
     def __init__(
         self,
         buffer_repo: UnprocessedBufferRepo,
         status_repo: ConversationStatusRepo,
+        memcell_repo: MemcellRepo,
     ) -> None:
         self._buffer = buffer_repo
         self._status = status_repo
+        self._memcell = memcell_repo
 
     async def list(self, session: SessionKey) -> list[CanonicalMessage]:
         rows = await self._buffer.list_for_track(
@@ -126,6 +132,56 @@ class SqliteSessionBufferStore:
             app_id=session.app_id,
             project_id=session.project_id,
         )
+
+    async def commit_cut(
+        self,
+        session: SessionKey,
+        records: Sequence[MemcellRecord],
+        *,
+        tail: Sequence[CanonicalMessage],
+        last_memcell_ts: dt.datetime | None,
+    ) -> None:
+        """Insert memcells, touch last_memcell_ts, and rewrite the buffer once.
+
+        One SQLite transaction closes the failure window in which a committed
+        memcell could leave its messages still buffered (#539).
+        """
+        memcell_rows = [_record_to_row(r, session) for r in records]
+        tail_rows = [_message_to_row(m, session) for m in tail]
+        async with session_scope(self._memcell.session_factory) as s:
+            if memcell_rows:
+                s.add_all(memcell_rows)
+            if last_memcell_ts is not None:
+                stmt = select(ConversationStatus).where(
+                    ConversationStatus.app_id == session.app_id,
+                    ConversationStatus.project_id == session.project_id,
+                    ConversationStatus.session_id == session.session_id,
+                    ConversationStatus.track == _SESSION_TRACK,
+                )
+                existing = (await s.execute(stmt)).scalars().first()
+                if existing is None:
+                    s.add(
+                        ConversationStatus(
+                            app_id=session.app_id,
+                            project_id=session.project_id,
+                            session_id=session.session_id,
+                            track=_SESSION_TRACK,
+                            last_memcell_ts=last_memcell_ts,
+                        )
+                    )
+                else:
+                    existing.last_memcell_ts = last_memcell_ts
+            await s.execute(
+                delete(UnprocessedBuffer).where(
+                    UnprocessedBuffer.app_id == session.app_id,
+                    UnprocessedBuffer.project_id == session.project_id,
+                    UnprocessedBuffer.session_id == session.session_id,
+                    UnprocessedBuffer.track == _SESSION_TRACK,
+                )
+            )
+            if tail_rows:
+                s.add_all(tail_rows)
+            await s.commit()
 
 
 class SqliteMemcellStore:

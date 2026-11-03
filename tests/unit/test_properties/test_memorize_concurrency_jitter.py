@@ -192,7 +192,7 @@ async def _jittered(
     )
     pipeline = SimpleNamespace(run_cell=run.pipeline_run_cell)
     stores = make_stores(
-        session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo),
+        session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo, memcell_repo),
         memcell=SqliteMemcellStore(memcell_repo),
     )
     memorize_mod = make_memory_service(
@@ -201,7 +201,6 @@ async def _jittered(
             llm=FakeLLMClient(handler=run.reply),
             instructions=bundled_instructions(),
             session_buffer=stores.session_buffer,
-            memcells=stores.memcell,
             limits=cfg.boundary_detection,
             attempt_timeout=lock_timeout,
         ),

@@ -174,6 +174,22 @@ class SessionBufferStore(Protocol):
         self, session: SessionKey, ts: dt.datetime
     ) -> None: ...
 
+    async def commit_cut(
+        self,
+        session: SessionKey,
+        records: Sequence[MemcellRecord],
+        *,
+        tail: Sequence[CanonicalMessage],
+        last_memcell_ts: dt.datetime | None,
+    ) -> None:
+        """Persist cut memcells and rewrite the buffer in one step.
+
+        Implementations that share a transactional store must apply the
+        memcell insert, the last-memcell timestamp touch, and the buffer
+        rewrite atomically so a crash cannot leave messages in both places.
+        """
+        ...
+
 
 @runtime_checkable
 class MemcellStore(Protocol):

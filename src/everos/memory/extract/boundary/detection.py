@@ -31,7 +31,7 @@ from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
-from everos.memory.ports import MemcellStore, SessionBufferStore, SessionKey
+from everos.memory.ports import SessionBufferStore, SessionKey
 
 from .messages import (
     Mode,
@@ -87,8 +87,8 @@ class BoundaryDetection:
     Args:
         llm: Boundary-detection model; ``None`` leaves messages buffered.
         instructions: Custom instructions for the boundary operator.
-        session_buffer: The per-session buffer of uncut messages.
-        memcells: The memcell ledger.
+        session_buffer: The per-session buffer of uncut messages (and the
+            atomic memcell cut).
         limits: Token / message counts past which cells are cut without the
             model.
         attempt_timeout: Seconds one model attempt may take; ``None`` for no
@@ -101,14 +101,12 @@ class BoundaryDetection:
         llm: LLMClient,
         instructions: CustomInstructions,
         session_buffer: SessionBufferStore,
-        memcells: MemcellStore,
         limits: BoundaryDetectionSettings,
         attempt_timeout: float | None = None,
     ) -> None:
         self._llm = llm
         self._instructions = instructions
         self._session_buffer = session_buffer
-        self._memcells = memcells
         self._limits = limits
         self._attempt_timeout = attempt_timeout
         self._quarantine = SessionQuarantine(session_buffer)
@@ -254,27 +252,27 @@ class BoundaryDetection:
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
         raw_type = _RAW_TYPE_BY_MODE[mode]
-        await self._memcells.insert_many(
-            session,
-            [
-                MemcellRecord(
-                    memcell_id=memcell_id,
-                    cell=cell,
-                    raw_type=raw_type,
-                    message_ids=ids,
-                    sender_ids=cell_senders,
-                )
-                for memcell_id, cell, ids, cell_senders in zip(
-                    memcell_ids, result.cells, message_ids, senders, strict=True
-                )
-            ],
-        )
-        last_cell_ts = max(cell.timestamp for cell in result.cells)
-        if last_cell_ts:
-            await self._session_buffer.touch_last_memcell(
-                session, from_timestamp(last_cell_ts)
+        records = [
+            MemcellRecord(
+                memcell_id=memcell_id,
+                cell=cell,
+                raw_type=raw_type,
+                message_ids=ids,
+                sender_ids=cell_senders,
             )
-        await self._session_buffer.replace(session, slice_tail(merged, result.tail))
+            for memcell_id, cell, ids, cell_senders in zip(
+                memcell_ids, result.cells, message_ids, senders, strict=True
+            )
+        ]
+        last_cell_ts = max(cell.timestamp for cell in result.cells)
+        # One transaction: memcell insert + status touch + buffer rewrite.
+        # Separate commits leave an orphan memcell if replace fails (#539).
+        await self._session_buffer.commit_cut(
+            session,
+            records,
+            tail=slice_tail(merged, result.tail),
+            last_memcell_ts=from_timestamp(last_cell_ts) if last_cell_ts else None,
+        )
         return BoundaryOutcome(
             cells=list(result.cells),
             memcell_ids=memcell_ids,

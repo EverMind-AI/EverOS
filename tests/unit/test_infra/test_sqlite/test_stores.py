@@ -86,6 +86,7 @@ async def stores(tmp_path: Path) -> AsyncIterator[_Stores]:
         buffer=SqliteSessionBufferStore(
             UnprocessedBufferRepo(session_factory=factory),
             ConversationStatusRepo(session_factory=factory),
+            MemcellRepo(session_factory=factory),
         ),
         memcell=SqliteMemcellStore(MemcellRepo(session_factory=factory)),
         cluster=SqliteClusterStore(ClusterRepo(session_factory=factory)),

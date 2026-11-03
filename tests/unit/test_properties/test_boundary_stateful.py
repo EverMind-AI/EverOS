@@ -75,7 +75,6 @@ from everos.config import BoundaryDetectionSettings, SqliteSettings
 from everos.core.errors import SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
-    SqliteMemcellStore,
     SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
@@ -146,13 +145,12 @@ class BoundaryMachine(RuleBasedStateMachine):
         self.memcell_repo = MemcellRepo(session_factory=self.factory)
         self.status_repo = ConversationStatusRepo(session_factory=self.factory)
         self.session_buffer = SqliteSessionBufferStore(
-            self.buffer_repo, self.status_repo
+            self.buffer_repo, self.status_repo, self.memcell_repo
         )
         self.boundary = BoundaryDetection(
             llm=FakeLLMClient(handler=self._reply),
             instructions=bundled_instructions(),
             session_buffer=self.session_buffer,
-            memcells=SqliteMemcellStore(self.memcell_repo),
             limits=NO_FORCED_CUTS,
         )
         # the model
