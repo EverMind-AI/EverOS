@@ -30,6 +30,17 @@ def _session_rows(srv: Any, session: str) -> dict[str, int]:
     }
 
 
+def _inbox(srv: Any) -> dict[str, str]:
+    db = system_db(srv.root)
+    return dict(rows(db, "SELECT request_id, payload_json FROM memorize_inbox"))
+
+
+_INBOX = {
+    "failed_s1": '{"messages": ["the original words"]}',
+    "queued_s9": '{"messages": ["other"]}',
+}
+
+
 def test_t3_1_session_delete_clears_the_conversation_state(make_server: Any) -> None:
     """A3: only session_id clears memcells, both buffer tracks, the status and
     the failed request's body; a scope with an owner leaves them."""
@@ -42,6 +53,7 @@ def test_t3_1_session_delete_clears_the_conversation_state(make_server: Any) -> 
         "unprocessed_buffer": 2,
         "conversation_status": 1,
     }
+    assert _inbox(srv) == _INBOX
 
     assert srv.delete(user_id="u1", session_id="s1").status_code == 200
     assert _session_rows(srv, "s1") == {
@@ -49,6 +61,7 @@ def test_t3_1_session_delete_clears_the_conversation_state(make_server: Any) -> 
         "unprocessed_buffer": 2,
         "conversation_status": 1,
     }
+    assert _inbox(srv) == _INBOX
     assert srv.delete(session_id="s1").status_code == 200
 
     assert _session_rows(srv, "s1") == {
@@ -56,10 +69,7 @@ def test_t3_1_session_delete_clears_the_conversation_state(make_server: Any) -> 
         "unprocessed_buffer": 0,
         "conversation_status": 0,
     }
-    inbox = dict(
-        rows(system_db(srv.root), "SELECT request_id, payload_json FROM memorize_inbox")
-    )
-    assert inbox == {"failed_s1": "", "queued_s9": '{"messages": ["other"]}'}
+    assert _inbox(srv) == {"failed_s1": "", "queued_s9": _INBOX["queued_s9"]}
 
 
 def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:

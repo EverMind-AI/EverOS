@@ -30,11 +30,15 @@ MERGE = r"memory consolidation assistant"
 
 @pytest.fixture
 def refl(make_server: Any) -> Any:
+    return _start_refl(make_server)
+
+
+def _start_refl(make_server: Any, **env: str) -> Any:
     srv = make_server()
     (srv.root / "ome.toml").write_text(
         "[strategies.reflect_episodes]\nenabled = true\n"
     )
-    srv.start()
+    srv.start(**env)
     return srv
 
 
@@ -355,11 +359,17 @@ def test_tb7_1_4_merged_facts_in_flight_merged_goes(refl: Any) -> None:
     _require(hits, "TB7.1 (4)")
 
 
-def test_t11_1_b_c_deletions_do_not_wait_on_held_embeddings(refl: Any) -> None:
+def test_t11_1_b_c_deletions_do_not_wait_on_held_embeddings(
+    make_server: Any,
+) -> None:
     """A11 (b)(c): clustering stuck in its embedding, and a Reflection finish
     stuck in its embedding; deletions touching their owner answer within the
-    index bound (15 s x tables + 1 s) instead of waiting."""
-    srv = refl
+    index bound (15 s x tables + 1 s) instead of waiting.
+
+    The embedding timeout is raised past the bound: at the default 30 s an
+    embedding held under a lock times out and retries well inside the bound,
+    so a deletion waiting on it could never fail the bound."""
+    srv = _start_refl(make_server, EVEROS_EMBEDDING__TIMEOUT_SECONDS="120")
     bound = 15 * 4 + 1
     ids = _clustered_pair(srv, "t11u", "manatee1q")
     assert ids is not None, "no cluster formed: not manufactured"
@@ -391,10 +401,10 @@ def test_t11_1_b_c_deletions_do_not_wait_on_held_embeddings(refl: Any) -> None:
         held_through = _window_open(srv, finish)
         finish.release.set()
         srv.proxy.clear()
+        assert took < bound, f"T11.1 (c): the deletion waited {took:.1f} s"
         if not held_through:
             continue
         print(f"T11.1 (c): deletion answered in {took:.2f} s with the finish held")
-        assert took < bound
         hit = True
         break
     assert hit, "T11.1 (c): finish embedding never held through: not manufactured"
