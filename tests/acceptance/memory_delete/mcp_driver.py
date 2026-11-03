@@ -2,8 +2,9 @@
 ``uv run --no-project --with everos-mcp==0.1.1 python -I mcp_driver.py``).
 
 ``full <token>``: add_memory x3 (wait), print ADDED, wait for a line on
-stdin, forget_session, search_memory. ``busy``: forget_session only. Every
-tool result is printed as ``<TOOL>: <isError> <text>``.
+stdin, search_memory (before), forget_session, search_memory (after).
+``busy``: forget_session only. Every tool result is printed as
+``<TOOL>: <isError> <text>``.
 """
 
 import asyncio
@@ -40,6 +41,8 @@ async def main(mode: str, token: str) -> None:
                 print(f"ADD: {r.isError} {_text(r)}", flush=True)
             print("ADDED", flush=True)
             sys.stdin.readline()
+            r = await s.call_tool("search_memory", {"query": f"{token} locker code"})
+            print(f"SEARCH_BEFORE: {r.isError} {_text(r)}", flush=True)
         r = await s.call_tool("forget_session", {})
         print(f"FORGET: {r.isError} {_text(r)}", flush=True)
         if mode == "full":

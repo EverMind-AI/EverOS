@@ -70,7 +70,10 @@ def test_t8_1_forget_session_deletes_what_it_says(server: Any) -> None:
     proc.stdin.flush()
     rest = [ln.strip() for ln in proc.stdout]
     proc.wait(120)
+    print("\n".join(lines + rest))
 
+    found = next(ln for ln in rest if ln.startswith("SEARCH_BEFORE:"))
+    assert "jackal81" in found.split(" ", 2)[2], ("positive control", found)
     forget = next(ln for ln in rest if ln.startswith("FORGET:"))
     assert "does not support deleting" not in forget, forget
     assert forget.startswith("FORGET: False"), forget

@@ -127,22 +127,31 @@ def _baseline(into: Path) -> Path:
     return into
 
 
+# agentic search reranks; without a key both sides answer 422 and compare equal.
+_RERANK = {"EVEROS_RERANK__API_KEY": os.environ.get("DEEPINFRA_API_KEY", "")}
+
+
 def test_t17_1_same_journey_same_shape(make_server: Any, tmp_path: Path) -> None:
     given = os.environ.get("EVEROS_ACC_BASELINE")
     checkout = Path(given) if given else _baseline(tmp_path / "base_tree")
     base = make_server("baseline")
     base.everos = checkout / ".venv" / "bin" / "everos"
     (base.root / "everos.toml").unlink(missing_ok=True)
-    base.start()
+    base.start(**_RERANK)
     before = _journey(base)
     gone = base.post("/memory/delete", {"session_id": "j1"}).status_code
     assert gone == 404, "positive control: the baseline is the old code"
     base.stop()
 
     branch = make_server("branch")
-    branch.start()
+    branch.start(**_RERANK)
     after = _journey(branch)
 
+    for side, steps in (("baseline", before), ("branch", after)):
+        print(f"T17.1 {side}: " + " ".join(f"{n}={c}" for n, c, _ in steps))
+    # Code 0 marks the markdown step, which is no HTTP call.
+    failed = [(n, c) for n, c, _ in before + after if c and not 200 <= c < 300]
+    assert not failed, failed
     assert [s[0] for s in after] == [s[0] for s in before]
     for (name, code_a, keys_a), (_, code_b, keys_b) in zip(before, after, strict=True):
         assert code_b == code_a, (name, code_a, code_b)

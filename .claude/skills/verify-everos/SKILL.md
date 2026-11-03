@@ -34,8 +34,11 @@ starting, as the acceptance tests do.
 ## 2. Is it ready?
 
 `curl -s http://127.0.0.1:$PORT/health` answers 200 within a few seconds.
-Its `cascade.pending` is the number of markdown changes not yet in the index;
-wait for 0 before reading the index. A server that exits instead: the last
+Its `cascade.pending` is the number of markdown changes not yet in the index.
+Before reading the index, poll it once a second until it reads 0 on two
+consecutive samples (`docs/api.md`, and `wait_converged` in
+`tests/acceptance/memory_delete/observe.py`): a single 0 can come between a
+markdown write and its projection being queued. A server that exits instead: the last
 lines of `$ROOT.log` (usually a missing key).
 
 ## 3. Drive it
