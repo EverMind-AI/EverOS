@@ -199,8 +199,6 @@ class ReflectionOrchestrator:
         Returns:
             The merged episode's event, ``None`` on skip.
         """
-        await self._detect_orphans(cluster_id, scope)
-
         members, episodes = await self._load_cluster_episodes(
             cluster_id=cluster_id, scope=scope
         )
@@ -218,6 +216,7 @@ class ReflectionOrchestrator:
                 live=len(episodes),
             )
             return None
+        await self._detect_orphans(cluster_id, scope)
 
         mode, algo_result = await self._reflect_cluster(
             episodes=episodes, owner_id=scope.owner_id

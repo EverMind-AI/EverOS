@@ -439,11 +439,18 @@ async def test_cluster_with_too_few_live_episodes_is_skipped(
         merged_entry_id="ep_m",
         reflected={"cl_thin"} if update else None,
     )
+    # The live merged episode is what the index reports as the cluster's
+    # orphan; a skipped cluster must not warn about it on every run.
+    ports.episode_index.orphans = AsyncMock(return_value=[left] if update else [])
 
-    merged = await ports.orchestrator().run(scope=_SCOPE)
+    with structlog.testing.capture_logs() as logs:
+        merged = await ports.orchestrator().run(scope=_SCOPE)
 
     assert merged == []
     ports.reflector.areflect.assert_not_called()
+    events = [e["event"] for e in logs]
+    assert "reflection_skipped_too_few_episodes" in events
+    assert "reflection_orphan_detected" not in events
 
 
 async def test_llm_failure_skips_cluster(ports: _Ports) -> None:
