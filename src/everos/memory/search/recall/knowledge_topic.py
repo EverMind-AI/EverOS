@@ -17,9 +17,8 @@ import dataclasses
 from collections.abc import Iterable, Mapping, Sequence
 from typing import ClassVar, Literal
 
-from everalgo.rank.fusion import rrf
-from everalgo.types import Candidate
-
+from everos.algo.rank.fusion import rrf
+from everos.algo.types import Candidate
 from everos.memory.models import KnowledgeTopic
 from everos.memory.ports import Filter, KnowledgeTopicIndex, ScoredKnowledgeTopic
 
@@ -93,7 +92,7 @@ type KnowledgeMethod = Literal["keyword", "vector", "hybrid"]
 
 
 class TopicRetriever:
-    """An everalgo ``RetrieveFn`` over the knowledge-topic index.
+    """An everos.algo ``RetrieveFn`` over the knowledge-topic index.
 
     ``keyword`` / ``vector`` recall one route; ``hybrid`` recalls both in
     parallel and fuses them with RRF. Every topic it returns is kept in

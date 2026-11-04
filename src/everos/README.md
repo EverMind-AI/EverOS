@@ -9,9 +9,10 @@ orientation; full architectural detail lives elsewhere.
 everos/
 ├── entrypoints/    Presentation: cli + api
 ├── service/        Application: use case orchestration
+├── algo/           Every memory algorithm (types / llm / boundary / extractors / rank), stateless
 ├── memory/         Domain: extract + search + cascade + custom_instructions + models
 ├── infra/          Infrastructure: persistence/{markdown, sqlite, lancedb, milvus, index}
-├── component/      Cross-cutting providers: llm / embedding / config / utils
+├── component/      Cross-cutting providers: llm / embedding / rerank / parser (incl. backend) / tokenizer
 ├── core/           Runtime base: observability / lifespan / context
 └── config/         Data: Settings + default.toml + custom_instructions files
 ```
@@ -22,12 +23,15 @@ and public API.
 ## Dependency rule
 
 ```
-entrypoints → service → memory → infra
-                          ↓
-                    component / core / config
+entrypoints → service → memory ← infra
+                         ↓
+                        algo
 ```
 
 Single-direction; enforced by `import-linter` in CI.
+
+`algo/` imports no other EverOS layer. Callers supply data, configuration, and
+external capabilities and own all persistent state. See [algo/README.md](algo/README.md).
 
 ## Further reading
 

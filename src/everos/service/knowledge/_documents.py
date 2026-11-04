@@ -13,8 +13,7 @@ __all__ = ["DocumentManager"]
 from collections.abc import Awaitable, Callable, Sequence
 from uuid import uuid4
 
-from everalgo.types import ParsedContent, RawFile
-
+from everos.algo.types import ParsedContent, RawFile
 from everos.core.errors import (
     DocumentNotFoundError,
     DuplicateDocumentError,

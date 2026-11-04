@@ -40,7 +40,7 @@ class GetMemoryType(StrEnum):
     :meth:`GetRequest._validate_owner_memory_type_pair`.
 
     Naming note: all four values use the bare kind name (no
-    ``_memory`` suffix) and match the LanceDB table name + everalgo
+    ``_memory`` suffix) and match the LanceDB table name + everos.algo
     type name for that kind.
     """
 

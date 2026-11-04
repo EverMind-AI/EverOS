@@ -43,7 +43,7 @@ has assigned the fresh case to its cluster. The strategy:
    thinner prompt this run (non-corrupting; the next run catches up),
    not a wrong write.
 4. Feeds the target + existing + supporting trio to
-   :class:`everalgo.agent_memory.AgentSkillExtractor`, then writes the
+   :class:`everos.algo.agent_memory.AgentSkillExtractor`, then writes the
    emitted skills back through the skill store and reaps the
    directory an update left behind when it renamed a skill (see
    :func:`_reap_renamed_skills`).
@@ -75,10 +75,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from everalgo.agent_memory import AgentSkillExtractor, SkillExtractionResult
-from everalgo.types import AgentCase as AlgoAgentCase
-from everalgo.types import AgentSkill as AlgoAgentSkill
-
+from everos.algo.agent_memory import AgentSkillExtractor, SkillExtractionResult
+from everos.algo.types import AgentCase as AlgoAgentCase
+from everos.algo.types import AgentSkill as AlgoAgentSkill
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps
@@ -383,7 +382,7 @@ def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
     strategy never races cascade indexing. Pre-1.2.3 events default
     missing fields to empty — those runs won't have useful data but also
     won't crash. ``case_gate`` rides along only when a gate admitted the case;
-    everalgo reads its presence as "admitted".
+    everos.algo reads its presence as "admitted".
     """
     gate = {"case_gate": event.case_gate} if event.case_gate is not None else {}
     return AlgoAgentCase(
@@ -405,7 +404,7 @@ async def _reap_renamed_skills(
 ) -> None:
     """Delete the directory an update left behind when it renamed a skill.
 
-    everalgo treats a name change as a first-class update
+    everos.algo treats a name change as a first-class update
     (``skill_ops._apply_update`` computes ``name_changed`` and returns
     ``prior.model_copy(update={"name": eff_name, ...})``), so the emitted
     skill keeps ``prior.id`` while carrying the new name. ``_persist_skill``

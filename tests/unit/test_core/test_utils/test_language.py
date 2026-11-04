@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from everalgo.user_memory import OutputLanguage
 
+from everos.algo.user_memory import OutputLanguage
 from everos.core.utils.language import detect_output_language
 
 

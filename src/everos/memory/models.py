@@ -4,7 +4,7 @@ These models live in the domain layer so service / pipeline / ingest can
 all consume the same canonical shapes.
 
 Algorithm-side models (``MemCell``, ``Episode``, ``ChatMessage``) are
-owned by ``everalgo.types`` and are not re-defined here. Re-export here for
+owned by ``everos.algo.types`` and are not re-defined here. Re-export here for
 the ``from everos.memory import MemCell, Episode`` convenience.
 """
 
@@ -16,14 +16,14 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Literal
 
-from everalgo.types import AgentCase as AlgoAgentCase
-from everalgo.types import AtomicFact as AlgoAtomicFact
-from everalgo.types import ChatMessage as AlgoMessage
-from everalgo.types import Episode as AlgoEpisode
-from everalgo.types import Foresight as AlgoForesight
-from everalgo.types import MemCell as MemCell
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from everos.algo.types import AgentCase as AlgoAgentCase
+from everos.algo.types import AtomicFact as AlgoAtomicFact
+from everos.algo.types import ChatMessage as AlgoMessage
+from everos.algo.types import Episode as AlgoEpisode
+from everos.algo.types import Foresight as AlgoForesight
+from everos.algo.types import MemCell as MemCell
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,7 +44,7 @@ class CanonicalMessage(BaseModel):
     """Canonical internal message after ingest normalisation.
 
     Carries enough metadata to be persisted into ``unprocessed_buffer``,
-    adapted into ``everalgo.types.Message`` for the algo layer, and
+    adapted into ``everos.algo.types.Message`` for the algo layer, and
     reconstructed back when ``adetect`` returns a ``tail``.
 
     Field split (mirrors src_old ``RawMessage.content_items``):
@@ -92,7 +92,7 @@ class IngestResult(BaseModel):
 class Episode(BaseModel):
     """Domain Episode — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.Episode`. everos
+    Composed (not inherited) from :class:`everos.algo.types.Episode`. everos
     keeps the *semantic* fields algo emits (``owner_id``, narrative
     ``episode`` text, ``subject``, ``timestamp``) and adds engineering
     context (``session_id``, ``sender_ids``, ``parent_id``). The global
@@ -101,10 +101,10 @@ class Episode(BaseModel):
     own.
 
     ``summary`` is a short display preview of ``episode`` and is required,
-    as everalgo makes it; an episode stored before it existed reads back
+    as everos.algo makes it; an episode stored before it existed reads back
     with ``""``. ``subject`` is the episode's title.
 
-    ``parent_id`` is the source memcell id. The new everalgo types no
+    ``parent_id`` is the source memcell id. The new everos.algo types no
     longer carry ``parent_id`` on Episode / Foresight / AtomicFact, so
     everos fills it from the memcell currently being processed (the
     pipeline knows the id — it created the memcell). ``parent_type`` is
@@ -168,7 +168,7 @@ class Episode(BaseModel):
 class AtomicFact(BaseModel):
     """Domain AtomicFact — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.AtomicFact`. Mirrors
+    Composed (not inherited) from :class:`everos.algo.types.AtomicFact`. Mirrors
     :class:`Episode`: everos keeps the *semantic* fields algo emits
     (``owner_id`` / ``content`` / ``timestamp``) and adds engineering context
     (``session_id`` / ``parent_id``) so md writer + cascade can audit-link
@@ -180,7 +180,7 @@ class AtomicFact(BaseModel):
     as a whole.)
 
     ``parent_id`` is the source episode entry_id, supplied by the caller
-    because the new everalgo types no longer carry it on AtomicFact.
+    because the new everos.algo types no longer carry it on AtomicFact.
     """
 
     owner_id: str
@@ -222,7 +222,7 @@ class AtomicFact(BaseModel):
 class Foresight(BaseModel):
     """Domain Foresight — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.Foresight`. Mirrors
+    Composed (not inherited) from :class:`everos.algo.types.Foresight`. Mirrors
     :class:`Episode`: everos keeps the semantic fields algo emits
     (``owner_id`` / ``foresight`` / ``evidence`` / ``timestamp`` plus the
     optional time-window trio) and adds engineering context
@@ -277,13 +277,13 @@ class Foresight(BaseModel):
 class AgentCase(BaseModel):
     """Domain AgentCase — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.AgentCase`; the two
+    Composed (not inherited) from :class:`everos.algo.types.AgentCase`; the two
     convert through :mod:`everos.memory.mappers.agent_case`. everos keeps the
     semantic fields algo emits (``task_intent`` / ``approach`` /
     ``quality_score`` / ``key_insight`` / ``timestamp``) and adds engineering
     context (``owner_id`` = agent_id, ``session_id`` / ``parent_id``).
 
-    ``case_gate`` is the admission decision when the case passed everalgo's
+    ``case_gate`` is the admission decision when the case passed everos.algo's
     correctness gate (``None`` when no gate ran). It travels with the case to
     skill extraction, which treats an admitted case as worth a skill whatever
     its quality score; the case markdown does not record it.
@@ -307,7 +307,7 @@ class AgentCase(BaseModel):
 class ExplicitInfoItem(BaseModel):
     """One fact a source states about the profile's owner.
 
-    Same shape as everalgo's ``ExplicitInfoItem``; extra keys a host attaches
+    Same shape as everos.algo's ``ExplicitInfoItem``; extra keys a host attaches
     ride along.
 
     Attributes:
@@ -328,7 +328,7 @@ class ExplicitInfoItem(BaseModel):
 class ImplicitTraitItem(BaseModel):
     """One stable pattern inferred about the profile's owner.
 
-    Same shape as everalgo's ``ImplicitTraitItem``; extra keys ride along.
+    Same shape as everos.algo's ``ImplicitTraitItem``; extra keys ride along.
 
     Attributes:
         description: The pattern as one short sentence.
@@ -383,7 +383,7 @@ class Profile(BaseModel):
         """A stored profile, without the items that are no longer items.
 
         Early profiles could hold an item with no ``description``; one bad
-        item must not fail every read of its profile, nor reach everalgo on
+        item must not fail every read of its profile, nor reach everos.algo on
         the next update. Each such item is dropped with a
         ``profile_entry_dropped`` warning.
         """
@@ -436,7 +436,7 @@ def _preview(item: object) -> str:
 class AgentSkill(BaseModel):
     """Domain agent skill — a reusable procedure aggregated from cases.
 
-    Mirrors the fields of everalgo-core 0.6 ``AgentSkill``; stage 3/4
+    Mirrors the fields of ``everos.algo.types.AgentSkill``; stage 3/4
     converges the two. ``id`` survives a rename, which is how a renamed
     skill is told apart from a new one.
     """
@@ -454,7 +454,7 @@ class AgentSkill(BaseModel):
 class Cluster(BaseModel):
     """Domain cluster snapshot — a group of related memories of one owner.
 
-    Mirrors the fields of everalgo-core 0.6 ``clustering.Cluster`` with the
+    Mirrors the fields of ``everos.algo.clustering.Cluster`` with the
     centroid as a plain float tuple, so the domain carries no numpy; stage
     3/4 converges the two.
     """
@@ -472,7 +472,7 @@ class Cluster(BaseModel):
 class KnowledgeMemory(BaseModel):
     """Domain knowledge memory — one node of an extracted topic tree.
 
-    Mirrors everalgo-knowledge ``KnowledgeMemory`` (flattened DFS form; the
+    Mirrors ``everos.algo.types.KnowledgeMemory`` (flattened DFS form; the
     node at ``topic_index=0`` is the document root and carries the title as
     ``topic`` and the document summary). :mod:`everos.memory.mappers.knowledge`
     converts between the two.

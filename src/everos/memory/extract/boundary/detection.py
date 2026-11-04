@@ -5,7 +5,7 @@ the user-memory pipeline and, in agent mode, the agent-memory pipeline. It
 also owns the ``memcell`` ledger: each cell gets exactly one row, whatever
 the mode, and both pipelines reference that row's ``memcell_id``.
 
-Both modes run :func:`everalgo.boundary.adetect_boundaries` over one buffer
+Both modes run :func:`everos.algo.boundary.adetect_boundaries` over one buffer
 track. Chat mode first drops tool rows; agent mode keeps them, and the
 algorithm keeps them in the cells without showing them to the model.
 Switching mode needs a fresh process (``settings.memorize.mode``).
@@ -20,10 +20,9 @@ import uuid
 from collections.abc import Sequence
 from typing import Literal, NamedTuple
 
-from everalgo.boundary import DetectionResult, adetect_boundaries
-from everalgo.llm import LLMClient, LLMOutputError
-from everalgo.types import MemCell
-
+from everos.algo.boundary import DetectionResult, adetect_boundaries
+from everos.algo.llm import LLMClient, LLMOutputError
+from everos.algo.types import MemCell
 from everos.config import BoundaryDetectionSettings
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
@@ -201,7 +200,7 @@ class BoundaryDetection:
 
         Three outcomes say the session's input itself is bad and the next
         call would hit it again: an unusable reply on every attempt
-        (``LLMOutputError``), a message the operator refuses (everalgo's
+        (``LLMOutputError``), a message the operator refuses (everos.algo's
         ``InvalidInputError``, a ``ValueError``) and a row that maps to no
         conversation item (``ValueError``). Only the first is retried. Any
         other error is infrastructure and propagates uncounted.

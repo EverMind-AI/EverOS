@@ -6,13 +6,13 @@ later call on the session would merge it back in and fail the same way. The
 third consecutive call that ends this way moves the session's buffer (and
 that call's own messages) to the ``quarantine`` track, raises an error the
 client can tell apart, and the next call starts from an empty buffer.
-Input the operator cannot take at all -- a message everalgo refuses, or a
+Input the operator cannot take at all -- a message everos.algo refuses, or a
 row that maps to no conversation item (an orphan tool result) -- counts the
 same way but is never retried. Infrastructure failures (no quota, network)
 are not counted: they propagate on the first attempt, so the buffer waits
 for the service to come back.
 
-Real: ingest, :class:`BoundaryDetection`, everalgo's boundary operator and
+Real: ingest, :class:`BoundaryDetection`, everos.algo's boundary operator and
 the SQLite stores on a temp file. Scripted: the model's replies.
 """
 
@@ -24,10 +24,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from everalgo.llm import LLMOutputError
-from everalgo.testing import FakeLLMClient
 from sqlmodel import SQLModel
 
+from everos.algo.llm import LLMOutputError
 from everos.config import BoundaryDetectionSettings, SqliteSettings
 from everos.core.errors import LLMServiceError, SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
@@ -54,6 +53,7 @@ from tests.fakes import (
     bundled_instructions,
     unused_raw_file_builder,
 )
+from tests.fakes.llm_client import FakeLLMClient
 
 BASE_TS = 1_700_000_000_000
 GARBAGE: str = UNUSABLE_REPLY

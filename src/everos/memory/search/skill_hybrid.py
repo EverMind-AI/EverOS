@@ -10,9 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from everalgo.rank.fusion import rrf
-from everalgo.types import Candidate
-
+from everos.algo.rank.fusion import rrf
+from everos.algo.types import Candidate
 from everos.core.observability.logging import get_logger
 from everos.memory.models import AgentSkill
 from everos.memory.search.callbacks import build_skill_rerank_fn

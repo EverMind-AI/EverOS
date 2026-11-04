@@ -2,7 +2,7 @@
 
 skill_hybrid is the **cross-encoder lane** for skill HYBRID retrieval.
 The LLM-rerank lane lives in ``SearchManager._search_agent_skills`` and
-goes through ``everalgo.rank.skill.arank`` directly — covered by
+goes through ``everos.algo.rank.skill.arank`` directly — covered by
 ``test_manager`` tests instead.
 
 Covered surfaces:

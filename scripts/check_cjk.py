@@ -45,10 +45,17 @@ def _is_allowlisted(path: str) -> bool:
     # 4. Translated doc mirrors, e.g. README.zh.md.
     if re.search(r"\.(zh|ja|ko)\.md$", path):
         return True
-    # 5. Filenames explicitly marked with a CJK/locale token.
+    # 5. Filenames explicitly marked with a CJK/locale token, and locale
+    #    directories such as ``prompts/zh/``.
     if re.search(r"(^|[._-])(cjk|zh|ja|ko)([._-]|$)", name):
         return True
-    # 6. Third-party integration samples: each use case ships its own demo
+    if re.search(r"/(zh|ja|ko)/", path):
+        return True
+    # 6. Prompt assets: the extraction prompts quote multilingual examples
+    #    because handling non-English input is the point, like test fixtures.
+    if re.search(r"^src/everos/.*/prompts/.*\.py$", path):
+        return True
+    # 7. Third-party integration samples: each use case ships its own demo
     #    content and branding for its audience, like test fixtures do.
     return path.startswith("use-cases/")
 

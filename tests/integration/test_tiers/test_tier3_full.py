@@ -11,8 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from everalgo.rank.protocols import AgenticDecision
 from httpx import AsyncClient
+
+from everos.algo.rank.protocols import AgenticDecision
 
 from .conftest import (
     add_and_flush,
@@ -57,12 +58,12 @@ async def test_agentic_search_succeeds(
 ) -> None:
     """AGENTIC now clears the rerank gate (Task 12).
 
-    The everalgo agentic retrieval algorithm (multi-query refinement,
+    The everos.algo agentic retrieval algorithm (multi-query refinement,
     round-2 expansion) has its own dedicated unit coverage in
     ``tests/unit/test_memory/test_search/test_agentic.py``; this test's
     job is only to prove the HTTP/capability wiring reaches it, so
     ``aagentic_retrieve`` is patched the same way that unit suite does
-    (see its ``fake_aagentic``) rather than re-driving everalgo's real
+    (see its ``fake_aagentic``) rather than re-driving everos.algo's real
     multi-query LLM loop end-to-end.
     """
 

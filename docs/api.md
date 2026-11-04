@@ -135,7 +135,7 @@ default — so a session with no tool use never yields a case), and so is one
 that does not end on an assistant text message. Trajectories that pass
 those gates can still be dropped by the extractor's own "worth extracting"
 LLM filter. EverOS logs the skip as `agent_case_skipped_by_algo` with the
-memcell and session ids; the reason itself is on the adjacent everalgo log
+memcell and session ids; the reason itself is on the adjacent algorithm log
 line, `skipping memcell (n_items=N): <reason> <detail>`. The same
 "seconds later" rule for every OME-produced kind is summarised in
 [how-memory-works.md](how-memory-works.md).

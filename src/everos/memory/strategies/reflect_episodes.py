@@ -51,7 +51,7 @@ async def reflect_episodes(event: CronTick, deps: MemoryDeps) -> list[Event]:
         return []
 
     # Deferred: avoid pulling LLM libs at module import time.
-    from everalgo.user_memory import EpisodeReflector
+    from everos.algo.user_memory import EpisodeReflector
 
     orchestrator = ReflectionOrchestrator(
         cluster_store=deps.stores.cluster,

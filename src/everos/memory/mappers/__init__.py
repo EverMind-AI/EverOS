@@ -1,4 +1,4 @@
-"""Pure conversions between everalgo value objects and memory domain models.
+"""Pure conversions between everos.algo value objects and memory domain models.
 
 Each module pairs ``from_algo`` / ``to_algo`` for one kind. They hold no
 state and touch no storage, so both directions are trivially testable.

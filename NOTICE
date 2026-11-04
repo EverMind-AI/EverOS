@@ -44,12 +44,12 @@ CairoSVG  (LGPL-3.0 — optional dependency, not installed by default)
 --------------------------------------------------------------------------------
 
 Trigger: ``pip install everos[multimodal]``
-Path:    everos[multimodal] -> everalgo-parser[svg] -> cairosvg
+Path:    everos[multimodal] -> cairosvg
 License: GNU Lesser General Public License, version 3
          https://www.gnu.org/licenses/lgpl-3.0.html
 Project: https://cairosvg.org/
 
-CairoSVG is dynamically linked through ``everalgo-parser`` and is only
+CairoSVG is imported lazily by the SVG branch of ``component/parser/backend`` and is only
 pulled in when the user explicitly opts into the ``multimodal`` extra.
 LGPL-3.0 is compatible with Apache-2.0 redistribution in this dynamic-
 linking arrangement; if you statically link or modify CairoSVG itself,

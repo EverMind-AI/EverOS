@@ -13,9 +13,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from everalgo.types import ChatMessage, MemCell
-from everalgo.types import Profile as AlgoProfile
 
+from everos.algo.types import ChatMessage, MemCell
+from everos.algo.types import Profile as AlgoProfile
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated

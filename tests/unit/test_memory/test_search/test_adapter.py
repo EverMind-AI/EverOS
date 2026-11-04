@@ -8,13 +8,13 @@ from everos.memory.search.adapter import resolve_pipeline
 from everos.memory.search.dto import SearchMethod
 
 
-def test_keyword_skips_everalgo() -> None:
+def test_keyword_skips_arank() -> None:
     fm, cfg = resolve_pipeline(SearchMethod.KEYWORD, "episode")
     assert fm is None
     assert cfg is None
 
 
-def test_vector_skips_everalgo() -> None:
+def test_vector_skips_arank() -> None:
     fm, cfg = resolve_pipeline(SearchMethod.VECTOR, "episode")
     assert fm is None
     assert cfg is None

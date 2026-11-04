@@ -26,7 +26,6 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from everalgo.testing import FakeLLMClient
 
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence import MemoryRoot
@@ -35,6 +34,7 @@ from everos.service import (
     build_application,
 )
 from tests.fakes import agent_trajectory_messages, make_providers, memorize_llm
+from tests.fakes.llm_client import FakeLLMClient
 from tests.fakes.storage import Storage
 
 _under_test: dict[str, Any] = {}

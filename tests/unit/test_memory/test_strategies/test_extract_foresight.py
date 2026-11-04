@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import structlog.testing
-from everalgo.types import (
+
+from everos.algo.types import (
     ChatMessage,
     Foresight,
     MemCell,
@@ -13,7 +14,6 @@ from everalgo.types import (
     ToolCallRequest,
     ToolCallResult,
 )
-
 from everos.memory.events import UserPipelineStarted
 from everos.memory.strategies import EXTRACT_FORESIGHT_SPEC, extract_foresight
 from tests.fakes import make_deps
@@ -239,7 +239,7 @@ async def test_tool_calls_do_not_crash_the_sender_scan(
     sender was resolved, before any LLM call. That made the strategy sound
     on plain user chat and guaranteed to dead-letter on agent
     trajectories, which is the shape ``/add`` receives from an agent
-    session. everalgo contracts for the mixed case
+    session. everos.algo contracts for the mixed case
     (``user_memory/_render.chat_messages``), so the fix is to honour that
     contract rather than pre-filter by hand.
 

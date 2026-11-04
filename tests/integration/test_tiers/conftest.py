@@ -24,7 +24,7 @@ LLM stubbing notes:
 - Search holds that same LLM only to satisfy the
   ``enable_llm_rerank=True`` non-None guard in
   ``SearchManager._validate_components``. That LLM is never actually
-  invoked in this suite: ``everalgo.rank.rerank._basic_arank`` only
+  invoked in this suite: ``everos.algo.rank.rerank._basic_arank`` only
   calls the LLM when ``enable_rerank and scored`` — and these tests
   never seed agent_case/agent_skill data, so ``scored`` is always empty.
   The memorize fake therefore serves search too;
@@ -45,11 +45,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 import pytest_asyncio
-from everalgo.testing import FakeLLMClient
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.rerank import RerankResult
 from tests.fakes import StorageView, make_providers, memorize_llm, open_storage_view
+from tests.fakes.llm_client import FakeLLMClient
 
 if TYPE_CHECKING:
     from everos.service import Application

@@ -1,4 +1,4 @@
-"""everalgo ``LLMClient`` conformance suite run against :class:`OpenAIProvider`.
+"""everos.algo ``LLMClient`` conformance suite run against :class:`OpenAIProvider`.
 
 The harness captures requests at the HTTP transport (``httpx.MockTransport``
 under the real ``openai.AsyncOpenAI``), so ``EffectiveRequest`` is read off the
@@ -14,17 +14,17 @@ from typing import Any
 
 import httpx
 import pytest
-from everalgo.llm import LLMMessage
-from everalgo.testing import (
+
+from everos.algo.llm import LLMMessage
+from everos.component.llm import OpenAIProvider
+from tests.fakes.llm_conformance import (
     NOT_SENT,
     OPTIONAL_CHECKS,
     REQUIRED_CHECKS,
+    ConformanceCheck,
     EffectiveRequest,
     UpstreamStub,
 )
-from everalgo.testing.conformance import ConformanceCheck
-
-from everos.component.llm import OpenAIProvider
 
 _BASE_URL = "http://test.local/v1"
 

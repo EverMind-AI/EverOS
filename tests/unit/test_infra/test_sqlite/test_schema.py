@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from everalgo.types import ChatMessage, MemCell
 from sqlalchemy import text
 
+from everos.algo.types import ChatMessage, MemCell
 from everos.config import SqliteSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (

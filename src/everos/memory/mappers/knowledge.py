@@ -1,12 +1,11 @@
-"""everalgo knowledge types <-> domain knowledge models."""
+"""everos.algo knowledge types <-> domain knowledge models."""
 
 from __future__ import annotations
 
 __all__ = ["category_to_algo", "memory_from_algo"]
 
-from everalgo.types import CategorySpec
-from everalgo.types import KnowledgeMemory as AlgoKnowledgeMemory
-
+from everos.algo.types import CategorySpec
+from everos.algo.types import KnowledgeMemory as AlgoKnowledgeMemory
 from everos.memory.models import KnowledgeCategory, KnowledgeMemory
 
 

@@ -46,9 +46,20 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 
 ### 3. Algorithm-orchestration separation
 
-`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-agent-memory` / `-rank` / `-knowledge`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for boundary detection, episode, profile and reflection it can append requirements to the operator's bundled rules via custom instructions. everalgo knows nothing about storage.
+Every memory algorithm lives in [`everos.algo`](../src/everos/algo/README.md):
+boundary detection, the user- and agent-memory extractors (memory-cell
+extraction, episode generation, profile evolution, cases and skills), online
+clustering, document topic extraction and ranking, with their prompts and the
+shared data contracts. Algorithms are stateless: the host passes data,
+configuration values, workflow state, and any external capabilities (the LLM
+client, retrieval callbacks) explicitly, and owns persistence and client
+lifecycles. EverOS passes storage-free data in and receives structured results;
+for boundary detection, episode, profile and reflection it can append
+requirements to the operator's bundled rules via custom instructions.
 
-This boundary lets the same algorithm power both this open-source lightweight version and other product forms.
+Keeping the algorithms independent of the host (they import no other EverOS
+layer) keeps them reusable across product forms and lets a family become a
+separate package later without taking EverOS state with it.
 
 ### 4. DDD layered architecture
 

@@ -15,9 +15,9 @@ from typing import Any
 
 import httpx
 import pytest
-from everalgo.llm import LLMMessage, StrictOutputModel
 from pydantic import ValidationError
 
+from everos.algo.llm import LLMMessage, StrictOutputModel
 from everos.component.llm import LLMCallError, OpenAIProvider, TokenUsage
 
 _VALID = '{"text": "ok"}'

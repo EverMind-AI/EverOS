@@ -1,13 +1,13 @@
 # Custom instructions
 
-Custom instructions let a deployment add requirements to an everalgo
+Custom instructions let a deployment add requirements to an `everos.algo`
 operator without touching the operator's prompt. The text is passed as the
-operator's `custom_instructions=` argument; everalgo appends it after its
+operator's `custom_instructions=` argument; the operator appends it after its
 bundled rules, so it **adds** to them and can never replace a rule or change
 the output shape the operator validates against.
 
 They replace the former prompt-slot files, which swapped the whole prompt
-template. everalgo's 2026-10 contract line removed
+template. The 2026-10 operator line removed
 whole-prompt overrides: an operator's rules and its strict reply schema are
 written together, so a replaced prompt could no longer be checked against
 the schema it has to produce.
@@ -16,7 +16,7 @@ the schema it has to produce.
 
 | File | Operator | Where it is appended |
 |---|---|---|
-| `boundary_detection.yaml` | `everalgo.boundary.adetect_boundaries` | last block of the system message |
+| `boundary_detection.yaml` | `everos.algo.boundary.adetect_boundaries` | last block of the system message |
 | `episode_extract.yaml` | `EpisodeExtractor.aextract` | last block of the system message |
 | `profile_extract.yaml` | `ProfileExtractor.aextract` (every INIT / UPDATE / COMPACT / REGROUP call) | additional-requirements section before the data |
 | `reflect.yaml` | `EpisodeReflector.areflect` | last block of the system message |

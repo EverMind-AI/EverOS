@@ -1,7 +1,7 @@
 """The canned knowledge scripts satisfy the real extractor they stand in for.
 
 Each script under ``tests/fakes/llm_scripts/knowledge`` is held to the strict
-reply model the everalgo knowledge extractor requests, and the default set is
+reply model the everos.algo knowledge extractor requests, and the default set is
 fed to the real extractor, so a script that drifted fails here rather than
 inside the tier-3 integration suite.
 """
@@ -11,11 +11,11 @@ from __future__ import annotations
 import json
 
 import pytest
-from everalgo.knowledge import KnowledgeExtractor
-from everalgo.knowledge import _replies as replies
-from everalgo.llm import parse_reply
-from everalgo.types import CategorySpec, ParsedContent
 
+from everos.algo.knowledge import KnowledgeExtractor
+from everos.algo.knowledge import _replies as replies
+from everos.algo.llm import parse_reply
+from everos.algo.types import CategorySpec, ParsedContent
 from tests.fakes import KNOWLEDGE_OPERATORS, knowledge_llm, knowledge_script
 
 

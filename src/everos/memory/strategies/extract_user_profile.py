@@ -45,8 +45,7 @@ profile in a follow-up turn (each cluster gets re-evaluated on every
 
 from __future__ import annotations
 
-from everalgo.user_memory import ProfileExtractor
-
+from everos.algo.user_memory import ProfileExtractor
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps

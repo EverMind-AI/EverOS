@@ -1,7 +1,7 @@
 """``memcell`` — metadata + payload archive for boundary-detected MemCells.
 
 Holds ``message_ids_json`` / ``sender_ids_json`` (JSON arrays of audit
-ids) plus ``payload_json`` — the full :class:`everalgo.types.MemCell`
+ids) plus ``payload_json`` — the full :class:`everos.algo.types.MemCell`
 serialised via ``model_dump_json``. The payload is what
 ``unprocessed_buffer`` cannot keep (boundary's delete-then-insert clears
 the staging slice once messages fold into a cell): downstream offline
@@ -14,7 +14,7 @@ The three nullable ``case_*`` columns stamp the agent-case extraction
 outcome: ``case_extracted_at`` is set once extraction ran to completion
 (not once it produced something); ``case_skip_reason`` is ``NULL`` exactly
 when a case came out, otherwise it names the gate that rejected the cell
-(everalgo's ``CaseSkipReason`` value, or ``no_agent_sender``);
+(everos.algo's ``CaseSkipReason`` value, or ``no_agent_sender``);
 ``case_skip_detail_json`` carries that gate's detail, bounded. They are
 written for diagnosis only -- nothing reads them through an API. Databases
 created before these columns existed gain them at schema creation

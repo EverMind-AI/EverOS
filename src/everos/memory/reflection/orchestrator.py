@@ -29,9 +29,8 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from everalgo.types import Episode as AlgoEpisode
-    from everalgo.user_memory import EpisodeReflector
-
+    from everos.algo.types import Episode as AlgoEpisode
+    from everos.algo.user_memory import EpisodeReflector
     from everos.component.embedding import EmbeddingProvider
 
 from everos.core.errors import AppError
@@ -625,7 +624,7 @@ def _owner_filter(scope: Scope) -> Filter:
 def _to_algo_episodes(episodes: list[StoredEpisode]) -> list[AlgoEpisode]:
     """Project stored episodes onto the algo Episode type the reflector reads."""
     # Deferred: avoid pulling LLM libs at module import time.
-    from everalgo.types import Episode as AlgoEpisode
+    from everos.algo.types import Episode as AlgoEpisode
 
     return [
         AlgoEpisode(

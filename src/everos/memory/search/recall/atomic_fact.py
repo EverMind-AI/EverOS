@@ -20,6 +20,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
+from everos.algo.rank import FactCandidate
 from everos.memory.models import AtomicFact
 from everos.memory.ports import (
     AtomicFactIndex,
@@ -29,7 +30,6 @@ from everos.memory.ports import (
     all_of,
     one_of,
 )
-from everos.memory.search._candidates import FactCandidate
 
 from .base import RecallerDeps, RecallResult, from_hits
 
@@ -56,7 +56,7 @@ class AtomicFactRecaller:
     """
 
     kind: ClassVar[str] = "atomic_fact"
-    everalgo_memory_type: ClassVar[str] = "episodic"
+    algo_memory_type: ClassVar[str] = "episodic"
 
     def __init__(self, deps: RecallerDeps, index: AtomicFactIndex) -> None:
         self._deps = deps

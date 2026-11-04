@@ -1,4 +1,4 @@
-"""memory.extract.parser — multimodal ContentItem parsing via everalgo.parser.
+"""memory.extract.parser — multimodal ContentItem parsing via the parser backend.
 
 External usage:
     from everos.memory.extract.parser import (
@@ -8,7 +8,8 @@ External usage:
         require_multimodal,
     )
 
-Only :func:`enrich_content_items` touches the optional ``everalgo.parser``
+Only :func:`enrich_content_items` touches the optional
+``everos.component.parser.backend``
 extra, and it does so lazily (inside the call). The availability helpers
 never import it, so this package is safe to import without the
 ``everos[multimodal]`` extra installed.

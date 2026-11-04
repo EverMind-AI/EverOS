@@ -1,7 +1,7 @@
 """Repository for the ``cluster`` + ``cluster_member`` pair.
 
 Bridges between the storage row shape and the algo-side
-:class:`everalgo.clustering.Cluster` value object. Callers always work in
+:class:`everos.algo.clustering.Cluster` value object. Callers always work in
 the algo type — this repo handles the centroid bytes round-trip, the
 preview JSON round-trip, and the membership join so the algo's
 ``members: list[str]`` field is always fully populated on read. The
@@ -23,11 +23,11 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from everalgo.clustering import Cluster as AlgoCluster
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
@@ -41,7 +41,7 @@ class ClusterRepo(RepoBase[Cluster]):
     """CRUD repository for the ``cluster`` + ``cluster_member`` table pair.
 
     Bridges between the SQLite row shape and the algo-side
-    :class:`everalgo.clustering.Cluster` value object, handling centroid
+    :class:`everos.algo.clustering.Cluster` value object, handling centroid
     bytes round-trip, preview JSON serialisation, and membership joins.
     """
 

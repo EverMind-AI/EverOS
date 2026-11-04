@@ -470,12 +470,10 @@ class RunSpec(BaseModel):
     """The memory root queried. A run that skips ADD is scored against a store somebody
     else built, so the root is part of the result's identity."""
     packages: dict[str, str] = Field(default_factory=dict)
-    """Installed versions of the packages that can change the numbers -- the everalgo
-    family above all. `everos_version` alone is not enough: EverOS 1.2.3 on
-    everalgo-user-memory 0.3.1 and on 0.4.0 are two different experiments, because that
-    package IS the extraction algorithm. The shipped stores were extracted with 0.3.1
-    while this repository pins 0.4.0, so a from-scratch end-to-end run cannot reproduce
-    published numbers by construction."""
+    """Installed versions of the packages that can change the numbers. The algorithms
+    ship inside everos itself, so `everos_version` names the extraction algorithm too;
+    the shipped stores were extracted by earlier releases, so a from-scratch end-to-end
+    run cannot reproduce published numbers by construction."""
     serving: list[ServingSpec] = Field(default_factory=list)
     ingest_identity: dict[str, str] = Field(default_factory=dict)
     """What must match for an already-ingested store to be reusable -- see
@@ -550,10 +548,10 @@ def ingest_identity(
 
     * ``top_k`` -- it caps how many episodes are injected into the answer prompt and has
       no bearing on what was ingested.
-    * the ``everalgo`` version -- extraction quality across the versions in use here was
-      measured and the difference did not move the benchmark, so a bump must not throw
-      away hours of ingest. The versions are still recorded in ``RunSpec.packages`` for
-      provenance; they just do not gate resume.
+    * the algorithm version (``everos`` itself now) -- extraction quality across the
+      versions in use here was measured and the difference did not move the benchmark,
+      so a bump must not throw away hours of ingest. The versions are still recorded
+      in ``RunSpec.packages`` for provenance; they just do not gate resume.
     """
     backbone = next(
         (s.model for s in serving if s.role in ("extraction", "backbone")), ""

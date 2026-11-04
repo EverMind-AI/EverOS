@@ -8,7 +8,7 @@ paths:
 
 - **`from __future__ import annotations`** is the first import in every module.
 - **Import order** (ruff `I` enforces, `make format` fixes): stdlib → third-party
-  → first-party (`everalgo`, then `everos`). One group per blank-line-separated block.
+  → first-party (`everos`). One group per blank-line-separated block.
 - **Absolute imports** for cross-package references (`from everos.memory import ...`).
   Relative imports (`from .models import ...`) only **within** a package, typically
   in its `__init__.py`.

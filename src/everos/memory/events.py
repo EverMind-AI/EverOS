@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from everalgo.types import MemCell
 from pydantic import BaseModel, ConfigDict, Field
 
+from everos.algo.types import MemCell
 from everos.memory.ports import Event
 
 
@@ -145,7 +145,7 @@ class AgentCaseExtracted(Event):
     short-circuit before any embedding work when algo would not distil the
     case into a skill.
     ``case_timestamp_ms`` drives the algo-side ``Cluster.last_ts`` for the
-    time-window filter in :func:`everalgo.clustering.cluster_by_geometry`.
+    time-window filter in :func:`everos.algo.clustering.cluster_by_geometry`.
     """
 
     memcell_id: str

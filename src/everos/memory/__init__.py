@@ -9,9 +9,9 @@ External usage:
         ToolCall, MemCell, Episode,
     )
 
-everalgo's own models are not re-exported: the domain converts to and
+everos.algo's own models are not re-exported: the domain converts to and
 from them in :mod:`everos.memory.mappers`, and code that calls an
-everalgo operator imports its types from ``everalgo`` directly.
+everos.algo operator imports its types from ``everos.algo`` directly.
 
 Storage is reached only through the protocols in :mod:`everos.memory.ports`;
 path resolution and addressing of markdown records live with the storage

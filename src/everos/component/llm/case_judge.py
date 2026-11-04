@@ -1,6 +1,6 @@
-"""everalgo's agent-case gate question answered by an LLM.
+"""everos.algo's agent-case gate question answered by an LLM.
 
-:class:`everalgo.agent_memory.AgentCaseGate` asks one provider-neutral
+:class:`everos.algo.agent_memory.AgentCaseGate` asks one provider-neutral
 yes / no question about a conversation and wants the probability of "yes";
 the host decides how to get it. :class:`LLMCaseJudge` asks the extraction
 LLM for that probability as a strict JSON reply. Range and finiteness are
@@ -13,10 +13,10 @@ __all__ = ["LLMCaseJudge"]
 
 from typing import TYPE_CHECKING
 
-from everalgo.llm import LLMClient, LLMMessage, StrictOutputModel, parse_reply
+from everos.algo.llm import LLMClient, LLMMessage, StrictOutputModel, parse_reply
 
 if TYPE_CHECKING:
-    from everalgo.agent_memory import CaseGateQuestion
+    from everos.algo.agent_memory import CaseGateQuestion
 
 _INSTRUCTIONS = """{instructions}
 
@@ -37,7 +37,7 @@ class _SuccessProbability(StrictOutputModel):
 class LLMCaseJudge:
     """Answer the agent-case gate question with one LLM call.
 
-    Implements :class:`everalgo.agent_memory.CaseJudge`.
+    Implements :class:`everos.algo.agent_memory.CaseJudge`.
 
     Args:
         llm: The model asked; its reply must pass ``_SuccessProbability``.

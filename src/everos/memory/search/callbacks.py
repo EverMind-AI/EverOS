@@ -1,4 +1,4 @@
-"""Callback factories handed to ``everalgo.rank.arank``.
+"""Callback factories handed to ``everos.algo.rank.arank``.
 
 Four rerank callbacks the rank pipelines take:
 
@@ -30,9 +30,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 
-from everalgo.rank.protocols import RerankFn
-from everalgo.types import Candidate
-
+from everos.algo.rank.protocols import RerankFn
+from everos.algo.types import Candidate
 from everos.component.rerank import RerankProvider
 from everos.core.observability.tracing import memory_span
 
@@ -43,10 +42,10 @@ def build_rerank_fn(
     text_field: str,
     instruction: str | None = None,
 ) -> RerankFn:
-    """Build an everalgo ``RerankFn`` over the configured rerank provider.
+    """Build an everos.algo ``RerankFn`` over the configured rerank provider.
 
     Returns a 2-arg ``(query, candidates) -> list[Candidate]`` async callable
-    matching ``everalgo.rank.protocols.RerankFn``. All reranked candidates are
+    matching ``everos.algo.rank.protocols.RerankFn``. All reranked candidates are
     returned without truncation — the caller (``aagentic_retrieve``) is
     responsible for slicing via ``round1_rerank_top_n``.
 

@@ -33,8 +33,7 @@ from everos.service.memory._models import MemorizeResult
 from everos.service.memory._session_locks import SessionLocks
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
     from everos.memory import IngestResult

@@ -1,9 +1,8 @@
-"""Round trip between everalgo ``AgentSkill`` and the domain skill."""
+"""Round trip between everos.algo ``AgentSkill`` and the domain skill."""
 
 from __future__ import annotations
 
-from everalgo.types import AgentSkill as AlgoAgentSkill
-
+from everos.algo.types import AgentSkill as AlgoAgentSkill
 from everos.memory.mappers import agent_skill
 
 

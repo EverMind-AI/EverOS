@@ -1,0 +1,1 @@
+"""English knowledge extractor prompts."""

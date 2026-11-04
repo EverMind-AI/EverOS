@@ -7,7 +7,7 @@ Hard partition by ``owner_type``:
 
 Per kind, :func:`memory.search.adapter.resolve_pipeline` decides whether
 the path is "single-route recall, no fusion" (``KEYWORD`` / ``VECTOR``)
-or "sparse + dense → everalgo.rank" (``HYBRID`` / ``AGENTIC``). Component
+or "sparse + dense → everos.algo.rank" (``HYBRID`` / ``AGENTIC``). Component
 guards (embedding / cross-encoder / LLM) raise early when a method is
 selected without its prerequisites.
 
@@ -31,9 +31,14 @@ import asyncio
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
-from everalgo.rank.fusion import rrf
-
+from everos.algo.rank import (
+    DEFAULT_RANK_CONFIG,
+    RankConfig,
+    arank,
+    build_ep_to_fact_parents,
+    heap_expand,
+)
+from everos.algo.rank.fusion import rrf
 from everos.config import load_settings
 from everos.config.settings import DeciderSettings
 from everos.core.context import resolve_request_id
@@ -66,7 +71,6 @@ from .dto import (
     UnprocessedMessageDTO,
 )
 from .filters import compile_filters
-from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import RoundDecider, search_episodes_llm_multiround
 from .recall import (
     KindRecaller,
@@ -87,8 +91,7 @@ from .shaper import (
 from .skill_hybrid import search_agent_skills_hybrid
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.embedding import EmbeddingProvider
     from everos.component.rerank import RerankProvider
     from everos.component.tokenizer import Tokenizer
@@ -496,7 +499,7 @@ class SearchManager:
             output = await arank(
                 rank_input(
                     req.query,
-                    memory_type=self._case.everalgo_memory_type,
+                    memory_type=self._case.algo_memory_type,
                     sparse=sparse,
                     dense=dense,
                     top_k=top_k,
@@ -564,7 +567,7 @@ class SearchManager:
             # LLM lane: generic ``arank`` dispatches by ``memory_type="skill"``
             # to the skill facade (adds the skill-only 0.4 relevance gate).
             # Config is ``rrf`` — ``skill_hybrid`` is an everos routing
-            # label, not an everalgo fusion mode.
+            # label, not an everos.algo fusion mode.
             with memory_span(
                 "everos.search.rank",
                 observation_type="span",
@@ -573,7 +576,7 @@ class SearchManager:
                 output = await arank(
                     rank_input(
                         req.query,
-                        memory_type=self._skill.everalgo_memory_type,
+                        memory_type=self._skill.algo_memory_type,
                         sparse=sparse,
                         dense=dense,
                         top_k=top_k,

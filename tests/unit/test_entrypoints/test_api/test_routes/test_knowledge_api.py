@@ -15,9 +15,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from everalgo.types import ParsedContent
 from httpx import ASGITransport, AsyncClient
 
+from everos.algo.types import ParsedContent
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence import MemoryRoot

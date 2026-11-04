@@ -30,8 +30,7 @@ __all__ = [
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from everalgo.types import ParsedContent, RawFile
-
+from everos.algo.types import ParsedContent, RawFile
 from everos.memory.ports import KnowledgeCatalog, KnowledgeStore
 
 from ._documents import DocumentManager

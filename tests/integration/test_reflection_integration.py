@@ -22,10 +22,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.testing import FakeLLMClient
-from everalgo.user_memory import EpisodeReflector
 
+from everos.algo.clustering import Cluster as AlgoCluster
+from everos.algo.user_memory import EpisodeReflector
 from everos.infra.cascade._projections import AtomicFactHandler, EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import (
@@ -46,6 +45,7 @@ from everos.memory.models import AtomicFact, Episode, ReflectionReport
 from everos.memory.ports import MemoryRef, Scope, all_of, eq, is_null
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from tests.fakes import user_track_script
+from tests.fakes.llm_client import FakeLLMClient
 from tests.fakes.storage import Storage, handler_deps
 
 OWNER = "u_test"

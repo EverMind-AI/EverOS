@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import structlog.testing
-from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType

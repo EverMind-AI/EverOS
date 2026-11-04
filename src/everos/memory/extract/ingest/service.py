@@ -39,8 +39,7 @@ from .id_gen import gen_message_id
 from .multimodal import coerce_items, derive_text
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.parser import RawFileBuilder
 
 

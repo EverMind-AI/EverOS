@@ -1,6 +1,6 @@
 """The knowledge search use case: recall, category-aware rerank, hit shaping.
 
-Recall over the knowledge-topic index feeds everalgo's category-aware
+Recall over the knowledge-topic index feeds everos.algo's category-aware
 retrieval: the recall pool's category mass is rolled up, the pool is
 reranked on the topics' full content (read from the catalog), and a small
 category boost breaks ties. Search cannot run without both an embedding and
@@ -16,8 +16,7 @@ import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from everalgo.rank import acategory_retrieve
-
+from everos.algo.rank import acategory_retrieve
 from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.memory.models import KnowledgeDocument, KnowledgeTopic

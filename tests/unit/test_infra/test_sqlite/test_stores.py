@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from everalgo.types import ChatMessage, MemCell, ToolCallResult
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 
+from everos.algo.types import ChatMessage, MemCell, ToolCallResult
 from everos.config import SqliteSettings
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot

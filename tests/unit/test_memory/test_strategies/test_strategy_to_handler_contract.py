@@ -17,9 +17,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import anyio
-from everalgo.agent_memory import CaseExtractionResult
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 
+from everos.algo.agent_memory import CaseExtractionResult
+from everos.algo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade._projections import (

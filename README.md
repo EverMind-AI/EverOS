@@ -271,8 +271,8 @@ extra:
 uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
-This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG support via
-cairosvg). Configure the `[multimodal]` section in `everos.toml`; its default
+This installs the parser backend's readers: `pillow`, `beautifulsoup4` and
+`cairosvg` (SVG support). Configure the `[multimodal]` section in `everos.toml`; its default
 model is `google/gemini-3.8-flash` via OpenRouter.
 
 **Office document support requires LibreOffice as a system dependency.**
@@ -705,10 +705,6 @@ integrations into one open-source ecosystem.
 <tr>
 <td><strong><a href="https://github.com/EverMind-AI/SkillCorpus">SkillCorpus</a></strong></td>
 <td>Curated, retrieval-ready agent skill corpora with retrieval and evaluation tooling.</td>
-</tr>
-<tr>
-<td><strong><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a></strong></td>
-<td>Stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
 </tr>
 <tr>
 <td><strong><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a></strong></td>

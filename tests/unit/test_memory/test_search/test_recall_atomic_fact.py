@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from everos.algo.rank import FactCandidate
 from everos.component.tokenizer import Tokenizer
 from everos.infra.persistence.index.adapters import AtomicFactIndexAdapter
 from everos.infra.persistence.lancedb import (
@@ -30,7 +31,6 @@ from everos.infra.persistence.lancedb import (
     ParentType,
 )
 from everos.memory.ports.query import all_of, eq
-from everos.memory.search._candidates import FactCandidate
 from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps
 from tests.fakes.storage import Storage

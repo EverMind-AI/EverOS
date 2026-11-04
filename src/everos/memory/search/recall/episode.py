@@ -20,7 +20,7 @@ class EpisodeRecaller:
     """
 
     kind: ClassVar[str] = "episode"
-    everalgo_memory_type: ClassVar[str] = "episodic"
+    algo_memory_type: ClassVar[str] = "episodic"
 
     def __init__(self, deps: RecallerDeps, index: EpisodeIndex) -> None:
         self._deps = deps

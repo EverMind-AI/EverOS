@@ -21,8 +21,8 @@ __all__ = [
 from collections.abc import Sequence
 from typing import Literal
 
-from everalgo.boundary import DetectionResult
-from everalgo.types import (
+from everos.algo.boundary import DetectionResult
+from everos.algo.types import (
     ChatMessage,
     ConversationItem,
     MemCell,
@@ -31,7 +31,6 @@ from everalgo.types import (
     ToolCallRequest,
     ToolCallResult,
 )
-
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import CanonicalMessage
 
@@ -64,7 +63,7 @@ def close_complete_tail(result: DetectionResult, *, is_final: bool) -> Detection
 
     Only an explicit ``tail_complete is True`` closes it: ``None`` means no
     model judged the tail, and a final call has already closed it upstream.
-    The cell takes the tail's last timestamp, as everalgo's own cells do, so
+    The cell takes the tail's last timestamp, as everos.algo's own cells do, so
     it orders after its siblings.
     """
     if is_final or result.tail_complete is not True or not result.tail:

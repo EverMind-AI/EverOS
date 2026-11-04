@@ -22,8 +22,8 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any, cast
 
 import numpy as np
-from everalgo.types import MemCell
 
+from everos.algo.types import MemCell
 from everos.core.utils.datetime import from_timestamp, get_utc_now
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (

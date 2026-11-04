@@ -1,6 +1,6 @@
 """Pins the startup warm-up of the token counter (#277).
 
-The warm-up loads tiktoken's encoding once through ``everalgo.utils.encode``
+The warm-up loads tiktoken's encoding once through ``everos.algo.utils.encode``
 and maps any failure to ``TokenizerAssetError`` with the cause attached, so a
 host that cannot fetch the encoding fails at startup with one clear message
 instead of a generic 500 on the first agent ``/add``.

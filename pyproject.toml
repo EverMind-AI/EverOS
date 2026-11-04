@@ -87,26 +87,16 @@ dependencies = [
     "watchfiles>=0.21.0",          # native fs watcher for config hot reload
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
-    # Algorithm library (everalgo monorepo, published on PyPI).
-    #
-    # All eight everalgo packages (the four below, the three transitive ones
-    # after them, and everalgo-parser in the `multimodal` extra) ship on one
-    # contract line -- currently the 2026-10-13 line, built on everalgo-core
-    # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
-    # one another, so a fresh `pip install everos` would otherwise mix lines
-    # the suite has never run together. Pin every one with `==` and raise them
-    # together, with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-user-memory==0.9.0rc4",
-    "everalgo-agent-memory==0.6.0rc3",
-    "everalgo-rank==0.5.0rc3",
-    "everalgo-knowledge==0.3.0rc2",
-    "everalgo-boundary==0.4.1",
-    "everalgo-core==0.6.0",
-    "everalgo-clustering==0.3.0rc2",
+    # Algorithms (src/everos/algo) and the parser backend
+    "tiktoken>=0.7",              # o200k_base token budgets (algo.utils.tokens)
+    "numpy>=1.26",                # cluster centroids (algo.clustering)
+    "httpx>=0.27",                # direct HTTP: rerank providers + the parser backend's URL fetch
 ]
 
 [project.optional-dependencies]
-multimodal = ["everalgo-parser[svg]==0.3.0rc2"]  # [svg] bundles cairosvg → SVG works by default
+# The parser backend (component/parser/backend) reads images, HTML and SVG;
+# cairosvg (LGPL, see NOTICE) rasterises SVG and is only pulled in here.
+multimodal = ["pillow>=10.0.0", "beautifulsoup4>=4.12.0", "cairosvg>=2.7.0"]
 # Native OpenTelemetry tracing export. Optional — EverOS never imports these
 # unless [observability] is enabled. Install with: pip install everos[otel]
 otel = [
@@ -189,6 +179,12 @@ ignore = [
 "benchmarks/adapters/longmemeval.py" = ["E501"]
 "benchmarks/adapters/subtlememory.py" = ["E501"]
 "benchmarks/adapters/evermembench.py" = ["E501"]
+# Code migrated from EverAlgo keeps its 120-column docstrings, comments and
+# prompt text; reflow a docstring when you edit it, never a prompt.
+"src/everos/algo/**/*.py" = ["E501"]
+"src/everos/component/parser/backend/**/*.py" = ["E501"]
+"tests/fakes/llm_client.py" = ["E501"]
+"tests/fakes/llm_conformance.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -270,10 +266,10 @@ name = "entrypoints-forbidden: entry points import the service, not what it wire
 type = "forbidden"
 source_modules = ["everos.entrypoints"]
 forbidden_modules = [
+    "everos.algo",
     "everos.memory",
     "everos.infra",
     "everos.component",
-    "everalgo",
 ]
 allow_indirect_imports = true
 
@@ -304,6 +300,7 @@ name = "core-forbidden: core and config depend on nothing above them"
 type = "forbidden"
 source_modules = ["everos.core", "everos.config"]
 forbidden_modules = [
+    "everos.algo",
     "everos.component",
     "everos.memory",
     "everos.service",
@@ -323,7 +320,46 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "mappers-pure: algo <-> domain mapping does no IO"
+name = "algo-independent: algorithms import no EverOS runtime layer"
+type = "forbidden"
+source_modules = ["everos.algo"]
+forbidden_modules = [
+    "everos.component",
+    "everos.config",
+    "everos.core",
+    "everos.entrypoints",
+    "everos.infra",
+    "everos.memory",
+    "everos.service",
+]
+
+[[tool.importlinter.contracts]]
+# Algorithms can invoke caller-supplied capabilities, but cannot choose a
+# storage or model implementation, discover configuration, or own a runtime.
+# Direct imports are checked: upstream algorithm/data libraries may themselves
+# import SDKs for their optional adapters without exposing them to local algo.
+name = "algo-no-runtime: external capabilities are supplied by callers"
+type = "forbidden"
+source_modules = ["everos.algo"]
+forbidden_modules = [
+    "aiosqlite",
+    "contextvars",
+    "httpx",
+    "lancedb",
+    "openai",
+    "os",
+    "pathlib",
+    "pydantic_settings",
+    "pymilvus",
+    "requests",
+    "sqlite3",
+    "sqlalchemy",
+    "sqlmodel",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "mappers-pure: algorithm <-> domain mapping does no IO"
 type = "forbidden"
 source_modules = ["everos.memory.mappers"]
 forbidden_modules = [

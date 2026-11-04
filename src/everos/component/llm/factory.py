@@ -72,7 +72,7 @@ def build_llm_provider(
         observer: Receives every completion; ``None`` discards them.
 
     Returns:
-        A provider that satisfies :class:`everalgo.llm.LLMClient`.
+        A provider that satisfies :class:`everos.algo.llm.LLMClient`.
     """
     return OpenAIProvider(
         model=config.model,

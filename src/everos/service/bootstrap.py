@@ -42,8 +42,7 @@ from functools import partial
 from pathlib import Path
 from types import TracebackType
 
-from everalgo.llm import LLMClient
-
+from everos.algo.llm import LLMClient
 from everos.component.embedding import EmbeddingProvider, build_embedding_provider
 from everos.component.llm import (
     LLMCaseJudge,
@@ -563,8 +562,8 @@ def _build_knowledge_service(
 
 
 def _knowledge_extractor(llm: LLMClient) -> KnowledgeExtractor:
-    # Deferred: everalgo.knowledge is heavy and only knowledge uploads need it.
-    from everalgo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
+    # Deferred: everos.algo.knowledge is heavy and only knowledge uploads need it.
+    from everos.algo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
 
     return AlgoKnowledgeExtractor(llm=llm)
 

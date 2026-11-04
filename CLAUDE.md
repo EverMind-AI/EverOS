@@ -25,8 +25,9 @@ cross-cutting, usable by every layer: core / component / config
 - `entrypoints/` — cli + api (incl. HTTP middleware) + tui (protocol translation only)
 - `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `KnowledgeService` / `OpsService` facades
 - `memory/` — domain (models + ports + extract + search + strategies + reflection + custom_instructions)
+- `algo/` — every memory algorithm (types / llm / utils / boundary / user_memory / agent_memory / clustering / knowledge / rank), stateless; data, configuration, workflow state, and external capabilities are explicit inputs. No imports of other EverOS layers.
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb + milvus) + the cascade and OME engines
-- `component/` — injectable providers (llm / embedding / rerank / parser / tokenizer)
+- `component/` — injectable providers (llm / embedding / rerank / parser incl. the multimodal parser backend / tokenizer)
 - `core/` — runtime base (errors / observability / context / utils.datetime)
 - `config/` — configuration data (Settings + default.toml + custom_instructions)
 
@@ -76,7 +77,7 @@ Selection rationale: [docs/architecture.md](docs/architecture.md).
 
 **src layout** (`src/everos/<...>`): standard PyPA project structure — code lives under `src/` so the working tree is not on the import path until installed, preventing accidental imports of in-development modules.
 
-Algorithm assets (prompts, extractors) live in the separate [`everalgo`](https://github.com/EverMind-AI/EverAlgo) library, consumed here as the `everalgo-*` PyPI packages.
+All memory algorithms live in `src/everos/algo/` (shared contracts, the `LLMClient` protocol, boundary detection, the user- and agent-memory extractors, clustering, knowledge extraction, ranking) with their prompts; see its [contract](src/everos/algo/README.md). Keep algorithms stateless and let callers own persistence and client lifecycles. The multimodal parser is a provider in `src/everos/component/parser/backend/`. EverOS has no dependency on the EverAlgo packages.
 
 ## Where things go
 

@@ -11,11 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from everalgo.clustering import Cluster
-from everalgo.rank.protocols import AgenticDecision
-from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import Candidate
 
+from everos.algo.clustering import Cluster
+from everos.algo.rank.protocols import AgenticDecision
+from everos.algo.types import Candidate
 from everos.component.tokenizer import Tokenizer
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import Cluster as DomainCluster
@@ -24,6 +23,7 @@ from everos.memory.search.agentic import _with_doc_metadata, search_episodes_age
 from everos.memory.search.dto import SearchEpisodeItem
 from everos.memory.search.recall import AtomicFactRecaller, EpisodeRecaller
 from everos.memory.search.recall.base import RecallerDeps
+from tests.fakes.llm_client import FakeLLMClient
 
 from ._records import ScriptedIndex, hit, stored_episode, stored_fact
 
@@ -84,8 +84,8 @@ class _StubClusterStore:
 @pytest.fixture()
 def clusters() -> list[Cluster]:
     # The cluster store is stubbed in every test, so cluster
-    # contents are never exercised by everalgo; we only need a valid instance
-    # that satisfies the everalgo ``Cluster`` schema (ndarray centroid + last_ts).
+    # contents are never exercised by everos.algo; we only need a valid instance
+    # that satisfies the everos.algo ``Cluster`` schema (ndarray centroid + last_ts).
     return [
         Cluster(
             id="cl_1",
@@ -246,7 +246,7 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
     assert result[0].episode == "body ep_1"
 
 
-# ── Metadata bridge to the everalgo _format_docs contract ──────────────────
+# ── Metadata bridge to the everos.algo _format_docs contract ──────────────────
 
 
 def test_doc_metadata_bridge_wraps_the_episode_for_format_docs() -> None:
@@ -280,8 +280,8 @@ async def test_agentic_emits_recall_and_rank_spans(
     """The agentic recall closures (base_retrieve) and the cross-encoder
     rerank_fn emit everos.search.recall / everos.search.rank spans. Driven
     by a fake aagentic_retrieve that actually invokes both callbacks — the
-    same way the real everalgo driver does — so the assertion is
-    deterministic and independent of everalgo's loop internals."""
+    same way the real everos.algo driver does — so the assertion is
+    deterministic and independent of everos.algo's loop internals."""
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,

@@ -2,7 +2,7 @@
 
 Strategies are functions of ``(event, deps)``; :class:`MemoryDeps` is the
 ``deps``. It holds ports only — the domain declares the storage protocols,
-the LLM contract comes from everalgo and the embedding contract from
+the LLM contract comes from everos.algo and the embedding contract from
 ``component`` — so a strategy can be exercised against in-memory doubles
 and the service layer decides which adapters stand behind it.
 
@@ -21,9 +21,8 @@ __all__ = ["Indexes", "MemoryDeps", "Stores"]
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from everalgo.agent_memory import CaseJudge
-from everalgo.llm import LLMClient
-
+from everos.algo.agent_memory import CaseJudge
+from everos.algo.llm import LLMClient
 from everos.component.embedding import EmbeddingProvider
 from everos.memory.ports import (
     AgentCaseIndex,

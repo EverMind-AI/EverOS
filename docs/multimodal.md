@@ -33,7 +33,7 @@ POST /api/v2/memory/add
   messages[].content = [ ContentItem, ContentItem, ... ]
         │
         │  text items      → used verbatim
-        │  non-text items  → multimodal LLM (everalgo-parser)
+        │  non-text items  → multimodal LLM (component/parser/backend)
         ▼
   parsed text merged back into the session buffer (in original order)
         │
@@ -70,8 +70,8 @@ install stays lean:
 uv pip install 'everos[multimodal]'    # or: pip install 'everos[multimodal]'
 ```
 
-This pulls in `everalgo-parser[svg]` — the `[svg]` bundle adds `cairosvg`
-so SVG works out of the box.
+This installs the parser backend's readers — `pillow`, `beautifulsoup4` and
+`cairosvg` — so images, HTML and SVG work out of the box.
 
 ### LibreOffice (office documents only)
 

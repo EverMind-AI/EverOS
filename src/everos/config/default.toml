@@ -125,7 +125,7 @@ full_text = false              # true = decider reads full episode text, not sum
 fallback_core = 3              # core size when every decider attempt fails
 
 [multimodal]
-# Independent LLM for multimodal parsing (everalgo-parser); must accept
+# Independent LLM for multimodal parsing (component/parser/backend); must accept
 # image / pdf / audio image_url parts. Override via env:
 #   EVEROS_MULTIMODAL__MODEL, EVEROS_MULTIMODAL__API_KEY, EVEROS_MULTIMODAL__BASE_URL
 model = "google/gemini-3.8-flash"
@@ -135,7 +135,7 @@ max_concurrency = 4
 # See [llm].
 # response_format_mode = "json_schema"
 # invalid_reply_retries = 1
-# file:// content-item support (read locally by EverOS, not everalgo).
+# file:// content-item support (read locally by EverOS, not the parser backend).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.
 # file_uri_allow_dirs = ["/srv/uploads"]
@@ -179,7 +179,7 @@ batch_size      = 10
 max_concurrent  = 5
 
 [boundary_detection]
-# Passed through to ``everalgo.boundary.adetect_boundaries``: leading cells
+# Passed through to ``everos.algo.boundary.adetect_boundaries``: leading cells
 # are cut without the model until the rest fits under both limits.
 hard_token_limit = 65536
 hard_msg_limit = 500
@@ -227,7 +227,7 @@ max_replays = 3
 row_retention_hours = 168.0
 
 [agent_memory]
-# Put everalgo's correctness gate in front of agent-case extraction: the
+# Put the agent-memory correctness gate in front of agent-case extraction: the
 # extraction LLM judges whether the work in a conversation was completed
 # correctly (one extra call per conversation), and only admitted ones become
 # cases. Off -> cases are admitted by the complexity and value filters.

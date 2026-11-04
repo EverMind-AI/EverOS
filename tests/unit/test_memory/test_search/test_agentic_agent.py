@@ -4,11 +4,11 @@ Two groups of tests:
 
 * White-box (patches ``aagentic_retrieve``): assert benchmark hyperparameters
   are wired correctly, plus a shaping test to verify DTOs are built
-  correctly. These never execute the real ``everalgo._format_docs`` /
+  correctly. These never execute the real ``everos.algo._format_docs`` /
   rerank_fn wiring — they are dead coverage for the metadata bridge.
 * Black-box (does NOT patch ``aagentic_retrieve``): exercises the real
   ``_format_docs`` prompt-rendering path and the real kind-shaped rerank_fn
-  via ``everalgo.testing.fake_llm.FakeLLMClient``. These pin the regression
+  via ``tests.fakes.llm_client.FakeLLMClient``. These pin the regression
   fixed by the metadata-bridge refactor (empty-description skill -> 500)
   and the skill/case rerank-fn swap.
 
@@ -23,10 +23,8 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-from everalgo.rank.protocols import AgenticDecision
-from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.types import Candidate
-
+from everos.algo.rank.protocols import AgenticDecision
+from everos.algo.types import Candidate
 from everos.component.rerank import RerankResult
 from everos.memory.ports import SearchHit
 from everos.memory.search.agentic_agent import (
@@ -39,6 +37,7 @@ from everos.memory.search.callbacks import (
 )
 from everos.memory.search.dto import SearchAgentCaseItem, SearchAgentSkillItem
 from everos.memory.search.recall import RecallResult
+from tests.fakes.llm_client import FakeLLMClient
 
 from ._records import hit, recalled, stored_case, stored_skill
 
@@ -309,12 +308,12 @@ async def test_search_agent_skills_agentic_shapes_result() -> None:
 # ── Black-box tests: real _format_docs + real kind-shaped rerank_fn ────────
 #
 # These deliberately do NOT patch ``aagentic_retrieve`` (unlike every test
-# above), so the metadata bridge (``_to_everalgo_doc_metadata``) and the
+# above), so the metadata bridge (``_to_algo_doc_metadata``) and the
 # kind-shaped ``rerank_fn`` (``build_skill_rerank_fn`` / ``build_case_rerank_fn``)
 # actually run.
 
 # JSON body a real LLM would return for the sufficiency-check prompt; parsed
-# by ``everalgo.rank.agentic._call_llm_for_sufficiency``. ``is_sufficient=True``
+# by ``everos.algo.rank.agentic._call_llm_for_sufficiency``. ``is_sufficient=True``
 # short-circuits Round 2, so one LLM call is enough for every test below.
 _SUFFICIENT_LLM_RESPONSE = json.dumps(
     {
@@ -338,10 +337,10 @@ class _IdentityReranker:
 
 
 async def test_agentic_survives_name_only_skill() -> None:
-    """A skill with an empty description is a valid everalgo output (see
-    everalgo ``agent_memory/skill_ops.py`` — the guard is ``if not name and
+    """A skill with an empty description is a valid everos.algo output (see
+    everos.algo ``agent_memory/skill_ops.py`` — the guard is ``if not name and
     not description``). The metadata bridge must produce a non-empty
-    passage for ``_format_docs``, otherwise everalgo raises ``ValueError``
+    passage for ``_format_docs``, otherwise everos.algo raises ``ValueError``
     and the request 500s. This is the regression test for that defect."""
     recaller = _StubRecaller(
         [_skill_hit("s_name_only", 0.9, name="rotate_secrets", description="")]

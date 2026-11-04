@@ -6,7 +6,7 @@ External usage:
         UserMemoryPipeline,
     )
 
-Calls everalgo (the algorithm library) for synchronous Episode extraction.
+Calls everos.algo (the algorithm library) for synchronous Episode extraction.
 A pipeline returns the events its cell produced; the service publishes them.
 """
 

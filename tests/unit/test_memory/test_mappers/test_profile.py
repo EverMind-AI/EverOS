@@ -1,9 +1,8 @@
-"""Round trip between everalgo ``Profile`` and the domain profile."""
+"""Round trip between everos.algo ``Profile`` and the domain profile."""
 
 from __future__ import annotations
 
-from everalgo.types import Profile as AlgoProfile
-
+from everos.algo.types import Profile as AlgoProfile
 from everos.memory.mappers import profile
 from everos.memory.models import Profile
 

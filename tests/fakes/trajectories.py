@@ -2,7 +2,7 @@
 
 Three tool-call rounds (``AgentCaseExtractor``'s default minimum) closed by a
 final assistant answer, so the case extractor reaches its model calls. The
-same trajectory is offered as a :class:`~everalgo.types.MemCell` for the
+same trajectory is offered as a :class:`~everos.algo.types.MemCell` for the
 operators and strategies, and as ``/add`` message dicts for the HTTP path.
 """
 
@@ -12,7 +12,7 @@ __all__ = ["TRAJECTORY_START_MS", "agent_trajectory", "agent_trajectory_messages
 
 from typing import Any
 
-from everalgo.types import (
+from everos.algo.types import (
     ChatMessage,
     ConversationItem,
     MemCell,

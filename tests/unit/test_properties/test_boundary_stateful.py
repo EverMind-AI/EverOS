@@ -7,11 +7,11 @@ property that matters is conservation: a message the service accepted is in
 the buffer or in exactly one memcell, never both and never nowhere.
 
 What is real: ``ingest.process`` (ids, canonical rows),
-:class:`BoundaryDetection` (``buffer`` and ``detect``), everalgo's boundary
+:class:`BoundaryDetection` (``buffer`` and ``detect``), everos.algo's boundary
 operator, and the three repositories on a temp SQLite file. What is
 scripted: the model's reply, which the machine tells how many of the merged
 messages to cut into how many cells, and whether to be unusable first (the
-stage tries an unusable reply three times). The operator, as everalgo
+stage tries an unusable reply three times). The operator, as everos.algo
 documents, never closes the trailing segment unless the call is final, so
 a cut at the very end of a non-final call leaves that run in the tail.
 
@@ -62,8 +62,6 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from everalgo.llm import LLMOutputError
-from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
@@ -71,6 +69,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
+from everos.algo.llm import LLMOutputError
 from everos.config import BoundaryDetectionSettings, SqliteSettings
 from everos.core.errors import SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
@@ -103,6 +102,7 @@ from tests.fakes import (
     bundled_instructions,
     unused_raw_file_builder,
 )
+from tests.fakes.llm_client import FakeLLMClient
 
 settings.register_profile(
     "ci",

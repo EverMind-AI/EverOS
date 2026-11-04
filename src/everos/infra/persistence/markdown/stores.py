@@ -22,8 +22,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import anyio
-from everalgo.user_memory import OutputLanguage
 
+from everos.algo.user_memory import OutputLanguage
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp, to_iso_format
 from everos.infra.persistence.memory_root import MemoryRoot
@@ -364,7 +364,7 @@ _OUTPUT_LANGUAGES = frozenset(language.value for language in OutputLanguage)
 
 
 def _known_language(value: str | None, *, owner_id: str) -> str | None:
-    """A stored profile language everalgo accepts, else ``None``.
+    """A stored profile language everos.algo accepts, else ``None``.
 
     ``user.md`` is hand-editable; a value outside ``OutputLanguage`` (case
     included) would make every later extraction fail, so it is ignored.

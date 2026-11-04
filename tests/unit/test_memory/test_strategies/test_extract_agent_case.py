@@ -3,7 +3,7 @@
 The real :class:`AgentCaseExtractor` runs against the canned agent-track
 scripts (``tests.fakes.agent_track_llm``); stores are in-memory doubles. The
 strategy files one case per assistant sender and logs the gate that rejected
-a memcell when there is no case. With a case judge in the deps, everalgo's
+a memcell when there is no case. With a case judge in the deps, everos.algo's
 correctness gate admits the memcell and its decision rides on the case.
 Every completed run stamps the memcell with its skip reason (``None`` when a
 case came out).
@@ -14,9 +14,8 @@ from __future__ import annotations
 import json
 
 import structlog.testing
-from everalgo.testing import FakeLLMClient
-from everalgo.types import ChatMessage, MemCell
 
+from everos.algo.types import ChatMessage, MemCell
 from everos.component.llm import LLMCaseJudge
 from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
 from everos.memory.strategies import EXTRACT_AGENT_CASE_SPEC, extract_agent_case
@@ -26,6 +25,7 @@ from tests.fakes import (
     agent_trajectory,
     make_deps,
 )
+from tests.fakes.llm_client import FakeLLMClient
 
 _COMPRESSED = json.loads(agent_track_script("case_compress"))
 

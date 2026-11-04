@@ -1,11 +1,10 @@
-"""everalgo ``AgentCase`` <-> domain :class:`~everos.memory.models.AgentCase`."""
+"""everos.algo ``AgentCase`` <-> domain :class:`~everos.memory.models.AgentCase`."""
 
 from __future__ import annotations
 
 __all__ = ["from_algo", "to_algo"]
 
-from everalgo.types import AgentCase as AlgoAgentCase
-
+from everos.algo.types import AgentCase as AlgoAgentCase
 from everos.memory.models import AgentCase
 
 
@@ -36,7 +35,7 @@ def to_algo(case: AgentCase, *, entry_id: str) -> AlgoAgentCase:
     """Algo case addressed by the stored case's entry id.
 
     ``case_gate`` rides along only when the case passed an admission gate;
-    everalgo reads its presence as "admitted".
+    everos.algo reads its presence as "admitted".
     """
     gate = {"case_gate": case.case_gate} if case.case_gate is not None else {}
     return AlgoAgentCase(

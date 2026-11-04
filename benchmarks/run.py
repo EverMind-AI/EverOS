@@ -2776,16 +2776,10 @@ def _get_everos_version() -> str:
 
 
 _PROVENANCE_PACKAGES = (
-    # The everalgo family first: these ARE the algorithms. user-memory / agent-memory do
-    # extraction (they decide what the store contains), rank does retrieval fusion.
-    "everalgo-user-memory",
-    "everalgo-agent-memory",
-    "everalgo-rank",
-    "everalgo-core",
-    "everalgo-clustering",
-    "everalgo-parser",
-    "everalgo-boundary",
+    # everos first: it carries the algorithms (user-memory / agent-memory extraction
+    # decides what the store contains, rank does retrieval fusion).
     "everos",
+    "tiktoken",
     "lancedb",
     "pyarrow",
     "openai",
@@ -3148,9 +3142,9 @@ def _assert_decider_answers(config: BenchmarkConfig) -> None:
 def _collect_packages() -> dict[str, str]:
     """Installed versions of the packages that can move the numbers.
 
-    Recorded per run because ``everos_version`` alone is ambiguous: the shipped stores
-    were extracted with everalgo-user-memory 0.3.1 while this repository pins 0.4.0, and
-    those two produce different stores from the same input.
+    Recorded per run because the algorithms version with everos itself: two releases
+    produce different stores from the same input, and the shipped stores were
+    extracted by earlier ones.
     """
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as _pkg_version

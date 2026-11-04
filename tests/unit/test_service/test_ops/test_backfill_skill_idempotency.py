@@ -70,7 +70,8 @@ class _StubClusterRepo:
         project_id: str = "default",
     ):  # type: ignore[no-untyped-def]
         import numpy as np
-        from everalgo.clustering import Cluster as AlgoCluster
+
+        from everos.algo.clustering import Cluster as AlgoCluster
 
         return [
             AlgoCluster(

@@ -1,6 +1,6 @@
 """``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
 
-The episode operator is real (everalgo ``EpisodeExtractor``); the model
+The episode operator is real (everos.algo ``EpisodeExtractor``); the model
 answers from the user-track canned scripts.
 """
 
@@ -10,9 +10,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from everalgo.llm import LLMOutputError
-from everalgo.types import ChatMessage, MemCell
 
+from everos.algo.llm import LLMOutputError
+from everos.algo.types import ChatMessage, MemCell
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS

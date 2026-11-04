@@ -53,7 +53,7 @@ class MemcellRepo(RepoBase[Memcell]):
 
         Used by offline strategies that pull every memcell in a cluster
         (membership lives in :class:`ClusterMember` and is supplied to
-        the strategy via :class:`everalgo.clustering.Cluster.members`).
+        the strategy via :class:`everos.algo.clustering.Cluster.members`).
         """
         if not memcell_ids:
             return []

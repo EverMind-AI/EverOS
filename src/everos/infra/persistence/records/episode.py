@@ -44,7 +44,7 @@ class Episode(IndexRecord):
     parent_id: str
     """Source memcell id. The pipeline knows the memcell currently being
     processed and writes its id into the md entry's inline block; the
-    cascade handler reads it back. The new everalgo Episode type no
+    cascade handler reads it back. The new everos.algo Episode type no
     longer emits ``parent_id`` itself (collapsed to caller-managed),
     so this is filled entirely from everos's engineering context."""
 

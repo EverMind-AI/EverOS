@@ -273,8 +273,8 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
-这会引入 `everalgo-parser`（包含用于 SVG 支持的 `[svg]` bundle，通过
-cairosvg）。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
+这会安装 parser backend 的依赖：`pillow`、`beautifulsoup4` 和 `cairosvg`（SVG
+支持）。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
 OpenRouter 使用的 `google/gemini-3.8-flash`。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
@@ -703,10 +703,6 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 <tr>
 <td><strong><a href="https://github.com/EverMind-AI/SkillCorpus">SkillCorpus</a></strong></td>
 <td>将分散的 Agent Skill 整理为可检索语料库，并提供检索与评测工具。</td>
-</tr>
-<tr>
-<td><strong><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a></strong></td>
-<td>为 EverOS 提供无状态的提取、排序、解析与记忆算法。</td>
 </tr>
 <tr>
 <td><strong><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a></strong></td>

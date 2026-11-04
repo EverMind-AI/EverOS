@@ -27,7 +27,7 @@ the documentation promises once everything has settled:
    place in law 1.
 
 What is real: ``memorize()`` end to end (ingest, lock, timeout,
-:class:`BoundaryDetection` and everalgo's boundary operator, the three SQLite
+:class:`BoundaryDetection` and everos.algo's boundary operator, the three SQLite
 repositories on a temp file). What is replaced: the model's replies (random
 delay, random cuts, unusable on poison or at random), the extraction pipeline
 (records what it was handed), and the settings (chat mode, the drawn
@@ -48,14 +48,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from everalgo.llm import LLMOutputError
-from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, given, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
+from everos.algo.llm import LLMOutputError
 from everos.config import SqliteSettings, load_settings
 from everos.core.errors import SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
@@ -83,6 +82,7 @@ from tests.fakes import (
     make_memory_service,
 )
 from tests.fakes.deps import make_stores
+from tests.fakes.llm_client import FakeLLMClient
 
 settings.register_profile(
     "ci", max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow]

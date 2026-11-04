@@ -1,6 +1,6 @@
 """The one exception :class:`OpenAIProvider` raises when a chat call fails.
 
-The everalgo ``LLMClient`` contract leaves the implementation's exception type
+The everos.algo ``LLMClient`` contract leaves the implementation's exception type
 to the host (``llm-contract.md`` §2.5): operators let it propagate unchanged,
 so the host recognises its own type. ``reason`` tells the host *why* the call
 failed, which is what decides whether retrying the operator is worth it.

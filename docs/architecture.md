@@ -17,6 +17,8 @@ idempotency, or upgrade guarantees; those require separate evidence.
   + reflection + strategies + get + events.
 - `infra/` (Adapters) — `persistence/` (markdown + sqlite + derived index)
   implementing `memory.ports`, and the cascade and OME engines.
+- `algo/` — stateless algorithms over explicit inputs and injected capabilities;
+  imports no other EverOS layer. The host retains state and lifecycle ownership.
 
 Cross-cutting capabilities have no dependency on business layers. Access
 depends on the capability: shared data and utilities differ from external
@@ -34,6 +36,8 @@ services or storage access.
 ```
 entrypoints → service → memory ← infra
                          (ports)
+                          ↓
+                         algo
 ```
 
 The domain owns its storage contracts. `memory/ports` declares what the
@@ -43,8 +47,10 @@ domain, never the other way round (dependency inversion).
 | from → to | Allowed? |
 |---|---|
 | entrypoints → service | ✅ |
-| entrypoints → business operations | Through service; direct imports of memory / infra / component / everalgo, including data types, are prohibited at entrypoints. Use service request/response contracts and permitted core/config entry APIs. Current import checks cover this package boundary. |
+| entrypoints → business operations | Through service; direct imports of memory / infra / component / algo, including data types, are prohibited at entrypoints. Use service request/response contracts and permitted core/config entry APIs. Current import checks cover this package boundary. |
 | service → memory | ✅ |
+| memory / service / infra / component → algo | ✅ — supply data, configuration, state, and external capabilities explicitly; `component` and `infra` take only its contracts (`types`, `llm`). |
+| algo → any other EverOS layer | ❌ — use storage-neutral algorithm contracts; the host maps its own models. |
 | memory → infra | ❌ (go through `memory/ports`) |
 | memory → service | ❌ |
 | infra → memory.ports / models / events / pure conversions / dependency declarations | ✅ when implementing a declared contract; a conversion must not invoke business workflows or perform hidden I/O. Shared data is not a dependency on a business service. |
@@ -80,7 +86,8 @@ layers = [
 
 # plus forbidden contracts: entrypoints-forbidden, infra-inverted,
 # memory-forbidden, core-forbidden, component-forbidden, mappers-pure,
-# ome-ports-only, service-usecases-forbidden, no-bypass-facade
+# ome-ports-only, service-usecases-forbidden, no-bypass-facade,
+# algo-independent, algo-no-runtime
 # (see pyproject.toml)
 ```
 
@@ -200,7 +207,7 @@ External message
 1. MemoryService.add          (entrypoint of write path)
        │
        ▼
-2. memory.extract.pipeline    (calls everalgo)
+2. memory.extract.pipeline    (calls everos.algo)
        │
        ▼
 3. infra.persistence.markdown.write       (file persistence)
@@ -359,12 +366,13 @@ Do not add process-wide accessors for business services or providers.
 
 | Package | Protocol | Implementations | Factory |
 |---|---|---|---|
-| `llm` | `everalgo.llm.LLMClient` | `OpenAIProvider` | `build_llm_provider(resolve_*_config(settings), observer=observer_for(settings))` |
+| `llm` | `everos.algo.llm.LLMClient` | `OpenAIProvider` | `build_llm_provider(resolve_*_config(settings), observer=observer_for(settings))` |
 | `embedding` | `EmbeddingProvider` | `OpenAIEmbeddingProvider` | `build_embedding_provider(settings.embedding)` |
 | `rerank` | `RerankProvider` | DeepInfra / vLLM / DashScope providers | `build_rerank_provider(settings.rerank)` |
-| `parser` | everalgo parser entry | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
+| `parser` | `component.parser.backend.aparse` | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
 
-Calling EverAlgo's parser from this component is normal integration. Reusing
+The parser backend is a provider, not an algorithm: it does file, subprocess
+and HTTP I/O, so it lives here rather than in `algo`. Reusing
 `RawFile` or `ParsedContent` does not introduce storage dependencies. Separate
 file acquisition and access policy from content conversion where independent
 testing or substitution is needed; inject a callable when sufficient instead
@@ -393,7 +401,7 @@ extract/
 ├── parser/       Input parsing (format normalization, message preprocessing)
 ├── boundary/     BoundaryDetection: session buffer -> memcells (+ ledger, quarantine)
 ├── pipeline/     Per-cell extraction (Episode md + the events that announce it)
-└── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
+└── llm_retry.py  The one host-side retry of an operator's LLMOutputError
 ```
 
 `BoundaryDetection` is built by the bootstrap and injected into
@@ -421,7 +429,7 @@ index backend:
 
 ### `memory/custom_instructions/`
 
-Per-operator requirements appended to everalgo's bundled rules
+Per-operator requirements appended to an operator's bundled rules
 (`config/custom_instructions/<operator>.yaml`, all disabled by default).
 `CustomInstructions.load(operator)` returns the text or `None`; the operator
 receives it as `custom_instructions=` and can neither lose a rule nor change
@@ -506,38 +514,63 @@ Full tree + frontmatter chassis: [storage_layout.md](storage_layout.md) and
 [how-memory-works.md](how-memory-works.md). Frontmatter has 4-tier field
 protection (L1 read-only / L2 system / L3 business / L4 user).
 
-## everalgo boundary
+## Algorithm boundary
 
-`everalgo` is a set of PyPI-published packages (`everalgo-user-memory`,
-`everalgo-agent-memory`, `everalgo-rank`, `everalgo-knowledge`, plus the
-optional `everalgo-parser` extra), imported under the `everalgo` namespace,
-providing memory algorithms, parsing, and their data contracts:
+### `everos.algo`
 
-- `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
-- `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
-- `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
-- `everalgo.boundary` — boundary detection (conversation -> MemCells)
-- `everalgo.rank` — fusion + rerank
-- `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
+[`everos.algo`](../src/everos/algo/README.md) holds every memory algorithm:
+the data contracts (`types`), the `LLMClient` protocol with its request types
+and reply parsing (`llm`), prompt rendering and token budgets (`utils`),
+boundary detection (`boundary`), the user-memory extractors (`user_memory`:
+episode / atomic fact / foresight / profile / reflection), the agent-memory
+extractors (`agent_memory`: case / skill / agent profile, with the case gate),
+online clustering (`clustering`), document topic extraction (`knowledge`) and
+ranking (`rank`: fusion, rerank, the retrieval facades, heap expansion and
+multi-round evidence selection). Each family exposes its public API through
+its `__init__`; prompts live beside their operator as module-level strings
+under `<family>/prompts/`. Until EverOS 1.6 these were the `everalgo-*` PyPI
+packages; EverOS now has no dependency on them.
 
-The integration separates responsibilities:
+The contract: keep working data local to a call and never mutate caller-owned
+inputs. Data, configuration values and previous workflow state are arguments;
+results and any updated state are returned to the host. The host constructs
+and injects external capabilities (an LLM client, an embedding or retrieval
+callback) and owns their lifecycles; an extractor object may hold the client
+it was constructed with, but holds no cache, request state or connection of
+its own. Algorithms do not read application settings, global context, files
+or databases. The one lazy load is tiktoken's `o200k_base` encoding, which
+`service/_warmup.py` fetches at startup so no request pays for it.
 
-- **Algorithm contracts** belong to EverAlgo. Host orchestration and callbacks
-  may use those contracts directly; sharing a candidate type is not the same
+`algo-independent` rejects dependencies on other EverOS layers, and
+`algo-no-runtime` rejects direct imports of concrete model/storage clients and
+runtime configuration discovery. These checks protect dependency direction;
+review and input-preservation tests protect stateless behavior. A family can
+become a separate package later without taking EverOS state with it.
+
+The multimodal parser is not an algorithm: it fetches URLs, writes temporary
+files and shells out to LibreOffice, so it lives in
+`component/parser/backend/` as a provider behind the optional `[multimodal]`
+extra (`pillow`, `beautifulsoup4`, `cairosvg`). It consumes `algo.types` and
+`algo.llm` like any other host code.
+
+### Responsibilities
+
+- **Algorithm contracts** belong to `everos.algo`. Host orchestration and
+  callbacks may use them directly; sharing a candidate type is not the same
   as duplicating ranking rules in the host.
-- **Host persistence** belongs to EverOS. Algorithm calls may invoke an injected
-  LLM or parsing capability; that does not make them pure functions or grant
-  them responsibility for EverOS markdown, index rows, or SQLite transactions.
-- **Operator prompts** belong to EverAlgo. Custom instructions append host
-  requirements through the operator's supported contract.
+- **Host persistence** belongs to the rest of EverOS. Algorithm calls may
+  invoke an injected LLM or parsing capability; that does not make them pure
+  functions or grant them responsibility for EverOS markdown, index rows, or
+  SQLite transactions.
+- **Operator prompts** belong to the algorithm. Custom instructions append
+  host requirements through the operator's `custom_instructions=` argument.
 - **Retry policy** belongs to the layers responsible for the operation being
-  retried. An operator output error is distinct from provider transport or
-  validation failure; a retry must preserve the applicable side-effect rules.
-
-This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
+  retried. An operator output error (`LLMOutputError`) is distinct from
+  provider transport or validation failure; a retry must preserve the
+  applicable side-effect rules.
 
 Import the LLM contract types (`LLMClient`, `LLMMessage`, `LLMOutputError`,
-`StrictOutputModel`) from `everalgo.llm`; EverOS does not re-export them.
+`StrictOutputModel`) from `everos.algo.llm`; EverOS does not re-export them.
 
 ## Error handling architecture
 
@@ -592,7 +625,7 @@ unmapped exception becomes a 500 `INTERNAL_ERROR` without its message.
 ### Boundary translation
 
 Translate provider-specific failures at their integration boundary. Shared
-EverAlgo contract errors may remain visible to callers that own their policy:
+algorithm contract errors may remain visible to callers that own their policy:
 
 - `LLMCallError` → `LLMServiceError` at `component/parser/_core.py`
 - Embedding / rerank provider errors → `EmbeddingServiceError` / `RerankServiceError` at their respective protocol modules

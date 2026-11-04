@@ -6,9 +6,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from everalgo.agent_memory import CaseExtractionResult
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
-
+from everos.algo.agent_memory import CaseExtractionResult
+from everos.algo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseReader,

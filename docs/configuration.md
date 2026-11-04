@@ -271,7 +271,7 @@ joins it only behind its session's backlog)
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `case_gate_enabled` | bool | `false` | Put everalgo's correctness gate in front of agent-case extraction: the extraction LLM judges whether the work in a conversation was completed correctly (one extra call per conversation up to 50k tokens; longer ones are admitted without a call), and only admitted conversations become cases. An admitted case drives skill extraction whatever its quality score. Off: cases are admitted by the complexity and value filters. Requires restart. |
+| `case_gate_enabled` | bool | `false` | Put the agent-memory correctness gate in front of agent-case extraction: the extraction LLM judges whether the work in a conversation was completed correctly (one extra call per conversation up to 50k tokens; longer ones are admitted without a call), and only admitted conversations become cases. An admitted case drives skill extraction whatever its quality score. Off: cases are admitted by the complexity and value filters. Requires restart. |
 
 ### `[clustering]`
 

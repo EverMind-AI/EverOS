@@ -1,6 +1,6 @@
 """Which output language a piece of extracted text is written in.
 
-Answers with an ``everalgo`` ``OutputLanguage`` value (the strings below), so
+Answers with an ``everos.algo`` ``OutputLanguage`` value (the strings below), so
 the language an episode was written in can be pinned on the extractions that
 follow it. Decided by Unicode script, not a trained detector: the target set
 is seven languages, and script ranges separate the non-Latin ones exactly.

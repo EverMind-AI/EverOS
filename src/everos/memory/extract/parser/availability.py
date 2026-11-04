@@ -1,8 +1,8 @@
 """Multimodal capability detection + guard.
 
-This module must NOT import ``everalgo.parser`` at module level — its job is
-to answer "is the extra installed?" before anything tries to use it. The
-probe lives inside :func:`multimodal_available`.
+This module must NOT import ``everos.component.parser.backend`` at module
+level — its job is to answer "is the extra installed?" before anything tries to
+use it. The probe lives inside :func:`multimodal_available`.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def has_unparsed_multimodal(items: list[dict[str, Any]]) -> bool:
 
 
 def multimodal_available() -> bool:
-    """Whether the ``everalgo.parser`` extra is importable."""
+    """Whether the ``everos.component.parser.backend`` extra is importable."""
     from everos.component.parser import parser_available  # Deferred: optional dep probe
 
     return parser_available()
@@ -36,7 +36,8 @@ def require_multimodal() -> None:
     """Guard: raise when multimodal input arrives without the extra installed.
 
     Raises:
-        MultimodalNotEnabledError: When ``everalgo.parser`` cannot be imported.
+        MultimodalNotEnabledError: When ``everos.component.parser.backend``
+            cannot be imported.
     """
     if not multimodal_available():
         raise MultimodalNotEnabledError(_INSTALL_HINT)

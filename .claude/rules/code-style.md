@@ -2,6 +2,10 @@
 
 - **Formatter & linter**: `ruff` is the single tool (replaces black / isort / flake8).
   Line length 88, target `py312`. Run `make format` to auto-fix; `make lint` checks.
+  Exception: the code migrated from EverAlgo (`src/everos/algo/**`,
+  `src/everos/component/parser/backend/**`, `tests/fakes/llm_client.py`,
+  `tests/fakes/llm_conformance.py`) was written at 120 columns and is exempt from
+  `E501`; reflow a docstring when you edit it, never a prompt.
 - **Active ruff rule sets**: `E F I N UP B SIM ASYNC`. Don't disable a rule inline
   unless there's a genuine reason — prefer fixing the code.
 - **Type hints**: annotate every public function signature (params + return). The

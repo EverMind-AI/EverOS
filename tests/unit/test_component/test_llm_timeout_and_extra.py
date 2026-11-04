@@ -128,8 +128,8 @@ async def _sent_body(**call_extra: Any) -> dict[str, Any]:
     Returns the JSON body that reached the transport.
     """
     import httpx
-    from everalgo.llm import LLMMessage, StrictOutputModel
 
+    from everos.algo.llm import LLMMessage, StrictOutputModel
     from everos.component.llm import OpenAIProvider
 
     class _Reply(StrictOutputModel):

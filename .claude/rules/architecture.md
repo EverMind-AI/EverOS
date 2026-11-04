@@ -24,10 +24,19 @@ cross-cutting, usable by every layer: core / component / config
 - `memory/` — domain: models, ports (`*Store` / `*Index` / `EventBus` /
   `StrategySpec`), extract / search / strategies / reflection / mappers /
   custom_instructions.
+- `algo/` — every memory algorithm, one family per subpackage (`types` /
+  `llm` / `utils` / `boundary` / `user_memory` / `agent_memory` /
+  `clustering` / `knowledge` / `rank`), stateless. Callers pass data,
+  configuration values, workflow state, and external capabilities explicitly
+  and own persistence and client lifecycles. Algorithms import no other EverOS
+  layer and never mutate inputs or retain per-request state. See
+  [the contract](../../src/everos/algo/README.md).
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb
   + milvus) and the two domain-agnostic engines (cascade, OME).
 - `component/` — injectable providers (llm / embedding / rerank / parser /
-  tokenizer / config loader).
+  tokenizer / config loader). The multimodal parser backend
+  (`component/parser/backend/`) lives here, not in `algo`, because it does
+  file, subprocess and HTTP I/O.
 - `core/` — runtime base: errors, observability, request context, stateless
   utils (`core.utils.datetime`); no web framework.
 - `config/` — Settings, default TOML, custom-instruction YAML.
@@ -39,7 +48,7 @@ cross-cutting, usable by every layer: core / component / config
    `events` and the pure `mappers`; it never invokes a domain workflow
    (extract / search / strategies / reflection).
 2. **Entry points only see the service**: `entrypoints` must not import
-   `memory`, `infra`, `component` or `everalgo` — not even their data types.
+   `memory`, `infra`, `component` or `algo` — not even their data types.
    DTOs and error types come through the `everos.service` facade or
    `everos.core`.
 3. **One assembler**: inside `service`, only `bootstrap` imports `infra` and
@@ -56,8 +65,9 @@ cross-cutting, usable by every layer: core / component / config
    other `memory` modules, `persistence`, `service`, or `entrypoints`.
 6. **Cross-cutting stays below**: `core` / `config` import no business layer;
    `component` imports only `core` and `config` (explicit settings types and
-   pure config helpers) and never hides behaviour behind a global
-   configuration lookup.
+   pure config helpers) plus the `algo` contracts it implements or feeds
+   (`LLMClient`, `RawFile` / `ParsedContent`), and never hides behaviour
+   behind a global configuration lookup.
 
 If a change needs to cross a boundary the wrong way, the design is wrong —
 refactor, don't add an exception. `make lint` enforces only what the

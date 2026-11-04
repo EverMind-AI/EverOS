@@ -1,4 +1,4 @@
-"""``cluster`` — persisted snapshot of one ``everalgo.clustering.Cluster``.
+"""``cluster`` — persisted snapshot of one ``everos.algo.clustering.Cluster``.
 
 Mirrors the algo-side frozen value object (centroid + count + last_ts +
 preview) plus everos engineering metadata (``owner_id`` / ``owner_type``
@@ -60,7 +60,7 @@ class Cluster(BaseTable, table=True):
 
     last_ts_ms: int
     """Most recent member's timestamp as Unix epoch milliseconds — matches
-    :attr:`everalgo.clustering.Cluster.last_ts` exactly so no lossy
+    :attr:`everos.algo.clustering.Cluster.last_ts` exactly so no lossy
     datetime ↔ int conversion is needed across the storage boundary."""
 
     preview_json: str

@@ -1,6 +1,6 @@
-"""Scripted replies for everalgo operators, shaped as their strict reply models.
+"""Scripted replies for everos.algo operators, shaped as their strict reply models.
 
-A :class:`~everalgo.testing.FakeLLMClient` handler receives the
+A :class:`~tests.fakes.llm_client.FakeLLMClient` handler receives the
 ``response_format`` each operator requests, so a test answers per operator
 by the reply model's name instead of by prompt text.
 
@@ -39,7 +39,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from everalgo.testing import FakeLLMClient
+from tests.fakes.llm_client import FakeLLMClient
 
 UNUSABLE_REPLY = "this is not JSON"
 """A reply no operator can parse: it raises ``LLMOutputError``."""

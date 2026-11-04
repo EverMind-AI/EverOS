@@ -1,8 +1,8 @@
-"""Host-side retry of an everalgo operator whose reply was unusable.
+"""Host-side retry of an everos.algo operator whose reply was unusable.
 
-everalgo operators make one model call and raise ``LLMOutputError`` when the
+everos.algo operators make one model call and raise ``LLMOutputError`` when the
 reply fails its schema or business checks; whether to call again is the
-host's decision (everalgo ``docs/concepts/llm-contract.md`` section 5). This
+host's decision. This
 is the one place EverOS makes it: a bounded number of identical attempts.
 Every other exception propagates from the first attempt, untouched.
 """
@@ -13,8 +13,7 @@ __all__ = ["OUTPUT_ATTEMPTS", "retry_llm_output"]
 
 from collections.abc import Awaitable, Callable
 
-from everalgo.llm import LLMOutputError
-
+from everos.algo.llm import LLMOutputError
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)

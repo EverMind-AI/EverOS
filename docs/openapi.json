@@ -3087,7 +3087,7 @@
           "agent_skill"
         ],
         "title": "GetMemoryType",
-        "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
+        "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everos.algo\ntype name for that kind."
       },
       "GetProfileItem": {
         "properties": {

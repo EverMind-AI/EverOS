@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pydantic
 import pytest
-from everalgo.types import ChatMessage, MemCell
 
+from everos.algo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,

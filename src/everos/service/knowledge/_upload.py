@@ -17,8 +17,7 @@ __all__ = [
 
 from typing import Protocol
 
-from everalgo.types import ParsedContent
-
+from everos.algo.types import ParsedContent
 from everos.core.errors import InvalidInputError, UnsupportedModalityError
 
 _PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(

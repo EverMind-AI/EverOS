@@ -34,7 +34,7 @@ class AgentSkillRecaller:
     """
 
     kind: ClassVar[str] = "agent_skill"
-    everalgo_memory_type: ClassVar[str] = "skill"
+    algo_memory_type: ClassVar[str] = "skill"
 
     def __init__(self, deps: RecallerDeps, index: AgentSkillIndex) -> None:
         self._deps = deps

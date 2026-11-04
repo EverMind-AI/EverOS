@@ -1,4 +1,4 @@
-"""Custom instructions appended to everalgo operators' bundled rules.
+"""Custom instructions appended to everos.algo operators' bundled rules.
 
 External usage:
     from everos.memory.custom_instructions import CustomInstructions

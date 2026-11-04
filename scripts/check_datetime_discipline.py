@@ -40,6 +40,9 @@ _SRC = _ROOT / "src"
 
 _ALLOWLIST: set[Path] = {
     _ROOT / "src/everos/core/utils/datetime.py",
+    # The algorithm layer imports no other EverOS layer, so it renders and
+    # parses its prompt timestamps (always UTC) with its own helper module.
+    _ROOT / "src/everos/algo/utils/timestamps.py",
     _ROOT / "src/everos/infra/persistence/sqlite/_base/base.py",
 }
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from everalgo.types import RawFile
-
+from everos.algo.types import RawFile
 from everos.config.settings import DeciderSettings
 
 

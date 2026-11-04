@@ -12,9 +12,9 @@ from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
-from everalgo.types import AtomicFact, ChatMessage, Foresight, MemCell
 from structlog.testing import capture_logs
 
+from everos.algo.types import AtomicFact, ChatMessage, Foresight, MemCell
 from everos.config import OmeSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
@@ -429,8 +429,7 @@ async def test_profile_chain_e2e(
     profile store is in-memory and ``ProfileExtractor`` is patched.
     """
 
-    from everalgo.types import Profile as AlgoProfile
-
+    from everos.algo.types import Profile as AlgoProfile
     from everos.infra.ome.records import RunStatus
 
     monkeypatch.setattr(

@@ -32,12 +32,12 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.config import SqliteSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
@@ -66,7 +66,7 @@ async def _fake_acluster_by_llm(
     new_cluster: AlgoCluster, existing: list[AlgoCluster], *, llm: Any
 ) -> AlgoCluster | None:
     """Same shape as the LLM merge: fold into the first cluster of the same group."""
-    from everalgo.clustering import cluster_by_geometry
+    from everos.algo.clustering import cluster_by_geometry
 
     return cluster_by_geometry(new_cluster, existing, threshold=0.9)
 

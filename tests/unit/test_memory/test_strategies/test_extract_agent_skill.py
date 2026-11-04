@@ -26,9 +26,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import structlog.testing
-from everalgo.agent_memory import OpOutcome, SkillExtractionResult
-from everalgo.types import AgentSkill as AlgoAgentSkill
 
+from everos.algo.agent_memory import OpOutcome, SkillExtractionResult
+from everos.algo.types import AgentSkill as AlgoAgentSkill
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import MarkdownAgentSkillStore
 from everos.memory._partition_locks import _reset_for_tests
@@ -715,7 +715,7 @@ async def test_reap_removes_the_directory_a_rename_left_behind(
 ) -> None:
     """An update that renames a skill must not leave its old directory.
 
-    everalgo's ``_apply_update`` keeps ``prior.id`` while changing the
+    everos.algo's ``_apply_update`` keeps ``prior.id`` while changing the
     name, so the emitted skill is written under a new directory and the
     old one would survive carrying the same ``cluster_id``. That is not a
     cosmetic leak: the next extraction's ``existing_relevant_skills`` come

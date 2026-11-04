@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The algorithms now live in `everos.algo`.** The boundary, user-memory,
+  agent-memory, clustering, knowledge and ranking operators, their prompts, the
+  shared data contracts and the `LLMClient` protocol moved from the
+  `everalgo-*` PyPI packages into `src/everos/algo/`; the multimodal parser
+  moved into `component/parser/backend/`. EverOS no longer depends on any
+  `everalgo` package: `tiktoken`, `numpy` and `httpx` are direct dependencies,
+  and the `[multimodal]` extra installs `pillow`, `beautifulsoup4` and
+  `cairosvg` directly. Behaviour is unchanged; import paths move from
+  `everalgo.X` to `everos.algo.X`, and the synchronous `async_to_sync`
+  bridges the library shipped for non-async callers are gone (EverOS only
+  ever used the async entry points).
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME

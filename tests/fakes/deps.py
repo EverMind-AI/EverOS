@@ -13,11 +13,10 @@ __all__ = [
 from pathlib import Path
 from typing import Any
 
-from everalgo.agent_memory import CaseJudge
-from everalgo.testing import FakeLLMClient
-
+from everos.algo.agent_memory import CaseJudge
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
+from tests.fakes.llm_client import FakeLLMClient
 
 from .embedding import FakeEmbeddingProvider
 from .indexes import (

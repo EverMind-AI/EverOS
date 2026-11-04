@@ -1,12 +1,12 @@
-"""ContentItem dict -> everalgo ``RawFile``.
+"""ContentItem dict -> the parser backend ``RawFile``.
 
-``RawFile`` ships in everalgo-core (always installed), so this module is safe
+``RawFile`` ships in ``everos.algo.types`` (always importable), so this module is safe
 to import without the ``everos[multimodal]`` extra.
 
-everalgo deliberately never reads the host filesystem (``http(s)`` fetch or
+the parser backend deliberately never reads the host filesystem (``http(s)`` fetch or
 caller-hydrated bytes only). EverOS — the trust boundary that legitimately
 touches local files — owns ``file://`` support: :func:`build_raw_file` reads
-the file locally (with guardrails) and hands everalgo a *hydrated* RawFile
+the file locally (with guardrails) and hands the parser backend a *hydrated* RawFile
 (``content`` bytes), so the library stays filesystem-stateless.
 """
 
@@ -20,8 +20,8 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import anyio
-from everalgo.types import RawFile
 
+from everos.algo.types import RawFile
 from everos.config import Settings
 from everos.core.observability.logging import get_logger
 
@@ -31,15 +31,15 @@ type RawFileBuilder = Callable[[dict[str, Any]], Awaitable[RawFile]]
 
 
 def to_raw_file(item: dict[str, Any]) -> RawFile:
-    """Build an :class:`everalgo.types.RawFile` from a ContentItem dict.
+    """Build an :class:`everos.algo.types.RawFile` from a ContentItem dict.
 
-    ``uri``-backed items are handed to everalgo as-is (it fetches ``http(s)``
+    ``uri``-backed items are handed to the parser backend as-is (it fetches ``http(s)``
     and dispatches by Content-Type). ``base64``-backed items are decoded and
-    keyed by the item's ``ext`` (everalgo dispatches by extension).
+    keyed by the item's ``ext`` (the parser backend dispatches by extension).
 
     Note: ``file://`` uris are **not** resolved here — they are hydrated
     upstream by :func:`build_raw_file`. A ``file://`` item reaching this
-    function is returned as a uri RawFile (which everalgo then rejects).
+    function is returned as a uri RawFile (which the parser backend then rejects).
 
     Raises:
         ValueError: When the item carries neither ``uri`` nor ``base64``.
@@ -85,7 +85,7 @@ def _resolve_file_uri(uri: str) -> Path:
 def _validated_file_path(uri: str, settings_source: Callable[[], Settings]) -> Path:
     """Resolve + guardrail-check a ``file://`` uri (synchronous fs ops).
 
-    This is the host-filesystem access everalgo refuses by design, so the
+    This is the host-filesystem access the parser backend refuses by design, so the
     guardrails live here (the application trust boundary):
 
     * canonical, symlink-resolved path that must be an existing regular file;
@@ -149,7 +149,7 @@ async def build_raw_file(
 
     ``http(s)`` uris and ``base64`` payloads route through the synchronous
     :func:`to_raw_file`. A ``file://`` uri is read here into a hydrated
-    RawFile (``content`` bytes + ``extension``) so everalgo never touches the
+    RawFile (``content`` bytes + ``extension``) so the parser backend never touches the
     filesystem. The original item dict is left unchanged (the buffer keeps the
     lightweight ``file://`` uri, not the inlined bytes).
     """

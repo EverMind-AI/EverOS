@@ -87,8 +87,8 @@ benchmarks/results/<Dataset>/<run>/
 └── traces/               per-round retrieval traces
 ```
 
-`run_spec.json` records the models actually served and the `everalgo` package
-versions, which determine what a store contains.
+`run_spec.json` records the models actually served and the `everos` version,
+which determines what a store contains (the algorithms ship inside it).
 
 ## 6. Results
 

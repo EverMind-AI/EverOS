@@ -1,4 +1,4 @@
-"""Episode AGENTIC cluster-path orchestration — 1:1 with everalgo benchmark.
+"""Episode AGENTIC cluster-path orchestration — 1:1 with everos.algo benchmark.
 
 Implements the cluster main path from ``benchmarks/common/stages/search.py``
 (``enable_cluster_retrieval=True``):
@@ -24,12 +24,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from everalgo.rank.agentic import aagentic_retrieve
-from everalgo.rank.cluster import acluster_retrieve
-from everalgo.rank.hybrid import ahybrid_retrieve
-from everalgo.rank.maxsim import amaxsim_retrieve
-from everalgo.types import Candidate
-
+from everos.algo.rank.agentic import aagentic_retrieve
+from everos.algo.rank.cluster import acluster_retrieve
+from everos.algo.rank.hybrid import ahybrid_retrieve
+from everos.algo.rank.maxsim import amaxsim_retrieve
+from everos.algo.types import Candidate
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory.mappers import cluster as cluster_mapper
@@ -44,8 +43,7 @@ from .dto import SearchEpisodeItem
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
@@ -185,7 +183,7 @@ async def search_episodes_agentic(
             )
 
     # 5. Load cluster snapshot + full-corpus all_docs (memcell-keyed).
-    #    Reshape metadata to the everalgo doc contract so the sufficiency /
+    #    Reshape metadata to the everos.algo doc contract so the sufficiency /
     #    multi-query LLM prompt (rendered by ``_format_docs``) sees the episode
     #    body and a ms-epoch date instead of the memcell id.
     owner_scope = Scope(
@@ -243,10 +241,10 @@ async def search_episodes_agentic(
 
 
 def _with_doc_metadata(candidate: Candidate) -> Candidate:
-    """Bridge an episode candidate to the everalgo ``_format_docs`` contract.
+    """Bridge an episode candidate to the everos.algo ``_format_docs`` contract.
 
     ``aagentic_retrieve`` renders Round-1 candidates into the sufficiency /
-    multi-query LLM prompt via ``everalgo.rank.agentic._format_docs``, which
+    multi-query LLM prompt via ``everos.algo.rank.agentic._format_docs``, which
     reads ``metadata["episode"]`` as a dict with ``subject`` + ``content``
     and the date from a ms-epoch ``metadata["timestamp"]``. The recalled
     metadata carries the body as a flat ``episode`` string; the flat body is

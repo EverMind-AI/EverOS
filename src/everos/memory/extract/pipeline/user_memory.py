@@ -15,10 +15,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from everalgo.types import Episode as AlgoEpisode
-from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor
-
+from everos.algo.types import Episode as AlgoEpisode
+from everos.algo.types import MemCell as AlgoMemCell
+from everos.algo.user_memory import EpisodeExtractor
 from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
@@ -29,7 +28,7 @@ from everos.memory.models import Episode, IngestResult
 from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
+    from everos.algo.llm import LLMClient
 
 
 class UserMemoryPipeline:

@@ -86,7 +86,7 @@ benchmarks/results/<Dataset>/<run>/
 └── traces/               逐轮检索 trace
 ```
 
-`run_spec.json` 记录实际提供服务的模型,以及决定库内容的 `everalgo` 包版本。
+`run_spec.json` 记录实际提供服务的模型,以及决定库内容的 `everos` 版本(算法随 everos 一起发布)。
 
 ## 6. 结果
 

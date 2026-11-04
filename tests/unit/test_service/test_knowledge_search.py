@@ -1,6 +1,6 @@
 """Unit tests for knowledge search service.
 
-The real recaller runs over a scripted knowledge-topic index; the everalgo
+The real recaller runs over a scripted knowledge-topic index; the everos.algo
 facade (``acategory_retrieve``) is replaced by a driver that does what it
 does -- recall through ``base_retrieve``, rerank through ``rerank_fn`` --
 so the service's wiring of both callbacks is exercised. The catalog runs

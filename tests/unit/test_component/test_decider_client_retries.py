@@ -5,7 +5,7 @@ multiplying with the decider's: four decider attempts times three SDK requests a
 60s deadline is a 728s round that still ends in the fixed top-3 fallback. It was
 declared and documented and reached nothing. Two gaps, both invisible:
 
-* the decider's client was built from an everalgo ``LLMConfig``, whose fields are
+* the decider's client was built from an everos.algo ``LLMConfig``, whose fields are
   ``model, api_key, base_url, temperature, max_tokens, timeout, extra`` -- there is no
   ``max_retries``, so ``AsyncOpenAI`` kept its default of 2.
 * With no ``[decider].model`` the decider was the shared extraction client, which
@@ -164,9 +164,8 @@ class _StopError(Exception):
 
 
 async def test_client_level_extra_and_per_call_kwargs_both_reach_the_request() -> None:
-    """Per-call wins on a collision, matching everalgo's own merge order."""
-    from everalgo.llm import LLMMessage, StrictOutputModel
-
+    """Per-call wins on a collision, matching everos.algo's own merge order."""
+    from everos.algo.llm import LLMMessage, StrictOutputModel
     from everos.component.llm import OpenAIProvider
 
     class _Reply(StrictOutputModel):

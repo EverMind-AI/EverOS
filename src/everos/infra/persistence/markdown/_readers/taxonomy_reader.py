@@ -2,7 +2,7 @@
 
 The taxonomy file lives at ``knowledge_dir/.taxonomy.md``. It uses YAML
 frontmatter with a ``categories`` list, each entry having ``id`` and
-``description`` — matching ``everalgo.types.CategorySpec`` exactly.
+``description`` — matching ``everos.algo.types.CategorySpec`` exactly.
 
 ``ensure_taxonomy(knowledge_dir)`` creates the file from
 ``DEFAULT_TAXONOMY`` if it does not exist.
@@ -15,7 +15,8 @@ from typing import Any
 
 import anyio
 import yaml
-from everalgo.types import CategorySpec
+
+from everos.algo.types import CategorySpec
 
 TAXONOMY_FILENAME = ".taxonomy.md"
 

@@ -1,7 +1,7 @@
 """trigger_skill_clustering strategy — group fresh AgentCases into clusters.
 
 Listens to :class:`AgentCaseExtracted`, embeds the case's ``task_intent``,
-and merges the resulting size-1 :class:`everalgo.clustering.Cluster` into
+and merges the resulting size-1 :class:`everos.algo.clustering.Cluster` into
 the agent's existing cluster set. Cluster identity is the algo's
 "caller-supplied id"; the strategy mints one upfront via
 :func:`mint_cluster_id` so the value flows unchanged whether the algo
@@ -20,10 +20,10 @@ call nor an LLM ranking call.
 from __future__ import annotations
 
 import numpy as np
-from everalgo.agent_memory import should_extract_skill
-from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.clustering import acluster_by_llm
 
+from everos.algo.agent_memory import should_extract_skill
+from everos.algo.clustering import Cluster as AlgoCluster
+from everos.algo.clustering import acluster_by_llm
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps

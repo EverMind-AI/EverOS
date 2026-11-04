@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from everalgo.types import ChatMessage, MemCell
-
+from everos.algo.types import ChatMessage, MemCell
 from everos.memory import IngestResult
 from everos.memory.events import AgentPipelineStarted
 from everos.memory.extract.pipeline import (

@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence import MemoryRoot
 from everos.service import (
@@ -36,6 +35,7 @@ from everos.service import (
     build_application,
 )
 from tests.fakes import make_providers, memorize_llm
+from tests.fakes.llm_client import FakeLLMClient
 from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------

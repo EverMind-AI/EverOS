@@ -15,8 +15,7 @@ from everos.core.errors import UnsupportedModalityError
 from everos.core.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.parser import RawFileBuilder
 
 logger = get_logger(__name__)

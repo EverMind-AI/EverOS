@@ -1,4 +1,4 @@
-"""``LLMCaseJudge`` answers everalgo's agent-case gate question with one call.
+"""``LLMCaseJudge`` answers everos.algo's agent-case gate question with one call.
 
 The question's instructions and criteria go to the model as the system
 message and the conversation as the user message; the reply's probability
@@ -9,12 +9,12 @@ a probability object is an ``LLMOutputError``.
 from __future__ import annotations
 
 import pytest
-from everalgo.agent_memory import CaseGateQuestion
-from everalgo.llm import LLMOutputError
-from everalgo.testing import FakeLLMClient
 
+from everos.algo.agent_memory import CaseGateQuestion
+from everos.algo.llm import LLMOutputError
 from everos.component.llm import LLMCaseJudge
 from tests.fakes import UNUSABLE_REPLY, agent_track_llm
+from tests.fakes.llm_client import FakeLLMClient
 
 _QUESTION = CaseGateQuestion(
     instructions="Was the work done right?",

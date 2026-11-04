@@ -31,7 +31,7 @@ class AgentCaseRecaller:
     """
 
     kind: ClassVar[str] = "agent_case"
-    everalgo_memory_type: ClassVar[str] = "case"
+    algo_memory_type: ClassVar[str] = "case"
 
     def __init__(self, deps: RecallerDeps, index: AgentCaseIndex) -> None:
         self._deps = deps

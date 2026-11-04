@@ -24,8 +24,7 @@ import re
 from datetime import datetime
 from typing import Protocol
 
-from everalgo.types import CategorySpec, KnowledgeMemory, ParsedContent
-
+from everos.algo.types import CategorySpec, KnowledgeMemory, ParsedContent
 from everos.memory.ports import Filter, all_of, eq
 
 _SCOPE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-@+]+$")
@@ -34,7 +33,7 @@ _SCOPE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-@+]+$")
 class KnowledgeExtractor(Protocol):
     """Structural type for the algo extractor.
 
-    Matches ``everalgo.knowledge.KnowledgeExtractor.aextract`` so
+    Matches ``everos.algo.knowledge.KnowledgeExtractor.aextract`` so
     callers can pass any compatible implementation (including test
     doubles).
     """

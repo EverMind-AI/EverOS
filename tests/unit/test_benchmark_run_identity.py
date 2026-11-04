@@ -8,9 +8,9 @@ the two runs merged into one report reproducible from neither -- and the fresh
 The identity is two values, not one, because the halves cost differently: re-ingesting a
 store is hours of LLM calls, re-reading it is minutes. These tests pin that split. In
 particular `top_k` must NOT invalidate a store -- it caps how many episodes reach the
-answer prompt and has no bearing on what was ingested -- and neither must an `everalgo`
-version bump, whose effect on extraction quality was measured and did not move the
-benchmark.
+answer prompt and has no bearing on what was ingested -- and neither must an
+algorithm version bump, whose effect on extraction quality was measured and did not
+move the benchmark.
 """
 
 from __future__ import annotations
@@ -164,7 +164,7 @@ def test_top_k_alone_never_invalidates_the_store(tmp_path: Path) -> None:
     assert read_identity(cfg_a, srv) != read_identity(cfg_b, srv)
 
 
-def test_the_everalgo_version_is_not_part_of_the_identity(tmp_path: Path) -> None:
+def test_the_algorithm_version_is_not_part_of_the_identity(tmp_path: Path) -> None:
     """Measured to leave extraction quality unmoved; must not discard an ingest."""
     keys = set(ingest_identity(_config(tmp_path), "locomo", _serving()))
     assert keys == {"data_digest", "adapter", "extraction_backbone"}

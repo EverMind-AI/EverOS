@@ -214,7 +214,7 @@ class LLMSettings(BaseModel):
     ``json_schema`` sends the strict schema of the operator's reply model,
     ``json_object`` sends JSON mode, ``prompt_only`` sends neither and relies on
     the prompt (the reply is still JSON, and is still validated locally). It is
-    a deployment choice because endpoint support differs: everalgo's contract
+    a deployment choice because endpoint support differs: everos.algo's contract
     (``llm-contract.md`` §7.2) measured 24 of 32 OpenRouter endpoints for one
     model accepting a strict schema, 29 accepting JSON mode, and all 32 with
     neither -- and sending a format the provider lacks reroutes the request.
@@ -349,7 +349,7 @@ class DeciderSettings(BaseModel):
 
 
 class MultimodalSettings(BaseModel):
-    """Multimodal parsing LLM config (everalgo-parser).
+    """Multimodal parsing LLM config (the parser backend).
 
     Flat section mirroring ``[llm]``. The model must accept multimodal
     ``image_url`` parts (image / pdf / audio); it is kept independent from
@@ -376,7 +376,7 @@ class MultimodalSettings(BaseModel):
     """Extra attempts after an unusable reply. See
     :attr:`LLMSettings.invalid_reply_retries`."""
 
-    # ``file://`` content-item support (read locally by EverOS, not everalgo).
+    # ``file://`` content-item support (read locally by EverOS, not the parser backend).
     file_uri_allow_dirs: list[str] = []
     """Allowlisted base dirs for ``file://`` uris. Empty = allow any readable
     file (local-first default); set to confine reads when the API is exposed."""
@@ -476,7 +476,7 @@ class RerankSettings(BaseModel):
 
 
 class BoundaryDetectionSettings(BaseModel):
-    """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
+    """Hard limits passed through to ``everos.algo.boundary.adetect_boundaries``."""
 
     hard_token_limit: int = Field(default=65536, ge=1)
     hard_msg_limit: int = Field(default=500, ge=1)
@@ -571,13 +571,13 @@ class MemorizeSettings(BaseModel):
 class AgentMemorySettings(BaseModel):
     """Agent-memory extraction (``[agent_memory]``).
 
-    ``case_gate_enabled`` puts everalgo's correctness gate in front of
+    ``case_gate_enabled`` puts everos.algo's correctness gate in front of
     agent-case extraction: the extraction LLM judges whether the
     conversation's work was completed correctly, and only admitted
     conversations become cases (each admitted case then drives skill
     extraction whatever its quality score). It costs one extra LLM call per
     conversation up to the gate's length threshold. Off, cases are admitted
-    by everalgo's complexity and value filters, as before. Needs a restart.
+    by everos.algo's complexity and value filters, as before. Needs a restart.
 
     Env binding:
         EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED

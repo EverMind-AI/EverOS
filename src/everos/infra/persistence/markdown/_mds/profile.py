@@ -3,9 +3,9 @@
 Path: ``users/<user_id>/user.md``.
 
 Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
-two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
+two evidence buckets emitted by :class:`everos.algo.user_memory.ProfileExtractor`
 (``explicit_info`` / ``implicit_traits``). ``profile_timestamp_ms``
-mirrors :attr:`everalgo.types.Profile.timestamp` so the
+mirrors :attr:`everos.algo.types.Profile.timestamp` so the
 ``extract_user_profile`` strategy can compare per-user freshness against
 cluster ``last_ts`` without re-parsing the body.
 """

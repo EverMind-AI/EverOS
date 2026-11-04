@@ -23,10 +23,9 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
-from everalgo.rank.agentic import aagentic_retrieve
-from everalgo.rank.hybrid import ahybrid_retrieve
-from everalgo.types import Candidate
-
+from everos.algo.rank.agentic import aagentic_retrieve
+from everos.algo.rank.hybrid import ahybrid_retrieve
+from everos.algo.types import Candidate
 from everos.core.observability.tracing import memory_span
 from everos.memory.ports import Filter, Stored
 from everos.memory.search.callbacks import (
@@ -41,8 +40,7 @@ from everos.memory.search.shaper import shape_agent_cases, shape_agent_skills
 from .dto import SearchAgentCaseItem, SearchAgentSkillItem
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.agent_case import AgentCaseRecaller
     from everos.memory.search.recall.agent_skill import AgentSkillRecaller
@@ -62,16 +60,16 @@ _REFINEMENT_STRATEGY: str = "multi_query"
 
 _EMPTY_PASSAGE = "(empty)"
 """Stand-in body for a row whose every passage field is blank. Keeps
-``everalgo.rank.agentic._format_docs`` from raising on an empty string."""
+``everos.algo.rank.agentic._format_docs`` from raising on an empty string."""
 
 
 def _with_doc_metadata(
     candidate: Candidate, *, format_passage: Callable[[dict[str, Any]], str]
 ) -> Candidate:
-    """Bridge an agent candidate to the everalgo ``_format_docs`` contract.
+    """Bridge an agent candidate to the everos.algo ``_format_docs`` contract.
 
     ``aagentic_retrieve`` renders round-1 candidates into the sufficiency /
-    multi-query LLM prompt via ``everalgo.rank.agentic._format_docs``, which
+    multi-query LLM prompt via ``everos.algo.rank.agentic._format_docs``, which
     reads ``metadata["episode"]`` as a dict with ``subject`` + ``content`` and
     a ms-epoch ``metadata["timestamp"]``. Agent-kind records carry their body
     across several fields (``name``/``description`` for skills,
@@ -236,7 +234,7 @@ async def _run_agentic_retrieve(
                 sparse_candidates=_SPARSE_CANDIDATES,
                 rrf_k=_HYBRID_RRF_K,
             )
-        # Bridge to the everalgo doc contract so ``_format_docs`` (the LLM
+        # Bridge to the everos.algo doc contract so ``_format_docs`` (the LLM
         # sufficiency / multi-query prompt) sees an episode dict + ms
         # timestamp; agent-kind rows otherwise lack it and _format_docs raises.
         return [_with_doc_metadata(c, format_passage=passage_formatter) for c in hits]

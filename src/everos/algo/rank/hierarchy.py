@@ -4,8 +4,9 @@ Replaces the four-layer serial pipeline (hierarchy.py) with a heap-based
 approach where RRF orders the expansion priority and LR-calibrated scores
 drive the global competition between episodes and their atomic facts.
 
-Pure synchronous module — zero I/O, zero async. Designed for zero-change
-migration to everalgo.
+The caller supplies prefetched candidates, fact buckets, and coefficients.
+All working heaps and scores are local to this invocation; the algorithm does
+no I/O, reads no application configuration, and does not mutate input data.
 """
 
 from __future__ import annotations
@@ -13,13 +14,11 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING
 
-from everalgo.rank.fusion import cosine_to_lr_score, lr, rrf
-from everalgo.types import Candidate, ScoredItem
-
-from everos.memory.search._candidates import FactCandidate
+from everos.algo.rank.fusion import cosine_to_lr_score, lr, rrf
+from everos.algo.types import Candidate, FactCandidate, ScoredItem
 
 if TYPE_CHECKING:
-    from everalgo.rank.weight import LRCoefs
+    from everos.algo.rank.weight import LRCoefs
 
 
 def build_ep_to_fact_parents(

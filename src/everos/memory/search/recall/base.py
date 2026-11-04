@@ -1,7 +1,7 @@
-"""Search hits -> everalgo ``Candidate``: the inbound mapper of the search path.
+"""Search hits -> everos.algo ``Candidate``: the inbound mapper of the search path.
 
 Every recaller turns the domain matches its index returns
-(:class:`~everos.memory.ports.SearchHit`) into everalgo ``Candidate``
+(:class:`~everos.memory.ports.SearchHit`) into everos.algo ``Candidate``
 objects for the rank algorithms, and hands back the matched records next
 to them in a :class:`RecallResult`. The two travel separately on purpose:
 
@@ -23,9 +23,9 @@ import dataclasses
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
-from everalgo.types import Candidate, RankInput
 from pydantic import BaseModel
 
+from everos.algo.types import Candidate, RankInput
 from everos.component.tokenizer import Tokenizer
 from everos.memory.ports import Filter, SearchHit, Stored
 
@@ -80,7 +80,7 @@ class KindRecaller(Protocol):
     kind: ClassVar[str]
     """``episode`` / ``atomic_fact`` / ``agent_case`` / ``agent_skill``."""
 
-    everalgo_memory_type: ClassVar[str]
+    algo_memory_type: ClassVar[str]
     """``episodic`` / ``case`` / ``skill`` -- passed to ``RankInput.memory_type``."""
 
     async def sparse_recall(
@@ -166,7 +166,7 @@ def rank_input(
     dense: RecallResult[Any],
     top_k: int,
 ) -> RankInput:
-    """The everalgo ``arank`` input for one kind's two recall routes.
+    """The everos.algo ``arank`` input for one kind's two recall routes.
 
     No ``radius``: the cosine floor is applied to the dense pool before it
     gets here (``RecallResult.within_radius``), and the ranker fuses scores

@@ -6,8 +6,8 @@ import inspect
 from typing import Any
 
 import pytest
-from everalgo.types import Candidate
 
+from everos.algo.types import Candidate
 from everos.memory.search.callbacks import (
     _SKILL_RERANK_INSTRUCTION,
     build_rerank_fn,

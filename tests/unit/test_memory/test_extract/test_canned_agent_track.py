@@ -1,7 +1,7 @@
 """The canned agent-track scripts satisfy the real operators they stand in for.
 
 Each script under ``tests/fakes/llm_scripts/agent_track`` is fed to the real
-everalgo operator through ``agent_track_llm``; a script that drifted from the
+everos.algo operator through ``agent_track_llm``; a script that drifted from the
 operator's strict reply model fails here instead of deep inside an
 integration test. Every operator also has its empty script, which exercises
 the path where it yields nothing. The case-gate scripts answer EverOS's own
@@ -13,16 +13,16 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from everalgo.agent_memory import (
+
+from everos.algo.agent_memory import (
     AgentCaseExtractor,
     AgentCaseGate,
     AgentSkillExtractor,
     CaseSkipReason,
 )
-from everalgo.boundary import adetect_boundaries
-from everalgo.clustering import Cluster, acluster_by_llm
-from everalgo.types import AgentCase
-
+from everos.algo.boundary import adetect_boundaries
+from everos.algo.clustering import Cluster, acluster_by_llm
+from everos.algo.types import AgentCase
 from everos.component.llm import LLMCaseJudge
 from tests.fakes import agent_track_llm, agent_track_script, agent_trajectory
 

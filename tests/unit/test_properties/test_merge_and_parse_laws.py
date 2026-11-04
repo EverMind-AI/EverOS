@@ -26,10 +26,10 @@ from __future__ import annotations
 import datetime as dt
 import random
 
-from everalgo.types import Candidate
 from hypothesis import given
 from hypothesis import strategies as st
 
+from everos.algo.types import Candidate
 from everos.infra.cascade.models import ScanInput
 from everos.infra.cascade.reconciler import PriorState, reconcile
 from everos.memory.extract.boundary.messages import merge_dedupe_sort

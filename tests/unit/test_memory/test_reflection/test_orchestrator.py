@@ -40,7 +40,7 @@ def _isolate_locks() -> None:
 
 @dataclass
 class _FakeAlgoResult:
-    """Minimal stand-in for ``everalgo.types.Episode``."""
+    """Minimal stand-in for ``everos.algo.types.Episode``."""
 
     owner_id: str | None
     episode: str

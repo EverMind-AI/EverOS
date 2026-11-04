@@ -16,8 +16,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from everalgo.types import CategorySpec, KnowledgeMemory, ParsedContent
 
+from everos.algo.types import CategorySpec, KnowledgeMemory, ParsedContent
 from everos.core.errors import PathTraversalError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import MarkdownKnowledgeStore

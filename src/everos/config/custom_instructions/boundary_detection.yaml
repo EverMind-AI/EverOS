@@ -1,4 +1,4 @@
-# Custom instructions for boundary detection (``everalgo.boundary.adetect_boundaries``).
+# Custom instructions for boundary detection (``everos.algo.boundary.adetect_boundaries``).
 #
 # What it does
 #   When enabled, ``instructions`` is appended verbatim after the

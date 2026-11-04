@@ -25,8 +25,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from everalgo.types import KnowledgeMemory, ParsedContent
 
+from everos.algo.types import KnowledgeMemory, ParsedContent
 from everos.component.embedding import EmbeddingProvider
 from everos.component.parser import aparse_file
 from everos.component.rerank import RerankResult

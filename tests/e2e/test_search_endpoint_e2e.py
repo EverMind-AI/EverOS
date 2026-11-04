@@ -36,9 +36,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
 from httpx import ASGITransport, AsyncClient
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.component.embedding import build_embedding_provider
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app

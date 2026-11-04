@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import structlog.testing
-from everalgo.types import AtomicFact
 
+from everos.algo.types import AtomicFact
 from everos.memory.events import (
     AtomicFactsExtracted,
     EpisodeExtracted,

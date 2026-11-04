@@ -1,7 +1,7 @@
 """Tests for :class:`ClusterRepo` — cluster + cluster_member persistence.
 
 Verifies the boundary translations between the algo value object
-(:class:`everalgo.clustering.Cluster`) and the two-table storage shape:
+(:class:`everos.algo.clustering.Cluster`) and the two-table storage shape:
 
 - centroid ``np.ndarray`` ↔ raw ``bytes``,
 - ``last_ts`` int ms-epoch stored verbatim (no datetime conversion),
@@ -18,9 +18,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
 from sqlmodel import SQLModel
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.config import SqliteSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine

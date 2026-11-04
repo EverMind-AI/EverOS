@@ -48,8 +48,7 @@ from ._queue_models import to_task_item as to_task_item
 from ._session_locks import SessionLocks
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
     from everos.memory.deps import Stores

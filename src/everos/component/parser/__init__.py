@@ -1,4 +1,4 @@
-"""component.parser — shared multimodal file parsing via everalgo-parser.
+"""component.parser — shared multimodal file parsing via the parser backend.
 
 External usage:
     from everos.component.parser import aparse_file, parser_available

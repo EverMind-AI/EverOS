@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import pytest
 import structlog
-from everalgo.types import (
-    AtomicFact as AlgoAtomicFact,
-)
-from everalgo.types import (
-    Episode as AlgoEpisode,
-)
-from everalgo.types import (
-    Foresight as AlgoForesight,
-)
 from pydantic import ValidationError
 
+from everos.algo.types import (
+    AtomicFact as AlgoAtomicFact,
+)
+from everos.algo.types import (
+    Episode as AlgoEpisode,
+)
+from everos.algo.types import (
+    Foresight as AlgoForesight,
+)
 from everos.memory.models import (
     AtomicFact,
     Episode,

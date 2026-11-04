@@ -5,10 +5,10 @@ Translates the public 4-method enum into everos's internal pipeline routing sign
 Passing ``AGENTIC`` here is a caller contract violation and raises
 ``ValueError`` as a defensive guard.
 
-* ``KEYWORD`` / ``VECTOR`` → ``None`` → manager skips ``everalgo.rank``.
+* ``KEYWORD`` / ``VECTOR`` → ``None`` → manager skips ``everos.algo.rank``.
 * ``HYBRID``  → ``"hierarchy"`` (episode / atomic_fact) — heap-expand
   pipeline (RRF-ordered expansion → LR-calibrated global top-N competition)
-  or ``"vector_anchored"`` (agent_case) — everalgo vector-anchored fusion (alpha=0.7)
+  or ``"vector_anchored"`` (agent_case) — everos.algo vector-anchored fusion (alpha=0.7)
   or ``"skill_hybrid"`` (agent_skill) — custom rrf → cross-encoder rerank → optional
   verify.
 """
@@ -28,11 +28,11 @@ def resolve_pipeline(
 ) -> tuple[str | None, None]:
     """Return ``(pipeline_signal, None)`` for a ``(method, kind)`` pair.
 
-    ``pipeline_signal`` of ``None`` means "do not call ``everalgo.rank.arank``;
+    ``pipeline_signal`` of ``None`` means "do not call ``everos.algo.rank.arank``;
     the manager runs single-route recall and returns directly".
     ``"hierarchy"`` routes to the heap-expand episode pipeline in
-    ``memory.search.hierarchy`` (RRF → LR → heap expansion → eviction).
-    ``"vector_anchored"`` routes to ``everalgo.rank.arank`` with vector-anchored
+    ``algo.rank`` (RRF → LR → heap expansion → eviction).
+    ``"vector_anchored"`` routes to ``everos.algo.rank.arank`` with vector-anchored
     fusion (alpha=0.7, saturation_k=5.0) — matches the opensource case retrieval.
     ``"skill_hybrid"`` routes to the custom skill hybrid orchestrator in
     ``memory.search.skill_hybrid`` (rrf → cross-encoder rerank → optional verify).

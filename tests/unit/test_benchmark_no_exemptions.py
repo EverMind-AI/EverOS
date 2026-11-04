@@ -140,9 +140,10 @@ def test_the_meta_key_declarations_reach_the_runner() -> None:
 def test_the_provenance_package_list_names_the_algorithm_packages() -> None:
     """These make a store's extraction reproducible; a wrong list hides drift."""
     assert run_mod._PROVENANCE_PACKAGES
-    # The everalgo packages decide an extraction's reproducibility; the rest are the
-    # storage and client stack that decide a retrieval's.
-    assert any(p.startswith("everalgo-") for p in run_mod._PROVENANCE_PACKAGES)
+    # everos carries the algorithms, so its version decides an extraction's
+    # reproducibility; the rest are the storage and client stack that decide a
+    # retrieval's.
+    assert run_mod._PROVENANCE_PACKAGES[0] == "everos"
     assert "everos" in run_mod._PROVENANCE_PACKAGES
     assert "lancedb" in run_mod._PROVENANCE_PACKAGES
     collected = run_mod._collect_packages()

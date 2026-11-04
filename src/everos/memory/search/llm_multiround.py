@@ -49,10 +49,10 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
-from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
-from everalgo.rank.fusion import rrf
-from everalgo.types import Candidate
-
+from everos.algo.llm import LLMMessage, StrictOutputModel, parse_reply
+from everos.algo.rank import select_injection
+from everos.algo.rank.fusion import rrf
+from everos.algo.types import Candidate
 from everos.config.settings import DeciderSettings
 from everos.core.observability.logging import get_logger
 from everos.memory.models import Episode
@@ -65,8 +65,7 @@ from .shaper import shape_episodes
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from everalgo.llm import LLMClient
-
+    from everos.algo.llm import LLMClient
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
@@ -237,7 +236,7 @@ class LLMRoundDecider:
     reads the validated reply.
 
     Args:
-        llm: everalgo LLM client.
+        llm: everos.algo LLM client.
         prompt: Template exposing ``{question}``, ``{core_so_far}``,
             ``{evidence}``, ``{max_sub}``. Defaults to :data:`_DECIDER_PROMPT`.
         tuning_source: Read current settings when this decider is invoked.
@@ -825,10 +824,11 @@ def _finalize_injection(
 ) -> list[SearchEpisodeItem]:
     """Assemble the final top_k and dump the final-injection trace (schema C).
 
-    Assembly (post-loop, once):
-      1. CORE first — every accumulated core, pinned to the front (a hard
-         guarantee: kept even when ``len(core) > top_k``), ordered by max RRF
-         score.
+    Selection is delegated to the stateless ``algo.rank.select_injection``.
+    This host function supplies the current state and configuration, shapes the
+    selected records, and writes the trace. Assembly (post-loop, once):
+      1. CORE first — accumulated core, ordered by max RRF score and capped at
+         ``top_k`` unless the caller explicitly enables ``core_overflow``.
       2. GUARANTEE — each sub-query's top non-core candidate (its ``guarantee``
          entries) reserves a slot, so no facet loses coverage.
       3. FILL — remaining candidates by MAX RRF score across sub-queries. MAX, not
@@ -849,53 +849,25 @@ def _finalize_injection(
         scores = subq_hits.get(cid)
         return max(scores, key=lambda k: scores[k]) if scores else None
 
-    slot_source: dict[str, str] = {}
-    chosen: list[str] = []
-    # 1. core-first, ordered by max RRF score across sub-queries. Capped at top_k:
-    # steps 2 and 3 honour top_k, so leaving core uncapped silently returned MORE
-    # than the caller asked for — measured at 316/1522 questions (20.8%) on
-    # SubtleMemory, up to 68 items for a top_k of 20 (3.4x the budget). That breaks
-    # the top_k contract and any same-budget comparison across methods. Core beyond
-    # the budget is by definition the lowest-scored core, so it is what gets dropped.
-    n_core_selected = 0
-    for cid in sorted(core_order, key=max_score, reverse=True):
-        if cid in slot_source:
-            continue
-        n_core_selected += 1
-        if not tuning_source().core_overflow and len(chosen) >= top_k:
-            continue  # keep counting for the trace, but do not exceed the budget
-        chosen.append(cid)
-        slot_source[cid] = "core"
-    n_core = len(chosen)
-    if n_core_selected > n_core:
+    selection = select_injection(
+        top_k=top_k,
+        core_ids=core_ids,
+        core_order=core_order,
+        candidate_ids=cand_by_id,
+        subq_hits=subq_hits,
+        guarantee=guarantee,
+        core_overflow=lambda: tuning_source().core_overflow,
+    )
+    if selection.n_core_selected > selection.n_core:
         logger.info(
             "llm_multiround_core_truncated",
             owner_id=owner_id,
-            selected=n_core_selected,
-            kept=n_core,
+            selected=selection.n_core_selected,
+            kept=selection.n_core,
             top_k=top_k,
         )
-    # 2. per-sub-query guarantee (top non-core, in block discovery order)
-    n_guaranteed = 0
-    for _sub_query, cid in guarantee:
-        if len(chosen) >= top_k:
-            break
-        if cid in slot_source or cid in core_ids:
-            continue
-        chosen.append(cid)
-        slot_source[cid] = "guarantee-top1"
-        n_guaranteed += 1
-    # 3. max-score fill to top_k
-    n_filled = 0
-    remaining = [cid for cid in cand_by_id if cid not in slot_source]
-    for cid in sorted(remaining, key=max_score, reverse=True):
-        if len(chosen) >= top_k:
-            break
-        chosen.append(cid)
-        slot_source[cid] = "maxscore-fill"
-        n_filled += 1
 
-    ordered_cands = [cand_by_id[cid] for cid in chosen if cid in cand_by_id]
+    ordered_cands = [cand_by_id[cid] for cid in selection.chosen if cid in cand_by_id]
     episodes = shape_episodes(ordered_cands, episodes_by_id)
 
     dump_path = trace_path_source()
@@ -915,7 +887,7 @@ def _finalize_injection(
                         "session_id": ep.session_id,
                         "timestamp": str(ep.timestamp),
                         "is_core": ep.id in core_ids,
-                        "slot_source": slot_source.get(ep.id),
+                        "slot_source": selection.slot_source.get(ep.id),
                         "max_rrf_score": max_score(ep.id),
                         "max_rrf_subquery": max_subquery(ep.id),
                         "per_subquery_scores": subq_hits.get(ep.id, {}),
@@ -923,9 +895,9 @@ def _finalize_injection(
                     for r, ep in enumerate(episodes)
                 ],
                 "assembly": {
-                    "n_core": n_core,
-                    "n_guaranteed": n_guaranteed,
-                    "n_filled": n_filled,
+                    "n_core": selection.n_core,
+                    "n_guaranteed": selection.n_guaranteed,
+                    "n_filled": selection.n_filled,
                     "top_k": top_k,
                     "subqueries_seen": subqueries_seen,
                 },

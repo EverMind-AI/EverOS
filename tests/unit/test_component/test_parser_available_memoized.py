@@ -1,7 +1,7 @@
 """``parser_available`` memoisation contract.
 
 Round-3 review finding #14: ``/health`` used to trigger a heavy
-``import everalgo.parser`` on every hit — pypdf / python-docx /
+``import everos.component.parser.backend`` on every hit — pypdf / python-docx /
 tesseract pulled in on the event loop, hundreds of ms of blocking
 work per request. The fix wraps :func:`parser_available` in
 ``functools.lru_cache(maxsize=1)`` so only the first call in the
@@ -39,7 +39,7 @@ def _clear_cache_between_tests() -> None:
 
 
 def test_parser_available_second_call_hits_cache() -> None:
-    """Second invocation must NOT re-run the ``import everalgo.parser``.
+    """Second invocation must NOT re-run the ``import everos.component.parser.backend``.
 
     Uses :meth:`functools.lru_cache.cache_info` to confirm the second
     call is a cache hit — the underlying ``import`` statement never
@@ -72,7 +72,7 @@ def test_parser_available_caches_missing_extra_result() -> None:
     original_import = __import__
 
     def _fake_import(name, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if name == "everalgo.parser":
+        if name == "everos.component.parser.backend":
             raise ImportError("simulated missing extra")
         return original_import(name, *args, **kwargs)
 
@@ -96,7 +96,7 @@ def test_parser_available_cache_clear_re_evaluates() -> None:
     fake_module = MagicMock()
 
     def _import_missing(name, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if name == "everalgo.parser":
+        if name == "everos.component.parser.backend":
             raise ImportError("first pass: missing")
         return __import__(name, *args, **kwargs)
 
@@ -106,6 +106,6 @@ def test_parser_available_cache_clear_re_evaluates() -> None:
     parser_available.cache_clear()
 
     # Now pretend the module is importable by pre-seeding sys.modules —
-    # `import everalgo.parser` will find it there and skip the loader.
-    with patch.dict(sys.modules, {"everalgo.parser": fake_module}):
+    # `import everos.component.parser.backend` will find it there and skip the loader.
+    with patch.dict(sys.modules, {"everos.component.parser.backend": fake_module}):
         assert parser_available() is True

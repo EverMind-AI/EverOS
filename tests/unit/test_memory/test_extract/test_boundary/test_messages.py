@@ -5,15 +5,15 @@ from __future__ import annotations
 import datetime as _dt
 
 import pytest
-from everalgo.boundary import DetectionResult
-from everalgo.types import (
+
+from everos.algo.boundary import DetectionResult
+from everos.algo.types import (
     ChatMessage,
     ConversationItem,
     MemCell,
     ToolCallRequest,
     ToolCallResult,
 )
-
 from everos.memory import CanonicalMessage, ToolCall
 from everos.memory.extract.boundary.messages import (
     close_complete_tail,
@@ -157,7 +157,7 @@ def test_close_complete_tail_leaves_a_final_call_alone() -> None:
 
 
 def test_split_message_ids_consumes_left_to_right() -> None:
-    from everalgo.types import MemCell
+    from everos.algo.types import MemCell
 
     merged = [_msg(f"m{i}", "user", ts_seconds=100 + i) for i in range(5)]
     cells = [
@@ -198,7 +198,7 @@ def test_split_message_ids_consumes_left_to_right() -> None:
 
 
 def test_unique_senders_preserves_first_occurrence_order() -> None:
-    from everalgo.types import MemCell
+    from everos.algo.types import MemCell
 
     cell = MemCell(
         items=[
@@ -233,7 +233,7 @@ def test_unique_senders_preserves_first_occurrence_order() -> None:
 
 
 def test_unique_senders_handles_tool_result_without_sender() -> None:
-    from everalgo.types import MemCell
+    from everos.algo.types import MemCell
 
     cell = MemCell(
         items=[

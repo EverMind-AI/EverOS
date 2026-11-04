@@ -1,9 +1,8 @@
-"""Conversions between everalgo ``AgentCase`` and the domain case."""
+"""Conversions between everos.algo ``AgentCase`` and the domain case."""
 
 from __future__ import annotations
 
-from everalgo.types import AgentCase as AlgoAgentCase
-
+from everos.algo.types import AgentCase as AlgoAgentCase
 from everos.memory.mappers import agent_case
 
 _GATE = {

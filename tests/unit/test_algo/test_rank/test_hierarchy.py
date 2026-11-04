@@ -1,18 +1,19 @@
-"""Unit tests for ``memory.search.hierarchy``."""
+"""Heap expansion preserves ranking behavior and caller-owned inputs."""
 
 from __future__ import annotations
 
 import datetime as _dt
+from copy import deepcopy
 
 import pytest
-from everalgo.rank.fusion import cosine_to_lr_score
-from everalgo.types import Candidate
 
-from everos.memory.search._candidates import FactCandidate
-from everos.memory.search.hierarchy import (
+from everos.algo.rank import (
+    FactCandidate,
     build_ep_to_fact_parents,
     heap_expand,
 )
+from everos.algo.rank.fusion import cosine_to_lr_score
+from everos.algo.types import Candidate
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -91,6 +92,27 @@ class TestBuildEpToFactParents:
 
 
 class TestHeapExpand:
+    def test_inputs_and_results_are_independent_between_calls(self) -> None:
+        sparse = [_ep(ep_id="ep-1", score=2.0)]
+        dense = [_ep(ep_id="ep-1", score=0.5)]
+        facts = {"ep-1": [_fact(fact_id="f1", score=0.95)]}
+        before = deepcopy((sparse, dense, facts))
+
+        first = heap_expand(sparse=sparse, dense=dense, episode_to_facts=facts)
+        heap_expand(
+            sparse=[_ep(ep_id="other", score=5.0)],
+            dense=[],
+            episode_to_facts={},
+        )
+        again = heap_expand(sparse=sparse, dense=dense, episode_to_facts=facts)
+
+        assert (sparse, dense, facts) == before
+        assert first == again
+        assert first is not again
+        first[0].metadata["request_local"] = True
+        assert "request_local" not in again[0].metadata
+        assert (sparse, dense, facts) == before
+
     def test_empty_inputs_returns_empty(self) -> None:
         assert heap_expand(sparse=[], dense=[], episode_to_facts={}) == []
 

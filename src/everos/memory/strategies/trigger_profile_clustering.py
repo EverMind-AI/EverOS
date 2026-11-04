@@ -2,7 +2,7 @@
 
 Listens to :class:`EpisodeExtracted` (emitted per-episode after the user
 pipeline writes its md), embeds the ``episode_text``, and merges the
-resulting size-1 :class:`everalgo.clustering.Cluster` into the user's
+resulting size-1 :class:`everos.algo.clustering.Cluster` into the user's
 existing user-memory cluster set.
 
 Uses :func:`cluster_by_geometry` (embedding-only cosine + time-window).
@@ -11,9 +11,9 @@ Uses :func:`cluster_by_geometry` (embedding-only cosine + time-window).
 from __future__ import annotations
 
 import numpy as np
-from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.clustering import cluster_by_geometry
 
+from everos.algo.clustering import Cluster as AlgoCluster
+from everos.algo.clustering import cluster_by_geometry
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock

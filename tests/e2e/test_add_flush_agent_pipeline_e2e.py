@@ -35,7 +35,7 @@ race-free, only the driver is conservative.
 White-box assertions (audit trail of internal surfaces touched):
     - sqlite ``memcell`` rows per session_id
     - per session: ≥1 ``agent_case``, or every memcell's persisted
-      ``case_skip_reason`` is an everalgo closure-gate reason (see
+      ``case_skip_reason`` is an everos.algo closure-gate reason (see
       ``_CLOSURE_GATE_REASONS``); ≥1 case across all sessions
     - filesystem ``<root>/agents/<agent>/.cases/*.md`` presence and
       LanceDB session isolation, for every agent that has a case
@@ -92,10 +92,10 @@ _AGENT_SESSIONS: dict[str, frozenset[str]] = {
 _CLOSURE_GATE_REASONS = frozenset({"trajectory_not_closed", "no_messages_after_strip"})
 """Skip reasons that let a session end with no agent_case.
 
-everalgo-agent-memory 0.6 extracts a case only from a closed trajectory (a
+The agent-memory extractor extracts a case only from a closed trajectory (a
 user request through to the assistant's final text). Boundary detection
 occasionally cuts a trajectory just before that final answer -- measured on
-two of these fixtures at 3 of 5 runs, against 1 of 5 before the everalgo
+two of these fixtures at 3 of 5 runs, against 1 of 5 before the everos.algo
 upgrade -- and then neither half passes the gate. That is accepted upstream
 behaviour; the strategy persists the reason on each memcell row, which is
 what this test reads instead of demanding a case per agent.
@@ -167,7 +167,7 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     """5 SWE-bench trajectories → agent_case + agent_skill on three agents.
 
     A session may end with no case when every one of its memcells was
-    rejected by everalgo's closure gate (boundary cut the trajectory before
+    rejected by everos.algo's closure gate (boundary cut the trajectory before
     the final answer); the persisted ``memcell.case_skip_reason`` proves it.
     The aggregate floor of one case keeps the downstream checks meaningful.
     """
@@ -245,8 +245,8 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         )
 
     # 4.5 agent_skill — aggregate floor across all three agents. Per-agent
-    # emission depends on everalgo's per-case quality gate
-    # (skip_quality_threshold, see everalgo/agent_memory/skill_ops.py) —
+    # emission depends on everos.algo's per-case quality gate
+    # (skip_quality_threshold, see everos.algo.agent_memory.skill_ops) —
     # extract_agent_skill itself has no cluster-size gate, so a per-agent
     # floor would be genuinely flaky (a single low-quality trajectory can
     # legitimately yield 0 skills for that agent). Empirically, on this

@@ -137,7 +137,7 @@ class PathTraversalError(DomainError):
 class UnsupportedModalityError(DomainError):
     """The uploaded file format is not supported (e.g. video, unknown type).
 
-    Wraps everalgo's ``NotImplementedError`` / dispatch ``ValueError`` so
+    Wraps the parser backend's ``NotImplementedError`` / dispatch ``ValueError`` so
     the caller gets a stable 415 instead of a raw 500.
     """
 

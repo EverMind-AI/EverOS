@@ -1,4 +1,4 @@
-"""Load the instructions a host appends to an everalgo operator's own rules.
+"""Load the instructions a host appends to an everos.algo operator's own rules.
 
 File shape (``config/custom_instructions/<operator>.yaml``)::
 
@@ -7,7 +7,7 @@ File shape (``config/custom_instructions/<operator>.yaml``)::
 
 When ``enabled`` is true and ``instructions`` is a non-blank string the
 loader returns it; otherwise ``None``. The text is passed to the operator as
-``custom_instructions=``: everalgo appends it after the bundled rules, so it
+``custom_instructions=``: everos.algo appends it after the bundled rules, so it
 can add a requirement but never replace a rule or the output shape.
 """
 

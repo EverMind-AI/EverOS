@@ -833,7 +833,7 @@ async def test_agent_hybrid_llm_rerank_dispatches_arank_for_case_then_skill(
     client. Order matters: the case call must precede the skill call so
     its results can feed the bridge.
     """
-    from everalgo.types import RankOutput
+    from everos.algo.types import RankOutput
 
     calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -864,7 +864,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     into the dense candidates that ``arank`` sees on the second call, while
     the direct skill recall pool is preserved.
     """
-    from everalgo.types import RankOutput, ScoredItem
+    from everos.algo.types import RankOutput, ScoredItem
 
     case = stored_case("ac_20261009_0001", owner_id="agent_a")
     assert case.ref.id == "agent_a_ac_20261009_0001"

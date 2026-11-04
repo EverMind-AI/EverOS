@@ -29,7 +29,7 @@ Only ``ChatMessage`` carries ``role``: ``ToolCallRequest`` has
 ``sender_id`` without it, ``ToolCallResult`` has neither — so the old
 attribute test raised ``AttributeError`` on the first tool call, making
 the strategy correct on plain user chat and guaranteed to dead-letter on
-agent trajectories. everalgo contracts for exactly this mixed input
+agent trajectories. everos.algo contracts for exactly this mixed input
 (``user_memory/_render.chat_messages``: "the caller need not pre-filter;
 an AgentMemCell-shaped MemCell is acceptable input"), and every other
 user-memory extractor gets it for free by delegating; this strategy was
@@ -38,7 +38,7 @@ yields no senders and returns without an LLM call.
 
 Extraction granularity is a separate, still-open question: this runs per
 memcell, while ``atomic_fact`` runs per episode. Moving it needs an
-everalgo entry point that does not exist yet — unrelated to the crash,
+everos.algo entry point that does not exist yet — unrelated to the crash,
 and not what the default-off above is about.
 """
 
@@ -46,9 +46,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from everalgo.types import ChatMessage
-from everalgo.user_memory import ForesightExtractor
-
+from everos.algo.types import ChatMessage
+from everos.algo.user_memory import ForesightExtractor
 from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import UserPipelineStarted

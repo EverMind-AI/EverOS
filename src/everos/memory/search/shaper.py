@@ -1,6 +1,6 @@
 """Ranked candidates -> public DTO items: the outbound mapper of the search path.
 
-The rank algorithms speak everalgo ``Candidate`` / ``ScoredItem``; the
+The rank algorithms speak everos.algo ``Candidate`` / ``ScoredItem``; the
 response speaks :mod:`everos.memory.search.dto`. This module is the only
 place the two meet. A ranked item contributes its id and score; every
 other DTO field comes from the stored domain record the recaller returned
@@ -8,7 +8,7 @@ next to it (``stored_by_id``, keyed by ``Candidate.id``), so no column
 name of any index is read here.
 
 * Simple kinds -- :func:`shape_episodes`, :func:`shape_agent_cases`,
-  :func:`shape_agent_skills` (and their ``*_ranked`` twins for an everalgo
+  :func:`shape_agent_skills` (and their ``*_ranked`` twins for an everos.algo
   ``RankOutput``) emit one DTO per candidate.
 * Hybrid output -- :func:`reshape_hybrid_output` collapses the mixed
   ``episode`` + ``atomic_fact`` ``ScoredItem`` list into episodes with
@@ -24,8 +24,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from everalgo.types import Candidate, RankOutput, ScoredItem
-
+from everos.algo.types import Candidate, RankOutput, ScoredItem
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
 from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode
@@ -214,14 +213,14 @@ def shape_agent_skills(
 def shape_agent_cases_ranked(
     output: RankOutput, stored_by_id: Mapping[str, Stored[AgentCase]]
 ) -> list[SearchAgentCaseItem]:
-    """:func:`shape_agent_cases` over an everalgo ``arank`` result."""
+    """:func:`shape_agent_cases` over an everos.algo ``arank`` result."""
     return shape_agent_cases(output.items, stored_by_id)
 
 
 def shape_agent_skills_ranked(
     output: RankOutput, stored_by_id: Mapping[str, Stored[AgentSkill]]
 ) -> list[SearchAgentSkillItem]:
-    """:func:`shape_agent_skills` over an everalgo ``arank`` result."""
+    """:func:`shape_agent_skills` over an everos.algo ``arank`` result."""
     return shape_agent_skills(output.items, stored_by_id)
 
 

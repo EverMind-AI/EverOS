@@ -24,8 +24,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import pytest
-from everalgo.types import KnowledgeMemory, ParsedContent
 
+from everos.algo.types import KnowledgeMemory, ParsedContent
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite._tables.knowledge import KnowledgeDocumentRow

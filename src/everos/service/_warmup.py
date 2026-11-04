@@ -1,6 +1,6 @@
 """Startup warm-up of the algorithm library's token counter.
 
-everalgo budgets the agent-track prompts with tiktoken's ``o200k_base``
+everos.algo budgets the agent-track prompts with tiktoken's ``o200k_base``
 encoding (the case gate, case compression, the agent profile), and tiktoken
 fetches that encoding over the network the first time a process uses it,
 caching it under ``TIKTOKEN_CACHE_DIR`` (default: a ``data-gym-cache`` folder
@@ -13,8 +13,8 @@ request path and turns a failure into one clear startup error.
 from __future__ import annotations
 
 import anyio
-from everalgo.utils import encode
 
+from everos.algo.utils import encode
 from everos.core.errors import TokenizerAssetError
 from everos.core.observability.logging import get_logger
 

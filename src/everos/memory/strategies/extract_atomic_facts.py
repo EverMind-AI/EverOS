@@ -13,8 +13,7 @@ the event's Reflection context through unchanged.
 
 from __future__ import annotations
 
-from everalgo.user_memory import AtomicFactExtractor
-
+from everos.algo.user_memory import AtomicFactExtractor
 from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import AtomicFactsExtracted, EpisodeExtracted

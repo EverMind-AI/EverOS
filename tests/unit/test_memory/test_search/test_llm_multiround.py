@@ -17,9 +17,8 @@ from collections.abc import Sequence
 from typing import Any
 
 import pytest
-from everalgo.testing import FakeLLMClient
-from everalgo.types import Candidate
 
+from everos.algo.types import Candidate
 from everos.config.search_runtime import SearchConfigSource
 from everos.config.settings import DeciderSettings
 from everos.memory.ports import SearchHit
@@ -35,6 +34,7 @@ from everos.memory.search.llm_multiround import (
     search_episodes_llm_multiround,
 )
 from everos.memory.search.recall import RecallResult
+from tests.fakes.llm_client import FakeLLMClient
 
 from ._records import hit, recalled, stored_episode
 

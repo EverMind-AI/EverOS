@@ -36,10 +36,10 @@ from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
-from everalgo.agent_memory import OpOutcome, SkillExtractionResult
-from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.types import AgentSkill as AlgoAgentSkill
 
+from everos.algo.agent_memory import OpOutcome, SkillExtractionResult
+from everos.algo.clustering import Cluster as AlgoCluster
+from everos.algo.types import AgentSkill as AlgoAgentSkill
 from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
 from everos.core.utils.datetime import get_utc_now

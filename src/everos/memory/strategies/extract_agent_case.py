@@ -6,11 +6,11 @@ together with the gate that rejected the memcell (logged as
 
 **Skip reasons are persisted**: every run that completes stamps the memcell
 through :meth:`MemcellStore.mark_case_extracted` -- ``skip_reason`` is
-``None`` exactly when a case came out, otherwise everalgo's
+``None`` exactly when a case came out, otherwise everos.algo's
 ``CaseSkipReason`` value (or ``no_agent_sender`` for EverOS's own gate below,
 named in the same vocabulary). A gated memcell is a successful run with no
 output, so without the stamp its reason would exist only in a log line.
-The most common reason in practice is everalgo's closure gate
+The most common reason in practice is everos.algo's closure gate
 (``trajectory_not_closed`` / ``no_messages_after_strip``): when boundary
 detection cuts a trajectory before the assistant's final answer, neither
 half is a closed task, and no case is produced -- accepted upstream
@@ -19,7 +19,7 @@ Quality score is persisted as-is; no everos-side threshold filter
 (opensource parity — let downstream rank / filter handle it).
 
 **Correctness gate** (``[agent_memory] case_gate_enabled``, off by default):
-with a judge in :attr:`MemoryDeps.case_judge`, everalgo admits a memcell by
+with a judge in :attr:`MemoryDeps.case_judge`, everos.algo admits a memcell by
 the judged probability that its work was completed correctly instead of by
 its complexity and value filters, and the admitted case carries the
 decision as ``case_gate``.
@@ -42,9 +42,8 @@ is the right md-layer fan-out (mirrors Episode/atomic_fact).
 
 from __future__ import annotations
 
-from everalgo.agent_memory import AgentCaseExtractor, AgentCaseGate
-from everalgo.types import AgentCase as AlgoAgentCase
-
+from everos.algo.agent_memory import AgentCaseExtractor, AgentCaseGate
+from everos.algo.types import AgentCase as AlgoAgentCase
 from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
@@ -115,7 +114,7 @@ async def extract_agent_case(
 
 
 def _case_gate(deps: MemoryDeps) -> AgentCaseGate | None:
-    """everalgo's correctness gate over the configured judge, if there is one."""
+    """everos.algo's correctness gate over the configured judge, if there is one."""
     if deps.case_judge is None:
         return None
     return AgentCaseGate(judge=deps.case_judge)

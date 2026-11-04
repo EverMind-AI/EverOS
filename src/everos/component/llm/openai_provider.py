@@ -1,9 +1,8 @@
-"""EverOS's implementation of the everalgo ``LLMClient`` contract.
+"""EverOS's implementation of the everos.algo ``LLMClient`` contract.
 
 :class:`OpenAIProvider` talks to any OpenAI-compatible Chat Completions
 endpoint through ``openai.AsyncOpenAI``. It is the only ``LLMClient``
-implementation in EverOS; everalgo's reference ``OpenAICompatClient`` is read,
-never used.
+implementation in EverOS.
 
 ``achat`` follows the recommended flow of ``llm-contract.md`` §7, one private
 method per step:
@@ -31,9 +30,9 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import openai
-from everalgo.llm import to_openai_response_format
 from pydantic import BaseModel, ValidationError
 
+from everos.algo.llm import to_openai_response_format
 from everos.core.observability.logging import get_logger
 
 from .errors import LLMCallError
@@ -41,8 +40,9 @@ from .observer import LLMCallObserver, NullObserver, TokenUsage
 
 if TYPE_CHECKING:
     import httpx
-    from everalgo.llm import LLMMessage
     from openai.types.chat import ChatCompletion
+
+    from everos.algo.llm import LLMMessage
 
 logger = get_logger(__name__)
 
@@ -80,8 +80,8 @@ class _AttemptFailedError(Exception):
 class OpenAIProvider:
     """``LLMClient`` over an OpenAI-compatible Chat Completions endpoint.
 
-    Satisfies :class:`everalgo.llm.LLMClient` structurally (PEP 544) and passes
-    every required and optional check of ``everalgo.testing.conformance``.
+    Satisfies :class:`everos.algo.llm.LLMClient` structurally (PEP 544) and passes
+    every required and optional check of ``tests.fakes.llm_conformance``.
 
     Args:
         model: Model id every request names, unless a call's ``**extra``
@@ -158,7 +158,7 @@ class OpenAIProvider:
         max_tokens: int | None = None,
         **extra: Any,
     ) -> str:
-        """Send one chat request; see :meth:`everalgo.llm.LLMClient.achat`.
+        """Send one chat request; see :meth:`everos.algo.llm.LLMClient.achat`.
 
         Returns:
             The reply text, already validated against ``response_format``.

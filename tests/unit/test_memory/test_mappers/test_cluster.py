@@ -1,10 +1,10 @@
-"""Round trip between everalgo ``Cluster`` and the domain cluster."""
+"""Round trip between everos.algo ``Cluster`` and the domain cluster."""
 
 from __future__ import annotations
 
 import numpy as np
-from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.memory.mappers import cluster
 
 

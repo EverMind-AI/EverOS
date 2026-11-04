@@ -128,8 +128,9 @@ def session_epoch_ms(raw: str) -> int | None:
     """Parse a session timestamp to epoch milliseconds, or None if unparseable.
 
     The wall clock is pinned to UTC whether or not the value carries an offset. Naive
-    values need it for the reason everalgo's LoCoMo loader gives -- without an explicit
-    zone the same dataset yields different epochs on machines in different zones.
+    values need it for the reason the EverAlgo benchmark's LoCoMo loader gives --
+    without an explicit zone the same dataset yields different epochs on machines in
+    different zones.
 
     Values that DO carry an offset need it because of how the reference reaches them.
     Every reference harness reads a locomo-style conversion of its dataset, and that

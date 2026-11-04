@@ -5,10 +5,10 @@ multimodal parse → unprocessed_buffer. Proves the three paths the unit
 tests can only mock:
 
 1. ``type="html"`` + base64 + ``ext="html"`` — the normal HTML-file call.
-2. ``type="html"`` + ``https`` uri — everalgo fetches the page and
+2. ``type="html"`` + ``https`` uri — the parser backend fetches the page and
    dispatches by the response Content-Type.
 3. ``type="html"`` + ``file://`` uri — EverOS reads the file locally and
-   hands everalgo hydrated bytes (the library never touches the fs).
+   hands the parser backend hydrated bytes (it never touches the fs).
 
 Real multimodal LLM (creds via ``.env``) + real public internet, so the
 module is marked ``live_llm``. Skipped when the ``[multimodal]`` extra is
@@ -33,7 +33,7 @@ from sqlalchemy import text as sql_text
 
 from tests.fakes.storage import StorageView
 
-pytest.importorskip("everalgo.parser")
+pytest.importorskip("everos.component.parser.backend")
 
 pytestmark = pytest.mark.live_llm
 

@@ -8,10 +8,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("everalgo.parser")
+pytest.importorskip("everos.component.parser.backend")
 
-from everalgo.types import ParsedContent
-
+from everos.algo.types import ParsedContent
 from everos.component import parser as _parser_mod
 from everos.component.llm import LLMCallError
 from everos.component.parser import build_raw_file

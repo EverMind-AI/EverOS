@@ -1,4 +1,4 @@
-"""everalgo ``clustering.Cluster`` <-> domain :class:`~everos.memory.models.Cluster`.
+"""everos.algo ``clustering.Cluster`` <-> domain :class:`~everos.memory.models.Cluster`.
 
 The algo cluster holds its centroid as a float32 ``numpy`` array; the domain
 holds a float tuple. ``to_algo`` restores float32 so geometry merges see the
@@ -10,8 +10,8 @@ from __future__ import annotations
 __all__ = ["from_algo", "to_algo"]
 
 import numpy as np
-from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.algo.clustering import Cluster as AlgoCluster
 from everos.memory.models import Cluster
 
 _CENTROID_DTYPE = np.float32

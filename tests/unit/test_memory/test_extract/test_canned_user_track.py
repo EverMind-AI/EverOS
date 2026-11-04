@@ -1,7 +1,7 @@
 """The canned user-track scripts satisfy the real operators they stand in for.
 
 Each script under ``tests/fakes/llm_scripts/user_track`` is fed to the real
-everalgo operator through ``user_track_llm``; a script that drifted from the
+everos.algo operator through ``user_track_llm``; a script that drifted from the
 operator's strict reply model fails here instead of deep inside an
 integration test. Every operator also has its empty (or blank) script,
 which exercises the path where it yields nothing.
@@ -12,18 +12,18 @@ from __future__ import annotations
 import json
 
 import pytest
-from everalgo.boundary import adetect_boundaries
-from everalgo.llm import LLMOutputError
-from everalgo.types import ChatMessage, MemCell
-from everalgo.types import Episode as AlgoEpisode
-from everalgo.types import Profile as AlgoProfile
-from everalgo.user_memory import (
+
+from everos.algo.boundary import adetect_boundaries
+from everos.algo.llm import LLMOutputError
+from everos.algo.types import ChatMessage, MemCell
+from everos.algo.types import Episode as AlgoEpisode
+from everos.algo.types import Profile as AlgoProfile
+from everos.algo.user_memory import (
     AtomicFactExtractor,
     EpisodeExtractor,
     EpisodeReflector,
     ProfileExtractor,
 )
-
 from tests.fakes import user_track_llm, user_track_script
 
 _TS = 1_775_116_800_000

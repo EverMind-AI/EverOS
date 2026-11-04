@@ -11,8 +11,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from everalgo.types import KnowledgeMemory, ParsedContent
 
+from everos.algo.types import KnowledgeMemory, ParsedContent
 from everos.core.errors import DuplicateDocumentError, ExtractionEmptyError
 from everos.infra.persistence import MemoryRoot
 from everos.service.knowledge import CreateDocumentResult

@@ -1,11 +1,10 @@
-"""everalgo ``AgentSkill`` <-> domain :class:`~everos.memory.models.AgentSkill`."""
+"""everos.algo ``AgentSkill`` <-> domain :class:`~everos.memory.models.AgentSkill`."""
 
 from __future__ import annotations
 
 __all__ = ["from_algo", "to_algo"]
 
-from everalgo.types import AgentSkill as AlgoAgentSkill
-
+from everos.algo.types import AgentSkill as AlgoAgentSkill
 from everos.memory.models import AgentSkill
 
 

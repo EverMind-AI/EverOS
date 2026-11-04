@@ -280,7 +280,7 @@ async def test_profile_without_a_language_reads_back_as_unknown(
 async def test_profile_language_outside_output_language_reads_as_unknown(
     root: MemoryRoot, stored: str
 ) -> None:
-    """A hand-edited language everalgo would refuse is ignored, with a warning."""
+    """A hand-edited language everos.algo would refuse is ignored, with a warning."""
     store = MarkdownProfileStore(root)
     ref = await store.write(
         _user(),
