@@ -35,6 +35,7 @@ from .deps import bundled_instructions as bundled_instructions
 from .deps import make_deps as make_deps
 from .deps import make_indexes as make_indexes
 from .deps import make_stores as make_stores
+from .deps import seed_sources as seed_sources
 from .deps import unscripted_llm as unscripted_llm
 from .embedding import FakeEmbeddingProvider as FakeEmbeddingProvider
 from .indexes import InMemoryAgentCaseIndex as InMemoryAgentCaseIndex
@@ -138,6 +139,7 @@ __all__ = [
     "make_stores",
     "memorize_llm",
     "open_storage_view",
+    "seed_sources",
     "static_trace_path",
     "static_tuning",
     "unscripted_llm",

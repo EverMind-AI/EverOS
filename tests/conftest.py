@@ -93,15 +93,15 @@ def _reset_settings_cache() -> Iterator[None]:
     import structlog
 
     from everos.config import load_settings
+    from everos.core.locks import LOCKS
     from everos.core.utils import datetime as dt_module
-    from everos.memory import _partition_locks
 
     # ``structlog.testing.capture_logs`` swaps structlog's global
     # configuration, and every application build (``configure_process``)
     # installs the production one. Reset structlog to defaults around every
     # test so neither leaks into the next one.
-    # ``_partition_locks`` caches one ``asyncio.Lock`` per (strategy,
-    # partition key) and never evicts it — correct for a single-loop
+    # ``LOCKS`` caches one ``asyncio.Lock`` per (kind, key) -- session,
+    # owner and partition locks -- and never evicts it — correct for a single-loop
     # production process, wrong across tests: pytest-asyncio gives each
     # test its own event loop, so the second test to touch a partition
     # gets a lock bound to a dead loop and the strategy dies with
@@ -113,13 +113,13 @@ def _reset_settings_cache() -> Iterator[None]:
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
-    _partition_locks._reset_for_tests()
+    LOCKS.reset()
     _reset_table_write_locks()
     yield
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
-    _partition_locks._reset_for_tests()
+    LOCKS.reset()
     _reset_table_write_locks()
 
 

@@ -31,6 +31,7 @@ from everos.service.bootstrap import _build_engine
 from tests.fakes import (
     InMemoryAgentSkillStore,
     InMemoryEpisodeIndex,
+    InMemoryEpisodeStore,
     InMemoryMemcellStore,
     InMemoryProfileStore,
     agent_track_llm,
@@ -471,6 +472,13 @@ async def test_profile_chain_e2e(
     alice = Scope(
         app_id="default", project_id="default", owner_id="u_alice", owner_type="user"
     )
+    episode = Episode(
+        owner_id="u_alice",
+        episode="alice likes hiking",
+        summary="",
+        timestamp=1_700_000_001_000,
+        parent_id="mc_aaaaaaaaaaa1",
+    )
     episode_index = InMemoryEpisodeIndex()
     episode_index.seed(
         Stored(
@@ -480,15 +488,12 @@ async def test_profile_chain_e2e(
                 md_path="ep.md",
             ),
             scope=alice,
-            item=Episode(
-                owner_id="u_alice",
-                episode="alice likes hiking",
-                summary="",
-                timestamp=1_700_000_001_000,
-                parent_id="mc_aaaaaaaaaaa1",
-            ),
+            item=episode,
         )
     )
+    # The episode is in md too: clustering re-checks it is still there.
+    episodes = InMemoryEpisodeStore()
+    episodes.seed(alice, "ep_20260517_0001", episode)
 
     with (
         patch(
@@ -501,7 +506,11 @@ async def test_profile_chain_e2e(
             monkeypatch,
             tmp_path,
             embedding=embedder,
-            stores={"memcell": memcells, "profile": InMemoryProfileStore()},
+            stores={
+                "memcell": memcells,
+                "profile": InMemoryProfileStore(),
+                "episode": episodes,
+            },
             indexes={"episode": episode_index},
         )
         mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)

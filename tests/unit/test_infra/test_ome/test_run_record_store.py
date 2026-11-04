@@ -9,7 +9,7 @@ import pytest
 from everos.core.utils.datetime import get_now_with_timezone
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
-from everos.infra.ome.records import RunStatus
+from everos.infra.ome.records import RunRecord, RunStatus
 
 
 @pytest.fixture
@@ -207,3 +207,54 @@ async def test_list_by_event_id_returns_empty_for_unknown(
 ) -> None:
     results = await store.list_by_event_id("nonexistent")
     assert results == []
+
+
+# ── event text kept only while a run may be replayed (memory delete, A16) ──
+
+
+async def _running(store: RunRecordStore, run_id: str) -> None:
+    await store.mark_running(
+        run_id=run_id,
+        strategy_name="s",
+        attempt=1,
+        event_topic="m:E",
+        event_payload='{"text": "what the user said"}',
+        max_retries_snapshot=2,
+        event_id=f"evt_{run_id}",
+    )
+
+
+async def test_success_clears_payload(store: RunRecordStore) -> None:
+    await _running(store, "r1")
+    await store.mark_success(run_id="r1", finished_at=get_now_with_timezone())
+    rec = await store.get("r1")
+    assert rec is not None and rec.event_payload == ""
+
+
+async def test_failed_and_running_keep_payload(store: RunRecordStore) -> None:
+    """Crash recovery replays a RUNNING row from its text; failures keep it
+    for diagnosis."""
+    for run_id in ("running", "failed", "dead"):
+        await _running(store, run_id)
+    now = get_now_with_timezone()
+    await store.mark_failed(run_id="failed", finished_at=now, error="x")
+    await store.mark_dead_letter(run_id="dead", finished_at=now, error="x")
+    for run_id in ("running", "failed", "dead"):
+        rec = await store.get(run_id)
+        assert rec is not None and rec.event_payload == '{"text": "what the user said"}'
+
+
+def test_only_a_success_row_may_have_no_payload() -> None:
+    now = get_now_with_timezone()
+    fields = {
+        "run_id": "r",
+        "strategy_name": "s",
+        "attempt": 1,
+        "started_at": now,
+        "event_topic": "m:E",
+        "event_payload": "",
+        "max_retries_snapshot": 0,
+    }
+    RunRecord(**fields, status=RunStatus.SUCCESS, finished_at=now)
+    with pytest.raises(ValueError, match="must keep its event_payload"):
+        RunRecord(**fields, status=RunStatus.RUNNING)

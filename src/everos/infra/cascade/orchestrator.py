@@ -30,6 +30,7 @@ from everos.infra.persistence.sqlite import (
     SqliteRepos,
 )
 
+from ._fence import DeleteFence
 from ._projections import HandlerDeps
 from ._worker import (
     DEFAULT_HANDLER_CONCURRENCY,
@@ -217,6 +218,8 @@ class CascadeOrchestrator:
         config: Cadences; ``None`` reads them from settings.
         watcher_enabled: Run the filesystem watcher; ``False`` leaves the
             scanner as the only path an md edit takes to the index.
+        fence: Shared with the memory deletions' index eraser; ``None``
+            when nothing in the process deletes memories.
     """
 
     def __init__(
@@ -229,6 +232,7 @@ class CascadeOrchestrator:
         sqlite: SqliteRepos,
         config: CascadeConfig | None = None,
         watcher_enabled: bool = True,
+        fence: DeleteFence | None = None,
     ) -> None:
         self._memory_root = memory_root
         self._watcher_enabled = watcher_enabled
@@ -242,6 +246,7 @@ class CascadeOrchestrator:
             knowledge_documents=sqlite.knowledge_document,
             knowledge_topics=sqlite.knowledge_topic,
             embedding=embedding,
+            fence=fence,
         )
         self._handlers = build_handlers(deps)
         self._scanner = CascadeScanner(

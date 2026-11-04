@@ -72,6 +72,8 @@ from everos.infra.cascade import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
     CascadeAdmin,
     CascadeOrchestrator,
+    DeleteFence,
+    FencedIndexEraser,
 )
 from everos.infra.ome import (
     OfflineEngine,
@@ -104,7 +106,7 @@ from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
-from everos.memory.ports import EventBus, StrategySpec
+from everos.memory.ports import EventBus, IndexEraser, StrategySpec
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
@@ -204,6 +206,9 @@ class Application:
         self._root.ensure()
         tables = await self._admin.create_schema()
         logger.info("sqlite_schema_ready", tables=tables)
+        # Before anything writes: a whole-owner deletion a crash cut short
+        # still has today's id counters to put back.
+        await self.memory.finish_interrupted_deletions()
 
         await self._admin.start_index()
         if self._admin.backend == "lancedb":
@@ -313,6 +318,7 @@ def build_application(
             settings.embedding, configured=providers.embedding is not None
         ),
     )
+    fence = DeleteFence(warn_entries=settings.cascade.delete_fence_warn_entries)
     cascade = CascadeOrchestrator(
         memory_root=root,
         tokenizer=tokenizer,
@@ -320,9 +326,11 @@ def build_application(
         index=index,
         sqlite=sqlite,
         watcher_enabled=settings.cascade.watcher_enabled,
+        fence=fence,
     )
+    eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine)
+        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -488,10 +496,12 @@ def _build_memory_service(
     deps: MemoryDeps,
     tokenizer: Tokenizer,
     bus: EventBus,
+    index_eraser: IndexEraser,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
+        index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
@@ -506,6 +516,7 @@ def _build_memory_service(
         stores=stores,
         user_pipeline=UserMemoryPipeline(
             episode_store=stores.episode,
+            memcell_store=stores.memcell,
             instructions=deps.instructions,
             llm_client=providers.llm,
         ),

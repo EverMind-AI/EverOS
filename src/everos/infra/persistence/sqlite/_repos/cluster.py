@@ -317,6 +317,75 @@ class ClusterRepo(RepoBase[Cluster]):
             )
             await s.commit()
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: set[str],
+        *,
+        count: int,
+        last_ts_ms: int,
+        preview_json: str,
+    ) -> None:
+        """Remove members and restamp the row in one transaction.
+
+        The centroid is left as it is: it moves only when a member is added.
+        """
+        async with session_scope(self._factory) as s:
+            if member_ids:
+                await s.execute(
+                    delete(ClusterMember)
+                    .where(ClusterMember.cluster_id == cluster_id)
+                    .where(ClusterMember.member_id.in_(member_ids))
+                )
+            await s.execute(
+                update(Cluster)
+                .where(Cluster.cluster_id == cluster_id)
+                .values(count=count, last_ts_ms=last_ts_ms, preview_json=preview_json)
+            )
+            await s.commit()
+
+    async def delete_cluster(self, cluster_id: str) -> None:
+        """Delete a cluster and its members (members first: foreign key)."""
+        async with session_scope(self._factory) as s:
+            await s.execute(
+                delete(ClusterMember).where(ClusterMember.cluster_id == cluster_id)
+            )
+            await s.execute(delete(Cluster).where(Cluster.cluster_id == cluster_id))
+            await s.commit()
+
+    async def delete_for_owner(
+        self,
+        owner_id: str,
+        owner_type: str,
+        kind: str,
+        *,
+        app_id: str,
+        project_id: str,
+    ) -> int:
+        """Delete every cluster of one owner and kind in one space; how many."""
+        async with session_scope(self._factory) as s:
+            ids = list(
+                (
+                    await s.execute(
+                        select(Cluster.cluster_id)
+                        .where(Cluster.app_id == app_id)
+                        .where(Cluster.project_id == project_id)
+                        .where(Cluster.owner_id == owner_id)
+                        .where(Cluster.owner_type == owner_type)
+                        .where(Cluster.kind == kind)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if ids:
+                await s.execute(
+                    delete(ClusterMember).where(ClusterMember.cluster_id.in_(ids))
+                )
+                await s.execute(delete(Cluster).where(Cluster.cluster_id.in_(ids)))
+            await s.commit()
+        return len(ids)
+
 
 def _row_to_algo(row: Cluster, members: list[str]) -> AlgoCluster:
     centroid = np.frombuffer(row.centroid_blob, dtype=_CENTROID_DTYPE)

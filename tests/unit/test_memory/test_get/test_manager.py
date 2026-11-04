@@ -421,3 +421,20 @@ async def test_profile_missing_in_scope_is_empty(manager, profile_repo) -> None:
     resp = await mgr.get(req)
     assert resp.data.profiles == []
     assert profile_repo.last_key == ("default", "beta", "u1")
+
+
+async def test_merged_episode_serialises_null_session_id(
+    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+) -> None:
+    """B10: a Reflection-merged episode has no session; /get lists it with
+    ``"session_id": null`` instead of failing the whole page."""
+    mgr, ep, _, _ = manager
+    merged = _episode_row("ep_m").model_copy(
+        update={"session_id": None, "parent_type": "cluster", "parent_id": "cl_1"}
+    )
+    ep.rows, ep.total = [merged, _episode_row("ep_1")], 2
+
+    resp = await mgr.get(GetRequest(user_id="u1", memory_type=GetMemoryType.EPISODE))
+
+    assert [item.session_id for item in resp.data.episodes] == [None, "sess_a"]
+    assert '"session_id":null' in resp.model_dump_json()

@@ -52,6 +52,35 @@ async def test_user_search_methods_succeed(
     assert resp.json()["data"]["episodes"], f"{method} search must find the episode"
 
 
+async def test_deletions_take_their_index_rows(tier3_runtime: AsyncClient) -> None:
+    """Both deletion routes erase the episode rows before they answer, on
+    either backend (the Milvus job runs this with ``index=milvus``)."""
+    # One sender each: a second write into the same md file does not move the
+    # cascade ledger that add_and_flush waits on.
+    owners = {"s_tier3_del_session": "u_del_a", "s_tier3_del_id": "u_del_b"}
+    owners["s_tier3_keep"] = "u_del_c"
+    for sid, owner in owners.items():
+        await add_and_flush(tier3_runtime, session_id=sid, sender_id=owner)
+
+    async def rows() -> dict[str, list[str]]:
+        return {o: [r["id"] for r in await episode_rows(o)] for o in owners.values()}
+
+    before = await rows()
+    assert all(before.values()), before
+
+    resp = await tier3_runtime.post(
+        "/api/v2/memory/delete", json={"session_id": "s_tier3_del_session"}
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await tier3_runtime.post(
+        "/api/v2/memory/delete_by_ids",
+        json={"memory_type": "episode", "memory_ids": before["u_del_b"]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert await rows() == {"u_del_a": [], "u_del_b": [], "u_del_c": before["u_del_c"]}
+
+
 async def test_agentic_search_succeeds(
     tier3_runtime: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

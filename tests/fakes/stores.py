@@ -38,7 +38,14 @@ from everos.memory.models import (
     Profile,
     ReflectionReport,
 )
-from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
+from everos.memory.ports import (
+    MemoryRef,
+    NoSourceCheck,
+    Scope,
+    SessionKey,
+    SourceCheck,
+    Stored,
+)
 
 
 class UnusedPort:
@@ -73,7 +80,14 @@ class _DailyLog[T]:
         """Everything written under ``owner_id``, in write order."""
         return [s.item for s in self.records if s.scope.owner_id == owner_id]
 
-    async def _append_many(self, scope: Scope, items: Sequence[T]) -> list[MemoryRef]:
+    async def _append_many(
+        self,
+        scope: Scope,
+        items: Sequence[T],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        if not items or not await _alive(only_if):
+            return []
         refs = []
         for item in items:
             entry_id = f"{self._prefix}_20260101_{len(self.records) + 1:04d}"
@@ -89,44 +103,149 @@ class _DailyLog[T]:
         return refs
 
     async def _deprecate(
-        self, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        if not await _alive(only_if):
+            return False
         for md_path, entry_id in entries:
             self.deprecated[md_path][entry_id] = replaced_by
+        return True
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        return self._remove(
+            scope, lambda item: getattr(item, "session_id", None) == session_id
+        )
+
+    def _remove(self, scope: Scope, drop: Any) -> list[MemoryRef]:
+        gone = [s for s in self.records if s.scope == scope and drop(s.item)]
+        self.records = [s for s in self.records if s not in gone]
+        return [s.ref for s in gone]
+
+
+async def _alive(only_if: SourceCheck | NoSourceCheck) -> bool:
+    return isinstance(only_if, NoSourceCheck) or await only_if()
 
 
 class InMemoryEpisodeStore(_DailyLog[Episode]):
     def __init__(self) -> None:
         super().__init__("ep", "episodes")
 
-    async def append(self, scope: Scope, episode: Episode) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [episode])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        episode: Episode,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [episode], only_if)
+        return refs[0] if refs else None
 
     async def append_many(
-        self, scope: Scope, episodes: Sequence[Episode]
+        self,
+        scope: Scope,
+        episodes: Sequence[Episode],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, episodes)
+        return await self._append_many(scope, episodes, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        wanted = set(entry_ids)
+        return {
+            s.ref.entry_id
+            for s in self.records
+            if s.scope == scope and s.ref.entry_id in wanted
+        }
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        wanted = set(entry_ids)
+        return [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+
+    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
+        wanted = set(entry_ids)
+        gone = [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+        self.records = [s for s in self.records if s not in gone]
+        return [s.ref for s in gone]
+
+    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
+        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
+        return {
+            key
+            for md_path, marks in self.deprecated.items()
+            if md_path.startswith(prefix)
+            for key, merged in marks.items()
+            if merged in targets
+        }
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
+        for md_path, marks in self.deprecated.items():
+            if md_path.startswith(prefix):
+                for key in set(keys) & marks.keys():
+                    del marks[key]
+
+    def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
+        """Put an episode under a chosen entry id (as if read from md)."""
+        ref = MemoryRef(
+            id=f"{scope.owner_id}_{entry_id}",
+            entry_id=entry_id,
+            md_path=f"{scope.owner_type}s/{scope.owner_id}/episodes/2026-01-01.md",
+        )
+        self.records.append(Stored(ref=ref, scope=scope, item=episode))
 
 
 class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
     def __init__(self) -> None:
         super().__init__("af", ".atomic_facts")
 
-    async def append_many(
-        self, scope: Scope, facts: Sequence[AtomicFact]
+    async def remove_by_parents(
+        self, scope: Scope, parent_ids: Collection[str]
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts)
+        parents = set(parent_ids)
+        return self._remove(scope, lambda fact: fact.parent_id in parents)
+
+    async def append_many(
+        self,
+        scope: Scope,
+        facts: Sequence[AtomicFact],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        return await self._append_many(scope, facts, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
 
 
 class InMemoryForesightStore(_DailyLog[Foresight]):
@@ -134,18 +253,28 @@ class InMemoryForesightStore(_DailyLog[Foresight]):
         super().__init__("fs", ".foresights")
 
     async def append_many(
-        self, scope: Scope, items: Sequence[Foresight]
+        self,
+        scope: Scope,
+        items: Sequence[Foresight],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, items)
+        return await self._append_many(scope, items, only_if)
 
 
 class InMemoryAgentCaseStore(_DailyLog[AgentCase]):
     def __init__(self) -> None:
         super().__init__("ac", ".agent_cases")
 
-    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [case])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        case: AgentCase,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [case], only_if)
+        return refs[0] if refs else None
 
 
 class InMemoryProfileStore:
@@ -309,6 +438,36 @@ class InMemoryClusterStore:
         )
         self.member_types[cluster_id][added] = member_type
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: Collection[str],
+        *,
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        cluster = self.clusters[cluster_id]
+        self.clusters[cluster_id] = cluster.model_copy(
+            update={
+                "members": [m for m in cluster.members if m not in member_ids],
+                "count": count,
+                "last_ts": last_ts,
+                "preview": list(preview),
+            }
+        )
+
+    async def delete(self, cluster_id: str) -> None:
+        self.clusters.pop(cluster_id, None)
+        self.owners.pop(cluster_id, None)
+        self.member_types.pop(cluster_id, None)
+
+    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
+        ids = [cid for cid, owner in self.owners.items() if owner == (scope, kind)]
+        for cid in ids:
+            await self.delete(cid)
+        return len(ids)
+
     async def list_distinct_owners(self) -> list[Scope]:
         return list(dict.fromkeys(scope for scope, _ in self.owners.values()))
 
@@ -329,3 +488,10 @@ class InMemoryReflectionReportStore:
             if (r.owner_id, r.app_id, r.project_id)
             == (scope.owner_id, scope.app_id, scope.project_id)
         }
+
+    async def delete_for_owner(self, scope: Scope) -> int:
+        mine = (scope.owner_id, scope.app_id, scope.project_id)
+        kept = [r for r in self.reports if (r.owner_id, r.app_id, r.project_id) != mine]
+        removed = len(self.reports) - len(kept)
+        self.reports = kept
+        return removed

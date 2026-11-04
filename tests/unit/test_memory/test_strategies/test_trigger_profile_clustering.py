@@ -15,7 +15,9 @@ import pytest
 import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.core.locks import LOCKS
 from everos.memory._partition_locks import _reset_for_tests
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
 from everos.memory.ports import Scope
@@ -23,7 +25,7 @@ from everos.memory.strategies import (
     TRIGGER_PROFILE_CLUSTERING_SPEC,
     trigger_profile_clustering,
 )
-from tests.fakes import InMemoryClusterStore, make_deps, make_stores
+from tests.fakes import InMemoryClusterStore, make_deps, make_stores, seed_sources
 
 _MODULE = "everos.memory.strategies.trigger_profile_clustering"
 _ALICE = Scope(
@@ -58,6 +60,21 @@ def _event(
     )
 
 
+def _with_episode(
+    deps: MemoryDeps,
+    *,
+    owner_id: str = "u_alice",
+    episode_entry_id: str = "ep_20260517_0001",
+) -> MemoryDeps:
+    """The episode the event announces is in md and its memcell exists."""
+    return seed_sources(
+        deps,
+        memcell_id="mc_aaaaaaaaaaa1",
+        episode_entry_id=episode_entry_id,
+        owner_id=owner_id,
+    )
+
+
 def test_spec() -> None:
     spec = TRIGGER_PROFILE_CLUSTERING_SPEC
     assert spec.name == "trigger_profile_clustering"
@@ -69,7 +86,7 @@ def test_spec() -> None:
 
 async def test_creates_new_cluster_when_no_existing() -> None:
     """Empty existing → cluster_by_geometry returns None → new cluster persisted."""
-    deps = make_deps()
+    deps = _with_episode(make_deps())
     with (
         patch(
             f"{_MODULE}.cluster_by_geometry", new=MagicMock(return_value=None)
@@ -105,7 +122,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
 
 async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     """algo returns merged Cluster → persisted under the existing id."""
-    deps = make_deps()
+    deps = _with_episode(make_deps())
     deps.stores.cluster.seed(
         _ALICE,
         "user_memory",
@@ -170,6 +187,8 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
     """Drive two trigger_profile_clustering runs and record entry/exit order."""
     log: list[str] = []
     deps = make_deps(stores=make_stores(cluster=_SlowClusterStore(log)))
+    for owner, entry_id in ((owner_a, "ep_run_a"), (owner_b, "ep_run_b")):
+        _with_episode(deps, owner_id=owner, episode_entry_id=entry_id)
     with patch(f"{_MODULE}.cluster_by_geometry", new=MagicMock(return_value=None)):
         await asyncio.gather(
             trigger_profile_clustering(
@@ -226,3 +245,86 @@ def test_applies_to_rejects_non_pipeline_source() -> None:
     deps = make_deps()
     assert applies_to(_event(), deps) is True
     assert applies_to(_event(source="reflection"), deps) is False
+
+
+# ── Embedding outside the clustering lock (memory delete, spec 1 §5.5) ──
+
+
+class _LockCheckingEmbedder:
+    """Embeds, and records whether the caller held the clustering lock."""
+
+    dim = 4
+
+    def __init__(self, vectors: dict[str, list[float]] | None = None) -> None:
+        self.vectors = vectors or {}
+        self.held_cluster_lock: list[bool] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.held_cluster_lock.append(
+            any(
+                kind == "partition:trigger_profile_clustering"
+                for kind, _ in LOCKS.held()
+            )
+        )
+        return self.vectors.get(text, [1.0, 0.0, 0.0, 0.0])
+
+
+async def test_clustering_embeds_without_holding_cluster_lock() -> None:
+    """A11: a slow embedding must not hold the owner's clustering lock (a
+    single-id deletion waits on it)."""
+    embedder = _LockCheckingEmbedder()
+    deps = _with_episode(make_deps(embedding=embedder))
+
+    await trigger_profile_clustering(_event(), deps)
+
+    assert embedder.held_cluster_lock == [False]
+
+
+_P5_VECTORS = {
+    0: [1.0, 0.0, 0.0, 0.0],
+    1: [0.0, 1.0, 0.0, 0.0],
+    2: [0.7, 0.7, 0.0, 0.0],
+}
+_P5_PLAN = [(0, 0), (1, 1), (2, 0), (3, 2), (4, 1), (5, 0), (6, 2), (7, 1)]
+
+
+async def test_clustering_result_unchanged_for_fixture_sequence() -> None:
+    """P5: moving the embedding out of the lock changes no clustering result.
+
+    The expected clusters were recorded on the code before the move (commit
+    after "feat(memory): check sources before every derived write"), by
+    running this same sequence and printing the clusters' members and count.
+    """
+    embedder = _LockCheckingEmbedder()
+    deps = make_deps(embedding=embedder)
+    for n, group in _P5_PLAN:
+        text = f"entry {n}"
+        embedder.vectors[text] = _P5_VECTORS[group]
+        entry = f"ep_20260101_{n + 1:04d}"
+        seed_sources(deps, memcell_id=f"mc_{n}", episode_entry_id=entry, owner_id="u")
+        await trigger_profile_clustering(
+            EpisodeExtracted(
+                memcell_id=f"mc_{n}",
+                episode_entry_id=entry,
+                episode_text=text,
+                episode_timestamp_ms=1_700_000_000_000 + n * 60_000,
+                owner_id="u",
+                session_id="s",
+            ),
+            deps,
+        )
+
+    clusters = deps.stores.cluster.clusters.values()  # type: ignore[attr-defined]
+    assert sorted((sorted(c.members), c.count) for c in clusters) == [
+        (
+            [
+                "ep_20260101_0001",
+                "ep_20260101_0003",
+                "ep_20260101_0004",
+                "ep_20260101_0006",
+                "ep_20260101_0007",
+            ],
+            5,
+        ),
+        (["ep_20260101_0002", "ep_20260101_0005", "ep_20260101_0008"], 3),
+    ]

@@ -2,7 +2,7 @@
 
 ``memorize()`` serialises one session's calls on an asyncio lock and wraps
 lock plus work in ``asyncio.timeout(session_lock_timeout_seconds)``; the
-``everos.service.memory._session_locks`` module docstring says why: two
+``Memorizer.run`` docstring (``everos.service.memory._memorize``) says why: two
 concurrent ``/add`` calls on one session would otherwise lose a tail. Boundary
 detection promises that every cell gets exactly one memcell row, and the
 memorize docs that the pipelines run for every cell. This test does not script

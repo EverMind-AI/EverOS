@@ -19,6 +19,7 @@ adapters that implement them. The domain layer here is reserved for actual
 business logic (extract / search / reflection / custom_instructions).
 """
 
+from ._partition_locks import user_cluster_lock as user_cluster_lock
 from .models import AgentCase as AgentCase
 from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
@@ -37,4 +38,5 @@ __all__ = [
     "IngestResult",
     "MemCell",
     "ToolCall",
+    "user_cluster_lock",
 ]

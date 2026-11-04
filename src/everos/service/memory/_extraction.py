@@ -12,8 +12,6 @@ from everos.core.observability.logging import get_logger
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
-    from everos.service.memory._models import MemorizeResult
-
 logger = get_logger("everos.service.memory")
 
 
@@ -28,34 +26,44 @@ class ExtractionSupervisor:
     idempotent, the same reason the async queue does not retry a failed
     delivery), and ``drain`` lets shutdown wait for what is still running
     instead of dropping it.
+
+    A memory deletion is supervised the same way (``label`` names it in the
+    logs): one cut short by a disconnect would leave a scope half deleted.
     """
 
     def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[MemorizeResult]] = set()
+        self._tasks: set[asyncio.Task[Any]] = set()
 
-    def supervise(
+    def supervise[T](
         self,
-        coro: Coroutine[Any, Any, MemorizeResult],
+        coro: Coroutine[Any, Any, T],
         *,
-        session_id: str,
+        session_id: str | None,
         memcell_ids: list[str],
-    ) -> asyncio.Task[MemorizeResult]:
-        task: asyncio.Task[MemorizeResult] = asyncio.ensure_future(coro)
+        label: str = "memorize_extraction",
+        expected: tuple[type[BaseException], ...] = (),
+    ) -> asyncio.Task[T]:
+        """Run ``coro`` as a task that outlives its caller.
+
+        A failure is logged as ``<label>_failed`` unless it is one of
+        ``expected`` (an answer the caller reports itself).
+        """
+        task: asyncio.Task[T] = asyncio.ensure_future(coro)
         self._tasks.add(task)
 
-        def _done(t: asyncio.Task[MemorizeResult]) -> None:
+        def _done(t: asyncio.Task[T]) -> None:
             self._tasks.discard(t)
             if t.cancelled():
                 logger.error(
-                    "memorize_extraction_cancelled",
+                    f"{label}_cancelled",
                     session_id=session_id,
                     memcell_ids=memcell_ids,
                 )
                 return
             exc = t.exception()
-            if exc is not None:
+            if exc is not None and not isinstance(exc, expected):
                 logger.error(
-                    "memorize_extraction_failed",
+                    f"{label}_failed",
                     session_id=session_id,
                     memcell_ids=memcell_ids,
                     error=f"{type(exc).__name__}: {exc}",

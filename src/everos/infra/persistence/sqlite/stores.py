@@ -14,6 +14,7 @@ __all__ = [
     "SqliteMemorizeInboxStore",
     "SqliteReflectionReportStore",
     "SqliteSessionBufferStore",
+    "SqliteSessionPurgeStore",
 ]
 
 import datetime as dt
@@ -44,6 +45,7 @@ from ._repos import (
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
 from ._tables import Memcell, MemorizeInbox, UnprocessedBuffer
@@ -242,6 +244,35 @@ class SqliteClusterStore:
             preview_json=json.dumps(list(preview), ensure_ascii=False),
         )
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: Collection[str],
+        *,
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        await self._repo.detach(
+            cluster_id,
+            set(member_ids),
+            count=count,
+            last_ts_ms=last_ts,
+            preview_json=json.dumps(list(preview), ensure_ascii=False),
+        )
+
+    async def delete(self, cluster_id: str) -> None:
+        await self._repo.delete_cluster(cluster_id)
+
+    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
+        return await self._repo.delete_for_owner(
+            scope.owner_id,
+            scope.owner_type,
+            kind,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+        )
+
     async def list_distinct_owners(self) -> list[Scope]:
         return [
             Scope(
@@ -384,6 +415,40 @@ class SqliteReflectionReportStore:
         return await self._repo.list_reflected_cluster_ids(
             scope.owner_id, scope.app_id, scope.project_id
         )
+
+    async def delete_for_owner(self, scope: Scope) -> int:
+        return await self._repo.delete_for_owner(
+            scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
+        )
+
+
+class SqliteSessionPurgeStore:
+    """One session's conversation state, deleted in one transaction.
+
+    Args:
+        repo: The purge over ``memcell``, ``unprocessed_buffer``,
+            ``conversation_status`` and ``memorize_inbox``.
+    """
+
+    def __init__(self, repo: SessionPurgeRepo) -> None:
+        self._repo = repo
+
+    async def purge(self, session: SessionKey) -> list[MemcellRecord]:
+        rows = await self._repo.purge(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+        )
+        return [
+            MemcellRecord(
+                memcell_id=row.memcell_id,
+                cell=MemCell.model_validate_json(row.payload_json),
+                raw_type=row.raw_type,
+                message_ids=json.loads(row.message_ids_json),
+                sender_ids=json.loads(row.sender_ids_json),
+            )
+            for row in rows
+        ]
 
 
 # ── Row <-> domain ───────────────────────────────────────────────────────

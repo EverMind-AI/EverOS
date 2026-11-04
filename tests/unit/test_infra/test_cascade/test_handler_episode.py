@@ -17,10 +17,11 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
+from everos.infra.cascade import DeleteFence
 from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import Comparison, Predicate
-from everos.infra.persistence.markdown import EpisodeWriter
+from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
 from everos.infra.persistence.records import Episode
 from tests.fakes import handler_deps
 
@@ -335,3 +336,59 @@ async def test_missing_timestamp_raises_value_error(
 
 
 _: Any = None
+
+
+# ── delete fence (memory delete, spec 1 §5.4) ────────────────────────────
+
+
+async def test_fenced_rows_are_not_upserted(
+    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+) -> None:
+    """A deletion fenced the row before this run's upsert: it is dropped."""
+    rel = await _write_one_entry(EpisodeWriter(memory_root), "u1", "hello world")
+    fence = DeleteFence()
+    handler = EpisodeHandler(
+        handler_deps(memory_root=memory_root, tokenizer=_StubTokenizer(), fence=fence)
+    )
+    blocker = fence.register_run()  # an earlier run still in flight
+    entry_id = (await MarkdownReader.read(memory_root.root / rel)).entries[0].id
+    fence.add([("default", "default", f"u1_{entry_id}")])
+
+    outcome = await handler.handle_added_or_modified(rel)
+
+    assert outcome.upserted == 0
+    assert fake_repo.rows == []
+    fence.end_run(blocker)
+
+
+async def test_upsert_rechecks_fence_and_deletes_late_rows(
+    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+) -> None:
+    """R7: a deletion fences the row while the upsert is in flight (after the
+    run filtered, before the upsert returned) and relies on the run to remove
+    it; the run deletes it right after its upsert."""
+    rel = await _write_one_entry(EpisodeWriter(memory_root), "u1", "hello world")
+    fence = DeleteFence()
+    handler = EpisodeHandler(
+        handler_deps(memory_root=memory_root, tokenizer=_StubTokenizer(), fence=fence)
+    )
+    upsert = fake_repo.upsert
+
+    async def upsert_while_deleting(rows: list[Episode]) -> None:
+        await upsert(rows)
+        fence.add([(r.app_id, r.project_id, r.id) for r in rows])  # the deletion
+
+    fake_repo.upsert = upsert_while_deleting  # type: ignore[method-assign]
+
+    await handler.handle_added_or_modified(rel)
+
+    assert len(fake_repo.deletes) == 1
+    late_id = fake_repo.upserts[0][0].id
+    assert late_id in repr(fake_repo.deletes[0])
+    assert _gauge_entries() == 0  # the run ended: nothing left fenced
+
+
+def _gauge_entries() -> float | None:
+    from prometheus_client import REGISTRY
+
+    return REGISTRY.get_sample_value("everos_memory_delete_fence_entries")

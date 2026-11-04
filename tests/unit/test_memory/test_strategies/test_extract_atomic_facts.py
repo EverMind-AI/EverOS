@@ -13,7 +13,7 @@ from everos.memory.events import (
     ReflectionContext,
 )
 from everos.memory.strategies import EXTRACT_ATOMIC_FACTS_SPEC, extract_atomic_facts
-from tests.fakes import make_deps
+from tests.fakes import make_deps, seed_sources
 
 _EXTRACTOR = "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
 
@@ -52,7 +52,9 @@ def test_spec() -> None:
 
 async def test_extracts_from_episode_text_and_writes_under_event_owner() -> None:
     """Single LLM call on episode_text; all facts written under event.owner_id."""
-    deps = make_deps()
+    deps = seed_sources(
+        make_deps(), memcell_id="mc_a", episode_entry_id="ep_20260517_0001"
+    )
     facts = [
         _fact("alice mentioned a weekend trip to tokyo"),
         _fact("alice said she needs hiking gear"),
@@ -143,3 +145,33 @@ async def test_facts_are_written_in_the_episode_language(
 
     call = extractor_cls.return_value.aextract_from_text.call_args
     assert call.kwargs["output_language"] == language
+
+
+async def test_reflection_fact_skips_memcell_check() -> None:
+    """A22: a Reflection event's ``memcell_id`` is the merged episode's id, not
+    a memcell. Its facts are written while that episode is in md, although no
+    memcell carries the id."""
+    merged = "ep_20260517_0009"
+    deps = seed_sources(make_deps(), memcell_id="mc_other", episode_entry_id=merged)
+    event = _event(memcell_id=merged, source="reflection")
+    event = event.model_copy(update={"episode_entry_id": merged})
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_text = AsyncMock(
+            return_value=[_fact("x")]
+        )
+        (out,) = await extract_atomic_facts(event, deps)
+
+    assert len(out.fact_entry_ids) == 1
+
+
+async def test_fact_dropped_when_episode_gone() -> None:
+    """Spec 2 R3: a single-id deletion removed the parent episode from md."""
+    deps = seed_sources(make_deps(), memcell_id="mc_a")  # episode not in md
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_text = AsyncMock(
+            return_value=[_fact("x")]
+        )
+        (out,) = await extract_atomic_facts(_event(), deps)
+
+    assert out.fact_entry_ids == []
+    assert deps.stores.atomic_fact.records == []  # type: ignore[attr-defined]

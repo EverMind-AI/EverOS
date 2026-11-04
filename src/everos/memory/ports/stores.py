@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "LOST_STATUS_WRITE",
+    "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
     "AgentCaseStore",
     "AgentSkillStore",
@@ -20,16 +21,21 @@ __all__ = [
     "KnowledgeStore",
     "MemcellStore",
     "MemorizeInboxStore",
+    "NoSourceCheck",
+    "OwnerDirDeletion",
+    "OwnerDirStore",
     "ProfileStore",
     "ReflectionReportStore",
     "SessionBufferStore",
+    "SessionPurgeStore",
+    "SourceCheck",
     "WrittenDocument",
 ]
 
 import datetime as dt
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, final, runtime_checkable
 
 from everos.memory.models import (
     AgentCase,
@@ -60,56 +66,176 @@ from everos.memory.ports.query import (
     Stored,
 )
 
+# ── Source checks ────────────────────────────────────────────────────────
+
+type SourceCheck = Callable[[], Awaitable[bool]]
+"""Whether everything a derived write was made from still exists.
+
+The daily-log stores run it under the owner's write lock, right before the
+write, and skip the write when it returns ``False``: a deletion that removed
+a source first and then took the same lock cannot be followed by a write
+derived from that source. It may read markdown and SQLite; it must not take
+the owner lock again (not reentrant), call a model or touch an index.
+"""
+
+
+@final
+class NoSourceCheck:
+    """The ``only_if`` of a write that has no deletable source to check."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NO_SOURCE_CHECK"
+
+
+NO_SOURCE_CHECK: Final = NoSourceCheck()
+
+
 # ── User-track daily logs ────────────────────────────────────────────────
 
 
 @runtime_checkable
 class EpisodeStore(Protocol):
-    """Episode truth: append-only daily logs per owner."""
+    """Episode truth: append-only daily logs per owner.
 
-    async def append(self, scope: Scope, episode: Episode) -> MemoryRef: ...
+    Every write takes ``only_if`` (no default, so no writer can forget it):
+    a skipped write returns ``None`` / an empty list / ``False``.
+    """
+
+    async def append(
+        self,
+        scope: Scope,
+        episode: Episode,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None: ...
 
     async def append_many(
-        self, scope: Scope, episodes: Sequence[Episode]
+        self,
+        scope: Scope,
+        episodes: Sequence[Episode],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
 
         The adapter groups references for storage; failures propagate after any
         earlier writes, without an all-or-nothing guarantee.
+
+        Returns:
+            Whether the references were marked (``False``: ``only_if`` failed).
         """
+        ...
+
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        """The ``entry_ids`` still in the owner's files, merged or not.
+
+        Reads the files without the owner lock, so a source check running
+        under it may call this.
+        """
+        ...
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        """The episodes of ``entry_ids`` still in md (no lock)."""
+        ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
+
+    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
+        """Remove these entries, each file under the owner lock; their refs."""
+        ...
+
+    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
+        """Entries the owner's files mark as merged into one of ``targets``."""
+        ...
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
         ...
 
 
 @runtime_checkable
 class AtomicFactStore(Protocol):
-    """Atomic-fact truth: append-only daily logs per owner."""
+    """Atomic-fact truth: append-only daily logs per owner (``only_if``: above)."""
 
     async def append_many(
-        self, scope: Scope, facts: Sequence[AtomicFact]
+        self,
+        scope: Scope,
+        facts: Sequence[AtomicFact],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
 
         The adapter groups references for storage; failures propagate after any
         earlier writes, without an all-or-nothing guarantee.
+
+        Returns:
+            Whether the references were marked (``False``: ``only_if`` failed).
         """
+        ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
+
+    async def remove_by_parents(
+        self, scope: Scope, parent_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        """Remove the owner's facts of these parent episodes; their refs."""
         ...
 
 
 @runtime_checkable
 class ForesightStore(Protocol):
-    """Foresight truth: append-only daily logs per owner."""
+    """Foresight truth: append-only daily logs per owner (``only_if``: above)."""
 
     async def append_many(
-        self, scope: Scope, items: Sequence[Foresight]
+        self,
+        scope: Scope,
+        items: Sequence[Foresight],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]: ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
 
 
 @runtime_checkable
@@ -126,9 +252,23 @@ class ProfileStore(Protocol):
 
 @runtime_checkable
 class AgentCaseStore(Protocol):
-    """Agent-case truth: append-only daily logs per agent."""
+    """Agent-case truth: append-only daily logs per agent (``only_if``: above)."""
 
-    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef: ...
+    async def append(
+        self,
+        scope: Scope,
+        case: AgentCase,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None: ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id``; their refs.
+
+        Takes the owner lock once first (a barrier), then rewrites each file
+        under it. The caller deletes the session's memcells before.
+        """
+        ...
 
 
 @runtime_checkable
@@ -145,6 +285,40 @@ class AgentSkillStore(Protocol):
     async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef: ...
 
     async def delete(self, scope: Scope, skill_name: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class OwnerDirDeletion:
+    """What deleting one owner's directory removed.
+
+    Attributes:
+        refs: The daily-log entries, by index table (``episode``,
+            ``atomic_fact``, ``foresight``, ``agent_case``).
+        count: Entries, plus one per skill directory, plus one for
+            ``user.md``.
+    """
+
+    refs: Mapping[str, Sequence[MemoryRef]]
+    count: int
+
+
+@runtime_checkable
+class OwnerDirStore(Protocol):
+    """Whole owner directories: deletion and its crash recovery."""
+
+    async def delete(self, scope: Scope) -> OwnerDirDeletion:
+        """Remove the owner's directory, keeping today's id counters."""
+        ...
+
+    async def sweep_trash(self) -> int:
+        """Finish deletions a crash interrupted; how many it finished."""
+        ...
+
+    async def owners_with_session(
+        self, app_id: str, project_id: str, session_id: str
+    ) -> list[Scope]:
+        """Every user and agent whose files mention ``session_id`` (slow path)."""
+        ...
 
 
 # ── Conversation state ───────────────────────────────────────────────────
@@ -260,6 +434,27 @@ class ClusterStore(Protocol):
         """
         ...
 
+    async def detach(
+        self,
+        cluster_id: str,
+        member_ids: Collection[str],
+        *,
+        count: int,
+        last_ts: int,
+        preview: Sequence[str],
+    ) -> None:
+        """Remove members and restamp count / last_ts / preview; the
+        centroid stays."""
+        ...
+
+    async def delete(self, cluster_id: str) -> None:
+        """Delete a cluster with its members."""
+        ...
+
+    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
+        """Delete every cluster of the owner of this kind; how many."""
+        ...
+
     async def list_distinct_owners(self) -> list[Scope]:
         """Every owner that has at least one cluster."""
         ...
@@ -340,6 +535,24 @@ class ReflectionReportStore(Protocol):
     async def create(self, report: ReflectionReport) -> None: ...
 
     async def reflected_cluster_ids(self, scope: Scope) -> set[str]: ...
+
+    async def delete_for_owner(self, scope: Scope) -> int:
+        """Delete every report of the owner; how many."""
+        ...
+
+
+@runtime_checkable
+class SessionPurgeStore(Protocol):
+    """A session's conversation state, for deleting the session."""
+
+    async def purge(self, session: SessionKey) -> list[MemcellRecord]:
+        """Delete the session's memcells, buffers and status in one
+        transaction, and blank its failed queued requests' bodies.
+
+        Returns the deleted memcells (their senders name the owners whose
+        memories came from the session).
+        """
+        ...
 
 
 # ── Knowledge base ───────────────────────────────────────────────────────

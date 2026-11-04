@@ -14,11 +14,12 @@ __all__ = [
     "AgentSkillIndex",
     "AtomicFactIndex",
     "EpisodeIndex",
+    "IndexEraser",
     "KnowledgeTopicIndex",
     "ProfileIndex",
 ]
 
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 from everos.memory.models import (
@@ -31,6 +32,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports.query import (
     Filter,
+    MemoryRef,
     Page,
     PageResult,
     Scope,
@@ -163,3 +165,30 @@ class KnowledgeTopicIndex(Protocol):
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[ScoredKnowledgeTopic]: ...
+
+
+@runtime_checkable
+class IndexEraser(Protocol):
+    """The one write a deletion makes to the derived index: removing rows.
+
+    The domain otherwise only reads the indexes (the cascade writes them).
+    A deletion removes the rows of what it removed from md at once, instead
+    of waiting for the cascade to notice, and keeps the cascade from writing
+    them back. Failures are logged and handed back to the cascade, never
+    raised: the markdown is already gone.
+    """
+
+    async def erase(
+        self, scope: Scope, removed: Mapping[str, Sequence[MemoryRef]]
+    ) -> None:
+        """Remove the rows of ``removed`` entries, by daily-log table.
+
+        Keys are table names (``episode``, ``atomic_fact``, ``foresight``,
+        ``agent_case``).
+        """
+        ...
+
+    async def erase_owner(self, scope: Scope, kinds: Collection[str]) -> None:
+        """Remove every row of the owner in the per-owner tables ``kinds``
+        (``user_profile``, ``agent_skill``)."""
+        ...

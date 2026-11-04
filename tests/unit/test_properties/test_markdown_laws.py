@@ -27,18 +27,31 @@ generated domain, with the domain's limits spelled out:
    line splits into two sections: a documented limit of the format.
 5. ``parse_inline_list`` inverts ``_render_value`` for lists of ids drawn
    from the entry-id alphabet (no commas, no edge whitespace).
+6. Every ``session_id`` the API accepts (``SessionId``) comes back from a
+   daily-log file as sent: an episode written with it is found and removed
+   by a deletion of that session. Law 4's single-line limit, enforced at
+   the request.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import tempfile
+from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import TypeAdapter, ValidationError
 
+from everos.entrypoints.api.schemas.ids import SessionId
 from everos.infra.cascade._projections._common import parse_inline_list
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import MarkdownEpisodeStore
 from everos.infra.persistence.markdown._base import entries as ent
 from everos.infra.persistence.markdown._base import frontmatter as fm
+from everos.memory.models import Episode
+from everos.memory.ports import NO_SOURCE_CHECK, Scope
 
 _ID_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 _line = st.text(st.characters(exclude_categories=("Cc", "Cs", "Zl", "Zp")), max_size=40)
@@ -134,3 +147,38 @@ def test_structured_entry_round_trips(
 @given(ids=st.lists(st.text(_ID_ALPHABET, min_size=1, max_size=24), max_size=8))
 def test_inline_list_round_trips(ids: list[str]) -> None:
     assert parse_inline_list(ent._render_value(ids)) == ids
+
+
+_SESSION_ID = TypeAdapter(SessionId)
+
+
+def _accepted(value: str) -> bool:
+    try:
+        _SESSION_ID.validate_python(value)
+    except ValidationError:
+        return False
+    return True
+
+
+async def _written_then_removed(root: Path, session_id: str) -> int:
+    store = MarkdownEpisodeStore(MemoryRoot(root))
+    scope = Scope(
+        app_id="default", project_id="default", owner_id="u1", owner_type="user"
+    )
+    episode = Episode(
+        owner_id="u1",
+        episode="e",
+        timestamp=1,
+        subject="s",
+        summary="s",
+        session_id=session_id,
+        parent_id="mc",
+    )
+    await store.append(scope, episode, only_if=NO_SOURCE_CHECK)
+    return len(await store.remove_session(scope, session_id))
+
+
+@given(session_id=st.text(min_size=1, max_size=128).filter(_accepted))
+def test_accepted_session_id_is_found_by_its_deletion(session_id: str) -> None:
+    with tempfile.TemporaryDirectory() as root:
+        assert asyncio.run(_written_then_removed(Path(root), session_id)) == 1

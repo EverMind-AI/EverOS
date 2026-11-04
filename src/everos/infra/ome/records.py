@@ -53,8 +53,8 @@ class RunRecord(BaseModel):
     event_payload: Annotated[
         str,
         Field(
-            min_length=1,
-            description="JSON-encoded event (``Event.model_dump_json`` output).",
+            description="JSON-encoded event (``Event.model_dump_json`` output); "
+            "emptied once the run succeeds.",
         ),
     ]
     max_retries_snapshot: Annotated[int, Field(ge=0)]
@@ -62,6 +62,8 @@ class RunRecord(BaseModel):
 
     @model_validator(mode="after")
     def _check_status_invariants(self) -> Self:
+        if self.status != RunStatus.SUCCESS and not self.event_payload:
+            raise ValueError(f"RunRecord: {self.status} must keep its event_payload")
         if self.status == RunStatus.RUNNING:
             if self.finished_at is not None:
                 raise ValueError("RunRecord: RUNNING must have finished_at=None")

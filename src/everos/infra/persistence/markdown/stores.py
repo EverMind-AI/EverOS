@@ -18,14 +18,21 @@ __all__ = [
 ]
 
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
+from typing import ClassVar
 
 import anyio
 from everalgo.user_memory import OutputLanguage
 
+from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
-from everos.core.utils.datetime import from_timestamp, to_iso_format
+from everos.core.utils.datetime import (
+    from_iso_format,
+    from_timestamp,
+    to_iso_format,
+    to_timestamp_ms,
+)
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import (
     AgentCase,
@@ -35,9 +42,15 @@ from everos.memory.models import (
     Foresight,
     Profile,
 )
-from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.ports import (
+    MemoryRef,
+    NoSourceCheck,
+    Scope,
+    SourceCheck,
+    Stored,
+)
 
-from ._base import EntryId, MarkdownReader
+from ._base import Entry, EntryId, MarkdownReader
 from ._mds import AgentSkillFrontmatter, UserProfileFrontmatter
 from ._readers import AgentSkillReader, ProfileReader
 from ._writers import (
@@ -56,14 +69,27 @@ type EntryBody = tuple[dict[str, object], dict[str, str]]
 """``(inline, sections)`` of one rendered daily-log entry."""
 
 
+def owner_lock(scope: Scope) -> str:
+    """The ``LOCKS`` key of the owner every markdown write of ``scope`` holds."""
+    return owner_key(scope.app_id, scope.project_id, scope.owner_type, scope.owner_id)
+
+
 class _DailyLogStore[T]:
     """Append / deprecate for one daily-log kind.
+
+    Every write holds the owner's lock (``"owner"`` in ``LOCKS``) and runs its
+    ``only_if`` first, inside the lock: a deletion removes the sources, then
+    takes the same lock, so a write that passed its check has finished before
+    the deletion reads the files, and one that runs later sees the sources
+    gone.
 
     Args:
         root: Memory root the files live under.
         writer: The kind's daily-log writer.
         to_entry: Renders one domain object as ``(inline, sections)``.
     """
+
+    _KIND: ClassVar[str]
 
     def __init__(
         self,
@@ -75,25 +101,130 @@ class _DailyLogStore[T]:
         self._writer = writer
         self._to_entry = to_entry
 
-    async def _append_many(self, scope: Scope, items: Sequence[T]) -> list[MemoryRef]:
-        eids = await self._writer.append_entries(
-            scope.owner_id,
-            [self._to_entry(item) for item in items],
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
+    async def _append_many(
+        self,
+        scope: Scope,
+        items: Sequence[T],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        if not items:
+            return []
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await self._sources_alive(scope, only_if, len(items)):
+                return []
+            eids = await self._writer.append_entries(
+                scope.owner_id,
+                [self._to_entry(item) for item in items],
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
         return [self._ref(scope, eid) for eid in eids]
 
     async def _deprecate(
-        self, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
         by_file: dict[str, dict[str, str]] = defaultdict(dict)
         for md_path, entry_id in entries:
             by_file[md_path][entry_id] = replaced_by
-        for md_path, replaced in by_file.items():
-            await self._writer.patch_frontmatter(
-                self._root.root / md_path, {"deprecated_entries": replaced}
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await self._sources_alive(scope, only_if, len(entries)):
+                return False
+            for md_path, replaced in by_file.items():
+                await self._writer.patch_frontmatter(
+                    self._root.root / md_path, {"deprecated_entries": replaced}
+                )
+        return True
+
+    async def _sources_alive(
+        self, scope: Scope, only_if: SourceCheck | NoSourceCheck, count: int
+    ) -> bool:
+        if isinstance(only_if, NoSourceCheck) or await only_if():
+            return True
+        logger.info(
+            "memory_write_skipped_source_gone",
+            kind=self._KIND,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            count=count,
+        )
+        return False
+
+    # ── Deletion ──────────────────────────────────────────────────────────
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's entries of ``session_id`` from every file of this kind.
+
+        The caller deleted the session's memcells first. Taking the owner lock
+        once then waits out every write that passed its source check before
+        that; any later one finds its memcell gone. So the files can be
+        scanned without the lock, and each match is re-read and rewritten
+        under it. An entry matches on its parsed ``session_id`` field, never
+        on a text prefix (``s1`` does not match ``s10``).
+        """
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            pass
+        needle = f"**session_id**: {session_id}"
+        removed: list[MemoryRef] = []
+        for path in await self._files_mentioning(scope, needle):
+            removed += await self._rewrite(
+                scope,
+                path,
+                lambda e: e.as_structured().inline.get("session_id") == session_id,
             )
+        return removed
+
+    async def _rewrite(
+        self, scope: Scope, path: Path, drop: Callable[[Entry], bool]
+    ) -> list[MemoryRef]:
+        """Remove the selected entries of one file under the owner lock."""
+        key = owner_lock(scope)
+        async with LOCKS.hold("owner", key):
+            removed = await self._writer.remove_entries(path, drop)
+            if removed:
+                LOCKS.bump_delete_count(key)
+        md_path = _relative(self._root, path)
+        return [
+            MemoryRef(id=f"{scope.owner_id}_{eid}", entry_id=eid, md_path=md_path)
+            for eid in removed
+        ]
+
+    def _folder(self, scope: Scope) -> Path:
+        return self._writer.path_for(
+            scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
+        ).parent
+
+    async def _daily_files(self, scope: Scope) -> list[Path]:
+        folder = anyio.Path(self._folder(scope))
+        if not await folder.is_dir():
+            return []
+        return sorted([Path(str(f)) async for f in folder.glob("*.md")])
+
+    async def _files_mentioning(self, scope: Scope, *needles: str) -> list[Path]:
+        """The owner's files of this kind whose text contains any of ``needles``."""
+        hits: list[Path] = []
+        for path in await self._daily_files(scope):
+            try:
+                text = await anyio.Path(path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            if any(needle in text for needle in needles):
+                hits.append(path)
+        return hits
+
+    def _path_of(self, scope: Scope, entry_id: str) -> Path | None:
+        try:
+            day = EntryId.parse(entry_id).date
+        except ValueError:
+            return None  # not an id this store ever minted
+        return self._writer.path_for(
+            scope.owner_id, day, app_id=scope.app_id, project_id=scope.project_id
+        )
 
     def _ref(self, scope: Scope, eid: EntryId) -> MemoryRef:
         path = self._writer.path_for(
@@ -117,22 +248,116 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         root: Memory root the files live under.
     """
 
+    _KIND = "episode"
+
     def __init__(self, root: MemoryRoot) -> None:
         super().__init__(root, EpisodeWriter(root), _episode_entry)
 
-    async def append(self, scope: Scope, episode: Episode) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [episode])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        episode: Episode,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [episode], only_if)
+        return refs[0] if refs else None
 
     async def append_many(
-        self, scope: Scope, episodes: Sequence[Episode]
+        self,
+        scope: Scope,
+        episodes: Sequence[Episode],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, episodes)
+        return await self._append_many(scope, episodes, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
+        return {entry.id for entry in await self._entries(scope, entry_ids)}
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        found: list[Stored[Episode]] = []
+        for path, entry in await self._entries_with_paths(scope, entry_ids):
+            found.append(
+                Stored(
+                    ref=MemoryRef(
+                        id=f"{scope.owner_id}_{entry.id}",
+                        entry_id=entry.id,
+                        md_path=_relative(self._root, path),
+                    ),
+                    scope=scope,
+                    item=_episode_from_entry(entry, owner_id=scope.owner_id),
+                )
+            )
+        return found
+
+    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
+        """Remove these entries; each file is rewritten under the owner lock."""
+        by_path: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in entry_ids:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                by_path[path].add(entry_id)
+        removed: list[MemoryRef] = []
+        for path, ids in sorted(by_path.items()):
+            removed += await self._rewrite(scope, path, lambda e, ids=ids: e.id in ids)
+        return removed
+
+    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
+        """The entries the owner's files mark as merged into any of ``targets``.
+
+        Reads every episode file's ``deprecated_entries`` (no lock). One step:
+        a caller that wants the closure repeats it with the result.
+        """
+        wanted = set(targets)
+        found: set[str] = set()
+        for path in await self._daily_files(scope):
+            marks = await _deprecations(path)
+            found |= {key for key, merged in marks.items() if merged in wanted}
+        return found
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from every episode file's ``deprecated_entries``."""
+        wanted = set(keys)
+        for path in await self._daily_files(scope):
+            if not (await _deprecations(path)).keys() & wanted:
+                continue
+            async with LOCKS.hold("owner", owner_lock(scope)):
+                await self._writer.drop_deprecations(path, wanted)
+
+    async def _entries(self, scope: Scope, entry_ids: Collection[str]) -> list[Entry]:
+        return [entry for _, entry in await self._entries_with_paths(scope, entry_ids)]
+
+    async def _entries_with_paths(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[tuple[Path, Entry]]:
+        wanted: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in entry_ids:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                wanted[path].add(entry_id)
+        found: list[tuple[Path, Entry]] = []
+        for path, ids in wanted.items():
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            found += [(path, entry) for entry in parsed.entries if entry.id in ids]
+        return found
 
 
 class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
@@ -142,18 +367,48 @@ class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
         root: Memory root the files live under.
     """
 
+    _KIND = "atomic_fact"
+
     def __init__(self, root: MemoryRoot) -> None:
         super().__init__(root, AtomicFactWriter(root), _atomic_fact_entry)
 
     async def append_many(
-        self, scope: Scope, facts: Sequence[AtomicFact]
+        self,
+        scope: Scope,
+        facts: Sequence[AtomicFact],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts)
+        return await self._append_many(scope, facts, only_if)
 
     async def deprecate(
-        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
-    ) -> None:
-        await self._deprecate(entries=entries, replaced_by=replaced_by)
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def remove_by_parents(
+        self, scope: Scope, parent_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        """Remove the owner's facts whose parent episode is one of ``parent_ids``."""
+        parents = set(parent_ids)
+        if not parents:
+            return []
+        needles = [f"**parent_id**: {parent}" for parent in parents]
+        removed: list[MemoryRef] = []
+        for path in await self._files_mentioning(scope, *needles):
+            removed += await self._rewrite(
+                scope,
+                path,
+                lambda e: e.as_structured().inline.get("parent_id") in parents,
+            )
+        return removed
 
 
 class MarkdownForesightStore(_DailyLogStore[Foresight]):
@@ -163,13 +418,19 @@ class MarkdownForesightStore(_DailyLogStore[Foresight]):
         root: Memory root the files live under.
     """
 
+    _KIND = "foresight"
+
     def __init__(self, root: MemoryRoot) -> None:
         super().__init__(root, ForesightWriter(root), _foresight_entry)
 
     async def append_many(
-        self, scope: Scope, items: Sequence[Foresight]
+        self,
+        scope: Scope,
+        items: Sequence[Foresight],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, items)
+        return await self._append_many(scope, items, only_if)
 
 
 class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
@@ -179,12 +440,20 @@ class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
         root: Memory root the files live under.
     """
 
+    _KIND = "agent_case"
+
     def __init__(self, root: MemoryRoot) -> None:
         super().__init__(root, AgentCaseWriter(root), _agent_case_entry)
 
-    async def append(self, scope: Scope, case: AgentCase) -> MemoryRef:
-        (ref,) = await self._append_many(scope, [case])
-        return ref
+    async def append(
+        self,
+        scope: Scope,
+        case: AgentCase,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [case], only_if)
+        return refs[0] if refs else None
 
 
 class MarkdownProfileStore:
@@ -230,13 +499,14 @@ class MarkdownProfileStore:
             profile_timestamp_ms=profile.timestamp,
             primary_language=profile.primary_language,
         )
-        path = await self._writer.write(
-            scope.owner_id,
-            frontmatter=frontmatter,
-            body=profile.summary,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            path = await self._writer.write(
+                scope.owner_id,
+                frontmatter=frontmatter,
+                body=profile.summary,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
         return MemoryRef(
             id=scope.owner_id,
             entry_id=frontmatter.id,
@@ -327,23 +597,25 @@ class MarkdownAgentSkillStore:
             source_case_ids=list(skill.source_case_ids),
             cluster_id=skill.cluster_id or None,
         )
-        await self._writer.write_main(
-            scope.owner_id,
-            name,
-            frontmatter=frontmatter,
-            body=skill.content,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            await self._writer.write_main(
+                scope.owner_id,
+                name,
+                frontmatter=frontmatter,
+                body=skill.content,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
         return self._ref(scope, frontmatter.id, name)
 
     async def delete(self, scope: Scope, skill_name: str) -> bool:
-        return await self._writer.delete_skill(
-            scope.owner_id,
-            skill_name,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            return await self._writer.delete_skill(
+                scope.owner_id,
+                skill_name,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
 
     def _ref(self, scope: Scope, skill_id: str, name: str) -> MemoryRef:
         entry_id = AgentSkillFrontmatter.sanitize_skill_name(name)
@@ -470,6 +742,31 @@ def _skill_from_md(frontmatter: AgentSkillFrontmatter, body: str) -> AgentSkill:
         maturity_score=frontmatter.maturity_score,
         source_case_ids=list(frontmatter.source_case_ids),
     )
+
+
+def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
+    """The episode an entry written by :func:`_episode_entry` holds."""
+    structured = entry.as_structured()
+    inline, sections = structured.inline, structured.sections
+    return Episode(
+        owner_id=inline.get("owner_id") or owner_id,
+        episode=sections.get("Content", ""),
+        summary=sections.get("Summary", ""),
+        subject=sections.get("Subject", ""),
+        timestamp=to_timestamp_ms(from_iso_format(inline["timestamp"])),
+        session_id=inline.get("session_id") or None,
+        parent_id=inline.get("parent_id", ""),
+        parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
+    )
+
+
+async def _deprecations(path: Path) -> dict[str, str]:
+    try:
+        parsed = await MarkdownReader.read(path)
+    except FileNotFoundError:
+        return {}
+    marks = parsed.frontmatter.get("deprecated_entries")
+    return dict(marks) if isinstance(marks, dict) else {}
 
 
 def _relative(root: MemoryRoot, path: Path) -> str:

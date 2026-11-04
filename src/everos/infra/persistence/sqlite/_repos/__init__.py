@@ -17,6 +17,7 @@ from .md_change_state import QueueSummary as QueueSummary
 from .memcell import MemcellRepo as MemcellRepo
 from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
 from .reflection_report import ReflectionReportRepo as ReflectionReportRepo
+from .session_purge import SessionPurgeRepo as SessionPurgeRepo
 from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "MemorizeInboxRepo",
     "QueueSummary",
     "ReflectionReportRepo",
+    "SessionPurgeRepo",
     "TopicUpsertPayload",
     "UnprocessedBufferRepo",
 ]

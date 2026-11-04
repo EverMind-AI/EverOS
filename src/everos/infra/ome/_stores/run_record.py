@@ -70,7 +70,13 @@ class RunRecordStore:
             )
 
     async def mark_success(self, *, run_id: str, finished_at: datetime) -> None:
-        """Mark RUNNING → SUCCESS."""
+        """Mark RUNNING → SUCCESS, dropping the event's text.
+
+        Only a RUNNING row is ever replayed (crash recovery), so a finished
+        run's copy of the conversation is kept nowhere it is needed -- and it
+        would outlive a deletion of that conversation. Failed and dead-letter
+        rows keep theirs for diagnosis, rolled off with the per-strategy cap.
+        """
         await self._update_status(run_id, RunStatus.SUCCESS, finished_at, None)
 
     async def mark_failed(
@@ -98,10 +104,11 @@ class RunRecordStore:
         finished_at: datetime,
         error: str | None,
     ) -> None:
+        payload = ", event_payload = ''" if status is RunStatus.SUCCESS else ""
         async with self._storage.write() as conn:
             await conn.execute(
                 "UPDATE run_record "
-                "SET status = ?, finished_at = ?, error = ? "
+                f"SET status = ?, finished_at = ?, error = ?{payload} "
                 "WHERE run_id = ?",
                 (status.value, to_iso_format(finished_at), error, run_id),
             )

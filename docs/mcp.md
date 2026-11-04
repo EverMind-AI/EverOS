@@ -57,7 +57,7 @@ Optional environment variables: `EVEROS_USER_ID` (memory owner, default `default
 
 Seven tools, backed by this server's `/api/v2/memory/*` endpoints: `get_profile`,
 `add_memory`, `search_memory`, `list_memories`, `record_trajectory`,
-`recall_agent_experience` and `forget_session` (not yet available here, see below). The
+`recall_agent_experience` and `forget_session`. The
 server also ships an autonomy protocol through MCP `instructions`, so capable hosts load the
 profile at session start, save new facts and recall context without being asked. The current tool list and the protocol are
 documented in the [everos-mcp README](https://github.com/EverMind-AI/EverOS-MCP#tools);
@@ -65,10 +65,11 @@ this page only covers what is specific to a self-hosted EverOS.
 
 ## Behaviour on a self-hosted server
 
-- **`forget_session` is not available yet.** Self-hosted EverOS has no session-scoped delete
-  endpoint ([#483](https://github.com/EverMind-AI/EverOS/issues/483)); the tool reports this
-  instead of failing. Memories are Markdown files under the memory root (`~/.everos/` by
-  default) — delete them there.
+- **`forget_session` deletes the session's memories.** It calls
+  [`POST /api/v2/memory/delete`](api.md#post-apiv2memorydelete) with the session id:
+  every owner's memories of that conversation and the conversation itself go. While the
+  session is still being memorized the server answers `SESSION_BUSY` ("nothing was deleted,
+  retry later"), which the tool passes on to the model.
 - **New memories become searchable shortly after saving.** `add_memory` returns once
   extraction has written the Markdown; the search index catches up a moment later.
   `list_memories` shows new entries sooner than `search_memory`.

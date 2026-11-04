@@ -41,6 +41,7 @@ class ErrorCode(StrEnum):
     PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED"
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     QUEUE_SATURATED = "QUEUE_SATURATED"
+    SESSION_BUSY = "SESSION_BUSY"
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +156,22 @@ class QueueSaturatedError(DomainError):
 
     The batch was **not** accepted. The API layer maps it to HTTP 429; the
     caller must retry later or buffer the batch itself -- never drop it.
+    """
+
+
+class SessionBusyError(DomainError):
+    """A memory deletion found its session still being memorized.
+
+    Nothing was deleted. The API layer maps it to HTTP 503 ``SESSION_BUSY``;
+    the caller retries later.
+    """
+
+
+class DeletionIncompleteError(AppError):
+    """A memory deletion failed after it had started removing things.
+
+    Part of the scope may be gone. Sending the same request again finishes
+    it. The API layer maps it to HTTP 500.
     """
 
 

@@ -557,14 +557,20 @@ class MemorizeSettings(BaseModel):
     session_id: on timeout the outer ``asyncio.timeout`` cancels the task
     and the lock auto-releases.
 
+    ``delete_wait_seconds`` caps how long a memory deletion of one session
+    waits for that session's memorize lock (an ``add()`` in progress); past
+    it the deletion answers 503 ``SESSION_BUSY`` and deletes nothing.
+
     Env binding:
         EVEROS_MEMORIZE__MODE
         EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS
+        EVEROS_MEMORIZE__DELETE_WAIT_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__*  (see :class:`AsyncQueueSettings`)
     """
 
     mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
+    delete_wait_seconds: float = Field(default=10.0, gt=0)
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
 
 
@@ -762,6 +768,12 @@ class CascadeSettings(BaseModel):
       is the only path an md edit takes to the index, so it is the
       edit-to-searchable latency. Every sweep also ``stat``-s every md file,
       which over a slow mount is the cost to weigh against it.
+
+    ``delete_fence_warn_entries``:
+      A memory deletion fences the index rows it removed while earlier
+      cascade runs are still in flight, so they cannot write them back. The
+      fence empties as those runs end; holding more entries than this logs
+      ``memory_delete_fence_large``, a sign that some run is not ending.
     """
 
     enabled: bool = True
@@ -771,6 +783,7 @@ class CascadeSettings(BaseModel):
     optimize_prune_retention_seconds: float = 60.0
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
     scan_interval_seconds: float = Field(default=30.0, gt=0)
+    delete_fence_warn_entries: int = Field(default=100_000, gt=0)
 
 
 class OmeSettings(BaseModel):

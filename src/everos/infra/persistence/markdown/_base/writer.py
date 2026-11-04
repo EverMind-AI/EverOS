@@ -43,13 +43,14 @@ import contextlib
 import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import anyio
 
 from everos.core.errors import PathTraversalError
+from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.memory_root import MemoryRoot
 
@@ -102,6 +103,17 @@ class MarkdownWriter:
             lock = asyncio.Lock()
             self._path_locks[key] = lock
         return lock
+
+    @contextlib.asynccontextmanager
+    async def locked(self, path: Path) -> AsyncIterator[None]:
+        """Hold :meth:`lock_for` ``path``, registered with ``LOCKS`` as held.
+
+        The registration (kind ``"md_path"``) only lets the lock-order checks
+        see this lock; the lock itself stays the writer's.
+        """
+        with LOCKS.observe("md_path", str(path)):
+            async with self.lock_for(path):
+                yield
 
     def _ensure_within_root(self, target: Path) -> Path:
         """Reject a write target that resolves outside the memory root.
@@ -195,7 +207,7 @@ class MarkdownWriter:
             FileNotFoundError: If ``path`` does not exist.
         """
         target = Path(path)
-        async with self.lock_for(target):
+        async with self.locked(target):
             # 1. Read raw text.
             raw = await anyio.Path(target).read_text(encoding="utf-8")
 
@@ -278,7 +290,7 @@ class MarkdownWriter:
             ``path`` (resolved as written).
         """
         target = Path(path)
-        async with self.lock_for(target):
+        async with self.locked(target):
             return await self._append_entries_unlocked(
                 target,
                 entries,
