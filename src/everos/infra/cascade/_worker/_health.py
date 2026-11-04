@@ -53,6 +53,21 @@ class CascadeWorkerHealth:
     kind has state yet. Named in :meth:`reasons` so an operator knows
     which table to look at."""
 
+    inflight_rows: int = 0
+    """Rows claimed by a drain and not yet completed (in a handler or
+    waiting for a handler slot)."""
+
+    stalled_seconds: float = 0.0
+    """Seconds since the last claimed row completed, while rows are in
+    flight; ``0.0`` when nothing is in flight. A healthy slow batch still
+    updates this as each row lands, so it measures the gap between
+    completions, not the batch duration."""
+
+    stall_alert_seconds: float = 0.0
+    """Gap at or above which :meth:`reasons` reports the stalled drain
+    (:data:`._tuning.DRAIN_STALL_POLL_INTERVALS` poll intervals). ``0``
+    disables the signal, keeping direct dataclass construction inert."""
+
     def reasons(self) -> list[str]:
         """Operational degradation reasons; empty when healthy.
 
@@ -73,5 +88,15 @@ class CascadeWorkerHealth:
                 f"version cleanup stalled for kind '{kind}' "
                 f"({int(self.prune_stale_seconds)}s since its last prune "
                 "— that table's index dir may grow)"
+            )
+        if (
+            self.inflight_rows
+            and self.stall_alert_seconds > 0
+            and self.stalled_seconds >= self.stall_alert_seconds
+        ):
+            out.append(
+                f"drain stalled: {self.inflight_rows} claimed row(s) with no "
+                f"completion for {int(self.stalled_seconds)}s "
+                "(a handler or its provider is not returning)"
             )
         return out

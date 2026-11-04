@@ -85,6 +85,18 @@ DRAIN_FAILURE_ALERT_THRESHOLD = 3
 """Consecutive :meth:`CascadeWorker.drain_once` exceptions at or above which
 :meth:`CascadeWorker.health` reports degraded — the md → LanceDB
 projection is not making progress, so accepted writes are not indexed."""
+DRAIN_STALL_POLL_INTERVALS = 20
+"""Poll intervals without a claimed row completing before
+:meth:`CascadeWorker.health` reports the drain stalled.
+
+A hung handler does not raise, so the failure counter stays at zero while
+``drain_once`` waits for its batch to finish and later rows stay pending.
+This signal measures the gap between row completions while rows are in
+flight, so a slow but progressing batch stays quiet and a provider call that
+never returns becomes visible. Twenty intervals (20s at the default 1s poll)
+is long enough to ride out a slow embedding call; the value scales with the
+worker poll interval so the replay harness with short polls sees it too.
+"""
 PRUNE_STALE_FACTOR = 3.0
 """Multiple of the prune interval without any successful prune before
 :meth:`CascadeWorker.health` reports degraded. The primary disk-bloat

@@ -228,6 +228,35 @@ async def test_operational_signal_flips_healthy(
     assert any("cleanup stalled" in r for r in health.reasons)
 
 
+async def test_stalled_drain_flips_health_unhealthy(
+    runtime: MemoryRoot, storage: Storage
+) -> None:
+    """#547: claimed rows with no completion make ``/health`` unhealthy.
+
+    A hung handler raises nothing, so the drain-failure counter stays at zero;
+    the liveness gap is the signal that says the projection stopped moving.
+    The pending count stays informational, as before.
+    """
+    orch = _make_orchestrator(storage, runtime)
+    await storage.sqlite.md_change_state.upsert(
+        "users/u1/episodes/ep_1.md",
+        kind="episode",
+        change_type="added",
+        mtime=1.0,
+    )
+    worker = orch._worker
+    worker._inflight_rows = 1
+    worker._last_progress_at = (
+        time.monotonic() - worker.health().stall_alert_seconds - 1.0
+    )
+
+    health = await orch.health()
+
+    assert health.pending >= 1
+    assert health.healthy is False
+    assert any("drain stalled" in r for r in health.reasons)
+
+
 async def test_maintenance_cadences_reach_the_worker_from_settings(
     monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:

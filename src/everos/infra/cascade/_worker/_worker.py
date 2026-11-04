@@ -69,6 +69,7 @@ from ._tuning import (
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_RETRY_BACKOFF_SECONDS,
+    DRAIN_STALL_POLL_INTERVALS,
     LOOP_RESTART_BACKOFF_SECONDS,
     MAINTENANCE_TASK_TIMEOUT_SECONDS,
     MAX_TOTAL_RETRIES,
@@ -156,6 +157,11 @@ class CascadeWorker:
         self._started_at: float = 0.0
         self._drain_consecutive_failures: int = 0
         self._unrecoverable_total: int = 0
+        # Rows claimed by a drain that have not completed yet, and the last
+        # completion time while any of them are in flight. A hung handler
+        # leaves both untouched, which is what the stall reason reads.
+        self._inflight_rows: int = 0
+        self._last_progress_at: float | None = None
 
     async def start(self) -> None:
         if self._task is not None:
@@ -231,8 +237,15 @@ class CascadeWorker:
             return 0
 
         async def process_bounded(row: MdChangeState) -> str | None:
-            async with self._handler_semaphore:
-                return await self._process_one(row)
+            self._inflight_rows += 1
+            if self._last_progress_at is None:
+                self._last_progress_at = time.monotonic()
+            try:
+                async with self._handler_semaphore:
+                    return await self._process_one(row)
+            finally:
+                self._inflight_rows -= 1
+                self._last_progress_at = time.monotonic()
 
         results = await asyncio.gather(*(process_bounded(row) for row in batch))
         touched_kinds = {kind for kind in results if kind is not None}
@@ -279,12 +292,18 @@ class CascadeWorker:
         per-kind optimize streak and the prune-staleness clock.
         """
         stale_seconds, stale_kind = self._maintenance.prune_staleness(self._started_at)
+        stalled_seconds = 0.0
+        if self._inflight_rows and self._last_progress_at is not None:
+            stalled_seconds = max(0.0, time.monotonic() - self._last_progress_at)
         return CascadeWorkerHealth(
             drain_consecutive_failures=self._drain_consecutive_failures,
             unrecoverable_total=self._unrecoverable_total,
             optimize_failure_streak=self._maintenance.optimize_failure_streak(),
             prune_stale_seconds=stale_seconds,
             prune_stale_kind=stale_kind,
+            inflight_rows=self._inflight_rows,
+            stalled_seconds=stalled_seconds,
+            stall_alert_seconds=(self._poll_interval * DRAIN_STALL_POLL_INTERVALS),
         )
 
     # ── internals ──────────────────────────────────────────────────────────
