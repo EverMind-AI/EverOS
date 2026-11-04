@@ -39,7 +39,16 @@ from tests.fakes import (
     unscripted_llm,
 )
 
-_STARTED = ["sqlite.create", "index.start", "ops.start", "ome.start", "memory.start"]
+# Interrupted whole-owner deletions are finished right after the schema
+# exists, before the cascade or the OME engine can write anything.
+_STARTED = [
+    "sqlite.create",
+    "memory.finish_interrupted_deletions",
+    "index.start",
+    "ops.start",
+    "ome.start",
+    "memory.start",
+]
 
 
 _OPTIONAL_SECTIONS = ("DECIDER", "MULTIMODAL", "EMBEDDING", "RERANK")

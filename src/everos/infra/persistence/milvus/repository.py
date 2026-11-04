@@ -15,12 +15,14 @@ __all__ = ["MilvusRepoBase", "MilvusValueLimitError"]
 
 import asyncio
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any, ClassVar, overload
 
 from pydantic import BaseModel
 from pymilvus import MilvusClient
 
+from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import ensure_utc
 from everos.infra.persistence.index.schema import (
@@ -58,6 +60,14 @@ larger outright. LanceDB has no such ceiling, so callers pass generous
 pool sizes -- agentic search deliberately passes a large sentinel and
 expects the engine to clamp. Clamping here keeps that expectation true on
 both backends instead of making every caller learn one engine's limit."""
+
+
+@asynccontextmanager
+async def _observed(lock: asyncio.Lock, collection: str) -> AsyncIterator[None]:
+    """Hold ``lock``, registered with ``LOCKS`` as held (lock-order checks)."""
+    with LOCKS.observe("milvus_collection", collection):
+        async with lock:
+            yield
 
 
 class MilvusRepoBase[T: BaseModel]:
@@ -118,7 +128,7 @@ class MilvusRepoBase[T: BaseModel]:
         name = self.collection_name
         if name in self._ready_collections:
             return
-        async with self._collection_lock(name):
+        async with _observed(self._collection_lock(name), name):
             if name in self._ready_collections:
                 return
             client = await self._connection.client()
@@ -174,7 +184,9 @@ class MilvusRepoBase[T: BaseModel]:
         await self.ensure_collection()
         payload = [self._codec.to_record(record) for record in records]
         client = await self._connection.client()
-        async with self._write_lock(self.collection_name):
+        async with _observed(
+            self._write_lock(self.collection_name), self.collection_name
+        ):
             await _run(client.upsert, self.collection_name, payload)
 
     async def update(self, updates: dict[str, Any], *, where: Filter) -> None:
@@ -196,7 +208,9 @@ class MilvusRepoBase[T: BaseModel]:
                 f"{self.collection_name}; delete the row and upsert it instead"
             )
         client = await self._connection.client()
-        async with self._write_lock(self.collection_name):
+        async with _observed(
+            self._write_lock(self.collection_name), self.collection_name
+        ):
             rows = await self._scan_raw(where, include_vectors=True)
             if not rows:
                 return
@@ -416,7 +430,9 @@ class MilvusRepoBase[T: BaseModel]:
     async def delete(self, predicate: Filter) -> None:
         await self.ensure_collection()
         client = await self._connection.client()
-        async with self._write_lock(self.collection_name):
+        async with _observed(
+            self._write_lock(self.collection_name), self.collection_name
+        ):
             await _run(
                 client.delete,
                 self.collection_name,

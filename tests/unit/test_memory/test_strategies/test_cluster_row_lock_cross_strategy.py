@@ -1,11 +1,11 @@
-"""Regression for #546: clustering and reflection must lock the cluster row.
+"""Regression for #546: clustering must re-read a cluster row reflection merged.
 
-Real SQLite cluster store and real locks; only the embedders are fixed.
+Real SQLite cluster store and real locks; only the embedders, the source
+episodes, and the snapshot returned by list_for_owner are fixed.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -13,22 +13,29 @@ from typing import Any
 import pytest
 
 from everos.config import SqliteSettings
+from everos.core.locks import LOCKS
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
     SqliteDatabase,
     SqliteRepos,
 )
-from everos.memory._partition_locks import _pools
 from everos.memory.events import EpisodeExtracted, ReflectionContext
-from everos.memory.models import Cluster
+from everos.memory.models import Cluster, Episode
 from everos.memory.ports import Scope
 from everos.memory.reflection.orchestrator import ReflectionFinisher
 from everos.memory.strategies import trigger_profile_clustering
-from tests.fakes import make_deps, make_indexes, make_stores
+from tests.fakes import (
+    make_deps,
+    make_indexes,
+    make_stores,
+    seed_sources,
+)
 
 _DIM = 8
 _T0 = 1_700_000_000_000
+_OWNER = "u_race"
+_CLUSTER = "cl_race"
 
 
 class _Embedder:
@@ -40,22 +47,18 @@ class _Embedder:
         return [self.value] * _DIM
 
 
-class _GatingStore:
-    """Real cluster store whose list_for_owner pauses after it reads."""
+class _StaleListStore:
+    """Real cluster store that serves a snapshot captured before a merge."""
 
-    def __init__(self, inner: SqliteClusterStore) -> None:
+    def __init__(self, inner: SqliteClusterStore, stale: list[Cluster]) -> None:
         self._inner = inner
-        self.read_done = asyncio.Event()
-        self.go = asyncio.Event()
+        self._stale = stale
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
-    async def list_for_owner(self, *args: Any, **kwargs: Any) -> Any:
-        rows = await self._inner.list_for_owner(*args, **kwargs)
-        self.read_done.set()
-        await self.go.wait()
-        return rows
+    async def list_for_owner(self, *args: Any, **kwargs: Any) -> list[Cluster]:
+        return self._stale
 
 
 def _event(owner_id: str) -> EpisodeExtracted:
@@ -69,9 +72,20 @@ def _event(owner_id: str) -> EpisodeExtracted:
     )
 
 
-async def _seed(store: SqliteClusterStore, scope: Scope, cluster_id: str) -> None:
+def _episode(owner_id: str, parent_id: str, text: str) -> Episode:
+    return Episode(
+        owner_id=owner_id,
+        episode=text,
+        summary=text,
+        timestamp=_T0,
+        subject=text,
+        parent_id=parent_id,
+    )
+
+
+async def _seed(store: SqliteClusterStore, scope: Scope) -> None:
     cluster = Cluster(
-        id=cluster_id,
+        id=_CLUSTER,
         centroid=(0.1,) * _DIM,
         count=2,
         last_ts=_T0,
@@ -81,8 +95,11 @@ async def _seed(store: SqliteClusterStore, scope: Scope, cluster_id: str) -> Non
     await store.upsert(scope, "user_memory", cluster, member_type="episode")
 
 
-async def _merge(store: SqliteClusterStore, scope: Scope, cluster_id: str) -> None:
+async def _merge(store: SqliteClusterStore, scope: Scope) -> None:
     stores, indexes = make_stores(), make_indexes()
+    stores.episode.seed(  # type: ignore[attr-defined]
+        scope, "ep_merged", _episode(scope.owner_id, _CLUSTER, "merged")
+    )
     finisher = ReflectionFinisher(
         cluster_store=store,
         episode_store=stores.episode,
@@ -92,16 +109,17 @@ async def _merge(store: SqliteClusterStore, scope: Scope, cluster_id: str) -> No
         embedder=_Embedder(0.2),
     )
     context = ReflectionContext(
-        cluster_id=cluster_id,
+        cluster_id=_CLUSTER,
         mode="init",
         source_members=[("ep1", "episode"), ("ep2", "episode")],
         episodes=[],
         merged_episode="merged episode",
         last_ts=_T0 + 1_000,
     )
-    assert await finisher.finish(
+    report = await finisher.finish(
         scope=scope, merged_entry_id="ep_merged", context=context
     )
+    assert report is not None
 
 
 def _assert_merged(cluster: Cluster | None) -> None:
@@ -121,34 +139,31 @@ async def store(tmp_path: Path) -> AsyncIterator[SqliteClusterStore]:
         await database.dispose()
 
 
-async def test_clustering_does_not_overwrite_reflections_merge(
-    store: SqliteClusterStore,
-) -> None:
-    serial = Scope(
-        app_id="default", project_id="default", owner_id="u_serial", owner_type="user"
+async def test_clustering_re_reads_reflections_merge(store: SqliteClusterStore) -> None:
+    scope = Scope(
+        app_id="default",
+        project_id="default",
+        owner_id=_OWNER,
+        owner_type="user",
     )
-    await _seed(store, serial, "cl_serial")
-    await _merge(store, serial, "cl_serial")
-    deps = make_deps(embedding=_Embedder(0.1), stores=make_stores(cluster=store))
-    await trigger_profile_clustering(_event("u_serial"), deps)
-    _assert_merged(await store.get("cl_serial"))
+    await _seed(store, scope)
+    # The snapshot clustering would have read before reflection merged the row.
+    stale = await store.list_for_owner(scope, "user_memory")
+    await _merge(store, scope)
 
-    race = Scope(
-        app_id="default", project_id="default", owner_id="u_race", owner_type="user"
+    deps = make_deps(
+        embedding=_Embedder(0.1),
+        stores=make_stores(cluster=_StaleListStore(store, stale)),
     )
-    await _seed(store, race, "cl_race")
-    gated = _GatingStore(store)
-    deps = make_deps(embedding=_Embedder(0.1), stores=make_stores(cluster=gated))
-    clustering = asyncio.create_task(trigger_profile_clustering(_event("u_race"), deps))
-    await asyncio.wait_for(gated.read_done.wait(), timeout=10)
-    # Reflection is not blocked by the clustering strategy lock; it writes the
-    # row, and clustering must re-read it instead of replaying the stale snapshot.
-    await asyncio.wait_for(_merge(store, race, "cl_race"), timeout=10)
-    mid = await store.get("cl_race")
-    assert mid is not None and mid.count == 1 and sorted(mid.members) == ["ep_merged"]
+    seed_sources(
+        deps,
+        memcell_id="mc_1",
+        episode_entry_id="ep3",
+        owner_id=_OWNER,
+    )
+    await trigger_profile_clustering(_event(_OWNER), deps)
 
-    gated.go.set()
-    await asyncio.wait_for(clustering, timeout=10)
-    _assert_merged(await store.get("cl_race"))
-    # Both paths write one row, so they share a data-keyed (not strategy) lock.
-    assert "default:default:cl_race" in _pools["cluster"]
+    _assert_merged(await store.get(_CLUSTER))
+    # The clustering upsert and the reflection replace_members both take the
+    # data-keyed row lock, so the lock exists for this cluster after both ran.
+    assert ("partition:cluster", "default:default:cl_race") in LOCKS._locks

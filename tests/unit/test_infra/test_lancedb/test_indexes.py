@@ -42,6 +42,7 @@ from everos.infra.persistence.lancedb import (
 from everos.infra.persistence.markdown import MarkdownEpisodeStore
 from everos.memory.models import AgentCase, Episode, Profile
 from everos.memory.ports import (
+    NO_SOURCE_CHECK,
     AgentCaseIndex,
     AgentSkillIndex,
     AtomicFactIndex,
@@ -123,7 +124,9 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
         sender_ids=["u1", "u2"],
         parent_id="mc_1",
     )
-    ref = await MarkdownEpisodeStore(root).append(_USER, episode)
+    ref = await MarkdownEpisodeStore(root).append(
+        _USER, episode, only_if=NO_SOURCE_CHECK
+    )
     handler = EpisodeHandler(
         handler_deps(
             memory_root=root,

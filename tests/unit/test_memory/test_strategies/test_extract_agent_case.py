@@ -25,6 +25,7 @@ from tests.fakes import (
     agent_track_script,
     agent_trajectory,
     make_deps,
+    seed_sources,
 )
 
 _COMPRESSED = json.loads(agent_track_script("case_compress"))
@@ -49,7 +50,7 @@ def test_spec() -> None:
 
 
 async def test_writes_the_case_and_announces_it() -> None:
-    deps = make_deps(llm=agent_track_llm())
+    deps = seed_sources(make_deps(llm=agent_track_llm()), memcell_id="mc_a")
     with structlog.testing.capture_logs() as captured:
         events = await extract_agent_case(_event(), deps)
 
@@ -99,7 +100,7 @@ async def test_fans_out_per_assistant_sender() -> None:
         update={"items": [*steps, answer.model_copy(update={"sender_id": "agent_b"})]}
     )
     llm = agent_track_llm()
-    deps = make_deps(llm=llm)
+    deps = seed_sources(make_deps(llm=llm), memcell_id="mc_a")
 
     events = await extract_agent_case(_event(handed_over), deps)
 
@@ -187,7 +188,9 @@ async def test_skips_when_no_assistant_sender() -> None:
 async def test_a_gate_admitted_case_carries_the_decision() -> None:
     """With a judge the gate replaces the filter; the decision rides along."""
     llm = agent_track_llm()
-    deps = make_deps(llm=llm, case_judge=LLMCaseJudge(llm))
+    deps = seed_sources(
+        make_deps(llm=llm, case_judge=LLMCaseJudge(llm)), memcell_id="mc_a"
+    )
 
     (announced,) = await extract_agent_case(_event(), deps)
 
@@ -210,3 +213,14 @@ async def test_logs_the_reason_when_the_gate_rejects_the_trajectory() -> None:
     (skipped,) = [e for e in captured if e.get("event") == "agent_case_skipped"]
     assert skipped["reason"] == "success_gate_rejected"
     assert skipped["detail"]["case_gate"]["success_probability"] == 0.1
+
+
+async def test_case_dropped_when_memcell_gone() -> None:
+    """Spec 1 §5.2: a session deletion removed the memcell first; the case is
+    not written and not announced."""
+    deps = make_deps(llm=agent_track_llm())  # no memcell: conversation deleted
+
+    events = await extract_agent_case(_event(), deps)
+
+    assert deps.stores.agent_case.records == []  # type: ignore[attr-defined]
+    assert events == []

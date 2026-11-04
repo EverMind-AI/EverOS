@@ -66,6 +66,7 @@ from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
+from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
 
 __all__ = [
     "MTIME_TOLERANCE_SECONDS",
@@ -102,6 +103,7 @@ __all__ = [
     "SqliteReflectionReportStore",
     "SqliteRepos",
     "SqliteSessionBufferStore",
+    "SqliteSessionPurgeStore",
     "TopicUpsertPayload",
     "UnprocessedBuffer",
     "UnprocessedBufferRepo",

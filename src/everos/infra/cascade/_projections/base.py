@@ -25,6 +25,7 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import IndexRepositories
 from everos.infra.persistence.sqlite import KnowledgeDocumentRepo, KnowledgeTopicRowRepo
 
+from .._fence import DeleteFence
 from ..models import HandlerOutcome
 
 
@@ -38,7 +39,9 @@ class HandlerDeps:
     ``md_change_state``. ``index`` holds the table each projection writes;
     the two knowledge repositories hold the SQLite side of the knowledge
     kinds. ``embedding`` is ``None`` on a keyword-only deployment: rows are
-    then written without vectors.
+    then written without vectors. ``fence`` keeps the daily-log projections
+    from writing back rows a memory deletion removed; ``None`` (tools that
+    run the projections outside the server) leaves it out.
     """
 
     memory_root: MemoryRoot
@@ -47,6 +50,7 @@ class HandlerDeps:
     knowledge_documents: KnowledgeDocumentRepo
     knowledge_topics: KnowledgeTopicRowRepo
     embedding: EmbeddingProvider | None = None
+    fence: DeleteFence | None = None
 
 
 class Handler(abc.ABC):

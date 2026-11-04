@@ -15,6 +15,7 @@ from ._repos import (
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
 from .sqlite_manager import SqliteDatabase
@@ -32,6 +33,7 @@ class SqliteRepos:
     memcell: MemcellRepo
     memorize_inbox: MemorizeInboxRepo
     reflection_report: ReflectionReportRepo
+    session_purge: SessionPurgeRepo
     unprocessed_buffer: UnprocessedBufferRepo
 
     @classmethod
@@ -47,5 +49,6 @@ class SqliteRepos:
             memcell=MemcellRepo(factory),
             memorize_inbox=MemorizeInboxRepo(factory),
             reflection_report=ReflectionReportRepo(factory),
+            session_purge=SessionPurgeRepo(factory),
             unprocessed_buffer=UnprocessedBufferRepo(factory),
         )

@@ -112,6 +112,12 @@ class StubMemoryService:
         self.health_calls = 0
         self.search = AsyncMock()
         self.get = AsyncMock()
+        self.delete = AsyncMock()
+        self.delete_by_ids = AsyncMock()
+
+    async def finish_interrupted_deletions(self) -> int:
+        self.lifecycle.append("memory.finish_interrupted_deletions")
+        return 0
 
     async def start(self) -> None:
         self.lifecycle.append("memory.start")
@@ -367,6 +373,7 @@ def make_memory_service(**overrides: Any) -> MemoryService:
         "search_manager": UnusedPort("search_manager"),
         "get_manager": UnusedPort("get_manager"),
         "raw_file_builder": unused_raw_file_builder,
+        "index_eraser": UnusedPort("index_eraser"),
     }
     return MemoryService(**{**fields, **overrides})
 

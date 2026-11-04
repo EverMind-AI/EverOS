@@ -198,6 +198,10 @@ mode = "agent"
 # synchronous portion of pipeline dispatch.
 # Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
 session_lock_timeout_seconds = 360.0
+# How long a memory deletion of one session (POST /memory/delete with only
+# session_id) waits for an add() in progress on that session; past it the
+# deletion returns 503 SESSION_BUSY and deletes nothing.
+delete_wait_seconds = 10.0
 
 [memorize.async_queue]
 # Queue behind ``async_mode=true`` on /add (a /flush joins it only behind its
@@ -284,6 +288,10 @@ optimize_rebuild_interval_seconds = 43200.0
 # WSL2 or a container) this is the edit-to-searchable latency. Every sweep also
 # stats every md file, which over a slow mount is the cost of a short interval.
 scan_interval_seconds = 30.0
+# A memory deletion fences the index rows it removed until the cascade runs
+# that started before it end; above this many entries it logs
+# memory_delete_fence_large (some run is not ending).
+delete_fence_warn_entries = 100000
 
 [ome]
 # Offline memory engine tunables. Not to be confused with <memory-root>/ome.toml,

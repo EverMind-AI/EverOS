@@ -1,7 +1,7 @@
 """Concurrent /add on one session must not lose messages (regression).
 
-White-box integration test for the per-session lock added in
-``everos.service.memory._session_locks``.
+White-box integration test for the per-session ``"session"`` lock of
+``everos.core.locks.LOCKS``, taken in ``everos.service.memory._memorize``.
 
 Bug class
 ---------

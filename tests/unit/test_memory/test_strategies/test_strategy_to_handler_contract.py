@@ -46,7 +46,7 @@ from everos.memory.strategies import (
     extract_atomic_facts,
     extract_foresight,
 )
-from tests.fakes import handler_deps, make_deps, make_stores
+from tests.fakes import handler_deps, make_deps, make_stores, seed_sources
 
 
 class _StubTokenizer(Tokenizer):
@@ -70,13 +70,14 @@ class _StubEmbedder(EmbeddingProvider):
 def _markdown_deps(tmp_path: Path) -> MemoryDeps:
     """Deps whose daily-log stores write real markdown under ``tmp_path``."""
     root = MemoryRoot(root=tmp_path)
-    return make_deps(
+    deps = make_deps(
         stores=make_stores(
             atomic_fact=MarkdownAtomicFactStore(root),
             foresight=MarkdownForesightStore(root),
             agent_case=MarkdownAgentCaseStore(root),
         )
     )
+    return seed_sources(deps, memcell_id="mc_a", episode_entry_id="ep_20260517_0001")
 
 
 def _episode_event(owner_id: str) -> EpisodeExtracted:

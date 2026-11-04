@@ -9,14 +9,11 @@ body is a read →
 modify → write on shared state (cluster rows, user.md, SKILL.md)
 serialise on a business key (``owner_id`` / ``agent_id``) here.
 
-Mirrors :mod:`everos.service.memory._session_locks` (and the markdown writer's
-per-path lock pool): one ``asyncio.Lock`` per
-``(strategy_name, partition_key)`` pair, **never evicted** — a lock
-with pending waiters must outlive any dict entry that points to it,
-otherwise GC racing waiters can drop the lock mid-flight (CPython
-bpo-28427). The pool grows with the live partition-key set, which in
-practice is bounded by the agent / user / cluster counts a single
-everos process owns.
+The locks live in :data:`everos.core.locks.LOCKS` under the kind
+``partition:<strategy_name>``: one ``asyncio.Lock`` per
+``(strategy_name, partition_key)`` pair, never evicted (see that module).
+The table grows with the live partition-key set, which in practice is
+bounded by the agent / user / cluster counts a single everos process owns.
 
 No acquire timeout: an OME strategy run has no upstream client
 waiting on it, so timing out a queued caller would only convert
@@ -35,29 +32,36 @@ layers a distributed coordinator on top.
 
 from __future__ import annotations
 
-import asyncio
+from contextlib import AbstractAsyncContextManager
 
-_pools: dict[str, dict[str, asyncio.Lock]] = {}
+from everos.core.locks import LOCKS
 
 
-def get_partition_lock(strategy_name: str, partition_key: str) -> asyncio.Lock:
-    """Return the lock for ``(strategy_name, partition_key)``; create on first use.
+def get_partition_lock(
+    strategy_name: str, partition_key: str
+) -> AbstractAsyncContextManager[None]:
+    """Hold the lock for ``(strategy_name, partition_key)`` with ``async with``.
 
-    ``dict.setdefault`` is atomic under single-threaded asyncio — no
-    ``await`` runs between the nested ``setdefault`` calls, so the
-    "check then insert" pair is indivisible. No meta-lock is needed.
-
-    Callers acquire the lock with ``async with``; the lock object is
-    cached forever (see module docstring on bpo-28427), and the inner
-    asyncio queue gives FIFO fairness across waiters on the same key.
+    Every call returns a fresh context manager over the same lock; waiters
+    on one key acquire it in FIFO order.
     """
-    return _pools.setdefault(strategy_name, {}).setdefault(
-        partition_key, asyncio.Lock()
+    return LOCKS.hold(f"partition:{strategy_name}", partition_key)
+
+
+def user_cluster_lock(
+    app_id: str, project_id: str, owner_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one user's clusters holds: profile clustering,
+    Reflection folding members in, and deletion taking them out."""
+    return get_partition_lock(
+        "trigger_profile_clustering", f"{app_id}:{project_id}:{owner_id}"
     )
 
 
-def get_cluster_row_lock(app_id: str, project_id: str, cluster_id: str) -> asyncio.Lock:
-    """Return the lock serialising writes to one cluster row.
+def get_cluster_row_lock(
+    app_id: str, project_id: str, cluster_id: str
+) -> AbstractAsyncContextManager[None]:
+    """Hold the lock serialising writes to one cluster row.
 
     Clustering (upsert) and reflection deprecation (replace_members) write the
     same row under different strategy locks, so the contended resource is the
@@ -67,9 +71,5 @@ def get_cluster_row_lock(app_id: str, project_id: str, cluster_id: str) -> async
 
 
 def _reset_for_tests() -> None:
-    """Test-only: drop every registered lock pool.
-
-    Used by test fixtures that need a clean lock registry between
-    cases (no inherited holders, no inherited waiters).
-    """
-    _pools.clear()
+    """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
+    LOCKS.reset()

@@ -50,7 +50,12 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
 from everos.memory.mappers import agent_case as agent_case_mapper
 from everos.memory.models import MemCell
-from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+from everos.memory.ports import (
+    Event,
+    Immediate,
+    Scope,
+    StrategySpec,
+)
 
 logger = get_logger(__name__)
 
@@ -97,9 +102,10 @@ async def extract_agent_case(
     # 3. File the same case under every agent sender and announce each copy
     #    → downstream trigger_skill_clustering.
     (algo_case,) = result.cases
-    extracted: list[Event] = [
+    filed = [
         await _file_case(algo_case, agent_id, event, deps) for agent_id in agent_ids
     ]
+    extracted: list[Event] = [case for case in filed if case is not None]
     await deps.stores.memcell.mark_case_extracted(
         event.memcell_id, skip_reason=None, skip_detail={}
     )
@@ -126,8 +132,11 @@ async def _file_case(
     agent_id: str,
     event: AgentPipelineStarted,
     deps: MemoryDeps,
-) -> AgentCaseExtracted:
-    """Write the case under ``agent_id`` and return its announcement."""
+) -> AgentCaseExtracted | None:
+    """Write the case under ``agent_id`` and return its announcement.
+
+    ``None`` when the store skipped the write (its ``only_if`` failed).
+    """
     case = agent_case_mapper.from_algo(
         algo_case,
         owner_id=agent_id,
@@ -140,7 +149,13 @@ async def _file_case(
         owner_id=agent_id,
         owner_type="agent",
     )
-    ref = await deps.stores.agent_case.append(scope, case)
+
+    async def memcell_alive() -> bool:  # a session deletion removes it first
+        return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
+
+    ref = await deps.stores.agent_case.append(scope, case, only_if=memcell_alive)
+    if ref is None:
+        return None
     return AgentCaseExtracted(
         memcell_id=event.memcell_id,
         case_entry_id=ref.entry_id,

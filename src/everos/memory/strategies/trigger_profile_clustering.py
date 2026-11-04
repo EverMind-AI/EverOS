@@ -16,7 +16,7 @@ from everalgo.clustering import cluster_by_geometry
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import get_cluster_row_lock, get_partition_lock
+from everos.memory._partition_locks import get_cluster_row_lock, user_cluster_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.mappers import cluster as cluster_mapper
@@ -70,11 +70,23 @@ async def trigger_profile_clustering(
     # Different users run fully in parallel.
     # Lock per (app, project, owner): clusters are scoped to a space, so a
     # different space's run must not serialise on (or merge into) this one.
-    partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
-    async with get_partition_lock("trigger_profile_clustering", partition):
-        # 1. Embed the episode_text into a vector.
-        vector_list = await deps.embedding.embed(event.episode_text)
-        vector = np.asarray(vector_list, dtype=np.float32)
+    # 1. Embed the episode_text into a vector -- before the lock: a model
+    #    call under it would hold every other writer of this owner's
+    #    clusters (and a deletion clearing one) for its whole duration.
+    vector_list = await deps.embedding.embed(event.episode_text)
+    vector = np.asarray(vector_list, dtype=np.float32)
+    async with user_cluster_lock(event.app_id, event.project_id, event.owner_id):
+        # The episode may have been deleted since it was extracted. A
+        # single-id deletion removes it from md first and then clears it from
+        # its cluster under this same lock, so checking here keeps a run
+        # queued behind that deletion from adding it back.
+        if not await _sources_alive(event, scope, deps):
+            logger.info(
+                "profile_cluster_skipped_source_gone",
+                episode_entry_id=event.episode_entry_id,
+                owner_id=event.owner_id,
+            )
+            return []
 
         # 2. Load this user's existing user-memory clusters (scoped to space).
         existing = [
@@ -125,6 +137,15 @@ async def trigger_profile_clustering(
             language=event.language,
         )
     ]
+
+
+async def _sources_alive(
+    event: EpisodeExtracted, scope: Scope, deps: MemoryDeps
+) -> bool:
+    """The episode is still in md and its memcell still exists."""
+    if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
+        return False
+    return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
 
 
 async def _fold_in(

@@ -32,7 +32,10 @@ dependencies = [
     # FTS workaround. Do not float past 0.34.x until 0.35 has been validated under
     # sustained churn (bounded + reclaimable index dir, no compaction crash) — see
     # docs/cascade_runbook.md. Never widen this floor back below 0.34 (older lance
-    # cannot read v8 data).
+    # cannot read v8 data). Before raising the ceiling, re-check that a
+    # merge_insert cancelled by asyncio.timeout never lands after the
+    # TimeoutError (0.34.0: 0 of 41 did); memory deletion's index fence
+    # assumes it.
     "lancedb>=0.34.0,<0.35.0",    # Vector + BM25 + scalar filter (Arrow-based)
     # Floor, not a new package: lancedb pulls pyarrow in anyway. 25.0.1 stops
     # the per-value `import pytz` attempt in to_pylist() (24 walked sys.path
@@ -195,7 +198,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-v --tb=short -m 'not slow and not live_llm'"
+addopts = "-v --tb=short -m 'not slow and not live_llm and not acceptance'"
 filterwarnings = [
     "error",
     # tzlocal (via APScheduler, imported by the OME engine): a container with no
@@ -222,6 +225,7 @@ filterwarnings = [
 markers = [
     "slow: runs that take >=10s (regardless of dependency); CI default excludes these. Run with `pytest -m slow`.",
     "live_llm: requires real LLM / embedder / reranker credentials from .env; burns tokens. CI default excludes. Run with `pytest -m live_llm`.",
+    "acceptance: starts real everos server processes with real providers (tests/acceptance); burns tokens, minutes per test. Run with `make acceptance`.",
 ]
 
 [tool.coverage.run]
@@ -381,6 +385,7 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._readers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.owner_dir",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",
@@ -418,6 +423,8 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
     # The cascade facade assembles its public surface from its own modules.
     "everos.infra.cascade -> everos.infra.cascade._worker",
+    "everos.infra.cascade -> everos.infra.cascade._eraser",
+    "everos.infra.cascade -> everos.infra.cascade._fence",
     "everos.infra.cascade -> everos.infra.cascade.admin",
     "everos.infra.cascade -> everos.infra.cascade.orchestrator",
     "everos.infra.cascade -> everos.infra.cascade.registry",

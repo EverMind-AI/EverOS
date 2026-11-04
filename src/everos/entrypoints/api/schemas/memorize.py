@@ -9,7 +9,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId
+from .ids import (
+    PATH_SAFE_CHARSET,
+    AppScopeId,
+    PathSafeId,
+    ProjectScopeId,
+    SessionId,
+)
 
 
 class ToolFunctionDTO(BaseModel):
@@ -72,7 +78,7 @@ class MessageItemDTO(BaseModel):
 
 
 class MemorizeAddRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, max_length=128)
+    session_id: SessionId = Field(..., min_length=1, max_length=128)
     app_id: AppScopeId = Field(
         default="default",
         min_length=1,
@@ -121,7 +127,7 @@ class AcceptedResponseData(BaseModel):
 
 
 class MemorizeFlushRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, max_length=128)
+    session_id: SessionId = Field(..., min_length=1, max_length=128)
     app_id: AppScopeId = Field(
         default="default",
         min_length=1,

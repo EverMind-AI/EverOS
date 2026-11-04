@@ -34,6 +34,7 @@ from everos.service import Application, build_application
 from .exception_handlers import register_handlers
 from .routes import (
     cascade,
+    delete,
     get,
     health,
     knowledge,
@@ -136,6 +137,7 @@ def create_app(
     app.include_router(memorize.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(get.router, prefix="/api/v1")
+    app.include_router(delete.router, prefix="/api/v1")
     app.include_router(ome.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
     # Operational, not a memory API: it stops a background subsystem. Mounted on
@@ -146,6 +148,7 @@ def create_app(
     app.include_router(memorize.router, prefix="/api/v2")
     app.include_router(search.router, prefix="/api/v2")
     app.include_router(get.router, prefix="/api/v2")
+    app.include_router(delete.router, prefix="/api/v2")
     app.include_router(ome.router, prefix="/api/v2")
     app.include_router(knowledge.router, prefix="/api/v2")
     app.include_router(cascade.router, prefix="/api/v2")

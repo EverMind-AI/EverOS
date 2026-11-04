@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
@@ -69,3 +69,17 @@ class ReflectionReportRepo(RepoBase[ReflectionReport]):
             )
             rows = (await s.execute(stmt)).scalars().all()
             return set(rows)
+
+    async def delete_for_owner(
+        self, owner_id: str, *, app_id: str, project_id: str
+    ) -> int:
+        """Delete every report of one owner in one space; how many."""
+        async with session_scope(self._factory) as s:
+            result = await s.execute(
+                delete(ReflectionReport)
+                .where(ReflectionReport.owner_id == owner_id)
+                .where(ReflectionReport.app_id == app_id)
+                .where(ReflectionReport.project_id == project_id)
+            )
+            await s.commit()
+        return result.rowcount or 0
