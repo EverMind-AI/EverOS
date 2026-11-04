@@ -36,7 +36,7 @@ dependencies = [
     # merge_insert cancelled by asyncio.timeout never lands after the
     # TimeoutError (0.34.0: 0 of 41 did); memory deletion's index fence
     # assumes it.
-    "lancedb>=0.34.0,<0.35.0",    # Vector + BM25 + scalar filter (Arrow-based)
+    "lancedb>=0.34.0,<0.42.0",    # Vector + BM25 + scalar filter (Arrow-based)
     # Floor, not a new package: lancedb pulls pyarrow in anyway. 25.0.1 stops
     # the per-value `import pytz` attempt in to_pylist() (24 walked sys.path
     # for every tz-aware timestamp) and materialises rows without a Scalar
@@ -50,7 +50,7 @@ dependencies = [
     # LLM & embedding (one provider per file pattern)
     # <3: openai 3.x (2026-09-24) moved to the httpx 1.0 pre-release line and its
     # client raises AttributeError on every request; 2.x is what the lock tests.
-    "openai>=1.0.0,<3",
+    "openai>=1.0.0,<4",
 
     # Markdown / file system
     "PyYAML>=6.0",                # YAML frontmatter parsing
@@ -101,9 +101,9 @@ dependencies = [
     # together, with a run of the release smoke against a PyPI-resolved install.
     "everalgo-user-memory==0.9.0rc4",
     "everalgo-agent-memory==0.6.0rc3",
-    "everalgo-rank==0.5.0rc3",
+    "everalgo-rank==0.5.0rc4",
     "everalgo-knowledge==0.3.0rc2",
-    "everalgo-boundary==0.4.1",
+    "everalgo-boundary==0.4.2",
     "everalgo-core==0.6.0",
     "everalgo-clustering==0.3.0rc2",
 ]
