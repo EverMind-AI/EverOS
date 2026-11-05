@@ -53,7 +53,9 @@ async def _wait_for_episode_rows(
 
 
 async def _atomic_fact_rows(owner_id: str) -> list[dict]:
-    rows = await tier_storage().repos.atomic_fact.scan(eq("owner_id", owner_id))
+    rows = await tier_storage().repos.atomic_fact.scan(
+        eq("owner_id", owner_id), with_vectors=True
+    )
     return [row.model_dump(mode="python") for row in rows]
 
 

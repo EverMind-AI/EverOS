@@ -64,7 +64,7 @@ async def _normal_row(
         await AgentSkillHandler(deps).handle_added_or_modified(
             str(path.relative_to(deps.memory_root.root))
         )
-        return (await deps.index.agent_skill.scan())[0]
+        return (await deps.index.agent_skill.scan(with_vectors=True))[0]
     if kind == "knowledge_topic":
         return await KnowledgeTopicHandler(deps)._build_lance_row(
             {
@@ -136,7 +136,7 @@ async def test_normal_projection_and_repair_match(storage: Storage, kind: str) -
     key = primary_key(raw["app_id"], raw["project_id"], raw["id"])
     columns = projection.values([])
     await repo.update(columns, where=key)
-    [incomplete] = await repo.scan(projection.null_filter())
+    [incomplete] = await repo.scan(projection.null_filter(), with_vectors=True)
     pending = _extract_row(incomplete.model_dump(), projection, tokenizer)
     assert isinstance(pending, _NullVectorRow)
     embedding.texts.clear()
@@ -149,7 +149,7 @@ async def test_normal_projection_and_repair_match(storage: Storage, kind: str) -
     assert result.rows_processed == 1
     assert result.rows_failed == 0
     assert embedding.texts == original_texts
-    [restored] = await repo.scan(key)
+    [restored] = await repo.scan(key, with_vectors=True)
     for column in columns:
         assert getattr(restored, column) == getattr(normal, column)
 

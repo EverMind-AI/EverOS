@@ -456,5 +456,7 @@ async def episode_rows(owner_id: str) -> list[dict[str, Any]]:
     """
     from everos.infra.persistence.index import eq
 
-    rows = await tier_storage().repos.episode.scan(eq("owner_id", owner_id))
+    rows = await tier_storage().repos.episode.scan(
+        eq("owner_id", owner_id), with_vectors=True
+    )
     return [row.model_dump(mode="python") for row in rows]
