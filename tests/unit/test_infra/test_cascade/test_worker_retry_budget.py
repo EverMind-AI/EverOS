@@ -19,6 +19,8 @@ the SQLite row is exactly what a killed process leaves behind.
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -149,3 +151,66 @@ async def test_recurring_restarts_still_reach_the_retry_budget(
     assert row.retryable is False
     assert row.retry_count == tuning.MAX_TOTAL_RETRIES
     assert [r.md_path for r in await ledger.list_failed()] == [PATH]
+
+
+class _LockedAttemptHandler(Handler):
+    """Attempt 1 takes a real SQLite write lock and fails transiently.
+
+    The lock is held by a second connection, as the watcher, the scanner or a
+    CLI ``cascade sync`` would, and released before attempt 2, which succeeds.
+    """
+
+    def __init__(self, db: Path, hold_seconds: float) -> None:
+        self.db = db
+        self.hold_seconds = hold_seconds
+        self.calls = 0
+        self._con: sqlite3.Connection | None = None
+
+    def release(self) -> None:
+        if self._con is not None:
+            self._con.execute("ROLLBACK")
+            self._con.close()
+            self._con = None
+
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        self.calls += 1
+        if self.calls == 1:
+            self._con = sqlite3.connect(self.db, isolation_level=None, timeout=0)
+            self._con.execute("BEGIN IMMEDIATE")
+            asyncio.get_running_loop().call_later(self.hold_seconds, self.release)
+            raise EmbeddingServiceError("embedding 503")
+        return HandlerOutcome(
+            md_path=md_path, kind="episode", upserted=0, deleted=0, skipped=1
+        )
+
+    async def handle_deleted(self, md_path: str) -> HandlerOutcome:
+        raise AssertionError("the row enqueued an add, not a delete")
+
+
+async def test_a_locked_attempt_write_does_not_strand_the_row(tmp_path: Path) -> None:
+    """``record_attempt`` hitting ``database is locked`` must not leave the row
+    ``processing`` (the #548 symptom); the ladder goes on and the row lands
+    ``done`` once the provider recovers.
+    """
+    root = MemoryRoot(tmp_path)
+    root.ensure()
+    engine = create_system_engine(root.system_db, SqliteSettings(busy_timeout_ms=50))
+    factory = create_session_factory(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    ledger = MdChangeStateRepo(session_factory=factory)
+    handler = _LockedAttemptHandler(root.system_db, hold_seconds=0.2)
+    try:
+        await ledger.upsert(PATH, kind="episode", change_type="added", mtime=1.0)
+        worker = CascadeWorker(
+            {"episode": handler}, ledger, max_retry=3, retry_backoff_seconds=0.3
+        )
+        await worker.drain_once()
+    finally:
+        handler.release()
+        await engine.dispose()
+
+    assert handler.calls == 2
+    row = await ledger.get_by_id(PATH)
+    assert row is not None
+    assert row.status == "done"

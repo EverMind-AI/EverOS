@@ -425,9 +425,24 @@ class CascadeWorker:
                     # the backoff, recovery keeps the row's retry_count and
                     # the next drain resumes the budget here instead of
                     # restarting the ladder at 0 (#549).
-                    await self._ledger.record_attempt(
-                        row.md_path, new_retry_count=retry_count
-                    )
+                    #
+                    # Best-effort: this write runs while the provider is
+                    # already failing, often under the same lock contention
+                    # as the terminal write. If it raised, the row would stay
+                    # ``processing`` for good (#548). The in-memory ladder
+                    # still bounds this process; a failed write only costs
+                    # the count of this one attempt if a restart follows.
+                    try:
+                        await self._ledger.record_attempt(
+                            row.md_path, new_retry_count=retry_count
+                        )
+                    except Exception as record_exc:
+                        logger.warning(
+                            "cascade_worker_record_attempt_failed",
+                            md_path=row.md_path,
+                            retry_count=retry_count,
+                            error=f"{type(record_exc).__name__}: {record_exc}",
+                        )
                     await asyncio.sleep(self._retry_backoff * (attempt + 1))
                     continue
                 # Inline attempts exhausted. Only stay retryable when
