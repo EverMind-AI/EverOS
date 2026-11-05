@@ -100,7 +100,9 @@ class CascadeScanner:
             # them this sweep.
             state = {p: s for p, s in state.items() if s.kind in kinds}
         decisions = reconcile(scan_inputs, state)
-        decisions = _recheck_deletions(self._memory_root.root, decisions)
+        decisions = await asyncio.to_thread(
+            _recheck_deletions, self._memory_root.root, decisions
+        )
         for decision in decisions:
             await self._ledger.upsert(
                 decision.md_path,
