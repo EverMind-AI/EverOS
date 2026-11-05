@@ -525,9 +525,8 @@ class CascadeWorker:
                     kind=row.kind,
                     change_type=applied,
                 )
-            elif current.status in ("pending", "processing"):
-                # Already queued by the watcher, or owned by a newer drainer
-                # that will finish it. Do not add another re-enqueue.
+            elif current.status == "pending":
+                # Already queued; whoever claims it next writes after us.
                 logger.info(
                     "cascade_worker_stale_claim_skipped",
                     md_path=row.md_path,
@@ -538,8 +537,9 @@ class CascadeWorker:
                 )
                 return None
             else:
-                # A newer claim already reached done/failed; the index may
-                # hold our older write, so queue one more pass from md.
+                # A newer claim is running or already finished. Its index
+                # write may have landed before ours, so queue one more pass
+                # from md; a running claim then sees the new lsn and skips.
                 logger.warning(
                     "cascade_worker_stale_claim",
                     md_path=row.md_path,

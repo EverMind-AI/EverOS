@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from everos.infra.cascade._worker._worker import CascadeWorker
 from everos.infra.cascade.models import HandlerOutcome
 from everos.infra.persistence.sqlite import MdChangeState
@@ -72,8 +74,11 @@ def _row(*, lsn: int, status: str = "processing", mtime: float = 1.0) -> MdChang
     )
 
 
-async def test_stale_claim_is_re_enqueued_instead_of_marked_done() -> None:
-    current = _row(lsn=2, status="done", mtime=2.0)
+@pytest.mark.parametrize("status", ["done", "failed", "processing"])
+async def test_stale_claim_is_re_enqueued_instead_of_marked_done(status: str) -> None:
+    # "processing": the newer claim may have written the index before this
+    # stale handler did, so it cannot be trusted to have the last word.
+    current = _row(lsn=2, status=status, mtime=2.0)
     ledger = _Ledger(current)
     worker = CascadeWorker({"episode": _Handler()}, ledger)  # type: ignore[arg-type]
 
@@ -103,3 +108,14 @@ async def test_own_claim_is_marked_done() -> None:
     assert ledger.done == [
         ("users/u1/episodes/episode.md", {"change_type": "modified"})
     ]
+
+
+async def test_stale_claim_leaves_a_pending_row_alone() -> None:
+    ledger = _Ledger(_row(lsn=2, status="pending", mtime=2.0))
+    worker = CascadeWorker({"episode": _Handler()}, ledger)  # type: ignore[arg-type]
+
+    result = await worker._process_one(_row(lsn=1))
+
+    assert result is None
+    assert ledger.done == []
+    assert ledger.upserts == []
