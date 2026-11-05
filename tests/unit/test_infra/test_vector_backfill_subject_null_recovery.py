@@ -311,3 +311,24 @@ async def test_update_is_addressed_by_full_key() -> None:
     }
     assert by_project["alpha"]["vector"] == [float(len("alpha text"))] * 3
     assert by_project["beta"]["vector"] == [float(len("beta text"))] * 3
+
+
+async def test_the_backlog_scan_reads_which_side_is_already_embedded() -> None:
+    """The scan has to fetch the vector columns (``scan(with_vectors=True)``):
+    a row whose primary vector exists and whose subject vector is missing
+    needs only the subject side. Read without its vectors the row looks
+    wholly unembedded and the primary embedding is paid for again."""
+    from everos.infra.persistence.index.vector_backfill import (
+        _TABLE_SPECS,
+        _scan_null_vector_backlog,
+    )
+    from tests.fakes.backfill import InMemoryVectorTable, episode_row
+
+    row = episode_row(subject="Trip planning", vector=[0.1] * 4, subject_vector=None)
+    tables = {s.table: InMemoryVectorTable(s.table) for s in _TABLE_SPECS}
+    tables["episode"] = InMemoryVectorTable("episode", [row])
+
+    backlog = await _scan_null_vector_backlog(tables, _FakeTokenizer())  # type: ignore[arg-type]
+
+    [episode] = [t for t in backlog.tables if t.table_name == "episode"]
+    assert [(r.needs_primary, r.needs_subject) for r in episode.rows] == [(False, True)]

@@ -265,9 +265,11 @@ class MilvusRepoBase[T: BaseModel]:
         rows = await self.find_where(where, limit=1)
         return rows[0] if rows else None
 
-    async def scan(self, where: Filter | None = None) -> list[T]:
+    async def scan(
+        self, where: Filter | None = None, *, with_vectors: bool = False
+    ) -> list[T]:
         """Stream every matching row without a fixed query-window cap."""
-        rows = await self._scan_raw(where, include_vectors=True)
+        rows = await self._scan_raw(where, include_vectors=with_vectors)
         return [self._codec.to_model(row) for row in rows]
 
     async def count_duplicate_keys(self) -> int:
@@ -374,6 +376,7 @@ class MilvusRepoBase[T: BaseModel]:
         vector: Sequence[float] | None = None,
         where: Filter | None = None,
         limit: int = 10,
+        with_vectors: bool = False,  # accepted; Milvus rows keep their shape
     ) -> list[dict[str, Any]]:
         if vector is None:
             return await self._query_candidate_rows(where, limit=limit)
@@ -386,6 +389,7 @@ class MilvusRepoBase[T: BaseModel]:
         *,
         columns: Sequence[str] | None = None,
         limit: int,
+        with_vectors: bool = False,  # accepted; Milvus rows keep their shape
     ) -> list[dict[str, Any]]:
         if not query_terms:
             return []
@@ -431,6 +435,7 @@ class MilvusRepoBase[T: BaseModel]:
         *,
         limit: int,
         vector_field: str = "vector",
+        with_vectors: bool = False,  # accepted; Milvus rows keep their shape
     ) -> list[dict[str, Any]]:
         if not vector:
             return []

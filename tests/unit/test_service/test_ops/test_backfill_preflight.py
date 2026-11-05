@@ -66,7 +66,7 @@ class _LockMustNotBeProbed(FakeOmeLock):
 
 
 class _UnreadTable(InMemoryVectorTable):
-    async def scan(self, where=None):  # type: ignore[no-untyped-def]
+    async def scan(self, where=None, *, with_vectors=False):  # type: ignore[no-untyped-def]
         raise AssertionError(
             f"{self.table_name} was scanned before the preflight — a large "
             "backlog would pay an O(N) scan the user cannot act on"

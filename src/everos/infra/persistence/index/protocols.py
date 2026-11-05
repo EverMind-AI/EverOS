@@ -121,6 +121,7 @@ class IndexRepository(Protocol[T]):
         vector: Sequence[float] | None = None,
         where: Filter | None = None,
         limit: int = 10,
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def sparse_search(
@@ -130,6 +131,7 @@ class IndexRepository(Protocol[T]):
         *,
         columns: Sequence[str] | None = None,
         limit: int,
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def dense_search(
@@ -139,9 +141,15 @@ class IndexRepository(Protocol[T]):
         *,
         limit: int,
         vector_field: str = "vector",
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
-    async def scan(self, where: Filter | None = None) -> list[T]: ...
+    async def scan(
+        self, where: Filter | None = None, *, with_vectors: bool = False
+    ) -> list[T]:
+        """Every matching record; vector fields are ``None`` unless
+        ``with_vectors`` (backends may still fill them)."""
+        ...
 
     async def count_duplicate_keys(self) -> int:
         """Extra rows sharing one declared ``PRIMARY_KEY`` tuple.

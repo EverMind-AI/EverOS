@@ -171,14 +171,19 @@ class LanceIndexContract[T]:
         vector: Sequence[float] | None = None,
         where: Filter | str | None = None,
         limit: int = 10,
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]:
         if vector is not None:
             # Route through dense_search so the metric is pinned to cosine.
             # The chassis search leaves distance_type at the table default
             # (L2), which would not match the Milvus backend's COSINE.
-            return await self.dense_search(vector, where, limit=limit)
+            return await self.dense_search(
+                vector, where, limit=limit, with_vectors=with_vectors
+            )
         rendered = where if isinstance(where, str) else _render_optional(where)
-        return await super().search(where=rendered, limit=limit)  # type: ignore[misc]
+        return await super().search(  # type: ignore[misc]
+            where=rendered, limit=limit, with_vectors=with_vectors
+        )
 
     async def sparse_search(
         self,
@@ -187,6 +192,7 @@ class LanceIndexContract[T]:
         *,
         columns: Sequence[str] | None = None,
         limit: int,
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]:
         fields = list(columns or getattr(self.schema, "BM25_FIELDS", ()))
         clean_terms = [term for term in query_terms if term]
@@ -201,7 +207,7 @@ class LanceIndexContract[T]:
             builder = table.query().nearest_to_text(query)
             if expression:
                 builder = builder.where(expression)
-            return await builder.limit(limit).to_list()
+            return await self._rows(builder.limit(limit), with_vectors=with_vectors)
 
         per_column = await asyncio.gather(*(_query_one(field) for field in fields))
         best: dict[str, dict[str, Any]] = {}
@@ -229,6 +235,7 @@ class LanceIndexContract[T]:
         *,
         limit: int,
         vector_field: str = "vector",
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]:
         if not vector:
             return []
@@ -243,16 +250,19 @@ class LanceIndexContract[T]:
         expression = where if isinstance(where, str) else _render_optional(where)
         if expression:
             builder = builder.where(expression)
-        return await builder.limit(limit).to_list()
+        return await self._rows(builder.limit(limit), with_vectors=with_vectors)
 
-    async def scan(self, where: Filter | str | None = None) -> list[T]:
-        """Return all matching records without a hidden row cap."""
+    async def scan(
+        self, where: Filter | str | None = None, *, with_vectors: bool = False
+    ) -> list[T]:
+        """Return all matching records without a hidden row cap; their vector
+        fields are ``None`` unless ``with_vectors``."""
         table = await self._table()
         builder = table.query()
         expression = where if isinstance(where, str) else _render_optional(where)
         if expression:
             builder = builder.where(expression)
-        rows = await builder.to_list()
+        rows = await self._rows(builder, with_vectors=with_vectors)
         return [self.schema.model_validate(row) for row in rows]
 
     async def count_duplicate_keys(self) -> int:
