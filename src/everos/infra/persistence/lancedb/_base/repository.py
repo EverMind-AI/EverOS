@@ -23,6 +23,7 @@ import pyarrow as pa
 from lancedb import AsyncTable
 
 from everos.core.errors import IndexSchemaMismatchError, VectorStoreBusyError
+from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.index.schema import (
@@ -407,9 +408,10 @@ class LanceRepoBase[T: IndexRecord]:
         acquired_at: float | None = None
         try:
             async with asyncio.timeout(budget):
-                async with self._write_lock(self.table_name):
-                    acquired_at = time.monotonic()
-                    yield
+                with LOCKS.observe("lance_table", self.table_name):
+                    async with self._write_lock(self.table_name):
+                        acquired_at = time.monotonic()
+                        yield
         except TimeoutError as exc:
             # ``acquired`` is the load-bearing field: it separates "never got
             # the lock" (a holder is slow or stuck) from "got it and overran"

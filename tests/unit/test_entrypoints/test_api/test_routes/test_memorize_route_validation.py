@@ -152,3 +152,21 @@ def test_add_request_can_defer_extraction() -> None:
     )
 
     assert request.defer_extraction is True
+
+
+_UNSTORABLE_SESSION_IDS = [" s1", "s1 ", "a\nb", "a\rb", "a\u2028b", "a\x1fb"]
+
+
+@pytest.mark.parametrize("session_id", _UNSTORABLE_SESSION_IDS)
+@pytest.mark.parametrize("path", ["/api/v2/memory/add", "/api/v2/memory/flush"])
+async def test_session_id_markdown_cannot_hold_is_422(
+    client: AsyncClient, path: str, session_id: str
+) -> None:
+    """A daily-log entry trims ``session_id`` and ends it at the line: such an
+    id would be stored as another one, and never be found by a deletion."""
+    body: dict[str, object] = {"session_id": session_id}
+    if path.endswith("/add"):
+        body["messages"] = [_message("u1").model_dump()]
+    resp = await client.post(path, json=body)
+    assert resp.status_code == 422, resp.text
+    assert "session_id" in resp.text

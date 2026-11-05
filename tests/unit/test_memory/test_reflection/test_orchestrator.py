@@ -13,10 +13,13 @@ Every storage dependency is a mock of its port. Tests verify:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
+import structlog.testing
 
+from everos.core.locks import LOCKS
 from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
@@ -120,12 +123,14 @@ class _Ports:
     report_store: MagicMock
     reflector: MagicMock
     embedder: MagicMock
+    memcell_store: MagicMock
 
     def orchestrator(self) -> ReflectionOrchestrator:
         return ReflectionOrchestrator(
             cluster_store=self.cluster_store,
             episode_store=self.episode_store,
             episode_index=self.episode_index,
+            memcell_store=self.memcell_store,
             report_store=self.report_store,
             reflector=self.reflector,
         )
@@ -143,7 +148,13 @@ class _Ports:
 
 @pytest.fixture
 def ports() -> _Ports:
-    return _Ports(*(MagicMock() for _ in range(8)))
+    ports = _Ports(*(MagicMock() for _ in range(9)))
+    # Nothing was deleted: every source is still in md, every memcell exists.
+    ports.episode_store.exists = AsyncMock(side_effect=lambda _scope, ids: set(ids))
+    ports.memcell_store.find_by_ids = AsyncMock(
+        side_effect=lambda ids: [object()] * len(ids)
+    )
+    return ports
 
 
 def _arm_cluster_flow(
@@ -182,6 +193,11 @@ def _arm_cluster_flow(
     ports.cluster_store.replace_members = AsyncMock()
     ports.embedder.embed = AsyncMock(return_value=[0.1] * 1024)
     ports.report_store.create = AsyncMock()
+
+
+async def _unchanged() -> bool:
+    """A source check that passes: nothing was deleted."""
+    return True
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────
@@ -261,6 +277,7 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
         scope=scope,
         parent_ids={"ep_20260601_0001"},
         merged_entry_id="ep_20260614_0001",
+        only_if=_unchanged,
     )
 
     assert marked == 3
@@ -277,6 +294,7 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
             ("facts/b.md", "af_3"),
         ],
         replaced_by="ep_20260614_0001",
+        only_if=ANY,
     )
 
 
@@ -284,7 +302,7 @@ async def test_deprecate_facts_without_parents_reads_nothing(ports: _Ports) -> N
     ports.atomic_fact_index.find = AsyncMock()
 
     marked = await ports.finisher()._deprecate_facts(
-        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m"
+        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m", only_if=_unchanged
     )
 
     assert marked == 0
@@ -301,6 +319,7 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
             owner_id=None, episode="merged text", subject="topic", timestamp=0
         ),
         last_ts=1_780_272_000_000,
+        only_if=_unchanged,
     )
 
     assert entry_id == "ep_m"
@@ -357,6 +376,7 @@ async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
             (ep2.ref.md_path, "ep_20260601_0002"),
         ],
         replaced_by="ep_20260614_0001",
+        only_if=ANY,
     )
     replace = ports.cluster_store.replace_members.await_args
     assert replace.args == ("cl_abc",)
@@ -395,6 +415,42 @@ async def test_run_update_mode_uses_old_episode(ports: _Ports) -> None:
     assert "old_episode" in kwargs
     assert merged.reflection is not None
     assert merged.reflection.mode == "update"
+
+
+@pytest.mark.parametrize("update", [False, True])
+async def test_cluster_with_too_few_live_episodes_is_skipped(
+    ports: _Ports, update: bool
+) -> None:
+    """A session deletion keeps cluster rows: members whose episodes are gone
+    leave fewer than a merge needs (two new ones for INIT, one new one beside
+    the merged episode for UPDATE). The cluster is skipped quietly, every run,
+    instead of reaching the model and failing there."""
+    if update:
+        left = _stored_episode(
+            entry_id="ep_old", parent_id="cl_thin", parent_type="cluster"
+        )
+    else:
+        left = _stored_episode(entry_id="ep_001", parent_id="mc_a")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_thin",
+        members=[(left.ref.entry_id, "episode"), ("ep_deleted", "episode")],
+        episodes=[left],
+        merged_entry_id="ep_m",
+        reflected={"cl_thin"} if update else None,
+    )
+    # The live merged episode is what the index reports as the cluster's
+    # orphan; a skipped cluster must not warn about it on every run.
+    ports.episode_index.orphans = AsyncMock(return_value=[left] if update else [])
+
+    with structlog.testing.capture_logs() as logs:
+        merged = await ports.orchestrator().run(scope=_SCOPE)
+
+    assert merged == []
+    ports.reflector.areflect.assert_not_called()
+    events = [e["event"] for e in logs]
+    assert "reflection_skipped_too_few_episodes" in events
+    assert "reflection_orphan_detected" not in events
 
 
 async def test_llm_failure_skips_cluster(ports: _Ports) -> None:
@@ -487,10 +543,13 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
     )
 
     ports.episode_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("a.md", "ep_1"), ("b.md", "ep_2")], replaced_by="ep_m"
+        _SCOPE,
+        entries=[("a.md", "ep_1"), ("b.md", "ep_2")],
+        replaced_by="ep_m",
+        only_if=ANY,
     )
     ports.atomic_fact_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m"
+        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m", only_if=ANY
     )
     ports.episode_index.update.assert_not_called()
     ports.atomic_fact_index.update.assert_not_called()
@@ -551,16 +610,99 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
         episodes=[selected, missing, selected, unrelated],
         to_deprecate={"mc_1"},
         merged_entry_id="ep_m",
+        only_if=_unchanged,
     )
     assert marked == 2
     ports.episode_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("a.md", "ep_1"), ("a.md", "ep_1")], replaced_by="ep_m"
+        _SCOPE,
+        entries=[("a.md", "ep_1"), ("a.md", "ep_1")],
+        replaced_by="ep_m",
+        only_if=ANY,
     )
     ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "")])
     assert (
         await finisher._deprecate_facts(
-            scope=_SCOPE, parent_ids={"ep_1"}, merged_entry_id="ep_m"
+            scope=_SCOPE,
+            parent_ids={"ep_1"},
+            merged_entry_id="ep_m",
+            only_if=_unchanged,
         )
         == 1
     )
     ports.atomic_fact_store.deprecate.assert_not_awaited()
+
+
+# ── Finish under deletions (memory delete, spec 1 §5.5, spec 2 R7) ───────
+
+
+def _arm_finish(ports: _Ports) -> tuple[Stored[Episode], Stored[Episode]]:
+    ep1 = _stored_episode(entry_id="ep_1", parent_id="mc_1", md_path="a.md")
+    ep2 = _stored_episode(entry_id="ep_2", parent_id="mc_2", md_path="b.md")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_abc",
+        members=[("ep_1", "episode"), ("ep_2", "episode")],
+        episodes=[ep1, ep2],
+        merged_entry_id="ep_m",
+    )
+    return ep1, ep2
+
+
+async def test_finish_embeds_before_taking_any_lock(ports: _Ports) -> None:
+    """A11: the centroid embedding runs under no lock at all."""
+    ep1, ep2 = _arm_finish(ports)
+    held_while_embedding: list[frozenset[tuple[str, str]]] = []
+
+    async def embed(text: str) -> list[float]:
+        held_while_embedding.append(LOCKS.held())
+        return [0.1] * 1024
+
+    ports.embedder.embed = AsyncMock(side_effect=embed)
+
+    report = await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+    )
+
+    assert report is not None
+    assert held_while_embedding == [frozenset()]
+
+
+async def test_finish_swaps_cluster_under_the_clustering_lock(ports: _Ports) -> None:
+    """Spec 2 R7: the member swap holds the lock a single-id deletion takes."""
+    ep1, ep2 = _arm_finish(ports)
+    held_while_swapping: list[frozenset[tuple[str, str]]] = []
+    ports.cluster_store.replace_members = AsyncMock(
+        side_effect=lambda *a, **k: held_while_swapping.append(LOCKS.held())
+    )
+
+    await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+    )
+
+    (held,) = held_while_swapping
+    assert ("partition:trigger_profile_clustering", "default:default:u_alice") in held
+
+
+async def test_finish_skips_swap_when_merged_gone(ports: _Ports) -> None:
+    """Spec 2 R7: M was deleted after the marks, before the swap.
+
+    The marks still happened (M was there under the owner lock); the cluster
+    must not gain M as a member.
+    """
+    ep1, ep2 = _arm_finish(ports)
+
+    async def exists(_scope: Scope, ids: Any) -> set[str]:
+        ids = set(ids)
+        if ports.episode_store.deprecate.await_count:  # a deletion of M ran
+            ids.discard("ep_m")
+        return ids
+
+    ports.episode_store.exists = AsyncMock(side_effect=exists)
+    with structlog.testing.capture_logs() as logs:
+        await ports.finisher().finish(
+            scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+        )
+
+    ports.episode_store.deprecate.assert_awaited_once()
+    ports.cluster_store.replace_members.assert_not_awaited()
+    assert any(e["event"] == "reflection_finish_skipped_merged_gone" for e in logs)

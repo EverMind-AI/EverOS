@@ -53,7 +53,7 @@ from everos.memory.strategies import (
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
-from tests.fakes import make_deps, make_stores
+from tests.fakes import make_deps, make_stores, seed_sources
 
 # Two orthogonal directions: entries of one group merge, the groups do not.
 _VECTORS = {0: [1.0, 0.0, 0.0, 0.0], 1: [0.0, 1.0, 0.0, 0.0]}
@@ -141,6 +141,10 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                         episode_timestamp_ms=1_700_000_000_000 + n,
                         owner_id="u",
                         session_id="s",
+                    )
+                    # The episode exists, as it does when the pipeline emits.
+                    seed_sources(
+                        deps, memcell_id=f"mc_{n}", episode_entry_id=entry, owner_id="u"
                     )
                     run = trigger_profile_clustering
                 else:

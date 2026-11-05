@@ -50,7 +50,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
@@ -76,6 +76,7 @@ from ._tuning import (
     MAINTENANCE_TASK_TIMEOUT_SECONDS,
     MAX_TOTAL_RETRIES,
     REBUILD_CONFLICT_BACKOFFS_SECONDS,
+    TERMINAL_WRITE_ATTEMPTS,
 )
 
 logger = get_logger(__name__)
@@ -313,6 +314,45 @@ class CascadeWorker:
                 except TimeoutError:
                     continue
 
+    async def _write_terminal(
+        self,
+        write: Callable[..., Awaitable[None]],
+        md_path: str,
+        *,
+        kind: str,
+        **fields: object,
+    ) -> None:
+        """Write one terminal ledger state, retrying a transient failure.
+
+        The terminal write is the only thing that moves a row out of
+        ``processing``, so a single transient SQLite lock must not be allowed
+        to strand the row there (:data:`TERMINAL_WRITE_ATTEMPTS` tries, linear
+        backoff). The last attempt's exception propagates unchanged.
+        """
+        for attempt in range(TERMINAL_WRITE_ATTEMPTS):
+            try:
+                await write(md_path, **fields)
+                return
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                if attempt == TERMINAL_WRITE_ATTEMPTS - 1:
+                    logger.error(
+                        "cascade_worker_terminal_write_failed",
+                        md_path=md_path,
+                        kind=kind,
+                        attempts=TERMINAL_WRITE_ATTEMPTS,
+                        error=error,
+                    )
+                    raise
+                logger.warning(
+                    "cascade_worker_terminal_write_retry",
+                    md_path=md_path,
+                    kind=kind,
+                    attempt=attempt,
+                    error=error,
+                )
+                await asyncio.sleep(self._retry_backoff * (attempt + 1))
+
     async def _process_one(self, row: MdChangeState) -> str | None:
         """Process one ``md_change_state`` row.
 
@@ -325,8 +365,10 @@ class CascadeWorker:
         """
         handler = self._handlers.get(row.kind)
         if handler is None:
-            await self._ledger.mark_failed(
+            await self._write_terminal(
+                self._ledger.mark_failed,
                 row.md_path,
+                kind=row.kind,
                 retryable=False,
                 error=f"no handler registered for kind {row.kind!r}",
                 new_retry_count=row.retry_count,
@@ -340,8 +382,10 @@ class CascadeWorker:
                 kind=row.kind,
                 retry_count=row.retry_count,
             )
-            await self._ledger.mark_failed(
+            await self._write_terminal(
+                self._ledger.mark_failed,
                 row.md_path,
+                kind=row.kind,
                 retryable=False,
                 error=f"retry budget exhausted after {row.retry_count} attempts",
                 new_retry_count=row.retry_count,
@@ -390,8 +434,10 @@ class CascadeWorker:
                 # the cross-cycle budget still has room; otherwise
                 # demote directly instead of taking an extra scanner
                 # cycle to hit the entry-check short-circuit.
-                await self._ledger.mark_failed(
+                await self._write_terminal(
+                    self._ledger.mark_failed,
                     row.md_path,
+                    kind=row.kind,
                     retryable=retry_count < MAX_TOTAL_RETRIES,
                     error=last_error,
                     new_retry_count=retry_count,
@@ -406,8 +452,10 @@ class CascadeWorker:
                     kind=row.kind,
                     unrecoverable_total=self._unrecoverable_total,
                 )
-                await self._ledger.mark_failed(
+                await self._write_terminal(
+                    self._ledger.mark_failed,
                     row.md_path,
+                    kind=row.kind,
                     retryable=False,
                     error=last_error,
                     new_retry_count=retry_count,
@@ -423,7 +471,12 @@ class CascadeWorker:
                 deleted=outcome.deleted,
                 skipped=outcome.skipped,
             )
-            await self._ledger.mark_done(row.md_path, change_type=applied)
+            await self._write_terminal(
+                self._ledger.mark_done,
+                row.md_path,
+                kind=row.kind,
+                change_type=applied,
+            )
             # Only flag the kind as "touched" when we actually wrote
             # something — skipped rows leave the table untouched, so
             # optimizing would be pure overhead.

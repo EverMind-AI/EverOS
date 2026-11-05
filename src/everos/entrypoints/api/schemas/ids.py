@@ -15,11 +15,16 @@ reserved set is ``< > : " / \\ | ? *``). The genuinely path-dangerous chars
 (``/`` ``\\`` NUL) stay out of the whitelist, and ``.``/``..`` stay blocked
 by the token filter; the markdown writer's ``_ensure_within_root`` is the
 final backstop regardless.
+
+``session_id`` never becomes a directory but is stored as one inline
+markdown value, which is trimmed and ends at the line; ``SessionId`` admits
+only ids that come back from that unchanged.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable
 from typing import Annotated
 
@@ -66,7 +71,21 @@ def _reject_reserved_scope_dir(reserved: str) -> Callable[[str], str]:
     return check
 
 
+def _one_trimmed_line(value: str) -> str:
+    """Refuse what a daily-log entry cannot hold as given: a line break, a
+    control character, leading or trailing whitespace. Stored, such an id
+    reads back as another one, and a deletion of the id sent finds nothing."""
+    if value != value.strip() or any(
+        unicodedata.category(ch) in ("Cc", "Cs", "Zl", "Zp") for ch in value
+    ):
+        raise ValueError(
+            "must be one line without control characters or surrounding whitespace"
+        )
+    return value
+
+
 PathSafeId = Annotated[str, AfterValidator(_reject_path_traversal)]
+SessionId = Annotated[str, AfterValidator(_one_trimmed_line)]
 AppScopeId = Annotated[str, AfterValidator(_reject_reserved_scope_dir("default_app"))]
 ProjectScopeId = Annotated[
     str, AfterValidator(_reject_reserved_scope_dir("default_project"))

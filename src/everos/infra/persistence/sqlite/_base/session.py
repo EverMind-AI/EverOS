@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from everos.core.locks import LOCKS
+
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Build an :class:`async_sessionmaker` bound to ``engine``.
@@ -31,15 +33,20 @@ async def session_scope(
     then closed. Callers are responsible for calling ``await session.commit()``
     on success.
 
+    The checkout is registered with ``LOCKS`` as held (kind
+    ``"sqlite_session"``), so the lock-order checks can see a task that waits
+    for an asyncio lock while holding a session.
+
     Usage:
         factory = create_session_factory(engine)
         async with session_scope(factory) as session:
             session.add(some_record)
             await session.commit()
     """
-    async with session_factory() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
+    with LOCKS.observe("sqlite_session", "checkout"):
+        async with session_factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise

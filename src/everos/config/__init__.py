@@ -21,6 +21,7 @@ from .settings import IndexSettings as IndexSettings
 from .settings import LanceDBSettings as LanceDBSettings
 from .settings import LLMSettings as LLMSettings
 from .settings import LoggingSettings as LoggingSettings
+from .settings import MemorizeSettings as MemorizeSettings
 from .settings import MemorySettings as MemorySettings
 from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
@@ -39,6 +40,7 @@ __all__ = [
     "LLMSettings",
     "LanceDBSettings",
     "LoggingSettings",
+    "MemorizeSettings",
     "MemorySettings",
     "MilvusSettings",
     "MultimodalSettings",

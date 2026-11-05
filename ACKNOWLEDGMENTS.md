@@ -97,7 +97,7 @@ Thanks to our community for valuable feedback, bug reports, and feature
 suggestions:
 
 - **GitHub Issues & Discussions** — bug reports and feature requests
-- **Discord** — [Join our Discord server](https://discord.gg/gYep5nQRZJ)
+- **Discord** — [Join our Discord server](https://discord.gg/QHQ2YYp7cH)
 - **X / Twitter** — [@EverMindAI](https://x.com/EverMindAI)
 
 ---

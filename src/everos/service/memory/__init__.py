@@ -6,9 +6,9 @@ One method per use case: :meth:`MemoryService.add` (``/add``),
 request to the ``async_mode`` queue.
 
 The add cycle lives in ``_memorize`` (lock, cut, extract, publish);
-``_extraction`` keeps an extraction alive past a cancelled request,
-``_session_locks`` holds the per-session locks, and ``_queue`` is the
-``async_mode`` worker (steps in ``_queue_steps``, data in ``_queue_models``).
+``_extraction`` keeps an extraction alive past a cancelled request, and
+``_queue`` is the ``async_mode`` worker (steps in ``_queue_steps``, data in
+``_queue_models``).
 Everything is injected by :func:`everos.service.build_application`; the
 service owns only those two background collaborators (extraction supervisor,
 queue worker) and their lifecycle (:meth:`~MemoryService.start` /
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 __all__ = [
     "TASK_STATUSES",
+    "DeleteResult",
     "ExtractionSupervisor",
     "FlushResult",
     "MemorizeResult",
@@ -30,10 +31,14 @@ __all__ = [
     "to_task_item",
 ]
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
+from everos.core.errors import PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
 
+from ._delete import Deleter
+from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
@@ -45,7 +50,6 @@ from ._queue_models import QueueHealth as QueueHealth
 from ._queue_models import TaskItem as TaskItem
 from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
-from ._session_locks import SessionLocks
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -56,7 +60,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
-    from everos.memory.ports import EventBus
+    from everos.memory.ports import EventBus, IndexEraser
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
 
@@ -81,6 +85,7 @@ class MemoryService:
         search_manager: Answers :meth:`search`.
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
+        index_eraser: Removes deleted memories' index rows (:meth:`delete`).
     """
 
     def __init__(
@@ -96,10 +101,15 @@ class MemoryService:
         search_manager: SearchManager,
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
+        index_eraser: IndexEraser,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
+        self._stores = stores
+        self._deleter = Deleter(
+            stores=stores, eraser=index_eraser, settings=settings.memorize
+        )
         self._memorizer = Memorizer(
             settings=settings,
             boundary=boundary,
@@ -107,7 +117,6 @@ class MemoryService:
             user_pipeline=user_pipeline,
             agent_pipeline=agent_pipeline,
             bus=bus,
-            locks=SessionLocks(),
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
         )
@@ -141,6 +150,78 @@ class MemoryService:
     async def get(self, req: GetRequest) -> GetResponse:
         """Paginated listing over the requested ``memory_type``."""
         return await self._get_manager.get(req)
+
+    # ── delete use cases ───────────────────────────────────────────────────
+
+    async def delete(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str | None,
+        agent_id: str | None,
+        session_id: str | None,
+    ) -> DeleteResult:
+        """Delete one scope of memories (``/delete``).
+
+        Runs to completion even if the caller goes away: a deletion cut in
+        half would leave the scope half deleted.
+        """
+        task = self._extractions.supervise(
+            self._deleter.delete(
+                app_id=app_id,
+                project_id=project_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                session_id=session_id,
+            ),
+            session_id=session_id,
+            memcell_ids=[],
+            label="memory_delete",
+            expected=(SessionBusyError, PathTraversalError),
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning(
+                "memory_delete_continues_after_cancel", session_id=session_id
+            )
+            raise
+
+    async def delete_by_ids(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        memory_type: str,
+        ids: list[str],
+        reason_code: str | None,
+        note: str | None,
+    ) -> None:
+        """Delete single memories by id (``/delete_by_ids``), shielded like
+        :meth:`delete`."""
+        task = self._extractions.supervise(
+            self._deleter.delete_by_ids(
+                app_id=app_id,
+                project_id=project_id,
+                memory_type=memory_type,
+                ids=ids,
+                reason_code=reason_code,
+                note=note,
+            ),
+            session_id=None,
+            memcell_ids=[],
+            label="memory_delete_by_ids",
+        )
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning("memory_delete_by_ids_continues_after_cancel")
+            raise
+
+    async def finish_interrupted_deletions(self) -> int:
+        """Finish whole-owner deletions a crash cut short (startup)."""
+        return await self._stores.owner_dir.sweep_trash()
 
     # ── async_mode queue ───────────────────────────────────────────────────
 

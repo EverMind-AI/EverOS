@@ -103,6 +103,18 @@ class BaseDailyLogHandler(Handler):
         return compute_content_sha256(parts)
 
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        # Registered before the file is read, ended however the run ends:
+        # a deletion that fences rows while this run is going keeps them out
+        # of this run's upsert (``_apply_lance_changes``).
+        fence = self._deps.fence
+        token = fence.register_run() if fence is not None else None
+        try:
+            return await self._project(md_path)
+        finally:
+            if fence is not None and token is not None:
+                fence.end_run(token)
+
+    async def _project(self, md_path: str) -> HandlerOutcome:
         absolute = self._deps.memory_root.root / md_path
         parsed = await MarkdownReader.read(absolute)
         new_entries = [
@@ -131,6 +143,10 @@ class BaseDailyLogHandler(Handler):
             project_id,
             md_path,
         )
+        # Rows a memory deletion fenced while this run was going stay out.
+        fence = self._deps.fence
+        if fence is not None:
+            to_upsert = [row for row in to_upsert if not fence.blocks(row)]
         new_by_id = {e.entry_id for e in new_entries}
         to_delete_ids = [
             row.entry_id for row in existing if row.entry_id not in new_by_id
@@ -226,9 +242,18 @@ class BaseDailyLogHandler(Handler):
         to_delete_ids: list[str],
         md_path: str,
     ) -> None:
-        """Flush upserts and deletes to LanceDB."""
+        """Flush upserts and deletes to LanceDB.
+
+        The fence is checked again once the upsert returned: a deletion that
+        fenced a row after this run filtered it relied on this run to delete
+        it (the two share no lock).
+        """
+        fence = self._deps.fence
         if to_upsert:
             await self.index_repo.upsert(to_upsert)
+            late = [r for r in to_upsert if fence.blocks(r)] if fence else []
+            if late:
+                await self.index_repo.delete(fence.filter_for(late))
         if to_delete_ids:
             await self.index_repo.delete(
                 all_of(eq("md_path", md_path), one_of("entry_id", to_delete_ids))

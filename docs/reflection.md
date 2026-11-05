@@ -308,7 +308,10 @@ Why Reflection is shaped the way it is:
   lets enough new fragments accumulate to be worth re-merging.
 - **Soft-archive, never delete.** Originals stay in Markdown, so every
   consolidation is traceable and the indexes can always be rebuilt from the
-  Markdown source of truth.
+  Markdown source of truth. Only a user's deletion removes them:
+  `delete_by_ids` on a merged episode takes its sources with it, while a
+  `/delete` of a source's session keeps the merged episode (see
+  [the API reference](api.md#post-apiv2memorydelete_by_ids)).
 - **A merged narrative is just an Episode.** Reusing the Episode type means
   search and every downstream consumer keep working unchanged — Reflection
   introduces no new retrieval path.
