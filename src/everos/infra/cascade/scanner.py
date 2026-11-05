@@ -100,6 +100,9 @@ class CascadeScanner:
             # them this sweep.
             state = {p: s for p, s in state.items() if s.kind in kinds}
         decisions = reconcile(scan_inputs, state)
+        decisions = await asyncio.to_thread(
+            _recheck_deletions, self._memory_root.root, decisions
+        )
         for decision in decisions:
             await self._ledger.upsert(
                 decision.md_path,
@@ -184,6 +187,51 @@ def _collect_scan_inputs(root: Path, kinds: set[str] | None = None) -> list[Scan
                 continue
             inputs.append(ScanInput(md_path=rel, mtime=mtime, kind=spec.name))
     return inputs
+
+
+def _recheck_deletions(
+    root: Path, decisions: list[ReconcileDecision]
+) -> list[ReconcileDecision]:
+    """Downgrade a tombstone when the file is present at decision time.
+
+    The walk runs in a thread while the watcher and other writers keep the
+    root changing. An editor that replaces a file by rename can hide it for
+    the duration of the walk; the watcher's upsert for the landed file then
+    reaches the state snapshot before reconcile runs, so a path that is on
+    disk right now looks "in state, not on disk". Upserting that as
+    ``deleted`` hands the worker the file's real mtime, and the reconciler
+    trusts the resulting ``done/deleted`` row forever (#544).
+
+    Re-stat only the would-be deletions. A path that exists is emitted as
+    ``modified`` with its current mtime instead; a path that is still gone
+    keeps the deletion. A non-ENOENT stat error aborts the sweep, matching
+    :func:`_collect_scan_inputs`' all-or-nothing rule.
+    """
+    checked: list[ReconcileDecision] = []
+    for decision in decisions:
+        if decision.change_type != "deleted":
+            checked.append(decision)
+            continue
+        path = root / decision.md_path
+        try:
+            if not path.is_file():
+                checked.append(decision)
+                continue
+            mtime = path.stat().st_mtime
+        except FileNotFoundError:
+            checked.append(decision)
+            continue
+        except OSError:
+            raise
+        checked.append(
+            ReconcileDecision(
+                md_path=decision.md_path,
+                kind=decision.kind,
+                change_type="modified",
+                mtime=mtime,
+            )
+        )
+    return checked
 
 
 async def _load_state_snapshot(ledger: MdChangeStateRepo) -> dict[str, PriorState]:
