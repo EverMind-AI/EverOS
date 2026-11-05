@@ -40,17 +40,10 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
     ) -> None:
         """Buffer ``rows`` as the whole (session, track) slice; stamp
         ``last_message_ts``."""
+        keys = _keys(app_id, project_id, session_id, track)
         async with session_scope(self._factory) as s:
-            await _stamp(
-                s,
-                session_id,
-                track,
-                app_id,
-                project_id,
-                "last_message_ts",
-                last_message_ts,
-            )
-            await _replace_buffer(s, session_id, track, rows, app_id, project_id)
+            await _stamp(s, keys, "last_message_ts", last_message_ts)
+            await _replace_buffer(s, keys, rows)
             await s.commit()
 
     async def cut(
@@ -66,31 +59,27 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
     ) -> None:
         """Insert ``memcells``, stamp ``last_memcell_ts`` (when given) and
         leave only ``tail`` buffered."""
+        keys = _keys(app_id, project_id, session_id, track)
         async with session_scope(self._factory) as s:
             s.add_all(memcells)
             await s.flush()
             if last_memcell_ts is not None:
-                await _stamp(
-                    s,
-                    session_id,
-                    track,
-                    app_id,
-                    project_id,
-                    "last_memcell_ts",
-                    last_memcell_ts,
-                )
-            await _replace_buffer(s, session_id, track, tail, app_id, project_id)
+                await _stamp(s, keys, "last_memcell_ts", last_memcell_ts)
+            await _replace_buffer(s, keys, tail)
             await s.commit()
 
 
+def _keys(app_id: str, project_id: str, session_id: str, track: str) -> dict[str, str]:
+    return {
+        "app_id": app_id,
+        "project_id": project_id,
+        "session_id": session_id,
+        "track": track,
+    }
+
+
 async def _stamp(
-    s: AsyncSession,
-    session_id: str,
-    track: str,
-    app_id: str,
-    project_id: str,
-    column: str,
-    ts: dt.datetime,
+    s: AsyncSession, keys: dict[str, str], column: str, ts: dt.datetime
 ) -> None:
     """Set ``column`` on the session's status row, creating the row if
     there is none; the other stamp keeps its value.
@@ -102,12 +91,6 @@ async def _stamp(
     would not match. Both run inside the caller's transaction.
     """
     now = get_utc_now()
-    keys = {
-        "app_id": app_id,
-        "project_id": project_id,
-        "session_id": session_id,
-        "track": track,
-    }
     updated = await s.execute(
         update(ConversationStatus)
         .where(*(getattr(ConversationStatus, k) == v for k, v in keys.items()))
@@ -122,19 +105,11 @@ async def _stamp(
 
 
 async def _replace_buffer(
-    s: AsyncSession,
-    session_id: str,
-    track: str,
-    rows: Sequence[UnprocessedBuffer],
-    app_id: str,
-    project_id: str,
+    s: AsyncSession, keys: dict[str, str], rows: Sequence[UnprocessedBuffer]
 ) -> None:
     await s.execute(
         delete(UnprocessedBuffer).where(
-            UnprocessedBuffer.app_id == app_id,
-            UnprocessedBuffer.project_id == project_id,
-            UnprocessedBuffer.session_id == session_id,
-            UnprocessedBuffer.track == track,
+            *(getattr(UnprocessedBuffer, k) == v for k, v in keys.items())
         )
     )
     s.add_all(rows)

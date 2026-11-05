@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,9 +14,6 @@ from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-_SQLITE_BUSY = 5
-_SQLITE_LOCKED = 6
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
@@ -79,4 +77,7 @@ def _is_lock_wait(exc: Exception) -> bool:
     if not isinstance(exc, OperationalError):
         return False
     code = getattr(exc.orig, "sqlite_errorcode", None)
-    return code is not None and code & 0xFF in (_SQLITE_BUSY, _SQLITE_LOCKED)
+    return code is not None and code & 0xFF in (
+        sqlite3.SQLITE_BUSY,
+        sqlite3.SQLITE_LOCKED,
+    )
