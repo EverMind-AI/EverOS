@@ -52,6 +52,13 @@ machinery that keeps a deleted memory from coming back.
   `MarkdownReader.read_text`, which retries with the writer's budget
   (about 2.5 s). Other platforms are unaffected.
 
+- **A cluster's `count`, centroid and `last_ts` now include an episode that
+  joined it while Reflection was merging it**
+  ([#563](https://github.com/EverMind-AI/EverOS/issues/563)). Reflection
+  wrote them from the members it read before its LLM call, so the new
+  member stayed in the cluster but was not counted, and the user-profile
+  gate, which sums `count`, undercounted.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME

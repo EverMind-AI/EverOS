@@ -25,8 +25,8 @@ See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection, Sequence
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Collection, Mapping, Sequence
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 if TYPE_CHECKING:
     from everalgo.types import Episode as AlgoEpisode
@@ -66,6 +66,13 @@ _PREVIEW_CHARS = 200
 
 type StoredEpisode = Stored[Episode]
 type ReflectionMode = Literal["init", "update"]
+
+
+class _Joined(NamedTuple):
+    """A cluster member that joined while reflection ran."""
+
+    vector: Sequence[float]
+    timestamp: int
 
 
 class ReflectionOrchestrator:
@@ -509,8 +516,9 @@ class ReflectionFinisher:
 
         Runs under a per-cluster partition lock; errors are logged, not
         raised, like every other per-cluster Reflection failure. The merged
-        episode's centroid is embedded first, under no lock: a failed
-        embedding leaves everything as it was.
+        episode and the members that joined since reflection read the
+        cluster are embedded first, under no lock: a failed embedding leaves
+        everything as it was.
 
         Returns:
             The report on success, ``None`` on failure or an empty diff.
@@ -518,12 +526,16 @@ class ReflectionFinisher:
         partition = f"{scope.app_id}:{scope.project_id}:{context.cluster_id}"
         try:
             centroid = await self._embedder.embed(context.merged_episode)
+            joined = await self._embed_joined(
+                scope=scope, context=context, merged_entry_id=merged_entry_id
+            )
             async with get_partition_lock("reflection_deprecate", partition):
                 return await self._execute_deprecation(
                     scope=scope,
                     merged_entry_id=merged_entry_id,
                     context=context,
                     centroid=centroid,
+                    joined=joined,
                 )
         except AppError:
             logger.warning(
@@ -547,6 +559,7 @@ class ReflectionFinisher:
         merged_entry_id: str,
         context: ReflectionContext,
         centroid: Sequence[float],
+        joined: Mapping[str, _Joined],
     ) -> ReflectionReport | None:
         """Run the deprecation steps inside the partition lock.
 
@@ -593,6 +606,7 @@ class ReflectionFinisher:
             to_deprecate=to_deprecate,
             merged_entry_id=merged_entry_id,
             centroid=centroid,
+            joined=joined,
         )
         report = ReflectionReport(
             id=uuid.uuid4().hex,
@@ -698,6 +712,7 @@ class ReflectionFinisher:
         to_deprecate: set[str],
         merged_entry_id: str,
         centroid: Sequence[float],
+        joined: Mapping[str, _Joined],
     ) -> None:
         """Fold the deprecated members into the merged episode.
 
@@ -705,6 +720,12 @@ class ReflectionFinisher:
         takes to take members out of a cluster -- and only while the merged
         episode still exists: once a deletion removed it, adding it as a
         member would leave the cluster pointing at nothing.
+
+        ``count``, ``centroid`` and ``last_ts`` are restamped from the members
+        the cluster has now, not from the ones reflection read before its LLM
+        call: profile clustering may have added episodes in between, and they
+        stay. ``count`` is exact; a member that joined after ``joined`` was
+        embedded counts but is left out of the centroid.
         """
         async with user_cluster_lock(scope.app_id, scope.project_id, scope.owner_id):
             if not await self._episode_store.exists(scope, [merged_entry_id]):
@@ -714,16 +735,51 @@ class ReflectionFinisher:
                     merged_entry_id=merged_entry_id,
                 )
                 return
+            kept = [
+                mid
+                for mid, _ in await self._cluster_store.members(context.cluster_id)
+                if mid not in to_deprecate and mid != merged_entry_id
+            ]
+            known = [joined[mid] for mid in kept if mid in joined]
+            vectors = [centroid, *(j.vector for j in known)]
             await self._cluster_store.replace_members(
                 context.cluster_id,
                 removed=to_deprecate,
                 added=merged_entry_id,
                 member_type="episode",
-                centroid=centroid,
-                count=1,
-                last_ts=context.last_ts,
+                centroid=[
+                    sum(col) / len(vectors) for col in zip(*vectors, strict=True)
+                ],
+                count=len(kept) + 1,
+                last_ts=max([context.last_ts, *(j.timestamp for j in known)]),
                 preview=[context.merged_episode[:_PREVIEW_CHARS]],
             )
+
+    async def _embed_joined(
+        self, *, scope: Scope, context: ReflectionContext, merged_entry_id: str
+    ) -> dict[str, _Joined]:
+        """Embed the members that joined the cluster after reflection read it.
+
+        Usually none. Done before any lock, like the merged episode's
+        embedding: a model call under the owner's clustering lock would hold
+        every other writer of the owner's clusters for its duration.
+        """
+        read = {mid for mid, _ in context.source_members} | {merged_entry_id}
+        ids = [
+            mid
+            for mid, _ in await self._cluster_store.members(context.cluster_id)
+            if mid not in read
+        ]
+        if not ids:
+            return {}
+        stored = await self._episode_store.read_many(scope, ids)
+        if not stored:
+            return {}
+        vectors = await self._embedder.embed_batch([s.item.episode for s in stored])
+        return {
+            s.ref.entry_id: _Joined(vector=v, timestamp=s.item.timestamp)
+            for s, v in zip(stored, vectors, strict=True)
+        }
 
 
 def _owner_filter(scope: Scope) -> Filter:
