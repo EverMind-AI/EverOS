@@ -202,6 +202,11 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
 
     # ── Worker claim ───────────────────────────────────────────────────────
 
+    async def read_one(self, md_path: str) -> MdChangeState | None:
+        """Read one row without changing it; used to detect a stale claim."""
+        async with session_scope(self._factory) as s:
+            return await s.get(MdChangeState, md_path)
+
     async def claim_one(self, md_path: str) -> MdChangeState | None:
         """Atomically transition one row ``pending → processing``.
 

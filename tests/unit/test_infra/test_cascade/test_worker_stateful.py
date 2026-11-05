@@ -445,9 +445,22 @@ def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
     and the "re-enqueue during processing wins" invariant must trip."""
     machine = CascadeMachine()
     try:
+        from types import SimpleNamespace
+
         from sqlalchemy import update
 
         from everos.infra.persistence.sqlite import session_scope
+
+        async def stale_read_one(md_path: str) -> Any:
+            # Pretend the re-enqueue never happened, so the worker still
+            # takes the mark_done path. The model must catch that verdict.
+            return SimpleNamespace(
+                md_path=md_path,
+                lsn=1,
+                status="processing",
+                kind="episode",
+                mtime=0.0,
+            )
 
         async def unguarded_mark_done(md_path: str, **_: Any) -> None:
             async with session_scope(machine.factory) as s:
@@ -460,6 +473,7 @@ def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
             machine.marked.add(md_path)
 
         machine.repo.mark_done = unguarded_mark_done  # type: ignore[method-assign]
+        machine.repo.read_one = stale_read_one  # type: ignore[method-assign]
         machine.upsert(PATHS[0], "episode", "added", False)
         machine.drain(["ok"], [(PATHS[0], "episode", "modified", False)])
         with pytest.raises(AssertionError):

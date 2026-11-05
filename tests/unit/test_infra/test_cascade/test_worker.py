@@ -50,6 +50,9 @@ class _Row:
     kind: str = "episode"
     change_type: str = "added"
     retry_count: int = 0
+    lsn: int = 1
+    mtime: float = 0.0
+    status: str = "processing"
 
 
 class _FakeRepo:
@@ -61,6 +64,10 @@ class _FakeRepo:
         self.applied: dict[str, str | None] = {}
         self.failed: list[tuple[str, bool, str, int]] = []
         self.attempts: list[tuple[str, int]] = []
+        self.rows = {row.md_path: row for row in batch}
+
+    async def read_one(self, md_path: str) -> _Row | None:
+        return self.rows.get(md_path) or _Row(md_path)
 
     async def claim_pending_batch(
         self, _limit: int, *, kinds: set[str] | None = None

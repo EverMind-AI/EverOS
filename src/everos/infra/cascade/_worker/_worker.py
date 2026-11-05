@@ -509,12 +509,52 @@ class CascadeWorker:
                 deleted=outcome.deleted,
                 skipped=outcome.skipped,
             )
-            await self._write_terminal(
-                self._ledger.mark_done,
-                row.md_path,
-                kind=row.kind,
-                change_type=applied,
-            )
+            # The handler may have run long enough for another drainer to
+            # claim a newer version of this path. Its index write is already
+            # applied at this point, so re-enqueue the current row instead of
+            # marking the old claim done; the next drain repairs the index
+            # from the latest md (#545). A same-lsn processing row is still
+            # ours and follows the normal mark_done path.
+            current = await self._ledger.read_one(row.md_path)
+            if current is None:
+                return None
+            if current.lsn == row.lsn and current.status == "processing":
+                await self._write_terminal(
+                    self._ledger.mark_done,
+                    row.md_path,
+                    kind=row.kind,
+                    change_type=applied,
+                )
+            elif current.status in ("pending", "processing"):
+                # Already queued by the watcher, or owned by a newer drainer
+                # that will finish it. Do not add another re-enqueue.
+                logger.info(
+                    "cascade_worker_stale_claim_skipped",
+                    md_path=row.md_path,
+                    kind=row.kind,
+                    claimed_lsn=row.lsn,
+                    current_lsn=current.lsn,
+                    current_status=current.status,
+                )
+                return None
+            else:
+                # A newer claim already reached done/failed; the index may
+                # hold our older write, so queue one more pass from md.
+                logger.warning(
+                    "cascade_worker_stale_claim",
+                    md_path=row.md_path,
+                    kind=row.kind,
+                    claimed_lsn=row.lsn,
+                    current_lsn=current.lsn,
+                    current_status=current.status,
+                )
+                await self._ledger.upsert(
+                    row.md_path,
+                    kind=current.kind,
+                    change_type="modified",
+                    mtime=current.mtime,
+                )
+                return None
             # Only flag the kind as "touched" when we actually wrote
             # something — skipped rows leave the table untouched, so
             # optimizing would be pure overhead.

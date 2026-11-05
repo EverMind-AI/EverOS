@@ -29,6 +29,9 @@ class _Row:
     kind: str = "episode"
     change_type: str = "added"
     retry_count: int = 0
+    lsn: int = 1
+    mtime: float = 0.0
+    status: str = "processing"
 
 
 class _RecordingRepo:
@@ -40,6 +43,12 @@ class _RecordingRepo:
         self.claim_calls: list[frozenset[str] | None] = []
         self.done: list[str] = []
         self.failed: list[tuple[str, bool, str, int]] = []
+        self.rows = {
+            row.md_path: row for rows in batch_by_kind.values() for row in rows
+        }
+
+    async def read_one(self, md_path: str) -> _Row | None:
+        return self.rows.get(md_path) or _Row(md_path)
 
     async def claim_pending_batch(
         self, limit: int, *, kinds: set[str] | None = None
