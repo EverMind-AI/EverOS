@@ -112,8 +112,11 @@ green (#548).
 
 Three attempts absorb a one-off lock without holding a handler slot for long:
 the backoff is one then two ``retry_backoff`` intervals (6s extra at the
-defaults), the same linear schedule the inline handler retries use, so a lock
-that persists stays a visible drain failure rather than a stranded row."""
+defaults), the same linear schedule the inline handler retries use. A lock
+that outlasts all three still leaves the row ``processing``: that drain ends
+as a drain failure, but the next drain that succeeds resets the failure count,
+so ``/health`` does not keep showing it. Reclaiming such a row needs a lease
+on the claim, which this retry does not add."""
 PRUNE_STALE_FACTOR = 3.0
 """Multiple of the prune interval without any successful prune before
 :meth:`CascadeWorker.health` reports degraded. The primary disk-bloat
