@@ -13,7 +13,7 @@ import asyncio
 import datetime as dt
 import time
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -281,6 +281,10 @@ class TableSource(Protocol):
 
     async def table(self, name: str, arrow_schema: pa.Schema) -> AsyncTable: ...
 
+    def query_slot(self) -> AbstractAsyncContextManager[None]:
+        """One of the process's search-query slots, held while a query runs."""
+        ...
+
 
 class LanceRepoBase[T: IndexRecord]:
     """Generic CRUD repository for one LanceDB table.
@@ -519,7 +523,9 @@ class LanceRepoBase[T: IndexRecord]:
         of the loop's busy time under a search-heavy soak (2026-11), while
         every search caller discarded them.
         """
-        table = await query.to_arrow()
+        slot = self._source.query_slot() if self._source is not None else nullcontext()
+        async with slot:
+            table = await query.to_arrow()
         if not with_vectors:
             present = set(table.column_names)
             drop = [

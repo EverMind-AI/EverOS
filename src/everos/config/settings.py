@@ -712,6 +712,12 @@ class LanceDBSettings(BaseModel):
     only: its first rebuild sweep after server start builds a missing index
     and the heavy maintenance beat keeps it healthy. The CLI never builds
     one (it would race the running server's commits)."""
+    max_concurrent_queries: int = Field(default=32, ge=1)
+    """Search queries (keyword, vector, filtered scan) one process runs on
+    LanceDB at once; the rest wait for a slot. One agentic search fans out to
+    about 28 of them. Uncapped, a burst opened every data file of a table once
+    per query (981 descriptors at peak against a 1024 soft limit, 2026-11) and
+    turned all their results into Python objects on the event loop together."""
 
 
 class CascadeSettings(BaseModel):
