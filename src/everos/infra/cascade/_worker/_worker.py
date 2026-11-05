@@ -17,6 +17,9 @@ Each cycle:
    budget (:data:`MAX_TOTAL_RETRIES`) is also exhausted, in which
    case ``retryable=False`` is set here directly so the row skips
    one extra scanner cycle before the entry-check would demote it.
+   Each consumed inline attempt is persisted on the row before its
+   backoff sleep, so a restart inside the ladder keeps the budget
+   rather than restarting it (#549).
 5. On any other exception: ``mark_failed(retryable=False)`` (treated
    as unrecoverable, surfaces in ``cascade fix`` for the user to
    triage by editing the md).
@@ -418,6 +421,28 @@ class CascadeWorker:
                 )
                 if attempt < self._max_retry:
                     retry_count += 1
+                    # Persist before the sleep: if this process dies during
+                    # the backoff, recovery keeps the row's retry_count and
+                    # the next drain resumes the budget here instead of
+                    # restarting the ladder at 0 (#549).
+                    #
+                    # Best-effort: this write runs while the provider is
+                    # already failing, often under the same lock contention
+                    # as the terminal write. If it raised, the row would stay
+                    # ``processing`` for good (#548). The in-memory ladder
+                    # still bounds this process; a failed write only costs
+                    # the count of this one attempt if a restart follows.
+                    try:
+                        await self._ledger.record_attempt(
+                            row.md_path, new_retry_count=retry_count
+                        )
+                    except Exception as record_exc:
+                        logger.warning(
+                            "cascade_worker_record_attempt_failed",
+                            md_path=row.md_path,
+                            retry_count=retry_count,
+                            error=f"{type(record_exc).__name__}: {record_exc}",
+                        )
                     await asyncio.sleep(self._retry_backoff * (attempt + 1))
                     continue
                 # Inline attempts exhausted. Only stay retryable when

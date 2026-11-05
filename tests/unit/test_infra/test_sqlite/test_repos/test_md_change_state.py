@@ -13,7 +13,7 @@ Covers the unit-test matrix from
 - ``claim_one`` — atomic; concurrent racers split 1 winner / N losers.
 - ``reset_retryable_to_pending`` — only ``retryable=TRUE`` rows move.
 
-Plus the rest of the repo surface (mark_done / mark_failed /
+Plus the rest of the repo surface (mark_done / mark_failed / record_attempt /
 queue_summary / list_failed / force_enqueue / claim_pending_batch).
 """
 
@@ -317,6 +317,47 @@ async def test_mark_failed_records_retryable_flag(
     assert row.retry_count == 0
 
 
+# ── record_attempt ───────────────────────────────────────────────────────
+
+
+async def test_record_attempt_persists_retry_count_on_processing_row(
+    repo: MdChangeStateRepo,
+) -> None:
+    """The inline ladder's count lands on the row while it is still processing."""
+    path = "users/u/episodes/episode-2026-05-12.md"
+    await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
+    await repo.claim_one(path)
+
+    await repo.record_attempt(path, new_retry_count=1)
+    row = await repo.get_by_id(path)
+    assert row is not None
+    assert row.status == "processing"
+    assert row.retry_count == 1
+
+    await repo.record_attempt(path, new_retry_count=2)
+    row = await repo.get_by_id(path)
+    assert row is not None
+    assert row.retry_count == 2
+
+
+async def test_record_attempt_noop_when_row_reverted_to_pending(
+    repo: MdChangeStateRepo,
+) -> None:
+    """A concurrent re-enqueue owns the row; a stale claim must not stamp it."""
+    path = "users/u/episodes/episode-2026-05-12.md"
+    await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
+    await repo.claim_one(path)
+    # The file changed while the handler ran: fresh row, fresh retry budget.
+    await repo.upsert(path, kind="episode", change_type="modified", mtime=2.0)
+
+    await repo.record_attempt(path, new_retry_count=5)
+
+    row = await repo.get_by_id(path)
+    assert row is not None
+    assert row.status == "pending", "the re-enqueue wins over the stale attempt"
+    assert row.retry_count == 0
+
+
 # ── Race: re-enqueue during processing must win over stale mark_xxx ─────
 #
 # Reproduces the Bug A scenario:
@@ -561,6 +602,28 @@ async def test_recover_orphan_processing_resets_stale_rows(
     # last_attempt_at cleared so the next claim records the new attempt.
     assert a.last_attempt_at is None
     assert b.last_attempt_at is None
+
+
+async def test_recover_orphan_processing_keeps_persisted_retry_count(
+    repo: MdChangeStateRepo,
+) -> None:
+    """Crash recovery rolls the claim back but must not forget the budget.
+
+    The poisoned interaction behind #549: ``record_attempt`` persists the inline
+    count on the ``processing`` row; if recovery reset it, the restart would
+    resume the ladder at attempt 0 and a row could retry forever.
+    """
+    await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
+    await repo.claim_one("a.md")
+    await repo.record_attempt("a.md", new_retry_count=4)
+
+    moved = await repo.recover_orphan_processing()
+
+    assert moved == 1
+    row = await repo.get_by_id("a.md")
+    assert row is not None
+    assert row.status == "pending"
+    assert row.retry_count == 4, "recovery must keep the attempts already spent"
 
 
 async def test_recover_orphan_processing_zero_when_clean(

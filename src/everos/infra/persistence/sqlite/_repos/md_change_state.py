@@ -374,6 +374,40 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
             )
             await s.commit()
 
+    async def record_attempt(self, md_path: str, *, new_retry_count: int) -> None:
+        """Persist an inline retry attempt on a still-``processing`` row.
+
+        ``_process_one`` runs its ``ExternalServiceError`` retries inline and
+        only :meth:`mark_failed` / :meth:`mark_done` land a terminal state. A
+        process that dies between two attempts therefore leaves the row
+        ``processing`` with whatever count the last write recorded;
+        :meth:`recover_orphan_processing` rolls it back to ``pending`` but
+        keeps that count, so writing it before each backoff sleep is what makes
+        the retry budget survive a restart (#549). Without it the next drain
+        restarted the ladder at 0, ``MAX_TOTAL_RETRIES`` never bounded a row
+        whose retries kept being interrupted by restarts, and ``cascade fix``
+        never listed the file.
+
+        Guarded by ``WHERE status='processing'`` for the same reason as
+        :meth:`mark_failed`: a concurrent re-enqueue (the file changed while
+        the handler ran) owns the row, and its fresh budget must not be
+        stamped with a superseded claim's count.
+
+        Args:
+            md_path: The row's primary key.
+            new_retry_count: Retries issued on this claim so far, including
+                the attempt that just failed.
+        """
+        now = get_utc_now()
+        async with session_scope(self._factory) as s:
+            await s.execute(
+                update(MdChangeState)
+                .where(MdChangeState.md_path == md_path)
+                .where(MdChangeState.status == "processing")
+                .values(retry_count=new_retry_count, last_attempt_at=now)
+            )
+            await s.commit()
+
     # ── Startup recovery ───────────────────────────────────────────────────
 
     async def recover_orphan_processing(self) -> int:

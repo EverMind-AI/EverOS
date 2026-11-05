@@ -18,9 +18,10 @@ Invariants after every step, from the repo and worker docstrings:
 1. the table matches the model: status, retryable, retry_count, lsn, error;
 2. a re-enqueue during processing wins: the stale verdict is dropped and
    the row is pending again with a fresh lsn;
-3. retry bookkeeping: transient failures spend the budget, a row stays
-   retryable only below ``MAX_TOTAL_RETRIES``, re-saves with new content
-   reset it, ``fix`` resets it;
+3. retry bookkeeping: transient failures spend the budget (each attempt is
+   persisted, so a mid-ladder restart keeps it), a row stays retryable only
+   below ``MAX_TOTAL_RETRIES``, re-saves with new content reset it, ``fix``
+   resets it;
 4. ``queue_summary`` (what ``cascade status`` and ``/health`` show) agrees
    with the table;
 5. no ``processing`` row while the process is alive and idle.
@@ -264,8 +265,17 @@ class CascadeMachine(RuleBasedStateMachine):
             m.update(status="done", retryable=None, error=False)
             return
         outcome = scripted.get(path, "ok")
-        if outcome in ("ok", "vanished", "transient_then_ok"):
+        if outcome in ("ok", "vanished"):
             m.update(status="done", retryable=None, error=False)
+        elif outcome == "transient_then_ok":
+            # The one retry it consumed is persisted before the successful
+            # second call, so the done row keeps that count (#549).
+            m.update(
+                status="done",
+                retryable=None,
+                error=False,
+                retry_count=m["retry_count"] + 1,
+            )
         elif outcome == "boom":
             m.update(status="failed", retryable=False, error=True)
         elif outcome == "transient":

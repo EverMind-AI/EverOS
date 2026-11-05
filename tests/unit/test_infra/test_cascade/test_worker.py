@@ -5,7 +5,8 @@ their own files. Here we focus on the worker's branch behaviour
 without touching the real handler / lancedb stack:
 
 - ``ExternalServiceError`` retries up to ``max_retry`` and then marks
-  ``retryable=TRUE``.
+  ``retryable=TRUE``; each consumed attempt is persisted on the row before
+  the backoff sleep, so a restart does not forget the budget (#549).
 - Any other exception marks ``retryable=FALSE`` immediately.
 - Successful handler ⇒ ``mark_done``.
 - A terminal write that raises once is retried, so the row still leaves
@@ -59,6 +60,7 @@ class _FakeRepo:
         self.done: list[str] = []
         self.applied: dict[str, str | None] = {}
         self.failed: list[tuple[str, bool, str, int]] = []
+        self.attempts: list[tuple[str, int]] = []
 
     async def claim_pending_batch(
         self, _limit: int, *, kinds: set[str] | None = None
@@ -86,6 +88,9 @@ class _FakeRepo:
         new_retry_count: int,
     ) -> None:
         self.failed.append((md_path, retryable, error, new_retry_count))
+
+    async def record_attempt(self, md_path: str, *, new_retry_count: int) -> None:
+        self.attempts.append((md_path, new_retry_count))
 
 
 class _OkHandler(Handler):
@@ -253,6 +258,29 @@ async def test_external_service_error_is_retried_then_retryable(
     assert path == "a.md"
     assert retryable is True
     assert retry_count == 2
+
+
+async def test_inline_retry_persists_each_attempt(patched_repo: _FakeRepo) -> None:
+    """The inline ladder writes each consumed retry before the next attempt.
+
+    The count used to live only in memory until the final ``mark_failed``; a
+    process death inside the ladder lost every attempt it had made (#549).
+    """
+    patched_repo.batch = [_Row(md_path="a.md")]
+    w = CascadeWorker(
+        {"episode": _ExternalServiceHandler()},
+        max_retry=2,
+        retry_backoff_seconds=0,
+        ledger=patched_repo,
+    )
+
+    await w.drain_once()
+
+    assert patched_repo.attempts == [("a.md", 1), ("a.md", 2)]
+    assert len(patched_repo.failed) == 1
+    assert patched_repo.failed[0][3] == 2, (
+        "the terminal write agrees with the last attempt"
+    )
 
 
 async def test_modified_event_for_vanished_file_is_processed_as_delete(

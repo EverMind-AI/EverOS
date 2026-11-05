@@ -113,6 +113,9 @@ MAX_TOTAL_RETRIES = 12
 
 Each cycle: worker retries up to ``MAX_RETRY`` (default 3) inline;
 scanner re-enqueues on the next 30s sweep; retry_count accumulates.
+Each inline attempt is persisted on the row before its backoff sleep
+(:meth:`MdChangeStateRepo.record_attempt`), so a restart inside a ladder
+keeps the budget instead of restarting it (#549).
 12 ≈ 4 scanner cycles × 3 inline retries ≈ 2 minutes of retrying.
 
 Once exhausted, ``mark_failed(retryable=False)`` so the reconciler
