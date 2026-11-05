@@ -23,10 +23,29 @@ from __future__ import annotations
 
 import logging
 import sys
+import traceback
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import Any, TextIO
 
 import structlog
+from structlog.typing import ExcInfo
+
+_TRACEBACK_FRAMES = 15
+"""Innermost frames kept per exception; deep async stacks run to 80+."""
+
+
+def _plain_traceback(sio: TextIO, exc_info: ExcInfo) -> None:
+    """Write ``exc_info`` as a plain stdlib traceback, innermost frames only.
+
+    structlog's default (rich, syntax-highlighted, with locals) is what the
+    server used to render. It is CPU-bound and runs inside the event loop:
+    ~290 ms per exception when first measured, ~3 s on a loaded soak host
+    (2026-11), long enough to keep other requests' SQLite write
+    transactions open past ``busy_timeout``. Locals are never printed: they
+    can hold request payloads.
+    """
+    sio.write("\n")
+    sio.write("".join(traceback.format_exception(*exc_info, limit=-_TRACEBACK_FRAMES)))
 
 
 def get_logger(name: str) -> Any:
@@ -99,19 +118,11 @@ def configure_logging(level: str = "INFO") -> None:
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.dev.ConsoleRenderer(
-                # structlog's default exception formatter is
-                # ``RichTracebackFormatter(show_locals=True, max_frames=100,
-                # extra_lines=3)``. On an async stack that is brutal: one
-                # unhandled exception in a soak run rendered 82 frames into
-                # **6423 log lines** (85MB of server.log across 11 such
-                # exceptions), and each render costs ~290ms of synchronous CPU
-                # inside the event loop. Locals also risk printing request
-                # payloads into logs. Keep the frames, drop the locals.
-                exception_formatter=structlog.dev.RichTracebackFormatter(
-                    show_locals=False,
-                    max_frames=15,
-                    extra_lines=1,
-                ),
+                # Not structlog's default ``RichTracebackFormatter``: one
+                # exception in a soak run rendered 82 frames into 6423 log
+                # lines, and the rendering blocks the event loop (see
+                # ``_plain_traceback``).
+                exception_formatter=_plain_traceback,
             ),
         ],
     )
