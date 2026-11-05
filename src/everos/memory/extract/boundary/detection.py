@@ -31,7 +31,7 @@ from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
-from everos.memory.ports import MemcellStore, SessionBufferStore, SessionKey
+from everos.memory.ports import SessionBufferStore, SessionKey
 
 from .messages import (
     Mode,
@@ -101,14 +101,12 @@ class BoundaryDetection:
         llm: LLMClient,
         instructions: CustomInstructions,
         session_buffer: SessionBufferStore,
-        memcells: MemcellStore,
         limits: BoundaryDetectionSettings,
         attempt_timeout: float | None = None,
     ) -> None:
         self._llm = llm
         self._instructions = instructions
         self._session_buffer = session_buffer
-        self._memcells = memcells
         self._limits = limits
         self._attempt_timeout = attempt_timeout
         self._quarantine = SessionQuarantine(session_buffer)
@@ -249,12 +247,14 @@ class BoundaryDetection:
         mode: Mode,
         message_count: int,
     ) -> BoundaryOutcome:
-        """Record one memcell row per cell, then keep only the tail buffered."""
+        """Record one memcell row per cell and keep only the tail buffered,
+        in one transaction: a failure leaves the buffer as it was."""
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
         raw_type = _RAW_TYPE_BY_MODE[mode]
-        await self._memcells.insert_many(
+        last_cell_ts = max(cell.timestamp for cell in result.cells)
+        await self._session_buffer.cut(
             session,
             [
                 MemcellRecord(
@@ -268,13 +268,9 @@ class BoundaryDetection:
                     memcell_ids, result.cells, message_ids, senders, strict=True
                 )
             ],
+            tail=slice_tail(merged, result.tail),
+            last_memcell_ts=from_timestamp(last_cell_ts) if last_cell_ts else None,
         )
-        last_cell_ts = max(cell.timestamp for cell in result.cells)
-        if last_cell_ts:
-            await self._session_buffer.touch_last_memcell(
-                session, from_timestamp(last_cell_ts)
-            )
-        await self._session_buffer.replace(session, slice_tail(merged, result.tail))
         return BoundaryOutcome(
             cells=list(result.cells),
             memcell_ids=memcell_ids,
@@ -288,9 +284,8 @@ class BoundaryDetection:
     async def _keep_buffered(
         self, session: SessionKey, merged: list[CanonicalMessage]
     ) -> None:
-        await self._session_buffer.replace(session, merged)
-        await self._session_buffer.touch_last_message(
-            session, max(m.timestamp for m in merged)
+        await self._session_buffer.keep(
+            session, merged, last_message_ts=max(m.timestamp for m in merged)
         )
 
 

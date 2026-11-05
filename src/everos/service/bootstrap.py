@@ -508,7 +508,6 @@ def _build_memory_service(
             llm=providers.llm,
             instructions=deps.instructions,
             session_buffer=stores.session_buffer,
-            memcells=stores.memcell,
             limits=settings.boundary_detection,
             attempt_timeout=settings.memorize.session_lock_timeout_seconds,
         ),

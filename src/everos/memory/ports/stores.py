@@ -330,23 +330,35 @@ class SessionBufferStore(Protocol):
 
     async def list(self, session: SessionKey) -> list[CanonicalMessage]: ...
 
-    async def replace(
-        self, session: SessionKey, messages: Sequence[CanonicalMessage]
-    ) -> None: ...
+    async def keep(
+        self,
+        session: SessionKey,
+        messages: Sequence[CanonicalMessage],
+        *,
+        last_message_ts: dt.datetime,
+    ) -> None:
+        """Make ``messages`` the whole buffer and stamp ``last_message_ts``,
+        in one transaction."""
+        ...
+
+    async def cut(
+        self,
+        session: SessionKey,
+        records: Sequence[MemcellRecord],
+        *,
+        tail: Sequence[CanonicalMessage],
+        last_memcell_ts: dt.datetime | None,
+    ) -> None:
+        """Record the memcells the buffer was cut into, stamp
+        ``last_memcell_ts`` (when given) and leave only ``tail`` buffered,
+        in one transaction: a failure writes none of it."""
+        ...
 
     async def quarantine(
         self, session: SessionKey, extra: Sequence[CanonicalMessage]
     ) -> int:
         """Set the buffer (plus ``extra``) aside; return how many moved."""
         ...
-
-    async def touch_last_message(
-        self, session: SessionKey, ts: dt.datetime
-    ) -> None: ...
-
-    async def touch_last_memcell(
-        self, session: SessionKey, ts: dt.datetime
-    ) -> None: ...
 
 
 @runtime_checkable

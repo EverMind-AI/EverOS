@@ -36,7 +36,6 @@ from ._base import create_system_engine as create_system_engine
 from ._base import session_scope as session_scope
 from ._repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from ._repos import ClusterRepo as ClusterRepo
-from ._repos import ConversationStatusRepo as ConversationStatusRepo
 from ._repos import DocumentListPage as DocumentListPage
 from ._repos import DocumentUpsertPayload as DocumentUpsertPayload
 from ._repos import KnowledgeDocumentRepo as KnowledgeDocumentRepo
@@ -75,7 +74,6 @@ __all__ = [
     "ClusterMember",
     "ClusterRepo",
     "ConversationStatus",
-    "ConversationStatusRepo",
     "DocumentListPage",
     "DocumentUpsertPayload",
     "Field",
