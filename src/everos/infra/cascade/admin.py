@@ -107,6 +107,9 @@ class CascadeAdmin:
     async def count_index_rows(self) -> dict[str, int]:
         return await self._index.count_business_rows()
 
+    async def count_duplicate_keys(self) -> dict[str, int]:
+        return await self._index.count_duplicate_keys()
+
     async def count_unbackfilled_rows(self) -> int:
         """Rows whose primary vector is still NULL, summed over every table.
 

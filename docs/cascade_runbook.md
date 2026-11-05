@@ -52,6 +52,11 @@ lsn:
 - `failed (retryable=FALSE)` is always user-actionable. Cascade will
   never auto-clear these — they represent malformed md the user must
   edit.
+- `status --duplicates` additionally scans every business table and
+  reports duplicate `(app_id, project_id, id)` rows. LanceDB has no
+  unique constraint, so a write path that bypasses the merge helper can
+  leave two rows for one logical key; searches then silently see only
+  one of them. The scan is O(N) per table, which is why it is opt-in.
 
 ### Machine-readable: the `cascade` block on `GET /health`
 

@@ -157,12 +157,18 @@ def relative_to_root(root: MemoryRoot, path: Path) -> str:
     return rel.as_posix()
 
 
-async def status(admin: CascadeAdmin) -> CascadeStatus:
-    """The ledger summary, live index row counts and indexed live sources."""
+async def status(admin: CascadeAdmin, *, duplicates: bool = False) -> CascadeStatus:
+    """The ledger summary, live index row counts and indexed live sources.
+
+    ``duplicates`` adds the O(N) duplicate-primary-key scan; it stays off
+    the default path because an embedded root does not need it on every
+    status call.
+    """
     return CascadeStatus(
         summary=await admin.queue_summary(),
         index_rows=await admin.count_index_rows(),
         live_sources=await admin.count_live_sources(),
+        duplicate_keys=(await admin.count_duplicate_keys() if duplicates else None),
     )
 
 

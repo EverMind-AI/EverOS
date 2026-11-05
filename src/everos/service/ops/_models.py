@@ -92,6 +92,7 @@ class CascadeStatus:
     summary: QueueSummary
     index_rows: dict[str, int]
     live_sources: int
+    duplicate_keys: dict[str, int] | None = None
 
 
 @dataclasses.dataclass(frozen=True)

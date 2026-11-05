@@ -270,6 +270,35 @@ class MilvusRepoBase[T: BaseModel]:
         rows = await self._scan_raw(where, include_vectors=True)
         return [self._codec.to_model(row) for row in rows]
 
+    async def count_duplicate_keys(self) -> int:
+        """Extra rows sharing one declared ``PRIMARY_KEY`` tuple.
+
+        Streams only the key columns, so memory follows the keys rather than
+        the documents (#479).
+        """
+        await self.ensure_collection()
+        client = await self._connection.client()
+        key = list(self.index_schema.primary_key)
+        iterator = await _run(
+            client.query_iterator,
+            self.collection_name,
+            batch_size=1000,
+            limit=-1,
+            filter=self._expr(None),
+            output_fields=key,
+        )
+        total = 0
+        distinct: set[tuple[Any, ...]] = set()
+        try:
+            while batch := await _run(iterator.next):
+                total += len(batch)
+                distinct.update(
+                    tuple(row.get(column) for column in key) for row in batch
+                )
+        finally:
+            await _run(iterator.close)
+        return total - len(distinct)
+
     async def _scan_raw(
         self,
         where: Filter | None,

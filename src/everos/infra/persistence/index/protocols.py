@@ -143,6 +143,16 @@ class IndexRepository(Protocol[T]):
 
     async def scan(self, where: Filter | None = None) -> list[T]: ...
 
+    async def count_duplicate_keys(self) -> int:
+        """Extra rows sharing one declared ``PRIMARY_KEY`` tuple.
+
+        A key-only read: implementations must not materialise the full row
+        (vectors included), because the check runs on roots where that is
+        the whole index in memory. ``upsert`` cannot create a duplicate, so
+        a non-zero answer means a write bypassed it.
+        """
+        ...
+
     async def update(self, updates: dict[str, Any], *, where: Filter) -> None: ...
 
     async def delete(self, predicate: Filter) -> None: ...

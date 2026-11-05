@@ -33,7 +33,7 @@ everos
 ├── server
 │   └── start [--host] [--port] [--root] [--reload] [--log-level]   Start the HTTP API server (uvicorn)
 └── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
-    ├── status                      Queue / LSN summary
+    ├── status [--duplicates]       Queue / LSN summary; opt-in duplicate-key scan
     ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
     └── fix [--apply]               List failed rows / re-enqueue retryable ones
 ```

@@ -267,13 +267,22 @@ def status(
         bool | None,
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
+    duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--duplicates",
+            help=(
+                "Scan every business table for duplicate (app_id, project_id, id) rows."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Print the queue / LSN summary."""
     settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> None:
         async with _runtime(settings) as ops:
-            status = await ops.cascade_status()
+            status = await ops.cascade_status(duplicates=duplicates)
             summary = status.summary
             lag = max(0, summary.max_lsn - summary.last_processed_lsn)
             typer.echo("queue:")
@@ -306,6 +315,10 @@ def status(
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
+            if status.duplicate_keys is not None:
+                typer.echo("duplicate primary keys:")
+                for table, count in status.duplicate_keys.items():
+                    typer.echo(f"  {table + ':':<24} {count}")
             # `summary.done` would count completed deletions, so a user who
             # removed their last markdown file would be warned that their
             # index is missing and sent to rebuild it from nothing.
