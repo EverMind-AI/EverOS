@@ -255,7 +255,7 @@ class BaseDailyWriter:
         """
         async with self._writer.locked(path):
             try:
-                raw = await anyio.Path(path).read_text(encoding="utf-8")
+                raw = await MarkdownReader.read_text(path)
             except FileNotFoundError:
                 return []
             meta, body = parse_frontmatter(raw)
@@ -278,7 +278,7 @@ class BaseDailyWriter:
         """Remove ``keys`` from the file's ``deprecated_entries``; whether any was."""
         async with self._writer.locked(path):
             try:
-                raw = await anyio.Path(path).read_text(encoding="utf-8")
+                raw = await MarkdownReader.read_text(path)
             except FileNotFoundError:
                 return False
             meta, body = parse_frontmatter(raw)

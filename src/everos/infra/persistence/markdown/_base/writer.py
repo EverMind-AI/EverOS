@@ -209,7 +209,7 @@ class MarkdownWriter:
         target = Path(path)
         async with self.locked(target):
             # 1. Read raw text.
-            raw = await anyio.Path(target).read_text(encoding="utf-8")
+            raw = await MarkdownReader.read_text(target)
 
             # 2. Split into frontmatter + remainder (entries body).
             existing_fm, remainder = parse_frontmatter(raw)

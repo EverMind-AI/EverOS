@@ -210,7 +210,7 @@ class _DailyLogStore[T]:
         hits: list[Path] = []
         for path in await self._daily_files(scope):
             try:
-                text = await anyio.Path(path).read_text(encoding="utf-8")
+                text = await MarkdownReader.read_text(path)
             except FileNotFoundError:
                 continue
             if any(needle in text for needle in needles):

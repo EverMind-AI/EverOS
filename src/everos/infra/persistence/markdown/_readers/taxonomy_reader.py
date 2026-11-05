@@ -17,6 +17,8 @@ import anyio
 import yaml
 from everalgo.types import CategorySpec
 
+from everos.infra.persistence.markdown._base.reader import MarkdownReader
+
 TAXONOMY_FILENAME = ".taxonomy.md"
 
 
@@ -176,7 +178,7 @@ async def parse_taxonomy(path: anyio.Path | Path) -> list[CategorySpec]:
     apath = anyio.Path(path) if not isinstance(path, anyio.Path) else path
     if not await apath.exists():
         return []
-    text = await apath.read_text(encoding="utf-8")
+    text = await MarkdownReader.read_text(apath)
     parts = text.split("---", 2)
     if len(parts) < 3:
         return []

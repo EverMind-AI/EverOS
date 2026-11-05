@@ -224,7 +224,7 @@ async def _concat_references(references_dir: Path) -> str:
         key=lambda p: p.name,
     )
     for path in paths:
-        text = await path.read_text(encoding="utf-8")
+        text = await MarkdownReader.read_text(path)
         pieces.append(text.rstrip())
     return "\n\n".join(pieces)
 

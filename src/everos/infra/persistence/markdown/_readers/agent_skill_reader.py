@@ -196,7 +196,7 @@ class AgentSkillReader:
         apath = anyio.Path(path)
         if not await apath.is_file():
             return None
-        text = await apath.read_text(encoding="utf-8")
+        text = await MarkdownReader.read_text(apath)
         return text.rstrip("\n")
 
     async def read_script(
@@ -219,7 +219,7 @@ class AgentSkillReader:
         apath = anyio.Path(path)
         if not await apath.is_file():
             return None
-        text = await apath.read_text(encoding="utf-8")
+        text = await MarkdownReader.read_text(apath)
         return text.rstrip("\n")
 
     # ── Internals — same shape as AgentSkillWriter ────────────────────────────
