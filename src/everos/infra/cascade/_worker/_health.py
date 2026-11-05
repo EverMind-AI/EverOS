@@ -65,7 +65,7 @@ class CascadeWorkerHealth:
 
     stall_alert_seconds: float = 0.0
     """Gap at or above which :meth:`reasons` reports the stalled drain
-    (:data:`._tuning.DRAIN_STALL_POLL_INTERVALS` poll intervals). ``0``
+    (:data:`._tuning.DRAIN_STALL_ALERT_SECONDS` by default). ``0``
     disables the signal, keeping direct dataclass construction inert."""
 
     def reasons(self) -> list[str]:

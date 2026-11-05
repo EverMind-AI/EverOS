@@ -69,7 +69,7 @@ from ._tuning import (
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_RETRY_BACKOFF_SECONDS,
-    DRAIN_STALL_POLL_INTERVALS,
+    DRAIN_STALL_ALERT_SECONDS,
     LOOP_RESTART_BACKOFF_SECONDS,
     MAINTENANCE_TASK_TIMEOUT_SECONDS,
     MAX_TOTAL_RETRIES,
@@ -122,6 +122,7 @@ class CascadeWorker:
             REBUILD_CONFLICT_BACKOFFS_SECONDS
         ),
         loop_restart_backoffs_seconds: Sequence[float] = LOOP_RESTART_BACKOFF_SECONDS,
+        drain_stall_alert_seconds: float = DRAIN_STALL_ALERT_SECONDS,
         on_unrecoverable: Callable[[str], None] | None = None,
     ) -> None:
         if handler_concurrency <= 0:
@@ -163,6 +164,7 @@ class CascadeWorker:
         # leaves both untouched, which is what the stall reason reads.
         self._inflight_rows: int = 0
         self._last_progress_at: float | None = None
+        self._drain_stall_alert_seconds = drain_stall_alert_seconds
 
     async def start(self) -> None:
         if self._task is not None:
@@ -238,9 +240,11 @@ class CascadeWorker:
             return 0
 
         async def process_bounded(row: MdChangeState) -> str | None:
-            self._inflight_rows += 1
-            if self._last_progress_at is None:
+            if self._inflight_rows == 0:
+                # Work begins after an idle period: the gap since the last
+                # completion was idle time, not a stall, so the clock restarts.
                 self._last_progress_at = time.monotonic()
+            self._inflight_rows += 1
             try:
                 async with self._handler_semaphore:
                     return await self._process_one(row)
@@ -304,7 +308,7 @@ class CascadeWorker:
             prune_stale_kind=stale_kind,
             inflight_rows=self._inflight_rows,
             stalled_seconds=stalled_seconds,
-            stall_alert_seconds=(self._poll_interval * DRAIN_STALL_POLL_INTERVALS),
+            stall_alert_seconds=self._drain_stall_alert_seconds,
         )
 
     # ── internals ──────────────────────────────────────────────────────────
