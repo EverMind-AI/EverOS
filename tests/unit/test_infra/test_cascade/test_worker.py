@@ -1243,6 +1243,36 @@ def test_worker_health_dataclass_thresholds() -> None:
     ).reasons()
     assert len(reasons) == 2  # drain + prune, not the sub-threshold optimize
 
+    assert not mk(0, 0, 0, 0.0, inflight_rows=1, stalled_seconds=1.0).reasons()
+    stalled = mk(
+        0,
+        0,
+        0,
+        0.0,
+        inflight_rows=1,
+        stalled_seconds=tuning.DRAIN_STALL_ALERT_SECONDS,
+        stall_alert_seconds=tuning.DRAIN_STALL_ALERT_SECONDS,
+    ).reasons()
+    assert any("drain stalled" in r for r in stalled)
+    assert not mk(
+        0,
+        0,
+        0,
+        0.0,
+        inflight_rows=1,
+        stalled_seconds=tuning.DRAIN_STALL_ALERT_SECONDS - 0.1,
+        stall_alert_seconds=tuning.DRAIN_STALL_ALERT_SECONDS,
+    ).reasons()
+    assert not mk(
+        0,
+        0,
+        0,
+        0.0,
+        inflight_rows=0,
+        stalled_seconds=tuning.DRAIN_STALL_ALERT_SECONDS * 10,
+        stall_alert_seconds=tuning.DRAIN_STALL_ALERT_SECONDS,
+    ).reasons()
+
 
 def test_worker_health_idle_is_not_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker with no optimize activity is never prune-stale (nothing to
@@ -1815,3 +1845,105 @@ async def test_rebuild_wait_timeout_leaves_the_optimize_running(
     assert not fake.rebuild_calls, "must not rebuild under a live runner"
     await w._maintenance.flush()
     assert len(fake.beats) == 2, "both beats must run to completion"
+
+
+async def test_hung_handler_is_visible_in_health(
+    patched_repo: _FakeRepo,
+) -> None:
+    """#547: a handler that never returns stalls the batch; health must say so.
+
+    ``drain_once`` gathers the whole claimed batch, so one hung handler leaves
+    every later row pending and raises nothing. The stall reason must appear
+    while the claimed row is in flight and clear once it lands.
+    """
+    patched_repo.batch = [_Row(md_path="stuck.md")]
+    entered = asyncio.Event()
+    released = asyncio.Event()
+
+    class _HangingHandler(_OkHandler):
+        async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+            entered.set()
+            await released.wait()
+            return await super().handle_added_or_modified(md_path)
+
+    w = CascadeWorker(
+        {"episode": _HangingHandler()},
+        retry_backoff_seconds=0,
+        poll_interval_seconds=10.0,
+        ledger=patched_repo,
+    )
+    task = asyncio.create_task(w.drain_once())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    try:
+        h = w.health()
+        assert h.inflight_rows == 1
+        assert h.reasons() == []
+
+        # Simulate the alert gap passing without waiting the full threshold.
+        w._last_progress_at = time.monotonic() - h.stall_alert_seconds - 1.0
+        h = w.health()
+        assert h.stalled_seconds >= h.stall_alert_seconds
+        reasons = h.reasons()
+        assert any("drain stalled" in r for r in reasons), reasons
+        assert any("claimed row" in r for r in reasons), reasons
+    finally:
+        released.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    h = w.health()
+    assert h.inflight_rows == 0
+    assert h.reasons() == []
+
+
+async def test_idle_time_before_a_batch_is_not_reported_as_a_stall(
+    patched_repo: _FakeRepo,
+) -> None:
+    """#547: the stall clock counts time with rows in flight, never idle time.
+
+    After an idle gap longer than the threshold, a freshly claimed row must not
+    be reported stalled; it is reported only once it has itself gone the
+    threshold without completing.
+    """
+    threshold = 0.3
+    entered = asyncio.Event()
+    released = asyncio.Event()
+
+    class _SecondCallHangs(_OkHandler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+            self.calls += 1
+            if self.calls == 2:
+                entered.set()
+                await released.wait()
+            return await super().handle_added_or_modified(md_path)
+
+    w = CascadeWorker(
+        {"episode": _SecondCallHangs()},
+        retry_backoff_seconds=0,
+        drain_stall_alert_seconds=threshold,
+        ledger=patched_repo,
+    )
+    patched_repo.batch = [_Row(md_path="first.md")]
+    assert await w.drain_once() == 1
+
+    await asyncio.sleep(threshold * 2)  # idle for longer than the threshold
+
+    patched_repo.batch = [_Row(md_path="second.md")]
+    task = asyncio.create_task(w.drain_once())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    try:
+        h = w.health()
+        assert h.inflight_rows == 1
+        assert h.reasons() == [], "idle time before the claim is not a stall"
+
+        await asyncio.sleep(threshold * 1.5)
+        reasons = w.health().reasons()
+        assert any("drain stalled" in r for r in reasons), reasons
+    finally:
+        released.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    assert w.health().reasons() == []

@@ -85,6 +85,23 @@ DRAIN_FAILURE_ALERT_THRESHOLD = 3
 """Consecutive :meth:`CascadeWorker.drain_once` exceptions at or above which
 :meth:`CascadeWorker.health` reports degraded — the md → LanceDB
 projection is not making progress, so accepted writes are not indexed."""
+DRAIN_STALL_ALERT_SECONDS = 120.0
+"""Seconds without any claimed row completing, while rows are in flight,
+before :meth:`CascadeWorker.health` reports the drain stalled.
+
+A hung handler does not raise, so the failure counter stays at zero while
+``drain_once`` waits for its batch to finish and later rows stay pending.
+This signal measures the gap between row completions while rows are in
+flight, so a slow but progressing batch stays quiet and a provider call that
+never returns becomes visible. The clock restarts when work begins after an
+idle period, so time spent idle never counts as a stall.
+
+A fixed value rather than a multiple of the poll interval: the poll interval
+is how long the worker waits between claims and says nothing about how long
+one row may take. One embedding call is given 30 s by the client timeout and
+is retried up to three times, so a single slow row can take about two minutes
+before the client gives up; 120 s sits at that edge.
+"""
 TERMINAL_WRITE_ATTEMPTS = 3
 """Attempts at the terminal ``mark_done`` / ``mark_failed`` write, the first
 included.
@@ -100,8 +117,11 @@ green (#548).
 
 Three attempts absorb a one-off lock without holding a handler slot for long:
 the backoff is one then two ``retry_backoff`` intervals (6s extra at the
-defaults), the same linear schedule the inline handler retries use, so a lock
-that persists stays a visible drain failure rather than a stranded row."""
+defaults), the same linear schedule the inline handler retries use. A lock
+that outlasts all three still leaves the row ``processing``: that drain ends
+as a drain failure, but the next drain that succeeds resets the failure count,
+so ``/health`` does not keep showing it. Reclaiming such a row needs a lease
+on the claim, which this retry does not add."""
 PRUNE_STALE_FACTOR = 3.0
 """Multiple of the prune interval without any successful prune before
 :meth:`CascadeWorker.health` reports degraded. The primary disk-bloat
