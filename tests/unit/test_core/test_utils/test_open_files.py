@@ -14,6 +14,8 @@ import pytest
 
 from everos.core.utils.open_files import (
     TARGET_SOFT_LIMIT,
+    WARN_BELOW,
+    low_limit_warning,
     raise_open_file_limit,
     raised_soft_limit,
 )
@@ -31,6 +33,23 @@ from everos.core.utils.open_files import (
 )
 def test_the_new_soft_limit(soft: int, hard: int, expected: int) -> None:
     assert raised_soft_limit(soft, hard) == expected
+
+
+@pytest.mark.parametrize(
+    ("limits", "warns"),
+    [
+        ((1024, 1024), True),  # hard limit 1024: could not raise
+        ((1024, WARN_BELOW - 1), True),
+        ((1024, WARN_BELOW), False),
+        ((1024, TARGET_SOFT_LIMIT), False),
+        (None, False),  # Windows
+    ],
+)
+def test_a_low_limit_is_reported(limits: tuple[int, int] | None, warns: bool) -> None:
+    message = low_limit_warning(limits)
+    assert (message is not None) == warns
+    if message:
+        assert "ulimit -n" in message and str(limits[1]) in message  # type: ignore[index]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no RLIMIT_NOFILE on Windows")
