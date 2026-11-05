@@ -18,3 +18,15 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
+    # These are pinned on purpose and upgraded by hand, together with the code
+    # changes the new version needs; a grouped bump of them has failed the test
+    # suite every time (#470, #523, #543, #559). Patch releases still come
+    # through. everalgo and lancedb are 0.x, where a minor release is the
+    # breaking one, so their minor bumps are skipped as well.
+    ignore:
+      - dependency-name: "everalgo-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "lancedb"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "openai"
+        update-types: ["version-update:semver-major"]

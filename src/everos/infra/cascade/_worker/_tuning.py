@@ -97,6 +97,23 @@ never returns becomes visible. Twenty intervals (20s at the default 1s poll)
 is long enough to ride out a slow embedding call; the value scales with the
 worker poll interval so the replay harness with short polls sees it too.
 """
+TERMINAL_WRITE_ATTEMPTS = 3
+"""Attempts at the terminal ``mark_done`` / ``mark_failed`` write, the first
+included.
+
+The terminal write is the only thing that moves a row out of ``processing``:
+the scanner skips a ``processing`` row whose mtime is unchanged, claiming
+takes only ``pending`` rows, and ``recover_orphan_processing`` runs at
+startup. A single transient SQLite failure (``database is locked`` past the
+busy timeout, contending with the watcher / scanner / a CLI ``cascade sync``)
+therefore leaves the row in ``processing`` until the process restarts or the
+md is edited — ``cascade status`` counts it pending and ``/health`` stays
+green (#548).
+
+Three attempts absorb a one-off lock without holding a handler slot for long:
+the backoff is one then two ``retry_backoff`` intervals (6s extra at the
+defaults), the same linear schedule the inline handler retries use, so a lock
+that persists stays a visible drain failure rather than a stranded row."""
 PRUNE_STALE_FACTOR = 3.0
 """Multiple of the prune interval without any successful prune before
 :meth:`CascadeWorker.health` reports degraded. The primary disk-bloat
