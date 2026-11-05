@@ -326,7 +326,8 @@ class OwnerDirStore(Protocol):
 
 @runtime_checkable
 class SessionBufferStore(Protocol):
-    """Messages received but not yet cut into memcells, per session."""
+    """Messages received but not yet cut into memcells, per session, and the
+    cut that turns some of them into memcells."""
 
     async def list(self, session: SessionKey) -> list[CanonicalMessage]: ...
 

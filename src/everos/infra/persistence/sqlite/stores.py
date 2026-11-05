@@ -64,7 +64,7 @@ _MAX_DETAIL_JSON_CHARS = 2000
 
 
 class SqliteSessionBufferStore:
-    """Session buffer + conversation status over ``unprocessed_buffer``.
+    """Session buffer, conversation status and the memcells cut from it.
 
     Args:
         buffer_repo: Repository of the ``unprocessed_buffer`` table.

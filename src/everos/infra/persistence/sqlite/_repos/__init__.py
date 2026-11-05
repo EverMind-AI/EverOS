@@ -1,4 +1,5 @@
-"""Business SQLite repositories, one per table.
+"""Business SQLite repositories, one per table, plus the session-scoped
+``SessionCutRepo`` / ``SessionPurgeRepo`` that span several in one transaction.
 
 Each is built over the session factory of the application's
 :class:`~everos.infra.persistence.sqlite.SqliteDatabase`.

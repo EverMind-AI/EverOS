@@ -87,8 +87,8 @@ class BoundaryDetection:
     Args:
         llm: Boundary-detection model; ``None`` leaves messages buffered.
         instructions: Custom instructions for the boundary operator.
-        session_buffer: The per-session buffer of uncut messages.
-        memcells: The memcell ledger.
+        session_buffer: The per-session buffer of uncut messages; it also
+            records the memcells cut from it.
         limits: Token / message counts past which cells are cut without the
             model.
         attempt_timeout: Seconds one model attempt may take; ``None`` for no

@@ -40,6 +40,24 @@ machinery that keeps a deleted memory from coming back.
   trailing whitespace or a control character (`422`). A daily-log file
   stores it as one trimmed line, so such an id was read back as another one
   and could not be matched by a session filter or deleted.
+- A SQLite write that waited out `[sqlite] busy_timeout_ms` on another
+  writer's lock answers `503 EXTERNAL_SERVICE_UNAVAILABLE` with the fixed
+  message `"database is busy"` (retryable) instead of an unhandled `500`; the
+  failed statement, without its values, is logged as
+  `sqlite_lock_wait_timed_out`. A queued `/add` failing that way records
+  `last_error` `"StorageError: database is busy"`.
+- Server log tracebacks are plain text (innermost 15 frames, no locals)
+  instead of rich's syntax-highlighted rendering, which blocked the event
+  loop for seconds per exception on a loaded host. CLI and TUI logs share
+  the same configuration.
+
+### Fixed
+
+- `/add` and `/flush` no longer leave half-written state when a SQLite write
+  lock times out: boundary detection records the memcells, the session's
+  status and the remaining buffer in one transaction. Before, a timeout at
+  the second or third write left memcells that were never extracted, or
+  buffered messages behind a `500` the caller could not act on.
 
 ### Fixed
 
