@@ -41,6 +41,17 @@ machinery that keeps a deleted memory from coming back.
   stores it as one trimmed line, so such an id was read back as another one
   and could not be matched by a session filter or deleted.
 
+### Fixed
+
+- **On Windows, reading a memory file no longer fails while another write
+  replaces it.** An `open` that races `os.replace` of the same file can be
+  refused for a moment (`PermissionError`, errno 13). Writes already waited
+  that out; reads did not, so a deletion could fail with
+  `DeletionIncompleteError` (`500`) and a cascade projection could fail
+  permanently. Every markdown read now goes through
+  `MarkdownReader.read_text`, which retries with the writer's budget
+  (about 2.5 s). Other platforms are unaffected.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME

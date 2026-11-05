@@ -223,7 +223,7 @@ class MarkdownOwnerDirStore:
                 continue
             async for path in folder.glob("*.md"):
                 try:
-                    if needle in await path.read_text(encoding="utf-8"):
+                    if needle in await MarkdownReader.read_text(path):
                         return True
                 except FileNotFoundError:
                     continue

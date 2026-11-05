@@ -43,7 +43,7 @@ from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import KnowledgeCategory, KnowledgeDocument, KnowledgeMemory
 from everos.memory.ports import WrittenDocument
 
-from ._base import dump_frontmatter, parse_frontmatter, sanitize_dirname
+from ._base import MarkdownReader, dump_frontmatter, parse_frontmatter, sanitize_dirname
 from ._readers import ensure_taxonomy, parse_taxonomy
 from ._writers import KnowledgeWriter
 
@@ -151,7 +151,7 @@ class MarkdownKnowledgeStore:
         index = await _locate_index(self._knowledge_dir(app_id, project_id), doc_id)
         if index is None:
             return None
-        fm, _ = parse_frontmatter(await anyio.Path(index).read_text(encoding="utf-8"))
+        fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
         return KnowledgeDocument(
             doc_id=doc_id,
             app_id=app_id,
@@ -259,7 +259,7 @@ async def _locate_index(knowledge_dir: Path, doc_id: str) -> Path | None:
     if not await adir.exists():
         return None
     async for index in adir.rglob(_INDEX_FILE):
-        fm, _ = parse_frontmatter(await index.read_text(encoding="utf-8"))
+        fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
         if fm.get("doc_id") == doc_id:
             return Path(str(index))
     return None
@@ -298,7 +298,7 @@ async def _rewrite_frontmatter(
 ) -> dict[str, object]:
     """Apply ``updates`` to one file's frontmatter; returns the previous one."""
     apath = anyio.Path(path)
-    fm, body = parse_frontmatter(await apath.read_text(encoding="utf-8"))
+    fm, body = parse_frontmatter(await MarkdownReader.read_text(apath))
     previous = dict(fm)
     if any(fm.get(k) != v for k, v in updates.items()):
         fm.update(updates)
