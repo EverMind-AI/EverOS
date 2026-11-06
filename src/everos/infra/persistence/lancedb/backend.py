@@ -337,9 +337,6 @@ class LanceIndexBackend:
                 raise
             logger.info("table_schema_migration_done", version=_TABLE_SCHEMA_VERSION)
 
-    # TODO(#477): BTree scalar index on `id` for the business tables — a 4x
-    # win on keyed lookups at 100k rows, but it must join rebuild_indexes()
-    # and `cascade rebuild` first and be soaked for index-directory growth.
     async def ensure_business_indexes(self) -> None:
         """Ensure FTS (BM25) indexes for every business table (idempotent).
 
@@ -372,7 +369,9 @@ class LanceIndexBackend:
         await self.migrate_fts_indexes()
         for schema in self._schemas:
             table = await self._open(schema)
-            await indexes.ensure_fts_indexes(table, self._index_schema(schema))
+            index_schema = self._index_schema(schema)
+            await indexes.ensure_fts_indexes(table, index_schema)
+            await indexes.ensure_scalar_indexes(table, index_schema)
 
     async def verify_business_schemas(self) -> None:
         """Fail loud at startup if an existing LanceDB table's columns don't
