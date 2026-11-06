@@ -32,6 +32,7 @@ from typing import Any
 from everos.config import AsyncQueueSettings
 from everos.core.context import reset_request_id, set_request_id
 from everos.core.errors import (
+    BoundaryLLMError,
     InvalidInputError,
     PayloadTooLargeError,
     QueueSaturatedError,
@@ -200,7 +201,12 @@ async def _deliver_with_retries(
     cfg: AsyncQueueSettings,
 ) -> None:
     assert row.id is not None
-    for attempt in range(1, cfg.max_attempts + 1):
+    # Boundary LLM failures happen before any state is written, so they get
+    # their own retry budget; every other failure keeps the caller's
+    # max_attempts (default 1) because a re-run is not replay-safe after the
+    # memcell/buffer write.
+    max_attempts = max(cfg.max_attempts, cfg.boundary_max_attempts)
+    for attempt in range(1, max_attempts + 1):
         try:
             # Inside the try: a row whose body was hand-edited into
             # garbage fails with that reason, not the whole pass.
@@ -212,7 +218,12 @@ async def _deliver_with_retries(
             )
         except Exception as exc:
             error = error_summary(exc)
-            if attempt < cfg.max_attempts:
+            attempts = (
+                cfg.boundary_max_attempts
+                if isinstance(exc, BoundaryLLMError)
+                else cfg.max_attempts
+            )
+            if attempt < attempts:
                 await mark(
                     row.id,
                     status="processing",
