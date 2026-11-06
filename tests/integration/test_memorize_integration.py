@@ -77,7 +77,7 @@ async def memorize_env(
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
 
-    started: dict[str, Any] = {"engine": None}
+    started: dict[str, Any] = {"application": None}
 
     async def _setup(
         *,
@@ -126,14 +126,13 @@ async def memorize_env(
             providers=make_providers(llm=fake_llm),
         )
         _under_test["memory"] = application.memory
-        engine = application._engine
-        await engine.start()
-        started["engine"] = engine
+        await application.start()
+        started["application"] = application
 
     yield _setup
 
-    if started["engine"] is not None:
-        await started["engine"].stop()
+    if started["application"] is not None:
+        await started["application"].aclose()
 
 
 # ---------------------------------------------------------------------------
