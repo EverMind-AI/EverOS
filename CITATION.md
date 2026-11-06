@@ -9,20 +9,40 @@ citation forms are below.
 
 ## Paper
 
-📄 **Paper coming soon** — a technical paper is in preparation.
+📄 **EverMemOS: A Self-Organizing Memory Operating System for Structured Long-Horizon Reasoning**
 
-```
-Coming soon
-```
+Published in *Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (ACL 2026), Volume 1: Long Papers*.
 
-BibTeX citation information will be added here once the paper is published.
+- ACL Anthology: https://aclanthology.org/2026.acl-long.2125/
+- arXiv: https://arxiv.org/abs/2601.02163
 
 ---
 
 ## BibTeX
 
 ```bibtex
-% Will be added when the paper is published
+@inproceedings{hu-etal-2026-evermemos,
+    title = "{E}ver{M}em{OS}: A Self-Organizing Memory Operating System for Structured Long-Horizon Reasoning",
+    author = "Hu, Chuanrui and
+      Gao, Xingze and
+      Zhou, Zuyi and
+      Xu, Dannong and
+      Bai, Yi and
+      Li, Xintong and
+      Zhang, Hui and
+      Li, Tong and
+      Zhang, Chong and
+      Bing, Lidong and
+      Deng, Yafeng",
+    booktitle = "Proceedings of the 64th Annual Meeting of the {A}ssociation for {C}omputational {L}inguistics (Volume 1: Long Papers)",
+    month = jul,
+    year = "2026",
+    address = "San Diego, California, United States",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2026.acl-long.2125/",
+    doi = "10.18653/v1/2026.acl-long.2125",
+    pages = "45836--45853"
+}
 ```
 
 ---
@@ -44,7 +64,7 @@ License: Apache 2.0
 
 If you use EverOS, we appreciate:
 
-- Citing the paper (when available)
+- Citing the paper
 - Starring the GitHub repository
 - Mentioning EverOS in your acknowledgments section
 
@@ -52,7 +72,7 @@ If you use EverOS, we appreciate:
 
 ## Stay updated
 
-- Watch the [GitHub repository](https://github.com/EverMind-AI/everos) for paper announcements
+- Watch the [GitHub repository](https://github.com/EverMind-AI/everos) for updates
 - Follow [@EverMindAI](https://x.com/EverMindAI) on X / Twitter
 - Join [GitHub Discussions](https://github.com/EverMind-AI/everos/discussions)
 
