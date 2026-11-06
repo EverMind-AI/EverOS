@@ -43,6 +43,10 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- A second server using the same memory root now refuses startup before
+  opening shared storage or resetting active cascade claims (#545). The
+  existing exclusive lock stays held through storage shutdown.
+
 - **On Windows, reading a memory file no longer fails while another write
   replaces it.** An `open` that races `os.replace` of the same file can be
   refused for a moment (`PermissionError`, errno 13). Writes already waited

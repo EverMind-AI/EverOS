@@ -291,3 +291,70 @@ async def test_a_failing_stop_does_not_skip_the_rest(tmp_path: Path) -> None:
     await application.aclose()
 
     assert events == ["memory.aclose", "ops.aclose", "index.close", "sqlite.dispose"]
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancellation"])
+async def test_failed_start_releases_the_root_lock(
+    tmp_path: Path, cancel: bool
+) -> None:
+    """Fail before OME starts; a later process must be able to take the root."""
+    import asyncio
+    import dataclasses
+
+    from everos.infra.ome import OmeLock
+    from tests.fakes.application import StubAdmin
+
+    error = asyncio.CancelledError if cancel else RuntimeError
+
+    class BrokenAdmin(StubAdmin):
+        async def start_index(self) -> None:
+            assert not OmeLock(application._root.ome_db).is_free()
+            raise error("startup interrupted")
+
+    events: list[str] = []
+    application = make_application(root=tmp_path, lifecycle=events)
+    application = dataclasses.replace(application, _admin=BrokenAdmin(events))
+    with pytest.raises(error):
+        await application.start()
+    assert OmeLock(application._root.ome_db).is_free()
+    assert events[-2:] == ["index.close", "sqlite.dispose"]
+
+
+async def test_cancelling_close_keeps_the_lock_until_cleanup_finishes(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    from everos.infra.ome import OmeLock
+    from tests.fakes.application import StubOpsService
+
+    entered = asyncio.Event()
+    proceed = asyncio.Event()
+
+    class SlowOps(StubOpsService):
+        async def aclose(self) -> None:
+            entered.set()
+            await proceed.wait()
+            await super().aclose()
+
+    events: list[str] = []
+    application = make_application(
+        root=tmp_path, lifecycle=events, ops=SlowOps(lifecycle=events)
+    )
+    await application.start()
+    closing = asyncio.create_task(application.aclose())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        for _ in range(2):
+            closing.cancel()
+            await asyncio.sleep(0)  # Deliver cancellation, not a timing estimate.
+            assert not OmeLock(application._root.ome_db).is_free()
+        proceed.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(closing, timeout=2)
+        assert events[-3:] == ["ops.aclose", "index.close", "sqlite.dispose"]
+        assert OmeLock(application._root.ome_db).is_free()
+    finally:
+        proceed.set()
+        await asyncio.gather(closing, return_exceptions=True)
+        await application.aclose()
