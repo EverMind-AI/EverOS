@@ -751,12 +751,18 @@ class _MdRows:
         self.run = run
         self.pending: list[Any] = []
         self.in_flight = 0
+        self.by_path: dict[str, Any] = {}
+
+    async def read_one(self, md_path: str) -> Any | None:
+        return self.by_path.get(md_path)
 
     async def claim_pending_batch(
         self, limit: int = 100, *, kinds: set[str] | None = None
     ) -> list[Any]:
         batch, self.pending = self.pending[:limit], self.pending[limit:]
         self.in_flight += len(batch)
+        for row in batch:
+            self.by_path[row.md_path] = row
         return batch
 
     async def mark_done(self, md_path: str, **_: Any) -> None:
@@ -861,6 +867,9 @@ async def _jittered_maintenance(
                             kind=kind,
                             change_type="modified",
                             retry_count=0,
+                            lsn=1,
+                            status="processing",
+                            mtime=0.0,
                         )
                     )
                 else:
