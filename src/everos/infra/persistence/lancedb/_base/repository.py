@@ -787,13 +787,16 @@ class LanceRepoBase[T: IndexRecord]:
             # ``return_exceptions``, so the whole search request 500s. Only
             # indexes on columns that are no longer indexed at all get dropped;
             # nothing queries those, so their drop opens no window.
-            wanted = set(self.index_schema.bm25_fields) | {
-                field.name for field in self.index_schema.vector_fields
-            }
+            wanted = (
+                set(self.index_schema.bm25_fields)
+                | {field.name for field in self.index_schema.vector_fields}
+                | {"id"}
+            )
             for idx in await table.list_indices():
                 if not wanted.intersection(idx.columns or ()):
                     await table.drop_index(idx.name)
             await indexes.ensure_fts_indexes(table, self.index_schema, replace=True)
+            await indexes.ensure_scalar_indexes(table, self.index_schema, replace=True)
             await indexes.ensure_vector_indexes(
                 table, self.index_schema, min_rows=_vector_index_min_rows()
             )
