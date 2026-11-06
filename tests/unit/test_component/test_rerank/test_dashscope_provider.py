@@ -31,13 +31,52 @@ def _ok_response(items: list[dict[str, float | int]]) -> httpx.Response:
     return httpx.Response(200, json={"output": {"results": items}})
 
 
-def test_only_gte_rerank_v2_is_supported() -> None:
-    with pytest.raises(ValueError, match="gte-rerank-v2 only"):
+def test_unsupported_model_rejected() -> None:
+    with pytest.raises(ValueError, match="supports"):
         DashScopeRerankProvider(
-            model="qwen3-rerank",
+            model="gte-rerank",
             api_key="k",
             base_url="https://dashscope.aliyuncs.com",
         )
+
+
+async def test_qwen3_rerank_forwards_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_bodies: list[dict[str, object]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_bodies.append(json.loads(req.content))
+        return _ok_response([{"index": 0, "relevance_score": 0.5}])
+
+    _patch_httpx(monkeypatch, handler)
+    p = DashScopeRerankProvider(
+        model="qwen3-rerank",
+        api_key="k",
+        base_url="https://dashscope-intl.aliyuncs.com",
+    )
+    await p.rerank("q", ["a"], instruction="judge it")
+    await p.rerank("q", ["a"])
+    assert seen_bodies[0]["model"] == "qwen3-rerank"
+    assert seen_bodies[0]["parameters"]["instruct"] == "judge it"
+    assert "instruct" not in seen_bodies[1]["parameters"]
+
+
+async def test_gte_rerank_v2_never_sends_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_bodies: list[dict[str, object]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_bodies.append(json.loads(req.content))
+        return _ok_response([{"index": 0, "relevance_score": 0.5}])
+
+    _patch_httpx(monkeypatch, handler)
+    p = DashScopeRerankProvider(
+        model="gte-rerank-v2", api_key="k", base_url="https://dashscope.aliyuncs.com"
+    )
+    await p.rerank("q", ["a"], instruction="judge it")
+    assert "instruct" not in seen_bodies[0]["parameters"]
 
 
 async def test_empty_documents_short_circuits(monkeypatch: pytest.MonkeyPatch) -> None:
