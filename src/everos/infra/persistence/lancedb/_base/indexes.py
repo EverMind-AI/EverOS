@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lancedb import AsyncTable
-from lancedb.index import FTS, IvfFlat
+from lancedb.index import FTS, BTree, IvfFlat
 
 if TYPE_CHECKING:
     from everos.infra.persistence.index.schema import IndexSchema
@@ -103,6 +103,24 @@ async def ensure_fts_indexes(
                 ascii_folding=True,
             ),
         )
+
+
+async def ensure_scalar_indexes(
+    table: AsyncTable, schema: IndexSchema, *, replace: bool = False
+) -> None:
+    """Create the BTree scalar index on ``id`` for a business table.
+
+    Without it every keyed lookup and every ``merge_insert`` match is a
+    full scan: at 100k rows a scoped point lookup measured 3.6 ms -> 0.8 ms
+    and a 100-row multi-column merge 11.2 ms -> 3.6 ms with the BTree
+    (issue #477). Idempotent; ``replace=True`` rebuilds it in place for
+    :meth:`LanceRepoBase.rebuild_indexes`, matching the FTS path.
+    """
+    indices = await table.list_indices()
+    indexed_cols = {col for idx in indices for col in (idx.columns or [])}
+    if "id" in indexed_cols and not replace:
+        return
+    await table.create_index("id", replace=replace, config=BTree())
 
 
 async def ensure_vector_indexes(
