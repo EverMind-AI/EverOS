@@ -57,7 +57,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         agent_case=MarkdownAgentCaseStore(root),
         agent_skill=MarkdownAgentSkillStore(root),
         session_buffer=SqliteSessionBufferStore(
-            sqlite.unprocessed_buffer, sqlite.conversation_status
+            sqlite.unprocessed_buffer, sqlite.session_cut
         ),
         memcell=SqliteMemcellStore(sqlite.memcell),
         cluster=SqliteClusterStore(sqlite.cluster),

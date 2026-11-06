@@ -52,6 +52,8 @@ cache_size_kb = 2048
 # Rows (with a non-null vector) before a table's vector columns get an
 # IVF_FLAT index. Below it every vector query scans the whole column.
 # vector_index_min_rows = 2000
+# Search queries one process runs on LanceDB at once; the rest wait.
+# max_concurrent_queries = 32
 
 [index]
 # Rebuildable vector/BM25 index. Markdown remains the source of truth.

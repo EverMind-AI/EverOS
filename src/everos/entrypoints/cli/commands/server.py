@@ -17,6 +17,7 @@ import uvicorn
 from everos.config import load_settings
 from everos.config.settings import resolve_root
 from everos.core.observability.logging import get_logger
+from everos.core.utils.open_files import low_limit_warning, raise_open_file_limit
 from everos.service import configure_process
 
 app = typer.Typer(
@@ -102,6 +103,11 @@ def start(
 
     bootstrap_logger = get_logger("everos.cli.server")
     bootstrap_logger.info("starting everos on %s:%d", host_resolved, port_resolved)
+    limits = raise_open_file_limit()
+    if limits is not None:
+        bootstrap_logger.info("open-file soft limit %d -> %d", *limits)
+    if warning := low_limit_warning(limits):
+        bootstrap_logger.warning(warning)
     bootstrap_logger.info(
         "once up, MCP clients connect with: uvx everos-mcp, "
         "EVEROS_BASE_URL=%s (guide: %s)",

@@ -13,7 +13,7 @@ import asyncio
 import datetime as dt
 import time
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -281,6 +281,10 @@ class TableSource(Protocol):
 
     async def table(self, name: str, arrow_schema: pa.Schema) -> AsyncTable: ...
 
+    def query_slot(self) -> AbstractAsyncContextManager[None]:
+        """One of the process's search-query slots, held while a query runs."""
+        ...
+
 
 class LanceRepoBase[T: IndexRecord]:
     """Generic CRUD repository for one LanceDB table.
@@ -509,6 +513,27 @@ class LanceRepoBase[T: IndexRecord]:
             return self._table_override
         assert self._source is not None
         return await self._source.table(self.schema.TABLE_NAME, self.arrow_schema)
+
+    async def _rows(self, query: Any, *, with_vectors: bool) -> list[dict[str, Any]]:
+        """Run ``query`` and return its rows as dicts.
+
+        Without ``with_vectors`` the schema's vector columns are dropped from
+        the Arrow result before it becomes Python objects. That conversion
+        runs on the event loop, and two 1024-float vectors per row were most
+        of the loop's busy time under a search-heavy soak (2026-11), while
+        every search caller discarded them.
+        """
+        slot = self._source.query_slot() if self._source is not None else nullcontext()
+        async with slot:
+            table = await query.to_arrow()
+        if not with_vectors:
+            present = set(table.column_names)
+            drop = [
+                f.name for f in self.index_schema.vector_fields if f.name in present
+            ]
+            if drop:
+                table = table.drop_columns(drop)
+        return table.to_pylist()
 
     def _to_arrow(self, records: Sequence[T]) -> pa.Table:
         self._check_vector_widths(records)
@@ -952,6 +977,7 @@ class LanceRepoBase[T: IndexRecord]:
         vector: Sequence[float] | None = None,
         where: str | None = None,
         limit: int = 10,
+        with_vectors: bool = False,
     ) -> list[dict[str, Any]]:
         """Hybrid search: optional vector ANN + scalar SQL-like predicate.
 
@@ -959,6 +985,7 @@ class LanceRepoBase[T: IndexRecord]:
             vector: Embedding to find nearest rows for; ``None`` skips ANN.
             where: SQL-like predicate (e.g. ``"tags = 'meeting'"``).
             limit: Max rows.
+            with_vectors: Keep the vector columns in the rows.
 
         Returns:
             List of row dicts (LanceDB native shape — fields depend on
@@ -971,7 +998,7 @@ class LanceRepoBase[T: IndexRecord]:
                 q = q.nearest_to(list(vector))
             if where is not None:
                 q = q.where(where)
-            return await q.limit(limit).to_list()
+            return await self._rows(q.limit(limit), with_vectors=with_vectors)
 
     # ── Update ─────────────────────────────────────────────────────────────
 

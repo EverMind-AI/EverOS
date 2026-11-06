@@ -11,17 +11,32 @@ from __future__ import annotations
 __all__ = ["LanceDbConnection"]
 
 import asyncio
-from collections.abc import Sequence
+import time
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
 import pyarrow as pa
 from lancedb import AsyncConnection, AsyncTable
 
 from everos.config import LanceDBSettings
 from everos.core.observability.logging import get_logger
+from everos.core.observability.metrics import Gauge, Histogram
 from everos.infra.persistence.lancedb._base.connection import open_lancedb_connection
 from everos.infra.persistence.memory_root import MemoryRoot
 
 logger = get_logger(__name__)
+
+_query_wait_seconds = Histogram(
+    name="lancedb_query_wait_seconds",
+    description="Time a search query waited for a LanceDB query slot.",
+    namespace="everos",
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
+)
+_queries_in_flight = Gauge(
+    name="lancedb_queries_in_flight",
+    description="LanceDB search queries holding a slot now.",
+    namespace="everos",
+)
 
 
 class LanceDbConnection:
@@ -38,6 +53,8 @@ class LanceDbConnection:
         self._conn: AsyncConnection | None = None
         self._tables: dict[str, AsyncTable] = {}
         self._lock = asyncio.Lock()
+        self._slots: asyncio.Semaphore | None = None
+        self._slots_loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def root(self) -> MemoryRoot:
@@ -48,6 +65,29 @@ class LanceDbConnection:
         """Open the connection if it is not open yet; return it."""
         async with self._lock:
             return await self._ensure_connection_locked()
+
+    @asynccontextmanager
+    async def query_slot(self) -> AsyncIterator[None]:
+        """Hold one of ``max_concurrent_queries`` search-query slots."""
+        slots = self._slots_of_running_loop()
+        started = time.monotonic()
+        async with slots:
+            _query_wait_seconds.observe(time.monotonic() - started)
+            _queries_in_flight.inc()
+            try:
+                yield
+            finally:
+                _queries_in_flight.dec()
+
+    def _slots_of_running_loop(self) -> asyncio.Semaphore:
+        """The slots, made anew when the running loop is not theirs: a
+        semaphore that ever had a waiter is bound to that loop (see
+        ``everos.core.locks``)."""
+        loop = asyncio.get_running_loop()
+        if self._slots is None or loop is not self._slots_loop:
+            self._slots = asyncio.Semaphore(self._settings.max_concurrent_queries)
+            self._slots_loop = loop
+        return self._slots
 
     async def table(self, name: str, arrow_schema: pa.Schema) -> AsyncTable:
         """Open the named table (creating it with ``arrow_schema`` if missing).

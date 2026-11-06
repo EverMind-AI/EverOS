@@ -62,9 +62,16 @@ class InMemoryVectorTable:
         self.fail_update: set[str] = set()
         self.fail_optimize = False
 
-    async def scan(self, where: Filter | None = None) -> list[BaseModel]:
+    async def scan(
+        self, where: Filter | None = None, *, with_vectors: bool = False
+    ) -> list[BaseModel]:
+        """Like the real backends: vector fields come back only when asked."""
         return [
-            _Record(**row) for row in self.rows if where is None or matches(where, row)
+            _Record(
+                **{k: v for k, v in row.items() if with_vectors or "vector" not in k}
+            )
+            for row in self.rows
+            if where is None or matches(where, row)
         ]
 
     async def update(self, updates: dict[str, Any], *, where: Filter) -> None:

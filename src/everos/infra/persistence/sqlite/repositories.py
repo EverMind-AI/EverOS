@@ -8,13 +8,13 @@ from dataclasses import dataclass
 
 from ._repos import (
     ClusterRepo,
-    ConversationStatusRepo,
     KnowledgeDocumentRepo,
     KnowledgeTopicRowRepo,
     MdChangeStateRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
@@ -26,13 +26,13 @@ class SqliteRepos:
     """The repositories of every business table in one ``system.db``."""
 
     cluster: ClusterRepo
-    conversation_status: ConversationStatusRepo
     knowledge_document: KnowledgeDocumentRepo
     knowledge_topic: KnowledgeTopicRowRepo
     md_change_state: MdChangeStateRepo
     memcell: MemcellRepo
     memorize_inbox: MemorizeInboxRepo
     reflection_report: ReflectionReportRepo
+    session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
     unprocessed_buffer: UnprocessedBufferRepo
 
@@ -42,13 +42,13 @@ class SqliteRepos:
         factory = database.session_factory
         return cls(
             cluster=ClusterRepo(factory),
-            conversation_status=ConversationStatusRepo(factory),
             knowledge_document=KnowledgeDocumentRepo(factory),
             knowledge_topic=KnowledgeTopicRowRepo(factory),
             md_change_state=MdChangeStateRepo(factory),
             memcell=MemcellRepo(factory),
             memorize_inbox=MemorizeInboxRepo(factory),
             reflection_report=ReflectionReportRepo(factory),
+            session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),
             unprocessed_buffer=UnprocessedBufferRepo(factory),
         )

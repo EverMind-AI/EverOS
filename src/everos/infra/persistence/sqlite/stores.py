@@ -41,10 +41,10 @@ from everos.memory.ports import OwnerType, PageResult, Scope, SessionKey
 
 from ._repos import (
     ClusterRepo,
-    ConversationStatusRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
@@ -64,20 +64,21 @@ _MAX_DETAIL_JSON_CHARS = 2000
 
 
 class SqliteSessionBufferStore:
-    """Session buffer + conversation status over ``unprocessed_buffer``.
+    """Session buffer, conversation status and the memcells cut from it.
 
     Args:
         buffer_repo: Repository of the ``unprocessed_buffer`` table.
-        status_repo: Repository of the ``conversation_status`` table.
+        cut_repo: Writes the buffer, its status and new memcells in one
+            transaction.
     """
 
     def __init__(
         self,
         buffer_repo: UnprocessedBufferRepo,
-        status_repo: ConversationStatusRepo,
+        cut_repo: SessionCutRepo,
     ) -> None:
         self._buffer = buffer_repo
-        self._status = status_repo
+        self._cut = cut_repo
 
     async def list(self, session: SessionKey) -> list[CanonicalMessage]:
         rows = await self._buffer.list_for_track(
@@ -88,15 +89,38 @@ class SqliteSessionBufferStore:
         )
         return [_row_to_message(row) for row in rows]
 
-    async def replace(
-        self, session: SessionKey, messages: Sequence[CanonicalMessage]
+    async def keep(
+        self,
+        session: SessionKey,
+        messages: Sequence[CanonicalMessage],
+        *,
+        last_message_ts: dt.datetime,
     ) -> None:
-        await self._buffer.replace(
+        await self._cut.keep(
             session.session_id,
             _SESSION_TRACK,
             [_message_to_row(m, session) for m in messages],
             app_id=session.app_id,
             project_id=session.project_id,
+            last_message_ts=last_message_ts,
+        )
+
+    async def cut(
+        self,
+        session: SessionKey,
+        records: Sequence[MemcellRecord],
+        *,
+        tail: Sequence[CanonicalMessage],
+        last_memcell_ts: dt.datetime | None,
+    ) -> None:
+        await self._cut.cut(
+            session.session_id,
+            _SESSION_TRACK,
+            [_record_to_row(r, session) for r in records],
+            [_message_to_row(m, session) for m in tail],
+            app_id=session.app_id,
+            project_id=session.project_id,
+            last_memcell_ts=last_memcell_ts,
         )
 
     async def quarantine(
@@ -107,24 +131,6 @@ class SqliteSessionBufferStore:
             _SESSION_TRACK,
             _QUARANTINE_TRACK,
             [_message_to_row(m, session) for m in extra],
-            app_id=session.app_id,
-            project_id=session.project_id,
-        )
-
-    async def touch_last_message(self, session: SessionKey, ts: dt.datetime) -> None:
-        await self._status.touch_last_message_ts(
-            session.session_id,
-            _SESSION_TRACK,
-            ts,
-            app_id=session.app_id,
-            project_id=session.project_id,
-        )
-
-    async def touch_last_memcell(self, session: SessionKey, ts: dt.datetime) -> None:
-        await self._status.touch_last_memcell_ts(
-            session.session_id,
-            _SESSION_TRACK,
-            ts,
             app_id=session.app_id,
             project_id=session.project_id,
         )

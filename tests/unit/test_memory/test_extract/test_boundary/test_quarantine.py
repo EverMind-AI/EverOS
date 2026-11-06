@@ -32,15 +32,11 @@ from everos.config import BoundaryDetectionSettings, SqliteSettings
 from everos.core.errors import LLMServiceError, SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
-    SqliteMemcellStore,
     SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite._repos.conversation_status import (
-    ConversationStatusRepo,
-)
-from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._repos.session_cut import SessionCutRepo
 from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
@@ -76,9 +72,8 @@ class _Stage:
             llm=self.llm,
             instructions=bundled_instructions(),
             session_buffer=SqliteSessionBufferStore(
-                self.buffer, ConversationStatusRepo(session_factory=self.factory)
+                self.buffer, SessionCutRepo(session_factory=self.factory)
             ),
-            memcells=SqliteMemcellStore(MemcellRepo(session_factory=self.factory)),
             limits=BoundaryDetectionSettings(
                 hard_token_limit=10_000, hard_msg_limit=100
             ),

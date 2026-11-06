@@ -65,10 +65,8 @@ from everos.infra.persistence.sqlite import (
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite._repos.conversation_status import (
-    ConversationStatusRepo,
-)
 from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
+from everos.infra.persistence.sqlite._repos.session_cut import SessionCutRepo
 from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
@@ -181,7 +179,7 @@ async def _jittered(
         await conn.run_sync(SQLModel.metadata.create_all)
     buffer_repo = UnprocessedBufferRepo(session_factory=factory)
     memcell_repo = MemcellRepo(session_factory=factory)
-    status_repo = ConversationStatusRepo(session_factory=factory)
+    cut_repo = SessionCutRepo(session_factory=factory)
     base = load_settings()
     cfg = base.model_copy(
         update={
@@ -192,7 +190,7 @@ async def _jittered(
     )
     pipeline = SimpleNamespace(run_cell=run.pipeline_run_cell)
     stores = make_stores(
-        session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo),
+        session_buffer=SqliteSessionBufferStore(buffer_repo, cut_repo),
         memcell=SqliteMemcellStore(memcell_repo),
     )
     memorize_mod = make_memory_service(
@@ -201,7 +199,6 @@ async def _jittered(
             llm=FakeLLMClient(handler=run.reply),
             instructions=bundled_instructions(),
             session_buffer=stores.session_buffer,
-            memcells=stores.memcell,
             limits=cfg.boundary_detection,
             attempt_timeout=lock_timeout,
         ),

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from everalgo.types import ChatMessage, MemCell, ToolCallResult
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 
@@ -28,14 +29,12 @@ from everos.infra.persistence.sqlite import (
     create_system_engine,
 )
 from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
-from everos.infra.persistence.sqlite._repos.conversation_status import (
-    ConversationStatusRepo,
-)
 from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite._repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite._repos.reflection_report import (
     ReflectionReportRepo,
 )
+from everos.infra.persistence.sqlite._repos.session_cut import SessionCutRepo
 from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
@@ -85,7 +84,7 @@ async def stores(tmp_path: Path) -> AsyncIterator[_Stores]:
     stores = _Stores(
         buffer=SqliteSessionBufferStore(
             UnprocessedBufferRepo(session_factory=factory),
-            ConversationStatusRepo(session_factory=factory),
+            SessionCutRepo(session_factory=factory),
         ),
         memcell=SqliteMemcellStore(MemcellRepo(session_factory=factory)),
         cluster=SqliteClusterStore(ClusterRepo(session_factory=factory)),
@@ -124,7 +123,7 @@ async def test_session_buffer_round_trips_messages(stores: _Stores) -> None:
     tool_call = ToolCall(id="t1", function={"name": "f", "arguments": "{}"})
     messages = [_message("m2", 2, tool_calls=[tool_call]), _message("m1", 1)]
 
-    await stores.buffer.replace(_SESSION, messages)
+    await stores.buffer.keep(_SESSION, messages, last_message_ts=messages[0].timestamp)
     loaded = await stores.buffer.list(_SESSION)
 
     assert loaded == sorted(messages, key=lambda m: m.timestamp)
@@ -135,7 +134,8 @@ async def test_session_buffer_round_trips_messages(stores: _Stores) -> None:
 async def test_session_buffer_quarantine_sets_the_buffer_aside(
     stores: _Stores,
 ) -> None:
-    await stores.buffer.replace(_SESSION, [_message("m1", 1)])
+    m1 = _message("m1", 1)
+    await stores.buffer.keep(_SESSION, [m1], last_message_ts=m1.timestamp)
 
     moved = await stores.buffer.quarantine(_SESSION, [_message("m2", 2)])
 
@@ -143,11 +143,125 @@ async def test_session_buffer_quarantine_sets_the_buffer_aside(
     assert await stores.buffer.list(_SESSION) == []
 
 
-async def test_session_status_touches_do_not_raise(stores: _Stores) -> None:
-    now = get_utc_now()
+async def _status(stores: _Stores) -> tuple[object, object] | None:
+    """``(last_message_ts, last_memcell_ts)`` of ``_SESSION``, or ``None``."""
+    async with stores.factory() as s:
+        row = (
+            await s.execute(
+                text(
+                    "SELECT last_message_ts, last_memcell_ts FROM conversation_status"
+                    " WHERE app_id = 'app' AND project_id = 'proj'"
+                    " AND session_id = 's1'"
+                )
+            )
+        ).first()
+    return None if row is None else (row[0], row[1])
 
-    await stores.buffer.touch_last_message(_SESSION, now)
-    await stores.buffer.touch_last_memcell(_SESSION, now)
+
+async def _memcell_ids(stores: _Stores) -> list[str]:
+    async with stores.factory() as s:
+        return list((await s.execute(text("SELECT memcell_id FROM memcell"))).scalars())
+
+
+def _record(memcell_id: str, *messages: CanonicalMessage) -> MemcellRecord:
+    cell = MemCell(
+        items=[
+            ChatMessage(
+                id=m.message_id,
+                role="user",
+                content=m.text,
+                sender_id="u1",
+                timestamp=int(m.timestamp.timestamp() * 1000),
+            )
+            for m in messages
+        ],
+        timestamp=int(messages[-1].timestamp.timestamp() * 1000),
+    )
+    return MemcellRecord(
+        memcell_id=memcell_id,
+        cell=cell,
+        raw_type="conversation",
+        message_ids=[m.message_id for m in messages],
+        sender_ids=["u1"],
+    )
+
+
+async def test_keep_buffers_messages_and_stamps_the_last_message(
+    stores: _Stores,
+) -> None:
+    m1, m2 = _message("m1", 1), _message("m2", 2)
+
+    await stores.buffer.keep(_SESSION, [m2, m1], last_message_ts=m2.timestamp)
+
+    assert await stores.buffer.list(_SESSION) == [m1, m2]
+    status = await _status(stores)
+    assert status is not None
+    assert status[0] is not None and status[1] is None
+
+
+async def test_cut_records_the_cells_and_buffers_only_the_tail(
+    stores: _Stores,
+) -> None:
+    m1, m2, m3 = _message("m1", 1), _message("m2", 2), _message("m3", 3)
+    await stores.buffer.keep(_SESSION, [m1, m2, m3], last_message_ts=m3.timestamp)
+    last_message = (await _status(stores) or (None, None))[0]
+
+    await stores.buffer.cut(
+        _SESSION, [_record("mc_1", m1, m2)], tail=[m3], last_memcell_ts=m2.timestamp
+    )
+
+    assert await _memcell_ids(stores) == ["mc_1"]
+    assert await stores.buffer.list(_SESSION) == [m3]
+    status = await _status(stores)
+    assert status is not None
+    assert status[0] == last_message  # cut leaves last_message_ts alone
+    assert status[1] is not None
+
+
+async def test_keep_leaves_the_last_memcell_stamp_alone(stores: _Stores) -> None:
+    m1, m2 = _message("m1", 1), _message("m2", 2)
+    await stores.buffer.keep(_SESSION, [m1], last_message_ts=m1.timestamp)
+    await stores.buffer.cut(
+        _SESSION, [_record("mc_1", m1)], tail=[], last_memcell_ts=m1.timestamp
+    )
+    last_memcell = (await _status(stores) or (None, None))[1]
+
+    await stores.buffer.keep(_SESSION, [m2], last_message_ts=m2.timestamp)
+
+    status = await _status(stores)
+    assert status is not None and status[1] == last_memcell
+
+
+async def test_a_cut_that_fails_midway_changes_nothing(stores: _Stores) -> None:
+    """The tail repeats a message id, so its insert breaks the buffer's
+    primary key after the cells and the status were written in the same
+    transaction; all of it must roll back. Three separate commits leave an
+    orphan memcell here (issue seen under SQLite lock timeouts in 1.6.0).
+    """
+    m1, m2 = _message("m1", 1), _message("m2", 2)
+    await stores.buffer.keep(_SESSION, [m1, m2], last_message_ts=m2.timestamp)
+    before = await _status(stores)
+
+    with pytest.raises(IntegrityError):
+        await stores.buffer.cut(
+            _SESSION, [_record("mc_1", m1)], tail=[m2, m2], last_memcell_ts=m1.timestamp
+        )
+
+    assert await _memcell_ids(stores) == []
+    assert await stores.buffer.list(_SESSION) == [m1, m2]
+    assert await _status(stores) == before
+
+
+async def test_a_keep_that_fails_midway_changes_nothing(stores: _Stores) -> None:
+    m1, m2 = _message("m1", 1), _message("m2", 2)
+    await stores.buffer.keep(_SESSION, [m1], last_message_ts=m1.timestamp)
+    before = await _status(stores)
+
+    with pytest.raises(IntegrityError):
+        await stores.buffer.keep(_SESSION, [m1, m2, m2], last_message_ts=m2.timestamp)
+
+    assert await stores.buffer.list(_SESSION) == [m1]
+    assert await _status(stores) == before
 
 
 async def test_memcells_round_trip(stores: _Stores) -> None:
@@ -355,3 +469,33 @@ async def test_reflection_reports(stores: _Stores) -> None:
     assert await stores.report.reflected_cluster_ids(_USER) == {"cl_1"}
     other = Scope(app_id="app", project_id="proj", owner_id="u2", owner_type="user")
     assert await stores.report.reflected_cluster_ids(other) == set()
+
+
+async def test_stamping_works_on_a_status_table_with_the_older_unique_key(
+    stores: _Stores,
+) -> None:
+    """Databases created before ``conversation_status`` was scoped by app and
+    project carry a ``(session_id, track)`` unique constraint; the schema
+    upgrade adds columns but not constraints, so stamping must not rely on
+    the newer four-column one."""
+    async with stores.factory() as s:
+        await s.execute(text("DROP TABLE conversation_status"))
+        await s.execute(
+            text(
+                "CREATE TABLE conversation_status ("
+                " id INTEGER PRIMARY KEY, created_at DATETIME, updated_at DATETIME,"
+                " app_id VARCHAR DEFAULT 'default', project_id VARCHAR DEFAULT"
+                " 'default', session_id VARCHAR NOT NULL, track VARCHAR NOT NULL,"
+                " last_message_ts DATETIME, last_memcell_ts DATETIME,"
+                " UNIQUE (session_id, track))"
+            )
+        )
+        await s.commit()
+    m1, m2 = _message("m1", 1), _message("m2", 2)
+
+    await stores.buffer.keep(_SESSION, [m1], last_message_ts=m1.timestamp)
+    await stores.buffer.keep(_SESSION, [m1, m2], last_message_ts=m2.timestamp)
+
+    assert await stores.buffer.list(_SESSION) == [m1, m2]
+    status = await _status(stores)
+    assert status is not None and status[0] is not None

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 import structlog
 
@@ -125,18 +127,49 @@ def _console_renderer_exception_formatter():
     return None
 
 
-def test_traceback_rendering_omits_locals_and_caps_frames() -> None:
+def _render_exception(depth: int) -> str:
+    """Render an exception raised ``depth`` calls deep, the way the server
+    log does, and return the text."""
+    import io
+
     formatter = _console_renderer_exception_formatter()
     assert formatter is not None, "ConsoleRenderer not found on the root handler"
-    assert isinstance(formatter, structlog.dev.RichTracebackFormatter)
-    assert formatter.show_locals is False, (
+
+    def dive(n: int, secret: str) -> None:
+        if n == 0:
+            raise ValueError("bottom")
+        dive(n - 1, secret)
+
+    try:
+        dive(depth, "payload-1234")
+    except ValueError:
+        out = io.StringIO()
+        formatter(out, sys.exc_info())
+        return out.getvalue()
+    raise AssertionError("dive did not raise")
+
+
+def test_traceback_rendering_omits_locals_and_caps_frames() -> None:
+    text = _render_exception(60)
+    assert "Traceback (most recent call last)" in text
+    assert "ValueError: bottom" in text
+    assert "payload-1234" not in text, (
         "locals rendering is what blew a soak run's logs up to 85MB and can "
         "print request payloads into them"
     )
-    assert formatter.max_frames <= 30, (
-        f"max_frames={formatter.max_frames} — deep async stacks render "
-        "thousands of lines per exception"
+    frames = text.count('File "')
+    assert frames <= 30, (
+        f"{frames} frames — deep async stacks render thousands of lines per exception"
     )
+
+
+def test_traceback_rendering_is_plain_text() -> None:
+    """Rich's syntax-highlighted rendering took ~3 s of CPU per exception
+    inside the event loop on a soak host (2026-11), holding SQLite write
+    transactions open past ``busy_timeout``; the log gets plain text."""
+    text = _render_exception(5)
+    assert "\x1b[" not in text
+    assert not any(ch in text for ch in "╭│╰")
 
 
 def test_reconfiguring_reaches_a_logger_that_already_logged(

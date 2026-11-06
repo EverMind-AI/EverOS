@@ -1064,6 +1064,35 @@ async def test_storage_errors_are_not_echoed_in_last_error(
     assert r2 is not None and r2.last_error == "RuntimeError: plain message"
 
 
+async def test_a_lock_wait_records_a_fixed_message_without_the_sql(
+    repo: MemorizeInboxRepo,
+) -> None:
+    """A lock wait reaches the queue as ``StorageError`` (session_scope
+    converts it); its ``last_error`` must not carry the SQL or its values,
+    which ride on the chained ``OperationalError``."""
+    from sqlalchemy.exc import OperationalError
+
+    from everos.core.errors import StorageError
+
+    async def memorize_hitting_a_lock(
+        payload: dict[str, Any], **_: Any
+    ) -> MemorizeResult:
+        cause = OperationalError(
+            "INSERT INTO memcell VALUES (?)", {"body": "secret"}, Exception("locked")
+        )
+        raise StorageError("database is busy") from cause
+
+    _wiring["deliver"] = memorize_hitting_a_lock
+    w = _worker(_settings())
+    await _enqueue_all(w, ("r1", "s1"))
+
+    await w.drain_once()
+
+    r1 = await repo.find_one(request_id="r1")
+    assert r1 is not None and r1.status == "failed"
+    assert r1.last_error == "StorageError: database is busy"
+
+
 async def test_externally_cancelled_loop_relaunches(
     repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:

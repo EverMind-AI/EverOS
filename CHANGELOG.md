@@ -40,9 +40,35 @@ machinery that keeps a deleted memory from coming back.
   trailing whitespace or a control character (`422`). A daily-log file
   stores it as one trimmed line, so such an id was read back as another one
   and could not be matched by a session filter or deleted.
+- A SQLite write that waited out `[sqlite] busy_timeout_ms` on another
+  writer's lock answers `503 EXTERNAL_SERVICE_UNAVAILABLE` with the fixed
+  message `"database is busy"` (retryable) instead of an unhandled `500`; the
+  failed statement, without its values, is logged as
+  `sqlite_lock_wait_timed_out`. A queued `/add` failing that way records
+  `last_error` `"StorageError: database is busy"`.
+- Server log tracebacks are plain text (innermost 15 frames, no locals)
+  instead of rich's syntax-highlighted rendering, which blocked the event
+  loop for seconds per exception on a loaded host. CLI and TUI logs share
+  the same configuration.
 
 ### Fixed
 
+- `/add` and `/flush` no longer leave half-written state when a SQLite write
+  lock times out: boundary detection records the memcells, the session's
+  status and the remaining buffer in one transaction. Before, a timeout at
+  the second or third write left memcells that were never extracted, or
+  buffered messages behind a `500` the caller could not act on.
+- A burst of searches no longer fails with `Too many open files`: LanceDB
+  search queries are capped per process (`[lancedb] max_concurrent_queries`,
+  default `32`; metrics `everos_lancedb_query_wait_seconds`,
+  `everos_lancedb_queries_in_flight`), where one agentic search fanned out to
+  about 28 queries that each opened every data file of a table. The server
+  also raises its open-file soft limit to 8192 at start (capped at the hard
+  limit, never lowered; logged), from Linux's 1024 and macOS's 256.
+- Search results are no longer converted with their vector columns, which
+  every search caller discarded; the conversion ran on the event loop and was
+  most of its busy time under search load, holding other requests' SQLite
+  write transactions open.
 - A second server using the same memory root now refuses startup before
   opening shared storage or resetting active cascade claims (#545). The
   existing exclusive lock stays held through storage shutdown.

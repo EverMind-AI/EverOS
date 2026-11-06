@@ -244,7 +244,7 @@ async def _scan_null_vector_backlog(
     scan_failed = 0
     for spec in _TABLE_SPECS:
         index = tables[spec.table]
-        records = await index.scan(_null_filter(spec))
+        records = await index.scan(_null_filter(spec), with_vectors=True)
         raw_rows = [record.model_dump(mode="python") for record in records]
         rows: list[_NullVectorRow] = []
         for raw in raw_rows:
