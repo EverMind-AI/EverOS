@@ -123,6 +123,17 @@ class DerivedIndex:
         """
         return {repo.table_name: await repo.count() for repo in self.repositories.all()}
 
+    async def count_duplicate_keys(self) -> dict[str, int]:
+        """Extra rows per table sharing a logical primary key.
+
+        O(N) per table and only used by the opt-in ``cascade status
+        --duplicates`` check; the default status path never scans.
+        """
+        return {
+            repo.table_name: await repo.count_duplicate_keys()
+            for repo in self.repositories.all()
+        }
+
     def _check_primary_keys(self) -> None:
         check_primary_keys(
             (repo.schema for repo in self.repositories.all()),

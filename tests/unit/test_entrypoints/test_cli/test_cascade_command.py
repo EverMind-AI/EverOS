@@ -11,6 +11,7 @@ are exercised by integration tests. Here we cover:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,13 @@ def test_help_exits_zero() -> None:
     assert "status" in result.stdout
     assert "fix" in result.stdout
     assert "rebuild" in result.stdout
+
+
+def test_status_help_lists_duplicates_flag() -> None:
+    result = CliRunner().invoke(cascade_mod.app, ["status", "--help"])
+    assert result.exit_code == 0
+    # rich may colour the help and split `--duplicates` around escapes.
+    assert "--duplicates" in re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
 
 
 def test_resolve_relative_under_root(

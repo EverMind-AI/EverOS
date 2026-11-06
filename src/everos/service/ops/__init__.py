@@ -232,9 +232,9 @@ class OpsService:
         """
         return _cascade.relative_to_root(self._root, path)
 
-    async def cascade_status(self) -> CascadeStatus:
+    async def cascade_status(self, *, duplicates: bool = False) -> CascadeStatus:
         """The ledger summary, live index row counts and indexed live sources."""
-        return await _cascade.status(self._admin)
+        return await _cascade.status(self._admin, duplicates=duplicates)
 
     async def cascade_force_enqueue_all(self) -> list[MdChangeState]:
         return await _cascade.force_enqueue_all(

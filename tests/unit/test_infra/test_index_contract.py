@@ -293,6 +293,37 @@ async def test_repository_port_crud_count_and_uncapped_scan(
     assert await derived.repositories.episode.count_where(owner) == 100
 
 
+async def test_count_duplicate_keys_uses_the_key_only_backend_read(
+    derived: DerivedIndex,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The duplicate check must not materialise full vector-bearing rows."""
+    await derived.repositories.episode.upsert([_episode(0), _episode(1)])
+
+    async def _forbidden_full_scan(*_: object, **__: object) -> None:
+        raise AssertionError("count_duplicate_keys must not call scan()")
+
+    monkeypatch.setattr(derived.repositories.episode, "scan", _forbidden_full_scan)
+
+    counts = await derived.count_duplicate_keys()
+
+    assert counts["episode"] == 0
+
+    if derived.name == "lancedb":
+        # Bypass upsert on purpose: only an unmerged write can duplicate a key.
+        await derived.repositories.episode.add([_episode(0)])  # type: ignore[attr-defined]
+        assert await derived.repositories.episode.count_duplicate_keys() == 1
+    assert set(counts) == {
+        "episode",
+        "atomic_fact",
+        "foresight",
+        "agent_case",
+        "agent_skill",
+        "user_profile",
+        "knowledge_topic",
+    }
+
+
 async def test_find_by_owner_entries_projects_requested_columns(
     derived: DerivedIndex,
 ) -> None:
