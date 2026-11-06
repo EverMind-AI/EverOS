@@ -23,7 +23,10 @@ __all__ = ["Memorizer", "flush_payload"]
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
+from everalgo.llm import LLMOutputError
+
 from everos.core.context import resolve_request_id
+from everos.core.errors import LLMServiceError
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
@@ -232,7 +235,9 @@ class Memorizer:
         cell has been tried, so the caller still sees the extraction failed.
 
         Raises:
-            Exception: The first pipeline failure, after all cells ran.
+            LLMServiceError: The first pipeline failure was an
+                ``LLMOutputError`` (no attempt got a usable reply).
+            Exception: Any other first pipeline failure, after all cells ran.
         """
         pipelines: dict[str, Pipeline] = {"user_memory": self._user_pipeline}
         if mode == "agent":
@@ -252,6 +257,12 @@ class Memorizer:
                 outcomes[track].append(result)
                 await self._bus.publish(result.events)
         if first_error is not None:
+            if isinstance(first_error, LLMOutputError):
+                # Every attempt got a reply the operator rejected: the model
+                # is at fault and a later retry may succeed, so a 503.
+                raise LLMServiceError(
+                    f"no usable LLM reply: {first_error}"
+                ) from first_error
             raise first_error
 
         user = PipelineOutcome.from_cells("user_memory", outcomes["user_memory"])
