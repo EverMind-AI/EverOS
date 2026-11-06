@@ -70,8 +70,6 @@ machinery that keeps a deleted memory from coming back.
   most of its busy time under search load, holding other requests' SQLite
   write transactions open.
 
-### Fixed
-
 - **On Windows, reading a memory file no longer fails while another write
   replaces it.** An `open` that races `os.replace` of the same file can be
   refused for a moment (`PermissionError`, errno 13). Writes already waited
