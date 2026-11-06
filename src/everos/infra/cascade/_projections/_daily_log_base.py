@@ -200,6 +200,15 @@ class BaseDailyLogHandler(Handler):
         call per entry: the per-entry fan-out queued N single-input requests
         on the process-wide embedding semaphore ahead of the interactive
         query embedding (issue #486).
+
+        A text whose content is empty (or whitespace only) is **not** sent:
+        providers reject an empty string inside the input array (TEI answers
+        ``400 Input validation error: `inputs` cannot be empty``), and the
+        batch is all-or-nothing, so one blank section would fail the file's
+        every other entry with it. Such a text is embedded as ``None``, the
+        same soft-degrade a missing provider produces, so the row is written
+        without a vector and ``vector_backfill`` re-embeds it once the md
+        carries content.
         """
         if not to_build:
             return []
@@ -217,7 +226,24 @@ class BaseDailyLogHandler(Handler):
             )
             vectors = [None] * len(flat)
         else:
-            vectors = [list(v) for v in await embedding.embed_batch(flat)]
+            # Positions that carry content, and a placeholder result aligned
+            # with ``flat`` so the per-entry slicing below is unchanged.
+            positions = [i for i, text in enumerate(flat) if text.strip()]
+            resolved: list[list[float] | None] = [None] * len(flat)
+            if positions:
+                embedded = await embedding.embed_batch([flat[i] for i in positions])
+                for i, vec in zip(positions, embedded, strict=True):
+                    resolved[i] = list(vec)
+            vectors = resolved
+            blank = len(flat) - len(positions)
+            if blank:
+                logger.debug(
+                    "cascade_handler_embed_blank_text",
+                    kind=self.kind,
+                    md_path=md_path,
+                    entries=len(to_build),
+                    blank=blank,
+                )
         rows: list[Any] = []
         cursor = 0
         for entry, texts in zip(to_build, texts_per_entry, strict=True):

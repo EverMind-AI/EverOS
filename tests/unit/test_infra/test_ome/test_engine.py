@@ -719,3 +719,42 @@ def test_jobs_persisted_under_the_engine_module_path_still_resolve(name: str) ->
 
     resolved = ref_to_obj(f"everos.infra.ome.engine:{name}")
     assert resolved is getattr(scheduling, name.removeprefix("_"))
+
+
+async def test_borrowed_lock_must_be_held_before_engine_start(cfg: OMEConfig) -> None:
+    from everos.infra.ome import OmeLock
+
+    lock = OmeLock(cfg.jobstore_path)
+    engine = OfflineEngine(config=cfg, lock=lock)
+    try:
+        with pytest.raises(OMEError, match="must hold"):
+            await engine.start()
+        assert not cfg.jobstore_path.exists()
+    finally:
+        await engine.stop()
+
+
+@pytest.mark.parametrize("fail", [False, True], ids=["stop", "rollback"])
+async def test_engine_does_not_release_a_borrowed_lock(
+    cfg: OMEConfig, fail: bool
+) -> None:
+    from everos.infra.ome import OmeLock
+
+    lock = OmeLock(cfg.jobstore_path)
+    engine = OfflineEngine(config=cfg, lock=lock)
+    if fail:
+
+        @ome_strategy(name="cycle", trigger=Immediate(on=[_E]), emits=[_E])
+        async def cycle(event: _E, deps: MemoryDeps) -> list[Event]:
+            return []
+
+        engine.register(cycle)
+    with lock.hold():
+        if fail:
+            with pytest.raises(StartupValidationError, match=r"(?i)cycle"):
+                await engine.start()
+        else:
+            await engine.start()
+            await engine.stop()
+        assert not OmeLock(cfg.jobstore_path).is_free()
+    assert OmeLock(cfg.jobstore_path).is_free()

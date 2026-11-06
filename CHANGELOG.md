@@ -69,6 +69,9 @@ machinery that keeps a deleted memory from coming back.
   every search caller discarded; the conversion ran on the event loop and was
   most of its busy time under search load, holding other requests' SQLite
   write transactions open.
+- A second server using the same memory root now refuses startup before
+  opening shared storage or resetting active cascade claims (#545). The
+  existing exclusive lock stays held through storage shutdown.
 
 - **On Windows, reading a memory file no longer fails while another write
   replaces it.** An `open` that races `os.replace` of the same file can be
@@ -85,6 +88,20 @@ machinery that keeps a deleted memory from coming back.
   wrote them from the members it read before its LLM call, so the new
   member stayed in the cluster but was not counted, and the user-profile
   gate, which sums `count`, undercounted.
+
+- **One empty section no longer fails a daily-log file's whole batch.** The
+  four daily-log handlers send every changed entry's text in one
+  `embed_batch` call, and embedding endpoints reject an empty string inside
+  the input array — text-embeddings-inference answers
+  `400 Input validation error: inputs cannot be empty`. An entry whose
+  embedded section is blank (an `atomic_fact` scaffold the extractor left
+  behind before its sentence was written, a `foresight` with an empty
+  `Foresight`, …) therefore failed the call for the *entire file*, so its
+  other entries — already extracted, already on disk — never reached the
+  index, and the projection failed permanently over content the user never
+  sees. Blank texts are now left out of the request and written with
+  `vector = None`, the same soft-degrade a missing provider produces;
+  `vector_backfill` re-embeds the row once the md carries content.
 
 ## [1.6.0] - 2026-10-28
 
