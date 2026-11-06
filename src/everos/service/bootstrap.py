@@ -33,6 +33,7 @@ __all__ = [
     "configure_process",
 ]
 
+import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
@@ -148,7 +149,7 @@ class Providers:
 
 @dataclasses.dataclass
 class _Lifecycle:
-    closed: bool = False
+    closing: asyncio.Task[None] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -171,6 +172,7 @@ class Application:
     _root: MemoryRoot = dataclasses.field(repr=False)
     _admin: CascadeAdmin = dataclasses.field(repr=False)
     _engine: OfflineEngine = dataclasses.field(repr=False)
+    _root_lock: OmeLock = dataclasses.field(repr=False)
     _stack: contextlib.AsyncExitStack = dataclasses.field(
         default_factory=contextlib.AsyncExitStack, repr=False
     )
@@ -197,6 +199,15 @@ class Application:
         stack unwinds in reverse, so the worker stops -- and running
         extractions are waited for -- before the engine they publish to.
         """
+        # Refuse a second server before opening or recovering shared storage.
+        self._root_lock.acquire()
+        try:
+            await self._start_components()
+        except BaseException:
+            await self.aclose()
+            raise
+
+    async def _start_components(self) -> None:
         scores = await init_score_sink(self._settings.observability)
         self._stack.push_async_callback(_shielded("score_sink", shutdown_score_sink))
         logger.info("tracing_score_sink_ready", enabled=scores)
@@ -232,13 +243,28 @@ class Application:
 
         Idempotent: a second call does nothing.
         """
-        if self._lifecycle.closed:
-            return
-        self._lifecycle.closed = True
-        await self._stack.aclose()
-        await _shielded("index", self._admin.close_index)()
-        await _shielded("sqlite", self._admin.dispose)()
-        shutdown_tracing()
+        if self._lifecycle.closing is None:
+            self._lifecycle.closing = asyncio.create_task(self._close_components())
+        closing = self._lifecycle.closing
+        cancelled = False
+        while not closing.done():
+            try:
+                await asyncio.shield(closing)
+            except asyncio.CancelledError:
+                # The caller may stop waiting only after writers and storage stop.
+                cancelled = True
+        closing.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _close_components(self) -> None:
+        try:
+            await self._stack.aclose()
+            await _shielded("index", self._admin.close_index)()
+            await _shielded("sqlite", self._admin.dispose)()
+            shutdown_tracing()
+        finally:
+            self._root_lock.release()
         logger.info("application_closed")
 
 
@@ -307,8 +333,8 @@ def build_application(
         instructions=CustomInstructions(_CONFIG_ROOT),
         case_judge=_case_judge(settings, providers.llm),
     )
-    engine = _build_engine(root, deps, settings.ome)
     ome_lock = OmeLock(root.ome_db)
+    engine = _build_engine(root, deps, settings.ome, lock=ome_lock)
     capabilities = _capabilities(settings, providers)
     admin = CascadeAdmin(
         database=database,
@@ -375,6 +401,7 @@ def build_application(
         _root=root,
         _admin=admin,
         _engine=engine,
+        _root_lock=ome_lock,
     )
 
 
@@ -439,7 +466,7 @@ def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
 
 
 def _build_engine(
-    root: MemoryRoot, deps: MemoryDeps, ome: OmeSettings
+    root: MemoryRoot, deps: MemoryDeps, ome: OmeSettings, *, lock: OmeLock | None = None
 ) -> OfflineEngine:
     """The OME engine with every strategy registered over ``deps``.
 
@@ -453,7 +480,8 @@ def _build_engine(
             config_path=root.ome_config,
             max_concurrent_runs=ome.max_concurrent_runs,
             run_timeout_seconds=ome.run_timeout_seconds,
-        )
+        ),
+        lock=lock,
     )
     for spec in STRATEGY_SPECS:
         engine.register(to_ome_strategy(spec, deps))

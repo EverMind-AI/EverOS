@@ -579,4 +579,5 @@ def make_application(
         _root=MemoryRoot(root) if root is not None else MemoryRoot.resolve(),
         _admin=StubAdmin(events),  # type: ignore[arg-type] - structural double
         _engine=StubEngine(events),  # type: ignore[arg-type] - structural double
+        _root_lock=OmeLock((MemoryRoot(root) if root else MemoryRoot.resolve()).ome_db),
     )

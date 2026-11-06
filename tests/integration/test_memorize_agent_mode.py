@@ -101,7 +101,7 @@ async def memorize_env(
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    started: dict[str, Any] = {"engine": None}
+    started: dict[str, Any] = {"application": None}
 
     async def _setup(*, mode: str = "agent", fake_llm: FakeLLMClient) -> None:
         monkeypatch.setenv("EVEROS_MEMORIZE__MODE", mode)
@@ -122,13 +122,13 @@ async def memorize_env(
         _under_test["memory"] = application.memory
         engine = application._engine
         _under_test["engine"] = engine
-        await engine.start()
-        started["engine"] = engine
+        await application.start()
+        started["application"] = application
 
     yield _setup
 
-    if started.get("engine") is not None:
-        await started["engine"].stop()
+    if started.get("application") is not None:
+        await started["application"].aclose()
 
 
 # ── Tests ────────────────────────────────────────────────────────────

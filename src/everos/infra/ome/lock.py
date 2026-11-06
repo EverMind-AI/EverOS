@@ -1,7 +1,8 @@
 """The memory root's exclusive lock, taken from outside a running engine.
 
-:class:`OfflineEngine` holds ``<jobstore>.lock`` for as long as it runs, so a
-second engine (a second server) on the same root fails at startup. Commands
+The server holds ``<jobstore>.lock`` before opening shared storage until all
+components and storage have closed. Standalone :class:`OfflineEngine` instances
+hold it from start to stop. A second owner of the same root fails at startup. Commands
 that rewrite shared storage without starting an engine -- the CLI's index
 writers, backfill -- take the same file with the same flags through
 :class:`OmeLock`, so they and a server exclude each other.

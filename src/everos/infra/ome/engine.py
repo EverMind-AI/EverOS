@@ -78,17 +78,24 @@ class OfflineEngine:
     Single-process invariant: a file lock on
     ``<jobstore_path>.lock`` guarantees at most one engine per jobstore
     at any time (cross-process safe; the lock is :class:`OmeLock`).
+
+    An optional ``lock`` is borrowed from the application: it must already
+    be held before ``start`` and stays held after ``stop`` or failed startup.
+    The application releases it after every other storage user stops. With
+    no supplied lock, the engine owns its lock from ``start`` to ``stop``.
     """
 
     def __init__(
         self,
         *,
         config: OMEConfig,
+        lock: OmeLock | None = None,
     ) -> None:
         self._config = config
         self._registry = StrategyRegistry()
         self._storage = OMEStorage(db_path=config.jobstore_path)
-        self._lock = OmeLock(config.jobstore_path)
+        self._lock = lock if lock is not None else OmeLock(config.jobstore_path)
+        self._owns_lock = lock is None
         self._started = False
         self._on_dead_letter: Callable[[RunRecord], None] | None = None
 
@@ -167,9 +174,12 @@ class OfflineEngine:
         """
         if self._started:
             return
-        await self._storage.init()
-        self._lock.acquire()
+        if self._owns_lock:
+            self._lock.acquire()
+        elif not self._lock.held:
+            raise OMEError("the application must hold the supplied OME lock")
         try:
+            await self._storage.init()
             await self._storage.hold_open()
             self._registry.validate()
             self._init_components()
@@ -185,7 +195,7 @@ class OfflineEngine:
             )
             self._start_config_reloader()
             self._started = True
-        except Exception:
+        except BaseException:
             await self._rollback_partial_start()
             raise
 
@@ -301,7 +311,8 @@ class OfflineEngine:
                 self._scheduler = None
         scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._lock.release()
+        if self._owns_lock:
+            self._lock.release()
         self._in_flight.disarm()
 
     async def wait_idle(self, *, timeout: float = 30.0) -> bool:  # noqa: ASYNC109
@@ -371,7 +382,8 @@ class OfflineEngine:
             self._scheduler = None
         scheduling.ENGINES.pop(self._engine_id, None)
         await self._storage.release()
-        self._lock.release()
+        if self._owns_lock:
+            self._lock.release()
         self._started = False
         self._in_flight.disarm()
 

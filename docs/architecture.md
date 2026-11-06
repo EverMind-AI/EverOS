@@ -275,10 +275,14 @@ The application layer has two jobs, kept in separate modules:
   strategies registered, the event bus, the cascade orchestrator and the domain
   pipelines and managers, and returns an `Application`: three facades plus a
   `Capabilities` snapshot of which optional providers were configured.
-  `Application.start()` brings up the system DB, the index, the
+  `Application.start()` first acquires the memory root's existing exclusive
+  OME lock, then brings up the system DB, the index, the
   cascade, OME and the `async_mode` queue in that order (the queue publishes
   into OME, so it starts last and stops first), and `aclose()` unwinds what was
   started, then closes the storage connections whether or not `start()` ran.
+  The lock is released after storage closes, including on startup failure.
+  The server's OME engine borrows this lock; standalone replay engines still
+  own their locks.
   `aclose()` is idempotent and `async with build_application(settings) as
   app:` closes on exit. Process observability is configured through
   `bootstrap.configure_process`; internal helpers can be constructed by their
