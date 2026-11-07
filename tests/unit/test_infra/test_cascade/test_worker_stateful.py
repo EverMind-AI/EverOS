@@ -166,6 +166,7 @@ class CascadeMachine(RuleBasedStateMachine):
         self.mid_events: list[tuple[str, str, str, bool]] = []
         self.claimed: set[str] = set()
         self.marked: set[str] = set()
+        self.settled: set[str] = set()
         self.trace: list[str] = []
         real_done, real_failed = self.repo.mark_done, self.repo.mark_failed
 
@@ -200,10 +201,36 @@ class CascadeMachine(RuleBasedStateMachine):
             return old["mtime"]
         return float(self.next_lsn) * 10.0  # any fresh value far from the old one
 
+    def _settle_marked(self) -> None:
+        """Apply verdicts this batch has already written to the ledger.
+
+        ``held`` reads the model. A sibling claimed earlier in the same
+        batch can already be terminal there while the model still says
+        ``processing`` — the post-drain pass has not run. An in-handler
+        enqueue of those same bytes then keeps the existing LSN, so the
+        model has to agree before it decides whether to re-queue.
+        """
+        for path in self.marked:
+            if path in self.settled:
+                continue
+            row = self.model.get(path)
+            if row is None or row["status"] != "processing":
+                continue
+            self._apply_outcome(path, row, self.outcome_of)
+            self.settled.add(path)
+
     async def _upsert_async(
         self, path: str, kind: str, change: str, same_mtime: bool, *, in_handler: bool
     ) -> None:
+        if in_handler:
+            self._settle_marked()
         mtime = self._mtime_for(path, same_mtime)
+        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
+        # The sibling's terminal write can commit inside that await, after
+        # the pre-check and before this read. Fold it in before deciding
+        # whether the ledger kept the old LSN.
+        if in_handler:
+            self._settle_marked()
         old = self.model.get(path)
         # A permanent failure of these same bytes is not put back on the
         # queue. A deletion still is: the index has to drop the file.
@@ -214,7 +241,6 @@ class CascadeMachine(RuleBasedStateMachine):
             and change != "deleted"
             and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
         )
-        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
         if held:
             assert old is not None
             assert lsn == old["lsn"], (lsn, old["lsn"])
@@ -353,7 +379,7 @@ class CascadeMachine(RuleBasedStateMachine):
         self.outcome_of = dict(zip(batch, outcomes, strict=False))
         self.attempts = defaultdict(int)
         self.mid_events = list(mid) if batch else []
-        self.claimed, self.marked = set(batch), set()
+        self.claimed, self.marked, self.settled = set(batch), set(), set()
         for path in batch:
             self.model[path]["status"] = "processing"
             event(f"drain: {self.outcome_of.get(path, 'ok')}")
@@ -368,6 +394,8 @@ class CascadeMachine(RuleBasedStateMachine):
             self.outcome_of, self.mid_events = {}, []
         assert handled == len(batch), (handled, batch)
         for path in batch:
+            if path in self.settled:
+                continue
             self._apply_outcome(path, self.model[path], scripted)
 
     @precondition(lambda self: not self.crashed)
@@ -459,6 +487,27 @@ class CascadeMachine(RuleBasedStateMachine):
 
 
 TestCascadeMachine = CascadeMachine.TestCase
+
+
+def test_in_handler_enqueue_sees_a_sibling_already_terminal() -> None:
+    """Same-mtime enqueue from a later handler keeps an earlier failure.
+
+    The batch claims an unhandled path first. That row is permanently
+    failed before the episode handler runs and enqueues it again at the
+    same mtime. The ledger returns the existing LSN; the model must
+    already show that verdict, not the pre-batch ``processing`` status.
+    """
+    machine = CascadeMachine()
+    try:
+        machine.upsert(PATHS[1], "orphan", "added", False)
+        machine.upsert(PATHS[0], "episode", "added", False)
+        machine.drain(["ok", "ok"], [(PATHS[1], "episode", "modified", True)])
+        machine.table_matches_model()
+        failed = machine.model[PATHS[1]]
+        assert failed["status"] == "failed" and failed["retryable"] is False
+        assert machine.model[PATHS[0]]["status"] == "done"
+    finally:
+        machine.teardown()
 
 
 def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
