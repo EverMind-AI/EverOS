@@ -158,8 +158,9 @@ class OMEConfig(BaseModel):
         int,
         Field(
             gt=0,
-            description="Per-strategy RunRecord ring-buffer size; oldest "
-            "entries are pruned on insert.",
+            description="Per-strategy completed-attempt history size; oldest "
+            "finished entries are pruned on completion. RUNNING recovery "
+            "records are always retained.",
         ),
     ] = 1000
     crash_recovery_enabled: bool = Field(

@@ -15,15 +15,10 @@ The locks live in :data:`everos.core.locks.LOCKS` under the kind
 The table grows with the live partition-key set, which in practice is
 bounded by the agent / user / cluster counts a single everos process owns.
 
-No acquire timeout: an OME strategy run has no upstream client
-waiting on it, so timing out a queued caller would only convert
-"slow" into a permanent ``dead_letter`` data-loss (`max_retries`
-exhaustion). The LLM client owns the per-request timeout
-(`component.llm.openai_provider`, default 60s) — that is the layer
-that breaks a stuck LLM call, not this one. If a genuinely hung
-strategy holds the lock indefinitely it surfaces as a stuck queue
-under process-level monitoring; the recovery is a process restart,
-not a silent data drop.
+No separate acquire timeout is imposed here. OME's existing attempt timeout
+still includes partition waiting and reacquiring execution capacity; a timed
+out attempt follows the normal retry / dead-letter policy. Direct callers
+without an executor wait until the lock is available or they are cancelled.
 
 Cross-process safety is out of scope: everos is single-process by
 design (see ``CLAUDE.md`` deployment notes); the enterprise edition
@@ -34,6 +29,7 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 
+from everos.core.concurrency import acquire_without_slot
 from everos.core.locks import LOCKS
 
 
@@ -43,9 +39,11 @@ def get_partition_lock(
     """Hold the lock for ``(strategy_name, partition_key)`` with ``async with``.
 
     Every call returns a fresh context manager over the same lock; waiters
-    on one key acquire it in FIFO order.
+    on one key acquire it in FIFO order. An OME attempt returns its execution
+    slot while waiting and reclaims it before entering the body. Direct calls
+    outside an executor keep ordinary lock semantics.
     """
-    return LOCKS.hold(f"partition:{strategy_name}", partition_key)
+    return acquire_without_slot(LOCKS.hold(f"partition:{strategy_name}", partition_key))
 
 
 def user_cluster_lock(

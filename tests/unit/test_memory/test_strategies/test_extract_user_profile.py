@@ -9,6 +9,7 @@ stand in for every port, so the assertions are on what was stored.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -351,3 +352,50 @@ async def test_partition_lock_lets_different_owners_run_in_parallel() -> None:
     log = await _run_serialisation_probe("u_alice", "u_bob")
     assert log.index("enter:u_alice") < log.index("leave:u_bob")
     assert log.index("enter:u_bob") < log.index("leave:u_alice")
+
+
+@pytest.mark.parametrize("field", ["app_id", "project_id"])
+async def test_partition_lock_keeps_same_owner_in_different_spaces_independent(
+    field: str,
+) -> None:
+    entered = 0
+    both_entered = asyncio.Event()
+
+    async def extract(_memcells, *, sender_id, **_kwargs):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both_entered.set()
+        await both_entered.wait()
+        return AlgoProfile(
+            owner_id=sender_id,
+            summary="summary",
+            timestamp=1_700_000_000_000,
+            explicit_info=[],
+            implicit_traits=[],
+        )
+
+    deps = make_deps()
+    scopes = [_scope(), replace(_scope(), **{field: "other"})]
+    events = []
+    for i, scope in enumerate(scopes):
+        cluster = f"cl_{i}"
+        _seed(
+            deps,
+            scope,
+            cluster_id=cluster,
+            entry_id=f"ep_{i}",
+            memcell_id=f"mc_{i}",
+            last_ts=1_700_000_000_000,
+        )
+        events.append(
+            _event(cluster_id=cluster).model_copy(update={field: getattr(scope, field)})
+        )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = extract
+        async with asyncio.timeout(2):
+            await asyncio.gather(
+                *(extract_user_profile(event, deps) for event in events)
+            )
+    assert len(deps.stores.profile.writes) == 2
+    assert all([await deps.stores.profile.read(scope) is not None for scope in scopes])
