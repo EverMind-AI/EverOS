@@ -25,6 +25,7 @@ from everalgo.llm import LLMClient, LLMOutputError
 from everalgo.types import MemCell
 
 from everos.config import BoundaryDetectionSettings
+from everos.core.errors import BoundaryLLMError, LLMServiceError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import from_timestamp
@@ -236,7 +237,18 @@ class BoundaryDetection:
         # A generation span, so the call's token usage is costed (a span-typed
         # observation's usage is dropped).
         with memory_span("everos.memcell.boundary", observation_type="generation"):
-            return await retry_llm_output(attempt, operator="boundary", mode=mode)
+            try:
+                return await retry_llm_output(attempt, operator="boundary", mode=mode)
+            except TimeoutError as err:
+                # The application-level per-attempt timeout is also a
+                # pre-write failure: the queue may retry it safely.
+                raise BoundaryLLMError("boundary detection timed out") from err
+            except LLMServiceError as err:
+                # Provider down / rate-limited / timed out before boundary
+                # detection wrote anything. The queue may retry this safely;
+                # a malformed-output LLMOutputError is handled by
+                # retry_llm_output and is not reclassified here.
+                raise BoundaryLLMError(str(err)) from err
 
     async def _commit_cells(
         self,

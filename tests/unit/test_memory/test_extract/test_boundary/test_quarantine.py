@@ -18,6 +18,7 @@ the SQLite stores on a temp file. Scripted: the model's replies.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import tempfile
 from pathlib import Path
@@ -29,7 +30,7 @@ from everalgo.testing import FakeLLMClient
 from sqlmodel import SQLModel
 
 from everos.config import BoundaryDetectionSettings, SqliteSettings
-from everos.core.errors import LLMServiceError, SessionBufferQuarantinedError
+from everos.core.errors import BoundaryLLMError, SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     SqliteSessionBufferStore,
@@ -194,9 +195,9 @@ async def test_a_usable_reply_resets_the_count() -> None:
 
 async def test_infrastructure_failures_are_neither_retried_nor_counted() -> None:
     async with _Stage() as stage:
-        stage.replies = [LLMServiceError("insufficient quota") for _ in range(5)]
+        stage.replies = [BoundaryLLMError("insufficient quota") for _ in range(5)]
         for i in range(1, 6):
-            with pytest.raises(LLMServiceError):
+            with pytest.raises(BoundaryLLMError):
                 await stage.add("s1", i)
         assert stage.llm.call_count == 5
         tracks = await stage.tracks("s1")
@@ -204,6 +205,24 @@ async def test_infrastructure_failures_are_neither_retried_nor_counted() -> None
         assert tracks["memorize"] == [], (
             "an outage keeps nothing and loses nothing: the client retries"
         )
+
+
+async def test_boundary_timeout_is_typed_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-attempt timeout is a pre-write failure the queue may retry."""
+    async with _Stage() as stage:
+        stage.boundary._attempt_timeout = 0.01
+
+        async def _slow(*_: object, **__: object) -> object:
+            await asyncio.sleep(0.2)
+            return None
+
+        monkeypatch.setattr(
+            "everos.memory.extract.boundary.detection.adetect_boundaries", _slow
+        )
+        with pytest.raises(BoundaryLLMError, match="timed out"):
+            await stage.add("s1", 1)
 
 
 async def test_sessions_are_counted_apart() -> None:
