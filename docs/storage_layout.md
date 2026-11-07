@@ -29,6 +29,8 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │       ├── user.md                          single-file rewrite (profile)
 │       │       ├── episodes/                         daily-log append
 │       │       │   └── episode-<YYYY-MM-DD>.md
+│       │       ├── images/                           daily-log append
+│       │       │   └── image-<YYYY-MM-DD>.md
 │       │       ├── .atomic_facts/                    daily-log append (hidden)
 │       │       │   └── atomic_fact-<YYYY-MM-DD>.md
 │       │       └── .foresights/                      daily-log append (hidden)
@@ -43,6 +45,10 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │               ├── references/               (optional)
 │       │               └── scripts/                  (optional)
 │       └── knowledge/                                user-visible (shared / global)
+│
+├── figures/                             picture originals, content-addressed
+│   ├── <first two hex>/<sha256>.<ext>    one file per distinct picture
+│   └── .cache/<sha256>-<edge>.jpeg       derived copies, rebuildable
 │
 ├── .index/                              system-managed, rebuildable (gitignore)
 │   ├── sqlite/
@@ -80,7 +86,7 @@ Each business memory kind picks one of three on-disk patterns:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / atomic_fact / foresight / agent_case |
+| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / atomic_fact / foresight / agent_case / image_memory |
 | **Skill-named dir** | `skills/skill_<name>/SKILL.md` (+ `references/` `scripts/`) | overwrite the file | agent skills (procedural memory) |
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced) | overwrite the file | user profile |
 

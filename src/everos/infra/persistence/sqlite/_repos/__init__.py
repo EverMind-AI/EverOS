@@ -6,6 +6,7 @@ Each is built over the session factory of the application's
 """
 
 from .cluster import ClusterRepo as ClusterRepo
+from .image_original import ImageOriginalRepo as ImageOriginalRepo
 from .knowledge import DocumentListPage as DocumentListPage
 from .knowledge import DocumentUpsertPayload as DocumentUpsertPayload
 from .knowledge import KnowledgeDocumentRepo as KnowledgeDocumentRepo
@@ -26,6 +27,7 @@ __all__ = [
     "ClusterRepo",
     "DocumentListPage",
     "DocumentUpsertPayload",
+    "ImageOriginalRepo",
     "KnowledgeDocumentRepo",
     "KnowledgeTopicRowRepo",
     "MdChangeStateRepo",

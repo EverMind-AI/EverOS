@@ -19,10 +19,12 @@ from .events import CronTick as CronTick
 from .events import Event as Event
 from .events import IdleTick as IdleTick
 from .events import ManualTick as ManualTick
+from .images import ImageStore as ImageStore
 from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
 from .indexes import AtomicFactIndex as AtomicFactIndex
 from .indexes import EpisodeIndex as EpisodeIndex
+from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
 from .indexes import KnowledgeTopicIndex as KnowledgeTopicIndex
 from .indexes import ProfileIndex as ProfileIndex
@@ -65,6 +67,7 @@ from .stores import AtomicFactStore as AtomicFactStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
 from .stores import ForesightStore as ForesightStore
+from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore

@@ -346,6 +346,23 @@ class DeciderSettings(BaseModel):
     Not 0: an empty core silently disables core-first injection -- the very mechanism
     under test -- and is indistinguishable in the output from a decider that chose
     nothing on purpose."""
+    image_candidates_per_round: int = Field(default=0, ge=0)
+    """Pictures the decider may look at per round, highest-ranked first.
+
+    Default 0: a decider that was never trained on picture candidates has no
+    reason to be shown any, and every picture costs visual tokens on a call
+    that runs inside the search request. Set it above 0 for a vision decider
+    -- the pictures past the cap are still candidates, just rendered as text.
+    """
+    image_detail: Literal["low", "high", "auto"] = "low"
+    """``detail`` hint on each picture part. ``low`` matches the 448px
+    thumbnail: requesting ``high`` on a thumbnail only multiplies tokens."""
+    image_thumbnail_edge: int = Field(default=448, ge=16)
+    """Long side of the decider's copy, in pixels. Separate from
+    ``[images] thumbnail_edge`` because the two answer to different owners:
+    this one is the loop's own cost knob, the other is the store's."""
+    image_quality: int = Field(default=85, ge=1, le=100)
+    """JPEG quality of the decider's copy."""
 
 
 class MultimodalSettings(BaseModel):
@@ -382,6 +399,69 @@ class MultimodalSettings(BaseModel):
     file (local-first default); set to confine reads when the API is exposed."""
     file_uri_max_bytes: int = 50 * 1024 * 1024
     """Max size (bytes) of a ``file://`` asset; larger files are rejected."""
+
+
+class ImagesSettings(BaseModel):
+    """``[images]`` — how picture content items are stored and scaled.
+
+    Pictures are content-addressed once per distinct file, so these limits
+    bound *ingress*, not the store: the same picture arriving twice costs
+    one file and one more reference.
+
+    ``max_bytes`` bounds one picture after decoding the content item;
+    ``max_per_message`` bounds how many a single message may carry (a
+    message past it keeps its first N, and the rest are reported as
+    rejected rather than silently dropped); ``max_request_bytes`` bounds
+    the decoded total of one add request. ``max_per_request`` bounds the
+    whole request the same way, because a hundred small pictures cost the
+    extraction model a hundred image tokens each.
+
+    ``thumbnail_edge`` and ``model_edge`` are the long-side caps of the two
+    derived copies under ``figures/.cache/``. The decider sees the
+    thumbnail; the extraction and answer models see the model copy. Both
+    are derived, never the truth: they can be rebuilt from the original at
+    any time, which is why nothing records their hashes.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_IMAGES__MAX_BYTES / __MAX_PER_MESSAGE / __MAX_REQUEST_BYTES /
+        __MAX_PER_REQUEST / __THUMBNAIL_EDGE / __MODEL_EDGE / __CACHE_QUALITY
+    """
+
+    max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    """Largest accepted picture, after the content item is decoded."""
+    max_per_message: int = Field(default=4, ge=0)
+    """Pictures a single message may carry; the rest are rejected."""
+    max_request_bytes: int = Field(default=32 * 1024 * 1024, ge=1)
+    """Decoded picture bytes one add request may carry in total."""
+    max_per_request: int = Field(default=16, ge=0)
+    """Pictures one add request may carry in total; the rest are rejected."""
+    thumbnail_edge: int = Field(default=448, ge=16)
+    """Long-side cap of the decider's copy, in pixels. The spec pins 448:
+    at patch 16 with 2x2 merging that is ~200 visual tokens per picture."""
+    model_edge: int = Field(default=1024, ge=16)
+    """Long-side cap of the copy handed to the extraction / answer model."""
+    cache_quality: int = Field(default=85, ge=1, le=100)
+    """JPEG quality of both derived copies."""
+    formats: list[str] = Field(default_factory=lambda: ["png", "jpeg", "webp", "gif"])
+    """Accepted picture formats, by the format ``Pillow`` reports."""
+
+
+class ExtractionSettings(BaseModel):
+    """``[extraction]`` — what the extraction model can read.
+
+    ``vision`` says whether the model behind ``[llm]`` accepts ``image_url``
+    content parts. With it on, picture content items are handed to that
+    model directly and it writes each picture's memory itself. With it off,
+    the picture is first turned into text by ``[multimodal]`` (the parser
+    route) and the memory is written from that text -- for a text-only
+    extraction model, at the cost of one extra call per picture.
+
+    Env binding: EVEROS_EXTRACTION__VISION
+    """
+
+    vision: bool = True
+    """Whether ``[llm]``'s model reads images. Default on: the 2.0
+    extractor is a vision model, and the text-only route costs a call."""
 
 
 class EmbeddingSettings(BaseModel):
@@ -949,6 +1029,8 @@ class Settings(BaseSettings):
     cascade: CascadeSettings = CascadeSettings()
     ome: OmeSettings = OmeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
+    images: ImagesSettings = ImagesSettings()
+    extraction: ExtractionSettings = ExtractionSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

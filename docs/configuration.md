@@ -145,6 +145,31 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `file_uri_allow_dirs` | list[string] | `[]` | No | Allowlisted base dirs for `file://` URIs. Empty = allow any readable file. |
 | `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
 
+### `[images]`
+
+Picture content items: how they are stored and how big the two derived copies
+are. Pictures are content-addressed and stored once, so these bound **ingress**,
+not the store — the same picture arriving twice costs one file and one more
+reference. A picture over a limit is rejected and counted; it never fails the
+message it arrived in.
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `max_bytes` | int | `10485760` | No | Largest accepted picture (bytes), after the content item decodes. |
+| `max_per_message` | int | `4` | No | Pictures one message may carry; the rest are rejected. `0` disables pictures. |
+| `max_request_bytes` | int | `33554432` | No | Decoded picture bytes one add request may carry. |
+| `max_per_request` | int | `16` | No | Pictures one add request may carry. |
+| `thumbnail_edge` | int | `448` | No | Long side of the decider's copy, px. |
+| `model_edge` | int | `1024` | No | Long side of the extraction / answer model's copy, px. |
+| `cache_quality` | int | `85` | No | JPEG quality of both derived copies. |
+| `formats` | list[string] | `["png","jpeg","webp","gif"]` | No | Accepted formats, by Pillow's name in lowercase. |
+
+### `[extraction]`
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `vision` | bool | `true` | No | Whether `[llm]`'s model reads images. On: pictures go to it directly and it writes each picture's memory. Off: `[multimodal]` parses them into text first (one extra call per picture). |
+
 ### `[embedding]`
 
 | Field | Type | Default | Required | Description |

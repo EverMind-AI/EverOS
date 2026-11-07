@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from ._repos import (
     ClusterRepo,
+    ImageOriginalRepo,
     KnowledgeDocumentRepo,
     KnowledgeTopicRowRepo,
     MdChangeStateRepo,
@@ -26,6 +27,7 @@ class SqliteRepos:
     """The repositories of every business table in one ``system.db``."""
 
     cluster: ClusterRepo
+    image_original: ImageOriginalRepo
     knowledge_document: KnowledgeDocumentRepo
     knowledge_topic: KnowledgeTopicRowRepo
     md_change_state: MdChangeStateRepo
@@ -42,6 +44,7 @@ class SqliteRepos:
         factory = database.session_factory
         return cls(
             cluster=ClusterRepo(factory),
+            image_original=ImageOriginalRepo(factory),
             knowledge_document=KnowledgeDocumentRepo(factory),
             knowledge_topic=KnowledgeTopicRowRepo(factory),
             md_change_state=MdChangeStateRepo(factory),

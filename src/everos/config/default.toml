@@ -125,6 +125,10 @@ retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 full_text = false              # true = decider reads full episode text, not summary
 fallback_core = 3              # core size when every decider attempt fails
+image_candidates_per_round = 0 # pictures the decider may look at per round; 0 = none
+image_detail = "low"           # `detail` hint on each picture part
+image_thumbnail_edge = 448     # long side of the decider's copy, in pixels
+image_quality = 85             # JPEG quality of the decider's copy
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
@@ -142,6 +146,27 @@ max_concurrency = 4
 # list base dirs to confine reads when the API is exposed.
 # file_uri_allow_dirs = ["/srv/uploads"]
 # file_uri_max_bytes = 52428800   # 50 MiB cap per file:// asset
+
+[images]
+# Picture content items: how they are stored and how big the two derived copies
+# are. Pictures are content-addressed and stored once, so these bound INGRESS,
+# not the store: the same picture arriving twice costs one file and one more
+# reference. Override via EVEROS_IMAGES__<KEY>.
+max_bytes = 10485760        # 10 MiB per picture, after the content item decodes
+max_per_message = 4         # pictures one message may carry; the rest are reported rejected
+max_request_bytes = 33554432  # 32 MiB of pictures per add request
+max_per_request = 16        # pictures per add request
+thumbnail_edge = 448        # long side of the decider's copy (patches 16, 2x2 merge: ~200 tokens)
+model_edge = 1024           # long side of the copy the extraction / answer model sees
+cache_quality = 85          # JPEG quality of both derived copies
+formats = ["png", "jpeg", "webp", "gif"]
+
+[extraction]
+# Whether the model behind [llm] reads images. On: pictures go to it directly
+# and it writes each picture's memory itself. Off: [multimodal] parses them into
+# text first (one extra call per picture) -- for a text-only extraction model.
+# Override via EVEROS_EXTRACTION__VISION.
+vision = true
 
 [embedding]
 # OpenAI-compatible embedding endpoint. Override via env:

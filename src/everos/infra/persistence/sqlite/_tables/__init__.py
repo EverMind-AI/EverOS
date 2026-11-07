@@ -10,6 +10,7 @@ every registered table.
 from .cluster import Cluster as Cluster
 from .cluster import ClusterMember as ClusterMember
 from .conversation_status import ConversationStatus as ConversationStatus
+from .image_original import ImageOriginal as ImageOriginal
 from .knowledge import KnowledgeDocumentRow as KnowledgeDocumentRow
 from .knowledge import KnowledgeTopicRow as KnowledgeTopicRow
 from .md_change_state import MdChangeState as MdChangeState
@@ -22,6 +23,7 @@ __all__ = [
     "Cluster",
     "ClusterMember",
     "ConversationStatus",
+    "ImageOriginal",
     "KnowledgeDocumentRow",
     "KnowledgeTopicRow",
     "MdChangeState",
