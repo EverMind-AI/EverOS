@@ -239,11 +239,16 @@ class CascadeMachine(RuleBasedStateMachine):
         )
 
     async def _wait_until_alone(self, md_path: str) -> None:
-        """Crash only when every other row of the batch has been marked."""
+        """Crash after other work items finish, including stale verdict skips."""
         deadline = time.perf_counter() + 30.0
         while time.perf_counter() < deadline:
             others = self.claimed - {md_path}
-            if others <= self.marked and self.handler.active == 1:
+            # A re-enqueued peer returns without mark_done. Wait for the actual
+            # work item to finish, including its retry and terminal-write path.
+            # Requiring each peer to have started avoids crashing before gather
+            # has first scheduled the rest of this batch.
+            started = self.marked | self.attempts.keys()
+            if others <= started and self.worker.health().inflight_rows == 1:
                 return
             await asyncio.sleep(0)
         raise RuntimeError(f"{md_path}: batch never settled around the crash")
@@ -438,6 +443,27 @@ class CascadeMachine(RuleBasedStateMachine):
 
 
 TestCascadeMachine = CascadeMachine.TestCase
+
+
+@pytest.mark.parametrize("other_outcome", ["ok", "transient_then_ok"])
+def test_crash_waits_for_a_reenqueued_peer_to_finish(other_outcome: str) -> None:
+    """A stale peer finishes without a terminal write before the scripted crash."""
+    machine = CascadeMachine()
+    try:
+        machine.upsert(PATHS[0], "episode", "added", False)
+        machine.upsert(PATHS[1], "episode", "added", False)
+        machine.drain(
+            ["crash", other_outcome], [(PATHS[1], "episode", "modified", False)]
+        )
+        assert machine.crashed
+        assert machine.worker.health().inflight_rows == 0
+        machine.table_matches_model()
+        machine.restart()
+        machine.drain(["ok", "ok"], [])
+        machine.table_matches_model()
+        machine.idle_means_nothing_processing()
+    finally:
+        machine.teardown()
 
 
 def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
