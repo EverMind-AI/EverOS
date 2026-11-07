@@ -535,8 +535,8 @@ This release pins the everalgo packages to one contract line, six of them
 release candidates: `everalgo-core 0.6.0`, `everalgo-boundary 0.4.1`,
 `everalgo-user-memory 0.9.0rc4`, `everalgo-agent-memory 0.6.0rc3`,
 `everalgo-rank 0.5.0rc3`, `everalgo-knowledge 0.3.0rc2`,
-`everalgo-clustering 0.3.0rc2` and, with the `multimodal` extra,
-`everalgo-parser 0.3.0rc2`. The pins are exact (`==`), so `pip install
+`everalgo-clustering 0.3.0rc2` and `everalgo-parser 0.3.0rc2` (also required
+by knowledge ingestion in a base installation). The pins are exact (`==`), so `pip install
 everos` resolves them without any pre-release flag; upgrade them together,
 never one at a time.
 
