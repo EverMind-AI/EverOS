@@ -1,6 +1,6 @@
 """Filesystem watcher — emits cascade enqueue events on md changes.
 
-watchdog 6's :class:`Observer` runs in its own native thread; the
+watchdog's :class:`Observer` runs in its own native thread; the
 event handler callback fires there too. We bridge those events back
 onto the orchestrator's asyncio loop via
 :func:`asyncio.run_coroutine_threadsafe` so every state-table write
@@ -17,7 +17,18 @@ import asyncio
 from collections.abc import Awaitable
 from pathlib import Path
 
-from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHandler
+from watchdog.events import (
+    DirCreatedEvent,
+    DirDeletedEvent,
+    DirModifiedEvent,
+    DirMovedEvent,
+    FileCreatedEvent,
+    FileDeletedEvent,
+    FileModifiedEvent,
+    FileMovedEvent,
+    FileSystemEvent,
+    FileSystemEventHandler,
+)
 from watchdog.observers import Observer
 
 from everos.core.observability.logging import get_logger
@@ -57,7 +68,21 @@ class CascadeWatcher:
         # rejects non-existent paths so we ensure it exists here.
         self._memory_root.ensure()
         self._observer.schedule(
-            self._handler, str(self._memory_root.root), recursive=True
+            self._handler,
+            str(self._memory_root.root),
+            recursive=True,
+            # Unused open/close events from reads can fill inotify's queue
+            # and crowd out actual markdown changes.
+            event_filter=[
+                FileCreatedEvent,
+                FileDeletedEvent,
+                FileModifiedEvent,
+                FileMovedEvent,
+                DirCreatedEvent,
+                DirDeletedEvent,
+                DirModifiedEvent,
+                DirMovedEvent,
+            ],
         )
         self._observer.start()
         self._started = True

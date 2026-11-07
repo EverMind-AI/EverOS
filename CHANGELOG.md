@@ -53,6 +53,9 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- The filesystem watcher subscribes only to changes it handles, excluding
+  file-open/close notifications that could overflow Linux's inotify queue
+  during read-heavy searches and delay markdown indexing.
 - A fresh `uv pip install everos` now resolves the parser dependency without
   requiring a global prerelease override. The base install pins the same
   parser version as the tested algorithm packages and the multimodal extra.
