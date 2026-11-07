@@ -130,6 +130,7 @@ class _ScriptedHandler(Handler):
             self.active -= 1
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:
+        self.machine.attempts[md_path] += 1
         self.machine.trace.append(f"delete {md_path}")
         return HandlerOutcome(
             md_path=md_path, kind="episode", upserted=0, deleted=1, skipped=0
@@ -445,13 +446,18 @@ class CascadeMachine(RuleBasedStateMachine):
 TestCascadeMachine = CascadeMachine.TestCase
 
 
-@pytest.mark.parametrize("other_outcome", ["ok", "transient_then_ok"])
-def test_crash_waits_for_a_reenqueued_peer_to_finish(other_outcome: str) -> None:
+@pytest.mark.parametrize(
+    ("other_change", "other_outcome"),
+    [("added", "ok"), ("added", "transient_then_ok"), ("deleted", "ok")],
+)
+def test_crash_waits_for_a_reenqueued_peer_to_finish(
+    other_change: str, other_outcome: str
+) -> None:
     """A stale peer finishes without a terminal write before the scripted crash."""
     machine = CascadeMachine()
     try:
         machine.upsert(PATHS[0], "episode", "added", False)
-        machine.upsert(PATHS[1], "episode", "added", False)
+        machine.upsert(PATHS[1], "episode", other_change, False)
         machine.drain(
             ["crash", other_outcome], [(PATHS[1], "episode", "modified", False)]
         )
