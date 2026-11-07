@@ -18,16 +18,24 @@ from everos.infra.persistence.sqlite import MTIME_TOLERANCE_SECONDS, MdChangeSta
 
 from .registry import match_kind
 
-PROJECTION_SETTLE_TIMEOUT_SECONDS = 15.0
-"""How long a write call waits to learn whether its files indexed.
+PROJECTION_SETTLE_TIMEOUT_SECONDS = 3.0
+"""How long ``/add`` and ``/flush`` wait to learn whether their files indexed.
 
-Sized to cover one pass of the worker's inline retry ladder (default
-``max_retry=3`` and a 2s backoff is 12s of sleep) plus a little room for
-the handler itself. An unrecoverable failure is marked on the first
-attempt, so it shows up well inside this. The wait ends as soon as every
-path has left ``pending`` / ``processing``; the budget is only the cap
-when a row never settles. Past it, a row still in flight is lag, not a
-failure, and the call keeps ``extracted``.
+A few seconds, not the worker's full inline retry ladder (~12s of backoff
+at the defaults). An unrecoverable failure is marked on the first attempt,
+so it is visible inside this window, and a healthy index usually settles
+faster than that. The wait ends as soon as every path has left ``pending``
+/ ``processing``.
+
+Past the budget, a row still in flight is lag, not a failure: the call
+keeps ``extracted``. Covering the whole retry ladder would pin every
+write on a down embedding service for the full backoff. Hosts that need
+that outcome poll ``GET /health`` (``cascade.failed_permanent`` /
+``failed_retryable``) instead of blocking the synchronous write path.
+
+Not a ``[cascade]`` setting. The section's knobs are cadences; a deadline
+that bounds one call stays a constant next to the code it guards, same as
+the other cascade hang bounds.
 """
 
 _POLL_SECONDS = 0.05

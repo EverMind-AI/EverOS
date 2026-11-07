@@ -29,7 +29,6 @@ from .admin import CascadeAdmin as CascadeAdmin
 from .orchestrator import CascadeConfig as CascadeConfig
 from .orchestrator import CascadeHealth as CascadeHealth
 from .orchestrator import CascadeOrchestrator as CascadeOrchestrator
-from .projection import ProjectionVerdict as ProjectionVerdict
 from .registry import KIND_REGISTRY as KIND_REGISTRY
 from .registry import KindSpec as KindSpec
 from .registry import match_kind as match_kind
@@ -44,6 +43,5 @@ __all__ = [
     "DeleteFence",
     "FencedIndexEraser",
     "KindSpec",
-    "ProjectionVerdict",
     "match_kind",
 ]

@@ -1,4 +1,8 @@
-"""``/add`` and ``/flush`` say ``degraded``, not ``extracted``, when indexing fails."""
+"""``/add`` and ``/flush`` stay HTTP 200 and say ``degraded`` when indexing fails.
+
+200 means the markdown write was accepted. The projection outcome is
+``data.status`` plus the failure counts, not the status code.
+"""
 
 from __future__ import annotations
 

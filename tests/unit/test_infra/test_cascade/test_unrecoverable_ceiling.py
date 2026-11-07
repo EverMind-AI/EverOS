@@ -12,7 +12,10 @@ from everos.config import SqliteSettings
 from everos.infra.cascade._projections import Handler
 from everos.infra.cascade._worker import CascadeWorker
 from everos.infra.cascade.models import HandlerOutcome
-from everos.infra.cascade.projection import settle_written
+from everos.infra.cascade.projection import (
+    PROJECTION_SETTLE_TIMEOUT_SECONDS,
+    settle_written,
+)
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     MdChangeStateRepo,
@@ -80,6 +83,42 @@ async def test_same_mtime_is_not_retried_after_an_unrecoverable_failure(
     assert again is not None
     assert again.status == "failed"
     assert again.retry_count == 1
+
+
+async def test_force_enqueue_all_redrives_a_permanent_same_mtime_failure(
+    ledger: tuple[MdChangeStateRepo, Path],
+) -> None:
+    """``cascade sync --force-all`` resets a terminal same-bytes row.
+
+    A watcher upsert of the same mtime must not. ``force_enqueue_all``
+    passes ``reset_retry_count=True``, so the handler runs again.
+    """
+    repo, _root = ledger
+    handler = _Boom()
+    worker = CascadeWorker(
+        {"episode": handler}, repo, retry_backoff_seconds=0, max_retry=0
+    )
+    await repo.upsert(_EPISODE, kind="episode", change_type="added", mtime=10.0)
+    await worker.drain_once()
+    assert handler.calls == 1
+
+    held = await repo.upsert(
+        _EPISODE, kind="episode", change_type="modified", mtime=10.0
+    )
+    await worker.drain_once()
+    assert held == 1
+    assert handler.calls == 1
+
+    before = await repo.force_enqueue_all()
+    assert [row.md_path for row in before] == [_EPISODE]
+    assert before[0].status == "failed"
+    forced = await repo.read_one(_EPISODE)
+    assert forced is not None
+    assert forced.status == "pending"
+    assert forced.retry_count == 0
+    assert forced.retryable is None
+    await worker.drain_once()
+    assert handler.calls == 2
 
 
 async def test_changed_mtime_and_operator_force_each_get_another_attempt(
@@ -170,6 +209,11 @@ async def test_settle_waits_until_a_processing_row_fails(
 
     assert verdict.failed_permanent == 1
     assert verdict.pending == 0
+
+
+def test_settle_budget_is_a_few_seconds() -> None:
+    """Pending after the budget is lag. The cap stays short on purpose."""
+    assert PROJECTION_SETTLE_TIMEOUT_SECONDS == 3.0
 
 
 async def test_settle_keeps_a_still_pending_row_out_of_the_failure_counts(

@@ -76,7 +76,6 @@ from everos.infra.cascade import (
     CascadeOrchestrator,
     DeleteFence,
     FencedIndexEraser,
-    ProjectionVerdict,
 )
 from everos.infra.ome import (
     OfflineEngine,
@@ -125,7 +124,7 @@ from everos.memory.strategies import STRATEGY_SPECS
 from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
-from everos.service.memory._projection import IndexProjection
+from everos.service.memory._projection import IndexProjection, IndexVerdict
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 
 logger = get_logger(__name__)
@@ -535,7 +534,7 @@ class _CascadeIndexProjection:
     def __init__(self, cascade: CascadeOrchestrator) -> None:
         self._cascade = cascade
 
-    async def await_written(self, paths: Collection[str]) -> ProjectionVerdict:
+    async def await_written(self, paths: Collection[str]) -> IndexVerdict:
         return await self._cascade.await_written(paths)
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from everos.infra.cascade import ProjectionVerdict
+from everos.infra.cascade.projection import ProjectionVerdict
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import MarkdownWriter, collect_md_writes
 from everos.service import MemorizeResult

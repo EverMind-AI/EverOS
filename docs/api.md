@@ -109,15 +109,24 @@ bare FastAPI `detail`); see [Errors](#errors).
 ### Eventual consistency
 
 `/add` and `/flush` write the markdown file (the source of truth)
-**synchronously** — when the call returns with `status: "extracted"`,
-the new entry exists on disk and its index projection has not failed.
-`status: "degraded"` means the markdown is on disk but at least one of
-the files this call wrote failed to land in the index (permanently, or
-on an attempt that may still be retried). Counts ride along as
-`failed_permanent` and `failed_retryable`. The configured vector / BM25 /
-scalar index backend is still updated by the in-process **cascade
-coroutine**; a row that is still queued when the call stops waiting is
-lag, not a failure, and the status stays `"extracted"`.
+**synchronously**. **HTTP 200 means that markdown write was accepted.**
+It does not by itself mean the index projection succeeded. Read
+`data.status` and the failure counts:
+
+- `status: "extracted"` — the new entry is on disk, and the index
+  projection of the files this call wrote has not failed. The call waits
+  a few seconds for that projection. A file still queued when the wait
+  ends is lag, not a failure, and the status stays `"extracted"`.
+- `status: "degraded"` — the markdown is on disk, but at least one of
+  those files failed to land in the index (permanently, or on an attempt
+  that may still be retried). Counts ride along as `failed_permanent`
+  and `failed_retryable`. This is still HTTP 200. A client that only
+  checks the status code cannot see it.
+
+The configured vector / BM25 / scalar index is updated by the in-process
+**cascade** coroutine. Hosts that need the outcome of a retry still in
+flight poll `GET /health` (`cascade.failed_permanent` /
+`cascade.failed_retryable`) rather than blocking the write.
 
 That means `/search` and `/get` may not see a record immediately after
 the `/flush` that produced it. Typical sync latency is sub-second, but
@@ -592,7 +601,7 @@ rule and how to poll progress.
 | Field | Type | Notes |
 |---|---|---|
 | `message_count` | `integer` | Number of messages accepted in this call |
-| `status` | `"accumulated" \| "extracted" \| "degraded"` | What the server did with the batch |
+| `status` | `"accumulated" \| "extracted" \| "degraded"` | Outcome of the batch. HTTP 200 already means the markdown write was accepted |
 | `failed_permanent` | `integer` | Files this call wrote that failed to index and will not be retried. `0` unless `status` is `degraded` |
 | `failed_retryable` | `integer` | Files this call wrote that failed to index and may still be retried. `0` unless `status` is `degraded` |
 
@@ -608,11 +617,12 @@ correlation.
   cell. The buffer is empty after the call returns. The index
   projection of those files has not failed.
 - `"degraded"` — Same markdown write as `"extracted"`, but at least one
-  of those files failed to index. `failed_permanent` / `failed_retryable`
-  say which. A permanent failure stays failed until the file changes or
-  an operator runs `everos cascade sync --path` / `everos cascade rebuild`.
-  `GET /health`'s `cascade.failed_permanent` is the same backlog across
-  the whole root.
+  of those files failed to index. The HTTP status stays `200`;
+  `failed_permanent` / `failed_retryable` say which failures. A permanent
+  failure stays failed until the file changes or an operator runs
+  `everos cascade sync --path`, `everos cascade sync --force-all`, or
+  `everos cascade rebuild`. `GET /health`'s `cascade.failed_permanent`
+  is the same backlog across the whole root.
 
 `202 Accepted` — only with `async_mode`, or when the session already has
 queued batches (see [Asynchronous mode](#asynchronous-mode)) — returns a
@@ -652,7 +662,9 @@ Response (real capture):
     "request_id": "ae78d3f689c941eea135893e702fd171",
     "data": {
         "message_count": 3,
-        "status": "accumulated"
+        "status": "accumulated",
+        "failed_permanent": 0,
+        "failed_retryable": 0
     }
 }
 ```
@@ -683,7 +695,7 @@ scope.
 
 | Field | Type | Notes |
 |---|---|---|
-| `status` | `"extracted" \| "no_extraction" \| "degraded"` | What happened |
+| `status` | `"extracted" \| "no_extraction" \| "degraded"` | Outcome of the flush. HTTP 200 already means the markdown write was accepted |
 | `failed_permanent` | `integer` | Files this flush wrote that failed to index and will not be retried. `0` unless `status` is `degraded` |
 | `failed_retryable` | `integer` | Files this flush wrote that failed to index and may still be retried. `0` unless `status` is `degraded` |
 
@@ -702,10 +714,11 @@ when the session already has queued batches, so the flush runs after them;
 `/flush` has no `async_mode` of its own. See
 [Asynchronous mode](#asynchronous-mode).
 
-A `200` from `/flush` is synchronous with respect to markdown persistence: by the
-time the response returns, the new entry is on disk. Derived index
-sync is still asynchronous — see
-[Eventual consistency](#eventual-consistency).
+A `200` from `/flush` means the markdown write was accepted: by the time
+the response returns, the new entry is on disk. It is still `200` when
+`data.status` is `degraded` — that word, not the status code, is the
+index-projection outcome. A file still queued is lag (`extracted`), not
+`degraded`. See [Eventual consistency](#eventual-consistency).
 
 #### cURL example
 
@@ -722,7 +735,9 @@ extraction LLM call):
 {
     "request_id": "e65bcf4f56c042e39cdf50866810672c",
     "data": {
-        "status": "extracted"
+        "status": "extracted",
+        "failed_permanent": 0,
+        "failed_retryable": 0
     }
 }
 ```

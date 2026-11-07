@@ -112,8 +112,22 @@ class MemorizeAddRequest(BaseModel):
 
 
 class AddResponseData(BaseModel):
+    """``200`` body. The status code means markdown was accepted.
+
+    Whether those files reached the index is ``status`` plus the failure
+    counts. ``degraded`` is not a different HTTP status.
+    """
+
     message_count: int
-    status: Literal["accumulated", "extracted", "degraded"]
+    status: Literal["accumulated", "extracted", "degraded"] = Field(
+        description=(
+            "What this call did. HTTP 200 means the markdown write was "
+            "accepted. `degraded` means the index projection of at least "
+            "one file this call wrote failed (`failed_permanent` / "
+            "`failed_retryable`). A file still queued when the call stops "
+            "waiting is lag, not a failure, and leaves this `extracted`."
+        ),
+    )
     failed_permanent: int = Field(
         default=0,
         description=(
@@ -157,7 +171,21 @@ class MemorizeFlushRequest(BaseModel):
 
 
 class FlushResponseData(BaseModel):
-    status: Literal["extracted", "no_extraction", "degraded"]
+    """``200`` body. The status code means markdown was accepted.
+
+    ``degraded`` reports a failed index projection in the body. It does
+    not change the HTTP status.
+    """
+
+    status: Literal["extracted", "no_extraction", "degraded"] = Field(
+        description=(
+            "What this flush did. HTTP 200 means the markdown write was "
+            "accepted. `degraded` means the index projection of at least "
+            "one file this flush wrote failed (`failed_permanent` / "
+            "`failed_retryable`). A file still queued when the flush stops "
+            "waiting is lag, not a failure, and leaves this `extracted`."
+        ),
+    )
     failed_permanent: int = Field(
         default=0,
         description=(
