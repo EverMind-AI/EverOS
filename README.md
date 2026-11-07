@@ -271,8 +271,9 @@ extra:
 uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
-This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG support via
-cairosvg). Configure the `[multimodal]` section in `everos.toml`; its default
+This adds the parser's `[svg]` bundle for SVG support via cairosvg; the base
+parser is already required by knowledge ingestion. Configure the `[multimodal]`
+section in `everos.toml`; its default
 model is `google/gemini-3.8-flash` via OpenRouter.
 
 **Office document support requires LibreOffice as a system dependency.**

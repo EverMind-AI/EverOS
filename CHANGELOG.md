@@ -53,6 +53,9 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- A fresh `uv pip install everos` now resolves the parser dependency without
+  requiring a global prerelease override. The base install pins the same
+  parser version as the tested algorithm packages and the multimodal extra.
 - `/add` and `/flush` no longer leave half-written state when a SQLite write
   lock times out: boundary detection records the memcells, the session's
   status and the remaining buffer in one transaction. Before, a timeout at
