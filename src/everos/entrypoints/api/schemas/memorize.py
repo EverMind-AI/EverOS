@@ -113,7 +113,21 @@ class MemorizeAddRequest(BaseModel):
 
 class AddResponseData(BaseModel):
     message_count: int
-    status: Literal["accumulated", "extracted"]
+    status: Literal["accumulated", "extracted", "degraded"]
+    failed_permanent: int = Field(
+        default=0,
+        description=(
+            "Files this call wrote whose index projection failed and will "
+            "not be retried. Non-zero only when status is degraded."
+        ),
+    )
+    failed_retryable: int = Field(
+        default=0,
+        description=(
+            "Files this call wrote whose index projection failed and may "
+            "still be retried. Non-zero only when status is degraded."
+        ),
+    )
 
 
 class AcceptedResponseData(BaseModel):
@@ -143,4 +157,18 @@ class MemorizeFlushRequest(BaseModel):
 
 
 class FlushResponseData(BaseModel):
-    status: Literal["extracted", "no_extraction"]
+    status: Literal["extracted", "no_extraction", "degraded"]
+    failed_permanent: int = Field(
+        default=0,
+        description=(
+            "Files this flush wrote whose index projection failed and will "
+            "not be retried. Non-zero only when status is degraded."
+        ),
+    )
+    failed_retryable: int = Field(
+        default=0,
+        description=(
+            "Files this flush wrote whose index projection failed and may "
+            "still be retried. Non-zero only when status is degraded."
+        ),
+    )

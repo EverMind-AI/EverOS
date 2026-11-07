@@ -78,6 +78,8 @@ async def add_memory(
         data=AddResponseData(
             message_count=result.message_count,
             status=result.status,
+            failed_permanent=result.failed_permanent,
+            failed_retryable=result.failed_retryable,
         ),
     )
 
@@ -104,5 +106,9 @@ async def flush_memory(
         return _accepted(response, request_id, result)
     return SuccessEnvelope(
         request_id=request_id,
-        data=FlushResponseData(status=result.status),
+        data=FlushResponseData(
+            status=result.status,
+            failed_permanent=result.failed_permanent,
+            failed_retryable=result.failed_retryable,
+        ),
     )

@@ -57,6 +57,7 @@ from everos.infra.persistence.memory_root import MemoryRoot
 from .entries import EntryId
 from .frontmatter import dump_frontmatter, parse_frontmatter
 from .reader import MarkdownReader
+from .writes import note_md_write
 
 
 class MarkdownWriter:
@@ -164,7 +165,7 @@ class MarkdownWriter:
             PathTraversalError: If ``path`` resolves outside the memory root.
         """
         target = Path(path)
-        self._ensure_within_root(target)
+        resolved = self._ensure_within_root(target)
         await anyio.Path(target.parent).mkdir(parents=True, exist_ok=True)
         tmp = target.parent / f".{target.name}.tmp.{uuid.uuid4().hex}"
         try:
@@ -174,6 +175,7 @@ class MarkdownWriter:
             # Best-effort cleanup of the staging file on failure.
             await _unlink_quiet(tmp)
             raise
+        note_md_write(self._memory_root.root, resolved)
         return target
 
     async def write_markdown(

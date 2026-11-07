@@ -43,6 +43,7 @@ from ._base import ProfilePathMixin as ProfilePathMixin
 from ._base import SkillPathMixin as SkillPathMixin
 from ._base import StructuredEntry as StructuredEntry
 from ._base import UserScopedFrontmatter as UserScopedFrontmatter
+from ._base import collect_md_writes as collect_md_writes
 from ._base import dump_frontmatter as dump_frontmatter
 from ._base import find_entry as find_entry
 from ._base import parse_frontmatter as parse_frontmatter
@@ -131,6 +132,7 @@ __all__ = [
     "StructuredEntry",
     "UserProfileFrontmatter",
     "UserScopedFrontmatter",
+    "collect_md_writes",
     "dump_frontmatter",
     "ensure_taxonomy",
     "find_entry",

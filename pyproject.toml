@@ -427,6 +427,7 @@ ignore_imports = [
     "everos.infra.cascade -> everos.infra.cascade._fence",
     "everos.infra.cascade -> everos.infra.cascade.admin",
     "everos.infra.cascade -> everos.infra.cascade.orchestrator",
+    "everos.infra.cascade -> everos.infra.cascade.projection",
     "everos.infra.cascade -> everos.infra.cascade.registry",
 ]
 

@@ -32,6 +32,8 @@ __all__ = [
 ]
 
 import asyncio
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import PathTraversalError, SessionBusyError
@@ -44,6 +46,7 @@ from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
 from ._models import Queued as Queued
+from ._projection import IndexProjection, IndexVerdict
 from ._queue import MemorizeQueueWorker
 from ._queue_models import TASK_STATUSES as TASK_STATUSES
 from ._queue_models import QueueHealth as QueueHealth
@@ -86,6 +89,10 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
+        index_projection: Settles the files this call wrote. ``None`` when
+            the cascade is not wired (the status stays the markdown one).
+        collect_writes: Context manager factory for the markdown paths
+            written during the call. ``None`` records nothing.
     """
 
     def __init__(
@@ -102,6 +109,8 @@ class MemoryService:
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
+        index_projection: IndexProjection | None = None,
+        collect_writes: Callable[[], AbstractContextManager[set[str]]] | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -121,6 +130,8 @@ class MemoryService:
             raw_file_builder=raw_file_builder,
         )
         queue_cfg = settings.memorize.async_queue
+        self._index_projection = index_projection
+        self._collect_writes = collect_writes or _no_writes
         self._queue = MemorizeQueueWorker(
             queue_cfg,
             inbox=stores.memorize_inbox,
@@ -359,8 +370,12 @@ class MemoryService:
         result = await self._memorize(
             flush_payload(session_id, app_id, project_id), is_final=True
         )
+        if result.status == "accumulated":
+            return FlushResult(status="no_extraction")
         return FlushResult(
-            status="extracted" if result.status == "extracted" else "no_extraction"
+            status=result.status,
+            failed_permanent=result.failed_permanent,
+            failed_retryable=result.failed_retryable,
         )
 
     async def _memorize(
@@ -379,6 +394,44 @@ class MemoryService:
             defer_extraction: Persist fresh messages to the unprocessed buffer
                 but skip boundary detection and both extraction pipelines.
         """
-        return await self._memorizer.run(
-            payload, is_final=is_final, defer_extraction=defer_extraction
-        )
+        with self._collect_writes() as written:
+            result = await self._memorizer.run(
+                payload, is_final=is_final, defer_extraction=defer_extraction
+            )
+        if (
+            result.status != "extracted"
+            or self._index_projection is None
+            or not written
+        ):
+            return result
+        verdict = await self._index_projection.await_written(written)
+        return _with_index_verdict(result, verdict)
+
+
+@contextmanager
+def _no_writes() -> Iterator[set[str]]:
+    """The collector when cascade is not wired: record nothing."""
+    yield set()
+
+
+def _with_index_verdict(
+    result: MemorizeResult, verdict: IndexVerdict
+) -> MemorizeResult:
+    """Replace ``extracted`` when a file this call wrote failed to index."""
+    if not verdict.observed or (
+        verdict.failed_permanent == 0 and verdict.failed_retryable == 0
+    ):
+        return result
+    logger.warning(
+        "memorize_index_degraded",
+        failed_permanent=verdict.failed_permanent,
+        failed_retryable=verdict.failed_retryable,
+        pending=verdict.pending,
+    )
+    return result.model_copy(
+        update={
+            "status": "degraded",
+            "failed_permanent": verdict.failed_permanent,
+            "failed_retryable": verdict.failed_retryable,
+        }
+    )

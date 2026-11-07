@@ -110,9 +110,14 @@ bare FastAPI `detail`); see [Errors](#errors).
 
 `/add` and `/flush` write the markdown file (the source of truth)
 **synchronously** — when the call returns with `status: "extracted"`,
-the new entry exists on disk. The configured vector / BM25 / scalar
-index backend is rebuilt by the in-process **cascade coroutine
-asynchronously**.
+the new entry exists on disk and its index projection has not failed.
+`status: "degraded"` means the markdown is on disk but at least one of
+the files this call wrote failed to land in the index (permanently, or
+on an attempt that may still be retried). Counts ride along as
+`failed_permanent` and `failed_retryable`. The configured vector / BM25 /
+scalar index backend is still updated by the in-process **cascade
+coroutine**; a row that is still queued when the call stops waiting is
+lag, not a failure, and the status stays `"extracted"`.
 
 That means `/search` and `/get` may not see a record immediately after
 the `/flush` that produced it. Typical sync latency is sub-second, but
@@ -587,18 +592,27 @@ rule and how to poll progress.
 | Field | Type | Notes |
 |---|---|---|
 | `message_count` | `integer` | Number of messages accepted in this call |
-| `status` | `"accumulated" \| "extracted"` | What the server did with the batch |
+| `status` | `"accumulated" \| "extracted" \| "degraded"` | What the server did with the batch |
+| `failed_permanent` | `integer` | Files this call wrote that failed to index and will not be retried. `0` unless `status` is `degraded` |
+| `failed_retryable` | `integer` | Files this call wrote that failed to index and may still be retried. `0` unless `status` is `degraded` |
 
 **`message_count`** — Always equal to `len(messages)` on a `200` —
 there is no partial accept. The field is present mainly for log
 correlation.
 
-**`status`** — Two-state outcome:
+**`status`** — Outcome of this call:
 - `"accumulated"` — Messages were added to the buffer; the boundary
   detector did **not** trigger this call. The buffer remains open.
 - `"extracted"` — During this call the boundary detector tripped; the
   LLM ran extraction and the writers persisted at least one memory
-  cell. The buffer is empty after the call returns.
+  cell. The buffer is empty after the call returns. The index
+  projection of those files has not failed.
+- `"degraded"` — Same markdown write as `"extracted"`, but at least one
+  of those files failed to index. `failed_permanent` / `failed_retryable`
+  say which. A permanent failure stays failed until the file changes or
+  an operator runs `everos cascade sync --path` / `everos cascade rebuild`.
+  `GET /health`'s `cascade.failed_permanent` is the same backlog across
+  the whole root.
 
 `202 Accepted` — only with `async_mode`, or when the session already has
 queued batches (see [Asynchronous mode](#asynchronous-mode)) — returns a
@@ -669,13 +683,19 @@ scope.
 
 | Field | Type | Notes |
 |---|---|---|
-| `status` | `"extracted" \| "no_extraction"` | What happened |
+| `status` | `"extracted" \| "no_extraction" \| "degraded"` | What happened |
+| `failed_permanent` | `integer` | Files this flush wrote that failed to index and will not be retried. `0` unless `status` is `degraded` |
+| `failed_retryable` | `integer` | Files this flush wrote that failed to index and may still be retried. `0` unless `status` is `degraded` |
 
 **`status`**:
 - `"extracted"` — The buffer had at least one message; extraction ran
-  and produced at least one memory cell.
+  and produced at least one memory cell, and the index projection of
+  those files has not failed.
 - `"no_extraction"` — The buffer was empty (no prior `/add` calls for
   this `(session_id, app_id, project_id)`, or it was already flushed).
+- `"degraded"` — Extraction wrote markdown, but at least one of those
+  files failed to index. Do not treat this as a fully successful write.
+  See `"degraded"` under [`/add`](#post-apiv2memoryadd).
 
 `202 Accepted` with the same body as `/add` (`message_count` is `0`) only
 when the session already has queued batches, so the flush runs after them;

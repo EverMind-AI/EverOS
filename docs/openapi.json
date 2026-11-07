@@ -2257,9 +2257,22 @@
             "type": "string",
             "enum": [
               "accumulated",
-              "extracted"
+              "extracted",
+              "degraded"
             ],
             "title": "Status"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent",
+            "description": "Files this call wrote whose index projection failed and will not be retried. Non-zero only when status is degraded.",
+            "default": 0
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable",
+            "description": "Files this call wrote whose index projection failed and may still be retried. Non-zero only when status is degraded.",
+            "default": 0
           }
         },
         "type": "object",
@@ -3285,9 +3298,22 @@
             "type": "string",
             "enum": [
               "extracted",
-              "no_extraction"
+              "no_extraction",
+              "degraded"
             ],
             "title": "Status"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent",
+            "description": "Files this flush wrote whose index projection failed and will not be retried. Non-zero only when status is degraded.",
+            "default": 0
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable",
+            "description": "Files this flush wrote whose index projection failed and may still be retried. Non-zero only when status is degraded.",
+            "default": 0
           }
         },
         "type": "object",

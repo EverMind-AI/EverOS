@@ -204,9 +204,24 @@ class CascadeMachine(RuleBasedStateMachine):
         self, path: str, kind: str, change: str, same_mtime: bool, *, in_handler: bool
     ) -> None:
         mtime = self._mtime_for(path, same_mtime)
-        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
-        assert lsn == self.next_lsn, (lsn, self.next_lsn)
         old = self.model.get(path)
+        # A permanent failure of these same bytes is not put back on the
+        # queue. A deletion still is: the index has to drop the file.
+        held = (
+            old is not None
+            and old["status"] == "failed"
+            and old["retryable"] is False
+            and change != "deleted"
+            and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
+        )
+        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
+        if held:
+            assert old is not None
+            assert lsn == old["lsn"], (lsn, old["lsn"])
+            event("upsert: terminal held")
+            self.trace.append(f"upsert held terminal {path}")
+            return
+        assert lsn == self.next_lsn, (lsn, self.next_lsn)
         keep = (
             old is not None
             and old["status"] == "failed"
@@ -277,7 +292,13 @@ class CascadeMachine(RuleBasedStateMachine):
                 retry_count=m["retry_count"] + 1,
             )
         elif outcome == "boom":
-            m.update(status="failed", retryable=False, error=True)
+            # Unrecoverable is one attempt, then terminal (#364).
+            m.update(
+                status="failed",
+                retryable=False,
+                error=True,
+                retry_count=m["retry_count"] + 1,
+            )
         elif outcome == "transient":
             r = m["retry_count"] + MAX_RETRY
             m.update(

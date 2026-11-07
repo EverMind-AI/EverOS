@@ -10,11 +10,32 @@ import pytest
 
 from everos.core.errors import PathTraversalError
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import EntryId, MarkdownReader, MarkdownWriter
+from everos.infra.persistence.markdown import (
+    EntryId,
+    MarkdownReader,
+    MarkdownWriter,
+    collect_md_writes,
+)
 
 
 def _make_writer(tmp_path: Path) -> MarkdownWriter:
     return MarkdownWriter(MemoryRoot(tmp_path))
+
+
+async def test_write_is_visible_to_an_active_collection(tmp_path: Path) -> None:
+    writer = _make_writer(tmp_path)
+    target = tmp_path / "default" / "default" / "users" / "u1" / "out.md"
+    with collect_md_writes() as written:
+        await writer.write(target, "hello\n")
+    assert written == {"default/default/users/u1/out.md"}
+
+
+async def test_write_outside_a_collection_records_nothing(tmp_path: Path) -> None:
+    writer = _make_writer(tmp_path)
+    with collect_md_writes() as written:
+        pass
+    await writer.write(tmp_path / "out.md", "hello\n")
+    assert written == set()
 
 
 async def test_write_creates_file_with_content(tmp_path: Path) -> None:

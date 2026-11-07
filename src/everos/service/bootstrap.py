@@ -38,7 +38,8 @@ import contextlib
 import dataclasses
 import datetime as dt
 import functools
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
+from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
 from types import TracebackType
@@ -75,6 +76,7 @@ from everos.infra.cascade import (
     CascadeOrchestrator,
     DeleteFence,
     FencedIndexEraser,
+    ProjectionVerdict,
 )
 from everos.infra.ome import (
     OfflineEngine,
@@ -96,6 +98,7 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownKnowledgeStore,
+    collect_md_writes,
 )
 from everos.infra.persistence.sqlite import (
     SqliteDatabase,
@@ -122,6 +125,7 @@ from everos.memory.strategies import STRATEGY_SPECS
 from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
+from everos.service.memory._projection import IndexProjection
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 
 logger = get_logger(__name__)
@@ -356,7 +360,14 @@ def build_application(
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser
+        settings,
+        providers,
+        deps,
+        tokenizer,
+        OmeEventBus(engine),
+        eraser,
+        _CascadeIndexProjection(cascade),
+        collect_md_writes,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -518,6 +529,16 @@ def build_replay_engine(
     return engine
 
 
+class _CascadeIndexProjection:
+    """Settle a memorize call's files through the process cascade."""
+
+    def __init__(self, cascade: CascadeOrchestrator) -> None:
+        self._cascade = cascade
+
+    async def await_written(self, paths: Collection[str]) -> ProjectionVerdict:
+        return await self._cascade.await_written(paths)
+
+
 def _build_memory_service(
     settings: Settings,
     providers: Providers,
@@ -525,11 +546,15 @@ def _build_memory_service(
     tokenizer: Tokenizer,
     bus: EventBus,
     index_eraser: IndexEraser,
+    index_projection: IndexProjection,
+    collect_writes: Callable[[], AbstractContextManager[set[str]]],
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
+        index_projection=index_projection,
+        collect_writes=collect_writes,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
