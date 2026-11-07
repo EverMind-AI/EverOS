@@ -16,12 +16,43 @@ The script is exposed via `pyproject.toml`:
 
 ```toml
 [project.scripts]
-everos = "everos.entrypoints.cli.main:app"
+everos = "everos.entrypoints.cli.launcher:main"
 ```
 
 After `uv sync` (or `pip install -e .`) the `everos` command resolves
-to [`src/everos/entrypoints/cli/main.py`](../src/everos/entrypoints/cli/main.py),
-a [Typer](https://typer.tiangolo.com/) app.
+to the [launcher](../src/everos/entrypoints/cli/launcher.py), which configures
+the process before invoking the [Typer app](../src/everos/entrypoints/cli/main.py).
+`python -m everos.entrypoints.cli.main` uses the same launcher.
+
+### Linux allocator default
+
+On Linux with glibc, the CLI defaults `MALLOC_ARENA_MAX` to `2` to reduce
+unused memory retained by allocation arenas. It re-executes the interpreter
+once so glibc reads the setting at process startup; command arguments and
+Python interpreter flags are preserved. Reload workers inherit the setting.
+macOS, Windows and non-glibc Linux keep their existing allocator behavior.
+
+An explicitly supplied `MALLOC_ARENA_MAX` or
+`GLIBC_TUNABLES=glibc.malloc.arena_max=...` takes precedence. For example:
+
+```bash
+MALLOC_ARENA_MAX=4 everos server start  # favor allocation concurrency
+MALLOC_ARENA_MAX=0 everos server start  # retain glibc's automatic arena limit
+```
+
+This is a process-launch setting, not a TOML or `.env` application setting.
+The default applies to CLI commands; importing EverOS into another Python
+application does not change that application's allocation policy. For direct
+Uvicorn or Python service usage, set it before starting the interpreter:
+
+```bash
+MALLOC_ARENA_MAX=2 uvicorn everos.entrypoints.api.app:create_app --factory
+MALLOC_ARENA_MAX=2 python my_application.py
+```
+
+The limit controls glibc arenas, not a total memory ceiling or other native
+allocators. Fewer arenas can trade memory savings for allocation contention;
+see [glibc's allocator documentation](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html).
 
 ## Subcommand layout
 

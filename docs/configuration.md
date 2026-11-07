@@ -18,6 +18,11 @@ everos server start
 
 ## Configuration Files
 
+Linux CLI processes use a default glibc arena limit of two. This is configured
+before interpreter startup, outside the TOML/`.env` settings below. See
+[Linux allocator default](cli.md#linux-allocator-default) for overrides and
+direct Uvicorn/Python usage.
+
 ### `everos.toml` — Application Settings
 
 Located at `<root>/everos.toml`. Controls all application behavior: API

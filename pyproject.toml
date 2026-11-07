@@ -162,7 +162,7 @@ include = [
 exclude = [".uv-cache", ".venv"]
 
 [project.scripts]
-everos = "everos.entrypoints.cli.main:app"
+everos = "everos.entrypoints.cli.launcher:main"
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Tooling
