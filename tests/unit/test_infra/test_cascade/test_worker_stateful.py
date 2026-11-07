@@ -54,10 +54,7 @@ from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.cascade.models import HandlerOutcome
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
-from everos.infra.persistence.sqlite._repos.md_change_state import (
-    MTIME_TOLERANCE_SECONDS,
-    MdChangeStateRepo,
-)
+from everos.infra.persistence.sqlite._repos.md_change_state import MdChangeStateRepo
 from everos.infra.persistence.sqlite._tables import MdChangeState
 
 settings.register_profile(
@@ -180,6 +177,9 @@ class CascadeMachine(RuleBasedStateMachine):
 
         self.repo.mark_done = done_counting  # type: ignore[method-assign]
         self.repo.mark_failed = failed_counting  # type: ignore[method-assign]
+        # Captured before a test replaces ``read_one``. The model must see
+        # the row the enqueue wrote, not a stub aimed at the worker.
+        self._ledger_read = self.repo.read_one
 
     async def _create_tables(self) -> None:
         async with self.engine.begin() as conn:
@@ -225,58 +225,45 @@ class CascadeMachine(RuleBasedStateMachine):
         if in_handler:
             self._settle_marked()
         mtime = self._mtime_for(path, same_mtime)
+        # Status before the post-await settle. A mark that commits during
+        # the upsert mutates this row in the model, but only a returned
+        # LSN equal to the one we held means the ledger refused the enqueue.
+        prior = self.model.get(path)
+        prior_status = None if prior is None else prior["status"]
         lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
-        # The sibling's terminal write can commit inside that await, after
-        # the pre-check and before this read. Fold it in before deciding
-        # whether the ledger kept the old LSN.
         if in_handler:
             self._settle_marked()
-        old = self.model.get(path)
-        # A permanent failure of these same bytes is not put back on the
-        # queue. A deletion still is: the index has to drop the file.
-        held = (
-            old is not None
-            and old["status"] == "failed"
-            and old["retryable"] is False
-            and change != "deleted"
-            and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
-        )
-        if held:
-            assert old is not None
-            assert lsn == old["lsn"], (lsn, old["lsn"])
+        current = self.model.get(path)
+        if current is not None and lsn == current["lsn"]:
             event("upsert: terminal held")
             self.trace.append(f"upsert held terminal {path}")
             return
         assert lsn == self.next_lsn, (lsn, self.next_lsn)
-        keep = (
-            old is not None
-            and old["status"] == "failed"
-            and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
-        )
-        retry_count = old["retry_count"] if (old is not None and keep) else 0
-        if old is not None and old["status"] == "processing":
-            # Re-enqueued while its handler runs: the verdict about to be
-            # written is stale and must be dropped (mark_* are guarded).
-            old["shielded"] = True
+        # The enqueue landed. Copy the row it wrote: a terminal mark that
+        # settled above may belong to a claim this write already replaced.
+        written = await self._ledger_read(path)
+        assert written is not None and written.lsn == lsn
+        in_flight = prior_status == "processing" and path not in self.marked
+        if in_flight:
+            # The handler for this claim has not marked yet. Its later
+            # verdict is stale and must not land on the new pending row.
             event("upsert: during processing")
         self.model[path] = {
-            "status": "pending",
-            "retryable": None,
-            "retry_count": retry_count,
-            "error": False,
-            "lsn": lsn,
-            "mtime": mtime,
-            "kind": kind,
-            "change": change,
-            "shielded": old["shielded"]
-            if (old is not None and old.get("shielded"))
-            else False,
+            "status": written.status,
+            "retryable": written.retryable,
+            "retry_count": written.retry_count,
+            "error": written.error is not None,
+            "lsn": written.lsn,
+            "mtime": written.mtime,
+            "kind": written.kind,
+            "change": written.change_type,
+            "shielded": in_flight,
         }
         self.next_lsn += 1
         where = " (in handler)" if in_handler else ""
         self.trace.append(
             f"upsert {path} kind={kind} change={change} same_mtime={same_mtime} "
-            f"-> lsn={lsn} retry_count={retry_count}{where}"
+            f"-> lsn={lsn} retry_count={written.retry_count}{where}"
         )
 
     async def _wait_until_alone(self, md_path: str) -> None:
@@ -505,6 +492,55 @@ def test_in_handler_enqueue_sees_a_sibling_already_terminal() -> None:
         machine.table_matches_model()
         failed = machine.model[PATHS[1]]
         assert failed["status"] == "failed" and failed["retryable"] is False
+        assert machine.model[PATHS[0]]["status"] == "done"
+    finally:
+        machine.teardown()
+
+
+def test_terminal_mark_during_upsert_keeps_a_fresh_lsn() -> None:
+    """A mark that commits after the guard read does not undo the enqueue.
+
+    ``upsert`` observes ``processing``, the sibling's terminal mark then
+    commits, and the enqueue still assigns a fresh LSN. The model must
+    follow that LSN, not the mark it folded in while waiting.
+    """
+    machine = CascadeMachine()
+    try:
+        sibling = PATHS[1]
+        machine.upsert(sibling, "orphan", "added", False)
+        machine.upsert(PATHS[0], "episode", "added", False)
+        read_seen = asyncio.Event()
+        mark_done = asyncio.Event()
+        real_read = machine.repo.read_one
+        real_mark = machine.repo.mark_failed
+
+        async def mark_after_guard(md_path: str, **kw: Any) -> None:
+            if md_path == sibling and not read_seen.is_set():
+                await read_seen.wait()
+            await real_mark(md_path, **kw)
+            if md_path == sibling:
+                mark_done.set()
+
+        async def read_then_let_mark_commit(md_path: str) -> Any:
+            row = await real_read(md_path)
+            if (
+                md_path == sibling
+                and row is not None
+                and row.status == "processing"
+                and not read_seen.is_set()
+            ):
+                read_seen.set()
+                await mark_done.wait()
+                return row
+            return row
+
+        machine.repo.mark_failed = mark_after_guard  # type: ignore[method-assign]
+        machine.repo.read_one = read_then_let_mark_commit  # type: ignore[method-assign]
+        machine.drain(["ok", "ok"], [(sibling, "episode", "modified", True)])
+        machine.table_matches_model()
+        requeued = machine.model[sibling]
+        assert requeued["status"] == "pending"
+        assert requeued["lsn"] == 3
         assert machine.model[PATHS[0]]["status"] == "done"
     finally:
         machine.teardown()
