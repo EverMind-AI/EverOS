@@ -46,6 +46,7 @@ from types import TracebackType
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider, build_embedding_provider
+from everos.component.images import ImageLimits
 from everos.component.llm import (
     LLMCaseJudge,
     LLMClientConfig,
@@ -108,12 +109,14 @@ from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
 from everos.memory.ports import EventBus, IndexEraser, StrategySpec
+from everos.memory.ports.images import ImageStore
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
     AgentSkillRecaller,
     AtomicFactRecaller,
     EpisodeRecaller,
+    ImageMemoryRecaller,
     KnowledgeTopicRecaller,
     ProfileRecaller,
     RecallerDeps,
@@ -167,6 +170,10 @@ class Application:
     memory: MemoryService
     knowledge: KnowledgeService
     ops: OpsService
+    images: ImageStore
+    """Read-only picture access for the two serving routes. Deliberately not on
+    ``MemoryService``: fetching a picture is not a memory operation, and the
+    routes that serve it must not be able to reach the write side."""
     capabilities: Capabilities
     _settings: Settings = dataclasses.field(repr=False)
     _root: MemoryRoot = dataclasses.field(repr=False)
@@ -361,6 +368,7 @@ def build_application(
     vector_tables = index.repositories.with_vectors()
     return Application(
         memory=memory,
+        images=stores.images,
         knowledge=_build_knowledge_service(
             settings, root, providers, indexes, sqlite, tokenizer, capabilities
         ),
@@ -518,6 +526,26 @@ def build_replay_engine(
     return engine
 
 
+def _image_limits(settings: Settings) -> ImageLimits:
+    """``[images]`` as the picture store's bounds.
+
+    One place, because both ingest (which accepts a picture) and extraction
+    (which scales it for the model) must read the same numbers: an ingest bound
+    wider than the extraction scale would accept pictures that are then sent
+    at a size no endpoint agreed to.
+    """
+    images = settings.images
+    return ImageLimits(
+        max_bytes=images.max_bytes,
+        max_per_message=images.max_per_message,
+        max_request_bytes=images.max_request_bytes,
+        max_per_request=images.max_per_request,
+        formats=tuple(images.formats),
+        model_edge=images.model_edge,
+        cache_quality=images.cache_quality,
+    )
+
+
 def _build_memory_service(
     settings: Settings,
     providers: Providers,
@@ -546,6 +574,9 @@ def _build_memory_service(
             memcell_store=stores.memcell,
             instructions=deps.instructions,
             llm_client=providers.llm,
+            image_store=stores.images,
+            image_memory_store=stores.image_memory,
+            image_limits=_image_limits(settings),
         ),
         agent_pipeline=AgentMemoryPipeline(),
         bus=bus,
@@ -563,6 +594,8 @@ def _build_memory_service(
             decider_client=providers.decider,
             tuning_source=SearchConfigSource().tuning,
             trace_path_source=SearchConfigSource().trace_path,
+            image_recaller=ImageMemoryRecaller(recaller_deps, indexes.image_memory),
+            image_store=stores.images,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,
@@ -570,6 +603,7 @@ def _build_memory_service(
             agent_skill_index=indexes.agent_skill,
             profile_index=indexes.profile,
         ),
+        indexes=indexes,
     )
 
 

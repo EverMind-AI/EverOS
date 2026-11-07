@@ -19,9 +19,24 @@ _INSTALL_HINT = (
 
 
 def has_unparsed_multimodal(items: list[dict[str, Any]]) -> bool:
-    """True if any content item is non-text and not yet parsed."""
+    """True if any content item needs the parser to become text.
+
+    A stored picture never does. It has already been accepted as a picture and
+    is handed to the extraction model as an image part — that is the whole
+    point of the picture path, and running it through a captioner first would
+    replace the picture with a lossy prose summary in every extraction. A
+    picture therefore counts as *handled* once it carries ``image_id``, even
+    though it has no ``parsed_content``.
+
+    The parser route is still there for a text-only extraction model: with
+    ``[extraction] vision = false`` the ingest layer does not store pictures at
+    all, so they arrive here unstored and are parsed exactly as before.
+    """
     return any(
-        item.get("type") != "text" and "parsed_content" not in item for item in items
+        item.get("type") != "text"
+        and "parsed_content" not in item
+        and "image_id" not in item
+        for item in items
     )
 
 

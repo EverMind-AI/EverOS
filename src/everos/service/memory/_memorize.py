@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
     from everos.memory.ports import EventBus
+    from everos.memory.ports.images import ImageStore
 
 logger = get_logger("everos.service.memory")
 
@@ -56,6 +57,9 @@ class Memorizer:
         boundary: Cuts each session's buffered messages into memcells.
         multimodal_llm: Parses non-text content; ``None`` when
             ``[multimodal]`` is not configured.
+        image_store: Where picture content items are stored, by content hash;
+            ``None`` disables the picture path (pictures are reported as
+            rejected rather than silently dropped).
         user_pipeline: The user-memory track, run on every cell.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
@@ -74,8 +78,12 @@ class Memorizer:
         bus: EventBus,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
+        image_store: ImageStore | None = None,
+        vision: bool = True,
     ) -> None:
         self._raw_file_builder = raw_file_builder
+        self._image_store = image_store
+        self._vision = vision
         self._settings = settings
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
@@ -197,6 +205,8 @@ class Memorizer:
             payload,
             multimodal_llm=self._multimodal_llm,
             raw_file_builder=self._raw_file_builder,
+            image_store=self._image_store,
+            vision=self._vision,
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested, mode=mode)
