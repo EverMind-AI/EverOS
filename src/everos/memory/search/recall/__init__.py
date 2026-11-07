@@ -26,6 +26,7 @@ from .base import merge_by_id_max as merge_by_id_max
 from .base import merge_stored as merge_stored
 from .base import rank_input as rank_input
 from .episode import EpisodeRecaller as EpisodeRecaller
+from .image_memory import ImageMemoryRecaller as ImageMemoryRecaller
 from .knowledge_topic import KnowledgeMethod as KnowledgeMethod
 from .knowledge_topic import KnowledgeTopicRecaller as KnowledgeTopicRecaller
 from .knowledge_topic import TopicRecall as TopicRecall
@@ -39,6 +40,7 @@ __all__ = [
     "AtomicFactRecaller",
     "EpisodeRecaller",
     "FactsByEpisode",
+    "ImageMemoryRecaller",
     "KindRecaller",
     "KnowledgeMethod",
     "KnowledgeTopicRecaller",

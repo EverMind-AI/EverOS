@@ -36,10 +36,13 @@ from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
+from everos.memory.ports import Scope
 
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
+from ._forget import ForgetManager
+from ._forget import ForgetResult as ForgetResult
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
@@ -56,7 +59,7 @@ if TYPE_CHECKING:
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
-    from everos.memory.deps import Stores
+    from everos.memory.deps import Indexes, Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
@@ -102,6 +105,7 @@ class MemoryService:
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
+        indexes: Indexes | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -109,6 +113,18 @@ class MemoryService:
         self._stores = stores
         self._deleter = Deleter(
             stores=stores, eraser=index_eraser, settings=settings.memorize
+        )
+        # Forgetting a picture has to find what referred to it, which is an
+        # index lookup, so it needs the read side as well as the write side.
+        self._forgetter = (
+            ForgetManager(
+                stores=stores,
+                indexes=indexes,
+                images=stores.images,
+                eraser=index_eraser,
+            )
+            if indexes is not None
+            else None
         )
         self._memorizer = Memorizer(
             settings=settings,
@@ -119,6 +135,8 @@ class MemoryService:
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            image_store=stores.images,
+            vision=settings.extraction.vision,
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
@@ -218,6 +236,40 @@ class MemoryService:
         except asyncio.CancelledError:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
+
+    async def forget_image(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str,
+        image_id: str,
+        reason: str | None = None,
+    ) -> ForgetResult:
+        """Forget one picture for one user: its memories, its vector, its file.
+
+        The picture's memories are marked forgotten, its index row is erased,
+        its original is taken out of circulation, and every episode whose body
+        referred to it is written again without that reference. Nothing is
+        deleted: the forget marks are what keep the material out of a default
+        result, and undoing them is a status change.
+
+        Raises:
+            RuntimeError: The service was built without read-side indexes, so
+                there is no way to find what referred to the picture.
+        """
+        if self._forgetter is None:
+            raise RuntimeError("forget needs the read-side indexes")
+        return await self._forgetter.forget_image(
+            scope=Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+            image_id=image_id,
+            reason=reason,
+        )
 
     async def finish_interrupted_deletions(self) -> int:
         """Finish whole-owner deletions a crash cut short (startup)."""

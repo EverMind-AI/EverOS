@@ -59,6 +59,7 @@ from .dto import (
     SearchAgentSkillItem,
     SearchData,
     SearchEpisodeItem,
+    SearchImageItem,
     SearchMethod,
     SearchProfileItem,
     SearchRequest,
@@ -67,7 +68,10 @@ from .dto import (
 )
 from .filters import compile_filters
 from .hierarchy import build_ep_to_fact_parents, heap_expand
-from .llm_multiround import RoundDecider, search_episodes_llm_multiround
+from .llm_multiround import (
+    RoundDecider,
+    search_episodes_and_images_llm_multiround,
+)
 from .recall import (
     KindRecaller,
     RecallResult,
@@ -83,6 +87,7 @@ from .shaper import (
     shape_agent_skills,
     shape_agent_skills_ranked,
     shape_episodes,
+    shape_images,
 )
 from .skill_hybrid import search_agent_skills_hybrid
 
@@ -92,12 +97,14 @@ if TYPE_CHECKING:
     from everos.component.embedding import EmbeddingProvider
     from everos.component.rerank import RerankProvider
     from everos.component.tokenizer import Tokenizer
+    from everos.memory.ports.images import ImageStore
 
     from .recall import (
         AgentCaseRecaller,
         AgentSkillRecaller,
         AtomicFactRecaller,
         EpisodeRecaller,
+        ImageMemoryRecaller,
         ProfileRecaller,
     )
 
@@ -177,6 +184,8 @@ class SearchManager:
         search_tokenizer: Tokenizer | None = None,
         tuning_source: Callable[[], DeciderSettings],
         trace_path_source: Callable[[], str | None],
+        image_recaller: ImageMemoryRecaller | None = None,
+        image_store: ImageStore | None = None,
     ) -> None:
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
@@ -194,6 +203,8 @@ class SearchManager:
         # field by field, but never shares the extraction client's SDK retries.
         self._decider_llm = decider_client
         self._search_tokenizer = search_tokenizer
+        self._images = image_recaller
+        self._image_store = image_store
 
     # ── Public entry ────────────────────────────────────────────────
 
@@ -231,13 +242,14 @@ class SearchManager:
             self._validate_components(req)
 
             if req.owner_type == "user":
-                episodes, profiles, unprocessed = await asyncio.gather(
+                (episodes, images), profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(req, where),
                     self._fetch_profile(req),
                     self._load_unprocessed(req),
                 )
                 data = SearchData(
                     episodes=episodes,
+                    images=images,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
                 )
@@ -361,7 +373,8 @@ class SearchManager:
             app_id=req.app_id,
             project_id=req.project_id,
         )
-        return await self._search_episodes(req, where, decider=decider)
+        episodes, _images = await self._search_episodes(req, where, decider=decider)
+        return episodes
 
     async def _search_episodes(
         self,
@@ -369,9 +382,10 @@ class SearchManager:
         where: Filter,
         *,
         decider: RoundDecider | None = None,
-    ) -> list[SearchEpisodeItem]:
+    ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
+        """User-track retrieval: the episodes and the pictures ranked with them."""
         if req.method == SearchMethod.AGENTIC:
-            return await search_episodes_agentic(
+            episodes = await search_episodes_agentic(
                 req.query,
                 owner_id=req.owner_id,
                 where=where,
@@ -386,9 +400,14 @@ class SearchManager:
                 top_k=self._top_k(req.top_k),
                 radius=_effective_radius(req),
             )
+            # The agentic arm is the pre-picture pipeline and knows nothing about
+            # pictures. Rather than splice images into a route that never ranked
+            # them, it returns episodes alone and leaves ``images`` empty --
+            # an empty array is honest, an image pinned to the wrong rank is not.
+            return episodes, []
 
         if req.method == SearchMethod.LLM_MULTIROUND:
-            return await search_episodes_llm_multiround(
+            return await search_episodes_and_images_llm_multiround(
                 req.query,
                 owner_id=req.owner_id,
                 where=where,
@@ -403,6 +422,8 @@ class SearchManager:
                 decider=decider,
                 tuning_source=self._tuning_source,
                 trace_path_source=self._trace_path_source,
+                image_recaller=self._images,
+                image_store=self._image_store,
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
@@ -426,7 +447,11 @@ class SearchManager:
             # Single-route recall has no per-fact score against the query, so
             # we do not back-fill — that would emit ``score=0.0`` facts whose
             # semantics are ambiguous.
-            return shape_episodes(recalled.candidates[:top_k], recalled.stored_by_id)
+            episodes = shape_episodes(
+                recalled.candidates[:top_k], recalled.stored_by_id
+            )
+            images = await self._image_hits(req, where, top_k)
+            return episodes, images
 
         # ── HYBRID: heap-expand hierarchy over parallel sparse + dense recall ──
         sparse, dense, query_vector = await self._recall_sparse_dense(
@@ -457,7 +482,36 @@ class SearchManager:
             )
             if req.min_score is not None:
                 shaped = [s for s in shaped if s.score >= req.min_score]
-            return shaped
+            images = await self._image_hits(req, where, top_k)
+            return shaped, images
+
+    async def _image_hits(
+        self, req: SearchRequest, where: Filter, top_k: int
+    ) -> list[SearchImageItem]:
+        """Picture memories for a single-route or hybrid search.
+
+        Those two routes rank the episode hierarchy through algorithms that
+        know nothing about pictures (heap-expand over atomic facts), so
+        pictures cannot join their fusion without changing what the route
+        measures. They get their own recall over the same query and the same
+        filters, and are ranked on their own score. That is a real limitation
+        of these routes and the reason multi-round is the default: it is the
+        only route where the two kinds compete in one pool.
+        """
+        if self._images is None:
+            return []
+        recalled = await self._images.sparse_recall(req.query, where, limit=top_k)
+        if req.method == SearchMethod.VECTOR and self._embedding is not None:
+            vector = await self._embedding.embed_query(req.query)
+            dense = await self._images.dense_recall(vector, where, limit=top_k)
+            recalled = merge_by_id_max(recalled, dense)
+        if req.min_score is not None:
+            recalled = recalled.within_radius(req.min_score)
+        return shape_images(
+            recalled.candidates[:top_k],
+            recalled.stored_by_id,
+            thumbnail_edge=self._tuning_source().image_thumbnail_edge,
+        )
 
     # ── Agent cases ─────────────────────────────────────────────────
 

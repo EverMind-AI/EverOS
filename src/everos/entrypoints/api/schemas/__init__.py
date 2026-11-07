@@ -14,6 +14,8 @@ from .delete import DeleteResponseData as DeleteResponseData
 from .envelope import ErrorDetail as ErrorDetail
 from .envelope import ErrorResponse as ErrorResponse
 from .envelope import SuccessEnvelope as SuccessEnvelope
+from .forget import ForgetImageRequest as ForgetImageRequest
+from .forget import ForgetImageResponseData as ForgetImageResponseData
 from .health import CascadeHealthBlock as CascadeHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse

@@ -49,18 +49,25 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
-from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
+from everalgo.llm import (
+    LLMMessage,
+    StrictOutputModel,
+    image_url_part_from_bytes,
+    parse_reply,
+)
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
 from everos.config.settings import DeciderSettings
 from everos.core.observability.logging import get_logger
-from everos.memory.models import Episode
+from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import Filter, Stored
+from everos.memory.ports.images import ImageStore
 
-from .dto import SearchEpisodeItem
+from .dto import SearchEpisodeItem, SearchImageItem
 from .recall import RecallResult
-from .shaper import shape_episodes
+from .recall.image_memory import IMAGE_KIND
+from .shaper import shape_episodes, shape_images
 
 logger = get_logger(__name__)
 
@@ -70,6 +77,7 @@ if TYPE_CHECKING:
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
+    from everos.memory.search.recall.image_memory import ImageMemoryRecaller
 
 
 # ── Retrieval hyperparameters (per-sub-query RRF blocks) ──────────────────────
@@ -86,6 +94,31 @@ _SEED_CANDIDATES: int = 50
 
 
 # ── Decider hook (pluggable: prompt-LLM in P1, trained policy in P2) ──────────
+
+
+class Picture(NamedTuple):
+    """One picture the decider may look at this round.
+
+    Attributes:
+        label: The label the evidence text uses for it (``P3``), so the decider
+            can tie an image part back to the numbered line it belongs to.
+        data: Bytes of the thumbnail — the decider's copy, never the original.
+        mime: MIME type of ``data``.
+    """
+
+    label: str
+    data: bytes
+    mime: str
+
+
+_PICTURE_MARK = " (picture)"
+"""Appended to a picture candidate's evidence line.
+
+The decider has to know that a numbered item is a picture and not a narrative:
+what it may expect to learn from one differs, and the model is told to judge a
+picture by what it shows. The mark rides in the text so it survives a decider
+that runs without images at all (``image_candidates_per_round = 0``).
+"""
 
 
 class RoundDecision(NamedTuple):
@@ -135,6 +168,8 @@ class RoundDecider(Protocol):
         evidence: str,
         n_candidates: int,
         round_idx: int,
+        *,
+        pictures: Sequence[Picture] = (),
     ) -> RoundDecision: ...
 
 
@@ -261,6 +296,8 @@ class LLMRoundDecider:
         evidence: str,
         n_candidates: int,
         round_idx: int,
+        *,
+        pictures: Sequence[Picture] = (),
     ) -> RoundDecision:
         tune = self._tuning_source()
         prompt = self._prompt.format(
@@ -274,7 +311,7 @@ class LLMRoundDecider:
         last_error = ""
         for attempt in range(tune.retries + 1):
             try:
-                raw, reply = await self._ask(prompt, tune)
+                raw, reply = await self._ask(prompt, tune, pictures)
                 break
             except Exception as err:
                 # Any failure degrades this round to the deterministic fallback
@@ -313,7 +350,10 @@ class LLMRoundDecider:
         return RoundDecision(stop=not queries, queries=queries, core=core, raw=raw)
 
     async def _ask(
-        self, prompt: str, tune: DeciderSettings
+        self,
+        prompt: str,
+        tune: DeciderSettings,
+        pictures: Sequence[Picture] = (),
     ) -> tuple[str, _DecisionReply]:
         """One decider call: the raw reply text and its validated form.
 
@@ -327,7 +367,7 @@ class LLMRoundDecider:
             LLMOutputError: The reply is not a valid :class:`_DecisionReply`.
         """
         text = await self._llm.achat(
-            [LLMMessage(role="user", content=prompt)],
+            [LLMMessage(role="user", content=_content(prompt, pictures, tune))],
             response_format=_DecisionReply,
             max_tokens=tune.max_tokens,
             **tune.extra,
@@ -371,8 +411,57 @@ async def search_episodes_llm_multiround(
     decider: RoundDecider | None = None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
+    image_recaller: ImageMemoryRecaller | None = None,
+    image_store: ImageStore | None = None,
 ) -> list[SearchEpisodeItem]:
-    """LLM-guided iterative multi-round episode search (per-sub-query RRF blocks).
+    """Multi-round search, episodes only.
+
+    The episode arm of :func:`search_episodes_and_images_llm_multiround`, for
+    callers that never surface pictures: the RL environment, the ablations and
+    the pre-picture API shape. The loop, the slot budget and the ranking are
+    the same one; only the second returned array is dropped.
+    """
+    episodes, _images = await search_episodes_and_images_llm_multiround(
+        query,
+        owner_id=owner_id,
+        where=where,
+        app_id=app_id,
+        project_id=project_id,
+        episode_recaller=episode_recaller,
+        atomic_fact_recaller=atomic_fact_recaller,
+        embed_query_fn=embed_query_fn,
+        llm=llm,
+        top_k=top_k,
+        reranker=reranker,
+        decider=decider,
+        tuning_source=tuning_source,
+        trace_path_source=trace_path_source,
+        image_recaller=image_recaller,
+        image_store=image_store,
+    )
+    return episodes
+
+
+async def search_episodes_and_images_llm_multiround(
+    query: str,
+    *,
+    owner_id: str,
+    where: Filter,
+    app_id: str = "default",
+    project_id: str = "default",
+    episode_recaller: EpisodeRecaller,
+    atomic_fact_recaller: AtomicFactRecaller,
+    embed_query_fn: Callable[[str], Awaitable[list[float]]],
+    llm: LLMClient,
+    top_k: int,
+    reranker: RerankProvider | None = None,
+    decider: RoundDecider | None = None,
+    tuning_source: Callable[[], DeciderSettings],
+    trace_path_source: Callable[[], str | None],
+    image_recaller: ImageMemoryRecaller | None = None,
+    image_store: ImageStore | None = None,
+) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
+    """LLM-guided iterative multi-round search (per-sub-query RRF blocks).
 
     Thin entry that delegates to :func:`_search_episodes_subq` — the only arm.
     Each round fuses every current sub-query's BM25+vector recall with RRF
@@ -399,9 +488,16 @@ async def search_episodes_llm_multiround(
             Phase-2 RL policy reuses this loop as its environment.
         tuning_source: Read settings at each existing loop/render/decision boundary.
         trace_path_source: Read the optional trace destination at each write boundary.
+        image_recaller: Picture recall; ``None`` searches episodes only.
+        image_store: Reads the thumbnails the decider looks at; required with
+            ``image_recaller``, and only consulted when
+            ``[decider].image_candidates_per_round`` is above 0.
 
     Returns:
-        Ranked ``SearchEpisodeItem`` list, empty on an empty seed.
+        ``(episodes, images)`` — one shared ranking split by kind, both empty
+        on an empty seed. The split is a presentation detail: the two kinds
+        were ranked together, so the slots one consumed are not available to
+        the other.
     """
     return await _search_episodes_subq(
         query,
@@ -418,6 +514,8 @@ async def search_episodes_llm_multiround(
         decider=decider,
         tuning_source=tuning_source,
         trace_path_source=trace_path_source,
+        image_recaller=image_recaller,
+        image_store=image_store,
     )
 
 
@@ -445,6 +543,8 @@ def _render_blocks(
         for rank, c in enumerate(cands):
             subject = str(c.metadata.get("subject", ""))
             summary = _decider_text(c.metadata, tuning_source=tuning_source)
+            if _is_picture(c):
+                summary = f"{summary}{_PICTURE_MARK}"
             lines.append(f"  {gi}: {subject} - {summary}")
             global_cands.append(c)
             index_meta.append(
@@ -478,6 +578,121 @@ def _render_core_so_far(
         src = core_source.get(cid, "original question")
         out.append(f'  - [from "{src}"] {subject} - {summary}')
     return "\n".join(out) or "(none)"
+
+
+async def _decide(
+    decide: RoundDecider,
+    query: str,
+    core_so_far: str,
+    rendered: str,
+    n_candidates: int,
+    round_idx: int,
+    pictures: Sequence[Picture],
+) -> RoundDecision:
+    """Call the decider, passing ``pictures`` only when there are some.
+
+    A policy written against the five-argument signature — every decider that
+    existed before pictures, and an RL policy compiling its own call — keeps
+    working unchanged. Passing an empty ``pictures=`` to it would be a
+    ``TypeError`` for no gain, and only a round that actually shows a picture
+    needs the extra argument.
+    """
+    if not pictures:
+        return await decide(query, core_so_far, rendered, n_candidates, round_idx)
+    return await decide(
+        query,
+        core_so_far,
+        rendered,
+        n_candidates,
+        round_idx,
+        pictures=pictures,
+    )
+
+
+def _content(
+    prompt: str, pictures: Sequence[Picture], tune: DeciderSettings
+) -> str | list[object]:
+    """The decider's user message: the text, then this round's pictures.
+
+    A text-only round keeps the plain string shape it has always sent, so a
+    deployment with ``image_candidates_per_round = 0`` sends byte-identical
+    requests to what it sent before pictures existed — which matters because
+    a strict ``json_schema`` response format plus a multimodal content array
+    is a combination not every endpoint accepts.
+
+    Each picture is introduced by a text part naming its evidence index, so the
+    decider can map "what does item 7 show" onto the right image rather than
+    guessing by position.
+    """
+    if not pictures:
+        return prompt
+    parts: list[object] = [{"type": "text", "text": prompt}]
+    for picture in pictures:
+        parts.append(
+            {
+                "type": "text",
+                "text": f"Picture for evidence item {picture.label}:",
+            }
+        )
+        part = image_url_part_from_bytes(picture.data, picture.mime)
+        parts.append(
+            part.model_copy(
+                update={
+                    "image_url": part.image_url.model_copy(
+                        update={"detail": tune.image_detail}
+                    )
+                }
+            ).model_dump()
+        )
+    return parts
+
+
+async def _round_pictures(
+    global_cands: Sequence[Candidate],
+    *,
+    store: ImageStore | None,
+    k: int,
+    edge: int,
+    quality: int,
+) -> list[Picture]:
+    """The thumbnails this round shows the decider, at most ``k`` of them.
+
+    Picked in evidence order — the fused ranking already put the most relevant
+    pictures first — so the cap costs the least relevant ones, and those stay
+    in the evidence as text. Every failure to load one degrades that picture
+    to text instead of failing the round: the decider's answer is still usable
+    without the pixels, and a round that raises would lose the whole search.
+
+    Returns an empty list when the knob is 0, which is the default: a decider
+    that was never trained on pictures is not shown any.
+    """
+    if k <= 0 or store is None:
+        return []
+    picked: list[Picture] = []
+    for gi, cand in enumerate(global_cands):
+        if len(picked) >= k:
+            break
+        if not _is_picture(cand):
+            continue
+        image_id = str(cand.metadata.get("image_id", ""))
+        if not image_id:
+            continue
+        try:
+            data = await store.read_derived(image_id, edge=edge, quality=quality)
+        except (FileNotFoundError, OSError, ValueError) as err:
+            logger.debug(
+                "llm_multiround_picture_unavailable",
+                image_id=image_id,
+                error=f"{type(err).__name__}: {err}"[:160],
+            )
+            continue
+        picked.append(Picture(label=str(gi), data=data, mime="image/jpeg"))
+    return picked
+
+
+def _is_picture(cand: Candidate) -> bool:
+    """Whether ``cand`` is a picture memory rather than an episode."""
+    return cand.metadata.get("kind") == IMAGE_KIND
 
 
 def _decider_text(meta: dict, *, tuning_source: Callable[[], DeciderSettings]) -> str:
@@ -586,7 +801,9 @@ async def _search_episodes_subq(
     decider: RoundDecider | None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
-) -> list[SearchEpisodeItem]:
+    image_recaller: ImageMemoryRecaller | None = None,
+    image_store: ImageStore | None = None,
+) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
     Each round: embed every current sub-query, recall (BM25 + vector) and fuse
@@ -626,6 +843,7 @@ async def _search_episodes_subq(
     subq_hits: dict[str, dict[str, float]] = {}  # id -> {sub_query: rrf_score}
     cand_by_id: dict[str, Candidate] = {}  # id -> best-score candidate ever seen
     episodes_by_id: dict[str, Stored[Episode]] = {}  # id -> recalled record
+    images_by_id: dict[str, Stored[ImageMemory]] = {}  # id -> recalled picture
     guarantee: list[tuple[str, str]] = []  # (sub_query, top id) per block, in order
     subqueries_seen: list[str] = []
     no_new_core_streak = 0
@@ -648,6 +866,12 @@ async def _search_episodes_subq(
                     episode_recaller.dense_recall(v, where, limit=_SEED_CANDIDATES)
                     if v
                     else _no_recall(),
+                    image_recaller.sparse_recall(q, where, limit=_SEED_CANDIDATES)
+                    if image_recaller is not None
+                    else _no_recall(),
+                    image_recaller.dense_recall(v, where, limit=_SEED_CANDIDATES)
+                    if image_recaller is not None and v
+                    else _no_recall(),
                 )
                 for q, v in zip(cur_queries, vecs, strict=True)
             ]
@@ -655,10 +879,18 @@ async def _search_episodes_subq(
         _ts_recall_done = time.monotonic()
         blocks: list[tuple[str, list[Candidate]]] = []
         block_meta: list[dict[str, object]] = []
-        for q, (sparse_result, dense_result) in zip(cur_queries, recalls, strict=True):
+        for q, (
+            sparse_result,
+            dense_result,
+            image_sparse,
+            image_dense,
+        ) in zip(cur_queries, recalls, strict=True):
             episodes_by_id.update(sparse_result.stored_by_id)
             episodes_by_id.update(dense_result.stored_by_id)
-            r_sparse, r_dense = sparse_result.candidates, dense_result.candidates
+            images_by_id.update(image_sparse.stored_by_id)
+            images_by_id.update(image_dense.stored_by_id)
+            r_sparse = [*sparse_result.candidates, *image_sparse.candidates]
+            r_dense = [*dense_result.candidates, *image_dense.candidates]
             # Block LABEL shown to the decider (and stored as each candidate's
             # source): round 0 labels its one block "original question" — the raw
             # question is already displayed above it and the few-shot uses this
@@ -701,7 +933,8 @@ async def _search_episodes_subq(
                 }
             )
         if round_idx == 0 and not any(b for _, b in blocks):
-            return []  # empty seed — nothing to rank or decide over
+            # Empty seed: nothing to rank or decide over.
+            return [], []
 
         # Render the blocked decider view + CORE-SO-FAR (global index across blocks).
         rendered, global_cands, index_meta = _render_blocks(
@@ -710,9 +943,22 @@ async def _search_episodes_subq(
         core_so_far = _render_core_so_far(
             core_order, core_source, cand_by_id, tuning_source=tuning_source
         )
+        pictures = await _round_pictures(
+            global_cands,
+            store=image_store,
+            k=tune.image_candidates_per_round,
+            edge=tune.image_thumbnail_edge,
+            quality=tune.image_quality,
+        )
         _ts_decide_start = time.monotonic()
-        decision = await decide(
-            query, core_so_far, rendered, len(global_cands), round_idx
+        decision = await _decide(
+            decide,
+            query,
+            core_so_far,
+            rendered,
+            len(global_cands),
+            round_idx,
+            pictures,
         )
 
         # Accumulate new core (global index -> id, dedup against already-cored).
@@ -791,7 +1037,7 @@ async def _search_episodes_subq(
         cur_queries = decision.queries  # else continue; (3) the loop caps rounds
 
     if not cand_by_id and not core_by_id:
-        return []
+        return [], []
     return _finalize_injection(
         owner_id=owner_id,
         question=query,
@@ -800,11 +1046,13 @@ async def _search_episodes_subq(
         core_order=core_order,
         cand_by_id=cand_by_id,
         episodes_by_id=episodes_by_id,
+        images_by_id=images_by_id,
         subq_hits=subq_hits,
         guarantee=guarantee,
         subqueries_seen=subqueries_seen,
         tuning_source=tuning_source,
         trace_path_source=trace_path_source,
+        image_thumbnail_edge=tune.image_thumbnail_edge,
     )
 
 
@@ -817,12 +1065,14 @@ def _finalize_injection(
     core_order: list[str],
     cand_by_id: dict[str, Candidate],
     episodes_by_id: dict[str, Stored[Episode]],
+    images_by_id: dict[str, Stored[ImageMemory]],
     subq_hits: dict[str, dict[str, float]],
     guarantee: list[tuple[str, str]],
     subqueries_seen: list[str],
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
-) -> list[SearchEpisodeItem]:
+    image_thumbnail_edge: int = 448,
+) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """Assemble the final top_k and dump the final-injection trace (schema C).
 
     Assembly (post-loop, once):
@@ -895,8 +1145,18 @@ def _finalize_injection(
         slot_source[cid] = "maxscore-fill"
         n_filled += 1
 
+    # The two kinds shared one ranking and one ``top_k`` budget; splitting them
+    # here is a presentation step only. Each keeps its rank, so a caller that
+    # interleaves the two arrays by score sees the order they competed in.
     ordered_cands = [cand_by_id[cid] for cid in chosen if cid in cand_by_id]
-    episodes = shape_episodes(ordered_cands, episodes_by_id)
+    episode_cands = [c for c in ordered_cands if not _is_picture(c)]
+    image_cands = [c for c in ordered_cands if _is_picture(c)]
+    episodes = shape_episodes(episode_cands, episodes_by_id)
+    images = shape_images(
+        image_cands,
+        images_by_id,
+        thumbnail_edge=image_thumbnail_edge,
+    )
 
     dump_path = trace_path_source()
     if dump_path:
@@ -927,11 +1187,12 @@ def _finalize_injection(
                     "n_guaranteed": n_guaranteed,
                     "n_filled": n_filled,
                     "top_k": top_k,
+                    "n_images": len(images),
                     "subqueries_seen": subqueries_seen,
                 },
             },
         )
-    return episodes
+    return episodes, images
 
 
 def _dataset_from_owner(owner_id: str) -> str:

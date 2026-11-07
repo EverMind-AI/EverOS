@@ -187,6 +187,41 @@ class SearchEpisodeItem(BaseModel):
     atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
 
 
+class SearchImageItem(BaseModel):
+    """Image-memory hit — one appearance of one picture.
+
+    ``id`` and ``image_id`` are different identities on purpose: ``id`` names
+    this *record* (a time, a provenance, a description), while ``image_id``
+    names the *file*, which is stored once however many records refer to it and
+    is what ``forget`` takes.
+
+    ``original_path`` and ``thumbnail_path`` are memory-root-relative. The
+    caller resolves them against its own root to hand the answering model the
+    original — never the thumbnail, which exists so the decider can look at
+    many pictures cheaply.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    entry_id: str
+    image_id: str
+    user_id: str | None
+    app_id: str = "default"
+    project_id: str = "default"
+    session_id: str | None = None
+    timestamp: _dt.datetime
+    description: str
+    ocr: str = ""
+    original_path: str
+    thumbnail_path: str
+    media_type: str = ""
+    width: int = 0
+    height: int = 0
+    status: Literal["current", "superseded", "forgotten"] = "current"
+    score: float
+
+
 class SearchProfileItem(BaseModel):
     """Owner profile — at most one per response, only for user owners.
 
@@ -280,7 +315,7 @@ class UnprocessedMessageDTO(BaseModel):
 class SearchData(BaseModel):
     """Body of ``response.data``.
 
-    All five arrays are always present so client code can iterate without
+    All arrays are always present so client code can iterate without
     branching on ``owner_type``. Routes not applicable to the request's
     owner type stay as ``[]``. ``unprocessed_messages`` is filled only
     when ``filters.session_id`` is present as a top-level eq scalar —
@@ -291,6 +326,12 @@ class SearchData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     episodes: list[SearchEpisodeItem] = Field(default_factory=list)
+    images: list[SearchImageItem] = Field(default_factory=list)
+    """Picture memories that survived the same ranking as the episodes.
+
+    Populated for both owner types — a picture can arrive in a chat or in an
+    agent's trace — because the picture is evidence whichever track it came
+    from."""
     profiles: list[SearchProfileItem] = Field(default_factory=list)
     agent_cases: list[SearchAgentCaseItem] = Field(default_factory=list)
     agent_skills: list[SearchAgentSkillItem] = Field(default_factory=list)

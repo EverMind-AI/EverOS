@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.6.0"
+    "version": "1.2.3"
   },
   "paths": {
     "/health": {
@@ -352,6 +352,122 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/forget": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Forget Image",
+        "description": "Forget one picture: its memories, its vector, and what referred to it.\n\nReturns what was touched, so a caller can see that the picture had a\nmemory at all instead of assuming success from an empty 200.",
+        "operationId": "forget_image_api_v1_memory_forget_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetImageResponseData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such picture for this user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/images/{image_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Image",
+        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw.",
+        "operationId": "get_image_api_v1_memory_images__image_id__get",
+        "parameters": [
+          {
+            "name": "image_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Image Id"
+            }
+          },
+          {
+            "name": "variant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(original|thumbnail)$",
+              "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request.",
+              "default": "original",
+              "title": "Variant"
+            },
+            "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -1330,6 +1446,122 @@
                 "schema": {
                   "$ref": "#/components/schemas/GetResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/forget": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Forget Image",
+        "description": "Forget one picture: its memories, its vector, and what referred to it.\n\nReturns what was touched, so a caller can see that the picture had a\nmemory at all instead of assuming success from an empty 200.",
+        "operationId": "forget_image_api_v2_memory_forget_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetImageResponseData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such picture for this user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/images/{image_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Image",
+        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw.",
+        "operationId": "get_image_api_v2_memory_images__image_id__get",
+        "parameters": [
+          {
+            "name": "image_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Image Id"
+            }
+          },
+          {
+            "name": "variant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(original|thumbnail)$",
+              "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request.",
+              "default": "original",
+              "title": "Variant"
+            },
+            "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -3296,6 +3528,91 @@
         ],
         "title": "FlushResponseData"
       },
+      "ForgetImageRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "image_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Image Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "image_id"
+        ],
+        "title": "ForgetImageRequest",
+        "description": "Which picture to forget, for which user.\n\nA picture is owned per user even though its file is shared: the memories\nwritten about it are the user's, and one user forgetting a picture must not\ntake it out of another user's memory."
+      },
+      "ForgetImageResponseData": {
+        "properties": {
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "image_memories": {
+            "type": "integer",
+            "title": "Image Memories"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "profiles": {
+            "type": "integer",
+            "title": "Profiles",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "image_id",
+          "image_memories"
+        ],
+        "title": "ForgetImageResponseData",
+        "description": "What a forget touched.\n\n``episodes`` are the entry ids of the *new* versions written without the\npicture. The versions they supersede are still in markdown, on purpose:\nasking what was said before a forget has to keep working."
+      },
       "GetAgentCaseItem": {
         "properties": {
           "id": {
@@ -4382,6 +4699,13 @@
             "type": "array",
             "title": "Episodes"
           },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/SearchImageItem"
+            },
+            "type": "array",
+            "title": "Images"
+          },
           "profiles": {
             "items": {
               "$ref": "#/components/schemas/SearchProfileItem"
@@ -4414,7 +4738,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SearchData",
-        "description": "Body of ``response.data``.\n\nAll five arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
+        "description": "Body of ``response.data``.\n\nAll arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
       },
       "SearchEpisodeItem": {
         "properties": {
@@ -4586,6 +4910,120 @@
         ],
         "title": "SearchHitDTO",
         "description": "One ranked result from knowledge search."
+      },
+      "SearchImageItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ocr": {
+            "type": "string",
+            "title": "Ocr",
+            "default": ""
+          },
+          "original_path": {
+            "type": "string",
+            "title": "Original Path"
+          },
+          "thumbnail_path": {
+            "type": "string",
+            "title": "Thumbnail Path"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type",
+            "default": ""
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "default": 0
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "current",
+              "superseded",
+              "forgotten"
+            ],
+            "title": "Status",
+            "default": "current"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "entry_id",
+          "image_id",
+          "user_id",
+          "timestamp",
+          "description",
+          "original_path",
+          "thumbnail_path",
+          "score"
+        ],
+        "title": "SearchImageItem",
+        "description": "Image-memory hit — one appearance of one picture.\n\n``id`` and ``image_id`` are different identities on purpose: ``id`` names\nthis *record* (a time, a provenance, a description), while ``image_id``\nnames the *file*, which is stored once however many records refer to it and\nis what ``forget`` takes.\n\n``original_path`` and ``thumbnail_path`` are memory-root-relative. The\ncaller resolves them against its own root to hand the answering model the\noriginal — never the thumbnail, which exists so the decider can look at\nmany pictures cheaply."
       },
       "SearchMethod": {
         "type": "string",
@@ -4947,6 +5385,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[FlushResponseData]"
+      },
+      "SuccessEnvelope_ForgetImageResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ForgetImageResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ForgetImageResponseData]"
       },
       "SuccessEnvelope_KnowledgeSearchResponse_": {
         "properties": {

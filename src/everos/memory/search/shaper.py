@@ -26,9 +26,16 @@ from typing import Any
 
 from everalgo.types import Candidate, RankOutput, ScoredItem
 
+from everos.component.images import derived_relpath
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
-from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode
+from everos.memory.models import (
+    AgentCase,
+    AgentSkill,
+    AtomicFact,
+    Episode,
+    ImageMemory,
+)
 from everos.memory.ports import Stored
 
 from .dto import (
@@ -36,6 +43,7 @@ from .dto import (
     SearchAgentSkillItem,
     SearchAtomicFactItem,
     SearchEpisodeItem,
+    SearchImageItem,
 )
 
 logger = get_logger(__name__)
@@ -55,6 +63,61 @@ def shape_episodes(
         for item in (_episode(r.id, r.score, stored_by_id) for r in ranked)
         if item is not None
     ]
+
+
+def shape_images(
+    ranked: Iterable[_Ranked],
+    stored_by_id: Mapping[str, Stored[ImageMemory]],
+    *,
+    thumbnail_edge: int,
+) -> list[SearchImageItem]:
+    """One picture DTO per ranked candidate, in order; unknown ids dropped.
+
+    ``thumbnail_edge`` is the configured decider size, echoed into the path so
+    a caller resolving ``thumbnail_path`` lands on the copy the decider was
+    actually shown rather than on whatever size the cache happens to hold.
+    """
+    return [
+        item
+        for item in (
+            _image(r.id, r.score, stored_by_id, thumbnail_edge=thumbnail_edge)
+            for r in ranked
+        )
+        if item is not None
+    ]
+
+
+def _image(
+    candidate_id: str,
+    score: float,
+    stored_by_id: Mapping[str, Stored[ImageMemory]],
+    *,
+    thumbnail_edge: int,
+) -> SearchImageItem | None:
+    stored = _lookup(candidate_id, stored_by_id, kind="image_memory", owner_type="user")
+    if stored is None:
+        return None
+    image = stored.item
+    thumbnail = derived_relpath(image.image_id, thumbnail_edge)
+    return SearchImageItem(
+        id=stored.ref.id,
+        entry_id=stored.ref.entry_id,
+        image_id=image.image_id,
+        user_id=image.owner_id,
+        app_id=stored.scope.app_id,
+        project_id=stored.scope.project_id,
+        session_id=image.session_id,
+        timestamp=to_display_tz(from_timestamp_ms(image.timestamp)),
+        description=image.description,
+        ocr=image.ocr,
+        original_path=image.original_relpath,
+        thumbnail_path=thumbnail,
+        media_type=image.media_type,
+        width=image.width,
+        height=image.height,
+        status=image.status,
+        score=float(score),
+    )
 
 
 def reshape_hybrid_output(
