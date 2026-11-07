@@ -30,6 +30,7 @@ Invariants after every step, from the repo and worker docstrings:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import shutil
 import tempfile
@@ -80,6 +81,13 @@ BATCH = 2
 MAX_RETRY = 1  # inline attempts after the first
 MAX_TOTAL = tuning.MAX_TOTAL_RETRIES
 OUTCOMES = ("ok", "transient", "transient_then_ok", "boom", "vanished", "crash")
+# Set only while the model itself is driving ``repo.upsert``. A worker
+# enqueue (the stale-claim re-queue after a handler returns) leaves this
+# unset, so the wrapper can record that write. Task-local: the other
+# handler in the batch must not inherit it.
+_MODEL_UPSERT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "cascade_model_upsert", default=False
+)
 
 
 def event(label: str) -> None:
@@ -180,6 +188,16 @@ class CascadeMachine(RuleBasedStateMachine):
         # Captured before a test replaces ``read_one``. The model must see
         # the row the enqueue wrote, not a stub aimed at the worker.
         self._ledger_read = self.repo.read_one
+        real_upsert = self.repo.upsert
+
+        async def upsert_counting(*args: Any, **kwargs: Any) -> int:
+            lsn = await real_upsert(*args, **kwargs)
+            if not _MODEL_UPSERT.get():
+                md_path = args[0] if args else kwargs["md_path"]
+                await self._note_worker_enqueue(md_path)
+            return lsn
+
+        self.repo.upsert = upsert_counting  # type: ignore[method-assign]
 
     async def _create_tables(self) -> None:
         async with self.engine.begin() as conn:
@@ -201,14 +219,44 @@ class CascadeMachine(RuleBasedStateMachine):
             return old["mtime"]
         return float(self.next_lsn) * 10.0  # any fresh value far from the old one
 
+    async def _note_worker_enqueue(self, md_path: str) -> None:
+        """Record an enqueue the worker issued, not the model.
+
+        After a handler returns, a row that is no longer the claim's
+        ``processing`` snapshot is put back on the queue
+        (``cascade_worker_stale_claim``). That write does not go through
+        :meth:`_upsert_async`. Without this, the post-drain pass still
+        applies the claim's verdict and the ledger row stays ``pending``.
+        """
+        row = await self._ledger_read(md_path)
+        if row is None:
+            return
+        self.next_lsn = max(self.next_lsn, row.lsn + 1)
+        if md_path not in self.model:
+            return
+        self.model[md_path] = {
+            "status": row.status,
+            "retryable": row.retryable,
+            "retry_count": row.retry_count,
+            "error": row.error is not None,
+            "lsn": row.lsn,
+            "mtime": row.mtime,
+            "kind": row.kind,
+            "change": row.change_type,
+            "shielded": True,
+        }
+        self.settled.add(md_path)
+        self.trace.append(
+            f"worker enqueue {md_path} -> lsn={row.lsn} status={row.status}"
+        )
+
     def _settle_marked(self) -> None:
         """Apply verdicts this batch has already written to the ledger.
 
-        ``held`` reads the model. A sibling claimed earlier in the same
-        batch can already be terminal there while the model still says
-        ``processing`` — the post-drain pass has not run. An in-handler
-        enqueue of those same bytes then keeps the existing LSN, so the
-        model has to agree before it decides whether to re-queue.
+        A sibling claimed earlier in the same batch can already be
+        terminal while the model still says ``processing``. Fold that in
+        before comparing LSNs, so a refused re-queue is not mistaken for
+        a fresh one. The returned LSN, not this status, decides which.
         """
         for path in self.marked:
             if path in self.settled:
@@ -230,7 +278,13 @@ class CascadeMachine(RuleBasedStateMachine):
         # LSN equal to the one we held means the ledger refused the enqueue.
         prior = self.model.get(path)
         prior_status = None if prior is None else prior["status"]
-        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
+        token = _MODEL_UPSERT.set(True)
+        try:
+            lsn = await self.repo.upsert(
+                path, kind=kind, change_type=change, mtime=mtime
+            )
+        finally:
+            _MODEL_UPSERT.reset(token)
         if in_handler:
             self._settle_marked()
         current = self.model.get(path)
@@ -381,9 +435,13 @@ class CascadeMachine(RuleBasedStateMachine):
             self.outcome_of, self.mid_events = {}, []
         assert handled == len(batch), (handled, batch)
         for path in batch:
-            if path in self.settled:
+            row = self.model[path]
+            if path in self.settled or row["status"] != "processing":
+                # A re-enqueue already replaced this claim. Applying the
+                # scripted verdict would paint a pending row done/failed.
+                row["shielded"] = False
                 continue
-            self._apply_outcome(path, self.model[path], scripted)
+            self._apply_outcome(path, row, scripted)
 
     @precondition(lambda self: not self.crashed)
     @rule()
@@ -440,6 +498,10 @@ class CascadeMachine(RuleBasedStateMachine):
         ms = self.model.values()
         assert s.pending == sum(
             1 for m in ms if m["status"] in ("pending", "processing")
+        ), (
+            f"pending ledger={s.pending} model="
+            f"{[(p, m['status'], m['lsn']) for p, m in self.model.items()]}\n"
+            + "\n".join(self.trace[-40:])
         )
         assert s.done == sum(1 for m in ms if m["status"] == "done")
         assert s.failed_retryable == sum(
@@ -542,6 +604,45 @@ def test_terminal_mark_during_upsert_keeps_a_fresh_lsn() -> None:
         assert requeued["status"] == "pending"
         assert requeued["lsn"] == 3
         assert machine.model[PATHS[0]]["status"] == "done"
+    finally:
+        machine.teardown()
+
+
+def test_stale_claim_requeue_stays_pending_in_the_model() -> None:
+    """The worker's post-handler re-queue is part of the model.
+
+    When the claim's snapshot is no longer ``processing`` at the same
+    LSN, the worker enqueues the path again instead of marking it done.
+    The post-drain pass must not paint that row with the handler's
+    success.
+    """
+    from types import SimpleNamespace
+
+    machine = CascadeMachine()
+    try:
+        machine.upsert(PATHS[0], "episode", "added", False)
+        real_read = machine.repo.read_one
+
+        async def finished_claim(md_path: str) -> Any:
+            row = await real_read(md_path)
+            if (
+                row is not None
+                and row.status == "processing"
+                and not _MODEL_UPSERT.get()
+            ):
+                return SimpleNamespace(
+                    lsn=row.lsn + 10,
+                    status="done",
+                    kind=row.kind,
+                    mtime=row.mtime,
+                )
+            return row
+
+        machine.repo.read_one = finished_claim  # type: ignore[method-assign]
+        machine.drain(["ok"], [])
+        machine.table_matches_model()
+        machine.summary_matches_table()
+        assert machine.model[PATHS[0]]["status"] == "pending"
     finally:
         machine.teardown()
 
