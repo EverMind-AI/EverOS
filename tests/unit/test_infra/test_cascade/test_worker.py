@@ -242,8 +242,10 @@ async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
         ledger=patched_repo,
     )
     await w.drain_once()
-    _path, retryable, _err, _retry = patched_repo.failed[0]
+    _path, retryable, _err, retry_count = patched_repo.failed[0]
     assert retryable is False
+    # The one attempt is recorded so a later re-enqueue can hit the budget.
+    assert retry_count == 1
 
 
 async def test_external_service_error_is_retried_then_retryable(

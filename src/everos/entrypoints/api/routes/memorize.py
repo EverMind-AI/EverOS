@@ -64,7 +64,11 @@ async def add_memory(
     app: ApplicationDep,
     request_id: RequestIdDep,
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
-    """Add messages into the user-memory + agent-memory pipelines."""
+    """Add messages into the user-memory + agent-memory pipelines.
+
+    ``200`` means the markdown write was accepted. ``data.status`` of
+    ``degraded`` is a failed index projection, not a different status code.
+    """
     result = await app.memory.add(
         req.model_dump(exclude={"async_mode", "defer_extraction"}),
         request_id=request_id,
@@ -78,6 +82,8 @@ async def add_memory(
         data=AddResponseData(
             message_count=result.message_count,
             status=result.status,
+            failed_permanent=result.failed_permanent,
+            failed_retryable=result.failed_retryable,
         ),
     )
 
@@ -92,7 +98,9 @@ async def flush_memory(
     """Force boundary detection over the current ``session_id`` buffer.
 
     Runs inline unless the session still has queued batches, in which case
-    the flush joins the queue behind them and answers 202.
+    the flush joins the queue behind them and answers 202. A ``200`` means
+    the markdown write was accepted; ``data.status`` ``degraded`` reports
+    a failed index projection in the body.
     """
     result = await app.memory.flush(
         session_id=req.session_id,
@@ -104,5 +112,9 @@ async def flush_memory(
         return _accepted(response, request_id, result)
     return SuccessEnvelope(
         request_id=request_id,
-        data=FlushResponseData(status=result.status),
+        data=FlushResponseData(
+            status=result.status,
+            failed_permanent=result.failed_permanent,
+            failed_retryable=result.failed_retryable,
+        ),
     )

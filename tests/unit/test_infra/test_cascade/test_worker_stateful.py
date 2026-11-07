@@ -30,6 +30,7 @@ Invariants after every step, from the repo and worker docstrings:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import shutil
 import tempfile
@@ -54,10 +55,7 @@ from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.cascade.models import HandlerOutcome
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
-from everos.infra.persistence.sqlite._repos.md_change_state import (
-    MTIME_TOLERANCE_SECONDS,
-    MdChangeStateRepo,
-)
+from everos.infra.persistence.sqlite._repos.md_change_state import MdChangeStateRepo
 from everos.infra.persistence.sqlite._tables import MdChangeState
 
 settings.register_profile(
@@ -83,6 +81,13 @@ BATCH = 2
 MAX_RETRY = 1  # inline attempts after the first
 MAX_TOTAL = tuning.MAX_TOTAL_RETRIES
 OUTCOMES = ("ok", "transient", "transient_then_ok", "boom", "vanished", "crash")
+# Set only while the model itself is driving ``repo.upsert``. A worker
+# enqueue (the stale-claim re-queue after a handler returns) leaves this
+# unset, so the wrapper can record that write. Task-local: the other
+# handler in the batch must not inherit it.
+_MODEL_UPSERT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "cascade_model_upsert", default=False
+)
 
 
 def event(label: str) -> None:
@@ -166,6 +171,7 @@ class CascadeMachine(RuleBasedStateMachine):
         self.mid_events: list[tuple[str, str, str, bool]] = []
         self.claimed: set[str] = set()
         self.marked: set[str] = set()
+        self.settled: set[str] = set()
         self.trace: list[str] = []
         real_done, real_failed = self.repo.mark_done, self.repo.mark_failed
 
@@ -179,6 +185,19 @@ class CascadeMachine(RuleBasedStateMachine):
 
         self.repo.mark_done = done_counting  # type: ignore[method-assign]
         self.repo.mark_failed = failed_counting  # type: ignore[method-assign]
+        # Captured before a test replaces ``read_one``. The model must see
+        # the row the enqueue wrote, not a stub aimed at the worker.
+        self._ledger_read = self.repo.read_one
+        real_upsert = self.repo.upsert
+
+        async def upsert_counting(*args: Any, **kwargs: Any) -> int:
+            lsn = await real_upsert(*args, **kwargs)
+            if not _MODEL_UPSERT.get():
+                md_path = args[0] if args else kwargs["md_path"]
+                await self._note_worker_enqueue(md_path)
+            return lsn
+
+        self.repo.upsert = upsert_counting  # type: ignore[method-assign]
 
     async def _create_tables(self) -> None:
         async with self.engine.begin() as conn:
@@ -200,42 +219,105 @@ class CascadeMachine(RuleBasedStateMachine):
             return old["mtime"]
         return float(self.next_lsn) * 10.0  # any fresh value far from the old one
 
+    async def _note_worker_enqueue(self, md_path: str) -> None:
+        """Record an enqueue the worker issued, not the model.
+
+        After a handler returns, a row that is no longer the claim's
+        ``processing`` snapshot is put back on the queue
+        (``cascade_worker_stale_claim``). That write does not go through
+        :meth:`_upsert_async`. Without this, the post-drain pass still
+        applies the claim's verdict and the ledger row stays ``pending``.
+        """
+        row = await self._ledger_read(md_path)
+        if row is None:
+            return
+        self.next_lsn = max(self.next_lsn, row.lsn + 1)
+        if md_path not in self.model:
+            return
+        self.model[md_path] = {
+            "status": row.status,
+            "retryable": row.retryable,
+            "retry_count": row.retry_count,
+            "error": row.error is not None,
+            "lsn": row.lsn,
+            "mtime": row.mtime,
+            "kind": row.kind,
+            "change": row.change_type,
+            "shielded": True,
+        }
+        self.settled.add(md_path)
+        self.trace.append(
+            f"worker enqueue {md_path} -> lsn={row.lsn} status={row.status}"
+        )
+
+    def _settle_marked(self) -> None:
+        """Apply verdicts this batch has already written to the ledger.
+
+        A sibling claimed earlier in the same batch can already be
+        terminal while the model still says ``processing``. Fold that in
+        before comparing LSNs, so a refused re-queue is not mistaken for
+        a fresh one. The returned LSN, not this status, decides which.
+        """
+        for path in self.marked:
+            if path in self.settled:
+                continue
+            row = self.model.get(path)
+            if row is None or row["status"] != "processing":
+                continue
+            self._apply_outcome(path, row, self.outcome_of)
+            self.settled.add(path)
+
     async def _upsert_async(
         self, path: str, kind: str, change: str, same_mtime: bool, *, in_handler: bool
     ) -> None:
+        if in_handler:
+            self._settle_marked()
         mtime = self._mtime_for(path, same_mtime)
-        lsn = await self.repo.upsert(path, kind=kind, change_type=change, mtime=mtime)
+        # Status before the post-await settle. A mark that commits during
+        # the upsert mutates this row in the model, but only a returned
+        # LSN equal to the one we held means the ledger refused the enqueue.
+        prior = self.model.get(path)
+        prior_status = None if prior is None else prior["status"]
+        token = _MODEL_UPSERT.set(True)
+        try:
+            lsn = await self.repo.upsert(
+                path, kind=kind, change_type=change, mtime=mtime
+            )
+        finally:
+            _MODEL_UPSERT.reset(token)
+        if in_handler:
+            self._settle_marked()
+        current = self.model.get(path)
+        if current is not None and lsn == current["lsn"]:
+            event("upsert: terminal held")
+            self.trace.append(f"upsert held terminal {path}")
+            return
         assert lsn == self.next_lsn, (lsn, self.next_lsn)
-        old = self.model.get(path)
-        keep = (
-            old is not None
-            and old["status"] == "failed"
-            and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
-        )
-        retry_count = old["retry_count"] if (old is not None and keep) else 0
-        if old is not None and old["status"] == "processing":
-            # Re-enqueued while its handler runs: the verdict about to be
-            # written is stale and must be dropped (mark_* are guarded).
-            old["shielded"] = True
+        # The enqueue landed. Copy the row it wrote: a terminal mark that
+        # settled above may belong to a claim this write already replaced.
+        written = await self._ledger_read(path)
+        assert written is not None and written.lsn == lsn
+        in_flight = prior_status == "processing" and path not in self.marked
+        if in_flight:
+            # The handler for this claim has not marked yet. Its later
+            # verdict is stale and must not land on the new pending row.
             event("upsert: during processing")
         self.model[path] = {
-            "status": "pending",
-            "retryable": None,
-            "retry_count": retry_count,
-            "error": False,
-            "lsn": lsn,
-            "mtime": mtime,
-            "kind": kind,
-            "change": change,
-            "shielded": old["shielded"]
-            if (old is not None and old.get("shielded"))
-            else False,
+            "status": written.status,
+            "retryable": written.retryable,
+            "retry_count": written.retry_count,
+            "error": written.error is not None,
+            "lsn": written.lsn,
+            "mtime": written.mtime,
+            "kind": written.kind,
+            "change": written.change_type,
+            "shielded": in_flight,
         }
         self.next_lsn += 1
         where = " (in handler)" if in_handler else ""
         self.trace.append(
             f"upsert {path} kind={kind} change={change} same_mtime={same_mtime} "
-            f"-> lsn={lsn} retry_count={retry_count}{where}"
+            f"-> lsn={lsn} retry_count={written.retry_count}{where}"
         )
 
     async def _wait_until_alone(self, md_path: str) -> None:
@@ -277,7 +359,13 @@ class CascadeMachine(RuleBasedStateMachine):
                 retry_count=m["retry_count"] + 1,
             )
         elif outcome == "boom":
-            m.update(status="failed", retryable=False, error=True)
+            # Unrecoverable is one attempt, then terminal (#364).
+            m.update(
+                status="failed",
+                retryable=False,
+                error=True,
+                retry_count=m["retry_count"] + 1,
+            )
         elif outcome == "transient":
             r = m["retry_count"] + MAX_RETRY
             m.update(
@@ -332,7 +420,7 @@ class CascadeMachine(RuleBasedStateMachine):
         self.outcome_of = dict(zip(batch, outcomes, strict=False))
         self.attempts = defaultdict(int)
         self.mid_events = list(mid) if batch else []
-        self.claimed, self.marked = set(batch), set()
+        self.claimed, self.marked, self.settled = set(batch), set(), set()
         for path in batch:
             self.model[path]["status"] = "processing"
             event(f"drain: {self.outcome_of.get(path, 'ok')}")
@@ -347,7 +435,13 @@ class CascadeMachine(RuleBasedStateMachine):
             self.outcome_of, self.mid_events = {}, []
         assert handled == len(batch), (handled, batch)
         for path in batch:
-            self._apply_outcome(path, self.model[path], scripted)
+            row = self.model[path]
+            if path in self.settled or row["status"] != "processing":
+                # A re-enqueue already replaced this claim. Applying the
+                # scripted verdict would paint a pending row done/failed.
+                row["shielded"] = False
+                continue
+            self._apply_outcome(path, row, scripted)
 
     @precondition(lambda self: not self.crashed)
     @rule()
@@ -404,6 +498,10 @@ class CascadeMachine(RuleBasedStateMachine):
         ms = self.model.values()
         assert s.pending == sum(
             1 for m in ms if m["status"] in ("pending", "processing")
+        ), (
+            f"pending ledger={s.pending} model="
+            f"{[(p, m['status'], m['lsn']) for p, m in self.model.items()]}\n"
+            + "\n".join(self.trace[-40:])
         )
         assert s.done == sum(1 for m in ms if m["status"] == "done")
         assert s.failed_retryable == sum(
@@ -438,6 +536,115 @@ class CascadeMachine(RuleBasedStateMachine):
 
 
 TestCascadeMachine = CascadeMachine.TestCase
+
+
+def test_in_handler_enqueue_sees_a_sibling_already_terminal() -> None:
+    """Same-mtime enqueue from a later handler keeps an earlier failure.
+
+    The batch claims an unhandled path first. That row is permanently
+    failed before the episode handler runs and enqueues it again at the
+    same mtime. The ledger returns the existing LSN; the model must
+    already show that verdict, not the pre-batch ``processing`` status.
+    """
+    machine = CascadeMachine()
+    try:
+        machine.upsert(PATHS[1], "orphan", "added", False)
+        machine.upsert(PATHS[0], "episode", "added", False)
+        machine.drain(["ok", "ok"], [(PATHS[1], "episode", "modified", True)])
+        machine.table_matches_model()
+        failed = machine.model[PATHS[1]]
+        assert failed["status"] == "failed" and failed["retryable"] is False
+        assert machine.model[PATHS[0]]["status"] == "done"
+    finally:
+        machine.teardown()
+
+
+def test_terminal_mark_during_upsert_keeps_a_fresh_lsn() -> None:
+    """A mark that commits after the guard read does not undo the enqueue.
+
+    ``upsert`` observes ``processing``, the sibling's terminal mark then
+    commits, and the enqueue still assigns a fresh LSN. The model must
+    follow that LSN, not the mark it folded in while waiting.
+    """
+    machine = CascadeMachine()
+    try:
+        sibling = PATHS[1]
+        machine.upsert(sibling, "orphan", "added", False)
+        machine.upsert(PATHS[0], "episode", "added", False)
+        read_seen = asyncio.Event()
+        mark_done = asyncio.Event()
+        real_read = machine.repo.read_one
+        real_mark = machine.repo.mark_failed
+
+        async def mark_after_guard(md_path: str, **kw: Any) -> None:
+            if md_path == sibling and not read_seen.is_set():
+                await read_seen.wait()
+            await real_mark(md_path, **kw)
+            if md_path == sibling:
+                mark_done.set()
+
+        async def read_then_let_mark_commit(md_path: str) -> Any:
+            row = await real_read(md_path)
+            if (
+                md_path == sibling
+                and row is not None
+                and row.status == "processing"
+                and not read_seen.is_set()
+            ):
+                read_seen.set()
+                await mark_done.wait()
+                return row
+            return row
+
+        machine.repo.mark_failed = mark_after_guard  # type: ignore[method-assign]
+        machine.repo.read_one = read_then_let_mark_commit  # type: ignore[method-assign]
+        machine.drain(["ok", "ok"], [(sibling, "episode", "modified", True)])
+        machine.table_matches_model()
+        requeued = machine.model[sibling]
+        assert requeued["status"] == "pending"
+        assert requeued["lsn"] == 3
+        assert machine.model[PATHS[0]]["status"] == "done"
+    finally:
+        machine.teardown()
+
+
+def test_stale_claim_requeue_stays_pending_in_the_model() -> None:
+    """The worker's post-handler re-queue is part of the model.
+
+    When the claim's snapshot is no longer ``processing`` at the same
+    LSN, the worker enqueues the path again instead of marking it done.
+    The post-drain pass must not paint that row with the handler's
+    success.
+    """
+    from types import SimpleNamespace
+
+    machine = CascadeMachine()
+    try:
+        machine.upsert(PATHS[0], "episode", "added", False)
+        real_read = machine.repo.read_one
+
+        async def finished_claim(md_path: str) -> Any:
+            row = await real_read(md_path)
+            if (
+                row is not None
+                and row.status == "processing"
+                and not _MODEL_UPSERT.get()
+            ):
+                return SimpleNamespace(
+                    lsn=row.lsn + 10,
+                    status="done",
+                    kind=row.kind,
+                    mtime=row.mtime,
+                )
+            return row
+
+        machine.repo.read_one = finished_claim  # type: ignore[method-assign]
+        machine.drain(["ok"], [])
+        machine.table_matches_model()
+        machine.summary_matches_table()
+        assert machine.model[PATHS[0]]["status"] == "pending"
+    finally:
+        machine.teardown()
 
 
 def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:

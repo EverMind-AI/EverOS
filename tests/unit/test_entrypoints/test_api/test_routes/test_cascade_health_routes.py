@@ -4,9 +4,10 @@ The route reads the running :class:`CascadeOrchestrator` through
 ``application.ops.cascade_health()``. These tests inject an autospec
 orchestrator into a real ``OpsService`` so the route
 logic is exercised without booting sqlite / lancedb / the worker.
-Cascade degradation is surfaced *only* here (a readiness signal), never
-on the write DTOs — a degraded projection does not change what ``/add``
-returns.
+Operational degradation (a stalled drain or prune) is surfaced here
+and does not by itself change what ``/add`` returns. A file this call
+wrote that the worker has already failed is a different signal: the
+write DTOs say ``degraded`` instead of ``extracted``.
 """
 
 from __future__ import annotations

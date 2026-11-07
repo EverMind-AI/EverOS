@@ -54,7 +54,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "description": "Add messages into the user-memory + agent-memory pipelines.\n\n``200`` means the markdown write was accepted. ``data.status`` of\n``degraded`` is a failed index projection, not a different status code.",
         "operationId": "add_memory_api_v1_memory_add_post",
         "requestBody": {
           "content": {
@@ -120,7 +120,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202. A ``200`` means\nthe markdown write was accepted; ``data.status`` ``degraded`` reports\na failed index projection in the body.",
         "operationId": "flush_memory_api_v1_memory_flush_post",
         "requestBody": {
           "content": {
@@ -1139,7 +1139,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "description": "Add messages into the user-memory + agent-memory pipelines.\n\n``200`` means the markdown write was accepted. ``data.status`` of\n``degraded`` is a failed index projection, not a different status code.",
         "operationId": "add_memory_api_v2_memory_add_post",
         "requestBody": {
           "content": {
@@ -1205,7 +1205,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202. A ``200`` means\nthe markdown write was accepted; ``data.status`` ``degraded`` reports\na failed index projection in the body.",
         "operationId": "flush_memory_api_v2_memory_flush_post",
         "requestBody": {
           "content": {
@@ -2257,9 +2257,23 @@
             "type": "string",
             "enum": [
               "accumulated",
-              "extracted"
+              "extracted",
+              "degraded"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "What this call did. HTTP 200 means the markdown write was accepted. `degraded` means the index projection of at least one file this call wrote failed (`failed_permanent` / `failed_retryable`). A file still queued when the call stops waiting is lag, not a failure, and leaves this `extracted`."
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent",
+            "description": "Files this call wrote whose index projection failed and will not be retried. Non-zero only when status is degraded.",
+            "default": 0
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable",
+            "description": "Files this call wrote whose index projection failed and may still be retried. Non-zero only when status is degraded.",
+            "default": 0
           }
         },
         "type": "object",
@@ -2267,7 +2281,8 @@
           "message_count",
           "status"
         ],
-        "title": "AddResponseData"
+        "title": "AddResponseData",
+        "description": "``200`` body. The status code means markdown was accepted.\n\nWhether those files reached the index is ``status`` plus the failure\ncounts. ``degraded`` is not a different HTTP status."
       },
       "Body_create_document_route_api_v1_knowledge_documents_post": {
         "properties": {
@@ -3285,16 +3300,31 @@
             "type": "string",
             "enum": [
               "extracted",
-              "no_extraction"
+              "no_extraction",
+              "degraded"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "What this flush did. HTTP 200 means the markdown write was accepted. `degraded` means the index projection of at least one file this flush wrote failed (`failed_permanent` / `failed_retryable`). A file still queued when the flush stops waiting is lag, not a failure, and leaves this `extracted`."
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent",
+            "description": "Files this flush wrote whose index projection failed and will not be retried. Non-zero only when status is degraded.",
+            "default": 0
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable",
+            "description": "Files this flush wrote whose index projection failed and may still be retried. Non-zero only when status is degraded.",
+            "default": 0
           }
         },
         "type": "object",
         "required": [
           "status"
         ],
-        "title": "FlushResponseData"
+        "title": "FlushResponseData",
+        "description": "``200`` body. The status code means markdown was accepted.\n\n``degraded`` reports a failed index projection in the body. It does\nnot change the HTTP status."
       },
       "GetAgentCaseItem": {
         "properties": {

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from collections.abc import Collection
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
@@ -40,6 +41,7 @@ from ._worker import (
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
     CascadeWorker,
 )
+from .projection import ProjectionVerdict, settle_written
 from .registry import build_handlers
 from .scanner import CascadeScanner
 from .watcher import CascadeWatcher
@@ -444,6 +446,20 @@ class CascadeOrchestrator:
             await asyncio.sleep(self._config.worker_poll_interval_seconds)
             idle_seconds += self._config.worker_poll_interval_seconds
         return processed
+
+    async def await_written(self, paths: Collection[str]) -> ProjectionVerdict:
+        """How the markdown ``paths`` finished in the projection ledger.
+
+        Unobserved when this orchestrator is not started. A path that is
+        still queued when the settle budget runs out counts as pending,
+        not as a failure.
+        """
+        return await settle_written(
+            self._ledger,
+            self._memory_root.root,
+            paths,
+            started=self._started,
+        )
 
     async def queue_summary(self) -> QueueSummary:
         """Forward to the repo so callers don't reach past this class."""

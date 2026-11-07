@@ -118,6 +118,12 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
           ``reset_retry_count=True`` resets it regardless — a forced
           re-enqueue must reach the handler even when the budget was
           spent.
+        - **Terminal failure, same bytes** → a row already
+          ``failed`` with ``retryable=False`` whose mtime is unchanged
+          is left alone, unless ``change_type`` is ``deleted`` or
+          ``reset_retry_count`` is set. A watcher event for the same
+          file must not put it back on the queue; recovery is an edit
+          (mtime change), ``cascade sync --path``, or ``cascade rebuild``.
 
         The fresh LSN on re-enqueue is the property that lets the worker
         rely on ``ORDER BY lsn`` for ordering without losing fairness
@@ -125,6 +131,17 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
         derivation is best-effort under concurrent writers — see module
         docstring for the trade-off.
         """
+        if not reset_retry_count and change_type != "deleted":
+            existing = await self.read_one(md_path)
+            if (
+                existing is not None
+                and existing.status == "failed"
+                and existing.retryable is False
+                and abs(existing.mtime - mtime) < MTIME_TOLERANCE_SECONDS
+            ):
+                # Same bytes, already terminal. Counting another enqueue
+                # would replay a failure that cannot succeed (#364).
+                return existing.lsn
         now = get_utc_now()
         async with session_scope(self._factory) as s:
             new_lsn = await _next_lsn(s)
