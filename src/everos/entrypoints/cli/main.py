@@ -1,8 +1,8 @@
 """everos CLI root entry point.
 
-Exposed as the ``everos`` console script in ``pyproject.toml``. Subcommand
-groups live under :mod:`everos.entrypoints.cli.commands` and are registered
-here.
+The console launcher invokes this Typer app after configuring the process.
+Subcommand groups live under :mod:`everos.entrypoints.cli.commands` and are
+registered here. Importing ``app`` for in-process use does not run the launcher.
 
 CLI subcommands run **in-process** — they call into the service layer
 directly rather than through the HTTP API. The HTTP API and CLI are two
@@ -33,4 +33,6 @@ demo.register(app)
 
 
 if __name__ == "__main__":
-    app()
+    from everos.entrypoints.cli.launcher import main
+
+    main()
