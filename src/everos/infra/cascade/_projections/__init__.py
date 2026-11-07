@@ -1,7 +1,7 @@
 """Cascade handlers — one per kind, sharing the :class:`Handler` chassis.
 
-Four daily-log handlers (episode / atomic_fact / foresight /
-agent_case) inherit :class:`BaseDailyLogHandler` for the shared
+Five daily-log handlers (episode / atomic_fact / foresight /
+agent_case / image_memory) inherit :class:`BaseDailyLogHandler` for the shared
 read / diff / embed / upsert / delete loop; the per-kind subclass only
 declares its repo binding, the texts to embed (``_embed_texts``) and
 the ``_build_row`` mapping. ``agent_skill``,
@@ -17,6 +17,7 @@ from .base import Handler as Handler
 from .base import HandlerDeps as HandlerDeps
 from .episode import EpisodeHandler as EpisodeHandler
 from .foresight import ForesightHandler as ForesightHandler
+from .image_memory import ImageMemoryHandler as ImageMemoryHandler
 from .knowledge_document import KnowledgeDocumentHandler as KnowledgeDocumentHandler
 from .knowledge_topic import KnowledgeTopicHandler as KnowledgeTopicHandler
 from .user_profile import UserProfileHandler as UserProfileHandler
@@ -29,6 +30,7 @@ __all__ = [
     "ForesightHandler",
     "Handler",
     "HandlerDeps",
+    "ImageMemoryHandler",
     "KnowledgeDocumentHandler",
     "KnowledgeTopicHandler",
     "UserProfileHandler",

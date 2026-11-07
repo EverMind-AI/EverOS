@@ -15,6 +15,7 @@ __all__ = [
     "AgentSkillIndexAdapter",
     "AtomicFactIndexAdapter",
     "EpisodeIndexAdapter",
+    "ImageMemoryIndexAdapter",
     "KnowledgeTopicIndexAdapter",
     "ProfileIndexAdapter",
 ]
@@ -33,6 +34,7 @@ from everos.memory.models import (
     AtomicFact,
     Episode,
     EpisodeParentType,
+    ImageMemory,
     KnowledgeTopic,
     Profile,
 )
@@ -256,6 +258,40 @@ class AgentSkillIndexAdapter(_SearchableIndex[AgentSkill]):
         return [_stored_agent_skill(_fields(r)) for r in rows]
 
 
+class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
+    """Picture-memory index reads — the same two routes the episodes get.
+
+    Args:
+        repo: Image-memory derived-index repository.
+    """
+
+    def __init__(self, repo: IndexRepository[Any]) -> None:
+        super().__init__(repo, _stored_image_memory)
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        rows = await self._repo.find_by_owner_entries(
+            scope.owner_id,
+            entry_ids,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            skip_vectors=True,
+        )
+        return [_stored_image_memory(_fields(r)) for r in rows]
+
+    async def find_by_parent(
+        self, *, parent_type: str, parent_id: str, limit: int = 100
+    ) -> list[Stored[ImageMemory]]:
+        rows = await self._repo.find_by_parent(parent_type, parent_id, limit=limit)
+        return [_stored_image_memory(_fields(r)) for r in rows]
+
+    async def paginate(
+        self, where: Filter, page: Page
+    ) -> PageResult[Stored[ImageMemory]]:
+        return await self._paginate(where, page)
+
+
 class ProfileIndexAdapter:
     """The one profile row per user.
 
@@ -376,6 +412,31 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
             sender_ids=list(fields.get("sender_ids") or []),
             parent_id=fields["parent_id"],
             parent_type=fields.get("parent_type") or "memcell",
+        ),
+    )
+
+
+def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
+    return Stored(
+        ref=_daily_ref(fields),
+        scope=_scope(fields),
+        item=ImageMemory(
+            owner_id=fields["owner_id"],
+            description=fields["description"],
+            ocr=fields.get("ocr") or "",
+            timestamp=to_timestamp_ms(fields["timestamp"]),
+            image_id=fields["image_id"],
+            original_relpath=fields.get("original_path") or "",
+            media_type=fields.get("media_type") or "",
+            width=int(fields.get("width") or 0),
+            height=int(fields.get("height") or 0),
+            session_id=fields.get("session_id"),
+            parent_id=fields.get("parent_id") or "",
+            parent_type=fields.get("parent_type") or "memcell",
+            entry_id=fields.get("entry_id"),
+            md_path=fields.get("md_path"),
+            status="superseded" if fields.get("deprecated_by") else "current",
+            superseded_by=fields.get("deprecated_by"),
         ),
     )
 

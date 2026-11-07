@@ -49,6 +49,7 @@ from ._repos.agent_skill import _AgentSkillRepo
 from ._repos.atomic_fact import _AtomicFactRepo
 from ._repos.episode import _EpisodeRepo
 from ._repos.foresight import _ForesightRepo
+from ._repos.image_memory import _ImageMemoryRepo
 from ._repos.knowledge_topic import _KnowledgeTopicRepo
 from ._repos.user_profile import _UserProfileRepo
 from .lancedb_manager import LanceDbConnection
@@ -165,6 +166,7 @@ class LanceIndexBackend:
             foresight=_ForesightRepo(source=connection, dim=dim),
             agent_case=_AgentCaseRepo(source=connection, dim=dim),
             agent_skill=_AgentSkillRepo(source=connection, dim=dim),
+            image_memory=_ImageMemoryRepo(source=connection, dim=dim),
             user_profile=_UserProfileRepo(source=connection, dim=dim),
             knowledge_topic=_KnowledgeTopicRepo(source=connection, dim=dim),
         )

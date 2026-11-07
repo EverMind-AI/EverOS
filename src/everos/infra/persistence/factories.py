@@ -16,12 +16,14 @@ __all__ = [
 from everos.config import Settings
 from everos.memory.deps import Indexes, Stores
 
+from .images import FileImageStore
 from .index import DerivedIndex
 from .index.adapters import (
     AgentCaseIndexAdapter,
     AgentSkillIndexAdapter,
     AtomicFactIndexAdapter,
     EpisodeIndexAdapter,
+    ImageMemoryIndexAdapter,
     KnowledgeTopicIndexAdapter,
     ProfileIndexAdapter,
 )
@@ -32,6 +34,7 @@ from .markdown import (
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownForesightStore,
+    MarkdownImageMemoryStore,
     MarkdownOwnerDirStore,
     MarkdownProfileStore,
 )
@@ -53,6 +56,8 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         episode=MarkdownEpisodeStore(root),
         atomic_fact=MarkdownAtomicFactStore(root),
         foresight=MarkdownForesightStore(root),
+        image_memory=MarkdownImageMemoryStore(root),
+        images=FileImageStore(root, sqlite.image_original),
         profile=MarkdownProfileStore(root),
         agent_case=MarkdownAgentCaseStore(root),
         agent_skill=MarkdownAgentSkillStore(root),
@@ -98,6 +103,7 @@ def build_indexes(index: DerivedIndex) -> Indexes:
         atomic_fact=AtomicFactIndexAdapter(repos.atomic_fact),
         agent_case=AgentCaseIndexAdapter(repos.agent_case),
         agent_skill=AgentSkillIndexAdapter(repos.agent_skill),
+        image_memory=ImageMemoryIndexAdapter(repos.image_memory),
         profile=ProfileIndexAdapter(repos.user_profile),
         knowledge_topic=KnowledgeTopicIndexAdapter(repos.knowledge_topic),
     )

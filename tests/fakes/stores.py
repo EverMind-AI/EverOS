@@ -14,6 +14,8 @@ __all__ = [
     "InMemoryClusterStore",
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
+    "InMemoryImageMemoryStore",
+    "InMemoryImageStore",
     "InMemoryMemcellStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
@@ -33,6 +35,7 @@ from everos.memory.models import (
     ClusterMemberType,
     Episode,
     Foresight,
+    ImageMemory,
     MemCell,
     MemcellRecord,
     Profile,
@@ -495,3 +498,112 @@ class InMemoryReflectionReportStore:
         removed = len(self.reports) - len(kept)
         self.reports = kept
         return removed
+
+
+class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
+    """Image-memory daily log, in memory."""
+
+    def __init__(self) -> None:
+        super().__init__("im", "images")
+
+    async def append(
+        self,
+        scope: Scope,
+        image: ImageMemory,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [image], only_if)
+        return refs[0] if refs else None
+
+    async def append_many(
+        self,
+        scope: Scope,
+        images: Sequence[ImageMemory],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        return await self._append_many(scope, images, only_if)
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+
+class InMemoryImageStore:
+    """Pictures held as bytes in a dict, keyed by content hash.
+
+    Mirrors the real store's contract rather than its filesystem: storing the
+    same bytes twice keeps one entry and counts a second reference, so a test
+    can assert the deduplication that the design rests on.
+    """
+
+    def __init__(self) -> None:
+        self.images: dict[str, tuple[bytes, str]] = {}
+        self.refs: dict[str, int] = {}
+        self.forgotten: set[str] = set()
+
+    async def store(self, data: bytes, *, limits: Any) -> Any:
+        from everos.component.images import decode_image
+
+        stored = decode_image(data, limits=limits)
+        self.images.setdefault(stored.image_id, (data, stored.media_type))
+        self.refs[stored.image_id] = self.refs.get(stored.image_id, 0) + 1
+        return stored
+
+    async def read(self, image_id: str) -> bytes:
+        # Mirrors the real store: an unknown id is ``FileNotFoundError``, which
+        # is what the serving route turns into a 404.
+        if image_id not in self.images:
+            raise FileNotFoundError(image_id)
+        return self.images[image_id][0]
+
+    async def read_derived(self, image_id: str, *, edge: int, quality: int) -> bytes:
+        return await self.read(image_id)
+
+    async def relpath_of(self, image_id: str) -> str:
+        if image_id not in self.images:
+            raise FileNotFoundError(image_id)
+        return f"figures/{image_id[:2]}/{image_id}.{self.images[image_id][1]}"
+
+    async def path_of(self, image_id: str) -> Any:
+        from pathlib import Path
+
+        return Path("/nonexistent") / await self.relpath_of(image_id)
+
+    async def metadata(self, image_id: str) -> Any:
+        from everos.component.images import StoredImageInfo
+
+        data, media_type = self.images[image_id]
+        return StoredImageInfo(
+            image_id=image_id,
+            media_type=media_type,
+            byte_size=len(data),
+            width=1,
+            height=1,
+            original_path=await self.relpath_of(image_id),
+            ref_count=self.refs.get(image_id, 0),
+        )
+
+    async def release(self, image_id: str) -> int:
+        self.refs[image_id] = max(0, self.refs.get(image_id, 1) - 1)
+        return self.refs[image_id]
+
+    async def exists(self, image_id: str) -> bool:
+        return image_id in self.images
+
+    async def forget(self, image_id: str) -> bool:
+        self.forgotten.add(image_id)
+        return image_id in self.images
+
+    async def restore(self, image_id: str) -> bool:
+        self.forgotten.discard(image_id)
+        return image_id in self.images

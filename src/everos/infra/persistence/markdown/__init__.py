@@ -55,6 +55,7 @@ from ._mds import AgentSkillFrontmatter as AgentSkillFrontmatter
 from ._mds import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
 from ._mds import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from ._mds import ForesightDailyFrontmatter as ForesightDailyFrontmatter
+from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from ._mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
 from ._mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from ._mds import UserProfileFrontmatter as UserProfileFrontmatter
@@ -73,6 +74,7 @@ from ._writers import AtomicFactWriter as AtomicFactWriter
 from ._writers import BaseDailyWriter as BaseDailyWriter
 from ._writers import EpisodeWriter as EpisodeWriter
 from ._writers import ForesightWriter as ForesightWriter
+from ._writers import ImageMemoryWriter as ImageMemoryWriter
 from ._writers import KnowledgeWriter as KnowledgeWriter
 from ._writers import ProfileWriter as ProfileWriter
 from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
@@ -82,6 +84,7 @@ from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
 from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
 from .stores import MarkdownForesightStore as MarkdownForesightStore
+from .stores import MarkdownImageMemoryStore as MarkdownImageMemoryStore
 from .stores import MarkdownProfileStore as MarkdownProfileStore
 
 __all__ = [
@@ -107,6 +110,8 @@ __all__ = [
     "ForesightDailyFrontmatter",
     "ForesightReader",
     "ForesightWriter",
+    "ImageMemoryDailyFrontmatter",
+    "ImageMemoryWriter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeDocumentPathMixin",
     "KnowledgeScopedMixin",
@@ -118,6 +123,7 @@ __all__ = [
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
+    "MarkdownImageMemoryStore",
     "MarkdownKnowledgeStore",
     "MarkdownOwnerDirStore",
     "MarkdownProfileStore",

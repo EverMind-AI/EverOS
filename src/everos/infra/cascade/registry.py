@@ -24,6 +24,7 @@ from everos.infra.persistence.markdown import (
     BaseFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
+    ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
     UserProfileFrontmatter,
@@ -34,6 +35,7 @@ from everos.infra.persistence.records import (
     AtomicFact,
     Episode,
     Foresight,
+    ImageMemory,
     KnowledgeTopic,
     UserProfile,
 )
@@ -46,6 +48,7 @@ from ._projections import (
     ForesightHandler,
     Handler,
     HandlerDeps,
+    ImageMemoryHandler,
     KnowledgeDocumentHandler,
     KnowledgeTopicHandler,
     UserProfileHandler,
@@ -124,6 +127,12 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=AgentSkillFrontmatter,
         index_schema=AgentSkill,
         handler_factory=AgentSkillHandler,
+    ),
+    KindSpec(
+        name="image_memory",
+        frontmatter_schema=ImageMemoryDailyFrontmatter,
+        index_schema=ImageMemory,
+        handler_factory=ImageMemoryHandler,
     ),
     KindSpec(
         name="user_profile",

@@ -28,6 +28,7 @@ from .indexes import (
     InMemoryAgentSkillIndex,
     InMemoryAtomicFactIndex,
     InMemoryEpisodeIndex,
+    InMemoryImageMemoryIndex,
     InMemoryProfileIndex,
 )
 from .stores import (
@@ -37,6 +38,8 @@ from .stores import (
     InMemoryClusterStore,
     InMemoryEpisodeStore,
     InMemoryForesightStore,
+    InMemoryImageMemoryStore,
+    InMemoryImageStore,
     InMemoryMemcellStore,
     InMemoryProfileStore,
     InMemoryReflectionReportStore,
@@ -67,6 +70,8 @@ def make_stores(**overrides: Any) -> Stores:
         "episode": InMemoryEpisodeStore(),
         "atomic_fact": InMemoryAtomicFactStore(),
         "foresight": InMemoryForesightStore(),
+        "image_memory": InMemoryImageMemoryStore(),
+        "images": InMemoryImageStore(),
         "profile": InMemoryProfileStore(),
         "agent_case": InMemoryAgentCaseStore(),
         "agent_skill": InMemoryAgentSkillStore(),
@@ -88,6 +93,7 @@ def make_indexes(**overrides: Any) -> Indexes:
         "atomic_fact": InMemoryAtomicFactIndex(),
         "agent_case": InMemoryAgentCaseIndex(),
         "agent_skill": InMemoryAgentSkillIndex(),
+        "image_memory": InMemoryImageMemoryIndex(),
         "profile": InMemoryProfileIndex(),
         "knowledge_topic": UnusedPort("knowledge_topic"),
     }

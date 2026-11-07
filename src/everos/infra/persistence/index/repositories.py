@@ -13,6 +13,7 @@ from ..records import (
     AtomicFact,
     Episode,
     Foresight,
+    ImageMemory,
     KnowledgeTopic,
     UserProfile,
 )
@@ -28,6 +29,7 @@ BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     Foresight,
     AgentCase,
     AgentSkill,
+    ImageMemory,
     UserProfile,
     KnowledgeTopic,
 )
@@ -49,6 +51,7 @@ class IndexRepositories:
     foresight: IndexRepository[Any]
     agent_case: IndexRepository[Any]
     agent_skill: AgentSkillIndexRepository[Any]
+    image_memory: IndexRepository[Any]
     user_profile: IndexRepository[Any]
     knowledge_topic: IndexRepository[Any]
 

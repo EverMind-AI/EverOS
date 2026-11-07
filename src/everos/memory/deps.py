@@ -36,6 +36,9 @@ from everos.memory.ports import (
     EpisodeIndex,
     EpisodeStore,
     ForesightStore,
+    ImageMemoryIndex,
+    ImageMemoryStore,
+    ImageStore,
     KnowledgeTopicIndex,
     MemcellStore,
     MemorizeInboxStore,
@@ -58,6 +61,8 @@ class Stores:
     episode: EpisodeStore
     atomic_fact: AtomicFactStore
     foresight: ForesightStore
+    image_memory: ImageMemoryStore
+    images: ImageStore
     profile: ProfileStore
     agent_case: AgentCaseStore
     agent_skill: AgentSkillStore
@@ -78,6 +83,7 @@ class Indexes:
     atomic_fact: AtomicFactIndex
     agent_case: AgentCaseIndex
     agent_skill: AgentSkillIndex
+    image_memory: ImageMemoryIndex
     profile: ProfileIndex
     knowledge_topic: KnowledgeTopicIndex
 

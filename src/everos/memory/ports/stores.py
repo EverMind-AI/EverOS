@@ -17,6 +17,7 @@ __all__ = [
     "ClusterStore",
     "EpisodeStore",
     "ForesightStore",
+    "ImageMemoryStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
     "MemcellStore",
@@ -47,6 +48,7 @@ from everos.memory.models import (
     ClusterMemberType,
     Episode,
     Foresight,
+    ImageMemory,
     KnowledgeCategory,
     KnowledgeDocument,
     KnowledgeMemory,
@@ -169,6 +171,52 @@ class EpisodeStore(Protocol):
 
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
+        ...
+
+
+@runtime_checkable
+class ImageMemoryStore(Protocol):
+    """Picture-memory truth: append-only daily logs per owner.
+
+    A picture memory is never edited in place. A changed description, or the
+    version a forget re-writes without the picture, is a new entry that
+    ``deprecate``s the old one -- which is why ``deprecate`` is the only way to
+    retire one and there is no ``update``.
+
+    Every write takes ``only_if`` (no default, so no writer can forget it): a
+    write whose source was deleted while it ran returns ``None`` / an empty
+    list / ``False``.
+    """
+
+    async def append(
+        self,
+        scope: Scope,
+        image: ImageMemory,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None: ...
+
+    async def append_many(
+        self,
+        scope: Scope,
+        images: Sequence[ImageMemory],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]: ...
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry."""
+        ...
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Remove the owner's picture memories that came from one session."""
         ...
 
 

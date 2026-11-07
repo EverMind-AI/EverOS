@@ -12,13 +12,21 @@ __all__ = [
     "InMemoryAgentSkillIndex",
     "InMemoryAtomicFactIndex",
     "InMemoryEpisodeIndex",
+    "InMemoryImageMemoryIndex",
     "InMemoryProfileIndex",
 ]
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode, Profile
+from everos.memory.models import (
+    AgentCase,
+    AgentSkill,
+    AtomicFact,
+    Episode,
+    ImageMemory,
+    Profile,
+)
 from everos.memory.ports import Filter, Page, PageResult, Scope, SearchHit, Stored
 
 from ._filter import matches
@@ -209,6 +217,58 @@ class InMemoryAgentSkillIndex(_Unsearchable):
             for r in self.rows
             if _same_space(r.scope, scope) and r.item.cluster_id == cluster_id
         ]
+
+
+class InMemoryImageMemoryIndex(_Unsearchable):
+    """Seeded picture memories; search routes raise until a test needs one."""
+
+    def __init__(self) -> None:
+        self.rows: list[Stored[ImageMemory]] = []
+
+    def seed(self, *rows: Stored[ImageMemory]) -> None:
+        self.rows.extend(rows)
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[ImageMemory]]:
+        hits = [
+            SearchHit(stored=row, score=None)
+            for row in self.rows
+            if matches(where, _image_fields(row))
+        ]
+        return hits if limit is None else hits[:limit]
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        wanted = set(entry_ids)
+        return [
+            r
+            for r in self.rows
+            if _same_space(r.scope, scope) and r.ref.entry_id in wanted
+        ]
+
+    async def find_by_parent(
+        self, *, parent_type: str, parent_id: str, limit: int = 100
+    ) -> list[Stored[ImageMemory]]:
+        return [
+            r
+            for r in self.rows
+            if r.item.parent_id == parent_id and r.item.parent_type == parent_type
+        ][:limit]
+
+
+def _image_fields(row: Stored[ImageMemory]) -> Mapping[str, Any]:
+    return {
+        **row.item.model_dump(),
+        "id": row.ref.id,
+        "entry_id": row.ref.entry_id,
+        "md_path": row.ref.md_path,
+        "app_id": row.scope.app_id,
+        "project_id": row.scope.project_id,
+        "owner_type": row.scope.owner_type,
+        "deprecated_by": None,
+    }
 
 
 class InMemoryProfileIndex:

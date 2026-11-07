@@ -26,6 +26,7 @@ from .repos import (
     _AtomicFactRepo,
     _EpisodeRepo,
     _ForesightRepo,
+    _ImageMemoryRepo,
     _KnowledgeTopicRepo,
     _UserProfileRepo,
 )
@@ -57,6 +58,7 @@ class MilvusIndexBackend:
             foresight=_ForesightRepo(connection, dim=dim),
             agent_case=_AgentCaseRepo(connection, dim=dim),
             agent_skill=_AgentSkillRepo(connection, dim=dim),
+            image_memory=_ImageMemoryRepo(connection, dim=dim),
             user_profile=_UserProfileRepo(connection, dim=dim),
             knowledge_topic=_KnowledgeTopicRepo(connection, dim=dim),
         )

@@ -74,7 +74,7 @@ from everos.service.bootstrap import build_replay_engine
 from .deps import bundled_instructions, make_stores, unscripted_llm
 from .sources import unused_raw_file_builder
 from .storage import make_storage
-from .stores import UnusedPort
+from .stores import InMemoryImageStore, UnusedPort
 
 _VECTOR_TABLES = (
     "episode",
@@ -82,6 +82,7 @@ _VECTOR_TABLES = (
     "foresight",
     "agent_case",
     "agent_skill",
+    "image_memory",
     "knowledge_topic",
 )
 
@@ -114,6 +115,7 @@ class StubMemoryService:
         self.get = AsyncMock()
         self.delete = AsyncMock()
         self.delete_by_ids = AsyncMock()
+        self.forget_image = AsyncMock()
 
     async def finish_interrupted_deletions(self) -> int:
         self.lifecycle.append("memory.finish_interrupted_deletions")
@@ -558,6 +560,7 @@ def make_application(
     ops: Any = None,
     capabilities: Capabilities = _ALL_CAPABILITIES,
     lifecycle: list[str] | None = None,
+    images: InMemoryImageStore | None = None,
 ) -> Application:
     """An :class:`Application` over stubs; any facade can be overridden.
 
@@ -568,6 +571,7 @@ def make_application(
     memory = memory if memory is not None else StubMemoryService(events)
     return Application(
         memory=memory,
+        images=images if images is not None else InMemoryImageStore(),
         knowledge=knowledge if knowledge is not None else StubKnowledgeService(),
         ops=(
             ops

@@ -14,6 +14,7 @@ __all__ = [
     "AgentSkillIndex",
     "AtomicFactIndex",
     "EpisodeIndex",
+    "ImageMemoryIndex",
     "IndexEraser",
     "KnowledgeTopicIndex",
     "ProfileIndex",
@@ -28,6 +29,7 @@ from everos.memory.models import (
     AtomicFact,
     Episode,
     EpisodeParentType,
+    ImageMemory,
     Profile,
 )
 from everos.memory.ports.query import (
@@ -86,6 +88,45 @@ class EpisodeIndex(Protocol):
         ...
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]: ...
+
+
+@runtime_checkable
+class ImageMemoryIndex(Protocol):
+    """Read side of the picture memories — a peer of :class:`EpisodeIndex`.
+
+    The two search routes are the same two the episodes use, over the same
+    vector space: BM25 across the description and the text in the picture, and
+    ANN over the picture's embedding. There is deliberately no third route --
+    a picture has no keyword surface of its own.
+    """
+
+    async def sparse_search(
+        self, terms: Sequence[str], where: Filter, *, limit: int
+    ) -> list[SearchHit[ImageMemory]]: ...
+
+    async def dense_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[SearchHit[ImageMemory]]: ...
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[ImageMemory]]: ...
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The named entries, for re-reading what a forget has to rewrite."""
+        ...
+
+    async def find_by_parent(
+        self, *, parent_type: str, parent_id: str, limit: int = 100
+    ) -> list[Stored[ImageMemory]]:
+        """Pictures that came in with one source segment.
+
+        This is the edge a forget walks: forgetting a segment retires the
+        pictures that arrived with it.
+        """
+        ...
 
 
 @runtime_checkable

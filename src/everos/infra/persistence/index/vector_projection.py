@@ -75,6 +75,7 @@ VECTOR_PROJECTIONS: dict[str, VectorProjection] = {
         VectorProjection("foresight", lambda r: r["foresight"]),
         VectorProjection("agent_case", lambda r: r["task_intent"]),
         VectorProjection("agent_skill", _skill_text),
+        VectorProjection("image_memory", lambda r: r["description"]),
         VectorProjection("knowledge_topic", lambda r: r["summary"]),
     )
 }

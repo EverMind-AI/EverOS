@@ -28,6 +28,7 @@ from .agent_skill import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .atomic_fact import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
 from .episode import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from .foresight import ForesightDailyFrontmatter as ForesightDailyFrontmatter
+from .image_memory import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from .knowledge_document import (
     KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "AtomicFactDailyFrontmatter",
     "EpisodeDailyFrontmatter",
     "ForesightDailyFrontmatter",
+    "ImageMemoryDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
     "UserProfileFrontmatter",

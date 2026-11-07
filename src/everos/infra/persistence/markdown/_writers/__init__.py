@@ -30,6 +30,7 @@ from .atomic_fact_writer import AtomicFactWriter as AtomicFactWriter
 from .base import BaseDailyWriter as BaseDailyWriter
 from .episode_writer import EpisodeWriter as EpisodeWriter
 from .foresight_writer import ForesightWriter as ForesightWriter
+from .image_memory_writer import ImageMemoryWriter as ImageMemoryWriter
 from .knowledge_writer import KnowledgeWriter as KnowledgeWriter
 from .profile_writer import ProfileWriter as ProfileWriter
 
@@ -40,6 +41,7 @@ __all__ = [
     "BaseDailyWriter",
     "EpisodeWriter",
     "ForesightWriter",
+    "ImageMemoryWriter",
     "KnowledgeWriter",
     "ProfileWriter",
 ]

@@ -31,6 +31,7 @@ from .atomic_fact import AtomicFact as AtomicFact
 from .base import IndexRecord as IndexRecord
 from .episode import Episode as Episode
 from .foresight import Foresight as Foresight
+from .image_memory import ImageMemory as ImageMemory
 from .index_record import IndexRecordMeta as IndexRecordMeta
 from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
 from .user_profile import UserProfile as UserProfile
@@ -46,6 +47,7 @@ __all__ = [
     "DenseVector",
     "Episode",
     "Foresight",
+    "ImageMemory",
     "IndexRecord",
     "IndexRecordMeta",
     "KnowledgeTopic",

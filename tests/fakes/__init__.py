@@ -42,6 +42,7 @@ from .indexes import InMemoryAgentCaseIndex as InMemoryAgentCaseIndex
 from .indexes import InMemoryAgentSkillIndex as InMemoryAgentSkillIndex
 from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
+from .indexes import InMemoryImageMemoryIndex as InMemoryImageMemoryIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
 from .llm import AGENT_TRACK_OPERATORS as AGENT_TRACK_OPERATORS
 from .llm import KNOWLEDGE_OPERATORS as KNOWLEDGE_OPERATORS
@@ -73,6 +74,8 @@ from .stores import InMemoryAtomicFactStore as InMemoryAtomicFactStore
 from .stores import InMemoryClusterStore as InMemoryClusterStore
 from .stores import InMemoryEpisodeStore as InMemoryEpisodeStore
 from .stores import InMemoryForesightStore as InMemoryForesightStore
+from .stores import InMemoryImageMemoryStore as InMemoryImageMemoryStore
+from .stores import InMemoryImageStore as InMemoryImageStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
@@ -100,6 +103,9 @@ __all__ = [
     "InMemoryEpisodeIndex",
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
+    "InMemoryImageMemoryIndex",
+    "InMemoryImageMemoryStore",
+    "InMemoryImageStore",
     "InMemoryMemcellStore",
     "InMemoryProfileIndex",
     "InMemoryProfileStore",

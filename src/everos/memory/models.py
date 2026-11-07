@@ -304,6 +304,67 @@ class AgentCase(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ImageMemory(BaseModel):
+    """Domain image memory — what one picture showed, as one memory.
+
+    One record per picture *occurrence*, not per file: the file is
+    content-addressed and stored once, while its time and provenance belong to
+    the message that carried it. The same picture in two sessions is one file
+    and two of these — which is why ``image_id`` (the file) and ``id`` (this
+    record) are separate identities.
+
+    The record is a peer of :class:`Episode`: it competes for retrieval on its
+    own, can be selected as core memory on its own, and can be forgotten on its
+    own. An episode body references it by ``image_id`` rather than copying its
+    description, so replacing a picture's description never rewrites the
+    episode.
+
+    ``status`` mirrors the other memory kinds rather than inventing a lifecycle:
+    ``current`` is the live record, ``superseded`` names the entry that replaced
+    it, and ``forgotten`` is a record whose picture was forgotten. Only
+    ``current`` records compete for retrieval by default.
+    """
+
+    owner_id: str
+    description: str
+    """What the picture shows, written by the extraction model while it looked
+    at the picture. This is the text the picture is retrieved by when no
+    vector is available, so it names what distinguishes this picture."""
+
+    timestamp: int
+    ocr: str = ""
+    """Text visible in the picture. Empty for a photograph of a scene; the
+    reason a screenshot of a sign is searchable by the words on it."""
+
+    image_id: str
+    """SHA-256 of the picture file. Stable across occurrences and the handle
+    ``forget`` takes."""
+
+    original_relpath: str = ""
+    """Memory-root-relative path of the original, ``figures/<aa>/<hash>.<ext>``.
+    Recorded rather than derived so a result can hand the caller a path even
+    when the picture file itself is gone."""
+
+    media_type: str = "jpeg"
+    width: int = 0
+    height: int = 0
+
+    # everos engineering metadata.
+    session_id: str | None = None
+    parent_id: str = ""
+    """Source memcell id — the segment the picture hung in."""
+    parent_type: EpisodeParentType = "memcell"
+    entry_id: str | None = None
+    """``im_<YYYYMMDD>_<NNNN>`` once written; ``None`` before the store
+    allocates it."""
+    md_path: str | None = None
+    status: Literal["current", "superseded", "forgotten"] = "current"
+    superseded_by: str | None = None
+    """Entry id of the record that replaced this one."""
+
+    model_config = ConfigDict(extra="allow")
+
+
 class ExplicitInfoItem(BaseModel):
     """One fact a source states about the profile's owner.
 
@@ -645,6 +706,7 @@ __all__ = [
     "EpisodeParentType",
     "ExplicitInfoItem",
     "Foresight",
+    "ImageMemory",
     "ImplicitTraitItem",
     "IngestResult",
     "MemCell",

@@ -40,6 +40,7 @@ from everos.memory.models import (
     AtomicFact,
     Episode,
     Foresight,
+    ImageMemory,
     Profile,
 )
 from everos.memory.ports import (
@@ -60,6 +61,7 @@ from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
     ForesightWriter,
+    ImageMemoryWriter,
     ProfileWriter,
 )
 
@@ -456,6 +458,61 @@ class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
         return refs[0] if refs else None
 
 
+class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
+    """Image-memory daily logs (``users/<id>/images/``).
+
+    A picture's memory is written once per occurrence and never edited in
+    place: a superseded description is a new entry that points back at the old
+    one through ``deprecated_entries``, which the cascade turns into the index
+    row's ``deprecated_by`` column. That keeps the file append-only and keeps
+    the old reading of the picture recoverable.
+
+    Args:
+        root: Memory root the files live under.
+    """
+
+    _KIND = "image_memory"
+
+    def __init__(self, root: MemoryRoot) -> None:
+        super().__init__(root, ImageMemoryWriter(root), _image_memory_entry)
+
+    async def append(
+        self,
+        scope: Scope,
+        image: ImageMemory,
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        refs = await self._append_many(scope, [image], only_if)
+        return refs[0] if refs else None
+
+    async def append_many(
+        self,
+        scope: Scope,
+        images: Sequence[ImageMemory],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        return await self._append_many(scope, images, only_if)
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Mark ``(md_path, entry_id)`` pairs superseded by ``replaced_by``."""
+        return await self._deprecate(
+            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
+        """Drop the owner's picture memories of one session from markdown."""
+        return await super().remove_session(scope, session_id)
+
+
 class MarkdownProfileStore:
     """The single ``users/<id>/user.md`` profile document.
 
@@ -628,6 +685,32 @@ class MarkdownAgentSkillStore:
         return MemoryRef(
             id=skill_id, entry_id=entry_id, md_path=_relative(self._root, path)
         )
+
+
+def _image_memory_entry(image: ImageMemory) -> EntryBody:
+    """Inline audit fields + Description / OCR sections.
+
+    ``ocr`` is omitted when empty: a photograph of a scene has no text in it,
+    and writing an empty section would make every such entry look like an entry
+    whose text was lost.
+    """
+    inline: dict[str, object] = {
+        "owner_id": image.owner_id,
+        "timestamp": _iso(image.timestamp),
+        "parent_type": image.parent_type,
+        "parent_id": image.parent_id,
+        "image_id": image.image_id,
+        "original_path": image.original_relpath,
+        "media_type": image.media_type,
+        "width": image.width,
+        "height": image.height,
+    }
+    if image.session_id is not None:
+        inline["session_id"] = image.session_id
+    sections = {"Description": image.description}
+    if image.ocr:
+        sections["OCR"] = image.ocr
+    return inline, sections
 
 
 # ── Markdown -> domain ───────────────────────────────────────────────────
