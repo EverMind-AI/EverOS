@@ -29,6 +29,7 @@ change, which is exactly what a forget must not do.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -343,8 +344,16 @@ def _strip_reference(text: str, image_id: str) -> str:
             cleaned = cleaned.replace(span, "")
     # A reference that stood alone in its own parentheses leaves ``()``; drop
     # the empty pair and the space that separated it, so the sentence reads as
-    # if the picture were never named.
-    return " ".join(cleaned.replace("()", "").split())
+    # if the picture were never named. The same pass closes up the space the
+    # removed reference left before the punctuation that followed it
+    # ("the signboard ." -> "the signboard."), which is otherwise visible to
+    # anyone reading the rewritten episode.
+    spaced = " ".join(cleaned.replace("()", "").split())
+    return _before_punctuation.sub(r"\1", spaced)
+
+
+_before_punctuation = re.compile(r"\s+([.,;:!?])")
+"""A space immediately before sentence punctuation, left by a removal."""
 
 
 def _parenthesised(text: str) -> list[str]:

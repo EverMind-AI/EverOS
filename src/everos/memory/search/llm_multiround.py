@@ -755,6 +755,8 @@ def _build_round_trace(
     core_carried_in: list[dict[str, object]],
     block_meta: list[dict[str, object]],
     timing_s: dict[str, float],
+    pictures: Sequence[Picture] = (),
+    picture_candidates: int = 0,
 ) -> dict[str, object]:
     """Assemble one per-round trace record (schema C).
 
@@ -806,6 +808,23 @@ def _build_round_trace(
         "recall": {"blocks": block_meta},
         "timing_s": timing_s,
     }
+    if pictures or picture_candidates:
+        # What the decider actually *saw* as pixels, as opposed to as text.
+        # Without this, "the decider read the thumbnails" and "the decider read
+        # the descriptions" produce identical traces -- and the whole point of
+        # the picture path is that they are different.
+        record["pictures"] = {
+            "attached": len(pictures),
+            "question": sum(1 for picture in pictures if picture.question),
+            "evidence_labels": [
+                picture.label for picture in pictures if not picture.question
+            ],
+            "candidates": picture_candidates,
+            "overflow_as_text": max(
+                picture_candidates - sum(1 for p in pictures if not p.question), 0
+            ),
+            "bytes": [len(picture.data) for picture in pictures],
+        }
     if decision.usage is not None or decision.raw is not None:
         record["decider"] = {"tokens": decision.usage, "raw": decision.raw}
     if decision.failed:
@@ -1029,6 +1048,10 @@ async def _search_episodes_subq(
                     global_cands=global_cands,
                     index_meta=index_meta,
                     decision=decision,
+                    pictures=pictures,
+                    picture_candidates=sum(
+                        1 for cand in global_cands if _is_picture(cand)
+                    ),
                     core_added=core_added,
                     core_carried_in=[
                         {

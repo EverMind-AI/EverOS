@@ -237,3 +237,19 @@ async def test_the_rewritten_episode_no_longer_refers_to_the_picture() -> None:
         s for s in stores.episode.records if s.ref.entry_id == result.episodes[0]
     ]
     assert written[0].item.image_ids == ["0" * 64]
+
+
+async def test_the_rewritten_body_has_no_gap_before_its_punctuation() -> None:
+    """A removal must leave prose, not ``the signboard .``."""
+    old = _stored_episode(
+        "ep_20260514_0001",
+        f"she described the signboard (img-2: {_IMAGE_ID}).",
+    )
+    manager, stores, _, _ = _manager(images=(), episodes=(old,))
+
+    result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
+
+    written = [
+        s for s in stores.episode.records if s.ref.entry_id == result.episodes[0]
+    ]
+    assert written[0].item.episode == "she described the signboard."

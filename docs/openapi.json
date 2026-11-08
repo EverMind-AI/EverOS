@@ -4978,6 +4978,12 @@
       },
       "QuestionPicture": {
         "properties": {
+          "type": {
+            "type": "string",
+            "const": "image",
+            "title": "Type",
+            "default": "image"
+          },
           "base64": {
             "anyOf": [
               {

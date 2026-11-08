@@ -531,18 +531,20 @@ class SearchManager:
                 reference must not cross into another owner's or space's
                 pictures.
             episodes: The selected episodes (mutated: their ``images`` filled).
-            images: The pictures ranked alongside them.
+            images: The pictures *ranked* alongside them.
 
         Returns:
-            ``images`` plus whatever was attached and not already there. A
-            picture that is both selected and referred to appears once, at the
-            top level, and is not repeated inside the episode.
+            ``images`` unchanged. A picture reached only through a reference is
+            attached to the episode that names it and is not added to the
+            ranked list: the list is what the ranking chose, and padding it
+            with unranked rows would report as core memory something no
+            decider selected. A picture that is both ranked and referred to
+            appears once, in the list, and is not repeated inside the episode.
         """
         wanted = {image_id for episode in episodes for image_id in episode.image_ids}
         if self._images is None or not wanted:
             return images
         selected = {image.image_id for image in images}
-        missing = wanted - selected
         stored = await self._images.find_by_image_ids(
             Scope(
                 app_id=req.app_id,
@@ -553,7 +555,7 @@ class SearchManager:
             list(wanted),
         )
         by_image_id = _picture_by_image_id(stored)
-        extra = attach_referenced_pictures(
+        attached = attach_referenced_pictures(
             episodes,
             image_ids=wanted,
             stored_images=by_image_id,
@@ -565,10 +567,10 @@ class SearchManager:
             episodes=len(episodes),
             referenced=len(wanted),
             selected=len(selected),
-            attached=len(extra),
-            unresolved=len(missing) - len(extra),
+            attached=len(attached),
+            unresolved=len(wanted) - len(selected) - len(attached),
         )
-        return [*images, *extra]
+        return images
 
     async def _image_hits(
         self, req: SearchRequest, where: Filter, top_k: int

@@ -85,6 +85,14 @@ class QuestionPicture(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    type: Literal["image"] = "image"
+    """Carried so a caller can reuse an ``/memory/add`` content item unchanged.
+
+    Redundant here — an item under ``images`` is a picture by definition — but
+    making a caller strip one field from a payload it already built is how
+    "the same shape" stops being true.
+    """
+
     base64: str | None = None
     uri: str | None = None
     ext: str | None = None

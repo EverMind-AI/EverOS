@@ -28,8 +28,8 @@ import pytest
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.errors import ProviderNotConfiguredError
-from everos.memory.models import CanonicalMessage, Cluster
-from everos.memory.ports import Scope, SearchHit, SessionKey
+from everos.memory.models import CanonicalMessage, Cluster, ImageMemory
+from everos.memory.ports import MemoryRef, Scope, SearchHit, SessionKey, Stored
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
@@ -159,6 +159,8 @@ def _build_manager(
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
+    image_recaller: Any = None,
+    image_store: Any = None,
 ) -> SearchManager:
     """A manager over the real recallers, each reading a scripted index.
 
@@ -211,6 +213,8 @@ def _build_manager(
         decider_client=llm_client or unscripted_llm(),
         tuning_source=static_tuning(),
         trace_path_source=static_trace_path(),
+        image_recaller=image_recaller,
+        image_store=image_store,
     )
 
 
@@ -1126,3 +1130,73 @@ async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert "langfuse.observation.input" not in attrs
+
+
+class _PictureIndex:
+    """The picture index as far as resolution needs it: current rows by file."""
+
+    def __init__(self, *rows: Stored[ImageMemory]) -> None:
+        self.rows = list(rows)
+
+    async def sparse_search(self, terms, where, *, limit: int):
+        return []
+
+    async def dense_search(self, vector, where, *, limit: int):
+        return []
+
+    async def find(self, where, *, limit: int | None = None):
+        return [SearchHit(stored=row, score=None) for row in self.rows][:limit]
+
+    async def find_by_image_ids(self, scope, image_ids):
+        wanted = set(image_ids)
+        return [
+            row
+            for row in self.rows
+            if row.item.image_id in wanted and row.item.superseded_by is None
+        ]
+
+
+async def test_a_referenced_picture_is_attached_and_not_padded_into_the_ranking() -> (
+    None
+):
+    """The ranked list is what the ranking chose; a reference is content, not a hit.
+
+    An episode kept without its pictures must still reach the reader with their
+    description and in-image text, and those pictures must not appear in
+    ``data.images`` as if a ranker had selected them.
+    """
+    from everos.memory.search.recall import ImageMemoryRecaller
+
+    image_id = "a" * 64
+    stored = Stored(
+        ref=MemoryRef(id="alice_im_1", entry_id="im_1", md_path="images.md"),
+        scope=Scope(
+            app_id="default", project_id="default", owner_id="alice", owner_type="user"
+        ),
+        item=ImageMemory(
+            owner_id="alice",
+            description="a sign reading EST. 2019",
+            timestamp=1_747_216_800_000,
+            ocr="EST. 2019",
+            image_id=image_id,
+            original_relpath=f"figures/aa/{image_id}.png",
+            parent_id="mc_1",
+            entry_id="im_1",
+        ),
+    )
+    episode = _episode_row("ep_1")
+    episode.stored.item.image_ids = [image_id]
+    manager = _build_manager(
+        episode_sparse=[episode],
+        image_recaller=ImageMemoryRecaller(
+            RecallerDeps(tokenizer=_tokenizer()),  # type: ignore[arg-type]
+            _PictureIndex(stored),  # type: ignore[arg-type]
+        ),
+    )
+
+    response = await manager.search(_user_req())
+
+    assert response.data.images == []
+    attached = response.data.episodes[0].images
+    assert [item.image_id for item in attached] == [image_id]
+    assert attached[0].ocr == "EST. 2019"

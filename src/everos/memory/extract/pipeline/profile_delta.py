@@ -88,8 +88,13 @@ facts that will still be true next time you meet them:
   doing that afternoon. A single event is not a portrait fact.
 - Do NOT infer from an object in the background what the person is like
   ("interested in design", "wealthy"); report the visible fact.
-- Do NOT restate what the conversation's own text already establishes unless the
-  photo adds something to it; the text profile update records those.
+- Prefer what only the photo establishes: a year, a name or brand on a sign, a
+  price board, an address, a model number, a breed on a tag. Those are the
+  facts the text update can never find, and the reason this call reports them.
+- Do NOT restate what the conversation's own text already establishes. If the
+  only thing a photo shows is something the messages already say, it adds no
+  item — but when it shows one extra legible detail the messages never mention,
+  that detail is the item, even if it sits beside familiar content.
 - A photo that shows nothing about its sender contributes nothing, and an empty
   list is the right answer then.
 
@@ -99,8 +104,11 @@ on file are skipped for you, so add a fact whenever you read one; do not try to
 guess whether it is already there.
 
 {"action": "add", "type": "explicit_info", "source_image_id": "img-1",
- "data": {"category": "...", "description": "...",
-          "evidence": "2026-10-30: the collar tag reads Biscuit"}}
+ "data": {"category": "pets", "description": "Has a cat named Biscuit",
+          "evidence": "2026-10-30: the collar tag in the photo reads Biscuit"}}
+When the messages already mention the cafe and its prices and the photo's sign
+also reads "EST. 2019", the item is the year: "The Dou She cafe has been open
+since 2019" — not a sentence repeating the name and prices the text gave.
 - "explicit_info" for a fact the photo makes legible: a name on a tag, a city on
   a sign, a breed, a model number.
 - "implicit_traits" for a disposition the photo evidences through a choice: a

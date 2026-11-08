@@ -28,6 +28,7 @@ from everos.memory.models import ImageMemory
 from everos.memory.ports import (
     Filter,
     ImageMemoryIndex,
+    Scope,
     Stored,
     all_of,
     one_of,
@@ -88,6 +89,20 @@ class ImageMemoryRecaller:
         full_where = all_of(where, one_of("entry_id", list(entry_ids)))
         hits = await self._index.find(full_where, limit=len(entry_ids))
         return _tagged(from_hits(hits, source="vector"))
+
+    async def find_by_image_ids(
+        self, scope: Scope, image_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The current picture memories about these files.
+
+        What an episode's ``image_ids`` resolve through.
+
+        Only current occurrences: a forgotten or superseded picture must not be
+        revived into an answer because an episode still refers to it.
+        """
+        if not image_ids:
+            return []
+        return await self._index.find_by_image_ids(scope, list(image_ids))
 
     async def fetch_for_parent(
         self, *, parent_type: str, parent_id: str
