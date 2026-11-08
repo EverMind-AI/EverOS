@@ -78,3 +78,19 @@ def test_asset_and_media_directories_are_blocked() -> None:
         "use-cases/example/videos/walkthrough.md",
     ]
     assert {violation.reason for violation in violations} == {"asset/media directory"}
+
+
+def test_source_package_named_images_is_allowed_but_media_in_it_is_not() -> None:
+    checker = _load_checker()
+
+    violations = checker.find_violations(
+        [
+            "src/everos/infra/persistence/images/store.py",
+            "src/everos/component/images/__init__.py",
+            "src/everos/infra/persistence/images/sample.png",
+        ]
+    )
+
+    assert [(violation.path, violation.reason) for violation in violations] == [
+        ("src/everos/infra/persistence/images/sample.png", "image file"),
+    ]

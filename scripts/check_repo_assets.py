@@ -66,7 +66,11 @@ def _normalise_path(path: str) -> PurePosixPath:
 def _violation_reason(path: str) -> str | None:
     posix_path = _normalise_path(path)
     lower_parts = tuple(part.lower() for part in posix_path.parts)
-    if any(part in BLOCKED_DIR_NAMES for part in lower_parts):
+    # Source packages may be named ``images`` (code that handles pictures, not
+    # pictures themselves); media files inside them are still blocked below.
+    if lower_parts[:1] != ("src",) and any(
+        part in BLOCKED_DIR_NAMES for part in lower_parts
+    ):
         return "asset/media directory"
 
     suffix = posix_path.suffix.lower()
