@@ -110,6 +110,14 @@ class Episode(BaseModel):
     pipeline knows the id — it created the memcell). ``parent_type`` is
     ``"cluster"`` for an episode Reflection merged out of a cluster, in
     which case ``parent_id`` is that cluster's id.
+
+    ``image_ids`` are the pictures this episode's body refers to, and it is
+    what makes that reference resolvable: the body names a picture by id and
+    never restates its description (the picture has its own memory), so a
+    reader — the answering model above all — needs the episode to say which
+    pictures it means. Recorded at write time from the cell's content items,
+    never parsed back out of the text: a body is model-written prose and an id
+    in it is a reference, not a field.
     """
 
     owner_id: str
@@ -121,6 +129,10 @@ class Episode(BaseModel):
     # everos engineering metadata.
     session_id: str | None = None
     sender_ids: list[str] = Field(default_factory=list)
+    image_ids: list[str] = Field(default_factory=list)
+    """Content hashes of the pictures the body refers to, in the order they
+    arrived. Empty for an episode that carried none, and for every episode
+    written before pictures existed."""
     parent_id: str
     parent_type: EpisodeParentType = "memcell"
     language: str | None = None
@@ -140,6 +152,7 @@ class Episode(BaseModel):
         sender_ids: list[str],
         parent_id: str,
         language: str | None = None,
+        image_ids: Sequence[str] = (),
     ) -> Episode:
         """Build a domain Episode from an algo Episode plus engineering context.
 
@@ -162,6 +175,7 @@ class Episode(BaseModel):
         data["sender_ids"] = list(sender_ids)
         data["parent_id"] = parent_id
         data["language"] = language
+        data["image_ids"] = list(image_ids)
         return cls.model_validate(data)
 
 

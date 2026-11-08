@@ -5485,6 +5485,20 @@
             "type": "array",
             "title": "Sender Ids"
           },
+          "image_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Ids"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/SearchImageItem"
+            },
+            "type": "array",
+            "title": "Images"
+          },
           "summary": {
             "type": "string",
             "title": "Summary"
@@ -5703,6 +5717,11 @@
             ],
             "title": "Status",
             "default": "current"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": ""
           },
           "score": {
             "type": "number",

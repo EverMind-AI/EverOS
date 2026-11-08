@@ -111,6 +111,15 @@ was sent.
 - In "content", refer to a picture by its label — "the user sent a photo of a
   latte (img-1)" — and never restate what the picture shows. The picture has its
   own memory; the episode only points at it.
+- This holds for every fact you can only know by looking: a year, a price, a
+  name or brand, an address, a menu line, a label on an object. None of them
+  belongs in "content" or "summary". Say "a photo of the shop's signboard
+  (img-2)" — not what the signboard says. The reason is exact: forgetting that
+  picture must remove its content from the memory, and text you copied into the
+  episode is no longer the picture's.
+- The same restriction applies to "evidence" in <profile>: quote only what the
+  conversation states, and let a picture-derived item describe the visible fact
+  without re-quoting the picture's text.
 - For every label, add one entry to "images" describing what the picture itself
   shows: the subject, the setting, the people visible, and the one detail that
   tells this picture apart from another. The description must be readable on its
@@ -121,7 +130,22 @@ was sent.
   carries no text. Text the conversation already quotes is not picture text.
 - A picture the conversation does not mention still gets its own "images" entry.
 - If two pictures show the same thing, describe how they differ, not the thing
-  twice."""
+  twice.
+- Every picture you were given must be referenced in "content" as "(img-N)" at
+  the place it was sent, even when you also describe it.
+
+Worked example. Conversation:
+  [2026-10-30 09:12 UTC (Friday)] Wang Lei: went to that cafe, here is my latte
+  [IMAGE: img-1]
+  [2026-10-30 09:15 UTC (Friday)] Wang Lei: here is the sign [IMAGE: img-2]
+Pictures: img-1 a latte with heart-shaped foam; img-2 a chalkboard reading
+"DOU SHE COFFEE / EST. 2019 / blend latte 22".
+Right answer for "content": "Wang Lei went to a new cafe and shared a photo of
+her latte (img-1), then a photo of the cafe's chalkboard sign (img-2)."
+Wrong answer, and why: "she shared a photo of the sign, which says DOU SHE
+COFFEE, EST. 2019, blend latte 22" - it copied the sign's text into the episode,
+so the words would survive after the photo is forgotten. The sign's text belongs
+in that picture's own "ocr", nowhere else."""
 
 _IMAGE_REPLY_FORMAT = """\
 Reply with one JSON object, nothing else:
@@ -246,6 +270,12 @@ def to_episode(
     model wrote it *and* gains the id, so an episode reads naturally while
     still naming the picture a forget or a result can address: the label means
     nothing outside this cell, and the hash is the only thing that survives it.
+
+    A label the reply never referenced is appended as a reference of its own.
+    The prompt asks for one, but a model that omits it would otherwise leave a
+    picture memory with nothing in the episode pointing at it — and the forget
+    path finds what to rewrite *through* that reference, so the omission would
+    make the picture's content survive in the episode body for ever.
     """
     from everalgo.types import Episode as AlgoEpisode
 
@@ -254,6 +284,13 @@ def to_episode(
         for label, image_id in sorted(labels.items(), key=lambda kv: -len(kv[0])):
             body = body.replace(f"({label})", f"({label}: {image_id})")
             body = body.replace(f"[IMAGE: {label}]", f"[IMAGE: {image_id}]")
+        missing = [
+            f"({label}: {image_id})"
+            for label, image_id in sorted(labels.items())
+            if f"({label}: {image_id})" not in body
+        ]
+        if missing:
+            body = f"{body.rstrip()} {' '.join(missing)}"
     return AlgoEpisode(
         owner_id=None,
         episode=body,

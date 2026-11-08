@@ -20,6 +20,7 @@ import pytest
 
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
+    MarkdownEpisodeStore,
     MarkdownImageMemoryStore,
     MarkdownReader,
     parse_structured_entry,
@@ -207,3 +208,58 @@ async def test_an_unnamed_picture_writes_no_name_field(root: MemoryRoot) -> None
     structured = parse_structured_entry(parsed.entries[0].body)
 
     assert "name" not in structured.inline
+
+
+async def test_an_episode_records_the_pictures_its_body_refers_to(
+    root: MemoryRoot,
+) -> None:
+    """The ids are written as a frontmatter-style inline line, ids only.
+
+    The body names a picture and never restates it, so this list is what makes
+    the reference resolvable; no description is inlined beside it.
+    """
+    from everos.memory.models import Episode
+
+    store = MarkdownEpisodeStore(root)
+    episode = Episode(
+        owner_id="u1",
+        episode=f"she sent a photo of the sign (img-2: {_IMAGE_ID})",
+        summary="the sign",
+        timestamp=_TS,
+        parent_id="mc_1",
+        session_id="s1",
+        image_ids=[_IMAGE_ID],
+    )
+
+    ref = await store.append(_user(), episode, only_if=NO_SOURCE_CHECK)
+
+    assert ref is not None
+    parsed = await MarkdownReader.read(root.root / ref.md_path)
+    structured = parse_structured_entry(parsed.entries[0].body)
+    assert structured.inline["image_ids"] == f"[{_IMAGE_ID}]"
+    assert _IMAGE_ID not in structured.sections["Content"].replace(_IMAGE_ID, "", 1)
+
+    read_back = await store.read_many(_user(), [ref.entry_id])
+    assert read_back[0].item.image_ids == [_IMAGE_ID]
+
+
+async def test_an_episode_without_pictures_writes_no_image_ids(
+    root: MemoryRoot,
+) -> None:
+    from everos.memory.models import Episode
+
+    store = MarkdownEpisodeStore(root)
+    episode = Episode(
+        owner_id="u1",
+        episode="they talked about lunch",
+        summary="lunch",
+        timestamp=_TS,
+        parent_id="mc_1",
+    )
+
+    ref = await store.append(_user(), episode, only_if=NO_SOURCE_CHECK)
+
+    assert ref is not None
+    parsed = await MarkdownReader.read(root.root / ref.md_path)
+    structured = parse_structured_entry(parsed.entries[0].body)
+    assert "image_ids" not in structured.inline

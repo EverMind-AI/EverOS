@@ -128,6 +128,18 @@ class ImageMemoryIndex(Protocol):
         """
         ...
 
+    async def find_by_image_ids(
+        self, scope: Scope, image_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The *current* picture memories about these files, one per occurrence.
+
+        What an episode's ``image_ids`` resolve through. Only current rows come
+        back: a forgotten or superseded picture must not be resurrected into an
+        answer just because an episode still refers to it — the reference is
+        history, the content is not current.
+        """
+        ...
+
 
 @runtime_checkable
 class AtomicFactIndex(Protocol):

@@ -217,6 +217,22 @@ class SearchEpisodeItem(BaseModel):
     """``None`` for merged episodes (Reflection aggregation products)."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
+    image_ids: list[str] = Field(default_factory=list)
+    """Pictures the body refers to, by content hash, in arrival order.
+
+    The body names them (``(img-1: <hash>)``) and never restates what they
+    show, so this is the key to their content. A referenced picture that is
+    also selected as core memory appears at the top level, not here; one that
+    was forgotten resolves to nothing, which is the correct answer for a
+    forget.
+    """
+    images: list[SearchImageItem] = Field(default_factory=list)
+    """The referenced pictures' contents, for the pictures not already selected.
+
+    Attached so a reader of the episode — the answering model above all — gets
+    what the body points at without a second lookup. A forgotten picture is
+    omitted rather than revived: the reference stays, its content does not.
+    """
     summary: str
     subject: str
     episode: str
@@ -255,7 +271,13 @@ class SearchImageItem(BaseModel):
     session_id: str | None = None
     timestamp: _dt.datetime
     description: str
+    """What the picture shows — the half of its memory a reader gets as text."""
+
     ocr: str = ""
+    """Text visible in the picture. Always present as a field, empty when the
+    picture carries none, so a caller renders ``description + ocr`` without
+    branching on whether the model happened to find text."""
+
     name: str = ""
     original_path: str
     thumbnail_path: str
@@ -263,6 +285,10 @@ class SearchImageItem(BaseModel):
     width: int = 0
     height: int = 0
     status: Literal["current", "superseded", "forgotten"] = "current"
+    label: str = ""
+    """``img-N`` the referring episode's body uses, when this item is attached
+    to an episode rather than ranked. Empty for a ranked result: a picture
+    selected on its own merit has no label in any body."""
     score: float
 
 

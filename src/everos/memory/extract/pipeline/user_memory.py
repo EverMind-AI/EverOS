@@ -175,6 +175,7 @@ class UserMemoryPipeline:
                     sender_ids=list(prepared.sender_ids),
                     parent_id=memcell_id,
                     language=language,
+                    image_ids=[picture.image_id for picture in pictures],
                 )
                 ref = await self._persist(ingested, ep, memcell_id)
                 if ref is None:

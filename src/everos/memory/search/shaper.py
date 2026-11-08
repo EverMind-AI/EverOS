@@ -10,6 +10,12 @@ name of any index is read here.
 * Simple kinds -- :func:`shape_episodes`, :func:`shape_agent_cases`,
   :func:`shape_agent_skills` (and their ``*_ranked`` twins for an everalgo
   ``RankOutput``) emit one DTO per candidate.
+* Pictures are shaped twice, from the same record: as a ranked result
+  (:func:`shape_images`), and as the *content of an episode's references*
+  (:func:`attach_referenced_pictures`). The second exists because an episode
+  body names a picture by id and never restates it — without resolving the
+  reference, an episode selected without its picture would reach the answering
+  model as a dangling id and nothing else.
 * Hybrid output -- :func:`reshape_hybrid_output` collapses the mixed
   ``episode`` + ``atomic_fact`` ``ScoredItem`` list into episodes with
   their facts nested.
@@ -20,8 +26,9 @@ dropped with a warning rather than failing the request.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Any
 
 from everalgo.types import Candidate, RankOutput, ScoredItem
@@ -85,6 +92,83 @@ def shape_images(
         )
         if item is not None
     ]
+
+
+def attach_referenced_pictures(
+    episodes: list[SearchEpisodeItem],
+    *,
+    image_ids: Iterable[str],
+    stored_images: Mapping[str, Stored[ImageMemory]],
+    selected_ids: Collection[str],
+    thumbnail_edge: int,
+) -> list[SearchImageItem]:
+    """Resolve the pictures an episode's body refers to; returns the extra ones.
+
+    An episode carries ``image_ids`` because its body refers to a picture
+    rather than restating it. That reference has to resolve for whoever reads
+    the result, or an episode kept without its picture memory is worth less
+    than the 1.0 text that inlined the picture's content.
+
+    Each selected episode gets the pictures *it* refers to, attached as
+    :attr:`~everos.memory.search.dto.SearchEpisodeItem.images`. A picture that
+    is also selected as core memory is **not** copied in — it is already at the
+    top level of the response, and duplicating it would show the reader the
+    same memory twice and pay for it twice in the answer context. A referenced
+    id that resolves to nothing (forgotten, superseded, or never extracted)
+    attaches nothing: the reference stays, which is exactly what a forget
+    means.
+
+    Args:
+        episodes: The selected episodes, mutated in place.
+        image_ids: Every id any of them refers to.
+        stored_images: The pictures fetched for those ids, by content hash.
+        selected_ids: Ids of the pictures already selected as core results.
+        thumbnail_edge: Configured decider size, echoed into the path.
+
+    Returns:
+        The pictures that were attached, once each — the caller reports them
+        alongside the result so a client can see what the episodes resolved to
+        without re-reading every episode.
+    """
+    wanted = {image_id for image_id in image_ids if image_id in stored_images}
+    if not wanted:
+        return []
+    attached: dict[tuple[str, str], SearchImageItem] = {}
+    for episode in episodes:
+        labels = _labels_in(episode.episode)
+        for image_id in episode.image_ids:
+            if image_id not in wanted or image_id in selected_ids:
+                continue
+            label = labels.get(image_id, "")
+            picture = attached.get((image_id, label))
+            if picture is None:
+                stored = stored_images[image_id]
+                picture = _image(
+                    stored.ref.id,
+                    0.0,
+                    {stored.ref.id: stored},
+                    thumbnail_edge=thumbnail_edge,
+                )
+                if picture is None:
+                    continue
+                picture = picture.model_copy(update={"label": label})
+                attached[(image_id, label)] = picture
+            episode.images.append(picture)
+    return list(attached.values())
+
+
+_LABEL_REFERENCE = re.compile(r"\((img-\d+): ([0-9a-f]{64})\)")
+"""(img-N: <hash>) — the reference shape the picture route writes into a body."""
+
+
+def _labels_in(body: str) -> dict[str, str]:
+    """``image_id -> img-N`` for every reference in one episode body.
+
+    Read back from the text because the body is where the label lives: it is a
+    per-cell name the model used, deliberately not stored, and a reader needs
+    it to tie an attached description to the sentence that named it.
+    """
+    return {image_id: label for label, image_id in _LABEL_REFERENCE.findall(body)}
 
 
 def _image(
@@ -189,6 +273,7 @@ def _episode(
         session_id=episode.session_id,
         timestamp=to_display_tz(from_timestamp_ms(episode.timestamp)),
         sender_ids=episode.sender_ids,
+        image_ids=episode.image_ids,
         summary=episode.summary or "",
         subject=episode.subject or "",
         episode=episode.episode,

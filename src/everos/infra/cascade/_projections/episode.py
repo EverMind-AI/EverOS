@@ -16,6 +16,9 @@ writers must match):
   — :class:`ParentType` enum; explicit in md so future kinds plug in
   without a schema change).
 - ``parent_id``: source memcell id.
+- ``image_ids`` (optional): ``[<sha256>, ...]`` — the pictures the narrative
+  refers to. Present only when the episode carried pictures; a handler that
+  wrote before pictures existed has no such line, which reads as "none".
 - ``sender_ids``: ``[u_a, u_b]`` rendered shape from
   ``_render_value`` (optional; defaults to empty list).
 
@@ -106,6 +109,7 @@ class EpisodeHandler(BaseDailyLogHandler):
             parent_type=s.inline.get("parent_type") or ParentType.MEMCELL.value,
             parent_id=s.inline.get("parent_id", ""),
             sender_ids=parse_inline_list(s.inline.get("sender_ids", "")),
+            image_ids=parse_inline_list(s.inline.get("image_ids", "")),
             subject=s.sections.get("Subject") or None,
             summary=s.sections.get("Summary") or None,
             episode=text,

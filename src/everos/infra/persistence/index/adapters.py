@@ -48,6 +48,9 @@ from everos.memory.ports import (
     ScoredKnowledgeTopic,
     SearchHit,
     Stored,
+    all_of,
+    is_null,
+    one_of,
     primary_key,
 )
 
@@ -286,6 +289,19 @@ class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
         rows = await self._repo.find_by_parent(parent_type, parent_id, limit=limit)
         return [_stored_image_memory(_fields(r)) for r in rows]
 
+    async def find_by_image_ids(
+        self, scope: Scope, image_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        rows = await self._repo.search(
+            where=all_of(
+                scope.to_filter(),
+                one_of("image_id", list(image_ids)),
+                is_null("deprecated_by"),
+            ),
+            limit=max(len(image_ids), 1),
+        )
+        return [_stored_image_memory(_fields(r)) for r in rows]
+
     async def paginate(
         self, where: Filter, page: Page
     ) -> PageResult[Stored[ImageMemory]]:
@@ -403,6 +419,7 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
         scope=_scope(fields),
         item=Episode(
             owner_id=fields["owner_id"],
+            image_ids=list(fields.get("image_ids") or []),
             episode=fields["episode"],
             timestamp=to_timestamp_ms(fields["timestamp"]),
             # Rows written before either column existed hold ``None``.

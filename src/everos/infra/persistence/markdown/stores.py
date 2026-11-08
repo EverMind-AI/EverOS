@@ -831,6 +831,21 @@ def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
     )
 
 
+def _list_field(raw: object) -> list[str]:
+    """A list-valued inline field parsed back from its rendered form.
+
+    Inline values round-trip as text (``[a, b, c]``); this is the inverse for
+    the one shape the episode writer emits, and it tolerates the field being
+    absent (every entry written before it existed) without inventing values.
+    """
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    if not isinstance(raw, str) or not raw.strip().startswith("["):
+        return []
+    body = raw.strip()[1:-1]
+    return [part.strip() for part in body.split(",") if part.strip()]
+
+
 def _image_memory_entry(image: ImageMemory) -> EntryBody:
     """Inline audit fields + Description / OCR sections.
 
@@ -905,6 +920,8 @@ def _episode_entry(episode: Episode) -> EntryBody:
     inline["parent_id"] = episode.parent_id
     if episode.sender_ids:
         inline["sender_ids"] = list(episode.sender_ids)
+    if episode.image_ids:
+        inline["image_ids"] = list(episode.image_ids)
     if episode.language:
         inline["language"] = episode.language
     sections: dict[str, str] = {}
@@ -991,6 +1008,7 @@ def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
         session_id=inline.get("session_id") or None,
         parent_id=inline.get("parent_id", ""),
         parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
+        image_ids=_list_field(inline.get("image_ids")),
     )
 
 

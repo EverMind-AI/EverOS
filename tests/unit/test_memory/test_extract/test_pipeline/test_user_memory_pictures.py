@@ -319,3 +319,26 @@ async def test_a_text_only_cell_never_touches_the_profile() -> None:
     )
 
     assert profiles.writes == []
+
+
+async def test_a_picture_the_reply_never_named_is_still_referenced() -> None:
+    """The body always names the pictures it carries, even when the model forgets.
+
+    A forget finds the episodes to rewrite *through* that reference: without it
+    the picture's content would stay in the episode body for ever.
+    """
+    reply = _image_reply() | {
+        "content": "The user shared a photo and asked what was in it."
+    }
+    llm = _RecordingLLM(reply)
+    pipeline, _, _ = _pipeline(llm)
+    cell = MemCell(
+        items=[_text_message(), _picture_message()], timestamp=1_700_000_000_000
+    )
+
+    outcome = await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
+    )
+
+    body = outcome.events[-1].episode_text
+    assert f"(img-1: {_IMAGE_ID})" in body

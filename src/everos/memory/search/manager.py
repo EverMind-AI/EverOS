@@ -47,8 +47,15 @@ from everos.core.observability.tracing import (
     memory_span,
 )
 from everos.core.utils.datetime import to_display_tz
-from everos.memory.models import CanonicalMessage
-from everos.memory.ports import ClusterStore, Filter, SessionBufferStore, SessionKey
+from everos.memory.models import CanonicalMessage, ImageMemory
+from everos.memory.ports import (
+    ClusterStore,
+    Filter,
+    Scope,
+    SessionBufferStore,
+    SessionKey,
+    Stored,
+)
 
 from .adapter import resolve_pipeline
 from .agentic import search_episodes_agentic
@@ -81,6 +88,7 @@ from .recall import (
     rank_input,
 )
 from .shaper import (
+    attach_referenced_pictures,
     reshape_hybrid_output,
     shape_agent_cases,
     shape_agent_cases_ranked,
@@ -260,6 +268,7 @@ class SearchManager:
                     self._fetch_profile(req),
                     self._load_unprocessed(req),
                 )
+                images = await self._resolve_episode_pictures(req, episodes, images)
                 data = SearchData(
                     episodes=episodes,
                     images=images,
@@ -499,6 +508,67 @@ class SearchManager:
                 shaped = [s for s in shaped if s.score >= req.min_score]
             images = await self._image_hits(req, where, top_k)
             return shaped, images
+
+    async def _resolve_episode_pictures(
+        self,
+        req: SearchRequest,
+        episodes: list[SearchEpisodeItem],
+        images: list[SearchImageItem],
+    ) -> list[SearchImageItem]:
+        """Attach the pictures the selected episodes refer to; returns the extra ones.
+
+        An episode body names its pictures by id and never restates what they
+        show, so a selected episode whose picture memory was not selected too
+        would otherwise hand the answering model a dangling reference and no
+        content — worse than 1.0, where the picture's text was inlined.
+
+        The lookup goes through the same scope filter the search used, and only
+        current pictures come back: a forgotten or superseded picture is not
+        revived by an episode that still refers to it.
+
+        Args:
+            req: The request, for the scope the reference is resolved in — a
+                reference must not cross into another owner's or space's
+                pictures.
+            episodes: The selected episodes (mutated: their ``images`` filled).
+            images: The pictures ranked alongside them.
+
+        Returns:
+            ``images`` plus whatever was attached and not already there. A
+            picture that is both selected and referred to appears once, at the
+            top level, and is not repeated inside the episode.
+        """
+        wanted = {image_id for episode in episodes for image_id in episode.image_ids}
+        if self._images is None or not wanted:
+            return images
+        selected = {image.image_id for image in images}
+        missing = wanted - selected
+        stored = await self._images.find_by_image_ids(
+            Scope(
+                app_id=req.app_id,
+                project_id=req.project_id,
+                owner_id=req.owner_id,
+                owner_type="user",
+            ),
+            list(wanted),
+        )
+        by_image_id = _picture_by_image_id(stored)
+        extra = attach_referenced_pictures(
+            episodes,
+            image_ids=wanted,
+            stored_images=by_image_id,
+            selected_ids=selected,
+            thumbnail_edge=self._tuning_source().image_thumbnail_edge,
+        )
+        logger.debug(
+            "search_episode_pictures_resolved",
+            episodes=len(episodes),
+            referenced=len(wanted),
+            selected=len(selected),
+            attached=len(extra),
+            unresolved=len(missing) - len(extra),
+        )
+        return [*images, *extra]
 
     async def _image_hits(
         self, req: SearchRequest, where: Filter, top_k: int
@@ -867,6 +937,27 @@ class SearchManager:
             raise ProviderNotConfiguredError(
                 provider="rerank", feature="agentic_search"
             )
+
+
+def _picture_by_image_id(
+    stored: Sequence[Stored[ImageMemory]],
+) -> dict[str, Stored[ImageMemory]]:
+    """One picture per content hash, preferring the current occurrence.
+
+    A picture can have several occurrences (one per arrival), all pointing at
+    the same file. Resolving an episode's reference needs one description, and
+    the current one is the memory about it — an older occurrence is history
+    kept for "what did it say before".
+    """
+    chosen: dict[str, Stored[ImageMemory]] = {}
+    for row in stored:
+        image_id = row.item.image_id
+        if not image_id:
+            continue
+        prior = chosen.get(image_id)
+        if prior is None or (prior.item.superseded_by and not row.item.superseded_by):
+            chosen[image_id] = row
+    return chosen
 
 
 def _feature_name(method: SearchMethod, owner_type: str) -> str:

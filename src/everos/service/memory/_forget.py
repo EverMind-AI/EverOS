@@ -300,6 +300,13 @@ class ForgetManager:
                 update={
                     "episode": _strip_reference(stored.item.episode, image_id),
                     "summary": _strip_reference(stored.item.summary, image_id),
+                    # The reference list follows the body: a version that no
+                    # longer names the picture must not claim to refer to it,
+                    # or a reader would try to resolve a picture the episode
+                    # was deliberately rewritten without.
+                    "image_ids": [
+                        kept for kept in stored.item.image_ids if kept != image_id
+                    ],
                 }
             )
             for stored in referring

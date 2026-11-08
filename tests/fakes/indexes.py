@@ -238,6 +238,18 @@ class InMemoryImageMemoryIndex(_Unsearchable):
         ]
         return hits if limit is None else hits[:limit]
 
+    async def find_by_image_ids(
+        self, scope: Scope, image_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        wanted = set(image_ids)
+        return [
+            r
+            for r in self.rows
+            if _same_space(r.scope, scope)
+            and r.item.image_id in wanted
+            and r.item.superseded_by is None
+        ]
+
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
     ) -> list[Stored[ImageMemory]]:

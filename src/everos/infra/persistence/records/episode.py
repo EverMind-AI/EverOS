@@ -10,6 +10,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
+from pydantic import Field
+
 from everos.infra.persistence.records.base import IndexRecord
 
 from ._parent_type import ParentType
@@ -50,6 +52,15 @@ class Episode(IndexRecord):
 
     sender_ids: list[str]
     """Distinct ``role=user|assistant`` senders behind the episode."""
+
+    image_ids: list[str] = Field(default_factory=list)
+    """Content hashes of the pictures the narrative refers to, in arrival order.
+
+    What makes the body's ``(img-1: <hash>)`` resolvable: a reader can ask the
+    picture table for these ids and get the description and in-image text the
+    episode deliberately does not repeat. Empty for an episode that carried no
+    picture, and for every row written before the field existed.
+    """
 
     subject: str | None = None
     summary: str | None = None

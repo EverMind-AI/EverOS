@@ -223,3 +223,17 @@ async def test_the_result_names_each_occurrence_and_the_file_it_was_sent_as() ->
         ("im_1", _IMAGE_ID, "IMG_2231.jpg"),
         ("im_2", _IMAGE_ID, "IMG_2232.jpg"),
     ]
+
+
+async def test_the_rewritten_episode_no_longer_refers_to_the_picture() -> None:
+    """The reference list follows the body; a dangling id would resolve to nothing."""
+    old = _stored_episode("ep_20260514_0001", f"see [IMAGE: {_IMAGE_ID}]")
+    old.item.image_ids = [_IMAGE_ID, "0" * 64]
+    manager, stores, _, _ = _manager(images=(), episodes=(old,))
+
+    result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
+
+    written = [
+        s for s in stores.episode.records if s.ref.entry_id == result.episodes[0]
+    ]
+    assert written[0].item.image_ids == ["0" * 64]
