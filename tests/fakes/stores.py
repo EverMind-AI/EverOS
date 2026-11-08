@@ -14,6 +14,7 @@ __all__ = [
     "InMemoryClusterStore",
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
+    "InMemoryForgetLogStore",
     "InMemoryImageMemoryStore",
     "InMemoryImageStore",
     "InMemoryMemcellStore",
@@ -42,6 +43,8 @@ from everos.memory.models import (
     ReflectionReport,
 )
 from everos.memory.ports import (
+    ForgetEntry,
+    ForgetTarget,
     MemoryRef,
     NoSourceCheck,
     Scope,
@@ -117,6 +120,19 @@ class _DailyLog[T]:
         for md_path, entry_id in entries:
             self.deprecated[md_path][entry_id] = replaced_by
         return True
+
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        return dict(self.deprecated.get(md_path, {}))
+
+    async def entries_for_session(
+        self, scope: Scope, session_id: str
+    ) -> list[tuple[str, str]]:
+        return [
+            (stored.ref.md_path, stored.ref.entry_id)
+            for stored in self.records
+            if stored.scope == scope
+            and getattr(stored.item, "session_id", None) == session_id
+        ]
 
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         return self._remove(
@@ -203,9 +219,14 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
         }
 
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
-        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
+        """Drop ``keys`` from every file of this owner's kind.
+
+        The real store knows an entry's file from its id; this fake keys files
+        by owner, so it drops the key wherever the owner has it.
+        """
+        needle = f"/{scope.owner_type}s/{scope.owner_id}/"
         for md_path, marks in self.deprecated.items():
-            if md_path.startswith(prefix):
+            if needle in f"/{md_path}":
                 for key in set(keys) & marks.keys():
                     del marks[key]
 
@@ -500,6 +521,66 @@ class InMemoryReflectionReportStore:
         return removed
 
 
+class InMemoryForgetLogStore:
+    """The forget log, in memory: entries in append order, undone by a flag."""
+
+    def __init__(self) -> None:
+        self.entries: list[ForgetEntry] = []
+        self.undone: set[str] = set()
+
+    async def record(
+        self,
+        *,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str = "user",
+        reason: str | None = None,
+        entry_ids: tuple[str, ...] = (),
+        episode_ids: tuple[tuple[str, str], ...] = (),
+        removed_profile_items: tuple[tuple[str, dict[str, object]], ...] = (),
+    ) -> ForgetEntry:
+        entry = ForgetEntry(
+            forget_id=f"fg_{len(self.entries) + 1:016x}",
+            target=target,
+            target_id=target_id,
+            owner_id=owner_id,
+            reasons=reason,
+            entry_ids=entry_ids,
+            episode_ids=episode_ids,
+            removed_profile_items=removed_profile_items,
+        )
+        self.entries.append(entry)
+        return entry
+
+    async def latest_live(
+        self,
+        *,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+    ) -> ForgetEntry | None:
+        for entry in reversed(self.entries):
+            if (
+                entry.target == target
+                and entry.target_id == target_id
+                and entry.owner_id == owner_id
+                and entry.forget_id not in self.undone
+            ):
+                return entry
+        return None
+
+    async def mark_undone(self, forget_id: str) -> bool:
+        if forget_id in self.undone:
+            return False
+        self.undone.add(forget_id)
+        return True
+
+
 class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
     """Image-memory daily log, in memory."""
 
@@ -537,6 +618,52 @@ class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
             entries=entries, replaced_by=replaced_by, only_if=only_if
         )
 
+    async def undeprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        if not await _alive(only_if):
+            return False
+        for md_path, entry_id in entries:
+            self.deprecated[md_path].pop(entry_id, None)
+        return True
+
+    async def entries_for_session(
+        self, scope: Scope, session_id: str
+    ) -> list[tuple[str, str, str]]:
+        return [
+            (stored.ref.md_path, stored.ref.entry_id, stored.item.image_id)
+            for stored in self.records
+            if stored.scope == scope and stored.item.session_id == session_id
+        ]
+
+    async def read_by_image(
+        self, scope: Scope, image_id: str, *, limit: int = 1_000
+    ) -> list[Stored[ImageMemory]]:
+        found: list[Stored[ImageMemory]] = []
+        for stored in self.records:
+            if stored.scope != scope or stored.item.image_id != image_id:
+                continue
+            mark = self.deprecated[stored.ref.md_path].get(stored.ref.entry_id)
+            found.append(
+                Stored(
+                    ref=stored.ref,
+                    scope=stored.scope,
+                    item=stored.item.model_copy(
+                        update={
+                            "superseded_by": mark,
+                            "status": "superseded" if mark else "current",
+                        }
+                    ),
+                )
+            )
+            if len(found) >= limit:
+                break
+        return found
+
 
 class InMemoryImageStore:
     """Pictures held as bytes in a dict, keyed by content hash.
@@ -557,6 +684,14 @@ class InMemoryImageStore:
         stored = decode_image(data, limits=limits)
         self.images.setdefault(stored.image_id, (data, stored.media_type))
         self.refs[stored.image_id] = self.refs.get(stored.image_id, 0) + 1
+        return stored
+
+    async def keep_unreferenced(self, data: bytes, *, limits: Any) -> Any:
+        """Store the bytes without counting a reference (the question picture)."""
+        from everos.component.images import decode_image
+
+        stored = decode_image(data, limits=limits)
+        self.images.setdefault(stored.image_id, (data, stored.media_type))
         return stored
 
     async def read(self, image_id: str) -> bytes:

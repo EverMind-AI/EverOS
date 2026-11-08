@@ -430,6 +430,152 @@
         }
       }
     },
+    "/api/v1/memory/forget/session": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Forget Session",
+        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it.",
+        "operationId": "forget_session_api_v1_memory_forget_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetSessionResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/forget/session/undo": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Undo Forget Session",
+        "description": "Undo the newest forget of one conversation for one user.",
+        "operationId": "undo_forget_session_api_v1_memory_forget_session_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoForgetSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetSessionResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/images/revise": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Revise Image Memory",
+        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nThe picture is the same picture: only what the memory says changes. The\nnew entry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
+        "operationId": "revise_image_memory_api_v1_memory_images_revise_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseImageMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ReviseImageMemoryResponseData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such picture memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memory/forget/undo": {
       "post": {
         "tags": [
@@ -1555,6 +1701,152 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/forget/session": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Forget Session",
+        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it.",
+        "operationId": "forget_session_api_v2_memory_forget_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetSessionResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/forget/session/undo": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Undo Forget Session",
+        "description": "Undo the newest forget of one conversation for one user.",
+        "operationId": "undo_forget_session_api_v2_memory_forget_session_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoForgetSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetSessionResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/images/revise": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Revise Image Memory",
+        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nThe picture is the same picture: only what the memory says changes. The\nnew entry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
+        "operationId": "revise_image_memory_api_v2_memory_images_revise_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseImageMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ReviseImageMemoryResponseData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such picture memory",
             "content": {
               "application/json": {
                 "schema": {
@@ -3724,6 +4016,97 @@
         "title": "ForgetImageResponseData",
         "description": "What a forget touched.\n\n``episodes`` are the entry ids of the *new* versions written without the\npicture. The versions they supersede are still in markdown, on purpose:\nasking what was said before a forget has to keep working.\n\n``pictures`` lists the picture memories themselves, in entry order;\n``image_memories`` repeats its length so a caller that only needs the\ncount does not have to walk it."
       },
+      "ForgetSessionRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "session_id"
+        ],
+        "title": "ForgetSessionRequest",
+        "description": "Which conversation to forget, for which user.\n\nReversible, unlike ``POST /memory/delete``: a delete removes memories, a\nforget marks them and can be undone. The session's picture files survive\nwhile any other live memory references them."
+      },
+      "ForgetSessionResponseData": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id",
+            "default": ""
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "image_memories": {
+            "type": "integer",
+            "title": "Image Memories",
+            "default": 0
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "ForgetSessionResponseData",
+        "description": "What forgetting one conversation touched.\n\n``episodes`` are entry ids marked forgotten, ``image_memories`` how many\npicture memories, and ``images`` the picture *files* taken out of\ncirculation because this session held their last live reference."
+      },
       "ForgottenPictureData": {
         "properties": {
           "entry_id": {
@@ -4679,6 +5062,130 @@
         "title": "QuiesceResponse",
         "description": "What the final drain accomplished, and what it left behind.\n\n``pending_before`` is the queue depth on arrival: a caller that expected the\nprojection to be up to date can assert it was 0 and learn otherwise. Anything\nabove 0 in ``pending_after`` means the drain could not finish -- the index is\nNOT a complete projection of the markdown, and searching it will silently\nunder-recall."
       },
+      "ReviseImageMemoryRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "image_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Image Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^im_\\d{8}_\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ocr": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "image_id"
+        ],
+        "title": "ReviseImageMemoryRequest",
+        "description": "Change one picture memory's description and/or in-picture text.\n\nSame scope fields and picture id as a forget; ``entry_id`` selects which\noccurrence when the picture has several (otherwise the current one). Both\ntext fields are optional but at least one is required - a request that\nchanges nothing is a caller bug, not a no-op.\n\nDeliberately not a ``PATCH`` of arbitrary fields: the picture's identity,\npath and time belong to the arrival, and \"edit\" here means what the memory\n*says*, not what it *is*."
+      },
+      "ReviseImageMemoryResponseData": {
+        "properties": {
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "supersedes": {
+            "type": "string",
+            "title": "Supersedes"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ocr": {
+            "type": "string",
+            "title": "Ocr",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "image_id",
+          "entry_id",
+          "supersedes",
+          "description"
+        ],
+        "title": "ReviseImageMemoryResponseData",
+        "description": "The version that was written, and the one it replaced."
+      },
       "RunSummary": {
         "properties": {
           "run_id": {
@@ -5605,6 +6112,23 @@
         ],
         "title": "SuccessEnvelope[ForgetImageResponseData]"
       },
+      "SuccessEnvelope_ForgetSessionResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ForgetSessionResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ForgetSessionResponseData]"
+      },
       "SuccessEnvelope_KnowledgeSearchResponse_": {
         "properties": {
           "request_id": {
@@ -5621,6 +6145,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
+      },
+      "SuccessEnvelope_ReviseImageMemoryResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReviseImageMemoryResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ReviseImageMemoryResponseData]"
       },
       "SuccessEnvelope_TaskItem_": {
         "properties": {
@@ -5689,6 +6230,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[UndoForgetResponseData]"
+      },
+      "SuccessEnvelope_UndoForgetSessionResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UndoForgetSessionResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[UndoForgetSessionResponseData]"
       },
       "TaskItem": {
         "properties": {
@@ -6116,6 +6674,102 @@
         ],
         "title": "UndoForgetResponseData",
         "description": "What an undo put back.\n\n``applied`` is ``False`` when there was nothing to undo — the picture was\nnever forgotten, or an earlier undo already reversed it. The rest of the\npayload is still filled in, so a caller sees the state it ends in rather\nthan having to ask again."
+      },
+      "UndoForgetSessionRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "session_id"
+        ],
+        "title": "UndoForgetSessionRequest",
+        "description": "Which conversation's newest forget to undo, for which user."
+      },
+      "UndoForgetSessionResponseData": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id",
+            "default": ""
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "image_memories": {
+            "type": "integer",
+            "title": "Image Memories",
+            "default": 0
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "applied"
+        ],
+        "title": "UndoForgetSessionResponseData",
+        "description": "What undoing a conversation's forget put back."
       },
       "UnprocessedMessageDTO": {
         "properties": {

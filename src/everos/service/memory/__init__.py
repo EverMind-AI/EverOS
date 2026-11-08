@@ -29,6 +29,8 @@ __all__ = [
     "QueueHealth",
     "Queued",
     "RevisionResult",
+    "SessionForgetResult",
+    "SessionUndoResult",
     "TaskItem",
     "TaskPage",
     "UndoResult",
@@ -53,6 +55,8 @@ from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._forget import ForgetManager
 from ._forget import ForgetResult as ForgetResult
 from ._forget import ForgottenPicture as ForgottenPicture
+from ._forget_session import SessionForgetManager
+from ._forget_session import SessionForgetResult as SessionForgetResult
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
@@ -65,6 +69,7 @@ from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
 from ._revise import RevisionManager
 from ._revise import RevisionResult as RevisionResult
+from ._undo import SessionUndoResult as SessionUndoResult
 from ._undo import UndoManager
 from ._undo import UndoResult as UndoResult
 
@@ -149,6 +154,9 @@ class MemoryService:
             stores=stores, images=stores.images, eraser=index_eraser
         )
         self._reviser = RevisionManager(stores=stores)
+        self._session_forgetter = SessionForgetManager(
+            stores=stores, images=stores.images, eraser=index_eraser
+        )
         self._memorizer = Memorizer(
             settings=settings,
             boundary=boundary,
@@ -365,6 +373,45 @@ class MemoryService:
             description=description,
             ocr=ocr,
             entry_id=entry_id,
+        )
+
+    async def forget_session(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str,
+        session_id: str,
+        reason: str | None = None,
+    ) -> SessionForgetResult:
+        """Forget everything one conversation established for one user.
+
+        Marks rather than deletes, so :meth:`undo_forget_session` reverses it.
+        A picture file survives while any other live memory references it.
+        """
+        return await self._session_forgetter.forget_session(
+            scope=Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+            session_id=session_id,
+            reason=reason,
+        )
+
+    async def undo_forget_session(
+        self, *, app_id: str, project_id: str, user_id: str, session_id: str
+    ) -> SessionUndoResult:
+        """Undo the newest forget of one conversation for one user."""
+        return await self._undoer.undo_session(
+            scope=Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+            session_id=session_id,
         )
 
     async def finish_interrupted_deletions(self) -> int:

@@ -77,6 +77,27 @@ class UndoResult:
     pictures: tuple[ForgottenPicture, ...] = ()
 
 
+@dataclass(frozen=True)
+class SessionUndoResult:
+    """What undoing a conversation's forget put back.
+
+    Attributes:
+        session_id: The conversation.
+        forget_id: The log entry reversed; empty when there was none.
+        applied: Whether anything was restored.
+        episodes: Entry ids of the episode versions marked current again.
+        image_memories: Picture memories marked current again.
+        images: Picture files brought back into circulation.
+    """
+
+    session_id: str
+    forget_id: str
+    applied: bool
+    episodes: tuple[str, ...]
+    image_memories: int
+    images: tuple[str, ...] = ()
+
+
 class UndoManager:
     """Reverses the newest forget of one picture for one owner.
 
@@ -158,6 +179,132 @@ class UndoManager:
             profiles=restored_profile,
             pictures=tuple(_picture_of(row, image_id) for row in restored_images),
         )
+
+    async def undo_session(self, *, scope: Scope, session_id: str) -> SessionUndoResult:
+        """Bring back everything the newest forget of one conversation removed.
+
+        The same reversal as a picture's, minus the episode *text* rewrite: a
+        session forget marks the session's episodes rather than re-writing them
+        (a picture never had to be stripped out of these bodies, because the
+        bodies never named the conversation), so undoing it is exactly "drop
+        those marks and the picture files' status".
+
+        A conversation that was never forgotten answers ``applied=False`` and
+        reports the state it found.
+        """
+        entry = await self._stores.forget_log.latest_live(
+            target="session",
+            target_id=session_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+        )
+        if entry is None:
+            return SessionUndoResult(
+                session_id=session_id,
+                forget_id="",
+                applied=False,
+                episodes=(),
+                image_memories=0,
+                images=(),
+            )
+
+        restored_episodes = await self._restore_session_episodes(scope, session_id)
+        restored_images = await self._restore_session_images(scope, session_id)
+        images = tuple(
+            dict.fromkeys(
+                row.item.image_id for row in restored_images if row.item.image_id
+            )
+        )
+        for image_id in images:
+            await self._images.restore(image_id)
+
+        await self._eraser.requeue(
+            "image_memory", {row.ref.md_path for row in restored_images}
+        )
+        if restored_episodes:
+            await self._eraser.requeue("episode", restored_episodes)
+        await self._stores.forget_log.mark_undone(entry.forget_id)
+
+        logger.info(
+            "memory.session.undo_completed",
+            session_id=session_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            forget_id=entry.forget_id,
+            image_memories=len(restored_images),
+            episodes=len(restored_episodes),
+        )
+        return SessionUndoResult(
+            session_id=session_id,
+            forget_id=entry.forget_id,
+            applied=True,
+            episodes=tuple(sorted(restored_episodes)),
+            image_memories=len(restored_images),
+            images=images,
+        )
+
+    async def _restore_session_episodes(
+        self, scope: Scope, session_id: str
+    ) -> set[str]:
+        """Drop this conversation's forget mark from its episodes; the files touched.
+
+        Reads markdown: the forget erased the index rows through the fence, so
+        the files are the only record of which entries carried the mark. An
+        episode later superseded by a real replacement keeps its mark — only
+        the forget's own ``forgotten`` marker is cleared.
+        """
+        entries = await self._stores.episode.entries_for_session(scope, session_id)
+        by_file: dict[str, set[str]] = {}
+        for md_path, entry_id in entries:
+            by_file.setdefault(md_path, set()).add(entry_id)
+        restored: set[str] = set()
+        for md_path, entry_ids in by_file.items():
+            marks = await self._stores.episode.deprecations(scope, md_path)
+            targets = [
+                entry_id
+                for entry_id in entry_ids
+                if marks.get(entry_id) == FORGET_REASON
+            ]
+            if not targets:
+                continue
+            await self._stores.episode.clear_deprecations(scope, targets)
+            restored |= set(targets)
+        return restored
+
+    async def _restore_session_images(
+        self, scope: Scope, session_id: str
+    ) -> list[Stored[ImageMemory]]:
+        """Mark current again the picture memories this conversation's forget retired.
+
+        Driven by the file ids the session's entries name, then read back per
+        file through :meth:`read_by_image`, which is the one reader that returns
+        an occurrence together with its mark — a session forget has no per-file
+        batch read, and inventing a second one would duplicate that logic.
+        """
+        entries = await self._stores.image_memory.entries_for_session(scope, session_id)
+        wanted = {entry_id for _, entry_id, _ in entries}
+        restored: list[Stored[ImageMemory]] = []
+        seen: set[str] = set()
+        for image_id in dict.fromkeys(image for _, _, image in entries if image):
+            for row in await self._stores.image_memory.read_by_image(scope, image_id):
+                if row.ref.entry_id not in wanted or row.ref.entry_id in seen:
+                    continue
+                if row.item.superseded_by != FORGET_REASON:
+                    continue
+                seen.add(row.ref.entry_id)
+                restored.append(row)
+        if restored:
+            await self._stores.image_memory.undeprecate(
+                scope,
+                entries=[(row.ref.md_path, row.ref.entry_id) for row in restored],
+                only_if=_always,
+            )
+            for row in restored:
+                row.item.superseded_by = None
+                row.item.status = "current"
+        return restored
 
     # ── steps ──────────────────────────────────────────────────────────────
 

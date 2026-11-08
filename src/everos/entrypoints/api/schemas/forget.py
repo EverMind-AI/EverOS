@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .ids import (
     PATH_SAFE_CHARSET,
@@ -54,6 +54,97 @@ class ForgottenPictureData(BaseModel):
     entry_id: str
     image_id: str
     name: str = ""
+
+
+class ForgetSessionRequest(BaseModel):
+    """Which conversation to forget, for which user.
+
+    Reversible, unlike ``POST /memory/delete``: a delete removes memories, a
+    forget marks them and can be undone. The session's picture files survive
+    while any other live memory references them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    app_id: AppScopeId = Field(
+        default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
+    )
+    project_id: ProjectScopeId = Field(
+        default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
+    )
+    user_id: PathSafeId = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=128)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ForgetSessionResponseData(BaseModel):
+    """What forgetting one conversation touched.
+
+    ``episodes`` are entry ids marked forgotten, ``image_memories`` how many
+    picture memories, and ``images`` the picture *files* taken out of
+    circulation because this session held their last live reference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    forget_id: str = ""
+    episodes: list[str] = Field(default_factory=list)
+    image_memories: int = 0
+    images: list[str] = Field(default_factory=list)
+
+
+class UndoForgetSessionRequest(ForgetSessionRequest):
+    """Which conversation's newest forget to undo, for which user."""
+
+
+class UndoForgetSessionResponseData(BaseModel):
+    """What undoing a conversation's forget put back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    forget_id: str = ""
+    applied: bool
+    episodes: list[str] = Field(default_factory=list)
+    image_memories: int = 0
+    images: list[str] = Field(default_factory=list)
+
+
+class ReviseImageMemoryRequest(ForgetImageRequest):
+    """Change one picture memory's description and/or in-picture text.
+
+    Same scope fields and picture id as a forget; ``entry_id`` selects which
+    occurrence when the picture has several (otherwise the current one). Both
+    text fields are optional but at least one is required - a request that
+    changes nothing is a caller bug, not a no-op.
+
+    Deliberately not a ``PATCH`` of arbitrary fields: the picture's identity,
+    path and time belong to the arrival, and "edit" here means what the memory
+    *says*, not what it *is*.
+    """
+
+    entry_id: str | None = Field(default=None, pattern=r"^im_\d{8}_\d+$")
+    description: str | None = Field(default=None, max_length=4_000)
+    ocr: str | None = Field(default=None, max_length=4_000)
+
+    @model_validator(mode="after")
+    def _validate_change(self) -> ReviseImageMemoryRequest:
+        if self.description is None and self.ocr is None:
+            raise ValueError("a revision needs a new description or a new ocr")
+        return self
+
+
+class ReviseImageMemoryResponseData(BaseModel):
+    """The version that was written, and the one it replaced."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_id: str
+    entry_id: str
+    supersedes: str
+    description: str
+    ocr: str = ""
 
 
 class UndoForgetRequest(ForgetImageRequest):

@@ -558,6 +558,31 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                 await self._writer.drop_deprecations(self._root.root / md_path, keys)
         return True
 
+    async def entries_for_session(
+        self, scope: Scope, session_id: str
+    ) -> list[tuple[str, str, str]]:
+        """``(md_path, entry_id, image_id)`` for the owner's pictures of one session.
+
+        The picture id rides along because forgetting the conversation has to
+        decide, per file, whether this session held its last live reference —
+        and that question is answered from the entries, not from a re-read of
+        files that are still being marked.
+        """
+        found: list[tuple[str, str, str]] = []
+        needle = f"**session_id**: {session_id}"
+        for path in await self._files_mentioning(scope, needle):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                inline = entry.as_structured().inline
+                if inline.get("session_id") != session_id:
+                    continue
+                found.append((md_path, entry.id, inline.get("image_id") or ""))
+        return found
+
     async def read_by_image(
         self, scope: Scope, image_id: str, *, limit: int = _IMAGE_READ_CAP
     ) -> list[Stored[ImageMemory]]:

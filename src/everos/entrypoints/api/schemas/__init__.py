@@ -16,9 +16,15 @@ from .envelope import ErrorResponse as ErrorResponse
 from .envelope import SuccessEnvelope as SuccessEnvelope
 from .forget import ForgetImageRequest as ForgetImageRequest
 from .forget import ForgetImageResponseData as ForgetImageResponseData
+from .forget import ForgetSessionRequest as ForgetSessionRequest
+from .forget import ForgetSessionResponseData as ForgetSessionResponseData
 from .forget import ForgottenPictureData as ForgottenPictureData
+from .forget import ReviseImageMemoryRequest as ReviseImageMemoryRequest
+from .forget import ReviseImageMemoryResponseData as ReviseImageMemoryResponseData
 from .forget import UndoForgetRequest as UndoForgetRequest
 from .forget import UndoForgetResponseData as UndoForgetResponseData
+from .forget import UndoForgetSessionRequest as UndoForgetSessionRequest
+from .forget import UndoForgetSessionResponseData as UndoForgetSessionResponseData
 from .health import CascadeHealthBlock as CascadeHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
@@ -79,6 +85,8 @@ __all__ = [
     "FlushResponseData",
     "ForgetImageRequest",
     "ForgetImageResponseData",
+    "ForgetSessionRequest",
+    "ForgetSessionResponseData",
     "ForgottenPictureData",
     "HealthCapabilities",
     "HealthResponse",
@@ -91,6 +99,8 @@ __all__ = [
     "PathSafeId",
     "ProjectScopeId",
     "QuiesceResponse",
+    "ReviseImageMemoryRequest",
+    "ReviseImageMemoryResponseData",
     "RunSummary",
     "SearchHitDTO",
     "SuccessEnvelope",
@@ -102,4 +112,6 @@ __all__ = [
     "TriggerResponse",
     "UndoForgetRequest",
     "UndoForgetResponseData",
+    "UndoForgetSessionRequest",
+    "UndoForgetSessionResponseData",
 ]

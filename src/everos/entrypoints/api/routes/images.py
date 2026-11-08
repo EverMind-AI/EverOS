@@ -1,4 +1,4 @@
-"""``POST /api/v2/memory/forget``, its undo, and the two read-only picture routes.
+"""The picture routes: forget, its undo, a revision, and the two read-only reads.
 
 Forgetting is its own endpoint rather than a mode of ``/memory/delete``: a
 delete removes memories, while a forget marks a picture and everything written
@@ -23,10 +23,16 @@ from everos.entrypoints.api.schemas import (
     ErrorResponse,
     ForgetImageRequest,
     ForgetImageResponseData,
+    ForgetSessionRequest,
+    ForgetSessionResponseData,
     ForgottenPictureData,
+    ReviseImageMemoryRequest,
+    ReviseImageMemoryResponseData,
     SuccessEnvelope,
     UndoForgetRequest,
     UndoForgetResponseData,
+    UndoForgetSessionRequest,
+    UndoForgetSessionResponseData,
 )
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -79,6 +85,103 @@ async def forget_image(
                 )
                 for picture in result.pictures
             ],
+        ),
+    )
+
+
+@router.post(
+    "/forget/session",
+    responses={
+        500: {
+            "model": ErrorResponse,
+            "description": "Forget incomplete; send the same request again",
+        },
+    },
+)
+async def forget_session(
+    req: ForgetSessionRequest, app: ApplicationDep, request_id: RequestIdDep
+) -> SuccessEnvelope[ForgetSessionResponseData]:
+    """Forget one conversation's memories for one user, reversibly.
+
+    Unlike ``/memory/delete`` this removes nothing: the episode versions and
+    picture memories are marked, and ``/forget/session/undo`` reverses it. A
+    picture file survives while any other live memory still references it.
+    """
+    result = await app.memory.forget_session(
+        app_id=req.app_id,
+        project_id=req.project_id,
+        user_id=req.user_id,
+        session_id=req.session_id,
+        reason=req.reason,
+    )
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=ForgetSessionResponseData(
+            session_id=result.session_id,
+            forget_id=result.forget_id,
+            episodes=list(result.episodes),
+            image_memories=result.image_memories,
+            images=list(result.images),
+        ),
+    )
+
+
+@router.post("/forget/session/undo")
+async def undo_forget_session(
+    req: UndoForgetSessionRequest, app: ApplicationDep, request_id: RequestIdDep
+) -> SuccessEnvelope[UndoForgetSessionResponseData]:
+    """Undo the newest forget of one conversation for one user."""
+    result = await app.memory.undo_forget_session(
+        app_id=req.app_id,
+        project_id=req.project_id,
+        user_id=req.user_id,
+        session_id=req.session_id,
+    )
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=UndoForgetSessionResponseData(
+            session_id=result.session_id,
+            forget_id=result.forget_id,
+            applied=result.applied,
+            episodes=list(result.episodes),
+            image_memories=result.image_memories,
+            images=list(result.images),
+        ),
+    )
+
+
+@router.post(
+    "/images/revise",
+    responses={
+        404: {"model": ErrorResponse, "description": "No such picture memory"},
+    },
+)
+async def revise_image_memory(
+    req: ReviseImageMemoryRequest, app: ApplicationDep, request_id: RequestIdDep
+) -> SuccessEnvelope[ReviseImageMemoryResponseData]:
+    """Write a revised version of one picture memory; the old one is superseded.
+
+    The picture is the same picture: only what the memory says changes. The
+    new entry supersedes the old, and the cascade recomputes its keyword index
+    and vector from the new text.
+    """
+    result = await app.memory.revise_image_memory(
+        app_id=req.app_id,
+        project_id=req.project_id,
+        user_id=req.user_id,
+        image_id=req.image_id,
+        description=req.description,
+        ocr=req.ocr,
+        entry_id=req.entry_id,
+    )
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=ReviseImageMemoryResponseData(
+            image_id=result.image_id,
+            entry_id=result.entry_id,
+            supersedes=result.supersedes,
+            description=result.description,
+            ocr=result.ocr,
         ),
     )
 

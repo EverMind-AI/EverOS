@@ -20,7 +20,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
-from everos.service.memory import ForgetResult, UndoResult, RevisionResult, UndoResult
+from everos.service.memory import ForgetResult, RevisionResult, UndoResult
 from everos.service.memory._forget import ForgottenPicture
 from tests.fakes import InMemoryImageStore, StubMemoryService, make_application
 
@@ -216,3 +216,61 @@ async def test_undo_rejects_a_malformed_request(
     assert response.status_code == 422
     undo_memory.undo_forget_image.assert_not_awaited()
 
+
+@pytest.fixture
+def revise_memory() -> StubMemoryService:
+    stub = StubMemoryService()
+    stub.revise_image_memory.return_value = RevisionResult(
+        image_id=_IMAGE_ID,
+        entry_id="im_20261108_00000002",
+        supersedes="im_20261107_00000001",
+        description="a sign reading DOU SHE EST 2019",
+        ocr="EST 2019",
+    )
+    return stub
+
+
+@pytest.fixture
+async def revise_client(revise_memory: StubMemoryService) -> AsyncIterator[AsyncClient]:
+    app = create_app(application=make_application(memory=revise_memory))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        yield c
+
+
+async def test_a_revision_answers_with_both_versions(
+    revise_client: AsyncClient, revise_memory: StubMemoryService
+) -> None:
+    response = await revise_client.post(
+        "/api/v2/memory/images/revise",
+        json={"user_id": "me", "image_id": _IMAGE_ID, "description": "a sign"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entry_id"] == "im_20261108_00000002"
+    assert data["supersedes"] == "im_20261107_00000001"
+    assert data["description"] == "a sign reading DOU SHE EST 2019"
+    revise_memory.revise_image_memory.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"user_id": "me", "image_id": _IMAGE_ID},  # nothing to change
+        {"user_id": "me", "image_id": "not-a-hash", "description": "x"},
+        {
+            "user_id": "me",
+            "image_id": _IMAGE_ID,
+            "entry_id": "nope",
+            "description": "x",
+        },
+        {"user_id": "me", "image_id": _IMAGE_ID, "description": "x", "extra": 1},
+    ],
+)
+async def test_a_malformed_revision_is_refused(
+    revise_client: AsyncClient, revise_memory: StubMemoryService, body: dict
+) -> None:
+    response = await revise_client.post("/api/v2/memory/images/revise", json=body)
+
+    assert response.status_code == 422
+    revise_memory.revise_image_memory.assert_not_awaited()
