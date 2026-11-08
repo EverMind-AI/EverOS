@@ -56,6 +56,36 @@ class ForgottenPictureData(BaseModel):
     name: str = ""
 
 
+class UndoForgetRequest(ForgetImageRequest):
+    """Which picture's newest forget to undo, for which user.
+
+    Same fields as :class:`ForgetImageRequest` on purpose: an undo addresses
+    exactly what the forget addressed, and a caller that kept its forget
+    request can reuse it. The forget it reverses is the newest one for that
+    picture by that user that no earlier undo already reversed.
+    """
+
+
+class UndoForgetResponseData(BaseModel):
+    """What an undo put back.
+
+    ``applied`` is ``False`` when there was nothing to undo — the picture was
+    never forgotten, or an earlier undo already reversed it. The rest of the
+    payload is still filled in, so a caller sees the state it ends in rather
+    than having to ask again.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_id: str
+    forget_id: str = ""
+    applied: bool
+    image_memories: int
+    episodes: list[str] = Field(default_factory=list)
+    profiles: int = 0
+    pictures: list[ForgottenPictureData] = Field(default_factory=list)
+
+
 class ForgetImageResponseData(BaseModel):
     """What a forget touched.
 

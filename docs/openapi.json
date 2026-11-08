@@ -430,6 +430,58 @@
         }
       }
     },
+    "/api/v1/memory/forget/undo": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Undo Forget Image",
+        "description": "Undo the newest forget of one picture for one user.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.",
+        "operationId": "undo_forget_image_api_v1_memory_forget_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoForgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Undo incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memory/images/{image_id}": {
       "get": {
         "tags": [
@@ -1503,6 +1555,58 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/forget/undo": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Undo Forget Image",
+        "description": "Undo the newest forget of one picture for one user.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.",
+        "operationId": "undo_forget_image_api_v2_memory_forget_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoForgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetResponseData_"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Undo incomplete; send the same request again",
             "content": {
               "application/json": {
                 "schema": {
@@ -4489,6 +4593,58 @@
         ],
         "title": "MessageItemDTO"
       },
+      "QuestionPicture": {
+        "properties": {
+          "base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base64"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uri"
+          },
+          "ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ext"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "QuestionPicture",
+        "description": "A picture attached to the question itself, not to the memory.\n\nSame content-item shape as ``/memory/add`` (``uri`` or ``base64``, plus\n``ext`` and an optional ``name``), because a caller that can send a picture\nto one endpoint should not have to learn a second shape for the other.\n\nA question picture is **content-addressed in ``figures/`` and establishes\nnothing**: no picture memory, no reference count, no profile item. It exists\nfor one search — the decider looks at it every round — and \"what I asked\nwith\" is not a fact about the user. Storing it by hash is what lets the\ndecider read it from the same place it reads a candidate, and lets the same\nquestion asked twice pay for the file once."
+      },
       "QuiesceResponse": {
         "properties": {
           "quiesced": {
@@ -5215,6 +5371,15 @@
             "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionPicture"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Images",
+            "description": "Pictures that are part of the question. They are shown to a multi-round decider on every round; they create no memory and no reference. Routes that cannot use them ignore them."
+          },
           "filters": {
             "anyOf": [
               {
@@ -5507,6 +5672,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[TopicDetailResponse]"
+      },
+      "SuccessEnvelope_UndoForgetResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UndoForgetResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[UndoForgetResponseData]"
       },
       "TaskItem": {
         "properties": {
@@ -5832,6 +6014,108 @@
         ],
         "title": "TriggerResponse",
         "description": "Response body for ``POST /api/v2/ome/trigger``.\n\n``status`` distinguishes three outcomes that were previously masked as\na single ``ok``:\n\n- ``ok``: at least one strategy was dispatched and all runs settled\n  within ``timeout``. Individual run outcomes are in ``runs`` (a\n  ``dead_letter`` there is still ``ok`` at this level — the strategy\n  *ran*, it just failed permanently).\n- ``timeout``: at least one strategy was dispatched but the engine did\n  not go idle within ``timeout``. Runs may be partially complete;\n  poll ``GET /health`` for cascade convergence separately.\n- ``not_dispatched``: no strategy was dispatched — the subscriber was\n  rejected by one of the dispatch gates (``_routes_to`` / ``enabled`` /\n  ``applies_to`` / ``Counter``). Common cause: forgetting\n  ``force=true`` on a strategy that is ``enabled=false`` in ome.toml."
+      },
+      "UndoForgetRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "image_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Image Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "image_id"
+        ],
+        "title": "UndoForgetRequest",
+        "description": "Which picture's newest forget to undo, for which user.\n\nSame fields as :class:`ForgetImageRequest` on purpose: an undo addresses\nexactly what the forget addressed, and a caller that kept its forget\nrequest can reuse it. The forget it reverses is the newest one for that\npicture by that user that no earlier undo already reversed."
+      },
+      "UndoForgetResponseData": {
+        "properties": {
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id",
+            "default": ""
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "image_memories": {
+            "type": "integer",
+            "title": "Image Memories"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "profiles": {
+            "type": "integer",
+            "title": "Profiles",
+            "default": 0
+          },
+          "pictures": {
+            "items": {
+              "$ref": "#/components/schemas/ForgottenPictureData"
+            },
+            "type": "array",
+            "title": "Pictures"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "image_id",
+          "applied",
+          "image_memories"
+        ],
+        "title": "UndoForgetResponseData",
+        "description": "What an undo put back.\n\n``applied`` is ``False`` when there was nothing to undo — the picture was\nnever forgotten, or an earlier undo already reversed it. The rest of the\npayload is still filled in, so a caller sees the state it ends in rather\nthan having to ask again."
       },
       "UnprocessedMessageDTO": {
         "properties": {

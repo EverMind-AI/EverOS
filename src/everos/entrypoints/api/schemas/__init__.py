@@ -17,6 +17,8 @@ from .envelope import SuccessEnvelope as SuccessEnvelope
 from .forget import ForgetImageRequest as ForgetImageRequest
 from .forget import ForgetImageResponseData as ForgetImageResponseData
 from .forget import ForgottenPictureData as ForgottenPictureData
+from .forget import UndoForgetRequest as UndoForgetRequest
+from .forget import UndoForgetResponseData as UndoForgetResponseData
 from .health import CascadeHealthBlock as CascadeHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
@@ -98,4 +100,6 @@ __all__ = [
     "TopicOverviewDTO",
     "TriggerRequest",
     "TriggerResponse",
+    "UndoForgetRequest",
+    "UndoForgetResponseData",
 ]

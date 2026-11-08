@@ -116,6 +116,10 @@ class StubMemoryService:
         self.delete = AsyncMock()
         self.delete_by_ids = AsyncMock()
         self.forget_image = AsyncMock()
+        self.undo_forget_image = AsyncMock()
+        self.revise_image_memory = AsyncMock()
+        self.forget_session = AsyncMock()
+        self.undo_forget_session = AsyncMock()
 
     async def finish_interrupted_deletions(self) -> int:
         self.lifecycle.append("memory.finish_interrupted_deletions")

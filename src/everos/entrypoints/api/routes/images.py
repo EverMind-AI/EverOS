@@ -1,4 +1,4 @@
-"""``POST /api/v2/memory/forget`` and the two read-only picture routes.
+"""``POST /api/v2/memory/forget``, its undo, and the two read-only picture routes.
 
 Forgetting is its own endpoint rather than a mode of ``/memory/delete``: a
 delete removes memories, while a forget marks a picture and everything written
@@ -25,6 +25,8 @@ from everos.entrypoints.api.schemas import (
     ForgetImageResponseData,
     ForgottenPictureData,
     SuccessEnvelope,
+    UndoForgetRequest,
+    UndoForgetResponseData,
 )
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -66,6 +68,50 @@ async def forget_image(
         request_id=request_id,
         data=ForgetImageResponseData(
             image_id=result.image_id,
+            image_memories=result.image_memories,
+            episodes=list(result.episodes),
+            profiles=result.profiles,
+            pictures=[
+                ForgottenPictureData(
+                    entry_id=picture.entry_id,
+                    image_id=picture.image_id,
+                    name=picture.name,
+                )
+                for picture in result.pictures
+            ],
+        ),
+    )
+
+
+@router.post(
+    "/forget/undo",
+    responses={
+        500: {
+            "model": ErrorResponse,
+            "description": "Undo incomplete; send the same request again",
+        },
+    },
+)
+async def undo_forget_image(
+    req: UndoForgetRequest, app: ApplicationDep, request_id: RequestIdDep
+) -> SuccessEnvelope[UndoForgetResponseData]:
+    """Undo the newest forget of one picture for one user.
+
+    ``applied: false`` means there was nothing to undo (never forgotten, or
+    already undone); the reported occurrences are still the current state.
+    """
+    result = await app.memory.undo_forget_image(
+        app_id=req.app_id,
+        project_id=req.project_id,
+        user_id=req.user_id,
+        image_id=req.image_id,
+    )
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=UndoForgetResponseData(
+            image_id=result.image_id,
+            forget_id=result.forget_id,
+            applied=result.applied,
             image_memories=result.image_memories,
             episodes=list(result.episodes),
             profiles=result.profiles,

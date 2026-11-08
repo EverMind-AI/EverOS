@@ -20,7 +20,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
-from everos.service.memory import ForgetResult
+from everos.service.memory import ForgetResult, UndoResult, RevisionResult, UndoResult
 from everos.service.memory._forget import ForgottenPicture
 from tests.fakes import InMemoryImageStore, StubMemoryService, make_application
 
@@ -143,3 +143,76 @@ async def test_an_unknown_variant_is_rejected(
     response = await client.get(f"/api/v2/memory/images/{_IMAGE_ID}?variant=huge")
 
     assert response.status_code == 422
+
+
+@pytest.fixture
+def undo_memory() -> StubMemoryService:
+    stub = StubMemoryService()
+    stub.undo_forget_image.return_value = UndoResult(
+        image_id=_IMAGE_ID,
+        forget_id="fg_0123456789abcdef",
+        applied=True,
+        image_memories=1,
+        episodes=("ep_20261107_00000004",),
+        profiles=1,
+        pictures=(
+            ForgottenPicture(
+                entry_id="im_20261107_00000001",
+                image_id=_IMAGE_ID,
+                name="IMG_2231.jpg",
+            ),
+        ),
+    )
+    return stub
+
+
+@pytest.fixture
+async def undo_client(undo_memory: StubMemoryService) -> AsyncIterator[AsyncClient]:
+    app = create_app(application=make_application(memory=undo_memory))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        yield c
+
+
+async def test_undo_reports_what_came_back(
+    undo_client: AsyncClient, undo_memory: StubMemoryService
+) -> None:
+    response = await undo_client.post(
+        "/api/v2/memory/forget/undo",
+        json={"user_id": "me", "image_id": _IMAGE_ID},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["applied"] is True
+    assert data["forget_id"] == "fg_0123456789abcdef"
+    assert data["image_memories"] == 1
+    assert data["episodes"] == ["ep_20261107_00000004"]
+    assert data["profiles"] == 1
+    assert data["pictures"] == [
+        {
+            "entry_id": "im_20261107_00000001",
+            "image_id": _IMAGE_ID,
+            "name": "IMG_2231.jpg",
+        }
+    ]
+    undo_memory.undo_forget_image.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"user_id": "me"},
+        {"user_id": "me", "image_id": "not-a-hash"},
+        {"user_id": "a/b", "image_id": _IMAGE_ID},
+        {"user_id": "me", "image_id": _IMAGE_ID, "unknown": 1},
+    ],
+)
+async def test_undo_rejects_a_malformed_request(
+    undo_client: AsyncClient, undo_memory: StubMemoryService, body: dict
+) -> None:
+    response = await undo_client.post("/api/v2/memory/forget/undo", json=body)
+
+    assert response.status_code == 422
+    undo_memory.undo_forget_image.assert_not_awaited()
+
