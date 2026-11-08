@@ -25,6 +25,10 @@ Two rules keep the results coherent with the rest of the store:
 - The episode body **refers to** a picture by its id and never restates its
   description. Replacing a picture's description then costs one entry, not a
   rewrite of the episode that mentions it.
+- What the pictures say about **their sender** leaves the call as profile
+  operations (see :mod:`.profile_delta`), so a conversation carried by photos
+  still moves the portrait. Those operations are add-only: this call never sees
+  the stored profile, and an index it cannot see is an index it cannot address.
 
 Numbers on the reply side are the same as the episode prompt's (``content`` /
 ``summary`` / ``title``), so the caller can hand the episode half to
@@ -53,6 +57,10 @@ from everalgo.utils import paragraphs, render_chat_line, tagged
 from pydantic import Field
 
 from everos.core.observability.logging import get_logger
+from everos.memory.extract.pipeline.profile_delta import (
+    PICTURE_PROFILE_RULES,
+    ProfileItemOp,
+)
 
 logger = get_logger(__name__)
 
@@ -78,12 +86,19 @@ class ImageFact(StrictOutputModel):
 
 
 class ImageEpisodeReply(StrictOutputModel):
-    """The one reply that carries the episode and every picture's memory."""
+    """The one reply that carries the episode, every picture's memory, and the profile.
+
+    ``profile`` is the write-time half of the design's "the picture call also
+    emits a profile change": a photo of a pet, a home or a hobby reaches the
+    portrait in the request that produced it, not in a later text-driven update
+    that a picture-heavy conversation may never trigger.
+    """
 
     content: str
     summary: str
     title: str
     images: list[ImageFact] = Field(default_factory=list)
+    profile: list[ProfileItemOp] = Field(default_factory=list)
 
 
 _IMAGE_RULES = """\
@@ -111,7 +126,10 @@ was sent.
 _IMAGE_REPLY_FORMAT = """\
 Reply with one JSON object, nothing else:
 {"content": "...", "summary": "...", "title": "...",
- "images": [{"ref": "img-1", "description": "...", "ocr": "..."}]}"""
+ "images": [{"ref": "img-1", "description": "...", "ocr": "..."}],
+ "profile": [{"action": "add", "type": "explicit_info",
+              "source_image_id": "img-1",
+              "data": {"category": "...", "description": "...", "evidence": "..."}}]}"""
 
 
 def build_system_prompt(
@@ -130,6 +148,7 @@ def build_system_prompt(
     return paragraphs(
         base,
         tagged("pictures", _IMAGE_RULES),
+        tagged("profile", PICTURE_PROFILE_RULES),
         tagged(
             "output_language",
             build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE),

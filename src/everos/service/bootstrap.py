@@ -577,6 +577,7 @@ def _build_memory_service(
             image_store=stores.images,
             image_memory_store=stores.image_memory,
             image_limits=_image_limits(settings),
+            profile_store=stores.profile,
         ),
         agent_pipeline=AgentMemoryPipeline(),
         bus=bus,
@@ -604,6 +605,7 @@ def _build_memory_service(
             profile_index=indexes.profile,
         ),
         indexes=indexes,
+        image_limits=_image_limits(settings),
     )
 
 

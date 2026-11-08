@@ -115,6 +115,7 @@ def _pipeline(
     llm: object,
     *,
     with_images: bool = True,
+    profile: object | None = None,
 ) -> tuple[UserMemoryPipeline, InMemoryImageMemoryStore, InMemoryImageStore]:
     episodes = MagicMock()
     episodes.append = AsyncMock(return_value=_REF)
@@ -135,6 +136,7 @@ def _pipeline(
         image_store=pictures if with_images else None,
         image_memory_store=memories if with_images else None,
         image_limits=_limits() if with_images else None,
+        profile_store=profile,
     )
     return pipeline, memories, pictures
 
@@ -265,3 +267,55 @@ async def test_a_picture_without_a_name_stores_an_empty_one() -> None:
     )
 
     assert memories.records[0].item.name == ""
+
+
+async def test_the_pictures_profile_items_land_in_user_md() -> None:
+    """The write-time half of the design: a photo moves the portrait now.
+
+    The item records the picture it came from (as its durable hash, not the
+    per-cell label), which is what lets a forget of that picture reach it.
+    """
+    from tests.fakes import InMemoryProfileStore
+
+    reply = _image_reply() | {
+        "profile": [
+            {
+                "action": "add",
+                "type": "explicit_info",
+                "source_image_id": "img-1",
+                "data": {
+                    "category": "pets",
+                    "description": "Has a cat named Biscuit",
+                    "evidence": "2026-05-14: the collar tag reads Biscuit",
+                },
+            }
+        ]
+    }
+    profiles = InMemoryProfileStore()
+    pipeline, _, _ = _pipeline(_RecordingLLM(reply), profile=profiles)
+    cell = MemCell(
+        items=[_text_message(), _picture_message()], timestamp=1_700_000_000_000
+    )
+
+    await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
+    )
+
+    scope = next(iter(profiles.profiles))
+    item = profiles.profiles[scope].explicit_info[0]
+    assert item.description == "Has a cat named Biscuit"
+    assert item.model_extra["source_image_ids"] == [_IMAGE_ID]
+
+
+async def test_a_text_only_cell_never_touches_the_profile() -> None:
+    from tests.fakes import InMemoryProfileStore
+
+    profiles = InMemoryProfileStore()
+    pipeline, _, _ = _pipeline(user_track_llm(), profile=profiles)
+    cell = MemCell(items=[_text_message()], timestamp=1_700_000_000_000)
+
+    await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
+    )
+
+    assert profiles.writes == []
