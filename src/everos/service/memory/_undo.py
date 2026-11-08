@@ -1,0 +1,277 @@
+"""Undoing a forget: the one status change that brings forgotten material back.
+
+What a forget changed, and what an undo puts back, in reverse order so that a
+failure part-way leaves the store consistent with the log entry that still says
+"forgotten":
+
+1. **The episode versions.** A forget wrote each referring episode again
+   without the picture and marked the original superseded. The undo appends the
+   original's *pre-forget text* as a new entry and marks the forget's rewrite
+   superseded by it. Appending, not un-marking the old entry: the store keeps
+   one current version per episode, and a re-marked original plus a re-marked
+   replacement would both claim to be current.
+2. **The picture memories.** Every occurrence the forget marked is marked
+   current again, so retrieval sees the picture. This is the one place a
+   supersession mark is edited rather than superseded — the same edit
+   :meth:`Deleter.delete_by_ids` makes when it drops the merge marks of entries
+   it deleted — because a "restored" second copy of the same occurrence would
+   be a new memory of a picture that never arrived again.
+3. **The profile items.** Items the forget removed because the picture alone
+   established them are merged back; an item re-established meanwhile by a
+   later conversation is not duplicated, because the merge is by description.
+4. **The picture file.** Its ``forgotten_at`` is cleared. The bytes were never
+   unlinked, which is what makes this a status change rather than a restore.
+
+Idempotency is per forget: the log entry is stamped only after every step
+succeeded, so a crashed undo can be retried, and a second undo of the same
+forget finds no live entry and restores nothing.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from everos.core.observability.logging import get_logger
+from everos.memory.extract.pipeline import profile_delta
+from everos.memory.models import Episode, ImageMemory
+from everos.memory.ports import ForgetEntry, MemoryRef, Scope, Stored
+from everos.service.memory._forget import (
+    FORGET_REASON,
+    ForgottenPicture,
+    _always,
+)
+
+if TYPE_CHECKING:
+    from everos.memory.deps import Stores
+    from everos.memory.ports import IndexEraser
+    from everos.memory.ports.images import ImageStore
+
+logger = get_logger("everos.service.memory")
+
+
+@dataclass(frozen=True)
+class UndoResult:
+    """What one undo put back.
+
+    Attributes:
+        image_id: The picture, by content hash.
+        forget_id: The log entry the undo reversed; empty when there was none.
+        applied: Whether anything was restored. ``False`` is the honest answer
+            for a second undo of the same forget, or for a picture that was
+            never forgotten — the picture is still current, nothing was undone.
+        image_memories: Picture memories marked current again (the picture's
+            current occurrences, when nothing needed undoing).
+        episodes: Entry ids of the restored episode versions.
+        profiles: Profile items re-merged.
+        pictures: One entry per picture memory, in entry order, with the name
+            each arrival carried.
+    """
+
+    image_id: str
+    forget_id: str
+    applied: bool
+    image_memories: int
+    episodes: tuple[str, ...]
+    profiles: int
+    pictures: tuple[ForgottenPicture, ...] = ()
+
+
+class UndoManager:
+    """Reverses the newest forget of one picture for one owner.
+
+    Args:
+        stores: Write-side stores; markdown and the forget log are the truth.
+        images: The picture files, whose status this clears.
+        eraser: Hands re-written files back to the cascade, so the projection
+            sees the marks the undo cleared.
+    """
+
+    def __init__(
+        self,
+        *,
+        stores: Stores,
+        images: ImageStore,
+        eraser: IndexEraser,
+    ) -> None:
+        self._stores = stores
+        self._images = images
+        self._eraser = eraser
+
+    async def undo_image(self, *, scope: Scope, image_id: str) -> UndoResult:
+        """Bring back everything the newest forget of ``image_id`` removed."""
+        occurrences = await self._stores.image_memory.read_by_image(scope, image_id)
+        entry = await self._stores.forget_log.latest_live(
+            target="image",
+            target_id=image_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+        )
+        if entry is None:
+            # Never forgotten, or already undone. Clearing the file's status is
+            # still correct (a forget whose log write failed leaves it set) and
+            # the current occurrences are the honest report.
+            await self._images.restore(image_id)
+            current = [row for row in occurrences if row.item.superseded_by is None]
+            return UndoResult(
+                image_id=image_id,
+                forget_id="",
+                applied=False,
+                image_memories=len(current),
+                episodes=(),
+                profiles=0,
+                pictures=tuple(_picture_of(row, image_id) for row in current),
+            )
+
+        restored_episodes = await self._restore_episodes(scope, entry)
+        restored_images = await self._restore_images(scope, entry, occurrences)
+        restored_profile = await self._restore_profile(scope, entry)
+        await self._images.restore(image_id)
+
+        await self._eraser.requeue(
+            "image_memory", {row.ref.md_path for row in restored_images}
+        )
+        if restored_episodes:
+            await self._eraser.requeue(
+                "episode", {ref.md_path for ref, _ in restored_episodes}
+            )
+        await self._stores.forget_log.mark_undone(entry.forget_id)
+
+        logger.info(
+            "memory.images.undo_completed",
+            image_id=image_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            forget_id=entry.forget_id,
+            image_memories=len(restored_images),
+            episodes=len(restored_episodes),
+            profiles=restored_profile,
+        )
+        return UndoResult(
+            image_id=image_id,
+            forget_id=entry.forget_id,
+            applied=True,
+            image_memories=len(restored_images),
+            episodes=tuple(ref.entry_id for ref, _ in restored_episodes),
+            profiles=restored_profile,
+            pictures=tuple(_picture_of(row, image_id) for row in restored_images),
+        )
+
+    # ── steps ──────────────────────────────────────────────────────────────
+
+    async def _restore_images(
+        self,
+        scope: Scope,
+        entry: ForgetEntry,
+        occurrences: list[Stored[ImageMemory]],
+    ) -> list[Stored[ImageMemory]]:
+        """Mark current again the occurrences this forget retired, nothing else.
+
+        Only entries the log recorded, and only while the mark still points at
+        a forget (``forgotten`` or this entry's id): a later forget of the same
+        picture is a different decision, and undoing an older one must not
+        reverse it.
+        """
+        wanted = set(entry.entry_ids)
+        targets = [
+            row
+            for row in occurrences
+            if row.ref.entry_id in wanted
+            and row.item.superseded_by in (FORGET_REASON, entry.forget_id)
+        ]
+        if not targets:
+            return []
+        await self._stores.image_memory.undeprecate(
+            scope,
+            entries=[(row.ref.md_path, row.ref.entry_id) for row in targets],
+            only_if=_always,
+        )
+        for row in targets:
+            row.item.status = "current"
+            row.item.superseded_by = None
+        return targets
+
+    async def _restore_episodes(
+        self, scope: Scope, entry: ForgetEntry
+    ) -> list[tuple[MemoryRef, Episode]]:
+        """Append each pre-forget episode body again, superseding the rewrite."""
+        if not entry.episode_ids:
+            return []
+        originals = await self._stores.episode.read_many(
+            scope, [original for original, _ in entry.episode_ids]
+        )
+        by_id = {row.ref.entry_id: row for row in originals}
+        pairs = [
+            (by_id[original], replacement)
+            for original, replacement in entry.episode_ids
+            if original in by_id
+        ]
+        if not pairs:
+            return []
+        refs = await self._stores.episode.append_many(
+            scope, [row.item for row, _ in pairs], only_if=_always
+        )
+        replacements = await self._stores.episode.read_many(
+            scope, [replacement for _, replacement in pairs]
+        )
+        replacement_paths = {row.ref.entry_id: row.ref.md_path for row in replacements}
+        written: list[tuple[MemoryRef, Episode]] = []
+        for (original, replacement_id), ref in zip(pairs, refs, strict=True):
+            md_path = replacement_paths.get(replacement_id)
+            if md_path is None:
+                # The rewrite is gone (deleted since); there is nothing left to
+                # supersede, and the restored version already reads as current.
+                written.append((ref, original.item))
+                continue
+            await self._stores.episode.deprecate(
+                scope,
+                entries=[(md_path, replacement_id)],
+                replaced_by=ref.entry_id,
+                only_if=_always,
+            )
+            written.append((ref, original.item))
+        return written
+
+    async def _restore_profile(self, scope: Scope, entry: ForgetEntry) -> int:
+        """Merge the profile items the forget removed back into ``user.md``."""
+        if not entry.removed_profile_items:
+            return 0
+        existing = await self._stores.profile.read(scope)
+        profile, restored = profile_delta.restore_items(
+            existing,
+            list(entry.removed_profile_items),
+            owner_id=scope.owner_id,
+            timestamp=_newest_observed_at(entry.removed_profile_items),
+        )
+        if not restored:
+            return 0
+        await self._stores.profile.write(scope, profile)
+        return restored
+
+
+def _picture_of(stored: Stored[ImageMemory], image_id: str) -> ForgottenPicture:
+    """One occurrence as the response's picture record."""
+    return ForgottenPicture(
+        entry_id=stored.ref.entry_id,
+        image_id=image_id,
+        name=stored.item.name,
+    )
+
+
+def _newest_observed_at(
+    items: tuple[tuple[str, dict[str, object]], ...],
+) -> int:
+    """The newest ``observed_at`` of a forget's removed items.
+
+    Only used when the profile had to be created by the undo (its owner had
+    none), which in practice cannot happen — a profile item cannot be removed
+    from a profile that does not exist — but must still have a value.
+    """
+    newest = 0
+    for _bucket, item in items:
+        value = item.get("observed_at")
+        if isinstance(value, int):
+            newest = max(newest, value)
+    return newest

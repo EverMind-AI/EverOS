@@ -67,6 +67,14 @@ class FencedIndexEraser:
             if not await self._delete(table, where, rows=len(refs)):
                 await self._requeue(table, {ref.md_path for ref in refs})
 
+    async def requeue(self, kind: str, md_paths: Collection[str]) -> None:
+        """Queue ``md_paths`` for one more projection, logging a failure.
+
+        A failure is not handed back: the next full scan of the memory root
+        re-reads the file anyway, because its mtime moved when it was written.
+        """
+        await self._requeue(kind, md_paths)
+
     async def erase_owner(self, scope: Scope, kinds: Collection[str]) -> None:
         # ponytail: no requeue on failure; the owner's files are gone, so the
         # cascade's deletion pass over them removes the rows when it runs.

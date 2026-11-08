@@ -196,6 +196,29 @@ class _DailyLogStore[T]:
             for eid in removed
         ]
 
+    async def entries_for_session(
+        self, scope: Scope, session_id: str
+    ) -> list[tuple[str, str]]:
+        """``(md_path, entry_id)`` of the owner's entries that came from ``session_id``.
+
+        Read from markdown rather than the index: a forget is the truth-changing
+        operation, and its target set must not depend on whether the cascade has
+        caught up. Matches the parsed ``session_id`` inline field, never a text
+        prefix (``s1`` must not match ``s10``).
+        """
+        found: list[tuple[str, str]] = []
+        needle = f"**session_id**: {session_id}"
+        for path in await self._files_mentioning(scope, needle):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                if entry.as_structured().inline.get("session_id") == session_id:
+                    found.append((md_path, entry.id))
+        return found
+
     def _folder(self, scope: Scope) -> Path:
         return self._writer.path_for(
             scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
@@ -332,6 +355,10 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             found |= {key for key, merged in marks.items() if merged in wanted}
         return found
 
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's supersession marks, keyed by the entry they retire."""
+        return await _deprecations(self._root.root / md_path)
+
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from every episode file's ``deprecated_entries``."""
         wanted = set(keys)
@@ -458,6 +485,11 @@ class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
         return refs[0] if refs else None
 
 
+_IMAGE_READ_CAP = 1_000
+"""Entries one undo-of-a-forget reads for one picture. Same bound as a forget
+marks, so the two can never disagree about how many occurrences there were."""
+
+
 class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
     """Image-memory daily logs (``users/<id>/images/``).
 
@@ -507,6 +539,64 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
         return await self._deprecate(
             scope, entries=entries, replaced_by=replaced_by, only_if=only_if
         )
+
+    async def undeprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Drop the supersession marks of ``(md_path, entry_id)`` pairs."""
+        by_file: dict[str, set[str]] = defaultdict(set)
+        for md_path, entry_id in entries:
+            by_file[md_path].add(entry_id)
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await self._sources_alive(scope, only_if, len(entries)):
+                return False
+            for md_path, keys in by_file.items():
+                await self._writer.drop_deprecations(self._root.root / md_path, keys)
+        return True
+
+    async def read_by_image(
+        self, scope: Scope, image_id: str, *, limit: int = _IMAGE_READ_CAP
+    ) -> list[Stored[ImageMemory]]:
+        """Every entry written about one picture, oldest first, marks included.
+
+        Read from markdown rather than the index on purpose: an undo runs after
+        a forget erased the rows through the fence, so the index no longer
+        knows the memories the forget marked. The markdown still does — it is
+        the truth — and it is also where the mark itself lives.
+        """
+        found: list[Stored[ImageMemory]] = []
+        for path in await self._files_mentioning(scope, f"**image_id**: {image_id}"):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = parsed.frontmatter.get("deprecated_entries") or {}
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                structured = entry.as_structured()
+                if structured.inline.get("image_id") != image_id:
+                    continue
+                found.append(
+                    Stored(
+                        ref=MemoryRef(
+                            id=f"{scope.owner_id}_{entry.id}",
+                            entry_id=entry.id,
+                            md_path=md_path,
+                        ),
+                        scope=scope,
+                        item=_image_memory_from(entry, owner_id=scope.owner_id),
+                    )
+                )
+                item = found[-1].item
+                item.superseded_by = marks.get(entry.id)
+                item.status = "superseded" if item.superseded_by else "current"
+                if len(found) >= limit:
+                    return found
+        return found
 
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Drop the owner's picture memories of one session from markdown."""
@@ -685,6 +775,35 @@ class MarkdownAgentSkillStore:
         return MemoryRef(
             id=skill_id, entry_id=entry_id, md_path=_relative(self._root, path)
         )
+
+
+def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
+    """The picture memory an entry written by :func:`_image_memory_entry` holds.
+
+    Mirrors :func:`_episode_from_entry`: inline fields carry the identity and
+    provenance, the two sections carry the text. An entry without a
+    ``timestamp`` cannot be re-written as a memory (there is nothing to date
+    it), so the caller treats the parse as a miss rather than inventing one.
+    """
+    structured = entry.as_structured()
+    inline, sections = structured.inline, structured.sections
+    return ImageMemory(
+        owner_id=inline.get("owner_id") or owner_id,
+        description=sections.get("Description", ""),
+        timestamp=to_timestamp_ms(from_iso_format(inline["timestamp"])),
+        ocr=sections.get("OCR", ""),
+        image_id=inline.get("image_id", ""),
+        name=inline.get("name") or "",
+        original_relpath=inline.get("original_path") or "",
+        media_type=inline.get("media_type") or "",
+        width=int(inline.get("width") or 0),
+        height=int(inline.get("height") or 0),
+        session_id=inline.get("session_id") or None,
+        parent_id=inline.get("parent_id", ""),
+        parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
+        entry_id=entry.id,
+        md_path=None,
+    )
 
 
 def _image_memory_entry(image: ImageMemory) -> EntryBody:

@@ -28,16 +28,23 @@ __all__ = [
     "MemoryService",
     "QueueHealth",
     "Queued",
+    "RevisionResult",
     "TaskItem",
     "TaskPage",
+    "UndoResult",
     "to_task_item",
 ]
 
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from everos.component.images import ImageLimits
 from everos.core.errors import PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
+from everos.memory.extract.ingest.multimodal import (
+    PictureBudget,
+    keep_question_pictures,
+)
 from everos.memory.ports import Scope
 
 from ._delete import Deleter
@@ -56,6 +63,10 @@ from ._queue_models import QueueHealth as QueueHealth
 from ._queue_models import TaskItem as TaskItem
 from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
+from ._revise import RevisionManager
+from ._revise import RevisionResult as RevisionResult
+from ._undo import UndoManager
+from ._undo import UndoResult as UndoResult
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -109,11 +120,14 @@ class MemoryService:
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
         indexes: Indexes | None = None,
+        image_limits: ImageLimits | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
         self._stores = stores
+        self._raw_file_builder = raw_file_builder
+        self._image_limits = image_limits or _image_limits_from(settings)
         self._deleter = Deleter(
             stores=stores, eraser=index_eraser, settings=settings.memorize
         )
@@ -129,6 +143,12 @@ class MemoryService:
             if indexes is not None
             else None
         )
+        # Undo needs no index read: what a forget changed is in the log and in
+        # markdown, which is where the picture's occurrences are read from.
+        self._undoer = UndoManager(
+            stores=stores, images=stores.images, eraser=index_eraser
+        )
+        self._reviser = RevisionManager(stores=stores)
         self._memorizer = Memorizer(
             settings=settings,
             boundary=boundary,
@@ -165,8 +185,28 @@ class MemoryService:
     # ── read use cases ─────────────────────────────────────────────────────
 
     async def search(self, req: SearchRequest) -> SearchResponse:
-        """Hybrid retrieval across the configured memory backends."""
-        return await self._search_manager.search(req)
+        """Hybrid retrieval across the configured memory backends.
+
+        Pictures attached to the question are stored first (content-addressed,
+        no memory, no reference) and handed to the manager as content hashes,
+        so the decider can look at them. A picture the store rejects is dropped
+        with a log line: the text question is still answerable.
+        """
+        if not req.images:
+            return await self._search_manager.search(req)
+        stored = await keep_question_pictures(
+            req.images,
+            store=self._stores.images,
+            limits=self._image_limits,
+            raw_file_builder=self._raw_file_builder,
+            budget=PictureBudget(
+                max_bytes=self._image_limits.max_request_bytes,
+                max_pictures=self._image_limits.max_per_request,
+            ),
+        )
+        return await self._search_manager.search(
+            req, question_image_ids=[image.image_id for image in stored]
+        )
 
     async def get(self, req: GetRequest) -> GetResponse:
         """Paginated listing over the requested ``memory_type``."""
@@ -272,6 +312,59 @@ class MemoryService:
             ),
             image_id=image_id,
             reason=reason,
+        )
+
+    async def undo_forget_image(
+        self, *, app_id: str, project_id: str, user_id: str, image_id: str
+    ) -> UndoResult:
+        """Undo the newest forget of one picture for one user.
+
+        A picture that was never forgotten is not an error: the answer says
+        nothing was undone and reports the occurrences that are current, which
+        is what a caller retrying an undo after a timeout needs to see.
+        """
+        return await self._undoer.undo_image(
+            scope=Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+            image_id=image_id,
+        )
+
+    async def revise_image_memory(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str,
+        image_id: str,
+        description: str | None = None,
+        ocr: str | None = None,
+        entry_id: str | None = None,
+    ) -> RevisionResult:
+        """Write a new version of one picture memory, superseding the old one.
+
+        The index follows from markdown: the new entry's tokens and vector are
+        computed by the cascade when it reads the file, so a revision never
+        touches the index directly.
+
+        Raises:
+            NotFoundError: The picture has no such current occurrence.
+            ValueError: Neither field to change was given.
+        """
+        return await self._reviser.revise_image(
+            scope=Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+            image_id=image_id,
+            description=description,
+            ocr=ocr,
+            entry_id=entry_id,
         )
 
     async def finish_interrupted_deletions(self) -> int:
@@ -437,3 +530,22 @@ class MemoryService:
         return await self._memorizer.run(
             payload, is_final=is_final, defer_extraction=defer_extraction
         )
+
+
+def _image_limits_from(settings: Settings) -> ImageLimits:
+    """``[images]`` as the request bounds the question-picture path enforces.
+
+    A service built without explicit limits (a test double, a CLI path that
+    does not inject them) still has to bound what a search may carry; reading
+    the loaded settings gives it the same numbers ingest uses.
+    """
+    images = settings.images
+    return ImageLimits(
+        max_bytes=images.max_bytes,
+        max_per_message=images.max_per_message,
+        max_request_bytes=images.max_request_bytes,
+        max_per_request=images.max_per_request,
+        formats=tuple(images.formats),
+        model_edge=images.model_edge,
+        cache_quality=images.cache_quality,
+    )

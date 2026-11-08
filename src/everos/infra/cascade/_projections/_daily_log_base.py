@@ -26,7 +26,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
@@ -158,6 +158,7 @@ class BaseDailyLogHandler(Handler):
             owner_id,
             app_id,
             project_id,
+            entry_ids=new_by_id,
         )
         return HandlerOutcome(
             md_path=md_path,
@@ -301,33 +302,52 @@ class BaseDailyLogHandler(Handler):
         owner_id: str,
         app_id: str,
         project_id: str,
+        *,
+        entry_ids: Collection[str] | None = None,
     ) -> None:
-        """Propagate deprecated_entries from frontmatter to LanceDB.
+        """Propagate deprecated_entries from frontmatter to LanceDB, both ways.
 
-        The md file is the source of truth; cascade reconstructs the
-        ``deprecated_by`` column on every sync/rebuild.
+        The md file is the source of truth, so the projection sets the
+        ``deprecated_by`` column for every mark the file holds **and clears it
+        for every entry the file still has without a mark**. The clear is what
+        makes an undo of a forget show up: the undo drops the mark, the file's
+        bytes change only in the frontmatter, and without it the row would keep
+        saying "superseded" forever.
+
+        Args:
+            frontmatter: The file's frontmatter, typed or as a dict.
+            owner_id: Whose entries these are.
+            app_id: Scope.
+            project_id: Scope.
+            entry_ids: The entry ids the file currently holds. ``None`` skips
+                the clear (a caller that does not know them must not clear
+                every row).
         """
         deprecated = getattr(frontmatter, "deprecated_entries", None)
         if not deprecated and isinstance(frontmatter, dict):
             deprecated = frontmatter.get("deprecated_entries")
-        if not deprecated:
-            return
+        marks = dict(deprecated or {})
         scope = (app_id, project_id)
-        await asyncio.gather(
-            *(
-                self._mark_deprecated(owner_id, entry_id, deprecated_by_val, scope)
-                for entry_id, deprecated_by_val in deprecated.items()
-            )
-        )
+        writes = [
+            self._mark_deprecated(owner_id, entry_id, deprecated_by_val, scope)
+            for entry_id, deprecated_by_val in marks.items()
+        ]
+        writes += [
+            self._mark_deprecated(owner_id, entry_id, None, scope)
+            for entry_id in (entry_ids or ())
+            if entry_id not in marks
+        ]
+        if writes:
+            await asyncio.gather(*writes)
 
     async def _mark_deprecated(
         self,
         owner_id: str,
         entry_id: str,
-        deprecated_by: str,
+        deprecated_by: str | None,
         scope: tuple[str, str],
     ) -> None:
-        """Set ``deprecated_by`` on a LanceDB row matching ``entry_id``.
+        """Set (or, with ``None``, clear) ``deprecated_by`` on the row of ``entry_id``.
 
         Scoped to ``(app_id, project_id, owner_id, entry_id)`` to avoid
         cross-space collisions. A missing row is silently ignored — the

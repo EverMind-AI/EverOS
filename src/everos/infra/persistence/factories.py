@@ -41,6 +41,7 @@ from .markdown import (
 from .memory_root import MemoryRoot
 from .sqlite import (
     SqliteClusterStore,
+    SqliteForgetLogStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
     SqliteReflectionReportStore,
@@ -58,6 +59,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         foresight=MarkdownForesightStore(root),
         image_memory=MarkdownImageMemoryStore(root),
         images=FileImageStore(root, sqlite.image_original),
+        forget_log=SqliteForgetLogStore(sqlite.forget_log),
         profile=MarkdownProfileStore(root),
         agent_case=MarkdownAgentCaseStore(root),
         agent_skill=MarkdownAgentSkillStore(root),

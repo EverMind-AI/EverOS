@@ -38,6 +38,7 @@ from ._repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from ._repos import ClusterRepo as ClusterRepo
 from ._repos import DocumentListPage as DocumentListPage
 from ._repos import DocumentUpsertPayload as DocumentUpsertPayload
+from ._repos import ForgetLogRepo as ForgetLogRepo
 from ._repos import ImageOriginalRepo as ImageOriginalRepo
 from ._repos import KnowledgeDocumentRepo as KnowledgeDocumentRepo
 from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
@@ -51,6 +52,7 @@ from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
 from ._tables import Cluster as Cluster
 from ._tables import ClusterMember as ClusterMember
 from ._tables import ConversationStatus as ConversationStatus
+from ._tables import ForgetLog as ForgetLog
 from ._tables import ImageOriginal as ImageOriginal
 from ._tables import KnowledgeDocumentRow as KnowledgeDocumentRow
 from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
@@ -63,6 +65,7 @@ from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
 from .repositories import SqliteRepos as SqliteRepos
 from .sqlite_manager import SqliteDatabase as SqliteDatabase
 from .stores import SqliteClusterStore as SqliteClusterStore
+from .stores import SqliteForgetLogStore as SqliteForgetLogStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
@@ -79,6 +82,8 @@ __all__ = [
     "DocumentListPage",
     "DocumentUpsertPayload",
     "Field",
+    "ForgetLog",
+    "ForgetLogRepo",
     "ImageOriginal",
     "ImageOriginalRepo",
     "KnowledgeDocumentRepo",
@@ -99,6 +104,7 @@ __all__ = [
     "SQLModel",
     "SqliteClusterStore",
     "SqliteDatabase",
+    "SqliteForgetLogStore",
     "SqliteKnowledgeCatalog",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",

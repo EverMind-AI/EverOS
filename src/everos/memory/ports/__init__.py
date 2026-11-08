@@ -19,6 +19,9 @@ from .events import CronTick as CronTick
 from .events import Event as Event
 from .events import IdleTick as IdleTick
 from .events import ManualTick as ManualTick
+from .forget_log import ForgetEntry as ForgetEntry
+from .forget_log import ForgetLogStore as ForgetLogStore
+from .forget_log import ForgetTarget as ForgetTarget
 from .images import ImageStore as ImageStore
 from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
@@ -115,6 +118,9 @@ __all__ = [
     "EventBus",
     "Filter",
     "ForesightStore",
+    "ForgetEntry",
+    "ForgetLogStore",
+    "ForgetTarget",
     "Idle",
     "IdleTick",
     "Immediate",

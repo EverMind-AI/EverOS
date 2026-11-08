@@ -10,6 +10,7 @@ from __future__ import annotations
 
 __all__ = [
     "SqliteClusterStore",
+    "SqliteForgetLogStore",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteReflectionReportStore",
@@ -37,10 +38,18 @@ from everos.memory.models import (
     ReflectionReport,
     ToolCall,
 )
-from everos.memory.ports import OwnerType, PageResult, Scope, SessionKey
+from everos.memory.ports import (
+    ForgetEntry,
+    ForgetTarget,
+    OwnerType,
+    PageResult,
+    Scope,
+    SessionKey,
+)
 
 from ._repos import (
     ClusterRepo,
+    ForgetLogRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
@@ -48,6 +57,7 @@ from ._repos import (
     SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
+from ._tables import ForgetLog as ForgetLogRow
 from ._tables import Memcell, MemorizeInbox, UnprocessedBuffer
 from ._tables import ReflectionReport as ReflectionReportRow
 
@@ -569,4 +579,86 @@ def _report_to_row(report: ReflectionReport) -> ReflectionReportRow:
         source_count=report.source_count,
         merged_entry_id=report.merged_entry_id,
         deprecated_fact_count=report.deprecated_fact_count,
+    )
+
+
+class SqliteForgetLogStore:
+    """The append-only forget log over the ``forget_log`` table.
+
+    Args:
+        repo: Repository of the ``forget_log`` table.
+    """
+
+    def __init__(self, repo: ForgetLogRepo) -> None:
+        self._repo = repo
+
+    async def record(
+        self,
+        *,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str = "user",
+        reason: str | None = None,
+        entry_ids: tuple[str, ...] = (),
+        episode_ids: tuple[tuple[str, str], ...] = (),
+        removed_profile_items: tuple[tuple[str, dict[str, object]], ...] = (),
+    ) -> ForgetEntry:
+        row = await self._repo.append(
+            target_kind=target,
+            target_id=target_id,
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
+            reason=reason,
+            entry_ids=list(entry_ids),
+            episode_ids=[list(pair) for pair in episode_ids],
+            removed_profile_items=[
+                [bucket, dict(item)] for bucket, item in removed_profile_items
+            ],
+        )
+        return _forget_entry(row)
+
+    async def latest_live(
+        self,
+        *,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+    ) -> ForgetEntry | None:
+        row = await self._repo.latest_live(
+            target_kind=target,
+            target_id=target_id,
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+        )
+        return _forget_entry(row) if row is not None else None
+
+    async def mark_undone(self, forget_id: str) -> bool:
+        return await self._repo.mark_undone(forget_id)
+
+
+def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
+    """One stored row as the domain reads it."""
+    return ForgetEntry(
+        forget_id=row.forget_id,
+        target=cast("ForgetTarget", row.target_kind),
+        target_id=row.target_id,
+        owner_id=row.owner_id,
+        reasons=row.reason,
+        entry_ids=tuple(json.loads(row.entry_ids_json or "[]")),
+        episode_ids=tuple(
+            (pair[0], pair[1]) for pair in json.loads(row.episode_ids_json or "[]")
+        ),
+        removed_profile_items=tuple(
+            (bucket, dict(item))
+            for bucket, item in json.loads(row.removed_profile_items_json or "[]")
+        ),
+        undone=row.undone_at is not None,
     )

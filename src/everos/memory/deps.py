@@ -36,6 +36,7 @@ from everos.memory.ports import (
     EpisodeIndex,
     EpisodeStore,
     ForesightStore,
+    ForgetLogStore,
     ImageMemoryIndex,
     ImageMemoryStore,
     ImageStore,
@@ -63,6 +64,7 @@ class Stores:
     foresight: ForesightStore
     image_memory: ImageMemoryStore
     images: ImageStore
+    forget_log: ForgetLogStore
     profile: ProfileStore
     agent_case: AgentCaseStore
     agent_skill: AgentSkillStore

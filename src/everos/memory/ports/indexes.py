@@ -233,3 +233,13 @@ class IndexEraser(Protocol):
         """Remove every row of the owner in the per-owner tables ``kinds``
         (``user_profile``, ``agent_skill``)."""
         ...
+
+    async def requeue(self, kind: str, md_paths: Collection[str]) -> None:
+        """Hand files back to the cascade so they are projected again.
+
+        An undo re-writes a file whose bytes the index has already reconciled
+        — a mark it cleared, a row erased — so the cascade's own diff sees
+        nothing to do. Queuing the file forces the projection to read the file
+        as it is now, which is the only way the rows come back.
+        """
+        ...

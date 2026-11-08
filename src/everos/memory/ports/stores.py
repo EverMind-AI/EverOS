@@ -215,6 +215,44 @@ class ImageMemoryStore(Protocol):
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry."""
         ...
 
+    async def undeprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Drop the retirement marks of ``(md_path, entry_id)``, making them current.
+
+        The inverse of :meth:`deprecate`, and the one edit a supersession mark
+        ever gets: undo-of-a-forget re-writes the memory as a new entry and
+        clears the mark of the version it restores, so the chain of versions
+        keeps saying which one is current.
+        """
+        ...
+
+    async def read_by_image(
+        self, scope: Scope, image_id: str, *, limit: int = 1_000
+    ) -> list[Stored[ImageMemory]]:
+        """Every entry about one picture, marks included.
+
+        An undo reads this instead of the index because a forget erased the
+        rows: markdown is the only place the occurrences still exist, and it is
+        also where the mark the undo has to clear lives.
+        """
+        ...
+
+    async def entries_for_session(
+        self, scope: Scope, session_id: str
+    ) -> list[tuple[str, str, str]]:
+        """``(md_path, entry_id, image_id)`` for the owner's pictures of a session.
+
+        Read from markdown, for the same reason as :meth:`read_by_image`: a
+        forget of a conversation must act on what the files say, not on what the
+        index has caught up to.
+        """
+        ...
+
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Remove the owner's picture memories that came from one session."""
         ...

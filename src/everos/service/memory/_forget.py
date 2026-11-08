@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
+from everos.memory.extract.pipeline import profile_delta
 from everos.memory.models import Episode
 from everos.memory.ports import Filter, MemoryRef, Scope, Stored, all_of, eq, is_null
 
@@ -92,9 +93,13 @@ class ForgetResult:
         image_memories: How many picture memories were marked forgotten.
         episodes: Entry ids of the episode versions written without the
             picture. The superseded versions are still on disk.
-        profiles: How many profile versions were written to drop what the
-            picture had established.
+        profiles: How many profile items were removed because this picture
+            alone established them. ``user.md`` is one document, so what a
+            forget reports is items, not versions.
         pictures: One entry per picture memory touched, in entry order.
+        forget_id: The forget log entry this call wrote (``fg_<hex>``), or
+            ``""`` when the log store is not configured. An explicit undo can
+            name it; the default undo finds it by target.
     """
 
     image_id: str
@@ -102,6 +107,7 @@ class ForgetResult:
     episodes: Sequence[str]
     profiles: int
     pictures: Sequence[ForgottenPicture] = ()
+    forget_id: str = ""
 
 
 class ForgetManager:
@@ -149,6 +155,23 @@ class ForgetManager:
 
         referring = await self._referring_episodes(scope, image_id)
         written = await self._rewrite_episodes(scope, referring, image_id)
+        profile_removed = await self._forget_profile(scope, image_id)
+        profiles = len(profile_removed)
+        entry = await self._stores.forget_log.record(
+            target="image",
+            target_id=image_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+            reason=reason,
+            entry_ids=tuple(hit.stored.ref.entry_id for hit in occurrences),
+            episode_ids=tuple(
+                (stored.ref.entry_id, ref.entry_id)
+                for stored, ref in zip(referring, written, strict=False)
+            ),
+            removed_profile_items=profile_removed,
+        )
 
         logger.info(
             "memory.images.forgotten",
@@ -158,13 +181,14 @@ class ForgetManager:
             owner_id=scope.owner_id,
             occurrences=len(occurrences),
             episodes=len(written),
+            profiles=profiles,
             reason=reason,
         )
         return ForgetResult(
             image_id=image_id,
             image_memories=len(occurrences),
             episodes=[ref.entry_id for ref in written],
-            profiles=0,
+            profiles=profiles,
             pictures=[
                 ForgottenPicture(
                     entry_id=hit.stored.ref.entry_id,
@@ -173,6 +197,7 @@ class ForgetManager:
                 )
                 for hit in occurrences
             ],
+            forget_id=entry.forget_id,
         )
 
     # ── steps ──────────────────────────────────────────────────────────────
@@ -201,6 +226,41 @@ class ForgetManager:
             only_if=_always,
         )
         return len(entries)
+
+    async def _forget_profile(
+        self, scope: Scope, image_id: str
+    ) -> tuple[tuple[str, dict[str, object]], ...]:
+        """Take the profile items that rested on this picture alone out of ``user.md``.
+
+        A profile item records the pictures that established it. The item goes
+        only when every one of them is forgotten (see
+        :func:`profile_delta.forget_images`); a fact a photo and a sentence
+        both established keeps the sentence's ground and stays. An item with no
+        picture source is never touched, which is why a forget cannot quietly
+        erase a text-derived fact.
+
+        The profile document is rewritten rather than versioned: ``user.md`` is
+        everalgo's output shape, the whole profile is replaced by every
+        synthesis, and there is no per-item markdown log to append to. What
+        makes the removal reversible is the caller's undo, which re-merges the
+        items this returned — so the item list is logged here at info level and
+        the caller's own response carries the count.
+        """
+        existing = await self._stores.profile.read(scope)
+        next_profile, removed, count = profile_delta.forget_images(existing, [image_id])
+        if not count or next_profile is None:
+            return ()
+        await self._stores.profile.write(scope, next_profile)
+        logger.info(
+            "memory.images.profile_forgotten",
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            image_id=image_id,
+            removed=count,
+            buckets=[bucket for bucket, _ in removed],
+        )
+        return tuple((bucket, item.model_dump(mode="json")) for bucket, item in removed)
 
     async def _referring_episodes(
         self, scope: Scope, image_id: str

@@ -65,6 +65,51 @@ class ImageOriginalRepo(RepoBase[ImageOriginal]):
                 await s.refresh(row)
         return row
 
+    async def record_unreferenced(
+        self,
+        *,
+        image_id: str,
+        media_type: str,
+        byte_size: int,
+        width: int,
+        height: int,
+        original_path: str,
+    ) -> ImageOriginal:
+        """Insert ``image_id`` at zero references if it is not known yet.
+
+        The question-picture case: the file must exist and be addressable, but
+        no memory points at it, so the row must not claim one. An existing row
+        is left exactly as it is — a real arrival already counted, and raising
+        the count from a query would make a forget under-release.
+        """
+        async with session_scope(self._factory) as s:
+            row = await s.get(ImageOriginal, image_id)
+            if row is not None:
+                return row
+            row = ImageOriginal(
+                image_id=image_id,
+                media_type=media_type,
+                byte_size=byte_size,
+                width=width,
+                height=height,
+                original_path=original_path,
+                first_seen_at=get_utc_now(),
+                ref_count=0,
+            )
+            s.add(row)
+            try:
+                await s.commit()
+            except Exception:
+                # Two queries with the same new picture at once: the loser
+                # reads the winner's row instead of failing the search.
+                await s.rollback()
+                existing = await s.get(ImageOriginal, image_id)
+                if existing is None:
+                    raise
+                return existing
+            await s.refresh(row)
+        return row
+
     async def release_reference(self, image_id: str) -> int:
         """Drop one reference to ``image_id``, floored at zero.
 
