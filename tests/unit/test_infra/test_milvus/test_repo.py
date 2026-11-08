@@ -536,6 +536,7 @@ _EPISODE_PHYSICAL = (
     ("parent_type", DataType.VARCHAR, "", 65535),
     ("parent_id", DataType.VARCHAR, "", 65535),
     ("sender_ids", DataType.ARRAY, "", 512),
+    ("image_ids", DataType.ARRAY, "", 512),
     ("subject", DataType.VARCHAR, "nullable", 65535),
     ("summary", DataType.VARCHAR, "nullable", 65535),
     ("episode", DataType.VARCHAR, "", 65535),
@@ -572,9 +573,10 @@ def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
         assert _flag(field) == row[2], field.name
         assert field.max_length == row[3], field.name
 
-    sender_ids = next(f for f in actual if f.name == "sender_ids")
-    assert sender_ids.element_type is DataType.VARCHAR
-    assert sender_ids.max_capacity == 256
+    for name in ("sender_ids", "image_ids"):
+        array = next(f for f in actual if f.name == name)
+        assert array.element_type is DataType.VARCHAR, name
+        assert array.max_capacity == 256, name
     for name in ("vector", "subject_vector"):
         assert next(f for f in actual if f.name == name).dim == 1024
 
