@@ -278,11 +278,17 @@ class Memorizer:
 
 def _prepared_cells(boundary: BoundaryOutcome) -> list[PreparedCell]:
     return [
-        PreparedCell(cell=cell, memcell_id=memcell_id, sender_ids=senders)
-        for cell, memcell_id, senders in zip(
+        PreparedCell(
+            cell=cell,
+            memcell_id=memcell_id,
+            sender_ids=senders,
+            picture_names=names,
+        )
+        for cell, memcell_id, senders, names in zip(
             boundary.cells,
             boundary.memcell_ids,
             boundary.per_cell_all_senders,
+            boundary.per_cell_picture_names,
             strict=True,
         )
     ]

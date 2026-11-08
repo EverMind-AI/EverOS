@@ -16,6 +16,9 @@ assume):
 - ``image_id``: SHA-256 of the stored picture — stable across occurrences and
   what an episode body references.
 - ``original_path``: root-relative path of the original.
+- ``name`` (optional): what the client called the picture on this arrival. It
+  is audit, not content: the digest does not cover it, so a renamed picture is
+  not re-embedded.
 - ``media_type`` / ``width`` / ``height``: what the file is, so a result can
   describe it without decoding it.
 
@@ -90,6 +93,7 @@ class ImageMemoryHandler(BaseDailyLogHandler):
             parent_id=s.inline.get("parent_id", ""),
             image_id=s.inline.get("image_id", ""),
             original_path=s.inline.get("original_path", ""),
+            name=s.inline.get("name") or "",
             media_type=s.inline.get("media_type", ""),
             width=optional_int(s.inline.get("width")) or 0,
             height=optional_int(s.inline.get("height")) or 0,

@@ -50,10 +50,10 @@ class CanonicalMessage(BaseModel):
     Field split (mirrors src_old ``RawMessage.content_items``):
 
     - ``content_items`` holds the raw ``ContentItem`` array verbatim
-      (text / image / audio / doc / pdf / html / email). Currently only
-      ``type="text"`` is parsed downstream; the field still keeps the
-      original structure so a future multimodal parser can reach back
-      without losing data.
+      (text / image / audio / doc / pdf / html / email). A picture item here
+      carries the client's ``name`` and, once ingest has stored it, its
+      ``image_id`` / dimensions — which is where an image memory's provenance
+      comes from, since the rendered ``text`` keeps only the hash.
     - ``text`` is the derived concatenation of ``content_items[*].text``
       for entries with ``type="text"`` — what the LLM-facing extractors
       and md writer consume.
@@ -339,6 +339,17 @@ class ImageMemory(BaseModel):
     image_id: str
     """SHA-256 of the picture file. Stable across occurrences and the handle
     ``forget`` takes."""
+
+    name: str = ""
+    """What the client called the picture (``IMG_2231.jpg``), as sent.
+
+    Provenance of the *occurrence*, not of the file: the same bytes may arrive
+    as ``IMG_2231.jpg`` in one conversation and ``board.png`` in another, and
+    the two arriving names are different facts about different messages. Empty
+    when the client sent none — an inline part usually carries no filename.
+    Kept because a caller mapping a memory back to its source (an evaluation
+    harness matching a dataset's picture ids) has only this to go on.
+    """
 
     original_relpath: str = ""
     """Memory-root-relative path of the original, ``figures/<aa>/<hash>.<ext>``.

@@ -110,6 +110,7 @@ def _image(
         timestamp=to_display_tz(from_timestamp_ms(image.timestamp)),
         description=image.description,
         ocr=image.ocr,
+        name=image.name,
         original_path=image.original_relpath,
         thumbnail_path=thumbnail,
         media_type=image.media_type,

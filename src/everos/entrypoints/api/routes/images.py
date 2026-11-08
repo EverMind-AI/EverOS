@@ -23,6 +23,7 @@ from everos.entrypoints.api.schemas import (
     ErrorResponse,
     ForgetImageRequest,
     ForgetImageResponseData,
+    ForgottenPictureData,
     SuccessEnvelope,
 )
 
@@ -68,6 +69,14 @@ async def forget_image(
             image_memories=result.image_memories,
             episodes=list(result.episodes),
             profiles=result.profiles,
+            pictures=[
+                ForgottenPictureData(
+                    entry_id=picture.entry_id,
+                    image_id=picture.image_id,
+                    name=picture.name,
+                )
+                for picture in result.pictures
+            ],
         ),
     )
 

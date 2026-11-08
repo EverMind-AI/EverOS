@@ -225,3 +225,43 @@ async def test_each_user_sender_gets_their_own_copy() -> None:
     assert owners == ["u1"]
     assert len(memories.items_for("u2")) == 1
     assert len(llm.calls) == 1
+
+
+async def test_the_memory_keeps_the_name_the_client_sent() -> None:
+    """The client's file name is provenance of this occurrence, not of the file.
+
+    The cell text keeps only the content hash, so the name has to reach the
+    memory from the content items through the boundary's per-cell map.
+    """
+    llm = _RecordingLLM(_image_reply())
+    pipeline, memories, _ = _pipeline(llm)
+    cell = MemCell(
+        items=[_text_message(), _picture_message()], timestamp=1_700_000_000_000
+    )
+
+    await pipeline.run_cell(
+        _INGESTED,
+        PreparedCell(
+            cell=cell,
+            memcell_id="mc_a",
+            sender_ids=["u1"],
+            picture_names={_IMAGE_ID: "IMG_2231.jpg"},
+        ),
+    )
+
+    assert memories.records[0].item.name == "IMG_2231.jpg"
+
+
+async def test_a_picture_without_a_name_stores_an_empty_one() -> None:
+    """An inline image part usually carries no file name; that is not an error."""
+    llm = _RecordingLLM(_image_reply())
+    pipeline, memories, _ = _pipeline(llm)
+    cell = MemCell(
+        items=[_text_message(), _picture_message()], timestamp=1_700_000_000_000
+    )
+
+    await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
+    )
+
+    assert memories.records[0].item.name == ""

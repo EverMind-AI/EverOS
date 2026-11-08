@@ -16,6 +16,7 @@ from .envelope import ErrorResponse as ErrorResponse
 from .envelope import SuccessEnvelope as SuccessEnvelope
 from .forget import ForgetImageRequest as ForgetImageRequest
 from .forget import ForgetImageResponseData as ForgetImageResponseData
+from .forget import ForgottenPictureData as ForgottenPictureData
 from .health import CascadeHealthBlock as CascadeHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
@@ -74,6 +75,9 @@ __all__ = [
     "ErrorDetail",
     "ErrorResponse",
     "FlushResponseData",
+    "ForgetImageRequest",
+    "ForgetImageResponseData",
+    "ForgottenPictureData",
     "HealthCapabilities",
     "HealthResponse",
     "KnowledgeSearchRequest",

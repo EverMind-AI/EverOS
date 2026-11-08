@@ -65,6 +65,25 @@ _OCCURRENCE_CAP = 1_000
 
 
 @dataclass(frozen=True)
+class ForgottenPicture:
+    """One picture memory a forget (or its undo) touched.
+
+    Returned so a caller can see *which* memories the picture had, not just
+    how many: a harness mapping a memory back to its dataset entry needs the
+    occurrence's own identity and the name it arrived under.
+
+    Attributes:
+        entry_id: ``im_<YYYYMMDD>_<NNNN>`` — this occurrence's id in markdown.
+        image_id: The file, by content hash.
+        name: The client's file name for this arrival, ``""`` when it sent none.
+    """
+
+    entry_id: str
+    image_id: str
+    name: str
+
+
+@dataclass(frozen=True)
 class ForgetResult:
     """What one forget touched.
 
@@ -75,12 +94,14 @@ class ForgetResult:
             picture. The superseded versions are still on disk.
         profiles: How many profile versions were written to drop what the
             picture had established.
+        pictures: One entry per picture memory touched, in entry order.
     """
 
     image_id: str
     image_memories: int
     episodes: Sequence[str]
     profiles: int
+    pictures: Sequence[ForgottenPicture] = ()
 
 
 class ForgetManager:
@@ -144,6 +165,14 @@ class ForgetManager:
             image_memories=len(occurrences),
             episodes=[ref.entry_id for ref in written],
             profiles=0,
+            pictures=[
+                ForgottenPicture(
+                    entry_id=hit.stored.ref.entry_id,
+                    image_id=image_id,
+                    name=getattr(hit.stored.item, "name", "") or "",
+                )
+                for hit in occurrences
+            ],
         )
 
     # ── steps ──────────────────────────────────────────────────────────────

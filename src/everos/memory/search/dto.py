@@ -199,6 +199,11 @@ class SearchImageItem(BaseModel):
     caller resolves them against its own root to hand the answering model the
     original — never the thumbnail, which exists so the decider can look at
     many pictures cheaply.
+
+    ``name`` is the file name the client sent with this occurrence, when it
+    sent one. It is not an identity (the same picture may arrive under two
+    names) but it is the only handle a caller has for saying which picture of
+    its own input this memory is about.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -213,6 +218,7 @@ class SearchImageItem(BaseModel):
     timestamp: _dt.datetime
     description: str
     ocr: str = ""
+    name: str = ""
     original_path: str
     thumbnail_path: str
     media_type: str = ""

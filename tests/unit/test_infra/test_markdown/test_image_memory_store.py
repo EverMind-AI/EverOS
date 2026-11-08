@@ -181,3 +181,29 @@ async def test_a_deleted_source_skips_the_write(root: MemoryRoot) -> None:
 
     assert ref is None
     assert not (root.root / "app/proj/users/u1/images").exists()
+
+
+async def test_the_entry_records_the_name_the_client_sent(root: MemoryRoot) -> None:
+    """The name is inline provenance of the occurrence, beside the file's hash."""
+    store = MarkdownImageMemoryStore(root)
+    ref = await store.append(
+        _user(), _image(name="IMG_2231.jpg"), only_if=NO_SOURCE_CHECK
+    )
+    assert ref is not None
+
+    parsed = await MarkdownReader.read(root.root / ref.md_path)
+    structured = parse_structured_entry(parsed.entries[0].body)
+
+    assert structured.inline["name"] == "IMG_2231.jpg"
+
+
+async def test_an_unnamed_picture_writes_no_name_field(root: MemoryRoot) -> None:
+    """Most pictures arrive without a name; an empty field would read as a loss."""
+    store = MarkdownImageMemoryStore(root)
+    ref = await store.append(_user(), _image(), only_if=NO_SOURCE_CHECK)
+    assert ref is not None
+
+    parsed = await MarkdownReader.read(root.root / ref.md_path)
+    structured = parse_structured_entry(parsed.entries[0].body)
+
+    assert "name" not in structured.inline

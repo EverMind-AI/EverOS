@@ -12,8 +12,8 @@ from __future__ import annotations
 
 __all__ = ["CellOutcome", "Pipeline", "PipelineOutcome", "PreparedCell"]
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from everos.memory.models import IngestResult, MemCell
@@ -30,11 +30,15 @@ class PreparedCell:
         cell: The memcell.
         memcell_id: Its id in the memcell store.
         sender_ids: Every sender in the cell (episodes record them).
+        picture_names: ``image_id -> client file name`` for the pictures the
+            cell carries. Read off the ingested content items, because the
+            cell's text keeps only the hash; empty when no picture had a name.
     """
 
     cell: MemCell
     memcell_id: str
     sender_ids: Sequence[str] = ()
+    picture_names: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

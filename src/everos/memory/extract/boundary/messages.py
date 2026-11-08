@@ -12,6 +12,7 @@ __all__ = [
     "close_complete_tail",
     "filter_for_mode",
     "merge_dedupe_sort",
+    "picture_names",
     "slice_tail",
     "split_message_ids",
     "to_conversation_item",
@@ -108,6 +109,31 @@ def unique_senders(cell: MemCell) -> list[str]:
         if sender and sender not in senders:
             senders.append(sender)
     return senders
+
+
+def picture_names(messages: Sequence[CanonicalMessage]) -> dict[str, str]:
+    """``image_id -> client file name`` for the pictures among ``messages``.
+
+    The rendered conversation text keeps only a picture's content hash, so the
+    name the client sent would be lost by the time a cell is extracted. This
+    reads it off the canonical content items instead, which is the only layer
+    that still holds them, and is keyed by hash because that is what the
+    extraction route finds in the cell's text.
+
+    First name wins when the same picture is sent twice under two names in one
+    cell: the memory is one record about one arrival, and picking the earliest
+    spelling keeps it stable across a re-run of the same batch.
+    """
+    names: dict[str, str] = {}
+    for message in messages:
+        for item in message.content_items:
+            if item.get("type") != "image" or item.get("status") != "stored":
+                continue
+            image_id = item.get("image_id")
+            name = item.get("name")
+            if image_id and name and image_id not in names:
+                names[str(image_id)] = str(name)
+    return names
 
 
 def to_conversation_item(message: CanonicalMessage) -> ConversationItem:

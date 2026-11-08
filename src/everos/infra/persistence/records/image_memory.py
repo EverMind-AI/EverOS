@@ -67,6 +67,15 @@ class ImageMemory(IndexRecord):
     original_path: str
     """Memory-root-relative path of the original, ``figures/<aa>/<hash>.<ext>``."""
 
+    name: str = ""
+    """What the client called the picture on this arrival (``IMG_2231.jpg``).
+
+    Not indexed and not part of the content digest: a renamed picture is the
+    same picture, so a name edit must not re-embed the row. Present so a
+    search result can hand the caller the file name it sent -- the only handle
+    an evaluation harness has for matching a memory to its dataset entry.
+    """
+
     media_type: str
     """Format the file is stored as (``png`` / ``jpeg`` / ``webp`` / ``gif``)."""
 

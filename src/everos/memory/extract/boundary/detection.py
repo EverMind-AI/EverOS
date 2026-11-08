@@ -38,6 +38,7 @@ from .messages import (
     close_complete_tail,
     filter_for_mode,
     merge_dedupe_sort,
+    picture_names,
     slice_tail,
     split_message_ids,
     to_conversation_item,
@@ -70,6 +71,11 @@ class BoundaryOutcome(NamedTuple):
         tail_complete: The model's verdict that the uncut tail is already a
             complete episode; ``None`` when no model judged it. ``True`` on a
             non-final call has already closed the tail into the last cell.
+        per_cell_picture_names: Each cell's ``image_id -> client file name``
+            for the pictures it carries, which the extraction route needs and
+            the cell's own text no longer holds. Defaulted so a caller that
+            builds an outcome from its own cells does not have to know about
+            pictures.
     """
 
     cells: list[MemCell]
@@ -79,6 +85,7 @@ class BoundaryOutcome(NamedTuple):
     status: Status
     message_count: int
     tail_complete: bool | None = None
+    per_cell_picture_names: Sequence[dict[str, str]] = ()
 
 
 class BoundaryDetection:
@@ -252,6 +259,7 @@ class BoundaryDetection:
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
+        names = _per_cell_picture_names(merged, result.cells)
         raw_type = _RAW_TYPE_BY_MODE[mode]
         last_cell_ts = max(cell.timestamp for cell in result.cells)
         await self._session_buffer.cut(
@@ -276,6 +284,7 @@ class BoundaryDetection:
             memcell_ids=memcell_ids,
             per_cell_message_ids=message_ids,
             per_cell_all_senders=senders,
+            per_cell_picture_names=names,
             status="extracted",
             message_count=message_count,
             tail_complete=result.tail_complete,
@@ -287,6 +296,25 @@ class BoundaryDetection:
         await self._session_buffer.keep(
             session, merged, last_message_ts=max(m.timestamp for m in merged)
         )
+
+
+def _per_cell_picture_names(
+    merged: Sequence[CanonicalMessage], cells: Sequence[MemCell]
+) -> list[dict[str, str]]:
+    """Each cell's picture names, sliced from ``merged`` in step with the cells.
+
+    Rows and cell items correspond 1:1 and in order (see
+    :func:`split_message_ids`), so the same walk gives each cell the content
+    items its own messages carried — including the ``name`` a picture arrived
+    under, which the rendered text does not keep.
+    """
+    names: list[dict[str, str]] = []
+    start = 0
+    for cell in cells:
+        end = start + len(cell.items)
+        names.append(picture_names(merged[start:end]))
+        start = end
+    return names
 
 
 def _session_of(ingested: IngestResult) -> SessionKey:
@@ -309,6 +337,7 @@ def _empty_outcome(
         memcell_ids=[],
         per_cell_message_ids=[],
         per_cell_all_senders=[],
+        per_cell_picture_names=[],
         status=status,
         message_count=message_count,
         tail_complete=tail_complete,

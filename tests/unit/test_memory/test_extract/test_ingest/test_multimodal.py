@@ -21,6 +21,7 @@ import io
 from PIL import Image
 
 from everos.component.images import ImageLimits
+from everos.memory.extract.boundary.messages import picture_names
 from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     coerce_items,
@@ -29,6 +30,7 @@ from everos.memory.extract.ingest.multimodal import (
     normalise_content,
     store_images,
 )
+from everos.memory.models import CanonicalMessage
 from everos.memory.ports.images import ImageStore
 from tests.fakes import InMemoryImageStore
 
@@ -229,3 +231,47 @@ def _assert_is_port() -> None:
     """The fake satisfies the port, so a test cannot drift from the contract."""
     store: ImageStore = InMemoryImageStore()
     assert store is not None
+
+
+def test_picture_names_are_read_off_the_content_items() -> None:
+    """The name travels with the content item, keyed by content hash.
+
+    The rendered text keeps only the hash, so this is the one place the name
+    still exists by the time a cell is extracted; the boundary reads it here
+    into the per-cell map the picture route writes memories from.
+    """
+    image_id = "c" * 64
+    message = CanonicalMessage(
+        message_id="m1",
+        session_id="s1",
+        sender_id="u1",
+        role="user",
+        timestamp=1_700_000_000_000,
+        content_items=[
+            {
+                "type": "image",
+                "image_id": image_id,
+                "name": "IMG_2231.jpg",
+                "status": "stored",
+            },
+            {"type": "text", "text": "look"},
+        ],
+        text=f"[IMAGE: {image_id}]\nlook",
+    )
+
+    assert picture_names([message]) == {image_id: "IMG_2231.jpg"}
+
+
+def test_an_unnamed_picture_contributes_no_name() -> None:
+    """An inline image part carries no filename; the map stays empty, not blank."""
+    message = CanonicalMessage(
+        message_id="m1",
+        session_id="s1",
+        sender_id="u1",
+        role="user",
+        timestamp=1_700_000_000_000,
+        content_items=[{"type": "image", "image_id": "c" * 64, "status": "stored"}],
+        text=f"[IMAGE: {'c' * 64}]",
+    )
+
+    assert picture_names([message]) == {}

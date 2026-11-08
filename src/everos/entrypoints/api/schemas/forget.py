@@ -41,12 +41,31 @@ class ForgetImageRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class ForgottenPictureData(BaseModel):
+    """One picture memory the request touched.
+
+    ``entry_id`` names the occurrence, ``image_id`` the file, and ``name`` is
+    what the client called the picture on that arrival — provenance a caller
+    needs to map the memory back to its own input.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: str
+    image_id: str
+    name: str = ""
+
+
 class ForgetImageResponseData(BaseModel):
     """What a forget touched.
 
     ``episodes`` are the entry ids of the *new* versions written without the
     picture. The versions they supersede are still in markdown, on purpose:
     asking what was said before a forget has to keep working.
+
+    ``pictures`` lists the picture memories themselves, in entry order;
+    ``image_memories`` repeats its length so a caller that only needs the
+    count does not have to walk it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -55,3 +74,4 @@ class ForgetImageResponseData(BaseModel):
     image_memories: int
     episodes: list[str] = Field(default_factory=list)
     profiles: int = 0
+    pictures: list[ForgottenPictureData] = Field(default_factory=list)

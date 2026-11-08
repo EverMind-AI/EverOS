@@ -41,7 +41,9 @@ def _scope() -> Scope:
     return Scope(app_id="app", project_id="proj", owner_id="u1", owner_type="user")
 
 
-def _stored_image(entry_id: str, image_id: str = _IMAGE_ID) -> Stored[ImageMemory]:
+def _stored_image(
+    entry_id: str, image_id: str = _IMAGE_ID, *, name: str = ""
+) -> Stored[ImageMemory]:
     return Stored(
         ref=MemoryRef(
             id=f"u1_{entry_id}",
@@ -54,6 +56,7 @@ def _stored_image(entry_id: str, image_id: str = _IMAGE_ID) -> Stored[ImageMemor
             description="a coffee shop sign",
             timestamp=_TS,
             image_id=image_id,
+            name=name,
             original_relpath=f"figures/ee/{image_id}.png",
             parent_id="mc_1",
             entry_id=entry_id,
@@ -203,3 +206,20 @@ async def test_forgetting_an_unknown_picture_is_a_no_op() -> None:
     assert result.episodes == []
     assert eraser.erased == [{"image_memory": []}]
     assert stores.image_memory.records == []
+
+
+async def test_the_result_names_each_occurrence_and_the_file_it_was_sent_as() -> None:
+    """A caller mapping a memory back to its input needs the name, not a count."""
+    manager, _, _, _ = _manager(
+        images=(
+            _stored_image("im_1", name="IMG_2231.jpg"),
+            _stored_image("im_2", name="IMG_2232.jpg"),
+        )
+    )
+
+    result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
+
+    assert [(p.entry_id, p.image_id, p.name) for p in result.pictures] == [
+        ("im_1", _IMAGE_ID, "IMG_2231.jpg"),
+        ("im_2", _IMAGE_ID, "IMG_2232.jpg"),
+    ]

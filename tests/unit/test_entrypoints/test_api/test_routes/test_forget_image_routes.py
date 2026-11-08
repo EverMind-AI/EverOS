@@ -21,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
 from everos.service.memory import ForgetResult
+from everos.service.memory._forget import ForgottenPicture
 from tests.fakes import InMemoryImageStore, StubMemoryService, make_application
 
 _IMAGE_ID = "a1" * 32
@@ -34,6 +35,13 @@ def memory() -> StubMemoryService:
         image_memories=1,
         episodes=["ep_20261107_00000002"],
         profiles=0,
+        pictures=[
+            ForgottenPicture(
+                entry_id="im_20261107_00000001",
+                image_id=_IMAGE_ID,
+                name="IMG_2231.jpg",
+            )
+        ],
     )
     return stub
 
@@ -64,6 +72,15 @@ async def test_forget_returns_what_it_touched(
     data = response.json()["data"]
     assert data["image_memories"] == 1
     assert data["episodes"] == ["ep_20261107_00000002"]
+    # The occurrence and the name it arrived under: what a caller needs to map
+    # the memory back to its own input.
+    assert data["pictures"] == [
+        {
+            "entry_id": "im_20261107_00000001",
+            "image_id": _IMAGE_ID,
+            "name": "IMG_2231.jpg",
+        }
+    ]
     memory.forget_image.assert_awaited()
 
 

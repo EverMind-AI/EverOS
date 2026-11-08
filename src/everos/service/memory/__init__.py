@@ -22,6 +22,8 @@ __all__ = [
     "DeleteResult",
     "ExtractionSupervisor",
     "FlushResult",
+    "ForgetResult",
+    "ForgottenPicture",
     "MemorizeResult",
     "MemoryService",
     "QueueHealth",
@@ -43,6 +45,7 @@ from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._forget import ForgetManager
 from ._forget import ForgetResult as ForgetResult
+from ._forget import ForgottenPicture as ForgottenPicture
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult

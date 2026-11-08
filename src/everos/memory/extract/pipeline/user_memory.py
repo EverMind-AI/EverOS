@@ -329,6 +329,7 @@ class UserMemoryPipeline:
                     timestamp=prepared.cell.timestamp,
                     ocr=ocr,
                     image_id=picture.image_id,
+                    name=prepared.picture_names.get(picture.image_id, ""),
                     original_relpath=original,
                     media_type=info.media_type if info else "jpeg",
                     width=info.width if info else 0,

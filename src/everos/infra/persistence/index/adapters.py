@@ -427,6 +427,7 @@ def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
             timestamp=to_timestamp_ms(fields["timestamp"]),
             image_id=fields["image_id"],
             original_relpath=fields.get("original_path") or "",
+            name=fields.get("name") or "",
             media_type=fields.get("media_type") or "",
             width=int(fields.get("width") or 0),
             height=int(fields.get("height") or 0),

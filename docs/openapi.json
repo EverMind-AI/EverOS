@@ -3602,6 +3602,13 @@
             "type": "integer",
             "title": "Profiles",
             "default": 0
+          },
+          "pictures": {
+            "items": {
+              "$ref": "#/components/schemas/ForgottenPictureData"
+            },
+            "type": "array",
+            "title": "Pictures"
           }
         },
         "additionalProperties": false,
@@ -3611,7 +3618,32 @@
           "image_memories"
         ],
         "title": "ForgetImageResponseData",
-        "description": "What a forget touched.\n\n``episodes`` are the entry ids of the *new* versions written without the\npicture. The versions they supersede are still in markdown, on purpose:\nasking what was said before a forget has to keep working."
+        "description": "What a forget touched.\n\n``episodes`` are the entry ids of the *new* versions written without the\npicture. The versions they supersede are still in markdown, on purpose:\nasking what was said before a forget has to keep working.\n\n``pictures`` lists the picture memories themselves, in entry order;\n``image_memories`` repeats its length so a caller that only needs the\ncount does not have to walk it."
+      },
+      "ForgottenPictureData": {
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entry_id",
+          "image_id"
+        ],
+        "title": "ForgottenPictureData",
+        "description": "One picture memory the request touched.\n\n``entry_id`` names the occurrence, ``image_id`` the file, and ``name`` is\nwhat the client called the picture on that arrival — provenance a caller\nneeds to map the memory back to its own input."
       },
       "GetAgentCaseItem": {
         "properties": {
@@ -4971,6 +5003,11 @@
             "title": "Ocr",
             "default": ""
           },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
           "original_path": {
             "type": "string",
             "title": "Original Path"
@@ -5023,7 +5060,7 @@
           "score"
         ],
         "title": "SearchImageItem",
-        "description": "Image-memory hit — one appearance of one picture.\n\n``id`` and ``image_id`` are different identities on purpose: ``id`` names\nthis *record* (a time, a provenance, a description), while ``image_id``\nnames the *file*, which is stored once however many records refer to it and\nis what ``forget`` takes.\n\n``original_path`` and ``thumbnail_path`` are memory-root-relative. The\ncaller resolves them against its own root to hand the answering model the\noriginal — never the thumbnail, which exists so the decider can look at\nmany pictures cheaply."
+        "description": "Image-memory hit — one appearance of one picture.\n\n``id`` and ``image_id`` are different identities on purpose: ``id`` names\nthis *record* (a time, a provenance, a description), while ``image_id``\nnames the *file*, which is stored once however many records refer to it and\nis what ``forget`` takes.\n\n``original_path`` and ``thumbnail_path`` are memory-root-relative. The\ncaller resolves them against its own root to hand the answering model the\noriginal — never the thumbnail, which exists so the decider can look at\nmany pictures cheaply.\n\n``name`` is the file name the client sent with this occurrence, when it\nsent one. It is not an identity (the same picture may arrive under two\nnames) but it is the only handle a caller has for saying which picture of\nits own input this memory is about."
       },
       "SearchMethod": {
         "type": "string",

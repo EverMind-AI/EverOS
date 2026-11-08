@@ -693,6 +693,11 @@ def _image_memory_entry(image: ImageMemory) -> EntryBody:
     ``ocr`` is omitted when empty: a photograph of a scene has no text in it,
     and writing an empty section would make every such entry look like an entry
     whose text was lost.
+
+    ``name`` is omitted when empty for the same reason: most pictures arrive
+    without one, and ``name: `` on every entry would read as a name that was
+    lost rather than never sent. It sits beside ``image_id`` because it is
+    provenance of this occurrence, while the hash is the identity of the file.
     """
     inline: dict[str, object] = {
         "owner_id": image.owner_id,
@@ -705,6 +710,8 @@ def _image_memory_entry(image: ImageMemory) -> EntryBody:
         "width": image.width,
         "height": image.height,
     }
+    if image.name:
+        inline["name"] = image.name
     if image.session_id is not None:
         inline["session_id"] = image.session_id
     sections = {"Description": image.description}
