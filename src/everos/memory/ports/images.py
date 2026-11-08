@@ -36,6 +36,24 @@ class ImageStore(Protocol):
         """
         ...
 
+    async def keep_unreferenced(
+        self, data: bytes, *, limits: ImageLimits
+    ) -> StoredImage:
+        """Store one picture with **no** memory and no reference count.
+
+        The question-picture path: a picture attached to a search query is
+        content-addressed like any original — so a second query with the same
+        picture costs nothing and the decider reads it from the same place as
+        a candidate — but it establishes no memory, because "what did I ask
+        with" is not a fact about the user. Its row starts at ``ref_count`` 0;
+        if the picture later arrives in a real message, the ordinary store
+        raises the count on the same file.
+
+        Raises:
+            ImageRejectedError: Bytes no accepted format can be read from.
+        """
+        ...
+
     async def read(self, image_id: str) -> bytes:
         """The original bytes of ``image_id``.
 

@@ -204,6 +204,58 @@ async def store_images(
     return dedupe(stored)
 
 
+async def keep_question_pictures(
+    pictures: Sequence[Any],
+    *,
+    store: ImageStore | None,
+    limits: ImageLimits,
+    raw_file_builder: Any,
+    budget: PictureBudget,
+) -> list[StoredImage]:
+    """Store the pictures attached to a question; create no memory and no reference.
+
+    The same bytes a message would arrive with, kept under the same hash so the
+    decider reads them from the same place, but deliberately *not* an arrival:
+    a question is not a fact about the user, so it writes no picture memory, no
+    episode reference and no profile item, and its row starts at zero
+    references.
+
+    A picture over a limit or unreadable is dropped with a log line rather than
+    failing the search: the text question is still answerable, and one bad
+    attachment must not cost a retrieval.
+
+    Returns:
+        The distinct pictures that were stored, in request order.
+    """
+    if store is None:
+        return []
+    stored: list[StoredImage] = []
+    for picture in pictures:
+        item = (
+            picture.model_dump(exclude_none=True)
+            if hasattr(picture, "model_dump")
+            else dict(picture)
+        )
+        try:
+            data = await _bytes_of(item, raw_file_builder=raw_file_builder)
+        except ValueError as exc:
+            logger.warning("memory.images.question_rejected", reason=str(exc)[:160])
+            continue
+        if not budget.admits(data):
+            logger.warning(
+                "memory.images.question_rejected",
+                reason="over the per-request picture limit",
+            )
+            continue
+        try:
+            stored.append(await store.keep_unreferenced(data, limits=limits))
+        except ValueError as exc:
+            logger.warning("memory.images.question_rejected", reason=str(exc)[:160])
+            continue
+        budget.charge(data)
+    return dedupe(stored)
+
+
 async def _bytes_of(item: dict[str, Any], *, raw_file_builder: Any) -> bytes:
     """The picture's bytes, from whichever form the content item carries.
 

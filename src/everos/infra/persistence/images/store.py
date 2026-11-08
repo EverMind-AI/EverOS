@@ -148,6 +148,39 @@ class FileImageStore:
         )
         return stored
 
+    async def keep_unreferenced(
+        self, data: bytes, *, limits: ImageLimits
+    ) -> StoredImage:
+        """Write the original and record its row at zero references.
+
+        Deliberately not :meth:`store` with a flag: an arrival *is* a reference
+        and forgetting one decrements it, so a question picture counted as an
+        arrival would leave a reference no memory owns.
+        """
+        stored = await anyio.to_thread.run_sync(
+            lambda: decode_image(data, limits=limits)
+        )
+        relative = (
+            f"{_FIGURES_DIR}/{stored.image_id[:2]}/{stored.image_id}.{stored.extension}"
+        )
+        await self._write_atomic(
+            self._resolve(relative), stored.data, expected_hash=stored.image_id
+        )
+        await self._originals.record_unreferenced(
+            image_id=stored.image_id,
+            media_type=stored.media_type,
+            byte_size=len(stored.data),
+            width=stored.width,
+            height=stored.height,
+            original_path=relative,
+        )
+        logger.info(
+            "memory.images.kept_unreferenced",
+            image_id=stored.image_id,
+            media_type=stored.media_type,
+        )
+        return stored
+
     async def _write_atomic(
         self, target: Path, data: bytes, *, expected_hash: str | None
     ) -> None:

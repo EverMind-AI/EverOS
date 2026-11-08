@@ -102,13 +102,19 @@ class Picture(NamedTuple):
     Attributes:
         label: The label the evidence text uses for it (``P3``), so the decider
             can tie an image part back to the numbered line it belongs to.
+            Empty for a question picture, which belongs to no evidence line.
         data: Bytes of the thumbnail — the decider's copy, never the original.
         mime: MIME type of ``data``.
+        question: Whether this picture came with the *question* rather than
+            from the candidates. A question picture is shown on every round
+            and is not charged against the per-round candidate cap: it is what
+            is being asked about, not a candidate to select.
     """
 
     label: str
     data: bytes
     mime: str
+    question: bool = False
 
 
 _PICTURE_MARK = " (picture)"
@@ -460,6 +466,7 @@ async def search_episodes_and_images_llm_multiround(
     trace_path_source: Callable[[], str | None],
     image_recaller: ImageMemoryRecaller | None = None,
     image_store: ImageStore | None = None,
+    question_image_ids: Sequence[str] = (),
 ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """LLM-guided iterative multi-round search (per-sub-query RRF blocks).
 
@@ -516,6 +523,7 @@ async def search_episodes_and_images_llm_multiround(
         trace_path_source=trace_path_source,
         image_recaller=image_recaller,
         image_store=image_store,
+        question_image_ids=question_image_ids,
     )
 
 
@@ -628,12 +636,12 @@ def _content(
         return prompt
     parts: list[object] = [{"type": "text", "text": prompt}]
     for picture in pictures:
-        parts.append(
-            {
-                "type": "text",
-                "text": f"Picture for evidence item {picture.label}:",
-            }
+        caption = (
+            "Picture attached to the question:"
+            if picture.question
+            else f"Picture for evidence item {picture.label}:"
         )
+        parts.append({"type": "text", "text": caption})
         part = image_url_part_from_bytes(picture.data, picture.mime)
         parts.append(
             part.model_copy(
@@ -654,23 +662,46 @@ async def _round_pictures(
     k: int,
     edge: int,
     quality: int,
+    question_image_ids: Sequence[str] = (),
 ) -> list[Picture]:
-    """The thumbnails this round shows the decider, at most ``k`` of them.
+    """The decider's pictures: the question's, then at most ``k`` candidates.
 
-    Picked in evidence order — the fused ranking already put the most relevant
-    pictures first — so the cap costs the least relevant ones, and those stay
-    in the evidence as text. Every failure to load one degrades that picture
-    to text instead of failing the round: the decider's answer is still usable
-    without the pixels, and a round that raises would lose the whole search.
+    Candidate pictures are picked in evidence order — the fused ranking already
+    put the most relevant pictures first — so the cap costs the least relevant
+    ones, and those stay in the evidence as text. Every failure to load one
+    degrades that picture to text instead of failing the round: the decider's
+    answer is still usable without the pixels, and a round that raises would
+    lose the whole search.
 
-    Returns an empty list when the knob is 0, which is the default: a decider
-    that was never trained on pictures is not shown any.
+    Question pictures come first and are not capped. They are what the question
+    is *about*, so a cap that dropped one would leave the decider answering a
+    question it cannot see; they are loaded even when ``k`` is 0, because unlike
+    a candidate they were attached deliberately.
+
+    Returns an empty list when the knob is 0 and the question carries no
+    picture, which is the default: a decider that was never trained on picture
+    candidates is not shown any.
     """
-    if k <= 0 or store is None:
-        return []
     picked: list[Picture] = []
+    if store is not None:
+        for image_id in question_image_ids:
+            try:
+                data = await store.read_derived(image_id, edge=edge, quality=quality)
+            except (FileNotFoundError, OSError, ValueError) as err:
+                logger.debug(
+                    "llm_multiround_question_picture_unavailable",
+                    image_id=image_id,
+                    error=f"{type(err).__name__}: {err}"[:160],
+                )
+                continue
+            picked.append(
+                Picture(label="", data=data, mime="image/jpeg", question=True)
+            )
+    if k <= 0 or store is None:
+        return picked
+    limit = len(picked) + k
     for gi, cand in enumerate(global_cands):
-        if len(picked) >= k:
+        if len(picked) >= limit:
             break
         if not _is_picture(cand):
             continue
@@ -803,6 +834,7 @@ async def _search_episodes_subq(
     trace_path_source: Callable[[], str | None],
     image_recaller: ImageMemoryRecaller | None = None,
     image_store: ImageStore | None = None,
+    question_image_ids: Sequence[str] = (),
 ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
@@ -949,6 +981,7 @@ async def _search_episodes_subq(
             k=tune.image_candidates_per_round,
             edge=tune.image_thumbnail_edge,
             quality=tune.image_quality,
+            question_image_ids=question_image_ids,
         )
         _ts_decide_start = time.monotonic()
         decision = await _decide(

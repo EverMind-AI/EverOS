@@ -68,6 +68,35 @@ class FilterNode(BaseModel):
 # ── Request ──────────────────────────────────────────────────────────────
 
 
+class QuestionPicture(BaseModel):
+    """A picture attached to the question itself, not to the memory.
+
+    Same content-item shape as ``/memory/add`` (``uri`` or ``base64``, plus
+    ``ext`` and an optional ``name``), because a caller that can send a picture
+    to one endpoint should not have to learn a second shape for the other.
+
+    A question picture is **content-addressed in ``figures/`` and establishes
+    nothing**: no picture memory, no reference count, no profile item. It exists
+    for one search — the decider looks at it every round — and "what I asked
+    with" is not a fact about the user. Storing it by hash is what lets the
+    decider read it from the same place it reads a candidate, and lets the same
+    question asked twice pay for the file once.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    base64: str | None = None
+    uri: str | None = None
+    ext: str | None = None
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> QuestionPicture:
+        if bool(self.base64) == bool(self.uri):
+            raise ValueError("a question picture needs exactly one of base64 / uri")
+        return self
+
+
 class SearchRequest(BaseModel):
     """Request body for ``POST /api/v2/memory/search``.
 
@@ -115,6 +144,15 @@ class SearchRequest(BaseModel):
             "and agent_skill fusion only; the episode hybrid path "
             "has built-in fact eviction and ignores this flag. "
             "Ignored by keyword / vector / agentic."
+        ),
+    )
+    images: list[QuestionPicture] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Pictures that are part of the question. They are shown to a "
+            "multi-round decider on every round; they create no memory and no "
+            "reference. Routes that cannot use them ignore them."
         ),
     )
     filters: FilterNode | None = None

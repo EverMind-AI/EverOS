@@ -28,7 +28,7 @@ The manager never writes to storage; it only reads LanceDB + markdown.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
@@ -208,7 +208,18 @@ class SearchManager:
 
     # ── Public entry ────────────────────────────────────────────────
 
-    async def search(self, req: SearchRequest) -> SearchResponse:
+    async def search(
+        self, req: SearchRequest, *, question_image_ids: Sequence[str] = ()
+    ) -> SearchResponse:
+        """Answer one search request.
+
+        Args:
+            req: The request.
+            question_image_ids: Content hashes of the pictures the question
+                carries, already stored by the caller. Only the multi-round
+                route uses them (it shows them to the decider every round);
+                the others rank nothing they would inform and ignore them.
+        """
         request_id = resolve_request_id()
         with memory_span(
             "everos.memory.search",
@@ -243,7 +254,9 @@ class SearchManager:
 
             if req.owner_type == "user":
                 (episodes, images), profiles, unprocessed = await asyncio.gather(
-                    self._search_episodes(req, where),
+                    self._search_episodes(
+                        req, where, question_image_ids=question_image_ids
+                    ),
                     self._fetch_profile(req),
                     self._load_unprocessed(req),
                 )
@@ -382,6 +395,7 @@ class SearchManager:
         where: Filter,
         *,
         decider: RoundDecider | None = None,
+        question_image_ids: Sequence[str] = (),
     ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
         """User-track retrieval: the episodes and the pictures ranked with them."""
         if req.method == SearchMethod.AGENTIC:
@@ -424,6 +438,7 @@ class SearchManager:
                 trace_path_source=self._trace_path_source,
                 image_recaller=self._images,
                 image_store=self._image_store,
+                question_image_ids=question_image_ids,
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
