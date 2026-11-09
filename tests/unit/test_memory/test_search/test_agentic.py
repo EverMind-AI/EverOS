@@ -6,6 +6,7 @@ are wired correctly, plus a shaping test to verify id remapping.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,10 +17,11 @@ from everalgo.rank.protocols import AgenticDecision
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
 
+from everos.component.rerank import RerankResult
 from everos.component.tokenizer import Tokenizer
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import Cluster as DomainCluster
-from everos.memory.ports import Scope
+from everos.memory.ports import Comparison, Scope
 from everos.memory.search.agentic import _with_doc_metadata, search_episodes_agentic
 from everos.memory.search.dto import SearchEpisodeItem
 from everos.memory.search.recall import AtomicFactRecaller, EpisodeRecaller
@@ -378,3 +380,88 @@ async def test_cross_encoder_scores_the_episode_text(
         )
 
     assert passages == ["body ep_1"]
+
+
+@pytest.mark.parametrize("size", [999, 1000, 1001])
+@pytest.mark.parametrize("sufficient", [True, False])
+async def test_large_cluster_bounds_rerank_without_losing_top_recall(
+    size: int,
+    sufficient: bool,
+) -> None:
+    """Run real cluster/agentic algorithms; fake only storage and model ports.
+
+    The best recall is stored last, so slicing the expanded storage order
+    would lose it. Ordinary clusters retain every member, including at the cap.
+    """
+    records = [stored_episode(f"ep_{i}") for i in range(size)]
+    ranked = [hit(record, 1.0 / (i + 1)) for i, record in enumerate(reversed(records))]
+    index = ScriptedIndex(
+        sparse=ranked,
+        subject=ranked,
+        found=[hit(record) for record in records],
+        filter_found=True,
+    )
+    target = records[-1].item.episode
+    batches: list[list[str]] = []
+
+    class Reranker:
+        async def rerank(self, query, passages, *, instruction=None):
+            batches.append(list(passages))
+            order = sorted(range(len(passages)), key=lambda i: passages[i] != target)
+            return [
+                RerankResult(index=i, score=1.0 / (rank + 1))
+                for rank, i in enumerate(order)
+            ]
+
+    replies = [
+        json.dumps(
+            {
+                "is_sufficient": sufficient,
+                "reasoning": "fixture",
+                "key_information_found": [],
+                "missing_information": [],
+            }
+        )
+    ]
+    if not sufficient:
+        replies.append(
+            json.dumps({"queries": ["more relevant detail"], "reasoning": "fixture"})
+        )
+
+    async def embed(query: str) -> list[float]:
+        return [0.1] * 4
+
+    from structlog.testing import capture_logs
+
+    with capture_logs() as logs:
+        result = await search_episodes_agentic(
+            "find relevant episode",
+            owner_id="alice",
+            where=Comparison("owner_id", "eq", "alice"),
+            episode_recaller=EpisodeRecaller(_deps(), index),
+            atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
+            cluster_store=_StubClusterStore(
+                [
+                    Cluster(
+                        id="large",
+                        members=[record.ref.entry_id for record in records],
+                        centroid=np.zeros(4, dtype=np.float32),
+                        last_ts=0,
+                    )
+                ]
+            ),
+            embed_query_fn=embed,
+            reranker=Reranker(),
+            llm=FakeLLMClient(responses=replies),
+            top_k=5,
+        )
+
+    assert len(result) == 5 and result[0].id == records[-1].ref.id
+    assert len(batches) == (1 if sufficient else 2)
+    assert len(batches[0]) == (size if size <= 1000 else 50)
+    assert target in batches[0]
+    if not sufficient:
+        assert len(batches[1]) == 40
+    assert any(log["event"] == "agentic_cluster_expansion_capped" for log in logs) == (
+        size > 1000
+    )

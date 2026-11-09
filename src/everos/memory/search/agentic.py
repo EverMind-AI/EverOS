@@ -1,4 +1,4 @@
-"""Episode AGENTIC cluster-path orchestration — 1:1 with everalgo benchmark.
+"""Episode AGENTIC cluster-path orchestration with a large-cluster guard.
 
 Implements the cluster main path from ``benchmarks/common/stages/search.py``
 (``enable_cluster_retrieval=True``):
@@ -10,6 +10,7 @@ Implements the cluster main path from ``benchmarks/common/stages/search.py``
 
 Hyperparameters match benchmark ``config.py`` defaults and are frozen as
 module-level constants — no env/TOML knobs at this layer.
+Oversized cluster expansions fall back to bounded hybrid recall before rerank.
 
 id contract: candidates flowing through the pipeline are episodes keyed
 by ``entry_id`` (the MaxSim parent fetch and the cluster corpus both key
@@ -56,6 +57,9 @@ _SPARSE_CANDIDATES: int = 50
 _HYBRID_RRF_K: int = 40
 _CLUSTER_BASE_CANDIDATES: int | None = None
 _CLUSTER_TOP_K: int = 10
+_CLUSTER_EXPANSION_LIMIT: int = 1000
+# A generous work ceiling (20x the usual first-round recall size). Beyond it,
+# use relevance-ranked hybrid recall instead of scoring an entire giant cluster.
 _ROUND1_TOP_N: int = 50
 _ROUND1_RERANK_TOP_N: int = 10
 _ROUND2_CAP: int = 40
@@ -92,7 +96,7 @@ async def search_episodes_agentic(
     top_k: int,
     radius: float | None = None,
 ) -> list[SearchEpisodeItem]:
-    """Episode AGENTIC search via cluster-scoped MaxSim — 1:1 with benchmark.
+    """Episode AGENTIC search via cluster-scoped MaxSim with bounded rerank work.
 
     Args:
         query: User search query.
@@ -201,11 +205,11 @@ async def search_episodes_agentic(
     ]
 
     # 6. cluster_scoped: narrows hybrid_full to top-K cluster member expansions.
-    async def cluster_scoped(q: str, _k: int) -> list[Candidate]:
+    async def cluster_scoped(q: str, k: int) -> list[Candidate]:
         # No recall span here: cluster_scoped delegates to hybrid_full, which
         # owns the recall span (and does the embedding). Wrapping it too
         # produced a duplicate, same-name everos.search.recall nested in itself.
-        return await acluster_retrieve(
+        candidates = await acluster_retrieve(
             q,
             base_retrieve=hybrid_full,
             base_candidates=_CLUSTER_BASE_CANDIDATES,
@@ -213,6 +217,16 @@ async def search_episodes_agentic(
             all_docs=all_docs,
             cluster_top_k=_CLUSTER_TOP_K,
         )
+        if len(candidates) > _CLUSTER_EXPANSION_LIMIT:
+            logger.warning(
+                "agentic_cluster_expansion_capped",
+                expanded_count=len(candidates),
+                limit=_CLUSTER_EXPANSION_LIMIT,
+            )
+            # Cluster expansion is in storage order, so a slice can discard the
+            # best hit. Reuse the normal relevance-ranked, scoped recall path.
+            return await hybrid_full(q, k)
+        return candidates
 
     # 7. Cross-encoder rerank fn (2-arg RerankFn, no internal truncation).
     rerank_fn = build_rerank_fn(
