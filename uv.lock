@@ -685,7 +685,7 @@ requires-dist = [
     { name = "textual", specifier = ">=8.2.7" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
-    { name = "watchdog", specifier = ">=4.0.0" },
+    { name = "watchdog", specifier = ">=4.0.0,<7" },
     { name = "watchfiles", specifier = ">=0.21.0" },
 ]
 provides-extras = ["multimodal", "otel", "milvus"]

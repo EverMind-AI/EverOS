@@ -53,6 +53,9 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- Keep fresh installs on `watchdog<7`, matching the tested event semantics;
+  watchdog 7.1 can stop recursive Linux file notifications under
+  `PYTHONWARNINGS=error` when nested directories are created concurrently.
 - The filesystem watcher subscribes only to changes it handles, excluding
   file-open/close notifications that could overflow Linux's inotify queue
   during read-heavy searches and delay markdown indexing.

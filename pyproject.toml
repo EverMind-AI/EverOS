@@ -54,7 +54,9 @@ dependencies = [
 
     # Markdown / file system
     "PyYAML>=6.0",                # YAML frontmatter parsing
-    "watchdog>=4.0.0",            # Cross-platform file system events (cascade daemon)
+    # 7.x changes event semantics and can kill recursive inotify delivery
+    # under warnings=error. Keep installs on the supported, lock-tested line.
+    "watchdog>=4.0.0,<7",         # Cross-platform file system events (cascade daemon)
 
     # Web framework (entrypoints/api)
     "fastapi>=0.104.0",
