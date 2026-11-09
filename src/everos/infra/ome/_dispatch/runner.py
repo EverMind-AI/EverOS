@@ -25,6 +25,7 @@ import traceback
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
+from everos.core.concurrency import ConcurrencySlot
 from everos.core.observability.logging import bound_log_context, get_logger
 from everos.core.observability.tracing import memory_span, use_traceparent
 from everos.core.utils.datetime import get_utc_now
@@ -69,7 +70,9 @@ class Runner:
         """Execute ``meta.func(event, ctx)`` with the attempt retry loop.
 
         ``engine_sem`` is held per *attempt*, not across the whole retry
-        chain: the backoff sleep happens outside it. The cap exists to
+        chain: backoff and cooperative partition-lock waits return their
+        capacity. A partition waiter reclaims capacity before its critical
+        section. The cap exists to
         bound concurrent strategy work — LLM calls, embeddings, storage
         IO — and a coroutine sleeping between attempts consumes none of
         that. Holding the slot across the sleep turned a partial outage
@@ -95,7 +98,7 @@ class Runner:
             if attempt > 0:
                 await self._sleep_backoff(attempt)
                 current_run_id = uuid4().hex
-            async with self._sem:
+            async with ConcurrencySlot(self._sem) as slot:
                 terminated = await self._run_one_attempt(
                     meta=meta,
                     event=event,
@@ -105,6 +108,7 @@ class Runner:
                     event_payload=event_payload,
                     max_retries_snapshot=max_retries_snapshot,
                     traceparent=traceparent,
+                    slot=slot,
                 )
             if terminated:
                 return
@@ -137,6 +141,7 @@ class Runner:
         event_payload: str,
         max_retries_snapshot: int,
         traceparent: str | None = None,
+        slot: ConcurrencySlot,
     ) -> bool:
         """Run one attempt; return ``True`` if a terminal state was
         written (success / dead-letter or persistence failure), ``False``
@@ -196,9 +201,14 @@ class Runner:
                 finally:
                     _CURRENT_STRATEGY.reset(token)
             except StrategyContractError as e:
+                await slot.acquire()
                 await self._terminate_dead_letter(current_run_id, _format_error(e))
                 return True
             except Exception as e:
+                # A timeout can cancel a partition wait while its execution
+                # slot is returned. Reclaim capacity after all strategy locks
+                # have unwound, before opening a connection for failure state.
+                await slot.acquire()
                 err = _format_error(e)
                 if attempt < max_retries_snapshot:
                     await self._rec.mark_failed(

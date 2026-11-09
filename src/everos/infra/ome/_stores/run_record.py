@@ -1,13 +1,11 @@
-"""RunRecord persistence — state machine writes + same-transaction ring-buffer trim.
+"""RunRecord persistence — state machine writes + completed-attempt history.
 
 State machine (one row per ``run_id``):
     RUNNING  →  SUCCESS / FAILED / DEAD_LETTER / CRASHED
 
-Every :meth:`RunRecordStore.mark_running` INSERT runs inside one
-``BEGIN IMMEDIATE`` transaction with a paired DELETE that keeps only
-the newest ``max_records_per_strategy`` rows for that strategy. Bound
-is enforced atomically — no background sweeper, no transient
-over-budget state.
+RUNNING rows are recovery state and never count toward the history limit.
+Every status update atomically keeps the most recently finished
+``max_records_per_strategy`` attempts for that strategy, including FAILED.
 """
 
 from __future__ import annotations
@@ -42,8 +40,8 @@ class RunRecordStore:
         max_retries_snapshot: int,
         event_id: str,
     ) -> None:
-        """Insert a new RUNNING row and trim the strategy's ring buffer atomically."""
-        async with self._storage.transaction() as conn:
+        """Insert a recoverable RUNNING row, independent of the history limit."""
+        async with self._storage.write() as conn:
             await conn.execute(
                 "INSERT INTO run_record "
                 "(run_id, strategy_name, status, attempt, started_at, "
@@ -60,13 +58,6 @@ class RunRecordStore:
                     max_retries_snapshot,
                     event_id,
                 ),
-            )
-            await conn.execute(
-                "DELETE FROM run_record "
-                "WHERE strategy_name = ? AND run_id NOT IN ("
-                "  SELECT run_id FROM run_record WHERE strategy_name = ? "
-                "  ORDER BY started_at DESC LIMIT ?)",
-                (strategy_name, strategy_name, self._max),
             )
 
     async def mark_success(self, *, run_id: str, finished_at: datetime) -> None:
@@ -105,12 +96,29 @@ class RunRecordStore:
         error: str | None,
     ) -> None:
         payload = ", event_payload = ''" if status is RunStatus.SUCCESS else ""
-        async with self._storage.write() as conn:
+        async with self._storage.transaction() as conn:
             await conn.execute(
                 "UPDATE run_record "
                 f"SET status = ?, finished_at = ?, error = ?{payload} "
                 "WHERE run_id = ?",
                 (status.value, to_iso_format(finished_at), error, run_id),
+            )
+            await conn.execute(
+                "DELETE FROM run_record "
+                "WHERE status != ? AND strategy_name = ("
+                "  SELECT strategy_name FROM run_record WHERE run_id = ?) "
+                "AND run_id NOT IN ("
+                "  SELECT run_id FROM run_record "
+                "  WHERE status != ? AND strategy_name = ("
+                "    SELECT strategy_name FROM run_record WHERE run_id = ?) "
+                "  ORDER BY finished_at DESC, run_id DESC LIMIT ?)",
+                (
+                    RunStatus.RUNNING.value,
+                    run_id,
+                    RunStatus.RUNNING.value,
+                    run_id,
+                    self._max,
+                ),
             )
 
     async def get(self, run_id: str) -> RunRecord | None:

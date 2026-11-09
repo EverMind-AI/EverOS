@@ -91,9 +91,7 @@ async def test_mark_dead_letter(store: RunRecordStore) -> None:
 
 @pytest.mark.asyncio
 async def test_ring_buffer_caps_strategy_records(store: RunRecordStore) -> None:
-    """Trim runs inside the same transaction as each ``mark_running``
-    insert; the per-strategy row count never exceeds the cap.
-    """
+    """Completed history is bounded as each attempt finishes."""
     for i in range(5):
         await store.mark_running(
             run_id=f"r{i}",
@@ -104,6 +102,7 @@ async def test_ring_buffer_caps_strategy_records(store: RunRecordStore) -> None:
             max_retries_snapshot=1,
             event_id="evt_test",
         )
+        await store.mark_success(run_id=f"r{i}", finished_at=get_now_with_timezone())
         listed = await store.list_runs(strategy_name="s")
         assert len(listed) <= 3  # never transiently above cap
 
@@ -258,3 +257,44 @@ def test_only_a_success_row_may_have_no_payload() -> None:
     RunRecord(**fields, status=RunStatus.SUCCESS, finished_at=now)
     with pytest.raises(ValueError, match="must keep its event_payload"):
         RunRecord(**fields, status=RunStatus.RUNNING)
+
+
+async def test_running_attempts_survive_history_limit(store: RunRecordStore) -> None:
+    for i in range(6):
+        await _running(store, f"r{i}")
+    assert {r.run_id for r in await store.find_running()} == {f"r{i}" for i in range(6)}
+    for i in range(6):
+        await store.mark_success(run_id=f"r{i}", finished_at=get_now_with_timezone())
+        assert len(await store.find_running()) == 5 - i
+    assert {r.run_id for r in await store.list_runs(strategy_name="s")} == {
+        "r3",
+        "r4",
+        "r5",
+    }
+
+
+@pytest.mark.parametrize(
+    "finish", ["mark_success", "mark_failed", "mark_dead_letter", "mark_crashed"]
+)
+async def test_history_trims_finished_attempts_without_pruning_live_rows(
+    store: RunRecordStore,
+    finish: str,
+) -> None:
+    await _running(store, "old_but_running")
+    for i in range(5):
+        run_id = f"recent_{i}"
+        await _running(store, run_id)
+        kwargs = {} if finish == "mark_success" else {"error": "test"}
+        await getattr(store, finish)(
+            run_id=run_id, finished_at=get_now_with_timezone(), **kwargs
+        )
+    assert [r.run_id for r in await store.find_running()] == ["old_but_running"]
+    history = await store.list_runs(strategy_name="s")
+    assert len(history) == 4  # three completed + one live
+    await store.mark_dead_letter(
+        run_id="old_but_running",
+        finished_at=get_now_with_timezone(),
+        error="last to finish",
+    )
+    assert (await store.get("old_but_running")).status == RunStatus.DEAD_LETTER
+    assert len(await store.list_runs(strategy_name="s")) == 3
