@@ -83,7 +83,12 @@ async def test_sync_add_without_backlog_runs_inline_and_keeps_old_body(
     assert resp.status_code == 200
     data = resp.json()
     assert set(data) == {"request_id", "data"}
-    assert data["data"] == {"message_count": 1, "status": "extracted"}
+    assert data["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "failed_permanent": 0,
+        "failed_retryable": 0,
+    }
     assert queue.enqueued == []
     ((payload, is_final, defer),) = fake_memorize.calls
     assert (is_final, defer) == (False, False)
@@ -151,7 +156,12 @@ async def test_async_mode_without_worker_runs_synchronously(
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"message_count": 1, "status": "extracted"}
+    assert resp.json()["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "failed_permanent": 0,
+        "failed_retryable": 0,
+    }
     assert len(fake_memorize.calls) == 1
 
 
@@ -175,7 +185,11 @@ async def test_sync_flush_without_backlog_keeps_old_body(
     resp = await client.post("/api/v2/memory/flush", json={"session_id": "s1"})
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"status": "extracted"}
+    assert resp.json()["data"] == {
+        "status": "extracted",
+        "failed_permanent": 0,
+        "failed_retryable": 0,
+    }
     ((_, is_final, _),) = fake_memorize.calls
     assert is_final is True
 
@@ -300,7 +314,12 @@ async def test_async_mode_is_ignored_when_queue_is_not_accepting(
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"message_count": 1, "status": "extracted"}
+    assert resp.json()["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "failed_permanent": 0,
+        "failed_retryable": 0,
+    }
     assert queue.enqueued == []
 
 

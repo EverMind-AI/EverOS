@@ -48,6 +48,7 @@ from .parsed import ParsedMarkdown as ParsedMarkdown
 from .path_safety import sanitize_dirname as sanitize_dirname
 from .reader import MarkdownReader as MarkdownReader
 from .writer import MarkdownWriter as MarkdownWriter
+from .writes import collect_md_writes as collect_md_writes
 
 __all__ = [
     "AgentScopedFrontmatter",
@@ -65,6 +66,7 @@ __all__ = [
     "SkillPathMixin",
     "StructuredEntry",
     "UserScopedFrontmatter",
+    "collect_md_writes",
     "dump_frontmatter",
     "find_entry",
     "parse_frontmatter",

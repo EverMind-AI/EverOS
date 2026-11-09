@@ -20,9 +20,11 @@ Each cycle:
    Each consumed inline attempt is persisted on the row before its
    backoff sleep, so a restart inside the ladder keeps the budget
    rather than restarting it (#549).
-5. On any other exception: ``mark_failed(retryable=False)`` (treated
-   as unrecoverable, surfaces in ``cascade fix`` for the user to
-   triage by editing the md).
+5. On any other exception: one attempt, then
+   ``mark_failed(retryable=False)`` (unrecoverable). ``retry_count``
+   records that attempt. The ledger will not re-queue the row while
+   its mtime is unchanged — recovery is an edit, ``cascade sync
+   --path``, or ``cascade rebuild``, not another watcher event.
 
 Before step 2, a row whose ``retry_count`` has already reached
 :data:`MAX_TOTAL_RETRIES` (across scanner re-enqueue cycles, not just
@@ -484,10 +486,15 @@ class CascadeWorker:
             except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 self._unrecoverable_total += 1
+                # One attempt counts. The row is terminal, and a later
+                # enqueue of the same mtime is refused, so this failure
+                # is not logged again until the file actually changes.
+                retry_count += 1
                 logger.exception(
                     "cascade_worker_unrecoverable",
                     md_path=row.md_path,
                     kind=row.kind,
+                    retry_count=retry_count,
                     unrecoverable_total=self._unrecoverable_total,
                 )
                 await self._write_terminal(
