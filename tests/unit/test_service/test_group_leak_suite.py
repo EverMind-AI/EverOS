@@ -14,7 +14,10 @@ section names:
 and records placed around those times: episodes inside, outside and
 straddling windows, a picture memory from before the late joiner, a later
 episode that refers to it, buffered messages before and after the join, and a
-personal episode and profile of ``u_chen``.
+personal episode and profile of ``u_chen``. Cases that need more seed their
+own: member-in-group profile items on both sides of a window, a scene spanning
+a member's absence, agent cases learned in this and another group, and the
+group write path with its strategies.
 
 Every case asserts the record is absent from search (keyword, vector,
 hybrid and the multi-round decider's very input), get, attached pictures,
@@ -37,7 +40,15 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import ForbiddenError
 from everos.entrypoints.api.app import create_app
-from everos.memory.ports import SessionKey
+from everos.memory.models import (
+    AgentCase,
+    ExplicitInfoItem,
+    MemberProfile,
+    Profile,
+    Scene,
+)
+from everos.memory.ports import NoSourceCheck, Scope, SessionKey
+from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import GetRequest, SearchRequest
 from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
@@ -46,9 +57,6 @@ NOT_YET: dict[int, str] = {
     6: "history route: not built yet (2.0 history); reads go through visible()",
     8: "group forget / undo / revise / delete: refused with 422 until Step 2",
     9: "knowledge reads by project members: Step 2 (task 17)",
-    11: "group strategies: no group write path yet; group cells reach no "
-    "one-to-one pipeline (tests/unit/test_service/test_memorize_groups.py)",
-    12: "group-sourced agent cases: no agent pipeline runs on group cells yet",
     13: "MCP: a separate package (everos-mcp) forwarding the HTTP API",
 }
 """Rows of section 9.3 this suite cannot exercise yet, and why."""
@@ -338,7 +346,236 @@ async def test_group_forget_and_delete_are_refused(fixture: _Fixture) -> None:
         assert refused.status_code == 422, (path, refused.text)
 
 
+def _member_profile(member: str, *items: tuple[str, int, int]) -> MemberProfile:
+    return MemberProfile(
+        group_id="trip",
+        member_id=member,
+        profile=Profile(
+            owner_id=member,
+            summary=f"summary marker of {member}",
+            timestamp=T0 + 9_000,
+            explicit_info=[
+                ExplicitInfoItem(
+                    description=text,
+                    category="plans",
+                    item_id=f"pi_{start}",
+                    source_memcell_ids=[f"mc_{start}"],
+                    source_start=T0 + start,
+                    source_end=T0 + end,
+                )
+                for text, start, end in items
+            ],
+        ),
+    )
+
+
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+async def test_profile_items_outside_the_window_never_attach(
+    fixture: _Fixture, asker: str
+) -> None:
+    """Row 4 and section 13.5: a profile item whose source is invisible."""
+    world = fixture.world
+    early, late = "early profile marker Lisbon", "late profile marker Lisbon"
+    await world.stores.member_profile.write(
+        world.scope("trip"),
+        _member_profile("u_chen", (early, 1000, 2000), (late, 8000, 9000)),
+    )
+    await world.project()
+    # The query names Chen, so his profile is attached for every asker.
+    response = await world.memory.search(
+        _search("keyword", group_id="trip", asker_id=asker).model_copy(
+            update={"query": "What does u_chen plan in Lisbon?"}
+        )
+    )
+    listed = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id=asker,
+            memory_type="member_profile",
+            member_id="u_chen",
+        )
+    )
+    for blob in (
+        _everything_text(response),
+        json.dumps(listed.model_dump(mode="json")),
+    ):
+        for text, (start, end) in ((early, (1000, 2000)), (late, (8000, 9000))):
+            seen = text in blob
+            assert seen == _visible(asker, T0 + start, T0 + end), (asker, text)
+        # The summary is written over both items: only an asker who sees both.
+        both = _visible(asker, T0 + 1000, T0 + 2000) and _visible(
+            asker, T0 + 8000, T0 + 9000
+        )
+        assert ("summary marker" in blob) == both
+
+
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+@pytest.mark.parametrize("method", ["keyword", "hybrid", "llm_multiround"])
+async def test_a_scene_reaches_only_askers_who_see_all_its_episodes(
+    fixture: _Fixture, asker: str, method: str
+) -> None:
+    """Section 9.1: a record with several sources is visible only if all are."""
+    world = fixture.world
+    text = "scene marker plan Lisbon offsite story"
+    await world.stores.scene.append(
+        world.scope("trip"),
+        Scene(
+            owner_id="trip",
+            scene_id="cl_leak",
+            version=1,
+            member_ids=["gep_a", "gep_b"],
+            subject="Lisbon offsite",
+            summary=text,
+            narrative=text,
+            timestamp=T0 + 9_000,
+            source_start=T0 + 1_000,
+        ),
+        supersedes=None,
+        only_if=NoSourceCheck(),
+    )
+    await world.project()
+    fixture.decider.prompts.clear()
+    # No session filter: a scene spans episodes and belongs to no session.
+    response = await world.memory.search(
+        _search(method, group_id="trip", asker_id=asker).model_copy(
+            update={"filters": None}
+        )
+    )
+    visible = _visible(asker, T0 + 1_000, T0 + 9_000)
+    assert (text in _everything_text(response)) == visible, (asker, method)
+    if not visible:
+        assert text not in "\n".join(fixture.decider.prompts)
+    listed = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id=asker,
+            memory_type="scene",
+        )
+    )
+    assert bool(listed.data.scenes) == visible
+
+
+async def test_an_agent_case_from_another_group_stays_there(fixture: _Fixture) -> None:
+    """Row 12 and section 13.5: an agent case from another group."""
+    world = fixture.world
+    agent = Scope(
+        app_id=APP, project_id=PROJECT, owner_id="bot_ava", owner_type="agent"
+    )
+    for group, intent in (
+        ("trip", "trip case marker Lisbon"),
+        ("other", "other case marker Lisbon"),
+    ):
+        await world.stores.agent_case.append(
+            agent,
+            AgentCase(
+                owner_id="bot_ava",
+                task_intent=intent,
+                approach="Steps.",
+                quality_score=0.9,
+                timestamp=T0 + 1_000,
+                session_id=f"s_{group}",
+                parent_id=f"mc_{group}",
+                source_group_id=group,
+            ),
+            only_if=NoSourceCheck(),
+        )
+    await world.project()
+
+    def search(**scope: Any) -> SearchRequest:
+        return SearchRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            agent_id="bot_ava",
+            query="case marker Lisbon",
+            method="keyword",
+            **scope,
+        )
+
+    in_trip = _everything_text(
+        await world.memory.search(search(context_group_id="trip", asker_id="u_chen"))
+    )
+    assert "trip case marker" in in_trip and "other case marker" not in in_trip
+    plain = _everything_text(await world.memory.search(search()))
+    assert "case marker" not in plain
+    with pytest.raises(ForbiddenError):
+        await world.memory.search(search(context_group_id="trip", asker_id="u_zoe"))
+
+
+async def test_group_strategies_read_only_the_groups_own_segments(
+    tmp_path: Path,
+) -> None:
+    """Row 11: group strategies read only the group's segments, member
+    profiles never read ``users/<m>/``, personal strategies never see a group
+    segment."""
+
+    def model(messages: Any, *, response_format: type, **_kw: Any) -> str:
+        name = response_format.__name__
+        if name == "_BatchReply":
+            return json.dumps(
+                {"reasoning": "s", "boundaries": [], "tail_complete": False}
+            )
+        if name == "_EpisodeReply":
+            return json.dumps({"title": "Plan", "summary": "Plan.", "content": "Plan."})
+        if name == "_ProfileItems":
+            prompt = "\n".join(str(m.content) for m in messages)
+            assert "personal marker" not in prompt
+            return json.dumps(
+                {
+                    "explicit_info": [
+                        {"evidence": "x", "description": "Plans", "category": "plans"}
+                    ],
+                    "implicit_traits": [],
+                }
+            )
+        raise AssertionError(name)
+
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        await world.roster("trip", [join("u_chen", T0), join("u_betty", T0)])
+        await world.personal_episode("u_chen", "personal marker Porto", at=T0 + 100)
+        await world.profile("u_chen", "personal marker Chen lives in Porto")
+        user_md = next((tmp_path / "default_app").rglob("user.md"))
+        before = user_md.read_bytes()
+        await world.memory.add(
+            {"session_id": "s_group", "app_id": APP, "project_id": PROJECT,
+             "group_id": "trip",
+             "messages": [
+                 {"sender_id": "u_chen", "role": "user", "timestamp": T0 + 1_000,
+                  "content": "group marker: book the venue"},
+                 {"sender_id": "u_betty", "role": "user", "timestamp": T0 + 2_000,
+                  "content": "group marker: ok"},
+             ]},
+            request_id="r",
+            async_mode=False,
+            defer_extraction=True,
+        )  # fmt: skip
+        await world.memory.flush(
+            session_id="s_group", request_id="f", app_id=APP, project_id=PROJECT
+        )
+        await world.run(*STRATEGY_SPECS)
+        kinds = {type(e).__name__ for e in world.bus.events}
+        assert not kinds & {"UserPipelineStarted", "EpisodeExtracted"}
+        group_cells = {
+            e.memcell_id
+            for e in world.bus.events
+            if type(e).__name__ == "GroupEpisodeExtracted"
+        }
+        for member in ("u_chen", "u_betty"):
+            profile = await world.stores.member_profile.read(
+                world.scope("trip"), member
+            )
+            assert profile is not None
+            for item in profile.profile.explicit_info:
+                assert (
+                    set((item.model_extra or {})["source_memcell_ids"]) <= group_cells
+                )
+        assert user_md.read_bytes() == before
+
+
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:
-    covered = {1, 2, 3, 4, 5, 7, 10}
+    covered = {1, 2, 3, 4, 5, 7, 10, 11, 12}
     assert covered | set(NOT_YET) == set(range(1, 14))
     assert not covered & set(NOT_YET)
