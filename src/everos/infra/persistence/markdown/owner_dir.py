@@ -40,6 +40,7 @@ from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
     ForesightWriter,
+    ImageMemoryWriter,
 )
 from .stores import owner_lock
 
@@ -67,6 +68,7 @@ class MarkdownOwnerDirStore:
                 "episode": EpisodeWriter(root),
                 "atomic_fact": AtomicFactWriter(root),
                 "foresight": ForesightWriter(root),
+                "image_memory": ImageMemoryWriter(root),
             },
             "agent": {"agent_case": AgentCaseWriter(root)},
         }

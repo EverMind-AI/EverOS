@@ -20,7 +20,14 @@ from everos.core.locks import LOCKS
 from everos.infra.persistence.factories import build_stores
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory.deps import Stores
-from everos.memory.models import AgentCase, AtomicFact, Episode, MemcellRecord, Profile
+from everos.memory.models import (
+    AgentCase,
+    AtomicFact,
+    Episode,
+    ImageMemory,
+    MemcellRecord,
+    Profile,
+)
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, SessionKey
 from everos.service.memory._delete import Deleter
 from tests.fakes.storage import Storage
@@ -268,6 +275,57 @@ async def test_owners_from_memcell_senders_users_and_agents(
     assert len(erased[("user", "u1")]["episode"]) == 1
     assert len(erased[("agent", "a1")]["agent_case"]) == 1
     assert await stores.memcell.find_by_ids(["mc_p_s1"]) == []
+
+
+def _picture(owner: str, session: str, project: str = "p") -> ImageMemory:
+    return ImageMemory(
+        owner_id=owner,
+        description=f"what {owner} was shown in {session}",
+        timestamp=_TS,
+        image_id="ab" * 32,  # the same file in every session
+        name="IMG_1.jpg",
+        session_id=session,
+        parent_id=f"mc_{project}_{session}",
+    )
+
+
+async def test_session_delete_removes_its_picture_memories(
+    stores: Stores, eraser: _RecordingEraser
+) -> None:
+    """A deleted session takes its picture memories with it, from the files
+    and from the index; another session's memory of the same file stays."""
+    for session in ("s1", "s2"):
+        await _seed(stores, session)
+        await stores.image_memory.append(
+            _user("u1"), _picture("u1", session), only_if=NO_SOURCE_CHECK
+        )
+
+    result = await _delete(_deleter(stores, eraser), session_id="s1")
+
+    assert result.count == 6  # u1: ep + fact + picture, u2: ep + fact, a1: case
+    erased = {(s.owner_type, s.owner_id): ids for s, ids in eraser.erased}
+    assert len(erased[("user", "u1")]["image_memory"]) == 1
+    assert await stores.image_memory.entries_for_session(_user("u1"), "s1") == []
+    assert len(await stores.image_memory.entries_for_session(_user("u1"), "s2")) == 1
+
+
+async def test_retry_finds_an_owner_left_with_only_pictures(
+    storage: Storage, stores: Stores, eraser: _RecordingEraser
+) -> None:
+    """A retry after the SQLite step: an owner whose only trace of the session
+    is a picture memory is still found by the scan of the files."""
+    await _seed(stores, "s1")
+    await stores.image_memory.append(
+        _user("u3"), _picture("u3", "s1"), only_if=NO_SOURCE_CHECK
+    )
+    await stores.session_purge.purge(
+        SessionKey(app_id="a", project_id="p", session_id="s1")
+    )
+
+    result = await _delete(_deleter(stores, eraser), session_id="s1")
+
+    assert result.count == 6
+    assert await _entries(storage, "user", "u3") == 0
 
 
 async def test_owners_found_by_scan_when_memcells_are_gone(

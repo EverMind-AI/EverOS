@@ -18,12 +18,20 @@ from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
+    MarkdownImageMemoryStore,
     MarkdownOwnerDirStore,
     MarkdownProfileStore,
     MarkdownReader,
 )
 from everos.infra.persistence.markdown import owner_dir as owner_dir_module
-from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode, Profile
+from everos.memory.models import (
+    AgentCase,
+    AgentSkill,
+    AtomicFact,
+    Episode,
+    ImageMemory,
+    Profile,
+)
 from everos.memory.ports import NO_SOURCE_CHECK, Scope
 
 _TS = 1_747_216_800_000
@@ -99,6 +107,36 @@ async def test_owner_delete_counts_and_keeps_today_counter(root: MemoryRoot) -> 
     )
     assert new.entry_id not in old and new.entry_id.endswith("04")
     assert not list(root.tmp_dir.glob("delete-*"))
+
+
+def _picture() -> ImageMemory:
+    return ImageMemory(
+        owner_id="u1",
+        description="d",
+        timestamp=_TS,
+        image_id="ab" * 32,
+        session_id="s1",
+        parent_id="mc_1",
+    )
+
+
+async def test_owner_delete_inventories_picture_memories(root: MemoryRoot) -> None:
+    """The owner's picture memories are in the deletion's refs, so their index
+    rows go with the rest, and today's picture log keeps its id counter."""
+    pictures = MarkdownImageMemoryStore(root)
+    old = await pictures.append_many(
+        _user(), [_picture(), _picture()], only_if=NO_SOURCE_CHECK
+    )
+
+    deletion = await MarkdownOwnerDirStore(root).delete(_user())
+
+    assert [r.entry_id for r in deletion.refs["image_memory"]] == [
+        r.entry_id for r in old
+    ]
+    assert deletion.count == 2
+    (new,) = await pictures.append_many(_user(), [_picture()], only_if=NO_SOURCE_CHECK)
+    assert new.entry_id not in {r.entry_id for r in old}
+    assert new.entry_id.endswith("03")
 
 
 async def test_agent_owner_delete_counts_skill_dirs(root: MemoryRoot) -> None:

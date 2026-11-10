@@ -190,6 +190,10 @@ class Deleter:
             "episode": await stores.episode.remove_session(scope, session_id),
             "atomic_fact": await stores.atomic_fact.remove_session(scope, session_id),
             "foresight": await stores.foresight.remove_session(scope, session_id),
+            # A picture memory names its session like the kinds above. Left out,
+            # a deleted session kept its pictures searchable with no memcell
+            # behind them, and re-sending the session added a second copy.
+            "image_memory": await stores.image_memory.remove_session(scope, session_id),
         }
 
     async def _owner(self, scope: Scope) -> int:

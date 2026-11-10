@@ -111,6 +111,11 @@ machinery that keeps a deleted memory from coming back.
   EverOS computes itself are now read back as milliseconds; the add API's own
   `timestamp` keeps accepting seconds.
 
+- **Deleting a session deletes its picture memories.** They name their
+  session like the other kinds but were left out, so a deleted session's
+  pictures stayed searchable with no memcell behind them, and re-sending the
+  session added a second copy. An owner delete inventories them too.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME
