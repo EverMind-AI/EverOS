@@ -28,6 +28,7 @@ import pytest
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.errors import ProviderNotConfiguredError
+from everos.memory.access import AccessPolicy
 from everos.memory.models import CanonicalMessage, Cluster, ImageMemory
 from everos.memory.ports import MemoryRef, Scope, SearchHit, SessionKey, Stored
 from everos.memory.search.dto import SearchMethod, SearchRequest
@@ -39,7 +40,12 @@ from everos.memory.search.recall import (
     EpisodeRecaller,
 )
 from everos.memory.search.recall.base import RecallerDeps
-from tests.fakes import static_trace_path, static_tuning, unscripted_llm
+from tests.fakes import (
+    InMemoryGroupStore,
+    static_trace_path,
+    static_tuning,
+    unscripted_llm,
+)
 
 from ._records import (
     ScriptedIndex,
@@ -175,6 +181,7 @@ def _build_manager(
     deps = RecallerDeps(tokenizer=_tokenizer())
     episodes = [*(episode_sparse or []), *(episode_dense or [])]
     return SearchManager(
+        access=AccessPolicy(InMemoryGroupStore()),
         episode_recaller=EpisodeRecaller(
             deps,
             ScriptedIndex(  # type: ignore[arg-type]
@@ -320,6 +327,7 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     """``compile_filters`` should pin owner_id / owner_type on the where."""
     index = ScriptedIndex(sparse=[_episode_row("ep_1")])
     mgr = SearchManager(
+        access=AccessPolicy(InMemoryGroupStore()),
         episode_recaller=EpisodeRecaller(RecallerDeps(tokenizer=_tokenizer()), index),  # type: ignore[arg-type]
         atomic_fact_recaller=MagicMock(),
         agent_case_recaller=MagicMock(),

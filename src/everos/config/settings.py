@@ -1026,6 +1026,18 @@ class KnowledgeSettings(BaseModel):
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
+class AccessSettings(BaseModel):
+    """Who is asking (``[access]``, docs/group-memory.md section 9.2).
+
+    EverOS trusts its caller. A deployment that serves several people puts a
+    gateway in front and names the header it sets here; the asker is then read
+    from that header and a request whose body ``asker_id`` disagrees is
+    refused (403). ``None`` (default): the body's ``asker_id`` is the asker.
+    """
+
+    identity_header: str | None = None
+
+
 class LoggingSettings(BaseModel):
     """``[logging]`` — the process's console log output.
 
@@ -1153,6 +1165,7 @@ class Settings(BaseSettings):
     images: ImagesSettings = ImagesSettings()
     extraction: ExtractionSettings = ExtractionSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    access: AccessSettings = AccessSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
 

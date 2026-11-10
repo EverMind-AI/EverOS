@@ -180,3 +180,36 @@ def _build_parent_to_episode_map(
             if pid:
                 parent_to_eps[pid].append(ep_id)
     return parent_to_eps
+
+
+class NoAtomicFacts(AtomicFactRecaller):
+    """The fact recall of a scope that has no atomic facts: a group's.
+
+    Atomic facts are one-to-one memory (and leave in 2.0); nothing writes one
+    for a group, and a group read must not query the atomic-fact table with a
+    group predicate either -- the table has no window columns to test. Every
+    recall answers empty, so each method's episode path runs unchanged.
+    """
+
+    def __init__(self) -> None:  # no index behind it
+        pass
+
+    async def sparse_recall(
+        self, query: str, where: Filter, *, limit: int
+    ) -> RecallResult[AtomicFact]:
+        return RecallResult.empty()
+
+    async def dense_recall(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> RecallResult[AtomicFact]:
+        return RecallResult.empty()
+
+    async def facts_for_episodes(
+        self,
+        ep_to_parents: Mapping[str, Sequence[str]],
+        where: Filter,
+        *,
+        per_episode: int,
+        query_vector: Sequence[float] | None = None,
+    ) -> FactsByEpisode:
+        return FactsByEpisode(buckets={}, stored_by_id={})

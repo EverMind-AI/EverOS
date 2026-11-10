@@ -1,4 +1,4 @@
-"""FastAPI dependencies: the application and the request id.
+"""FastAPI dependencies: the application, the request id and the asserted asker.
 
 Routes declare them in their signature through ``Depends`` rather than
 calling them on the ``Request``, so a test can swap the
@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from everos.config import load_settings
 from everos.core.observability.tracing import gen_request_id
 from everos.service import Application
 
@@ -31,3 +32,21 @@ ApplicationDep = Annotated[Application, Depends(application)]
 
 RequestIdDep = Annotated[str, Depends(extract_request_id)]
 """Route parameter type for the request id."""
+
+
+def asserted_asker(request: Request) -> str | None:
+    """The asker the gateway asserted, when ``[access] identity_header`` is set.
+
+    Read-only protocol translation: the header named in the settings, or
+    ``None`` when no header is configured or the request carries none. Whether
+    it agrees with the body's ``asker_id`` is the service's decision.
+    """
+    header = load_settings().access.identity_header
+    if not header:
+        return None
+    value = request.headers.get(header)
+    return value or None
+
+
+AskerHeaderDep = Annotated[str | None, Depends(asserted_asker)]
+"""Route parameter type for the gateway-asserted asker."""

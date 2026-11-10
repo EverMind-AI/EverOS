@@ -4,6 +4,14 @@ Hard partition by ``owner_type``:
 
 * ``user``  → ``episodes`` (+ ``profiles`` when ``include_profile=true``)
 * ``agent`` → ``agent_cases`` + ``agent_skills``
+* ``group`` → ``episodes`` and pictures of one or several groups, as one pool
+
+Every request first goes through the access policy
+(:mod:`everos.memory.access`): its read scope's predicate replaces the owner
+part of every recall's ``where``, so visibility is decided in the index query
+and no ranking -- the multi-round decider included -- sees a candidate the
+asker may not. A group scope recalls no atomic facts (there are none, and the
+fact table has no window columns) and attaches no personal profile.
 
 Per kind, :func:`memory.search.adapter.resolve_pipeline` decides whether
 the path is "single-route recall, no fusion" (``KEYWORD`` / ``VECTOR``)
@@ -37,7 +45,11 @@ from everalgo.rank.fusion import rrf
 from everos.config import load_settings
 from everos.config.settings import DeciderSettings
 from everos.core.context import resolve_request_id
-from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
+from everos.core.errors import (
+    ConfigurationError,
+    InvalidInputError,
+    ProviderNotConfiguredError,
+)
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
     capture_input,
@@ -47,6 +59,12 @@ from everos.core.observability.tracing import (
     memory_span,
 )
 from everos.core.utils.datetime import to_display_tz
+from everos.memory.access import (
+    AccessPolicy,
+    ReadScope,
+    ScopeRequest,
+    resolve_identity,
+)
 from everos.memory.models import CanonicalMessage, ImageMemory
 from everos.memory.ports import (
     ClusterStore,
@@ -71,9 +89,11 @@ from .dto import (
     SearchProfileItem,
     SearchRequest,
     SearchResponse,
+    SearchScope,
+    SearchWindow,
     UnprocessedMessageDTO,
 )
-from .filters import compile_filters
+from .filters import compile_scoped
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import (
     RoundDecider,
@@ -81,6 +101,7 @@ from .llm_multiround import (
 )
 from .recall import (
     KindRecaller,
+    NoAtomicFacts,
     RecallResult,
     maxsim_episode_recall,
     merge_by_id_max,
@@ -195,7 +216,10 @@ class SearchManager:
         trace_path_source: Callable[[], str | None],
         image_recaller: ImageMemoryRecaller | None = None,
         image_store: ImageStore | None = None,
+        access: AccessPolicy,
     ) -> None:
+        self._access = access
+        self._no_facts = NoAtomicFacts()
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
         self._ep = episode_recaller
@@ -222,7 +246,11 @@ class SearchManager:
     # ── Public entry ────────────────────────────────────────────────
 
     async def search(
-        self, req: SearchRequest, *, question_image_ids: Sequence[str] = ()
+        self,
+        req: SearchRequest,
+        *,
+        question_image_ids: Sequence[str] = (),
+        asserted_asker: str | None = None,
     ) -> SearchResponse:
         """Answer one search request.
 
@@ -232,6 +260,13 @@ class SearchManager:
                 carries, already stored by the caller. Only the multi-round
                 route uses them (it shows them to the decider every round);
                 the others rank nothing they would inform and ignore them.
+            asserted_asker: The asker a gateway asserted (``[access]
+                identity_header``); a body ``asker_id`` must agree with it.
+
+        Raises:
+            ForbiddenError: The asker may not read the scope (403).
+            InvalidInputError: A group scope without an asker, or a method
+                that has no group route (422).
         """
         request_id = resolve_request_id()
         with memory_span(
@@ -253,25 +288,37 @@ class SearchManager:
                 span,
                 {"query": req.query, "top_k": req.top_k, "method": req.method.value},
             )
-            # Compile filters first: a malformed `filters` payload is a user
-            # input error (422) and should surface before the server-side
-            # component guard (500). The two steps are independent.
-            where = compile_filters(
-                req.filters,
-                owner_id=req.owner_id,
-                owner_type=req.owner_type,
-                app_id=req.app_id,
-                project_id=req.project_id,
-            )
+            # The read scope first: who may see what decides every ``where``.
+            # Then the filters: a malformed `filters` payload is a user input
+            # error (422) and should surface before the server-side component
+            # guard (500). The two steps are independent.
+            scope = await self._read_scope(req, asserted_asker)
+            where = compile_scoped(req.filters, scope.predicate)
             self._validate_components(req)
 
-            if req.owner_type == "user":
+            if scope.is_group:
+                (episodes, images), unprocessed = await asyncio.gather(
+                    self._search_episodes(
+                        req, where, question_image_ids=question_image_ids, scope=scope
+                    ),
+                    self._load_unprocessed(req, scope),
+                )
+                images = await self._resolve_episode_pictures(
+                    req, episodes, images, scope=scope
+                )
+                data = SearchData(
+                    episodes=episodes,
+                    images=images,
+                    unprocessed_messages=unprocessed,
+                    scope=_scope_view(scope),
+                )
+            elif req.owner_type == "user":
                 (episodes, images), profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(
                         req, where, question_image_ids=question_image_ids
                     ),
                     self._fetch_profile(req),
-                    self._load_unprocessed(req),
+                    self._load_unprocessed(req, scope),
                 )
                 images = await self._resolve_episode_pictures(req, episodes, images)
                 data = SearchData(
@@ -283,7 +330,7 @@ class SearchManager:
             else:  # "agent"
                 (cases, skills), unprocessed = await asyncio.gather(
                     self._search_cases_and_skills(req, where),
-                    self._load_unprocessed(req),
+                    self._load_unprocessed(req, scope),
                 )
                 data = SearchData(
                     agent_cases=cases,
@@ -331,15 +378,31 @@ class SearchManager:
 
     # ── Unprocessed buffer ──────────────────────────────────────────
 
+    async def _read_scope(
+        self, req: SearchRequest, asserted_asker: str | None
+    ) -> ReadScope:
+        return await self._access.read_scope(
+            resolve_identity(header=asserted_asker, body_asker=req.asker_id),
+            ScopeRequest(
+                app_id=req.app_id,
+                project_id=req.project_id,
+                user_id=req.user_id,
+                agent_id=req.agent_id,
+                group_ids=req.scope_group_ids,
+                audience=req.audience,
+            ),
+        )
+
     async def _load_unprocessed(
-        self, req: SearchRequest
+        self, req: SearchRequest, scope: ReadScope
     ) -> list[UnprocessedMessageDTO]:
         """Load in-flight buffer rows for ``filters.session_id`` (if present).
 
         Returns ``[]`` unless ``filters`` carries a top-level ``session_id``
         eq scalar — buffer rows have no ``user_id`` / ``agent_id`` attribution
         (boundary detection runs before owner inference), so session is the
-        only meaningful query dimension.
+        only meaningful query dimension. A group scope sees a bound session's
+        messages that lie inside the asker's windows, nothing else.
         """
         session_id = _extract_top_level_session_id(req.filters)
         if session_id is None:
@@ -348,6 +411,14 @@ class SearchManager:
             app_id=req.app_id, project_id=req.project_id, session_id=session_id
         )
         messages = await self._session_buffer.list(session)
+        if scope.is_group:
+
+            async def _never() -> bool:
+                return False
+
+            messages = await self._access.buffered_messages(
+                scope, session, messages, owner_has_memory=_never
+            )
         return [_unprocessed_message_to_dto(m, session) for m in messages]
 
     # ── Agent partition ─────────────────────────────────────────────
@@ -393,14 +464,11 @@ class SearchManager:
         """
         req = req.model_copy(update={"method": SearchMethod.LLM_MULTIROUND})
         self._validate_components(req)
-        where = compile_filters(
-            req.filters,
-            owner_type=req.owner_type,
-            owner_id=req.owner_id,
-            app_id=req.app_id,
-            project_id=req.project_id,
+        scope = await self._read_scope(req, None)
+        where = compile_scoped(req.filters, scope.predicate)
+        episodes, _images = await self._search_episodes(
+            req, where, decider=decider, scope=scope
         )
-        episodes, _images = await self._search_episodes(req, where, decider=decider)
         return episodes
 
     async def _search_episodes(
@@ -410,8 +478,13 @@ class SearchManager:
         *,
         decider: RoundDecider | None = None,
         question_image_ids: Sequence[str] = (),
+        scope: ReadScope | None = None,
     ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
-        """User-track retrieval: the episodes and the pictures ranked with them."""
+        """User-track retrieval: the episodes and the pictures ranked with them.
+
+        A group scope runs the same routes over a recall with no atomic facts.
+        """
+        facts = self._no_facts if scope is not None and scope.is_group else self._fact
         if req.method == SearchMethod.AGENTIC:
             episodes = await search_episodes_agentic(
                 req.query,
@@ -420,7 +493,7 @@ class SearchManager:
                 app_id=req.app_id,
                 project_id=req.project_id,
                 episode_recaller=self._ep,
-                atomic_fact_recaller=self._fact,
+                atomic_fact_recaller=facts,
                 cluster_store=self._clusters,
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
@@ -442,7 +515,7 @@ class SearchManager:
                 app_id=req.app_id,
                 project_id=req.project_id,
                 episode_recaller=self._ep,
-                atomic_fact_recaller=self._fact,
+                atomic_fact_recaller=facts,
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 llm=self._decider_llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -473,7 +546,9 @@ class SearchManager:
                         req.query, where, limit=self._recall_limit(req.top_k)
                     )
                 else:
-                    recalled = await self._maxsim_atomic_recall(req, where, top_k)
+                    recalled = await self._maxsim_atomic_recall(
+                        req, where, top_k, facts
+                    )
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
@@ -495,7 +570,7 @@ class SearchManager:
             metadata={"phase": fusion_mode},
         ):
             rrf_candidates = rrf(sparse.candidates, dense.candidates)
-            facts = await self._fact.facts_for_episodes(
+            fact_buckets = await facts.facts_for_episodes(
                 build_ep_to_fact_parents(rrf_candidates),
                 where,
                 per_episode=max(top_k * 2, 20),
@@ -504,13 +579,13 @@ class SearchManager:
             scored = heap_expand(
                 sparse=sparse.candidates,
                 dense=dense.candidates,
-                episode_to_facts=facts.buckets,
+                episode_to_facts=fact_buckets.buckets,
                 top_k=top_k,
             )
             shaped = reshape_hybrid_output(
                 scored,
                 episodes_by_id=merge_stored(sparse, dense),
-                facts_by_id=facts.stored_by_id,
+                facts_by_id=fact_buckets.stored_by_id,
             )
             if req.min_score is not None:
                 shaped = [s for s in shaped if s.score >= req.min_score]
@@ -522,6 +597,8 @@ class SearchManager:
         req: SearchRequest,
         episodes: list[SearchEpisodeItem],
         images: list[SearchImageItem],
+        *,
+        scope: ReadScope | None = None,
     ) -> list[SearchImageItem]:
         """Attach the pictures the selected episodes refer to; returns the extra ones.
 
@@ -553,15 +630,22 @@ class SearchManager:
         if self._images is None or not wanted:
             return images
         selected = {image.image_id for image in images}
-        stored = await self._images.find_by_image_ids(
-            Scope(
-                app_id=req.app_id,
-                project_id=req.project_id,
-                owner_id=req.owner_id,
-                owner_type="user",
-            ),
-            list(wanted),
-        )
+        if scope is not None and scope.is_group:
+            # Through the read scope: a picture memory outside the asker's
+            # windows stays out even when a visible episode refers to it.
+            stored = await self._images.find_by_image_ids_in(
+                scope.predicate, list(wanted)
+            )
+        else:
+            stored = await self._images.find_by_image_ids(
+                Scope(
+                    app_id=req.app_id,
+                    project_id=req.project_id,
+                    owner_id=req.owner_id,
+                    owner_type="user",
+                ),
+                list(wanted),
+            )
         by_image_id = _picture_by_image_id(stored)
         attached = attach_referenced_pictures(
             episodes,
@@ -814,7 +898,11 @@ class SearchManager:
             return sparse, dense.within_radius(_effective_radius(req)), vector
 
     async def _maxsim_atomic_recall(
-        self, req: SearchRequest, where: Filter, top_k: int
+        self,
+        req: SearchRequest,
+        where: Filter,
+        top_k: int,
+        facts: AtomicFactRecaller,
     ) -> RecallResult[Any]:
         """MaxSim recall: atomic-fact ANN max-pooled onto parent episodes.
 
@@ -824,7 +912,7 @@ class SearchManager:
         recalled = await maxsim_episode_recall(
             await self._embed_query(req.query),
             where,
-            facts=self._fact,
+            facts=facts,
             episodes=self._ep,
             top_k=top_k,
             fact_limit=min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP),
@@ -907,6 +995,10 @@ class SearchManager:
         the LLM lane (``True``) reranks via the LLM and needs no rerank
         provider; the cross-encoder lane (``False``, default) does.
         """
+        if req.owner_type == "group" and req.method == SearchMethod.AGENTIC:
+            raise InvalidInputError(
+                "method 'agentic' has no group route; use hybrid or llm_multiround"
+            )
         method = req.method
         is_agent_hybrid = method == SearchMethod.HYBRID and req.owner_type == "agent"
 
@@ -947,6 +1039,20 @@ class SearchManager:
             raise ProviderNotConfiguredError(
                 provider="rerank", feature="agentic_search"
             )
+
+
+def _scope_view(scope: ReadScope) -> SearchScope:
+    """The scope block a group search returns: groups, asker, windows."""
+    return SearchScope(
+        group_ids=list(scope.owner_ids),
+        asker_id=scope.asker_id or "",
+        audience=scope.audience,
+        windows=[
+            SearchWindow(group_id=view.group_id, from_=w.start, to=w.end)
+            for view in scope.groups
+            for w in view.windows
+        ],
+    )
 
 
 def _picture_by_image_id(

@@ -8,9 +8,11 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
   from the ``user_profile`` table; at most one item)
 * ``agent`` + ``agent_case``   → ``data.agent_cases``
 * ``agent`` + ``agent_skill``  → ``data.agent_skills``
+* ``group`` + ``episode``      → ``data.episodes`` inside the asker's windows
 
-Reads only — never writes. Filters are compiled through
-:func:`compile_filters_for_get` so the column allow-list stays
+Reads only — never writes. The owner part of every ``where`` is the access
+policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
+it through :func:`compile_scoped_for_get` so the column allow-list stays
 shared with :mod:`memory.search`. Pagination + sort run in the index
 behind the injected ports.
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
+from everos.memory.access import AccessPolicy, ScopeRequest, resolve_identity
 from everos.memory.models import AgentCase, AgentSkill, Episode
 from everos.memory.ports import (
     AgentCaseIndex,
@@ -41,7 +44,7 @@ from .dto import (
     GetRequest,
     GetResponse,
 )
-from .filters_adapter import compile_filters_for_get
+from .filters_adapter import compile_scoped_for_get
 
 logger = get_logger(__name__)
 
@@ -64,7 +67,9 @@ class GetManager:
         agent_case_index: AgentCaseIndex,
         agent_skill_index: AgentSkillIndex,
         profile_index: ProfileIndex,
+        access: AccessPolicy,
     ) -> None:
+        self._access = access
         self._ep = episode_index
         self._case = agent_case_index
         self._skill = agent_skill_index
@@ -72,16 +77,29 @@ class GetManager:
 
     # ── Public entry ─────────────────────────────────────────────────
 
-    async def get(self, req: GetRequest) -> GetResponse:
+    async def get(
+        self, req: GetRequest, *, asserted_asker: str | None = None
+    ) -> GetResponse:
+        """One page of the requested kind, inside the asker's read scope.
+
+        Raises:
+            ForbiddenError: The asker may not read the scope (403).
+            InvalidInputError: A group scope without an asker (422).
+        """
         request_id = resolve_request_id()
         descending = req.sort_order == "desc"
-        where = compile_filters_for_get(
-            req.filters,
-            owner_id=req.owner_id,
-            owner_type=req.owner_type,
-            app_id=req.app_id,
-            project_id=req.project_id,
+        scope = await self._access.read_scope(
+            resolve_identity(header=asserted_asker, body_asker=req.asker_id),
+            ScopeRequest(
+                app_id=req.app_id,
+                project_id=req.project_id,
+                user_id=req.user_id,
+                agent_id=req.agent_id,
+                group_ids=req.scope_group_ids,
+                audience=req.audience,
+            ),
         )
+        where = compile_scoped_for_get(req.filters, scope.predicate)
         page = Page(
             sort_by=req.sort_by,
             number=req.page,
@@ -141,14 +159,18 @@ class GetManager:
     @staticmethod
     def _shape_episode(stored: Stored[Episode]) -> GetEpisodeItem:
         episode = stored.item
+        group = stored.scope.owner_type == "group"
         return GetEpisodeItem(
             id=stored.ref.id,
-            user_id=episode.owner_id,
+            user_id=None if group else episode.owner_id,
+            group_id=episode.owner_id if group else None,
             app_id=stored.scope.app_id,
             project_id=stored.scope.project_id,
             session_id=episode.session_id,
             timestamp=to_display_tz(from_timestamp_ms(episode.timestamp)),
             sender_ids=episode.sender_ids,
+            subject_ids=list(episode.subject_ids),
+            origin=episode.origin,
             summary=episode.summary,
             subject=episode.subject,
             episode=episode.episode,

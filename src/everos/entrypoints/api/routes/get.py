@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from everos.entrypoints.api.dependencies import ApplicationDep
+from everos.entrypoints.api.dependencies import ApplicationDep, AskerHeaderDep
 from everos.service import GetRequest, GetResponse
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/get", response_model=GetResponse)
-async def post_get(req: GetRequest, app: ApplicationDep) -> GetResponse:
-    """Paginated listing over the requested ``memory_type``."""
-    return await app.memory.get(req)
+async def post_get(
+    req: GetRequest, app: ApplicationDep, asker_header: AskerHeaderDep
+) -> GetResponse:
+    """Paginated listing over the requested ``memory_type``, in the read scope."""
+    return await app.memory.get(req, asserted_asker=asker_header)

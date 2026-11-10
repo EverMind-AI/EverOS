@@ -367,6 +367,14 @@ max_concurrent_runs = 20
 # not a latency target -- too low kills slow-but-healthy extractions. 0 disables.
 run_timeout_seconds = 1800.0
 
+[access]
+# Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no
+# authentication: the asker of a request is the caller's assertion. A
+# deployment serving several people sets the header its gateway writes; the
+# asker is then read from it, and a body asker_id that differs is refused
+# with 403. Unset (default): the body's asker_id is the asker.
+# identity_header = "X-EverOS-Asker"
+
 [logging]
 # Console log level: DEBUG | INFO | WARNING | ERROR. `everos server start
 # --log-level` (or EVEROS_LOG_LEVEL) overrides it for the server; interactive

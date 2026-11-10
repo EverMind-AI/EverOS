@@ -13,6 +13,7 @@ loader / merger / env reader).
 """
 
 from .hints import missing_config_error as missing_config_error
+from .settings import AccessSettings as AccessSettings
 from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
@@ -34,6 +35,7 @@ from .settings import load_settings as load_settings
 from .settings import resolve_root as resolve_root
 
 __all__ = [
+    "AccessSettings",
     "AsyncQueueSettings",
     "BoundaryDetectionSettings",
     "EmbeddingSettings",

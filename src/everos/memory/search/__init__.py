@@ -62,11 +62,14 @@ from .dto import SearchMethod as SearchMethod
 from .dto import SearchProfileItem as SearchProfileItem
 from .dto import SearchRequest as SearchRequest
 from .dto import SearchResponse as SearchResponse
+from .dto import SearchScope as SearchScope
+from .dto import SearchWindow as SearchWindow
 from .filters import ALLOWED_FIELDS as ALLOWED_FIELDS
 from .filters import RESERVED_FIELDS as RESERVED_FIELDS
 from .filters import FilterError as FilterError
 from .filters import compile_filters as compile_filters
 from .filters import compile_predicate as compile_predicate
+from .filters import compile_scoped as compile_scoped
 
 __all__ = [
     "ALLOWED_FIELDS",
@@ -82,6 +85,9 @@ __all__ = [
     "SearchProfileItem",
     "SearchRequest",
     "SearchResponse",
+    "SearchScope",
+    "SearchWindow",
     "compile_filters",
     "compile_predicate",
+    "compile_scoped",
 ]

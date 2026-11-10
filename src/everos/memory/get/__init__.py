@@ -34,6 +34,7 @@ from .dto import GetProfileItem as GetProfileItem
 from .dto import GetRequest as GetRequest
 from .dto import GetResponse as GetResponse
 from .filters_adapter import compile_filters_for_get as compile_filters_for_get
+from .filters_adapter import compile_scoped_for_get as compile_scoped_for_get
 from .manager import GetManager as GetManager
 
 __all__ = [
@@ -47,4 +48,5 @@ __all__ = [
     "GetRequest",
     "GetResponse",
     "compile_filters_for_get",
+    "compile_scoped_for_get",
 ]

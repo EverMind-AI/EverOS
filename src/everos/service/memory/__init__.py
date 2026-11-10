@@ -192,16 +192,22 @@ class MemoryService:
 
     # ── read use cases ─────────────────────────────────────────────────────
 
-    async def search(self, req: SearchRequest) -> SearchResponse:
+    async def search(
+        self, req: SearchRequest, *, asserted_asker: str | None = None
+    ) -> SearchResponse:
         """Hybrid retrieval across the configured memory backends.
 
         Pictures attached to the question are stored first (content-addressed,
         no memory, no reference) and handed to the manager as content hashes,
         so the decider can look at them. A picture the store rejects is dropped
         with a log line: the text question is still answerable.
+
+        ``asserted_asker`` is the asker a gateway asserted through the
+        identity header (``[access] identity_header``); the read scope is
+        decided by the access policy either way.
         """
         if not req.images:
-            return await self._search_manager.search(req)
+            return await self._search_manager.search(req, asserted_asker=asserted_asker)
         stored = await keep_question_pictures(
             req.images,
             store=self._stores.images,
@@ -213,12 +219,16 @@ class MemoryService:
             ),
         )
         return await self._search_manager.search(
-            req, question_image_ids=[image.image_id for image in stored]
+            req,
+            question_image_ids=[image.image_id for image in stored],
+            asserted_asker=asserted_asker,
         )
 
-    async def get(self, req: GetRequest) -> GetResponse:
-        """Paginated listing over the requested ``memory_type``."""
-        return await self._get_manager.get(req)
+    async def get(
+        self, req: GetRequest, *, asserted_asker: str | None = None
+    ) -> GetResponse:
+        """Paginated listing over the requested ``memory_type``, in the read scope."""
+        return await self._get_manager.get(req, asserted_asker=asserted_asker)
 
     # ── delete use cases ───────────────────────────────────────────────────
 

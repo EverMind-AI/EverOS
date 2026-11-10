@@ -125,6 +125,23 @@ class ImageMemoryRecaller:
             return []
         return await self._index.find_by_image_ids(scope, list(image_ids))
 
+    async def find_by_image_ids_in(
+        self, where: Filter, image_ids: Sequence[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The current picture memories about these files, inside a read scope.
+
+        ``where`` is the scope's predicate, which already excludes superseded
+        rows and, for a group, everything outside the asker's windows: an
+        episode the asker may see does not bring along a picture they may not.
+        """
+        if not image_ids:
+            return []
+        hits = await self._index.find(
+            all_of(where, one_of("image_id", list(image_ids))),
+            limit=max(len(image_ids) * 4, 1),
+        )
+        return [hit.stored for hit in hits]
+
     async def fetch_for_parent(
         self, *, parent_type: str, parent_id: str
     ) -> list[Stored[ImageMemory]]:

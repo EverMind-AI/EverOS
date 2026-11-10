@@ -16,7 +16,7 @@ operator allow-list, timestamp / array-column rendering).
 from __future__ import annotations
 
 from everos.memory.ports import Filter
-from everos.memory.search import FilterNode, compile_filters
+from everos.memory.search import FilterNode, compile_filters, compile_scoped
 
 
 def compile_filters_for_get(
@@ -39,3 +39,8 @@ def compile_filters_for_get(
         app_id=app_id,
         project_id=project_id,
     )
+
+
+def compile_scoped_for_get(filters: FilterNode | None, scope: Filter) -> Filter:
+    """``/get`` filters ANDed onto a read scope's predicate (the access policy's)."""
+    return compile_scoped(filters, scope)

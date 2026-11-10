@@ -108,6 +108,7 @@ from everos.infra.persistence.sqlite import (
     SqliteKnowledgeCatalog,
     SqliteRepos,
 )
+from everos.memory.access import AccessPolicy
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
@@ -589,6 +590,8 @@ def _build_memory_service(
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
+    # The one access policy every read path asks (docs/group-memory.md, D9).
+    access = AccessPolicy(stores.groups)
     return MemoryService(
         index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
@@ -631,12 +634,14 @@ def _build_memory_service(
             trace_path_source=SearchConfigSource().trace_path,
             image_recaller=ImageMemoryRecaller(recaller_deps, indexes.image_memory),
             image_store=stores.images,
+            access=access,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,
             agent_case_index=indexes.agent_case,
             agent_skill_index=indexes.agent_skill,
             profile_index=indexes.profile,
+            access=access,
         ),
         indexes=indexes,
         image_limits=_image_limits(settings),

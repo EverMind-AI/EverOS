@@ -20,9 +20,10 @@ from __future__ import annotations
 import pytest
 
 from everos.core.errors import ProviderNotConfiguredError
+from everos.memory.access import AccessPolicy
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
-from tests.fakes import static_trace_path, static_tuning
+from tests.fakes import InMemoryGroupStore, static_trace_path, static_tuning
 
 
 class _StubLLM:
@@ -47,6 +48,7 @@ def _build_manager(
     presence matters here.
     """
     return SearchManager(
+        access=AccessPolicy(InMemoryGroupStore()),
         episode_recaller=None,  # type: ignore[arg-type]
         atomic_fact_recaller=None,  # type: ignore[arg-type]
         agent_case_recaller=None,  # type: ignore[arg-type]

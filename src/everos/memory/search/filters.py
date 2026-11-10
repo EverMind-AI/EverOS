@@ -12,6 +12,7 @@ from typing import Any, Final, Literal
 
 from everos.core.errors import FilterError as FilterError
 from everos.core.utils.datetime import ensure_utc, from_iso_format, from_timestamp
+from everos.memory.access import owner_predicate
 from everos.memory.ports import (
     Filter,
     Scalar,
@@ -19,8 +20,6 @@ from everos.memory.ports import (
     any_of,
     compare,
     contains,
-    eq,
-    is_null,
     one_of,
 )
 
@@ -56,15 +55,32 @@ def compile_filters(
     app_id: str = "default",
     project_id: str = "default",
 ) -> Filter:
-    """Validate request filters and return one normalized predicate tree."""
-    base: list[Filter] = [
-        eq("owner_id", owner_id),
-        eq("owner_type", owner_type),
-        eq("app_id", app_id),
-        eq("project_id", project_id),
-    ]
-    if owner_type == "user":
-        base.append(is_null("deprecated_by"))
+    """Validate request filters and return one normalized predicate tree.
+
+    The owner part is :func:`everos.memory.access.owner_predicate`, the one a
+    personal or agent read scope compiles to; a read that went through the
+    access policy uses :func:`compile_scoped` with its scope's predicate.
+    """
+    return compile_scoped(
+        node,
+        owner_predicate(
+            owner_id=owner_id,
+            owner_type=owner_type,
+            app_id=app_id,
+            project_id=project_id,
+        ),
+    )
+
+
+def compile_scoped(node: FilterNode | None, scope: Filter) -> Filter:
+    """The request's filters ANDed onto a read scope's predicate.
+
+    ``scope`` is :attr:`everos.memory.access.ReadScope.predicate` -- owner,
+    space, status and membership windows. The filter DSL can narrow it, never
+    widen it: the reserved fields are refused, and the window columns are not
+    in :data:`ALLOWED_FIELDS`.
+    """
+    base: list[Filter] = [scope]
     if node is not None:
         compiled = _compile_node(node.model_dump(exclude_none=True))
         if compiled is not None:
@@ -204,4 +220,5 @@ __all__ = [
     "RESERVED_FIELDS",
     "compile_filters",
     "compile_predicate",
+    "compile_scoped",
 ]

@@ -68,7 +68,16 @@ class GetRequest(BaseModel):
     user_id: str | None = Field(default=None, min_length=1)
     agent_id: str | None = Field(default=None, min_length=1)
     """Memory owner — provide ``user_id`` for ``episode`` / ``profile`` or
-    ``agent_id`` for ``agent_case`` / ``agent_skill``; exactly one must be set."""
+    ``agent_id`` for ``agent_case`` / ``agent_skill``; exactly one owner scope
+    must be set (``user_id``, ``agent_id``, ``group_id`` or ``group_ids``)."""
+    group_id: str | None = Field(default=None, min_length=1)
+    group_ids: list[str] | None = Field(default=None, min_length=1, max_length=16)
+    """A group scope (docs/group-memory.md, 5.4): ``episode`` only for now. The
+    listing holds what the asker's membership windows contain."""
+    asker_id: str | None = Field(default=None, min_length=1)
+    """Who asks: required for a group scope (or the identity header); with
+    ``user_id`` optional and equal to it."""
+    audience: Literal["asker", "group"] = "asker"
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the query
@@ -88,8 +97,17 @@ class GetRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_user_xor_agent(self) -> Self:
-        if (self.user_id is None) == (self.agent_id is None):
-            raise ValueError("exactly one of user_id / agent_id must be provided")
+        scopes = [
+            self.user_id is not None,
+            self.agent_id is not None,
+            self.group_id is not None,
+            self.group_ids is not None,
+        ]
+        if sum(scopes) != 1:
+            raise ValueError(
+                "exactly one of user_id / agent_id / group_id / group_ids "
+                "must be provided"
+            )
         return self
 
     @model_validator(mode="after")
@@ -108,17 +126,33 @@ class GetRequest(BaseModel):
                 f"memory_type {self.memory_type.value!r} is not valid "
                 "when agent_id is set"
             )
+        if self.owner_type == "group" and self.memory_type != GetMemoryType.EPISODE:
+            raise ValueError(
+                f"memory_type {self.memory_type.value!r} is not valid for a group scope"
+            )
         return self
 
     @property
-    def owner_id(self) -> str:
-        """Derived from whichever of ``user_id`` / ``agent_id`` is set."""
-        return self.user_id or self.agent_id or ""
+    def scope_group_ids(self) -> tuple[str, ...]:
+        """The groups of a group scope, in request order; ``()`` otherwise."""
+        if self.group_id is not None:
+            return (self.group_id,)
+        return tuple(dict.fromkeys(self.group_ids or ()))
 
     @property
-    def owner_type(self) -> Literal["user", "agent"]:
-        """``"user"`` if ``user_id`` is set, else ``"agent"``."""
-        return "user" if self.user_id is not None else "agent"
+    def owner_id(self) -> str:
+        """Derived from whichever owner scope is set (the first group of a pool)."""
+        groups = self.scope_group_ids
+        return self.user_id or self.agent_id or (groups[0] if groups else "")
+
+    @property
+    def owner_type(self) -> Literal["user", "agent", "group"]:
+        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set."""
+        if self.user_id is not None:
+            return "user"
+        if self.agent_id is not None:
+            return "agent"
+        return "group"
 
 
 # ── Item DTOs (mirror Search*Item shapes minus score) ────────────────────
@@ -131,12 +165,16 @@ class GetEpisodeItem(BaseModel):
 
     id: str
     user_id: str | None
+    group_id: str | None = None
+    """Owning group, for a group episode (``user_id`` is then ``None``)."""
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
     """``None`` for an episode Reflection merged from several sessions."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
     summary: str
     subject: str
     episode: str

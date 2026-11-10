@@ -19,6 +19,7 @@ from .agent_case import AgentCaseRecaller as AgentCaseRecaller
 from .agent_skill import AgentSkillRecaller as AgentSkillRecaller
 from .atomic_fact import AtomicFactRecaller as AtomicFactRecaller
 from .atomic_fact import FactsByEpisode as FactsByEpisode
+from .atomic_fact import NoAtomicFacts as NoAtomicFacts
 from .base import KindRecaller as KindRecaller
 from .base import RecallerDeps as RecallerDeps
 from .base import RecallResult as RecallResult
@@ -44,6 +45,7 @@ __all__ = [
     "KindRecaller",
     "KnowledgeMethod",
     "KnowledgeTopicRecaller",
+    "NoAtomicFacts",
     "ProfileRecaller",
     "RecallResult",
     "RecallerDeps",

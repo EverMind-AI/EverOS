@@ -183,7 +183,7 @@
           "memory"
         ],
         "summary": "Post Search",
-        "description": "Hybrid retrieval across the configured memory backends.",
+        "description": "Hybrid retrieval across the configured memory backends.\n\nA group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
         "operationId": "post_search_api_v1_memory_search_post",
         "requestBody": {
           "content": {
@@ -225,7 +225,7 @@
           "memory"
         ],
         "summary": "Post Get",
-        "description": "Paginated listing over the requested ``memory_type``.",
+        "description": "Paginated listing over the requested ``memory_type``, in the read scope.",
         "operationId": "post_get_api_v1_memory_get_post",
         "requestBody": {
           "content": {
@@ -1582,7 +1582,7 @@
           "memory"
         ],
         "summary": "Post Search",
-        "description": "Hybrid retrieval across the configured memory backends.",
+        "description": "Hybrid retrieval across the configured memory backends.\n\nA group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
         "operationId": "post_search_api_v2_memory_search_post",
         "requestBody": {
           "content": {
@@ -1624,7 +1624,7 @@
           "memory"
         ],
         "summary": "Post Get",
-        "description": "Paginated listing over the requested ``memory_type``.",
+        "description": "Paginated listing over the requested ``memory_type``, in the read scope.",
         "operationId": "post_get_api_v2_memory_get_post",
         "requestBody": {
           "content": {
@@ -4330,6 +4330,17 @@
             ],
             "title": "User Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -4362,6 +4373,29 @@
             },
             "type": "array",
             "title": "Sender Ids"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "summary": {
             "type": "string",
@@ -4474,6 +4508,55 @@
               }
             ],
             "title": "Agent Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 16,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Ids"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "asker",
+              "group"
+            ],
+            "title": "Audience",
+            "default": "asker"
           },
           "app_id": {
             "type": "string",
@@ -5435,6 +5518,16 @@
             },
             "type": "array",
             "title": "Unprocessed Messages"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -5458,6 +5551,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
           },
           "app_id": {
             "type": "string",
@@ -5491,6 +5595,29 @@
             },
             "type": "array",
             "title": "Sender Ids"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "image_ids": {
             "items": {
@@ -5652,6 +5779,17 @@
             ],
             "title": "User Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -5677,6 +5815,36 @@
             "type": "string",
             "format": "date-time",
             "title": "Timestamp"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "description": {
             "type": "string",
@@ -5843,6 +6011,55 @@
             ],
             "title": "Agent Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 16,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Ids"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "asker",
+              "group"
+            ],
+            "title": "Audience",
+            "default": "asker"
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -5950,6 +6167,88 @@
         ],
         "title": "SearchResponse",
         "description": "Top-level response envelope."
+      },
+      "SearchScope": {
+        "properties": {
+          "owner_type": {
+            "type": "string",
+            "const": "group",
+            "title": "Owner Type",
+            "default": "group"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          },
+          "asker_id": {
+            "type": "string",
+            "title": "Asker Id"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "asker",
+              "group"
+            ],
+            "title": "Audience",
+            "default": "asker"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/SearchWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_ids",
+          "asker_id"
+        ],
+        "title": "SearchScope",
+        "description": "The scope a group search was answered in (docs/group-memory.md, 5.3)."
+      },
+      "SearchWindow": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "SearchWindow",
+        "description": "One of the asker's membership windows in one group, ``[from, to)`` ms."
       },
       "SuccessEnvelope_AcceptedResponseData_": {
         "properties": {

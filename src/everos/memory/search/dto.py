@@ -121,7 +121,19 @@ class SearchRequest(BaseModel):
     agent_id: str | None = Field(default=None, min_length=1)
     """Memory owner — provide ``user_id`` for user-memory (episodes /
     profiles) or ``agent_id`` for agent-memory (cases / skills); exactly
-    one must be set."""
+    one owner scope must be set (``user_id``, ``agent_id``, ``group_id`` or
+    ``group_ids``)."""
+    group_id: str | None = Field(default=None, min_length=1)
+    group_ids: list[str] | None = Field(default=None, min_length=1, max_length=16)
+    """A group scope (docs/group-memory.md, section 5.3): one group, or several
+    searched as one ranked pool. Needs an asker who is a current member of
+    each; the asker sees only what lies inside their membership windows."""
+    asker_id: str | None = Field(default=None, min_length=1)
+    """Who asks. Required for a group scope unless the deployment's identity
+    header carries it. With ``user_id`` it is optional and must equal it."""
+    audience: Literal["asker", "group"] = "asker"
+    """``asker`` (default): the asker's own view. ``group``: only what every
+    current member can see -- for a reply posted to the whole group."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB
@@ -167,8 +179,17 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_user_xor_agent(self) -> SearchRequest:
-        if (self.user_id is None) == (self.agent_id is None):
-            raise ValueError("exactly one of user_id / agent_id must be provided")
+        scopes = [
+            self.user_id is not None,
+            self.agent_id is not None,
+            self.group_id is not None,
+            self.group_ids is not None,
+        ]
+        if sum(scopes) != 1:
+            raise ValueError(
+                "exactly one of user_id / agent_id / group_id / group_ids "
+                "must be provided"
+            )
         return self
 
     @model_validator(mode="after")
@@ -178,18 +199,30 @@ class SearchRequest(BaseModel):
         return self
 
     @property
-    def owner_id(self) -> str:
-        """Derived from whichever of ``user_id`` / ``agent_id`` is set.
-
-        The xor validator guarantees exactly one is non-None, so the
-        ``or`` falls through to a real string (never the ``""`` default).
-        """
-        return self.user_id or self.agent_id or ""
+    def scope_group_ids(self) -> tuple[str, ...]:
+        """The groups of a group scope, in request order; ``()`` otherwise."""
+        if self.group_id is not None:
+            return (self.group_id,)
+        return tuple(dict.fromkeys(self.group_ids or ()))
 
     @property
-    def owner_type(self) -> Literal["user", "agent"]:
-        """``"user"`` if ``user_id`` is set, else ``"agent"``."""
-        return "user" if self.user_id is not None else "agent"
+    def owner_id(self) -> str:
+        """Derived from whichever owner scope is set (the first group of a pool).
+
+        The xor validator guarantees exactly one is set, so the ``or`` falls
+        through to a real string (never the ``""`` default).
+        """
+        groups = self.scope_group_ids
+        return self.user_id or self.agent_id or (groups[0] if groups else "")
+
+    @property
+    def owner_type(self) -> Literal["user", "agent", "group"]:
+        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set."""
+        if self.user_id is not None:
+            return "user"
+        if self.agent_id is not None:
+            return "agent"
+        return "group"
 
 
 # ── Item DTOs ────────────────────────────────────────────────────────────
@@ -218,13 +251,19 @@ class SearchEpisodeItem(BaseModel):
 
     id: str
     user_id: str | None
-    """Owning user (``None`` only on malformed cascade rows)."""
+    """Owning user; ``None`` for a group episode (and on malformed rows)."""
+    group_id: str | None = None
+    """Owning group, for a group episode; ``None`` on one-to-one memory."""
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
     """``None`` for merged episodes (Reflection aggregation products)."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
+    subject_ids: list[str] = Field(default_factory=list)
+    """Members a group episode is about; empty on one-to-one memory."""
+    origin: Literal["member", "assistant", "mixed"] | None = None
+    """Whose messages a group episode rests on; unset on one-to-one memory."""
     image_ids: list[str] = Field(default_factory=list)
     """Pictures the body refers to, by content hash, in arrival order.
 
@@ -274,10 +313,16 @@ class SearchImageItem(BaseModel):
     entry_id: str
     image_id: str
     user_id: str | None
+    group_id: str | None = None
+    """Owning group, for a group picture memory."""
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
     timestamp: _dt.datetime
+    sender_ids: list[str] = Field(default_factory=list)
+    """Who posted the picture, on a group picture memory."""
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
     description: str
     """What the picture shows — the half of its memory a reader gets as text."""
 
@@ -390,6 +435,28 @@ class UnprocessedMessageDTO(BaseModel):
 # ── Response envelope ────────────────────────────────────────────────────
 
 
+class SearchWindow(BaseModel):
+    """One of the asker's membership windows in one group, ``[from, to)`` ms."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    group_id: str
+    from_: int | None = Field(default=None, alias="from")
+    to: int | None = None
+
+
+class SearchScope(BaseModel):
+    """The scope a group search was answered in (docs/group-memory.md, 5.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner_type: Literal["group"] = "group"
+    group_ids: list[str]
+    asker_id: str
+    audience: Literal["asker", "group"] = "asker"
+    windows: list[SearchWindow] = Field(default_factory=list)
+
+
 class SearchData(BaseModel):
     """Body of ``response.data``.
 
@@ -417,6 +484,9 @@ class SearchData(BaseModel):
     """In-flight messages still in the boundary-detection buffer for
     the ``filters.session_id`` (if supplied as a top-level eq scalar);
     otherwise stays empty."""
+    scope: SearchScope | None = None
+    """The group scope and the asker's windows; ``None`` for a user or agent
+    search, whose scope is the owner the request named."""
 
 
 class SearchResponse(BaseModel):

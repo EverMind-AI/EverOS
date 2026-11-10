@@ -178,20 +178,27 @@ def _image(
     *,
     thumbnail_edge: int,
 ) -> SearchImageItem | None:
-    stored = _lookup(candidate_id, stored_by_id, kind="image_memory", owner_type="user")
+    stored = _lookup(
+        candidate_id, stored_by_id, kind="image_memory", owner_type=_MEMORY_OWNERS
+    )
     if stored is None:
         return None
     image = stored.item
     thumbnail = derived_relpath(image.image_id, thumbnail_edge)
+    group = stored.scope.owner_type == "group"
     return SearchImageItem(
         id=stored.ref.id,
         entry_id=stored.ref.entry_id,
         image_id=image.image_id,
-        user_id=image.owner_id,
+        user_id=None if group else image.owner_id,
+        group_id=image.owner_id if group else None,
         app_id=stored.scope.app_id,
         project_id=stored.scope.project_id,
         session_id=image.session_id,
         timestamp=to_display_tz(from_timestamp_ms(image.timestamp)),
+        sender_ids=list(image.sender_ids),
+        subject_ids=list(image.subject_ids),
+        origin=image.origin,
         description=image.description,
         ocr=image.ocr,
         name=image.name,
@@ -261,18 +268,24 @@ def _episode(
     *,
     atomic_facts: list[SearchAtomicFactItem] | None = None,
 ) -> SearchEpisodeItem | None:
-    stored = _lookup(candidate_id, stored_by_id, kind="episode", owner_type="user")
+    stored = _lookup(
+        candidate_id, stored_by_id, kind="episode", owner_type=_MEMORY_OWNERS
+    )
     if stored is None:
         return None
     episode = stored.item
+    group = stored.scope.owner_type == "group"
     return SearchEpisodeItem(
         id=stored.ref.id,
-        user_id=episode.owner_id,
+        user_id=None if group else episode.owner_id,
+        group_id=episode.owner_id if group else None,
         app_id=stored.scope.app_id,
         project_id=stored.scope.project_id,
         session_id=episode.session_id,
         timestamp=to_display_tz(from_timestamp_ms(episode.timestamp)),
         sender_ids=episode.sender_ids,
+        subject_ids=list(episode.subject_ids),
+        origin=episode.origin,
         image_ids=episode.image_ids,
         summary=episode.summary or "",
         subject=episode.subject or "",
@@ -377,6 +390,11 @@ def shape_agent_skills_ranked(
 # ── Lookup ──────────────────────────────────────────────────────────────
 
 
+_MEMORY_OWNERS = frozenset({"user", "group"})
+"""Owners of episodes and picture memories. Which of them a read may see was
+decided by the scope predicate the recall ran with; shaping only maps."""
+
+
 def _lookup[T](
     candidate_id: str,
     stored_by_id: Mapping[str, Stored[T]],
@@ -388,7 +406,8 @@ def _lookup[T](
     if stored is None:
         logger.warning("shape_missing_record", kind=kind, id=candidate_id)
         return None
-    if stored.scope.owner_type != owner_type:
+    allowed = owner_type if isinstance(owner_type, frozenset) else {owner_type}
+    if stored.scope.owner_type not in allowed:
         logger.warning(
             "shape_unexpected_owner_type",
             kind=kind,

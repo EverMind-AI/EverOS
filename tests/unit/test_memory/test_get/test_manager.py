@@ -33,12 +33,14 @@ from everos.infra.persistence.lancedb import (
     Episode,
     UserProfile,
 )
+from everos.memory.access import AccessPolicy
 from everos.memory.get import (
     GetManager,
     GetMemoryType,
     GetRequest,
 )
 from everos.memory.search import FilterNode
+from tests.fakes import InMemoryGroupStore
 
 # ── Stub repos ──────────────────────────────────────────────────────────
 
@@ -196,6 +198,7 @@ def manager(
     ac = _StubRepo()
     sk = _StubRepo()
     mgr = GetManager(
+        access=AccessPolicy(InMemoryGroupStore()),
         episode_index=EpisodeIndexAdapter(ep),  # type: ignore[arg-type]
         agent_case_index=AgentCaseIndexAdapter(ac),  # type: ignore[arg-type]
         agent_skill_index=AgentSkillIndexAdapter(sk),  # type: ignore[arg-type]

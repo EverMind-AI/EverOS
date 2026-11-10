@@ -84,9 +84,19 @@ _GROUP_COLUMNS: Mapping[str, object] = {
     "source_end": None,
 }
 
+_GROUP_ITEM_FIELDS: Mapping[str, object] = {
+    # docs/group-memory.md, section 5.3: "One-to-one responses carry the new
+    # fields with empty defaults."
+    "group_id": None,
+    "subject_ids": [],
+    "origin": None,
+}
+
 ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
     "episode_row": _GROUP_COLUMNS,
     "image_memory_row": {**_GROUP_COLUMNS, "sender_ids": []},
+    "search": {**_GROUP_ITEM_FIELDS, "sender_ids": [], "scope": None},
+    "get": _GROUP_ITEM_FIELDS,
 }
 """Fields a later change added to a one-to-one output, with their empty default.
 
