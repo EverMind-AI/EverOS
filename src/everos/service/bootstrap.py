@@ -114,6 +114,7 @@ from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
+from everos.memory.groups import RosterManager
 from everos.memory.ports import EventBus, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
 from everos.memory.search.manager import SearchManager
@@ -645,6 +646,11 @@ def _build_memory_service(
         ),
         indexes=indexes,
         image_limits=_image_limits(settings),
+        rosters=RosterManager(
+            stores.groups,
+            implicit_create=settings.groups.implicit_create,
+            implicit_join=settings.groups.implicit_join,
+        ),
     )
 
 

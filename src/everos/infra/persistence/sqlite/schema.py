@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 _ADDED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "image_original": ("forgotten_at",),
     "memcell": ("case_extracted_at", "case_skip_reason", "case_skip_detail_json"),
+    "unprocessed_buffer": ("client_message_id",),
 }
 """Columns added to a table after its first release, by table name."""
 

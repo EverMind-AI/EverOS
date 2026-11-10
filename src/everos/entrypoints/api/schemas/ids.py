@@ -71,7 +71,7 @@ def _reject_reserved_scope_dir(reserved: str) -> Callable[[str], str]:
     return check
 
 
-def _one_trimmed_line(value: str) -> str:
+def one_trimmed_line(value: str) -> str:
     """Refuse what a daily-log entry cannot hold as given: a line break, a
     control character, leading or trailing whitespace. Stored, such an id
     reads back as another one, and a deletion of the id sent finds nothing."""
@@ -85,8 +85,27 @@ def _one_trimmed_line(value: str) -> str:
 
 
 PathSafeId = Annotated[str, AfterValidator(_reject_path_traversal)]
-SessionId = Annotated[str, AfterValidator(_one_trimmed_line)]
+SessionId = Annotated[str, AfterValidator(one_trimmed_line)]
 AppScopeId = Annotated[str, AfterValidator(_reject_reserved_scope_dir("default_app"))]
 ProjectScopeId = Annotated[
     str, AfterValidator(_reject_reserved_scope_dir("default_project"))
 ]
+
+
+def refuse_group_scope(value: str | None) -> str | None:
+    """A group-scoped forget, undo, revision or delete is refused (422).
+
+    Inside a group these travel along sources (docs/group-memory.md, section
+    9.4) and arrive with Step 2; until then the request is refused whole, so
+    no partial forget can run (section 5.5).
+    """
+    if value is not None:
+        raise ValueError(
+            "group-scoped forget and delete are not available yet "
+            "(docs/group-memory.md, section 5.5)"
+        )
+    return value
+
+
+GroupScopeRefused = Annotated[str | None, AfterValidator(refuse_group_scope)]
+"""The ``group_id`` field of the forget / delete requests: always refused."""

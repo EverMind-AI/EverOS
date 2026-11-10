@@ -1026,6 +1026,20 @@ class KnowledgeSettings(BaseModel):
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
+class GroupsSettings(BaseModel):
+    """Group memory (``[groups]``, docs/group-memory.md section 5.2).
+
+    ``implicit_create``: a ``/memory/add`` naming an unknown ``group_id``
+    creates the group (its first message's time is its creation time).
+    ``implicit_join``: a message from a sender who is not a member opens an
+    interval at that message (``source = implicit``); off, such a batch is
+    refused with 422.
+    """
+
+    implicit_create: bool = True
+    implicit_join: bool = True
+
+
 class AccessSettings(BaseModel):
     """Who is asking (``[access]``, docs/group-memory.md section 9.2).
 
@@ -1165,6 +1179,7 @@ class Settings(BaseSettings):
     images: ImagesSettings = ImagesSettings()
     extraction: ExtractionSettings = ExtractionSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    groups: GroupsSettings = GroupsSettings()
     access: AccessSettings = AccessSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

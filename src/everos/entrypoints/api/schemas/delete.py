@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .ids import (
     PATH_SAFE_CHARSET,
     AppScopeId,
+    GroupScopeRefused,
     PathSafeId,
     ProjectScopeId,
     SessionId,
@@ -37,6 +38,10 @@ class DeleteRequest(BaseModel):
     user_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     agent_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     session_id: SessionId | None = Field(default=None, min_length=1, max_length=128)
+    group_id: GroupScopeRefused = Field(
+        default=None,
+        description="A group-scoped delete; refused with 422 before Step 2.",
+    )
 
     @model_validator(mode="after")
     def _one_scope(self) -> DeleteRequest:

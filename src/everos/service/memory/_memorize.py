@@ -14,6 +14,15 @@ feed both pipelines in agent mode. Publishing is this use case's job:
 pipelines and strategies return events, and each cell's are published as
 soon as the cell is done, so a failing cell never takes an earlier cell's
 events with it.
+
+A session bound to a group (or a batch naming ``group_id``) takes the group
+path (docs/group-memory.md, section 7.1): under the session lock the batch is
+admitted into its group (binding, inline roster, implicit joins; 409 / 403 /
+422 before anything is written), an inline roster change first cuts the
+session's open buffer (D18), and the cells go to the group pipeline -- never
+to the one-to-one pipelines, which would file group content as each sender's
+personal memory. Until the group pipeline is wired (``group_pipeline=None``)
+group cells are cut and kept as memcells, unextracted.
 """
 
 from __future__ import annotations
@@ -21,15 +30,24 @@ from __future__ import annotations
 __all__ = ["Memorizer", "flush_payload"]
 
 import asyncio
+import contextlib
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from everos.core.context import resolve_request_id
+from everos.core.errors import InvalidInputError, RosterConflictError
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
+from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
+from everos.memory import IngestResult as _IngestResult
+from everos.memory.access import resolve_identity
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
+from everos.memory.groups import BatchMessage
+from everos.memory.ports import Scope, SessionKey
 from everos.service.memory._extraction import ExtractionSupervisor
+from everos.service.memory._groups import to_events
 from everos.service.memory._models import MemorizeResult
 
 if TYPE_CHECKING:
@@ -40,6 +58,7 @@ if TYPE_CHECKING:
     from everos.memory import IngestResult
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
+    from everos.memory.groups import RosterManager
     from everos.memory.ports import EventBus
     from everos.memory.ports.images import ImageStore
 
@@ -65,6 +84,10 @@ class Memorizer:
         bus: Where each cell's events are published.
         extractions: Keeps extractions alive past a cancelled request.
         raw_file_builder: Host file hydration capability for ingestion.
+        rosters: Admits a group batch into its group; ``None`` refuses
+            ``group_id`` (a build without group memory).
+        group_pipeline: Extracts group cells (the group episode); ``None``
+            keeps them as memcells until it is wired.
     """
 
     def __init__(
@@ -80,7 +103,12 @@ class Memorizer:
         raw_file_builder: RawFileBuilder,
         image_store: ImageStore | None = None,
         vision: bool = True,
+        rosters: RosterManager | None = None,
+        group_pipeline: Pipeline | None = None,
     ) -> None:
+        self._rosters = rosters
+        self._group_pipeline = group_pipeline
+        self._multi_sender_warned: set[tuple[str, str, str]] = set()
         self._raw_file_builder = raw_file_builder
         self._image_store = image_store
         self._vision = vision
@@ -167,15 +195,16 @@ class Memorizer:
                 )
             if isinstance(prepared, MemorizeResult):
                 return prepared
-            ingested, boundary = prepared
+            ingested, boundaries = prepared
             # The cells exist, so their extraction must not die with a
             # cancelled request (a client that went away). The task is owned
             # by the supervisor, which keeps it, retrieves its outcome and
             # waits for it at shutdown; the request only shields it.
+            memcell_ids = [mid for b in boundaries for mid in b.memcell_ids]
             extraction = self._extractions.supervise(
-                self._extract(payload, ingested, boundary, mode=mode),
+                self._extract(payload, ingested, boundaries, mode=mode),
                 session_id=session_id,
-                memcell_ids=boundary.memcell_ids,
+                memcell_ids=memcell_ids,
             )
             try:
                 return await asyncio.shield(extraction)
@@ -183,7 +212,7 @@ class Memorizer:
                 logger.warning(
                     "memorize_extraction_continues_after_cancel",
                     session_id=session_id,
-                    memcell_ids=boundary.memcell_ids,
+                    memcell_ids=memcell_ids,
                 )
                 raise
 
@@ -194,13 +223,28 @@ class Memorizer:
         mode: Mode,
         is_final: bool,
         defer_extraction: bool,
-    ) -> MemorizeResult | tuple[IngestResult, BoundaryOutcome]:
+    ) -> MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]]:
         """Inner critical section — runs under the per-session lock.
 
         Returns the result when nothing reached the boundary, or the
-        ingested batch and the boundary outcome for :meth:`_extract` to run
-        once the lock is released.
+        ingested batch and the boundary outcomes for :meth:`_extract` to run
+        once the lock is released (two for a group batch whose roster change
+        cut the open buffer first, one otherwise).
         """
+        session = SessionKey(
+            app_id=payload.get("app_id") or "default",
+            project_id=payload.get("project_id") or "default",
+            session_id=payload["session_id"],
+        )
+        group_id = await self._group_of(payload, session)
+        cut_first: list[BoundaryOutcome] = []
+        if group_id is not None:
+            payload = {**payload, "group_id": group_id}
+            cut_first = await self._admit_group_batch(
+                payload, session, group_id, mode=mode, is_final=is_final
+            )
+        else:
+            self._note_multi_sender(payload, session)
         ingested = await ingest_process(
             payload,
             multimodal_llm=self._multimodal_llm,
@@ -210,26 +254,203 @@ class Memorizer:
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested, mode=mode)
+            if cut_first:
+                return ingested, cut_first
             return MemorizeResult(
                 message_count=len(payload.get("messages", [])),
                 status=_merge_status(buffered.status, "skipped"),
             )
 
         boundary = await self._boundary.detect(ingested, mode=mode, is_final=is_final)
+        boundaries = [*cut_first, boundary] if boundary.cells else cut_first
 
-        if not boundary.cells:
+        if not boundaries:
             # Nothing went past the boundary stage — no pipelines to dispatch.
             return MemorizeResult(
                 message_count=len(payload.get("messages", [])),
                 status=_merge_status(boundary.status, "skipped"),
             )
-        return ingested, boundary
+        return ingested, boundaries
+
+    async def _group_of(
+        self, payload: dict[str, Any], session: SessionKey
+    ) -> str | None:
+        """The group this batch belongs to: its ``group_id``, or the binding.
+
+        Raises:
+            RosterConflictError: The batch names another group than the one
+                the session is bound to (409, D18).
+            InvalidInputError: ``group_id`` on a build without group memory.
+        """
+        named = payload.get("group_id") or None
+        if self._rosters is None:
+            if named is not None:
+                raise InvalidInputError("group memory is not available")
+            return None
+        bound = await self._rosters.store.binding(session)
+        if named is not None and bound is not None and named != bound:
+            raise RosterConflictError(
+                f"session {session.session_id!r} belongs to another group"
+            )
+        return named or bound
+
+    async def _admit_group_batch(
+        self,
+        payload: dict[str, Any],
+        session: SessionKey,
+        group_id: str,
+        *,
+        mode: Mode,
+        is_final: bool,
+    ) -> list[BoundaryOutcome]:
+        """Admit a group batch; cut the open buffer first when it changes the roster.
+
+        Runs under the session lock, before the batch's messages are buffered.
+        Returns the outcome of that cut (D18), or nothing.
+        """
+        assert self._rosters is not None
+        messages = payload.get("messages") or []
+        raw_roster = payload.get("roster") or []
+        if not messages and not raw_roster:
+            return []  # a flush: the binding already names the group
+        await self._rosters.check_binding(session, group_id)
+        identity = resolve_identity(
+            header=payload.get("asserted_asker"), body_asker=payload.get("asker_id")
+        )
+        first = min((int(m["timestamp"]) for m in messages), default=None)
+        events = to_events(
+            raw_roster,
+            source="inline",
+            now=first if first is not None else to_timestamp_ms(get_utc_now()),
+        )
+        cut: list[BoundaryOutcome] = []
+        if events and not is_final:
+            closed = await self._boundary.detect(
+                _IngestResult(
+                    session_id=session.session_id,
+                    app_id=session.app_id,
+                    project_id=session.project_id,
+                    messages=[],
+                    group_id=group_id,
+                ),
+                mode=mode,
+                is_final=True,
+            )
+            if closed.cells:
+                cut.append(closed)
+        await self._rosters.admit_batch(
+            Scope(
+                app_id=session.app_id,
+                project_id=session.project_id,
+                owner_id=group_id,
+                owner_type="group",
+            ),
+            session=session,
+            asker_id=identity.asker_id,
+            roster=events,
+            messages=[
+                BatchMessage(
+                    sender_id=m["sender_id"],
+                    role=m["role"],
+                    at=int(m["timestamp"]),
+                    sender_name=m.get("sender_name"),
+                )
+                for m in messages
+            ],
+        )
+        return cut
+
+    def _note_multi_sender(self, payload: dict[str, Any], session: SessionKey) -> None:
+        """Log once per session a one-to-one batch with several human senders.
+
+        Such a batch keeps the per-sender behaviour (section 10); a group chat
+        must send ``group_id`` to become group memory.
+        """
+        senders = {
+            m.get("sender_id")
+            for m in payload.get("messages") or []
+            if m.get("role") == "user"
+        }
+        key = (session.app_id, session.project_id, session.session_id)
+        if len(senders) < 2 or key in self._multi_sender_warned:
+            return
+        if len(self._multi_sender_warned) > 10_000:
+            self._multi_sender_warned.clear()
+        self._multi_sender_warned.add(key)
+        logger.info(
+            "memorize.multi_sender_without_group",
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+            senders=len(senders),
+        )
+
+    async def with_buffers_closed[T](
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        sessions: Sequence[str],
+        change: Callable[[], Awaitable[T]],
+    ) -> T:
+        """Cut every listed session's open buffer, then run ``change`` (D18).
+
+        The sessions' locks are taken in sorted order and held while
+        ``change`` runs, so no message can slip into a buffer between the cut
+        and the roster change. A session whose lock stays busy past the
+        session lock timeout is skipped: the membership windows keep reads
+        correct, the cut only keeps a new member's first segment theirs.
+        The cut cells are extracted after the locks are released.
+        """
+        mode = self._settings.memorize.mode
+        wait = self._settings.memorize.session_lock_timeout_seconds
+        cut: list[tuple[IngestResult, BoundaryOutcome]] = []
+        async with contextlib.AsyncExitStack() as held:
+            for session_id in sorted(set(sessions)):
+                key = session_key(app_id, project_id, session_id)
+                try:
+                    await held.enter_async_context(
+                        LOCKS.hold("session", key, max_wait=wait)
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "groups.buffer_cut_skipped_busy",
+                        app_id=app_id,
+                        project_id=project_id,
+                        session_id=session_id,
+                    )
+                    continue
+                session = SessionKey(app_id, project_id, session_id)
+                group_id = (
+                    await self._rosters.store.binding(session)
+                    if self._rosters
+                    else None
+                )
+                empty = _IngestResult(
+                    session_id=session_id,
+                    app_id=app_id,
+                    project_id=project_id,
+                    messages=[],
+                    group_id=group_id,
+                )
+                closed = await self._boundary.detect(empty, mode=mode, is_final=True)
+                if closed.cells:
+                    cut.append((empty, closed))
+            result = await change()
+        for ingested, closed in cut:
+            await self._extract(
+                flush_payload(ingested.session_id, app_id, project_id),
+                ingested,
+                [closed],
+                mode=mode,
+            )
+        return result
 
     async def _extract(
         self,
         payload: dict[str, Any],
         ingested: IngestResult,
-        boundary: BoundaryOutcome,
+        boundaries: Sequence[BoundaryOutcome],
         *,
         mode: Mode,
     ) -> MemorizeResult:
@@ -244,12 +465,15 @@ class Memorizer:
         Raises:
             Exception: The first pipeline failure, after all cells ran.
         """
+        if ingested.group_id is not None:
+            return await self._extract_group(payload, ingested, boundaries)
         pipelines: dict[str, Pipeline] = {"user_memory": self._user_pipeline}
         if mode == "agent":
             pipelines["agent_memory"] = self._agent_pipeline
         outcomes: dict[str, list[CellOutcome]] = {track: [] for track in pipelines}
         first_error: BaseException | None = None
-        for prepared in _prepared_cells(boundary):
+        cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
+        for prepared in cells:
             results = await asyncio.gather(
                 *(p.run_cell(ingested, prepared) for p in pipelines.values()),
                 return_exceptions=True,
@@ -273,6 +497,47 @@ class Memorizer:
         return MemorizeResult(
             message_count=len(payload.get("messages", [])),
             status=_merge_status(user.status, agent_status),
+        )
+
+    async def _extract_group(
+        self,
+        payload: dict[str, Any],
+        ingested: IngestResult,
+        boundaries: Sequence[BoundaryOutcome],
+    ) -> MemorizeResult:
+        """Group cells go to the group pipeline, and to nothing else.
+
+        The extension point of the group write path (section 7): the group
+        pipeline writes one group episode per cell under ``groups/<g>/``.
+        Without it the cells stay memcells, unextracted, and the batch reads
+        as accumulated -- never as the one-to-one per-sender copies.
+        """
+        cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
+        count = len(payload.get("messages", []))
+        if self._group_pipeline is None:
+            logger.info(
+                "memorize.group_extraction_pending",
+                session_id=ingested.session_id,
+                group_id=ingested.group_id,
+                memcell_ids=[c.memcell_id for c in cells],
+            )
+            return MemorizeResult(message_count=count, status="accumulated")
+        done: list[CellOutcome] = []
+        first_error: BaseException | None = None
+        for prepared in cells:
+            try:
+                result = await self._group_pipeline.run_cell(ingested, prepared)
+            except Exception as exc:  # one cell's failure; the next still runs
+                _log_cell_failure(ingested, prepared, "group_memory", exc)
+                first_error = first_error or exc
+                continue
+            done.append(result)
+            await self._bus.publish(result.events)
+        if first_error is not None:
+            raise first_error
+        outcome = PipelineOutcome.from_cells("group_memory", done)
+        return MemorizeResult(
+            message_count=count, status=_merge_status(outcome.status, "skipped")
         )
 
 

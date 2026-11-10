@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .ids import (
     PATH_SAFE_CHARSET,
     AppScopeId,
+    GroupScopeRefused,
     PathSafeId,
     ProjectScopeId,
 )
@@ -37,6 +38,10 @@ class ForgetImageRequest(BaseModel):
         default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
     )
     user_id: PathSafeId = Field(min_length=1, max_length=128)
+    group_id: GroupScopeRefused = Field(
+        default=None,
+        description="A group-scoped forget; refused with 422 before Step 2.",
+    )
     image_id: str = Field(min_length=64, max_length=64, pattern=_IMAGE_ID)
     reason: str | None = Field(default=None, max_length=500)
 
@@ -73,6 +78,10 @@ class ForgetSessionRequest(BaseModel):
         default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
     )
     user_id: PathSafeId = Field(min_length=1, max_length=128)
+    group_id: GroupScopeRefused = Field(
+        default=None,
+        description="A group-scoped forget; refused with 422 before Step 2.",
+    )
     session_id: str = Field(min_length=1, max_length=128)
     reason: str | None = Field(default=None, max_length=500)
 

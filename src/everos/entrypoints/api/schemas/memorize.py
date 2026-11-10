@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .groups import RosterEventDTO
 from .ids import (
     PATH_SAFE_CHARSET,
     AppScopeId,
@@ -67,6 +68,16 @@ class MessageItemDTO(BaseModel):
     content: str | list[ContentItemDTO]
     tool_calls: list[ToolCallDTO] | None = None
     tool_call_id: str | None = None
+    message_id: SessionId | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Optional client id of the message, unique within the session. "
+            "Kept for a group session (message-level forget, source quotes); "
+            "ignored on a one-to-one session."
+        ),
+    )
 
     @model_validator(mode="after")
     def _tool_row_needs_call_id(self) -> MessageItemDTO:
@@ -92,6 +103,35 @@ class MemorizeAddRequest(BaseModel):
         pattern=PATH_SAFE_CHARSET,
     )
     messages: list[MessageItemDTO] = Field(..., min_length=1, max_length=500)
+    group_id: PathSafeId | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=PATH_SAFE_CHARSET,
+        description=(
+            "The group the session belongs to. The first batch naming it binds "
+            "the session; a later batch without it inherits the binding; a "
+            "batch naming another group is 409. An unknown group is created "
+            "([groups] implicit_create)."
+        ),
+    )
+    roster: list[RosterEventDTO] = Field(
+        default_factory=list,
+        max_length=500,
+        description=(
+            "Roster events applied before the messages (an event without `at` "
+            "takes the batch's first message time). For an existing group the "
+            "asker must be an owner or admin."
+        ),
+    )
+    asker_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Who sends the batch; needed for roster events of an existing group."
+        ),
+    )
     defer_extraction: bool = Field(
         default=False,
         description=(
@@ -109,6 +149,15 @@ class MemorizeAddRequest(BaseModel):
             "never run out of order."
         ),
     )
+
+    @model_validator(mode="after")
+    def _group_fields(self) -> MemorizeAddRequest:
+        if self.roster and self.group_id is None:
+            raise ValueError("roster events need a group_id")
+        ids = [m.message_id for m in self.messages if m.message_id is not None]
+        if len(ids) != len(set(ids)):
+            raise ValueError("message_id must be unique within the batch")
+        return self
 
 
 class AddResponseData(BaseModel):

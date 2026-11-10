@@ -367,6 +367,14 @@ max_concurrent_runs = 20
 # not a latency target -- too low kills slow-but-healthy extractions. 0 disables.
 run_timeout_seconds = 1800.0
 
+[groups]
+# Group memory (docs/group-memory.md, section 5.2).
+# An /add naming an unknown group_id creates the group.
+implicit_create = true
+# A message from a sender who is not a member opens an interval at that
+# message (source = implicit); false refuses such a batch with 422.
+implicit_join = true
+
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no
 # authentication: the asker of a request is the caller's assertion. A

@@ -89,6 +89,7 @@ async def process(
     session_id: str = payload["session_id"]
     app_id: str = payload.get("app_id") or "default"
     project_id: str = payload.get("project_id") or "default"
+    group_id: str | None = payload.get("group_id") or None
     raw_messages: list[dict[str, Any]] = payload["messages"]
     limits = image_limits or _image_limits()
     store = image_store if vision else None
@@ -146,6 +147,9 @@ async def process(
                 text=text,
                 tool_calls=_coerce_tool_calls(m.get("tool_calls")),
                 tool_call_id=m.get("tool_call_id"),
+                # The caller's id is kept for a group batch only: the
+                # one-to-one path stays exactly as it was.
+                client_message_id=m.get("message_id") if group_id else None,
             )
         )
 
@@ -155,6 +159,7 @@ async def process(
         project_id=project_id,
         messages=canonical,
         unparsed_non_text_count=non_text_total + rejected_images,
+        group_id=group_id,
     )
 
 

@@ -489,6 +489,7 @@ def _message_to_row(m: CanonicalMessage, session: SessionKey) -> UnprocessedBuff
             else None
         ),
         tool_call_id=m.tool_call_id,
+        client_message_id=m.client_message_id,
     )
 
 
@@ -511,6 +512,7 @@ def _row_to_message(row: UnprocessedBuffer) -> CanonicalMessage:
         text=row.text,
         tool_calls=tool_calls,
         tool_call_id=row.tool_call_id,
+        client_message_id=row.client_message_id,
     )
 
 

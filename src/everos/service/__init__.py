@@ -50,10 +50,14 @@ from .knowledge import TopicDetail as TopicDetail
 from .knowledge import TopicOverview as TopicOverview
 from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import FlushResult as FlushResult
+from .memory import GroupUpsertResult as GroupUpsertResult
+from .memory import GroupView as GroupView
 from .memory import MemorizeResult as MemorizeResult
 from .memory import MemoryService as MemoryService
 from .memory import Queued as Queued
 from .memory import QueueHealth as QueueHealth
+from .memory import RosterChangeResult as RosterChangeResult
+from .memory import RosterEventInput as RosterEventInput
 from .memory import TaskItem as TaskItem
 from .memory import TaskPage as TaskPage
 from .ops import BACKFILL_PHASES as BACKFILL_PHASES
@@ -103,6 +107,8 @@ __all__ = [
     "FlushResult",
     "GetRequest",
     "GetResponse",
+    "GroupUpsertResult",
+    "GroupView",
     "HealthReport",
     "KnowledgeExtractor",
     "KnowledgeService",
@@ -119,6 +125,8 @@ __all__ = [
     "Queued",
     "QuiesceResult",
     "RebuildResult",
+    "RosterChangeResult",
+    "RosterEventInput",
     "SearchHit",
     "SearchKnowledgeResult",
     "SearchRequest",

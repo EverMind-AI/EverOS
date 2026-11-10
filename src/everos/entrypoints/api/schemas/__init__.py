@@ -25,6 +25,13 @@ from .forget import UndoForgetRequest as UndoForgetRequest
 from .forget import UndoForgetResponseData as UndoForgetResponseData
 from .forget import UndoForgetSessionRequest as UndoForgetSessionRequest
 from .forget import UndoForgetSessionResponseData as UndoForgetSessionResponseData
+from .groups import GroupDTO as GroupDTO
+from .groups import GroupUpsertRequest as GroupUpsertRequest
+from .groups import GroupUpsertResponseData as GroupUpsertResponseData
+from .groups import MemberIntervalDTO as MemberIntervalDTO
+from .groups import RosterChangeRequest as RosterChangeRequest
+from .groups import RosterChangeResponseData as RosterChangeResponseData
+from .groups import RosterEventDTO as RosterEventDTO
 from .health import CascadeHealthBlock as CascadeHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
@@ -88,10 +95,14 @@ __all__ = [
     "ForgetSessionRequest",
     "ForgetSessionResponseData",
     "ForgottenPictureData",
+    "GroupDTO",
+    "GroupUpsertRequest",
+    "GroupUpsertResponseData",
     "HealthCapabilities",
     "HealthResponse",
     "KnowledgeSearchRequest",
     "KnowledgeSearchResponse",
+    "MemberIntervalDTO",
     "MemorizeAddRequest",
     "MemorizeFlushRequest",
     "MemorizeQueueHealthBlock",
@@ -101,6 +112,9 @@ __all__ = [
     "QuiesceResponse",
     "ReviseImageMemoryRequest",
     "ReviseImageMemoryResponseData",
+    "RosterChangeRequest",
+    "RosterChangeResponseData",
+    "RosterEventDTO",
     "RunSummary",
     "SearchHitDTO",
     "SuccessEnvelope",

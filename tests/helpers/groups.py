@@ -39,7 +39,8 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps, Stores
 from everos.memory.models import Episode, Group, ImageMemory, Profile, RosterEvent
-from everos.memory.ports import NoSourceCheck, Scope
+from everos.memory.ports import NoSourceCheck, Scope, SessionKey
+from everos.service import RosterEventInput
 from everos.service.bootstrap import _build_memory_service
 from tests.fakes import (
     FakeEmbeddingProvider,
@@ -150,6 +151,13 @@ class GroupWorld:
         return Scope(
             app_id=APP, project_id=PROJECT, owner_id=group_id, owner_type="group"
         )
+
+    def session(self, session_id: str) -> SessionKey:
+        return SessionKey(app_id=APP, project_id=PROJECT, session_id=session_id)
+
+    @staticmethod
+    def roster_input(**fields: Any) -> RosterEventInput:
+        return RosterEventInput(**fields)
 
     def personal(self, user_id: str) -> Scope:
         return Scope(

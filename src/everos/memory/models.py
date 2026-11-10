@@ -72,6 +72,11 @@ class CanonicalMessage(BaseModel):
     text: str
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    client_message_id: str | None = None
+    """The caller's own ``message_id`` (unique within the session), kept for a
+    group batch: message-level forget and source quotes address messages by it
+    (docs/group-memory.md, section 5.2). ``None`` on one-to-one batches, which
+    keep today's generated ids only."""
 
 
 class IngestResult(BaseModel):
@@ -90,6 +95,9 @@ class IngestResult(BaseModel):
     buffer rows, and md paths all land in the right space."""
     messages: list[CanonicalMessage]
     unparsed_non_text_count: int = 0
+    group_id: str | None = None
+    """The group the session is bound to (D18); ``None`` on the one-to-one path.
+    A pipeline reads it to know whose memory a cell is."""
 
 
 class Episode(BaseModel):

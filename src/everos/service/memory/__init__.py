@@ -24,11 +24,15 @@ __all__ = [
     "FlushResult",
     "ForgetResult",
     "ForgottenPicture",
+    "GroupUpsertResult",
+    "GroupView",
     "MemorizeResult",
     "MemoryService",
     "QueueHealth",
     "Queued",
     "RevisionResult",
+    "RosterChangeResult",
+    "RosterEventInput",
     "SessionForgetResult",
     "SessionUndoResult",
     "TaskItem",
@@ -41,13 +45,14 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from everos.component.images import ImageLimits
-from everos.core.errors import PathTraversalError, SessionBusyError
+from everos.core.errors import InvalidInputError, PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     keep_question_pictures,
 )
-from everos.memory.ports import Scope
+from everos.memory.ports import Scope, SessionKey
 
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
@@ -57,6 +62,11 @@ from ._forget import ForgetResult as ForgetResult
 from ._forget import ForgottenPicture as ForgottenPicture
 from ._forget_session import SessionForgetManager
 from ._forget_session import SessionForgetResult as SessionForgetResult
+from ._groups import GroupUpsertResult as GroupUpsertResult
+from ._groups import GroupUseCases
+from ._groups import GroupView as GroupView
+from ._groups import RosterChangeResult as RosterChangeResult
+from ._groups import RosterEventInput as RosterEventInput
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
@@ -82,6 +92,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
+    from everos.memory.groups import RosterManager
     from everos.memory.ports import EventBus, IndexEraser
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
@@ -126,6 +137,8 @@ class MemoryService:
         index_eraser: IndexEraser,
         indexes: Indexes | None = None,
         image_limits: ImageLimits | None = None,
+        rosters: RosterManager | None = None,
+        group_pipeline: Pipeline | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -168,6 +181,17 @@ class MemoryService:
             raw_file_builder=raw_file_builder,
             image_store=stores.images,
             vision=settings.extraction.vision,
+            rosters=rosters,
+            group_pipeline=group_pipeline,
+        )
+        self._groups = (
+            GroupUseCases(
+                rosters=rosters,
+                memorizer=self._memorizer,
+                clock=lambda: to_timestamp_ms(get_utc_now()),
+            )
+            if rosters is not None
+            else None
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
@@ -230,6 +254,38 @@ class MemoryService:
         """Paginated listing over the requested ``memory_type``, in the read scope."""
         return await self._get_manager.get(req, asserted_asker=asserted_asker)
 
+    # ── group use cases ────────────────────────────────────────────────────
+
+    def _group_cases(self) -> GroupUseCases:
+        if self._groups is None:
+            raise InvalidInputError("group memory is not available")
+        return self._groups
+
+    async def upsert_group(self, **request: Any) -> GroupUpsertResult:
+        """Create a group or update its meta (``PUT /groups/{id}``).
+
+        Raises:
+            ForbiddenError: The asker may not manage the existing group.
+            RosterConflictError: The roster does not fold.
+            InvalidInputError: No asker.
+        """
+        return await self._group_cases().upsert(**request)
+
+    async def change_roster(self, **request: Any) -> RosterChangeResult:
+        """Append roster events (``POST /groups/{id}/roster``).
+
+        The group's sessions' open buffers are cut first (D18).
+
+        Raises:
+            ForbiddenError: Not a current member, or not allowed this event.
+            RosterConflictError: The events do not fold.
+        """
+        return await self._group_cases().change(**request)
+
+    async def read_group(self, **request: Any) -> GroupView:
+        """A group's meta and roster, for a current member (``GET /groups/{id}``)."""
+        return await self._group_cases().read(**request)
+
     # ── delete use cases ───────────────────────────────────────────────────
 
     async def delete(
@@ -245,7 +301,23 @@ class MemoryService:
 
         Runs to completion even if the caller goes away: a deletion cut in
         half would leave the scope half deleted.
+
+        Raises:
+            InvalidInputError: The session belongs to a group. A group-scoped
+                delete is a propagated forget that is not available before
+                Step 2 (docs/group-memory.md, section 5.5); deleting the
+                session's buffer and memcells alone would leave the group's
+                memory of it half removed.
         """
+        if session_id is not None:
+            bound = await self._stores.groups.binding(
+                SessionKey(app_id, project_id, session_id)
+            )
+            if bound is not None:
+                raise InvalidInputError(
+                    "the session belongs to a group; group-scoped delete is not "
+                    "available yet"
+                )
         task = self._extractions.supervise(
             self._deleter.delete(
                 app_id=app_id,

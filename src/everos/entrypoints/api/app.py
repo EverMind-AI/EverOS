@@ -36,6 +36,7 @@ from .routes import (
     cascade,
     delete,
     get,
+    groups,
     health,
     images,
     knowledge,
@@ -136,6 +137,7 @@ def create_app(
     # v1 and v2 stay identical by construction — see test_api_versioning.
     # v1 first — legacy alias, behavior identical.
     app.include_router(memorize.router, prefix="/api/v1")
+    app.include_router(groups.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(get.router, prefix="/api/v1")
     app.include_router(delete.router, prefix="/api/v1")
@@ -148,6 +150,7 @@ def create_app(
     app.include_router(tasks.router, prefix="/api/v1")
     # v2 — cloud-aligned name, same routers.
     app.include_router(memorize.router, prefix="/api/v2")
+    app.include_router(groups.router, prefix="/api/v2")
     app.include_router(search.router, prefix="/api/v2")
     app.include_router(get.router, prefix="/api/v2")
     app.include_router(images.router, prefix="/api/v2")

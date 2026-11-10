@@ -50,3 +50,5 @@ class UnprocessedBuffer(BaseTable, table=True):
     text: str
     tool_calls_json: str | None = None
     tool_call_id: str | None = None
+    client_message_id: str | None = None
+    """The caller's ``message_id`` of a group batch; NULL otherwise."""

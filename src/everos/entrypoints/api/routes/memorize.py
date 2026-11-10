@@ -14,7 +14,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Response
 from starlette.status import HTTP_202_ACCEPTED
 
-from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.dependencies import (
+    ApplicationDep,
+    AskerHeaderDep,
+    RequestIdDep,
+)
 from everos.entrypoints.api.schemas import (
     AcceptedResponseData,
     AddResponseData,
@@ -45,6 +49,8 @@ _ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": SuccessEnvelope[AcceptedResponseData],
         "description": "Queued: async_mode, or the session already had a backlog",
     },
+    403: {"description": "Roster events from an asker who may not send them"},
+    409: {"description": "Session bound to another group, or a roster conflict"},
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
 }
@@ -57,16 +63,40 @@ _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
+def _payload(req: MemorizeAddRequest, asker_header: str | None) -> dict[str, Any]:
+    """The request as the service's payload dict.
+
+    The group fields appear only when the request uses them, so a one-to-one
+    payload (also what the ``async_mode`` queue persists) is exactly what it
+    was before groups existed.
+    """
+    payload = req.model_dump(exclude={"async_mode", "defer_extraction"})
+    for key in ("group_id", "roster", "asker_id"):
+        if not payload.get(key):
+            payload.pop(key, None)
+    for message in payload["messages"]:
+        if message.get("message_id") is None:
+            message.pop("message_id", None)
+    if asker_header is not None:
+        payload["asserted_asker"] = asker_header
+    return payload
+
+
 @router.post("/add", responses=_ADD_RESPONSES)
 async def add_memory(
     req: Annotated[MemorizeAddRequest, ...],
     response: Response,
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
-    """Add messages into the user-memory + agent-memory pipelines."""
+    """Add messages into the user-memory + agent-memory pipelines.
+
+    With ``group_id`` the session becomes (or already is) a group session:
+    its messages become group memory, never per-sender personal memory.
+    """
     result = await app.memory.add(
-        req.model_dump(exclude={"async_mode", "defer_extraction"}),
+        _payload(req, asker_header),
         request_id=request_id,
         async_mode=req.async_mode,
         defer_extraction=req.defer_extraction,

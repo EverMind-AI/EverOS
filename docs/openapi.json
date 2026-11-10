@@ -54,7 +54,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "description": "Add messages into the user-memory + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.",
         "operationId": "add_memory_api_v1_memory_add_post",
         "requestBody": {
           "content": {
@@ -94,6 +94,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Roster events from an asker who may not send them"
+          },
+          "409": {
+            "description": "Session bound to another group, or a roster conflict"
           },
           "413": {
             "description": "Body over memorize.async_queue.max_payload_bytes"
@@ -163,6 +169,249 @@
           },
           "429": {
             "description": "Queue at its per-session or global cap"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/groups/{group_id}": {
+      "put": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Upsert Group",
+        "description": "Create the group, or update its meta (owners and admins).\n\nA new group whose roster names no owner gets the asker as its owner.",
+        "operationId": "upsert_group_api_v1_groups__group_id__put",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpsertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_GroupUpsertResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A roster event conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Read Group",
+        "description": "The group's meta and current roster; every interval with history.",
+        "operationId": "read_group_api_v1_groups__group_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          },
+          {
+            "name": "include_history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include History"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_GroupDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/groups/{group_id}/roster": {
+      "post": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Change Roster",
+        "description": "Append roster events; owners and admins send any, a member their own leave.\n\nMessages the group's sessions still hold in their buffers are cut into\nsegments first, so no segment spans the change.",
+        "operationId": "change_roster_api_v1_groups__group_id__roster_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_RosterChangeResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A roster event conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1453,7 +1702,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "description": "Add messages into the user-memory + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.",
         "operationId": "add_memory_api_v2_memory_add_post",
         "requestBody": {
           "content": {
@@ -1493,6 +1742,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Roster events from an asker who may not send them"
+          },
+          "409": {
+            "description": "Session bound to another group, or a roster conflict"
           },
           "413": {
             "description": "Body over memorize.async_queue.max_payload_bytes"
@@ -1562,6 +1817,249 @@
           },
           "429": {
             "description": "Queue at its per-session or global cap"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/groups/{group_id}": {
+      "put": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Upsert Group",
+        "description": "Create the group, or update its meta (owners and admins).\n\nA new group whose roster names no owner gets the asker as its owner.",
+        "operationId": "upsert_group_api_v2_groups__group_id__put",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpsertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_GroupUpsertResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A roster event conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Read Group",
+        "description": "The group's meta and current roster; every interval with history.",
+        "operationId": "read_group_api_v2_groups__group_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          },
+          {
+            "name": "include_history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include History"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_GroupDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/groups/{group_id}/roster": {
+      "post": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Change Roster",
+        "description": "Append roster events; owners and admins send any, a member their own leave.\n\nMessages the group's sessions still hold in their buffers are cut into\nsegments first, so no segment spans the change.",
+        "operationId": "change_roster_api_v2_groups__group_id__roster_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_RosterChangeResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a current member, or not allowed to change this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A roster event conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3476,6 +3974,18 @@
               }
             ],
             "title": "Session Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped delete; refused with 422 before Step 2."
           }
         },
         "additionalProperties": false,
@@ -3949,6 +4459,18 @@
             "minLength": 1,
             "title": "User Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped forget; refused with 422 before Step 2."
+          },
           "image_id": {
             "type": "string",
             "maxLength": 64,
@@ -4040,6 +4562,18 @@
             "maxLength": 128,
             "minLength": 1,
             "title": "User Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped forget; refused with 422 before Step 2."
           },
           "session_id": {
             "type": "string",
@@ -4640,6 +5174,210 @@
         "title": "GetResponse",
         "description": "Top-level response envelope."
       },
+      "GroupDTO": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "integer",
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "history_visible_from": {
+            "type": "string",
+            "enum": [
+              "join",
+              "creation"
+            ],
+            "title": "History Visible From"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Extra"
+          },
+          "roster": {
+            "items": {
+              "$ref": "#/components/schemas/MemberIntervalDTO"
+            },
+            "type": "array",
+            "title": "Roster",
+            "description": "Current members; every interval with include_history=true."
+          }
+        },
+        "type": "object",
+        "required": [
+          "group_id",
+          "app_id",
+          "project_id",
+          "name",
+          "description",
+          "created_at",
+          "history_visible_from",
+          "roster"
+        ],
+        "title": "GroupDTO",
+        "description": "A group's meta and roster."
+      },
+      "GroupUpsertRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who asks. Required unless the deployment's identity header ([access] identity_header) carries it; a different value there is 403."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "history_visible_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "join",
+                  "creation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Visible From"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra"
+          },
+          "roster": {
+            "items": {
+              "$ref": "#/components/schemas/RosterEventDTO"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Roster"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GroupUpsertRequest",
+        "description": "``PUT /groups/{group_id}``: create the group, or update its meta."
+      },
+      "GroupUpsertResponseData": {
+        "properties": {
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          },
+          "events_applied": {
+            "type": "integer",
+            "title": "Events Applied"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "events_applied",
+          "group"
+        ],
+        "title": "GroupUpsertResponseData"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4820,6 +5558,88 @@
         "title": "KnowledgeSearchResponse",
         "description": "Response for POST /search."
       },
+      "MemberIntervalDTO": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "title": "Member Id"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "human",
+              "assistant"
+            ],
+            "title": "Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "joined_at": {
+            "type": "integer",
+            "title": "Joined At"
+          },
+          "left_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left At"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "api",
+              "inline",
+              "implicit"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_id",
+          "seq",
+          "kind",
+          "display_name",
+          "role",
+          "joined_at",
+          "source"
+        ],
+        "title": "MemberIntervalDTO",
+        "description": "One membership interval, ``[joined_at, left_at)`` in epoch ms."
+      },
       "MemorizeAddRequest": {
         "properties": {
           "session_id": {
@@ -4852,6 +5672,43 @@
             "maxItems": 500,
             "minItems": 1,
             "title": "Messages"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "The group the session belongs to. The first batch naming it binds the session; a later batch without it inherits the binding; a batch naming another group is 409. An unknown group is created ([groups] implicit_create)."
+          },
+          "roster": {
+            "items": {
+              "$ref": "#/components/schemas/RosterEventDTO"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Roster",
+            "description": "Roster events applied before the messages (an event without `at` takes the batch's first message time). For an existing group the asker must be an owner or admin."
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who sends the batch; needed for roster events of an existing group."
           },
           "defer_extraction": {
             "type": "boolean",
@@ -5049,6 +5906,20 @@
               }
             ],
             "title": "Tool Call Id"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id",
+            "description": "Optional client id of the message, unique within the session. Kept for a group session (message-level forget, source quotes); ignored on a one-to-one session."
           }
         },
         "type": "object",
@@ -5176,6 +6047,18 @@
             "minLength": 1,
             "title": "User Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped forget; refused with 422 before Step 2."
+          },
           "image_id": {
             "type": "string",
             "maxLength": 64,
@@ -5275,6 +6158,186 @@
         ],
         "title": "ReviseImageMemoryResponseData",
         "description": "The version that was written, and the one it replaced."
+      },
+      "RosterChangeRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who asks. Required unless the deployment's identity header ([access] identity_header) carries it; a different value there is 403."
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RosterEventDTO"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Events"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "RosterChangeRequest",
+        "description": "``POST /groups/{group_id}/roster``: append roster events."
+      },
+      "RosterChangeResponseData": {
+        "properties": {
+          "events_applied": {
+            "type": "integer",
+            "title": "Events Applied"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events_applied",
+          "group"
+        ],
+        "title": "RosterChangeResponseData"
+      },
+      "RosterEventDTO": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "join",
+              "leave",
+              "update"
+            ],
+            "title": "Op"
+          },
+          "member_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Member Id"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "assistant"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                "type": "array",
+                "maxItems": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member",
+                  "assistant"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At",
+            "description": "Epoch ms the event takes effect; defaults to now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "member_id"
+        ],
+        "title": "RosterEventDTO",
+        "description": "One roster event: ``join`` opens an interval, ``leave`` closes it,\n``update`` changes ``display_name`` / ``aliases`` / ``role`` / ``title``."
       },
       "RunSummary": {
         "properties": {
@@ -6454,6 +7517,40 @@
         ],
         "title": "SuccessEnvelope[ForgetSessionResponseData]"
       },
+      "SuccessEnvelope_GroupDTO_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GroupDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[GroupDTO]"
+      },
+      "SuccessEnvelope_GroupUpsertResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GroupUpsertResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[GroupUpsertResponseData]"
+      },
       "SuccessEnvelope_KnowledgeSearchResponse_": {
         "properties": {
           "request_id": {
@@ -6487,6 +7584,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[ReviseImageMemoryResponseData]"
+      },
+      "SuccessEnvelope_RosterChangeResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RosterChangeResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[RosterChangeResponseData]"
       },
       "SuccessEnvelope_TaskItem_": {
         "properties": {
@@ -6922,6 +8036,18 @@
             "minLength": 1,
             "title": "User Id"
           },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped forget; refused with 422 before Step 2."
+          },
           "image_id": {
             "type": "string",
             "maxLength": 64,
@@ -7023,6 +8149,18 @@
             "maxLength": 128,
             "minLength": 1,
             "title": "User Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "A group-scoped forget; refused with 422 before Step 2."
           },
           "session_id": {
             "type": "string",
