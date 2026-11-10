@@ -1337,8 +1337,9 @@ The first half of Step 1 differs from the text above in these places:
   one older than a current member's join, and one from a former member that
   falls inside or before an earlier interval.
 - **Inline roster events.** An event without `at` takes the batch's first
-  message time. It cuts only the batch's own session; the roster route cuts
-  every session of the group.
+  message time. Like the roster route, a batch that carries roster events
+  cuts the open buffer of every session of the group before the change
+  applies (tasks 4-7 closed the gap where it cut only its own session).
 - **Groups without an owner or admin** may be managed by any current member, so
   an implicitly created group can always be administered.
 - **Route prefix.** The group routes are also mounted under `/api/v1`, like

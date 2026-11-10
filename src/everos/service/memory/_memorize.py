@@ -18,8 +18,9 @@ events with it.
 A session bound to a group (or a batch naming ``group_id``) takes the group
 path (docs/group-memory.md, section 7.1): under the session lock the batch is
 admitted into its group (binding, inline roster, implicit joins; 409 / 403 /
-422 before anything is written), an inline roster change first cuts the
-session's open buffer (D18), and the cells go to the group pipeline -- never
+422 before anything is written), an inline roster change first cuts the open
+buffer of every session of the group -- their locks held with the batch's, in
+sorted order (D18) -- and the cells go to the group pipeline -- never
 to the one-to-one pipelines, which would file group content as each sender's
 personal memory. The bootstrap wires
 :class:`~everos.memory.extract.pipeline.GroupMemoryPipeline`; a build without
@@ -182,29 +183,42 @@ class Memorizer:
             # Buffers and memcells are scoped by app / project, so two sessions
             # that merely share a session_id across projects must not wait on
             # each other (the queue runs them side by side).
-            lock_key = session_key(
-                payload.get("app_id", "default"),
-                payload.get("project_id", "default"),
-                session_id,
-            )
-            timeout_s = self._settings.memorize.session_lock_timeout_seconds
-            async with LOCKS.hold("session", lock_key, max_wait=timeout_s):
+            app_id = payload.get("app_id") or "default"
+            project_id = payload.get("project_id") or "default"
+            # A batch that changes its group's roster cuts every session of
+            # the group first (D18), so it holds their locks as well as its
+            # own -- all of them in sorted order, like the roster route.
+            others = await self._sessions_cut_with(payload, is_final=is_final)
+            async with contextlib.AsyncExitStack() as held:
+                held_others = await self._hold_sessions(
+                    held,
+                    app_id=app_id,
+                    project_id=project_id,
+                    own=session_id,
+                    others=others,
+                )
+                elsewhere = await self._cut_buffers(
+                    app_id, project_id, held_others, mode=mode
+                )
                 prepared = await self._cut(
                     payload,
                     mode=mode,
                     is_final=is_final,
                     defer_extraction=defer_extraction,
                 )
-            if isinstance(prepared, MemorizeResult):
+            if isinstance(prepared, MemorizeResult) and not elsewhere:
                 return prepared
-            ingested, boundaries = prepared
             # The cells exist, so their extraction must not die with a
             # cancelled request (a client that went away). The task is owned
             # by the supervisor, which keeps it, retrieves its outcome and
             # waits for it at shutdown; the request only shields it.
-            memcell_ids = [mid for b in boundaries for mid in b.memcell_ids]
+            memcell_ids = [
+                mid
+                for _, b in [*elsewhere, *_own_cuts(prepared)]
+                for mid in b.memcell_ids
+            ]
             extraction = self._extractions.supervise(
-                self._extract(payload, ingested, boundaries, mode=mode),
+                self._extract_cut(payload, prepared, elsewhere, mode=mode),
                 session_id=session_id,
                 memcell_ids=memcell_ids,
             )
@@ -217,6 +231,134 @@ class Memorizer:
                     memcell_ids=memcell_ids,
                 )
                 raise
+
+    async def _sessions_cut_with(
+        self, payload: dict[str, Any], *, is_final: bool
+    ) -> list[str]:
+        """The other sessions of the batch's group, when the batch changes its roster.
+
+        Read before any lock is taken, to know which locks to take; the
+        session's binding is decided again under its lock. A session that
+        binds between the two reads is not cut: the windows keep reads right,
+        the cut only keeps a new member's first segment theirs (section 7.1).
+        """
+        if self._rosters is None or is_final or not payload.get("roster"):
+            return []
+        session = SessionKey(
+            app_id=payload.get("app_id") or "default",
+            project_id=payload.get("project_id") or "default",
+            session_id=payload["session_id"],
+        )
+        group_id = payload.get("group_id") or await self._rosters.store.binding(session)
+        if group_id is None:
+            return []
+        record = await self._rosters.store.get(
+            Scope(
+                app_id=session.app_id,
+                project_id=session.project_id,
+                owner_id=group_id,
+                owner_type="group",
+            )
+        )
+        if record is None:
+            return []
+        return [s for s in record.sessions if s != session.session_id]
+
+    async def _hold_sessions(
+        self,
+        held: contextlib.AsyncExitStack,
+        *,
+        app_id: str,
+        project_id: str,
+        own: str | None,
+        others: Sequence[str],
+    ) -> list[str]:
+        """Take the batch's session lock and the others', in sorted order.
+
+        The batch's own lock (``own``) is required: waiting past the session
+        lock timeout raises, as it always has. Another session whose lock
+        stays busy is skipped with a warning -- the membership windows keep
+        reads correct; the cut only keeps a new member's first segment theirs.
+
+        Returns:
+            The other sessions whose locks are held.
+        """
+        wait = self._settings.memorize.session_lock_timeout_seconds
+        mine = {own} if own is not None else set()
+        keys = {session_key(app_id, project_id, s): s for s in {*mine, *others}}
+        got: list[str] = []
+        for key in sorted(keys):
+            session_id = keys[key]
+            if session_id == own:
+                await held.enter_async_context(
+                    LOCKS.hold("session", key, max_wait=wait)
+                )
+                continue
+            try:
+                await held.enter_async_context(
+                    LOCKS.hold("session", key, max_wait=wait)
+                )
+            except TimeoutError:
+                logger.warning(
+                    "groups.buffer_cut_skipped_busy",
+                    app_id=app_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                continue
+            got.append(session_id)
+        return got
+
+    async def _cut_buffers(
+        self, app_id: str, project_id: str, sessions: Sequence[str], *, mode: Mode
+    ) -> list[tuple[IngestResult, BoundaryOutcome]]:
+        """Close each listed session's open buffer into cells (a flush's cut).
+
+        Runs under the sessions' locks; the cells are extracted after the
+        locks are released.
+        """
+        cut: list[tuple[IngestResult, BoundaryOutcome]] = []
+        for session_id in sessions:
+            session = SessionKey(app_id, project_id, session_id)
+            group_id = (
+                await self._rosters.store.binding(session) if self._rosters else None
+            )
+            empty = _IngestResult(
+                session_id=session_id,
+                app_id=app_id,
+                project_id=project_id,
+                messages=[],
+                group_id=group_id,
+            )
+            closed = await self._boundary.detect(empty, mode=mode, is_final=True)
+            if closed.cells:
+                cut.append((empty, closed))
+        return cut
+
+    async def _extract_cut(
+        self,
+        payload: dict[str, Any],
+        prepared: MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]],
+        elsewhere: Sequence[tuple[IngestResult, BoundaryOutcome]],
+        *,
+        mode: Mode,
+    ) -> MemorizeResult:
+        """Extract the batch's own cells, then those cut from the group's others."""
+        result = (
+            prepared
+            if isinstance(prepared, MemorizeResult)
+            else await self._extract(payload, *prepared, mode=mode)
+        )
+        for ingested, closed in elsewhere:
+            await self._extract(
+                flush_payload(
+                    ingested.session_id, ingested.app_id, ingested.project_id
+                ),
+                ingested,
+                [closed],
+                mode=mode,
+            )
+        return result
 
     async def _cut(
         self,
@@ -405,39 +547,11 @@ class Memorizer:
         The cut cells are extracted after the locks are released.
         """
         mode = self._settings.memorize.mode
-        wait = self._settings.memorize.session_lock_timeout_seconds
-        cut: list[tuple[IngestResult, BoundaryOutcome]] = []
         async with contextlib.AsyncExitStack() as held:
-            for session_id in sorted(set(sessions)):
-                key = session_key(app_id, project_id, session_id)
-                try:
-                    await held.enter_async_context(
-                        LOCKS.hold("session", key, max_wait=wait)
-                    )
-                except TimeoutError:
-                    logger.warning(
-                        "groups.buffer_cut_skipped_busy",
-                        app_id=app_id,
-                        project_id=project_id,
-                        session_id=session_id,
-                    )
-                    continue
-                session = SessionKey(app_id, project_id, session_id)
-                group_id = (
-                    await self._rosters.store.binding(session)
-                    if self._rosters
-                    else None
-                )
-                empty = _IngestResult(
-                    session_id=session_id,
-                    app_id=app_id,
-                    project_id=project_id,
-                    messages=[],
-                    group_id=group_id,
-                )
-                closed = await self._boundary.detect(empty, mode=mode, is_final=True)
-                if closed.cells:
-                    cut.append((empty, closed))
+            locked = await self._hold_sessions(
+                held, app_id=app_id, project_id=project_id, own=None, others=sessions
+            )
+            cut = await self._cut_buffers(app_id, project_id, locked, mode=mode)
             result = await change()
         for ingested, closed in cut:
             await self._extract(
@@ -541,6 +655,16 @@ class Memorizer:
         return MemorizeResult(
             message_count=count, status=_merge_status(outcome.status, "skipped")
         )
+
+
+def _own_cuts(
+    prepared: MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]],
+) -> list[tuple[IngestResult, BoundaryOutcome]]:
+    """The batch's own ``(ingested, boundary)`` pairs; none for a result."""
+    if isinstance(prepared, MemorizeResult):
+        return []
+    ingested, boundaries = prepared
+    return [(ingested, boundary) for boundary in boundaries]
 
 
 def _prepared_cells(boundary: BoundaryOutcome) -> list[PreparedCell]:

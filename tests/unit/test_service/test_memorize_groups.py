@@ -12,8 +12,9 @@ scripted boundary model (``tests/helpers/groups.py``). What these pin
   ``users/`` and no one-to-one event is published;
 - an inline roster change cuts the session's open buffer first, so the
   messages buffered before it form their own segment (D18);
-- a roster change through the roster route cuts the open buffers of every
-  session of the group before it applies;
+- a roster change -- inline on ``/memory/add`` or through the roster route --
+  cuts the open buffers of every session of the group before it applies, so
+  no segment spans it (task 4);
 - without ``group_id`` a multi-sender batch still runs today's path.
 """
 
@@ -169,6 +170,45 @@ async def test_an_inline_roster_change_cuts_the_open_buffer_first(
             "inline",
             _T0 + 10,
         )
+
+
+async def test_an_inline_roster_change_cuts_every_session_of_the_group(
+    tmp_path: Path,
+) -> None:
+    async with GroupWorld.open(tmp_path, llm=_boundary_model()) as world:
+        for session in ("s1", "s2"):
+            await _add(
+                world,
+                _batch(
+                    session,
+                    _message("u_chen", _T0 + 1, f"opening {session}"),
+                    group_id="trip",
+                    asker_id="u_chen",
+                ),
+            )
+        await _add(
+            world,
+            _batch(
+                "s1",
+                _message("u_evan", _T0 + 10, "Hi all, Evan here"),
+                group_id="trip",
+                asker_id="u_chen",
+                roster=[{"op": "join", "member_id": "u_evan", "at": _T0 + 10}],
+            ),
+        )
+        assert [
+            m.sender_id
+            for m in await world.stores.session_buffer.list(world.session("s1"))
+        ] == ["u_evan"]
+        # The other session's buffered message became a segment too, before
+        # the change, and was extracted as the group's episode.
+        assert await world.stores.session_buffer.list(world.session("s2")) == []
+        sessions = {
+            e.session_id
+            for e in world.bus.events
+            if type(e).__name__ == "GroupEpisodeExtracted"
+        }
+        assert sessions == {"s1", "s2"}
 
 
 async def test_the_roster_route_cuts_every_session_of_the_group(
