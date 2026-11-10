@@ -1354,6 +1354,78 @@ The first half of Step 1 differs from the text above in these places:
 - **D17 also applies to one-to-one chats.** A picture the assistant posts adds
   no items to the user's profile.
 
+### Implementation notes (Step 1, tasks 4-7)
+
+The second half of Step 1 differs from the text above in these places:
+
+- **No 2.0 scenes or query-encoder state on this line.** Task 6 builds on
+  both, and neither exists here. Group scenes are built from operators that
+  do exist, with no new prompt text. Each new group episode is placed by
+  everalgo's `cluster_by_geometry`, with the `[clustering]` threshold and time
+  window that users' episode clusters use. The narrative comes from everalgo's
+  `EpisodeReflector`: INIT over the members when the scene is new, then
+  UPDATE with each new episode. The group's state for the query encoder is
+  not built: no encoder on this line takes a state. So "group queries use the
+  group's state" holds only in the weak sense that no query is encoded with a
+  personal state.
+- **Scene storage.** Scene versions are entries of daily logs,
+  `groups/<g>/scenes/scene-<YYYY-MM-DD>.md` (entry ids `gsc_`), not
+  `scenes/<scene_id>.md`. An entry records `scene_id`, `version` and
+  `member_ids`. A new version marks the one it replaces in
+  `deprecated_entries`, in the same locked write. The index rows are in the
+  `episode` table with `parent_type = scene`; there is no `scene` table. So
+  scenes compete with episodes in every recall, under the same window
+  predicate. Search and get mark them `type = "Scene"`, and their
+  `source.memcell_id` is null. A session-filtered search finds no scene,
+  because a scene belongs to no session. `[groups] scenes` switches scenes
+  off.
+- **Prompt registry.** There is no prompt registry on this line either. The
+  roster block is a versioned constant next to its renderer
+  (`memory/extract/pipeline/group_render.py`): id `chat.group_roster_block`,
+  version 1, with a fingerprint the tests pin.
+- **Member-in-group profile format.** There is no 2.0 profile format on this
+  line. A member's profile uses `user.md`'s fields plus `group_id`,
+  `member_id`, `pending_memcell_ids` (the throttle) and `history`. Each item
+  carries `item_id`, `source_memcell_ids` and the span `source_start` /
+  `source_end`. The profile operator does not say which segment an item came
+  from, so an item's sources are all the segments of the update that added or
+  rewrote it. The index row id is `<group_id>:<member_id>`.
+- **Member-profile visibility.** An item is shown when the span of its
+  sources lies in one of the asker's windows. The summary is written over
+  every item, so it is shown only when every item is.
+- **Throttle on flush.** A flush of a session bound to a group publishes
+  `GroupFlushed`, whether or not it cut a segment. Every member with pending
+  segments is then updated.
+- **Named members.** `include_profile` attaches the asker's profile and those
+  of up to three members the query names, from each group of the scope.
+- **Subjects.** Only human members are subjects; an assistant the text names
+  is not. A picture memory's subjects are the members its description or OCR
+  names, otherwise its human poster.
+- **Picture time.** A group picture memory is dated by the message that
+  carried the picture, not by the segment's end. Its window test uses that
+  time.
+- **Inline roster cut.** A batch that carries roster events holds the locks
+  of every session of its group with its own, in sorted order, and cuts their
+  buffers before the change applies. A busy session is skipped, as on the
+  roster route.
+- **Agent cases.** An agent read in a group's context is `agent_id` plus
+  `context_group_id`. Its asker, the agent itself unless `asker_id` names
+  another, must be a current member, or the read is 403. A group-sourced case
+  carries no source span, so windows are not applied to it. Skills are not
+  filtered by context.
+- **Question rendering** applies to the whole multi-round loop, to the first
+  round's recall as well as to the decider, and only to that method. It can
+  be switched off with `[groups] asker_in_question`.
+- **Get.** `image_memory` and `member_profile` are available on group scopes
+  only: users have no picture listing on this line.
+- **Table schema version 5.** Version 4 had already shipped with the first
+  half. `user_profile.subject_id` and `agent_case.source_group_id` are
+  therefore added by version 5. Milvus still has no migration step, so a
+  Milvus store reports drift and needs `everos cascade rebuild`.
+- **Episode reader.** Episodes read back from markdown now keep `sender_ids`
+  and `language`. Scenes need the members' senders, and an undo used to drop
+  both.
+
 ---
 
 ## 15. Risks

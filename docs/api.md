@@ -525,11 +525,15 @@ and should be reserved for offline or background workflows.
 | `"profile"` | user | `data.profiles` — [GetProfileItem](#getprofileitem) |
 | `"agent_case"` | agent | `data.agent_cases` — [GetAgentCaseItem](#getagentcaseitem) |
 | `"agent_skill"` | agent | `data.agent_skills` — [GetAgentSkillItem](#getagentskillitem) |
+| `"scene"` | group | `data.scenes` — group scene versions, in the [GetEpisodeItem](#getepisodeitem) shape with `type: "Scene"` |
+| `"image_memory"` | group | `data.images` — the group's picture memories |
+| `"member_profile"` | group | `data.profiles` — one member's profile in each group of the scope; needs `member_id` |
 
 `memory_type` must match the requested owner kind: `"episode"` /
 `"profile"` require `user_id`; `"agent_case"` / `"agent_skill"`
-require `agent_id`. The mismatching combinations are rejected with
-`422`.
+require `agent_id`; a group scope (`group_id` / `group_ids`) takes
+`"episode"`, `"scene"`, `"image_memory"` and `"member_profile"`. The
+mismatching combinations are rejected with `422`.
 
 ## Endpoints
 
@@ -1575,6 +1579,32 @@ current member can see). The asker must be a current member of each group, and
 sees only records whose sources lie inside one of their membership windows;
 the search response carries a `scope` block with those windows. Group-scoped
 `/memory/delete` and forget routes answer `422` until group forget lands.
+
+**What a group session writes.** Each segment becomes one group episode under
+`groups/<group_id>/episodes/`, with `sender_ids` (who spoke), `subject_ids`
+(the members it names, else the human senders) and `origin` (`member`,
+`assistant` or `mixed`). Each picture becomes one picture memory with
+`sender_ids = [poster]`. In the background, each member who spoke gets a
+profile in the group, `groups/<group_id>/members/<member_id>.md`. It is
+updated after `[groups] member_profile_every` segments and on every flush.
+The group's scenes are written to `groups/<group_id>/scenes/`.
+
+**Group results.** A group episode carries `owner_type: "group"`, `group_id`
+and `source: {memcell_id, from, to}`: its memcell and the epoch ms of the
+segment's first and last message. A scene has `type: "Scene"` and
+`memcell_id: null`. With `include_profile: true` a group search attaches the
+asker's member-in-group profile and those of up to three members the query
+names by roster name or alias, in each group:
+`{owner_type: "group", group_id, member_id, profile_data}`. Items whose
+sources lie outside the asker's windows are left out, and so is the summary
+then. A personal profile is never attached. The multi-round search starts
+from `"<display name>: <question>"`.
+
+**Agent memory in a group.** An agent case learned from a group session
+carries `source_group_id`. `/memory/search` and `/memory/get` with `agent_id`
+return such cases only with `context_group_id` set to that group. The asker
+must be a current member of it, which is the agent itself unless `asker_id`
+names another member. Cases learned outside any group are always returned.
 
 **Identity.** EverOS has no authentication: `asker_id` is the caller's
 assertion. A deployment behind a gateway sets `[access] identity_header`; the

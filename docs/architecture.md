@@ -398,13 +398,18 @@ extract/
 ├── ingest/       Standardized message intake + multi-modal parser dispatch
 ├── parser/       Input parsing (format normalization, message preprocessing)
 ├── boundary/     BoundaryDetection: session buffer -> memcells (+ ledger, quarantine)
-├── pipeline/     Per-cell extraction (Episode md + the events that announce it)
+├── pipeline/     Per-cell extraction (Episode md + the events that announce it);
+│                 the group pipeline writes one group episode per segment
 └── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
 ```
 
 `BoundaryDetection` is built by the bootstrap and injected into
 `MemoryService`; it owns the session buffer, the `memcell` ledger and the
-quarantine of a session the model keeps failing to segment. Why in the
+quarantine of a session the model keeps failing to segment. A cell of a
+session bound to a group goes to `GroupMemoryPipeline` (and, in agent mode,
+the agent pipeline) instead of the one-to-one user pipeline: one episode
+under `groups/<group_id>/`, speakers labelled by their roster names, and the
+attribution fields set by code (`pipeline/group_render.py`). Why in the
 domain: deciding where an episode ends is a memory rule, and keeping it out
 of the service lets it be tested against in-memory stores and a scripted
 model. `llm_retry.py` centralizes the host's retry of `LLMOutputError` for
@@ -424,9 +429,10 @@ index backend:
 - LSN-based crash recovery via the SQLite `md_change_state` queue
 - Handlers for the business kinds: episode, atomic_fact, foresight,
   image_memory, user_profile, agent_case, agent_skill, knowledge_document,
-  knowledge_topic, and the group kinds -- group_episode and
-  group_image_memory into the same tables, group_roster (``group.md``) into
-  the SQLite roster mirror
+  knowledge_topic, and the group kinds -- group_episode, group_scene and
+  group_image_memory into the episode and picture tables, group_member_profile
+  into ``user_profile``, group_roster (``group.md``) into the SQLite roster
+  mirror
 
 ### `memory/custom_instructions/`
 
@@ -464,6 +470,9 @@ them.
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation once the merged episode's facts exist)
 - `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
+- `update_member_profiles` / `update_group_scenes` — group memory: the
+  member-in-group profiles (on each group episode, throttled, and on
+  `GroupFlushed`) and the group's scenes
 
 Who publishes: the domain never does. The memorize service publishes each
 pipeline cell's events on the `EventBus` (`OmeEventBus` over the engine), and
@@ -509,7 +518,9 @@ sound dependency structure.
     ├── groups/<group_id>/                              # group memory (group-memory.md)
     │   ├── group.md                                    # meta + append-only roster log
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # one entry per segment
-    │   └── images/image-<YYYY-MM-DD>.md                # one entry per picture
+    │   ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
+    │   ├── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
+    │   └── members/<member_id>.md                      # member-in-group profile
     └── knowledge/                                      # global shared knowledge
 ```
 

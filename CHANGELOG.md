@@ -56,12 +56,46 @@ machinery that keeps a deleted memory from coming back.
     only to a current member whose membership windows cover all of the
     record's sources. With `[access] identity_header` set, the asker is read
     from the gateway's header.
-  - **Group messages are not extracted yet:** they are cut into memcells and
-    stop there. Group episodes and member-in-group profiles come in the next
-    step.
   - **Table schema version 4** adds `subject_ids`, `origin`, `source_start`
     and `source_end` to `episode` and `image_memory`, plus `sender_ids` to
     `image_memory`. Existing rows read as one-to-one records.
+- **Group memory, second half** ([docs/group-memory.md](docs/group-memory.md),
+  Step 1 tasks 4-7):
+  - **One group episode per segment.** A segment of a session bound to a
+    group is written once, under `groups/<group_id>/episodes/`, never as each
+    sender's personal memory. The extraction call is the one-to-one call: the
+    speakers carry their roster names (an assistant member as
+    `"<name> (assistant)"`) and a roster block (template
+    `chat.group_roster_block` v1) follows the custom instructions. Code sets
+    `sender_ids`, `subject_ids` (the members the episode names, else the human
+    senders), `origin` (`member` / `assistant` / `mixed`) and the segment's
+    span.
+  - **Pictures once per group,** with `sender_ids` set to the poster. The
+    profile items a picture yields reach only the poster's member-in-group
+    profile.
+  - **Member-in-group profiles** in `groups/<group_id>/members/<member_id>.md`
+    (strategy `update_member_profiles`, everalgo's profile operator over the
+    member's own segments of the group). A profile is updated after
+    `[groups] member_profile_every` new segments (default `5`) and on every
+    flush of the group. Every item records the segments it was read from.
+  - **Group scenes** in `groups/<group_id>/scenes/` (strategy
+    `update_group_scenes`, `[groups] scenes`, default `true`): episodes that
+    are close in vector and time get one narrative over them, written by
+    everalgo's episode reflector. Each change is a new version. Scenes compete
+    with episodes in search. A scene is shown only to an asker who can see
+    all of its episodes.
+  - **Agent cases learned in a group** carry `source_group_id`. They are
+    returned only to an agent read in that group's context:
+    `context_group_id`, asked by a current member.
+  - **Search:** a group episode carries `owner_type` and
+    `source: {memcell_id, from, to}`. `include_profile` attaches the asker's
+    and up to three named members' in-group profiles, cut to the asker's
+    windows. The multi-round question starts with the asker's name
+    (`[groups] asker_in_question`, default `true`).
+  - **Get:** `memory_type` takes `scene`, `image_memory` and
+    `member_profile` (with `member_id`) on group scopes.
+  - **Table schema version 5** adds `user_profile.subject_id` and
+    `agent_case.source_group_id`. Existing rows read as before.
 
 ### Changed
 
@@ -203,6 +237,12 @@ machinery that keeps a deleted memory from coming back.
   session.
 - **Picture bytes referenced by group memory are served only to askers who
   can see them.** Anyone else gets the same 404 as for a missing picture.
+- **A roster change sent inline on `/memory/add` cuts the open buffer of every
+  session of the group,** as the roster route does. It used to cut only the
+  batch's own session, so another session's next segment could span the
+  change.
+- **Episodes read back from markdown keep their `sender_ids` and `language`.**
+  The reader dropped both, so an episode an undo restored lost them.
 
 ### Removed
 
@@ -224,8 +264,11 @@ machinery that keeps a deleted memory from coming back.
   - delete and forget answer 422;
   - `agentic` search answers 422;
   - there is no history route.
-- **Milvus stores** have no migration to table schema version 4. They report
-  schema drift and need `everos cascade rebuild`.
+- **A group's query-encoder state is not built.** The design encodes group
+  queries with the group's own state. No query encoder on this line takes a
+  state, so group and personal queries are encoded the same way.
+- **Milvus stores** have no migration to table schema versions 4 and 5. They
+  report schema drift and need `everos cascade rebuild`.
 
 ## [1.6.0] - 2026-10-28
 

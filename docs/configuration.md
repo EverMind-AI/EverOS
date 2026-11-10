@@ -353,12 +353,16 @@ strategies and is hot-reloaded; these require a restart.
 
 ### `[groups]`
 
-Group memory ([group-memory.md](group-memory.md), section 5.2).
+Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4, 7.7 and
+8.2).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
+| `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
+| `scenes` | bool | `true` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. `false` writes no scenes. |
+| `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
 
 ### `[access]`
 
