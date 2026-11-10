@@ -54,7 +54,9 @@ dependencies = [
 
     # Markdown / file system
     "PyYAML>=6.0",                # YAML frontmatter parsing
-    "watchdog>=4.0.0",            # Cross-platform file system events (cascade daemon)
+    # 7.x changes event semantics and can kill recursive inotify delivery
+    # under warnings=error. Keep installs on the supported, lock-tested line.
+    "watchdog>=4.0.2,<7",         # macOS event_filter support; tested pre-7 contract
 
     # Web framework (entrypoints/api)
     "fastapi>=0.104.0",
@@ -92,8 +94,7 @@ dependencies = [
 
     # Algorithm library (everalgo monorepo, published on PyPI).
     #
-    # All eight everalgo packages (the four below, the three transitive ones
-    # after them, and everalgo-parser in the `multimodal` extra) ship on one
+    # All eight everalgo packages (including the four transitive ones) ship on one
     # contract line -- currently the 2026-10-13 line, built on everalgo-core
     # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
     # one another, so a fresh `pip install everos` would otherwise mix lines
@@ -106,6 +107,7 @@ dependencies = [
     "everalgo-boundary==0.4.1",
     "everalgo-core==0.6.0",
     "everalgo-clustering==0.3.0rc2",
+    "everalgo-parser==0.3.0rc2",
 ]
 
 [project.optional-dependencies]

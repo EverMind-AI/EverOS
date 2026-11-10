@@ -227,7 +227,8 @@ class Deleter:
         ids: Sequence[str],
         reason_code: str | None,
         note: str | None,
-    ) -> None:
+        user_id: str | None = None,
+    ) -> int:
         """Delete episodes by memory id (``<owner_id>_<entry_id>``).
 
         Per owner, in this order (each step is safe to redo, so the same
@@ -243,13 +244,17 @@ class Deleter:
         5. the merge marks keyed by them -- last, a resend after 1 needs them;
         6. their index rows.
 
-        ``note`` is never logged.
+        ``user_id`` optionally restricts deletion to that exact owner; other
+        owners' ids are treated as absent. Returns the number of requested
+        episodes removed, excluding cascade-only removals. ``note`` is never logged.
         """
         if memory_type != "episode":
             raise ValueError(f"unsupported memory_type {memory_type!r}")
         by_owner: dict[str, list[str]] = {}
         for memory_id in dict.fromkeys(ids):
             owner_id, entry_id = _split_memory_id(memory_id)
+            if user_id is not None and owner_id != user_id:
+                continue
             by_owner.setdefault(owner_id, []).append(entry_id)
         hit: list[str] = []
         for owner_id, entry_ids in by_owner.items():
@@ -269,6 +274,7 @@ class Deleter:
             hit=hit,
             skipped=[m for m in dict.fromkeys(ids) if m not in set(hit)],
         )
+        return len(hit)
 
     async def _delete_episodes(self, scope: Scope, targets: Sequence[str]) -> list[str]:
         """Steps 1-6 for one owner; the requested entries that were in md."""

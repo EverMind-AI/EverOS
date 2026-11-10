@@ -21,6 +21,7 @@ from typing import Any, ClassVar, Protocol
 
 import pyarrow as pa
 from lancedb import AsyncTable
+from lancedb.query import AsyncFTSQuery, AsyncVectorQuery
 
 from everos.core.errors import IndexSchemaMismatchError, VectorStoreBusyError
 from everos.core.locks import LOCKS
@@ -517,22 +518,25 @@ class LanceRepoBase[T: IndexRecord]:
     async def _rows(self, query: Any, *, with_vectors: bool) -> list[dict[str, Any]]:
         """Run ``query`` and return its rows as dicts.
 
-        Without ``with_vectors`` the schema's vector columns are dropped from
-        the Arrow result before it becomes Python objects. That conversion
-        runs on the event loop, and two 1024-float vectors per row were most
-        of the loop's busy time under a search-heavy soak (2026-11), while
-        every search caller discarded them.
+        Project unused vectors out of the query result before materializing
+        Arrow buffers, not just before converting them to Python objects.
+        Vector search still uses vectors internally to compute distances.
         """
+        if not with_vectors:
+            columns = [
+                f.name
+                for f in self.index_schema.fields
+                if f.kind is not IndexFieldKind.DENSE_VECTOR
+            ]
+            # These are computed by the query, not stored in the table schema.
+            if isinstance(query, AsyncFTSQuery):
+                columns.append("_score")
+            elif isinstance(query, AsyncVectorQuery):
+                columns.append("_distance")
+            query = query.select(columns)
         slot = self._source.query_slot() if self._source is not None else nullcontext()
         async with slot:
             table = await query.to_arrow()
-        if not with_vectors:
-            present = set(table.column_names)
-            drop = [
-                f.name for f in self.index_schema.vector_fields if f.name in present
-            ]
-            if drop:
-                table = table.drop_columns(drop)
         return table.to_pylist()
 
     def _to_arrow(self, records: Sequence[T]) -> pa.Table:

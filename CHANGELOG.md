@@ -53,6 +53,15 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- Keep fresh installs on `watchdog<7`, matching the tested event semantics;
+  watchdog 7.1 can stop recursive Linux file notifications under
+  `PYTHONWARNINGS=error` when nested directories are created concurrently.
+- The filesystem watcher subscribes only to changes it handles, excluding
+  file-open/close notifications that could overflow Linux's inotify queue
+  during read-heavy searches and delay markdown indexing.
+- A fresh `uv pip install everos` now resolves the parser dependency without
+  requiring a global prerelease override. The base install pins the same
+  parser version as the tested algorithm packages and the multimodal extra.
 - `/add` and `/flush` no longer leave half-written state when a SQLite write
   lock times out: boundary detection records the memcells, the session's
   status and the remaining buffer in one transaction. Before, a timeout at
@@ -532,8 +541,8 @@ This release pins the everalgo packages to one contract line, six of them
 release candidates: `everalgo-core 0.6.0`, `everalgo-boundary 0.4.1`,
 `everalgo-user-memory 0.9.0rc4`, `everalgo-agent-memory 0.6.0rc3`,
 `everalgo-rank 0.5.0rc3`, `everalgo-knowledge 0.3.0rc2`,
-`everalgo-clustering 0.3.0rc2` and, with the `multimodal` extra,
-`everalgo-parser 0.3.0rc2`. The pins are exact (`==`), so `pip install
+`everalgo-clustering 0.3.0rc2` and `everalgo-parser 0.3.0rc2` (also required
+by knowledge ingestion in a base installation). The pins are exact (`==`), so `pip install
 everos` resolves them without any pre-release flag; upgrade them together,
 never one at a time.
 

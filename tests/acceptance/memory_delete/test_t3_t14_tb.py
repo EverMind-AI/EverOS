@@ -140,15 +140,23 @@ def test_tb2_1_unknown_and_other_project_ids(make_server: Any) -> None:
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    assert resp.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "deleted": 1,
+    }
     entries = {(e["path"].split("/")[1], e["entry_id"]) for e in md_entries(srv.root)}
     assert entries == {("other", there)}
-    # The whole request again: the same answer, nothing else moves.
+    # The whole request again: success with zero deletions; nothing else moves.
     again = srv.delete_by_ids(
         [f"nobody_{here}", "u1_ep_20240101_0001", "u1_ep_20251001_0099", f"u1_{here}"]
     )
     assert again.status_code == 200
-    assert again.json()["data"] == {"memory_type": "episode", "success": True}
+    assert again.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "deleted": 0,
+    }
     assert {(e["path"].split("/")[1], e["entry_id"]) for e in md_entries(srv.root)} == {
         ("other", there)
     }

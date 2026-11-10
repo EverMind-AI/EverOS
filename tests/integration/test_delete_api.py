@@ -291,6 +291,51 @@ async def test_by_ids_deletes_a_merged_episode_and_its_sources(
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    assert resp.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "deleted": 1,
+    }
     assert await _md_ids(storage_view, source) == set()
+    assert await _index_ids(storage_view) == set()
+
+
+@pytest.mark.parametrize("api_version", ["v1", "v2"])
+async def test_by_ids_owner_guard_and_count(
+    client: AsyncClient, storage_view: StorageView, api_version: str
+) -> None:
+    """An owner guard preserves foreign md/index/get; null keeps id-only deletes."""
+    own = await _seed(storage_view, "u1", "own")
+    foreign = await _seed(storage_view, "u10", "foreign")
+    path = f"/api/{api_version}/memory/delete_by_ids"
+    body = {
+        "memory_type": "episode",
+        "memory_ids": [foreign.id, own.id, own.id, "u1_ep_20200101_9999"],
+        "user_id": "u1",
+    }
+    response = await client.post(path, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "deleted": 1,
+    }
+    assert await _md_ids(storage_view, own) == set()
+    assert await _md_ids(storage_view, foreign) == {foreign.entry_id}
+    assert await _index_ids(storage_view) == {foreign.id}
+    listed = await client.post(
+        f"/api/{api_version}/memory/get",
+        json={"user_id": "u10", "memory_type": "episode"},
+    )
+    assert listed.status_code == 200
+    assert {e["id"] for e in listed.json()["data"]["episodes"]} == {foreign.id}
+    repeated = await client.post(path, json=body)
+    assert repeated.status_code == 200
+    assert repeated.json()["data"]["deleted"] == 0
+    assert await _md_ids(storage_view, foreign) == {foreign.entry_id}
+    assert await _index_ids(storage_view) == {foreign.id}
+    unguarded = await client.post(path, json=body | {"user_id": None})
+    assert unguarded.status_code == 200
+    assert unguarded.json()["data"]["deleted"] == 1
+    assert await _md_ids(storage_view, foreign) == set()
     assert await _index_ids(storage_view) == set()

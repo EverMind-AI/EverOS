@@ -594,6 +594,7 @@ dependencies = [
     { name = "everalgo-clustering" },
     { name = "everalgo-core" },
     { name = "everalgo-knowledge" },
+    { name = "everalgo-parser" },
     { name = "everalgo-rank" },
     { name = "everalgo-user-memory" },
     { name = "fastapi" },
@@ -659,6 +660,7 @@ requires-dist = [
     { name = "everalgo-clustering", specifier = "==0.3.0rc2" },
     { name = "everalgo-core", specifier = "==0.6.0" },
     { name = "everalgo-knowledge", specifier = "==0.3.0rc2" },
+    { name = "everalgo-parser", specifier = "==0.3.0rc2" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = "==0.3.0rc2" },
     { name = "everalgo-rank", specifier = "==0.5.0rc3" },
     { name = "everalgo-user-memory", specifier = "==0.9.0rc4" },
@@ -683,7 +685,7 @@ requires-dist = [
     { name = "textual", specifier = ">=8.2.7" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
-    { name = "watchdog", specifier = ">=4.0.0" },
+    { name = "watchdog", specifier = ">=4.0.2,<7" },
     { name = "watchfiles", specifier = ">=0.21.0" },
 ]
 provides-extras = ["multimodal", "otel", "milvus"]

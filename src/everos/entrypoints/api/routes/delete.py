@@ -57,12 +57,15 @@ async def delete_memories_by_ids(
     Ids that match nothing are skipped (not 404); sending the same request
     again is harmless.
     """
-    await app.memory.delete_by_ids(
+    deleted = await app.memory.delete_by_ids(
         app_id=req.app_id,
         project_id=req.project_id,
         memory_type=req.memory_type,
         ids=req.memory_ids,
+        user_id=req.user_id,
         reason_code=req.reason.code if req.reason else None,
         note=req.reason.note if req.reason else None,
     )
-    return SuccessEnvelope(request_id=request_id, data=DeleteByIdsResponseData())
+    return SuccessEnvelope(
+        request_id=request_id, data=DeleteByIdsResponseData(deleted=deleted)
+    )

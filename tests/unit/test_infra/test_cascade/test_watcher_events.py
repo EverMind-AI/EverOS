@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -33,6 +34,7 @@ from watchdog.events import (
     FileDeletedEvent,
     FileModifiedEvent,
     FileMovedEvent,
+    FileSystemEvent,
 )
 
 from everos.infra.cascade.registry import match_kind
@@ -334,6 +336,34 @@ async def test_observer_delivers_a_new_file(
     assert row.change_type in {"added", "modified"}
     assert row.status == "pending"
     assert row.mtime > 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="inotify emits read events")
+async def test_reading_files_does_not_emit_watcher_events(
+    runtime: MemoryRoot,
+    watcher: CascadeWatcher,
+    storage: Storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reads must not consume the notification queue needed by actual edits."""
+    observed: list[str] = []
+    source = _episode(runtime.root)
+    source.write_text("existing content", encoding="utf-8")
+    await _wait_row(storage, _rel(runtime.root, source))
+
+    def record(event: FileSystemEvent) -> None:
+        if str(event.src_path) == str(source):
+            observed.append(event.event_type)
+
+    monkeypatch.setattr(watcher._handler, "on_any_event", record)
+    for _ in range(64):
+        source.read_bytes()
+    # Delivery of this later event is the barrier; do not sleep and assume
+    # the read notifications would already have arrived.
+    marker = _episode(runtime.root, "episode-2026-01-02.md")
+    marker.write_text("real edit", encoding="utf-8")
+    await _wait_row(storage, _rel(runtime.root, marker))
+    assert not {"opened", "closed_no_write"}.intersection(observed)
 
 
 async def test_in_place_save_never_registers_as_deleted(

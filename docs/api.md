@@ -1425,6 +1425,7 @@ Aligned with the Cloud endpoint.
 |---|---|---|---|---|
 | `memory_type` | `"episode"` | yes | — | only episodes |
 | `memory_ids` | `string[]` | yes | — | `1..50` ids `<owner_id>_ep_<YYYYMMDD>_<n>`; path-safe owner of 1..128 characters; a real date |
+| `user_id` | `string` \| `null` | no | `null` | Optional owner guard; path-safe id of 1..128 characters. Only this user's episodes are affected. |
 | `reason` | `{ "code", "note" }` \| `null` | no | `null` | `code` ∈ `hallucination`, `outdated`, `wrong_subject`, `wrong_time`, `redundant`, `missing`, `privacy`, `style`, `other`; `note` ≤ 256 chars |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
@@ -1434,6 +1435,10 @@ Duplicate ids are deleted once; ids that match nothing are skipped (no
 `404`); sending the same request again is harmless. Ids are looked up in
 the request's `app_id` / `project_id` only: the id of a memory in another
 app or project is skipped like one that matches nothing.
+
+When `user_id` is set, another user's id is also skipped like an absent id.
+Omitting it or passing `null` retains id-only deletion across owners within
+the requested app/project.
 
 #### What it deletes
 
@@ -1448,9 +1453,14 @@ Deleting one source of a merged episode keeps the merged episode.
 ```json
 {
   "request_id": "<32-char hex>",
-  "data": { "memory_type": "episode", "success": true }
+  "data": { "memory_type": "episode", "success": true, "deleted": 1 }
 }
 ```
+
+`deleted` counts requested episodes actually removed, once per id. It excludes
+absent, already-deleted, out-of-scope and owner-mismatched ids, and excludes
+additional episodes or facts removed by the cascade. A repeated completed
+request returns `success: true, deleted: 0`.
 
 The log line `memory_delete_by_ids` records the reason code and which ids
 were found and which skipped; it never records `note` or any memory text.

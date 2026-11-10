@@ -69,6 +69,22 @@ runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`); the
 user-visible dirs are *not* pre-created — they appear on first write.
 Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
 
+### Clearing all local data
+
+With the default local LanceDB backend, stop all EverOS processes using
+the memory root before removing the **entire root directory**, including
+hidden directories such as `.index/` and `.tmp/`. This removes both the
+memory files and the SQLite state, including messages awaiting extraction.
+It also removes configuration files; save any configuration you need
+outside the root first. Run `everos init --root <path>`, configure the new
+root, and restart the server to begin with empty local storage.
+
+Removing only an app, project, or user subdirectory does not clear the
+shared SQLite state or pending work in `.index/`; it is not a complete
+data reset. Removing a local root also does not remove data from a remote
+Milvus backend. For owner, session, or episode deletion while retaining
+the root, use the [memory deletion APIs](api.md#post-apiv2memorydelete).
+
 > The single-file writer also supports `agent.md` / `soul.md` / `tools.md`
 > / `behaviors.md`, but no shipped strategy produces those today — only
 > `user.md` is written. `memcell` is a SQLite-only kind (the boundary

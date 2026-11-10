@@ -2725,6 +2725,20 @@
                 "type": "null"
               }
             ]
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "If set, only episodes owned by this user are affected; other owners' ids are treated as not found. Omit or use null for id-only deletion."
           }
         },
         "additionalProperties": false,
@@ -2748,11 +2762,19 @@
             "type": "boolean",
             "title": "Success",
             "default": true
+          },
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted",
+            "description": "Requested episodes removed, excluding duplicates, absent ids, other owners' ids when user_id is set, and cascade-only removals."
           }
         },
         "type": "object",
+        "required": [
+          "deleted"
+        ],
         "title": "DeleteByIdsResponseData",
-        "description": "``{\"memory_type\": \"episode\", \"success\": true}`` (Cloud's shape)."
+        "description": "Cloud-compatible result, counting requested episodes actually removed."
       },
       "DeleteReason": {
         "properties": {
