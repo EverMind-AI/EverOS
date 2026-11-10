@@ -165,6 +165,13 @@ class SqliteMemcellStore:
         rows = await self._repo.find_by_ids(list(memcell_ids))
         return [MemCell.model_validate_json(row.payload_json) for row in rows]
 
+    async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
+        rows = await self._repo.find_by_ids(list(memcell_ids))
+        return {
+            row.memcell_id: MemCell.model_validate_json(row.payload_json)
+            for row in rows
+        }
+
     async def recent_in_session(
         self,
         session: SessionKey,

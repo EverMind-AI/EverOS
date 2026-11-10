@@ -451,6 +451,9 @@ class InMemoryMemcellStore:
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]:
         return [self.cells[i] for i in memcell_ids if i in self.cells]
 
+    async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
+        return {i: self.cells[i] for i in memcell_ids if i in self.cells}
+
     async def recent_in_session(
         self,
         session: SessionKey,

@@ -500,6 +500,15 @@ class MemcellStore(Protocol):
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]: ...
 
+    async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
+        """The cells of ``memcell_ids`` that exist, keyed by id, in one query.
+
+        :meth:`find_by_ids` returns bare cells, which carry no id: when some of
+        the ids are gone the caller cannot tell which cell is which. This is
+        the read for a caller that holds several ids and needs each answer.
+        """
+        ...
+
     async def recent_in_session(
         self,
         session: SessionKey,
