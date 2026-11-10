@@ -56,7 +56,7 @@ dependencies = [
     "PyYAML>=6.0",                # YAML frontmatter parsing
     # 7.x changes event semantics and can kill recursive inotify delivery
     # under warnings=error. Keep installs on the supported, lock-tested line.
-    "watchdog>=4.0.2,<7",         # macOS event_filter support; tested pre-7 contract
+    "watchdog>=4.0.2,<8",         # macOS event_filter support; tested pre-7 contract
 
     # Web framework (entrypoints/api)
     "fastapi>=0.104.0",
