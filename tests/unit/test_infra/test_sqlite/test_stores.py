@@ -313,6 +313,39 @@ async def test_memcells_round_trip(stores: _Stores) -> None:
     assert await stores.memcell.find_by_ids(["mc_1", "missing"]) == [cell]
 
 
+async def test_recent_in_session_reads_the_session_newest_first(
+    stores: _Stores,
+) -> None:
+    """The session's cells up to a moment, newest first, without the one asked
+    about: what a picture-only cell reads its conversation's language from."""
+    m1, m2, m3, m4 = (_message(f"m{i}", i) for i in range(1, 5))
+    await stores.memcell.insert_many(
+        _SESSION,
+        [
+            _record("mc_1", m1),
+            _record("mc_2", m2),
+            _record("mc_3", m3),
+            _record("mc_4", m4),
+        ],
+    )
+    other = SessionKey(app_id="app", project_id="proj", session_id="s2")
+    await stores.memcell.insert_many(other, [_record("mc_x", m2)])
+
+    def ids(cells: list[MemCell]) -> list[str]:
+        return [cell.items[0].id for cell in cells]
+
+    until_m3 = int(m3.timestamp.timestamp() * 1000)
+    assert ids(
+        await stores.memcell.recent_in_session(
+            _SESSION, until_ms=until_m3, exclude="mc_3", limit=8
+        )
+    ) == ["m2", "m1"]
+    until_m4 = int(m4.timestamp.timestamp() * 1000)
+    assert ids(
+        await stores.memcell.recent_in_session(_SESSION, until_ms=until_m4, limit=2)
+    ) == ["m4", "m3"]
+
+
 async def test_memcell_reads_frozen_payload_from_sqlite(stores: _Stores) -> None:
     payload = _FROZEN_MEMCELL.read_text()
     async with stores.factory() as session:

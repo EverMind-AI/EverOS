@@ -35,19 +35,19 @@ _REF = MemoryRef(
 )
 
 
-def _message(role: str, sender: str) -> ChatMessage:
+def _message(role: str, sender: str, content: str = "hello") -> ChatMessage:
     return ChatMessage(
         id=f"m_{sender}",
         role=role,
-        content="hello",
+        content=content,
         timestamp=1_700_000_000_000,
         sender_id=sender,
     )
 
 
-def _prepared(*senders: str) -> PreparedCell:
+def _prepared(*senders: str, said: str = "hello") -> PreparedCell:
     cell = MemCell(
-        items=[_message("user", s) for s in senders or ("u1",)],
+        items=[_message("user", s, said) for s in senders or ("u1",)],
         timestamp=1_700_000_000_000,
     )
     return PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=list(senders))
@@ -123,23 +123,27 @@ async def test_emit_episode_extracted_after_md_write() -> None:
 
 
 @pytest.mark.parametrize(
-    ("content", "language"),
+    ("said", "content", "language"),
     [
-        ("The user booked a trip to Lisbon for the spring.", "English"),
-        ("用户预订了春天去里斯本的行程。", "Chinese"),
-        ("2026-05-17 12:00", None),
+        # The conversation decides, whatever language the reply came back in.
+        ("hello", "The user booked a trip to Lisbon for the spring.", "English"),
+        ("hello", "用户预订了春天去里斯本的行程。", "English"),
+        ("你好", "The user booked a trip to Lisbon for the spring.", "Chinese"),
+        # A conversation without a letter leaves it to the episode's text.
+        ("2026-05-17 12:00", "用户预订了春天去里斯本的行程。", "Chinese"),
+        ("2026-05-17 12:00", "2026-05-17 12:00", None),
     ],
 )
-async def test_episode_and_event_carry_the_detected_language(
-    content: str, language: str | None
+async def test_episode_and_event_carry_the_conversation_s_language(
+    said: str, content: str, language: str | None
 ) -> None:
-    """The episode's language is detected once and pinned on every copy."""
+    """The language is resolved once per cell and pinned on every copy."""
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
     outcome = await _pipeline(
         memorize_llm(episode_content=content), episode_store
-    ).run_cell(_INGESTED, _prepared("u1", "u2"))
+    ).run_cell(_INGESTED, _prepared("u1", "u2", said=said))
 
     events = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
     written = [call.args[1] for call in episode_store.append.await_args_list]

@@ -21,6 +21,14 @@ writer, the events, the strategies keyed on ``EpisodeExtracted``) is unaware of
 which one ran. The picture memories are written before the episode so that an
 episode body's ``img-N`` references name records that exist.
 
+Both routes are told the language to write in. It is resolved before the call
+from the session's human messages
+(:mod:`everos.memory.extract.conversation_language`), never left to the model,
+which answered English picture cells in Chinese; the same language then pins
+the episode, its event and so every extraction downstream. Only a session
+without a letter anywhere leaves the model the choice, and the language its
+episode was written in is pinned instead, as before.
+
 A picture is evidence about its sender as well as a memory of its own, so the
 picture route also merges the reply's profile items into ``user.md`` before the
 episode is published -- into the poster's ``user.md`` only (D17): a picture one
@@ -40,7 +48,7 @@ from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor
+from everalgo.user_memory import EpisodeExtractor, OutputLanguage
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
@@ -48,6 +56,7 @@ from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
+from everos.memory.extract.conversation_language import resolve_cell_language
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline import image_memory as image_extract
 from everos.memory.extract.pipeline import profile_delta
@@ -67,6 +76,7 @@ from everos.memory.ports import (
     MemoryRef,
     ProfileStore,
     Scope,
+    SessionKey,
 )
 from everos.memory.ports.images import ImageStore
 
@@ -150,13 +160,28 @@ class UserMemoryPipeline:
         md_paths: list[str] = []
         user_senders = _unique_user_senders(cell)
         if user_senders:
+            # Named to the model, never left to it: the language is the
+            # conversation's, resolved from its human messages.
+            named = await resolve_cell_language(
+                cell,
+                memcell_id=memcell_id,
+                session=SessionKey(
+                    ingested.app_id, ingested.project_id, ingested.session_id
+                ),
+                memcells=self._memcell_store,
+            )
             pictures = await self._pictures_of(cell)
             algo_ep, described, profile_ops = await self._extract(
-                ingested, prepared, pictures
+                ingested, prepared, pictures, named
             )
-            # The model writes in the conversation's language; what it chose
-            # pins every extraction downstream of this episode.
-            language = detect_output_language(algo_ep.episode)
+            # That language pins every extraction downstream of this episode.
+            # Only a conversation without a letter in it left the choice to
+            # the model; then what it chose is read off the episode.
+            language = (
+                str(named)
+                if named is not None
+                else detect_output_language(algo_ep.episode)
+            )
             by_poster = ops_by_poster(profile_ops, pictures)
             for sender_id in user_senders:
                 md_paths += await self._persist_images(
@@ -215,12 +240,14 @@ class UserMemoryPipeline:
         ingested: IngestResult,
         prepared: PreparedCell,
         pictures: Sequence[Picture],
+        language: OutputLanguage | None,
     ) -> _Extraction:
         """One whole-cell episode (and picture descriptions, and profile items).
 
         ``sender_id=None`` binds the episode to no user; the fan-out to one copy
         per sender happens in markdown only, so a cell costs one call. An
-        unusable reply is tried again by :func:`retry_llm_output`.
+        unusable reply is tried again by :func:`retry_llm_output`. ``language``
+        is named to the model on either route; ``None`` leaves it the choice.
         """
         custom_instructions = self._instructions.load("episode_extract")
 
@@ -233,30 +260,35 @@ class UserMemoryPipeline:
                 "project_id": ingested.project_id,
                 "memcell_id": prepared.memcell_id,
                 "pictures": len(pictures),
+                "output_language": None if language is None else str(language),
             },
         ) as extract_span:
             if pictures:
                 algo_ep, described, ops = await self._extract_with_pictures(
-                    prepared, pictures, custom_instructions
+                    prepared, pictures, custom_instructions, language
                 )
             else:
                 algo_ep, described, ops = (
-                    *await self._extract_text(prepared, custom_instructions),
+                    *await self._extract_text(prepared, custom_instructions, language),
                     [],
                 )
             capture_output(extract_span, algo_ep.episode)
         return algo_ep, described, ops
 
     async def _extract_text(
-        self, prepared: PreparedCell, custom_instructions: str | None
+        self,
+        prepared: PreparedCell,
+        custom_instructions: str | None,
+        language: OutputLanguage | None,
     ) -> tuple[AlgoEpisode, dict[str, tuple[str, str]]]:
-        """The text-only route: everalgo's extractor, exactly as before."""
+        """The text-only route: everalgo's extractor, told the language."""
 
         async def attempt() -> AlgoEpisode:
             return await self._ep_ext.aextract(
                 prepared.cell,
                 sender_id=None,
                 custom_instructions=custom_instructions,
+                output_language=language,
             )
 
         return (
@@ -271,6 +303,7 @@ class UserMemoryPipeline:
         prepared: PreparedCell,
         pictures: Sequence[Picture],
         custom_instructions: str | None,
+        language: OutputLanguage | None,
     ) -> _Extraction:
         """The picture route: one call for the episode, the descriptions, the profile.
 
@@ -288,7 +321,7 @@ class UserMemoryPipeline:
                 prepared.cell,
                 pictures=labels,
                 custom_instructions=custom_instructions,
-                output_language=None,
+                output_language=language,
             )
             return (
                 image_extract.to_episode(reply, prepared.cell, labels=by_label),

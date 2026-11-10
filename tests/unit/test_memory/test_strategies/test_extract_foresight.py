@@ -159,6 +159,40 @@ async def test_writes_every_foresight_of_a_sender_in_one_batch() -> None:
     assert (second.foresight, second.evidence) == ("buy tickets", "confirmed")
 
 
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        ("alice plans a trip to tokyo next spring with her sister", "English"),
+        ("爱丽丝打算明年春天和她妹妹一起去东京旅行", "Chinese"),
+    ],
+)
+async def test_the_conversation_s_language_is_named(text: str, language: str) -> None:
+    """Foresights are written in the language the senders speak, named in code."""
+    event = UserPipelineStarted(
+        memcell_id="mc_a",
+        session_id="s1",
+        memcell=MemCell(
+            items=[
+                ChatMessage(
+                    id="m1",
+                    role="user",
+                    content=text,
+                    timestamp=1_700_000_000_000,
+                    sender_id="u_alice",
+                )
+            ],
+            timestamp=1_700_000_000_000,
+        ),
+    )
+    deps = seed_sources(make_deps(), memcell_id="mc_a")
+    with patch(_EXTRACTOR) as mock_cls:
+        mock_cls.return_value.aextract = AsyncMock(return_value=[])
+        await extract_foresight(event, deps)
+
+    (call,) = mock_cls.return_value.aextract.call_args_list
+    assert call.kwargs["output_language"] == language
+
+
 async def test_skips_when_memcell_has_no_messages() -> None:
     event = UserPipelineStarted(
         memcell_id="mc_b",

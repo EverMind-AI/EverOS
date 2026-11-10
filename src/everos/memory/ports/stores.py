@@ -500,6 +500,22 @@ class MemcellStore(Protocol):
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]: ...
 
+    async def recent_in_session(
+        self,
+        session: SessionKey,
+        *,
+        until_ms: int,
+        limit: int,
+        exclude: str | None = None,
+    ) -> list[MemCell]:
+        """The session's latest cells up to ``until_ms`` (inclusive), newest first.
+
+        At most ``limit`` cells; ``exclude`` leaves one memcell id out (the
+        cell the caller already holds). What a cell with too little text of
+        its own reads its conversation's language from.
+        """
+        ...
+
     async def mark_case_extracted(
         self,
         memcell_id: str,

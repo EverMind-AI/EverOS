@@ -150,9 +150,11 @@ class Episode(BaseModel):
     parent_id: str
     parent_type: EpisodeParentType = "memcell"
     language: str | None = None
-    """The ``OutputLanguage`` value the episode is written in, detected from
-    its text; downstream extractions are pinned to it. ``None`` when unknown
-    (an episode stored before it existed, or text with no letters)."""
+    """The ``OutputLanguage`` value the episode is written in: its
+    conversation's, resolved from the human messages and named to the model
+    (read off the episode's own text only for a conversation without a
+    letter); downstream extractions are pinned to it. ``None`` when unknown
+    (an episode stored before it existed, or no text anywhere)."""
 
     # Group attribution (docs/group-memory.md, section 4.5). One-to-one
     # episodes keep the defaults, and markdown writes none of the three then.

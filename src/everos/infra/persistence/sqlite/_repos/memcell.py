@@ -66,6 +66,38 @@ class MemcellRepo(RepoBase[Memcell]):
                 by_id.update((r.memcell_id, r) for r in rows)
         return [by_id[mid] for mid in memcell_ids if mid in by_id]
 
+    async def recent_in_session(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        session_id: str,
+        until: dt.datetime,
+        limit: int,
+        exclude: str | None = None,
+    ) -> list[Memcell]:
+        """The session's rows up to ``until`` (inclusive), newest first.
+
+        Rides ``ix_memcell_session`` for the scope + session prefix. Every
+        track is read: rows written before the ``memorize`` track name carry
+        an older one and are the same conversation. Ties on ``timestamp``
+        order by ``memcell_id`` so the answer is stable.
+        """
+        stmt = select(Memcell).where(
+            Memcell.app_id == app_id,
+            Memcell.project_id == project_id,
+            Memcell.session_id == session_id,
+            Memcell.timestamp <= until,  # type: ignore[operator]
+        )
+        if exclude is not None:
+            stmt = stmt.where(Memcell.memcell_id != exclude)
+        stmt = stmt.order_by(
+            Memcell.timestamp.desc(),  # type: ignore[union-attr]
+            Memcell.memcell_id.desc(),  # type: ignore[attr-defined]
+        ).limit(limit)
+        async with session_scope(self._factory) as s:
+            return list((await s.execute(stmt)).scalars().all())
+
     async def mark_case_extracted(
         self,
         memcell_id: str,

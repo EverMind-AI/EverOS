@@ -52,11 +52,13 @@ from everalgo.user_memory import ForesightExtractor
 from everos.core.observability.logging import get_logger
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import UserPipelineStarted
+from everos.memory.extract.conversation_language import resolve_cell_language
 from everos.memory.models import Foresight
 from everos.memory.ports import (
     Event,
     Immediate,
     Scope,
+    SessionKey,
     StrategySpec,
 )
 
@@ -77,11 +79,25 @@ async def extract_foresight(
         }
     )
     extractor = ForesightExtractor(llm=deps.llm) if sender_ids else None
+    # The conversation's language, resolved as the episode's was, so the
+    # foresights of a cell are written in the same language as its episode.
+    language = (
+        await resolve_cell_language(
+            memcell,
+            memcell_id=event.memcell_id,
+            session=SessionKey(event.app_id, event.project_id, event.session_id),
+            memcells=deps.stores.memcell,
+        )
+        if sender_ids
+        else None
+    )
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).
     foresights: list[Foresight] = []
     for sid in sender_ids:
-        algo_foresights = await extractor.aextract(memcell, sender_id=sid)
+        algo_foresights = await extractor.aextract(
+            memcell, sender_id=sid, output_language=language
+        )
         foresights.extend(
             Foresight.from_algo(
                 algo_fs,

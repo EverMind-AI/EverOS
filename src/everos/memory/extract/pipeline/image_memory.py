@@ -218,7 +218,10 @@ def build_messages(
         pictures: ``(label, bytes, mime)`` per picture, in conversation order.
             The label is the one the conversation text uses (``img-1``).
         custom_instructions: The host's instructions.
-        output_language: Language to write in; ``None`` follows the speakers.
+        output_language: Language to write in. The pipeline names the
+            conversation's, resolved in code; ``None`` leaves the model to
+            follow the speakers, which it does not reliably do on a picture
+            cell (whole replies drift into Chinese).
         detail: ``detail`` hint on each image part. ``high`` because this call
             has to read small text out of a picture; the decider's
             thumbnail-only default is set separately.

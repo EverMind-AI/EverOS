@@ -165,6 +165,24 @@ class SqliteMemcellStore:
         rows = await self._repo.find_by_ids(list(memcell_ids))
         return [MemCell.model_validate_json(row.payload_json) for row in rows]
 
+    async def recent_in_session(
+        self,
+        session: SessionKey,
+        *,
+        until_ms: int,
+        limit: int,
+        exclude: str | None = None,
+    ) -> list[MemCell]:
+        rows = await self._repo.recent_in_session(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+            until=from_timestamp_ms(until_ms),
+            limit=limit,
+            exclude=exclude,
+        )
+        return [MemCell.model_validate_json(row.payload_json) for row in rows]
+
     async def mark_case_extracted(
         self,
         memcell_id: str,

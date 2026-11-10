@@ -427,23 +427,49 @@ class InMemoryAgentSkillStore:
 
 
 class InMemoryMemcellStore:
-    """Memcells by id."""
+    """Memcells by id, with the session each was inserted under."""
 
     def __init__(self) -> None:
         self.cells: dict[str, MemCell] = {}
+        self.sessions: dict[str, SessionKey] = {}
         self.case_marks: dict[str, tuple[str | None, dict[str, Any]]] = {}
 
-    def seed(self, memcell_id: str, cell: MemCell) -> None:
+    def seed(
+        self, memcell_id: str, cell: MemCell, session: SessionKey | None = None
+    ) -> None:
         self.cells[memcell_id] = cell
+        if session is not None:
+            self.sessions[memcell_id] = session
 
     async def insert_many(
         self, session: SessionKey, records: Sequence[MemcellRecord]
     ) -> None:
         for record in records:
             self.cells[record.memcell_id] = record.cell
+            self.sessions[record.memcell_id] = session
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]:
         return [self.cells[i] for i in memcell_ids if i in self.cells]
+
+    async def recent_in_session(
+        self,
+        session: SessionKey,
+        *,
+        until_ms: int,
+        limit: int,
+        exclude: str | None = None,
+    ) -> list[MemCell]:
+        found = sorted(
+            (
+                (cell.timestamp, memcell_id)
+                for memcell_id, cell in self.cells.items()
+                if self.sessions.get(memcell_id) == session
+                and cell.timestamp <= until_ms
+                and memcell_id != exclude
+            ),
+            reverse=True,
+        )
+        return [self.cells[memcell_id] for _, memcell_id in found[:limit]]
 
     async def mark_case_extracted(
         self,

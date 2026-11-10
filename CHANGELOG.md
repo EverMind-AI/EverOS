@@ -156,6 +156,23 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **Extractions are written in the conversation's language.** No extraction
+  prompt named a language, so the model was left to work it out, and the 2.0
+  backbone answered English picture cells in Chinese -- episode, picture
+  descriptions and profile items together (2.0 stores of English benchmarks:
+  4.6% to 45% of picture descriptions in Chinese). The language read back off
+  such a reply then pinned the cell's atomic facts and froze the owner's
+  profile language. The language is now resolved in code from the session's
+  human messages and named in every prompt of the cell (episode on both
+  routes, picture descriptions, picture profile items, atomic facts, profile,
+  foresight): one vote per message, picture references and code blocks
+  ignored, and a cell with too little text of its own (a picture with no
+  caption) reads its session's earlier cells (`MemcellStore.recent_in_session`).
+  Only a session without a letter anywhere still leaves the choice to the
+  model. An explicit language is honoured as before: a profile's stored
+  `primary_language` still wins. Language detection also stopped reading long
+  English text as Spanish or German on two accented names: German and Spanish
+  markers must now outnumber English function words too.
 - `/add` and `/flush` no longer leave half-written state when a SQLite write
   lock times out: boundary detection records the memcells, the session's
   status and the remaining buffer in one transaction. Before, a timeout at

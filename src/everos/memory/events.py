@@ -116,8 +116,9 @@ class EpisodeExtracted(Event):
     through to :class:`AtomicFactsExtracted` so the step that finishes the
     merge knows what to deprecate."""
     language: str | None = None
-    """The episode's detected ``OutputLanguage`` value; the extractions this
-    event drives write in it. ``None`` lets each extractor infer its own."""
+    """The episode's ``OutputLanguage`` value (see ``Episode.language``); the
+    extractions this event drives write in it. ``None`` lets each extractor
+    infer its own."""
 
 
 class GroupEpisodeExtracted(Event):
