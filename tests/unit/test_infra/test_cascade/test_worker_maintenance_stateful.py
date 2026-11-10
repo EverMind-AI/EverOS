@@ -69,6 +69,8 @@ import itertools
 import os
 import random
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -719,6 +721,7 @@ class _RandomLanceRepo:
         self.active += 1
         if self.active > 1:
             r.violations.append(f"{self.kind}: {op} overlapped another call")
+        call_index = len(self.calls)
         self.calls.append((r.life, op, outcome))
         if op in ("optimize", "prune"):
             now = time.perf_counter()
@@ -737,7 +740,14 @@ class _RandomLanceRepo:
             if outcome == "fail":
                 raise RuntimeError("index maintenance boom")
         except asyncio.CancelledError:
-            if outcome != "hang" and not r.stopping:
+            deadline = r.deadlines.get(asyncio.current_task())
+            if deadline is not None and deadline.expired():
+                # The real deadline, not the fake's planned outcome, decides
+                # whether this cancellation is legal. A descheduled loop can
+                # time out even a normally quick call. Health sees a failure,
+                # so the independent call ledger must record that outcome too.
+                self.calls[call_index] = (r.life, op, "hang")
+            elif not r.stopping:
                 r.violations.append(f"{self.kind}: {op} was cancelled mid-flight")
             raise
         finally:
@@ -783,6 +793,7 @@ class _JitterRun:
         self.stopped = False  # stop() returned: nothing may start
         self.violations: list[str] = []
         self.trace: list[str] = []
+        self.deadlines: dict[asyncio.Task[Any] | None, asyncio.Timeout] = {}
         self.t0 = time.perf_counter()
         self.repos = {
             kind: _RandomLanceRepo(self, kind, random.Random(self.rng.random()))
@@ -832,6 +843,31 @@ class _JitterRun:
         return dead
 
 
+class _ObservedDeadlines:
+    """Observe real timeout scopes without changing their cancellation rules."""
+
+    def __init__(self, run: _JitterRun) -> None:
+        self.run = run
+        self.base = maintenance.asyncio
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.base, name)
+
+    @asynccontextmanager
+    async def timeout(self, delay: float) -> AsyncIterator[asyncio.Timeout]:
+        task = asyncio.current_task()
+        previous = self.run.deadlines.get(task)
+        async with self.base.timeout(delay) as deadline:
+            self.run.deadlines[task] = deadline
+            try:
+                yield deadline
+            finally:
+                if previous is None:
+                    self.run.deadlines.pop(task)
+                else:
+                    self.run.deadlines[task] = previous
+
+
 async def _jittered_maintenance(
     plan: list[tuple[str, str, float]],
     seed: int,
@@ -845,6 +881,17 @@ async def _jittered_maintenance(
     restarts the worker that far through the plan, or never. ``quiet_tail``
     is how long the loops run on alone after the last write."""
     run = _JitterRun(seed, beat_weights, rebuild_weights)
+    with mock.patch.object(maintenance, "asyncio", _ObservedDeadlines(run)):
+        await _drive_jittered_maintenance(run, plan, restart_at, quiet_tail)
+    assert not run.deadlines
+
+
+async def _drive_jittered_maintenance(
+    run: _JitterRun,
+    plan: list[tuple[str, str, float]],
+    restart_at: float | None,
+    quiet_tail: float,
+) -> None:
     w = run.new_worker()
     await w.start()
     run.note("started")
@@ -1033,6 +1080,30 @@ def test_jittered_maintenance_loops(
             plan, seed, restart_at, beat_weights, rebuild_weights, quiet_tail
         )
     )
+
+
+def test_jitter_accepts_a_real_deadline_after_a_scheduler_stall() -> None:
+    """A normally quick call can time out when the event loop is suspended."""
+    note = _JitterRun.note
+    stalled = []
+
+    def stall_once(run: _JitterRun, what: str) -> None:
+        note(run, what)
+        if not stalled and what.startswith("episode.ensure ->"):
+            stalled.append(what)
+            asyncio.get_running_loop().call_soon(time.sleep, _J_TIMEOUT * 2)
+
+    plan = [
+        ("episode", "row", 0.1),
+        ("plain", "touch", 0.0),
+        ("profile", "touch", 0.01),
+        ("profile", "row", 0.03),
+    ]
+    with mock.patch.object(_JitterRun, "note", stall_once):
+        asyncio.run(
+            _jittered_maintenance(plan, 359, None, (3, 2, 3, 1), (1, 1, 1, 6), 0.6)
+        )
+    assert stalled, "the controlled scheduling stall was not reached"
 
 
 def test_jitter_catches_the_wait_that_cancels() -> None:
