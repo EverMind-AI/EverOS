@@ -23,10 +23,12 @@ episode body's ``img-N`` references name records that exist.
 
 A picture is evidence about its sender as well as a memory of its own, so the
 picture route also merges the reply's profile items into ``user.md`` before the
-episode is published. That runs here rather than in the ``extract_user_profile``
-strategy because a conversation carried by photos would otherwise never move
-the portrait, and it shares that strategy's partition lock so the two writers
-of ``user.md`` cannot lose each other's items. The strategy still runs
+episode is published -- into the poster's ``user.md`` only (D17): a picture one
+sender posted says nothing about the other senders of the cell. That runs
+here rather than in the ``extract_user_profile`` strategy because a
+conversation carried by photos would otherwise never move the portrait, and
+it shares that strategy's partition lock so the two writers of ``user.md``
+cannot lose each other's items. The strategy still runs
 afterwards and reads the merged profile, so picture items and text items end up
 in one document with one merge rule between them.
 """
@@ -151,6 +153,7 @@ class UserMemoryPipeline:
             # The model writes in the conversation's language; what it chose
             # pins every extraction downstream of this episode.
             language = detect_output_language(algo_ep.episode)
+            by_poster = _ops_by_poster(profile_ops, pictures)
             for sender_id in user_senders:
                 md_paths += await self._persist_images(
                     ingested,
@@ -160,11 +163,13 @@ class UserMemoryPipeline:
                     owner_id=sender_id,
                     session_id=ingested.session_id,
                 )
+                # D17: what a picture says about a person is about its poster;
+                # another sender of the cell gets none of it.
                 await self._persist_profile(
                     ingested,
                     prepared,
-                    ops=profile_ops,
-                    pictures=pictures,
+                    ops=by_poster.get(sender_id, []),
+                    pictures=[p for p in pictures if p.poster == sender_id],
                     owner_id=sender_id,
                     language=language,
                 )
@@ -339,6 +344,13 @@ class UserMemoryPipeline:
         seen: dict[str, str] = {}
         for item in cell.items:
             text = str(getattr(item, "content", "") or "")
+            # Who posted it: a user's picture is evidence about that user; an
+            # assistant's (or a tool's) is evidence about no user at all.
+            poster = (
+                str(getattr(item, "sender_id", "") or "")
+                if getattr(item, "role", None) == "user"
+                else ""
+            )
             for image_id in _image_ids_in(text):
                 if image_id in seen:
                     continue
@@ -366,6 +378,7 @@ class UserMemoryPipeline:
                         image_id=image_id,
                         data=data,
                         mime="image/jpeg",
+                        poster=poster,
                     )
                 )
         return pictures
@@ -476,15 +489,51 @@ class _Picture:
         image_id: Content hash — what the memory records and a forget takes.
         data: Bytes of the model-scaled copy.
         mime: MIME type of those bytes.
+        poster: Sender of the message the picture first appeared in.
     """
 
-    __slots__ = ("data", "image_id", "label", "mime")
+    __slots__ = ("data", "image_id", "label", "mime", "poster")
 
-    def __init__(self, *, label: str, image_id: str, data: bytes, mime: str) -> None:
+    def __init__(
+        self, *, label: str, image_id: str, data: bytes, mime: str, poster: str = ""
+    ) -> None:
         self.label = label
         self.image_id = image_id
         self.data = data
         self.mime = mime
+        self.poster = poster
+
+
+def _ops_by_poster(
+    ops: Sequence[profile_delta.ProfileItemOp], pictures: Sequence[_Picture]
+) -> dict[str, list[profile_delta.ProfileItemOp]]:
+    """Each picture-derived profile operation, under the picture's poster (D17).
+
+    An operation names its picture by content hash (``source_image_id`` after
+    :func:`profile_delta.retarget`); it goes to whoever posted that picture.
+    One that names none was read off the cell's pictures together: it goes to
+    their poster when they all have one, and to nobody when they do not --
+    giving it to every poster would hand one person's picture to another,
+    the leak this routing exists to close. An assistant's picture reaches no
+    one: the user track holds profiles of users only.
+    """
+    poster_of = {picture.image_id: picture.poster for picture in pictures}
+    posters = {picture.poster for picture in pictures}
+    routed: dict[str, list[profile_delta.ProfileItemOp]] = {}
+    dropped = 0
+    for op in ops:
+        source = getattr(op, "source_image_id", "")
+        if source in poster_of:
+            owner = poster_of[source]
+        elif len(posters) == 1:
+            (owner,) = posters
+        else:
+            dropped += 1
+            continue
+        routed.setdefault(owner, []).append(op)
+    if dropped:
+        logger.info("memory.images.profile_unattributed", dropped=dropped)
+    return routed
 
 
 def _image_ids_in(text: str) -> list[str]:

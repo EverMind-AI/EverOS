@@ -342,3 +342,74 @@ async def test_a_picture_the_reply_never_named_is_still_referenced() -> None:
 
     body = outcome.events[-1].episode_text
     assert f"(img-1: {_IMAGE_ID})" in body
+
+
+# ── D17: a picture's profile items go to its poster only ─────────────────
+
+
+def _profile_reply(*ops: dict) -> dict:
+    return _image_reply() | {"profile": list(ops)}
+
+
+def _cat_fact(label: str = "img-1") -> dict:
+    return {
+        "action": "add",
+        "type": "explicit_info",
+        "source_image_id": label,
+        "data": {
+            "category": "pets",
+            "description": "Has a cat named Biscuit",
+            "evidence": "the collar tag reads Biscuit",
+        },
+    }
+
+
+async def test_a_pictures_profile_items_reach_only_its_poster() -> None:
+    """The leak this fixes (docs/group-memory.md, D17): before, every human
+    sender of the cell had the poster's cat merged into their own profile."""
+    from tests.fakes import InMemoryProfileStore
+
+    profiles = InMemoryProfileStore()
+    pipeline, memories, _ = _pipeline(
+        _RecordingLLM(_profile_reply(_cat_fact())), profile=profiles
+    )
+    cell = MemCell(
+        items=[_text_message("u1"), _text_message("u2"), _picture_message("u1")],
+        timestamp=1_700_000_000_000,
+    )
+
+    await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "u2"])
+    )
+
+    owners = {scope.owner_id for scope in profiles.profiles}
+    assert owners == {"u1"}
+    # The picture memories themselves are unchanged: one copy per sender.
+    assert len(memories.items_for("u2")) == 1
+
+
+async def test_an_assistants_picture_moves_no_users_profile() -> None:
+    """A photo says something about the person who sent it; the assistant is
+    not a user, so its picture establishes nothing about the user."""
+    from tests.fakes import InMemoryProfileStore
+
+    profiles = InMemoryProfileStore()
+    pipeline, _, _ = _pipeline(
+        _RecordingLLM(_profile_reply(_cat_fact())), profile=profiles
+    )
+    bot_picture = ChatMessage(
+        id="m_3",
+        role="assistant",
+        content=f"[IMAGE: {_IMAGE_ID}]",
+        timestamp=1_700_000_000_000,
+        sender_id="bot",
+    )
+    cell = MemCell(
+        items=[_text_message("u1"), bot_picture], timestamp=1_700_000_000_000
+    )
+
+    await pipeline.run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "bot"])
+    )
+
+    assert profiles.profiles == {}
