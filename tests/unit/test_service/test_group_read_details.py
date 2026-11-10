@@ -12,7 +12,9 @@ these pin (task 7):
   lie outside the asker's windows;
 - the multi-round decider's question is ``"<display name>: <question>"``;
 - get lists a member's profile in the group (``member_profile`` with
-  ``member_id``) and the group's picture memories (``image_memory``).
+  ``member_id``) and the group's picture memories (``image_memory``);
+- on the wire, the fields read the way the evaluation harnesses read them:
+  ``episodes[].source.from`` / ``to`` and ``profiles[].member_id``.
 """
 
 from __future__ import annotations
@@ -23,9 +25,12 @@ from typing import Any
 
 import pytest
 from everalgo.testing import FakeLLMClient
+from httpx import ASGITransport, AsyncClient
 
+from everos.entrypoints.api.app import create_app
 from everos.memory.models import ExplicitInfoItem, MemberProfile, Profile
 from everos.service import GetRequest, SearchRequest
+from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join
 
 T0 = 1_772_323_200_000
@@ -237,3 +242,40 @@ def test_member_profile_needs_a_member_and_a_group_scope() -> None:
         GetRequest(group_id="trip", asker_id="u_chen", memory_type="member_profile")
     with pytest.raises(ValueError):
         GetRequest(user_id="u_chen", memory_type="member_profile", member_id="u_b")
+
+
+async def test_the_wire_shape_the_harnesses_read(tmp_path: Path) -> None:
+    world, cm = await _world(tmp_path)
+    try:
+        app = create_app(application=make_application(memory=world.memory))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://t"
+        ) as client:
+            response = await client.post(
+                "/api/v2/memory/search",
+                json={
+                    "app_id": APP,
+                    "project_id": PROJECT,
+                    "group_id": "trip",
+                    "asker_id": "u_chen",
+                    "query": "Where does Bets stay in Lisbon?",
+                    "method": "keyword",
+                    "include_profile": True,
+                },
+            )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        (episode,) = data["episodes"]
+        assert episode["owner_type"] == "group"
+        assert episode["source"] == {
+            "memcell_id": f"mc_trip_{T0 + 1_000}",
+            "from": T0 + 1_000,
+            "to": T0 + 2_000,
+        }
+        for key in ("sender_ids", "subject_ids", "origin", "subject", "timestamp"):
+            assert key in episode
+        members = {p["member_id"] for p in data["profiles"]}
+        assert members == {"u_chen", "u_betty"}
+        assert {p["owner_type"] for p in data["profiles"]} == {"group"}
+    finally:
+        await cm.__aexit__(None, None, None)
