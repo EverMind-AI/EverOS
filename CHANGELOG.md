@@ -79,11 +79,14 @@ machinery that keeps a deleted memory from coming back.
     `[groups] member_profile_every` new segments (default `5`) and on every
     flush of the group. Every item records the segments it was read from.
   - **Group scenes** in `groups/<group_id>/scenes/` (strategy
-    `update_group_scenes`, `[groups] scenes`, default `true`): episodes that
-    are close in vector and time get one narrative over them, written by
-    everalgo's episode reflector. Each change is a new version. Scenes compete
-    with episodes in search. A scene is shown only to an asker who can see
-    all of its episodes.
+    `update_group_scenes`), an opt-in: `[groups] scenes`, default `false`.
+    Episodes that are close in vector and time get one narrative over them,
+    written by everalgo's episode reflector. Each change is a new version.
+    Scenes compete with episodes in search. A scene is shown only to an
+    asker who can see all of its episodes. They are off by default because
+    the design builds group scenes on 2.0's per-owner scenes, which do not
+    exist yet: until they do, a group gets no record type users do not have,
+    and ingestion makes no extra reflector calls.
   - **Agent cases learned in a group** carry `source_group_id`. They are
     returned only to an agent read in that group's context:
     `context_group_id`, asked by a current member.

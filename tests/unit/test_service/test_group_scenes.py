@@ -12,7 +12,9 @@ cascade projects the markdown into a real LanceDB. What these pin:
   returns on its own; an asker who sees them all sees the scene;
 - get lists scenes under ``memory_type = scene``, and ``episode`` lists no
   scene;
-- with ``[groups] scenes = false`` no scene is written.
+- scenes are an opt-in: with the default ``[groups] scenes = false`` no
+  scene is written and no narrative call is made. The tests of what a scene
+  does switch them on.
 """
 
 from __future__ import annotations
@@ -32,6 +34,18 @@ from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
 T0 = 1_772_323_200_000
 _TEXT = "Chen and Dan planned the Lisbon offsite venue"
+
+
+@pytest.fixture
+def scenes_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``[groups] scenes = true`` for the strategy under test (default off)."""
+    base = Settings()
+    settings = base.model_copy(
+        update={"groups": base.groups.model_copy(update={"scenes": True})}
+    )
+    # The package re-exports the function under the module's name.
+    module = importlib.import_module("everos.memory.strategies.update_group_scenes")
+    monkeypatch.setattr(module, "load_settings", lambda: settings)
 
 
 def _model(messages: Any, *, response_format: type, **_: Any) -> str:
@@ -100,6 +114,7 @@ def _search(asker: str) -> SearchRequest:
     )
 
 
+@pytest.mark.usefixtures("scenes_on")
 async def test_a_scene_is_withheld_unless_all_its_episodes_are_visible(
     tmp_path: Path,
 ) -> None:
@@ -148,6 +163,7 @@ async def test_a_scene_is_withheld_unless_all_its_episodes_are_visible(
         assert {e.type for e in episodes.data.episodes} == {"Conversation"}
 
 
+@pytest.mark.usefixtures("scenes_on")
 async def test_a_new_member_episode_supersedes_the_scene_version(
     tmp_path: Path,
 ) -> None:
@@ -176,19 +192,19 @@ async def test_a_new_member_episode_supersedes_the_scene_version(
         assert "deprecated_entries:" in text
 
 
-async def test_scenes_can_be_switched_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = Settings()
-    settings = base.model_copy(
-        update={"groups": base.groups.model_copy(update={"scenes": False})}
-    )
-    # The package re-exports the function under the module's name.
-    module = importlib.import_module("everos.memory.strategies.update_group_scenes")
-    monkeypatch.setattr(module, "load_settings", lambda: settings)
-    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=_model)) as world:
+async def test_the_default_writes_no_scene(tmp_path: Path) -> None:
+    """Off by default: two episodes of one scene, and neither a scene nor a call."""
+    assert Settings().groups.scenes is False
+    llm = FakeLLMClient(handler=_model)
+    async with GroupWorld.open(tmp_path, llm=llm) as world:
         await _setup(world)
         await _segment(world, 1_000)
         await _segment(world, 2_000)
         scenes = tmp_path / "default_app" / PROJECT / "groups" / "trip" / "scenes"
         assert not scenes.exists()
+        episodes = [
+            e for e in world.bus.events if type(e).__name__ == "GroupEpisodeExtracted"
+        ]
+        assert len(episodes) == 2  # the strategy had its events, and skipped them
+    called = [call.response_format.__name__ for call in llm.calls]
+    assert "_ReflectOutput" not in called

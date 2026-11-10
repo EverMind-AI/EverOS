@@ -1587,7 +1587,8 @@ the search response carries a `scope` block with those windows. Group-scoped
 `sender_ids = [poster]`. In the background, each member who spoke gets a
 profile in the group, `groups/<group_id>/members/<member_id>.md`. It is
 updated after `[groups] member_profile_every` segments and on every flush.
-The group's scenes are written to `groups/<group_id>/scenes/`.
+With `[groups] scenes = true` (off by default), the group's scenes are
+written to `groups/<group_id>/scenes/`.
 
 **Group results.** A group episode carries `owner_type: "group"`, `group_id`
 and `source: {memcell_id, from, to}`: its memcell and the epoch ms of the

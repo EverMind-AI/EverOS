@@ -1359,15 +1359,19 @@ The first half of Step 1 differs from the text above in these places:
 The second half of Step 1 differs from the text above in these places:
 
 - **No 2.0 scenes or query-encoder state on this line.** Task 6 builds on
-  both, and neither exists here. Group scenes are built from operators that
-  do exist, with no new prompt text. Each new group episode is placed by
-  everalgo's `cluster_by_geometry`, with the `[clustering]` threshold and time
-  window that users' episode clusters use. The narrative comes from everalgo's
-  `EpisodeReflector`: INIT over the members when the scene is new, then
-  UPDATE with each new episode. The group's state for the query encoder is
-  not built: no encoder on this line takes a state. So "group queries use the
-  group's state" holds only in the weak sense that no query is encoded with a
-  personal state.
+  both, and neither exists here, nor yet on any other branch. Group scenes
+  are therefore **off by default** (`[groups] scenes = false`) and are an
+  opt-in until 2.0's per-owner scenes exist: until then a group would get a
+  record type users do not have, and every group episode that joins a scene
+  would cost ingestion one more reflector call. Switched on, group scenes
+  are built from operators that do exist, with no new prompt text. Each new
+  group episode is placed by everalgo's `cluster_by_geometry`, with the
+  `[clustering]` threshold and time window that users' episode clusters use.
+  The narrative comes from everalgo's `EpisodeReflector`: INIT over the
+  members when the scene is new, then UPDATE with each new episode. The
+  group's state for the query encoder is not built: no encoder on this line
+  takes a state. So "group queries use the group's state" holds only in the
+  weak sense that no query is encoded with a personal state.
 - **Scene storage.** Scene versions are entries of daily logs,
   `groups/<g>/scenes/scene-<YYYY-MM-DD>.md` (entry ids `gsc_`), not
   `scenes/<scene_id>.md`. An entry records `scene_id`, `version` and
@@ -1377,8 +1381,8 @@ The second half of Step 1 differs from the text above in these places:
   scenes compete with episodes in every recall, under the same window
   predicate. Search and get mark them `type = "Scene"`, and their
   `source.memcell_id` is null. A session-filtered search finds no scene,
-  because a scene belongs to no session. `[groups] scenes` switches scenes
-  off.
+  because a scene belongs to no session. `[groups] scenes = true` switches
+  scenes on; they are off by default (see the note above).
 - **Prompt registry.** There is no prompt registry on this line either. The
   roster block is a versioned constant next to its renderer
   (`memory/extract/pipeline/group_render.py`): id `chat.group_roster_block`,

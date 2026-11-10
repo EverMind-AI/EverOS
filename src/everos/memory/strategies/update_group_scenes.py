@@ -21,7 +21,10 @@ Built from operators that already exist, with no new prompt text (D15):
   the first to the end of the last), so a read shows it only to an asker who
   can see every one of them; the episodes still return on their own.
 
-``[groups] scenes = false`` switches the strategy off; without an embedding
+An opt-in: the strategy runs only with ``[groups] scenes = true`` (default
+``false``). The design builds group scenes on 2.0's per-owner scenes, which
+do not exist yet; until they do, a group gets no record type users do not
+have, and ingestion makes no extra reflector calls. Without an embedding
 provider it does nothing (the episodes cannot be placed).
 """
 

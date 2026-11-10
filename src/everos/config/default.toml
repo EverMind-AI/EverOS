@@ -378,8 +378,11 @@ implicit_join = true
 # which they spoke, and at every flush of the group (section 7.4).
 member_profile_every = 5
 # Build each group's scenes from its episodes (section 7.7): one narrative
-# call each time an episode joins a scene of two or more episodes.
-scenes = true
+# call each time an episode joins a scene of two or more episodes. Off by
+# default: group scenes are designed on 2.0's per-owner scenes, which do not
+# exist yet, so until they do a group gets no record type a user does not
+# have, and ingestion makes no extra reflector calls. true opts in.
+scenes = false
 # A group search's multi-round question names the asker:
 # "<display name>: <question>" (section 8.2).
 asker_in_question = true

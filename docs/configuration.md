@@ -361,7 +361,7 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4, 7.7 and
 | `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
 | `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
-| `scenes` | bool | `true` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. `false` writes no scenes. |
+| `scenes` | bool | `false` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. Off by default: the design builds group scenes on 2.0's per-owner scenes, which do not exist yet. Until they do, group scenes are an opt-in, so a group gets no record type users do not have, and ingestion makes no extra reflector calls. `true` opts in. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
 
 ### `[access]`
