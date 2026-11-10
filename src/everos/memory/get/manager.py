@@ -9,6 +9,8 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 * ``agent`` + ``agent_case``   → ``data.agent_cases``
 * ``agent`` + ``agent_skill``  → ``data.agent_skills``
 * ``group`` + ``episode``      → ``data.episodes`` inside the asker's windows
+* ``group`` + ``scene``        → ``data.scenes``: the scene versions, which share
+  the episode table (``parent_type = scene``) and its windows
 
 Reads only — never writes. The owner part of every ``where`` is the access
 policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
@@ -32,6 +34,9 @@ from everos.memory.ports import (
     ProfileIndex,
     Scope,
     Stored,
+    all_of,
+    eq,
+    ne,
 )
 
 from .dto import (
@@ -110,6 +115,8 @@ class GetManager:
 
         match req.memory_type:
             case GetMemoryType.EPISODE:
+                if scope.is_group:
+                    where = all_of(where, ne("parent_type", "scene"))
                 episodes = await self._ep.paginate(where, page)
                 items = [self._shape_episode(e) for e in episodes.items]
                 data = GetData(
@@ -117,6 +124,12 @@ class GetManager:
                     total_count=episodes.total,
                     count=len(items),
                 )
+            case GetMemoryType.SCENE:
+                scenes = await self._ep.paginate(
+                    all_of(where, eq("parent_type", "scene")), page
+                )
+                items = [self._shape_episode(e) for e in scenes.items]
+                data = GetData(scenes=items, total_count=scenes.total, count=len(items))
             case GetMemoryType.PROFILE:
                 profiles = await self._fetch_profile(req)
                 data = GetData(
@@ -175,7 +188,7 @@ class GetManager:
             summary=episode.summary,
             subject=episode.subject,
             episode=episode.episode,
-            type="Conversation",
+            type="Scene" if episode.parent_type == "scene" else "Conversation",
         )
 
     @staticmethod

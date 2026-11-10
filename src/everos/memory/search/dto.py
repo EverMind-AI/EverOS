@@ -294,7 +294,9 @@ class SearchEpisodeItem(BaseModel):
     summary: str
     subject: str
     episode: str
-    type: Literal["Conversation"]
+    type: Literal["Conversation", "Scene"]
+    """``Scene`` for a group scene version: a narrative over several of the
+    group's episodes, competing with them in the same ranking."""
     score: float
     atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
 

@@ -28,6 +28,7 @@ __all__ = [
     "OwnerDirStore",
     "ProfileStore",
     "ReflectionReportStore",
+    "SceneStore",
     "SessionBufferStore",
     "SessionPurgeStore",
     "SourceCheck",
@@ -60,6 +61,7 @@ from everos.memory.models import (
     MemorizeTask,
     Profile,
     ReflectionReport,
+    Scene,
 )
 from everos.memory.ports.query import (
     MemoryRef,
@@ -333,6 +335,26 @@ class ProfileStore(Protocol):
     async def read(self, scope: Scope) -> Profile | None: ...
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef: ...
+
+
+@runtime_checkable
+class SceneStore(Protocol):
+    """A group's scene versions (``groups/<g>/scenes/``), append-only."""
+
+    async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
+        """The newest version of one scene, or ``None`` when it has none."""
+        ...
+
+    async def append(
+        self,
+        scope: Scope,
+        scene: Scene,
+        *,
+        supersedes: Stored[Scene] | None,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        """Write a version; mark ``supersedes`` replaced by it, in one step."""
+        ...
 
 
 @runtime_checkable

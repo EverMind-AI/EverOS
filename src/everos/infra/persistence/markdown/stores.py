@@ -17,6 +17,7 @@ __all__ = [
     "MarkdownImageMemoryStore",
     "MarkdownMemberProfileStore",
     "MarkdownProfileStore",
+    "MarkdownSceneStore",
 ]
 
 from collections import defaultdict
@@ -46,6 +47,7 @@ from everos.memory.models import (
     ImageMemory,
     MemberProfile,
     Profile,
+    Scene,
 )
 from everos.memory.ports import (
     MemoryRef,
@@ -71,6 +73,7 @@ from ._writers import (
     ForesightWriter,
     GroupEpisodeWriter,
     GroupImageMemoryWriter,
+    GroupSceneWriter,
     ImageMemoryWriter,
     ProfileWriter,
 )
@@ -726,6 +729,78 @@ class MarkdownProfileStore:
         )
 
 
+class MarkdownSceneStore(_DailyLogStore[Scene]):
+    """Scene versions of a group (``groups/<id>/scenes/scene-<date>.md``).
+
+    Append-only, like the picture memories: a new version is a new entry, and
+    the version it replaces is listed in its file's ``deprecated_entries``
+    against the new one, in the same locked step -- which the cascade turns
+    into ``deprecated_by`` on the old row, so only the newest competes. The
+    rows live in the episode table (``parent_type = scene``). A scene belongs
+    to a group: any other scope is refused.
+
+    Args:
+        root: Memory root the files live under.
+    """
+
+    _KIND = "scene"
+
+    def __init__(self, root: MemoryRoot) -> None:
+        writer = GroupSceneWriter(root)
+        super().__init__(root, writer, _scene_entry, group_writer=writer)
+
+    async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
+        newest: Stored[Scene] | None = None
+        for path in await self._files_mentioning(scope, f"**scene_id**: {scene_id}"):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                if entry.as_structured().inline.get("scene_id") != scene_id:
+                    continue
+                scene = _scene_from_entry(entry, owner_id=scope.owner_id)
+                if newest is None or scene.version > newest.item.version:
+                    newest = Stored(
+                        ref=MemoryRef(
+                            id=f"{scope.owner_id}_{entry.id}",
+                            entry_id=entry.id,
+                            md_path=md_path,
+                        ),
+                        scope=scope,
+                        item=scene,
+                    )
+        return newest
+
+    async def append(
+        self,
+        scope: Scope,
+        scene: Scene,
+        *,
+        supersedes: Stored[Scene] | None,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        if scope.owner_type != "group":
+            raise ValueError("a scene belongs to a group scope")
+        writer = self._writer_for(scope)
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await self._sources_alive(scope, only_if, 1):
+                return None
+            (eid,) = await writer.append_entries(
+                scope.owner_id,
+                [_scene_entry(scene)],
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
+            if supersedes is not None:
+                await writer.patch_frontmatter(
+                    self._root.root / supersedes.ref.md_path,
+                    {"deprecated_entries": {supersedes.ref.entry_id: eid.format()}},
+                )
+        return self._ref(scope, eid)
+
+
 class MarkdownMemberProfileStore:
     """``groups/<g>/members/<member_id>.md``: a member's profile in one group.
 
@@ -1074,6 +1149,66 @@ def _episode_entry(episode: Episode) -> EntryBody:
         sections["Summary"] = episode.summary
     sections["Content"] = episode.episode
     return inline, sections
+
+
+def _scene_entry(scene: Scene) -> EntryBody:
+    """A scene version in the episode entry contract, plus its own fields.
+
+    ``parent_type = scene`` and ``parent_id`` = the scene id make the
+    episode cascade project it into the episode table; ``member_ids`` are
+    the episodes it covers and ``version`` counts its versions.
+    """
+    inline: dict[str, object] = {
+        "owner_id": scene.owner_id,
+        "scene_id": scene.scene_id,
+        "version": scene.version,
+        "timestamp": _iso(scene.timestamp),
+        "source_start": _iso(scene.source_start),
+        "parent_type": "scene",
+        "parent_id": scene.scene_id,
+        "member_ids": list(scene.member_ids),
+    }
+    if scene.sender_ids:
+        inline["sender_ids"] = list(scene.sender_ids)
+    if scene.subject_ids:
+        inline["subject_ids"] = list(scene.subject_ids)
+    if scene.origin is not None:
+        inline["origin"] = scene.origin
+    if scene.language:
+        inline["language"] = scene.language
+    sections: dict[str, str] = {}
+    if scene.subject:
+        sections["Subject"] = scene.subject
+    if scene.summary:
+        sections["Summary"] = scene.summary
+    sections["Content"] = scene.narrative
+    return inline, sections
+
+
+def _scene_from_entry(entry: Entry, *, owner_id: str) -> Scene:
+    """The scene version an entry written by :func:`_scene_entry` holds."""
+    structured = entry.as_structured()
+    inline, sections = structured.inline, structured.sections
+    timestamp = to_timestamp_ms(from_iso_format(inline["timestamp"]))
+    return Scene(
+        owner_id=inline.get("owner_id") or owner_id,
+        scene_id=inline.get("scene_id", ""),
+        version=int(inline.get("version") or 1),
+        member_ids=_list_field(inline.get("member_ids")),
+        subject=sections.get("Subject", ""),
+        summary=sections.get("Summary", ""),
+        narrative=sections.get("Content", ""),
+        timestamp=timestamp,
+        source_start=(
+            to_timestamp_ms(from_iso_format(inline["source_start"]))
+            if inline.get("source_start")
+            else timestamp
+        ),
+        sender_ids=_list_field(inline.get("sender_ids")),
+        subject_ids=_list_field(inline.get("subject_ids")),
+        origin=inline.get("origin") or None,  # type: ignore[arg-type]
+        language=inline.get("language") or None,
+    )
 
 
 def _atomic_fact_entry(fact: AtomicFact) -> EntryBody:

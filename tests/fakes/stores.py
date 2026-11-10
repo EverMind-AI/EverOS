@@ -22,6 +22,7 @@ __all__ = [
     "InMemoryMemcellStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
+    "InMemorySceneStore",
     "UnusedPort",
 ]
 
@@ -47,6 +48,7 @@ from everos.memory.models import (
     ReflectionReport,
     Roster,
     RosterEvent,
+    Scene,
     fold_roster,
 )
 from everos.memory.ports import (
@@ -327,6 +329,41 @@ class InMemoryProfileStore:
             entry_id=f"profile_{scope.owner_id}",
             md_path=f"users/{scope.owner_id}/user.md",
         )
+
+
+class InMemorySceneStore:
+    """Scene versions per group scope, in write order; marks kept beside them."""
+
+    def __init__(self) -> None:
+        self.versions: list[Stored[Scene]] = []
+        self.superseded: dict[str, str] = {}
+
+    async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
+        mine = [
+            v for v in self.versions if v.scope == scope and v.item.scene_id == scene_id
+        ]
+        return max(mine, key=lambda v: v.item.version) if mine else None
+
+    async def append(
+        self,
+        scope: Scope,
+        scene: Scene,
+        *,
+        supersedes: Stored[Scene] | None,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> MemoryRef | None:
+        if not isinstance(only_if, NoSourceCheck) and not await only_if():
+            return None
+        entry_id = f"gsc_{len(self.versions) + 1:08d}"
+        ref = MemoryRef(
+            id=f"{scope.owner_id}_{entry_id}",
+            entry_id=entry_id,
+            md_path=f"groups/{scope.owner_id}/scenes/scene.md",
+        )
+        self.versions.append(Stored(ref=ref, scope=scope, item=scene))
+        if supersedes is not None:
+            self.superseded[supersedes.ref.entry_id] = entry_id
+        return ref
 
 
 class InMemoryMemberProfileStore:

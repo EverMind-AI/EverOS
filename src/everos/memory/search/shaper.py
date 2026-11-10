@@ -290,7 +290,7 @@ def _episode(
         summary=episode.summary or "",
         subject=episode.subject or "",
         episode=episode.episode,
-        type="Conversation",
+        type="Scene" if episode.parent_type == "scene" else "Conversation",
         score=float(score),
         atomic_facts=atomic_facts or [],
     )

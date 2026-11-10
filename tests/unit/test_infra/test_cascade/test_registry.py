@@ -64,7 +64,7 @@ def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_thirteen_kinds() -> None:
+def test_registry_has_exactly_fourteen_kinds() -> None:
     """The registry pins the cascade surface — no silent registration."""
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
@@ -77,6 +77,7 @@ def test_registry_has_exactly_thirteen_kinds() -> None:
         "user_profile",
         "group_episode",
         "group_image_memory",
+        "group_scene",
         "group_member_profile",
         "group_roster",
         "knowledge_document",

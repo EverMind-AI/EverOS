@@ -25,6 +25,10 @@ writers must match):
   :func:`._common.group_columns`): the segment's first message, whom it is
   about, whose messages it rests on.
 
+A group scene version (``groups/<g>/scenes/scene-*.md``) follows the same
+contract with ``parent_type: scene`` and ``parent_id`` the scene id, and
+projects into the same table: scenes compete with episodes in every recall.
+
 ``sections``:
 
 - ``Subject`` (optional): one-line topic — embedded into
@@ -51,7 +55,7 @@ from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
 
 
 class EpisodeHandler(BaseDailyLogHandler):
-    """Cascade handler for ``users/<u>/`` and ``groups/<g>/episodes/episode-*.md``."""
+    """Cascade handler for the episode logs, and for group scene versions."""
 
     kind = "episode"
 

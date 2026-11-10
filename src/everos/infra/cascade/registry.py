@@ -28,6 +28,7 @@ from everos.infra.persistence.markdown import (
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
     GroupMemberProfileFrontmatter,
+    GroupSceneDailyFrontmatter,
     ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
@@ -160,6 +161,15 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=GroupImageMemoryDailyFrontmatter,
         index_schema=ImageMemory,
         handler_factory=ImageMemoryHandler,
+    ),
+    # A group's scene versions are rows of the episode table (parent_type =
+    # scene): they compete with the episodes in every recall, under the same
+    # window predicate (docs/group-memory.md, section 7.7).
+    KindSpec(
+        name="group_scene",
+        frontmatter_schema=GroupSceneDailyFrontmatter,
+        index_schema=Episode,
+        handler_factory=EpisodeHandler,
     ),
     KindSpec(
         name="group_member_profile",

@@ -49,6 +49,7 @@ from everos.memory.ports import (
     ProfileIndex,
     ProfileStore,
     ReflectionReportStore,
+    SceneStore,
     SessionBufferStore,
     SessionPurgeStore,
 )
@@ -79,6 +80,7 @@ class Stores:
     session_purge: SessionPurgeStore
     groups: GroupStore
     member_profile: MemberProfileStore
+    scene: SceneStore
 
 
 @dataclass(frozen=True)

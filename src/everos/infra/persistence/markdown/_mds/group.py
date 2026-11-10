@@ -5,6 +5,7 @@ Paths (docs/group-memory.md, section 6.1)::
     groups/<group_id>/group.md                      meta + roster log
     groups/<group_id>/episodes/episode-<date>.md    one entry per segment
     groups/<group_id>/images/image-<date>.md        one entry per picture
+    groups/<group_id>/scenes/scene-<date>.md        one entry per scene version
     groups/<group_id>/members/<member_id>.md        member-in-group profile
 
 ``group.md`` is a single file: its frontmatter is the group's meta, its body
@@ -17,7 +18,8 @@ from running the one-to-one path.
 The group daily logs mint ``gep`` / ``gim`` entry ids rather than the user
 kinds' ``ep`` / ``im``: an index row id is ``<owner_id>_<entry_id>``, and a group
 whose id equals a member's user id must not share row ids with that user's
-memory in the same table.
+memory in the same table. Scene versions (``gsc``) are rows of the episode
+table too, so they need an id space of their own as well.
 """
 
 from __future__ import annotations
@@ -79,6 +81,25 @@ class GroupImageMemoryDailyFrontmatter(DailyLogPathMixin, GroupScopedFrontmatter
 
     type: Literal["group_image_memory_daily"] = "group_image_memory_daily"
     file_type: Literal["group_image_memory_daily"] = "group_image_memory_daily"
+    date: _dt.date
+    entry_count: int = 0
+    last_appended_at: _dt.datetime | None = None
+    deprecated_entries: dict[str, str] = Field(default_factory=dict)
+
+
+class GroupSceneDailyFrontmatter(DailyLogPathMixin, GroupScopedFrontmatter):
+    """Frontmatter for ``groups/<g>/scenes/scene-<YYYY-MM-DD>.md``.
+
+    One entry per scene version; a superseded version is listed in
+    ``deprecated_entries`` against the version that replaced it.
+    """
+
+    ENTRY_ID_PREFIX: ClassVar[str] = "gsc"
+    DIR_NAME: ClassVar[str] = "scenes"
+    FILE_PREFIX: ClassVar[str] = "scene"
+
+    type: Literal["group_scene_daily"] = "group_scene_daily"
+    file_type: Literal["group_scene_daily"] = "group_scene_daily"
     date: _dt.date
     entry_count: int = 0
     last_appended_at: _dt.datetime | None = None

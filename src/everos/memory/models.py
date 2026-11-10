@@ -30,7 +30,10 @@ from everos.core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 _Role = Literal["user", "assistant", "tool"]
-EpisodeParentType = Literal["memcell", "cluster"]
+EpisodeParentType = Literal["memcell", "cluster", "scene"]
+"""What an episode row rests on: a memcell (a segment), a cluster (a Reflection
+merge), or a scene -- a group scene version, which the episode table holds
+next to the group's episodes (docs/group-memory.md, section 7.7)."""
 Origin = Literal["member", "assistant", "mixed"]
 """Whose messages a group record rests on (docs/group-memory.md, section 4.5)."""
 
@@ -519,6 +522,35 @@ class Profile(BaseModel):
         )
 
 
+class Scene(BaseModel):
+    """One version of a group scene (docs/group-memory.md, section 7.7).
+
+    A scene is a group's episodes about one thing with a narrative written
+    over them. It links to its episodes (``member_ids``, their entry ids) and
+    never changes them. A change is a new version that supersedes the
+    previous one; the old version stays readable in markdown.
+
+    Its span runs from its first member's first message (``source_start``)
+    to its newest member's last (``timestamp``): a read shows the scene only
+    to an asker whose window contains all of it.
+    """
+
+    owner_id: str
+    """The group."""
+    scene_id: str
+    version: int
+    member_ids: list[str]
+    subject: str
+    summary: str
+    narrative: str
+    timestamp: int
+    source_start: int
+    sender_ids: list[str] = Field(default_factory=list)
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: Origin | None = None
+    language: str | None = None
+
+
 MEMBER_ITEM_KEYS: tuple[str, ...] = (
     "item_id",
     "source_memcell_ids",
@@ -706,7 +738,7 @@ class KnowledgeTopic(BaseModel):
     updated_at: dt.datetime
 
 
-ClusterKind = Literal["user_memory", "agent_case"]
+ClusterKind = Literal["user_memory", "agent_case", "group_scene"]
 ClusterMemberType = Literal["episode", "case"]
 
 
@@ -1038,6 +1070,7 @@ __all__ = [
     "RosterEvent",
     "RosterOp",
     "RosterSource",
+    "Scene",
     "ToolCall",
     "fold_roster",
     "mint_cluster_id",

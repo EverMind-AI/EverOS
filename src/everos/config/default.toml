@@ -377,6 +377,9 @@ implicit_join = true
 # A member's profile in a group is updated after this many new segments in
 # which they spoke, and at every flush of the group (section 7.4).
 member_profile_every = 5
+# Build each group's scenes from its episodes (section 7.7): one narrative
+# call each time an episode joins a scene of two or more episodes.
+scenes = true
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

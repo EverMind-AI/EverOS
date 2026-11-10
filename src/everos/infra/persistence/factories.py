@@ -39,6 +39,7 @@ from .markdown import (
     MarkdownMemberProfileStore,
     MarkdownOwnerDirStore,
     MarkdownProfileStore,
+    MarkdownSceneStore,
 )
 from .memory_root import MemoryRoot
 from .sqlite import (
@@ -76,6 +77,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         session_purge=SqliteSessionPurgeStore(sqlite.session_purge),
         groups=GroupRosterStore(root, sqlite.group_roster),
         member_profile=MarkdownMemberProfileStore(root),
+        scene=MarkdownSceneStore(root),
     )
 
 

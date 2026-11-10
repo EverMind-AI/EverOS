@@ -1,6 +1,6 @@
 """``ParentType`` — provenance label for memory records linked back to a source.
 
-Three values cover the current provenance graph:
+Four values cover the current provenance graph:
 
 * :attr:`ParentType.MEMCELL` — the original ingestion unit; every
   business row (episode / foresight / atomic_fact / agent_case) points
@@ -9,6 +9,8 @@ Three values cover the current provenance graph:
   from an episode rather than directly from a MemCell.
 * :attr:`ParentType.CLUSTER` — used by merged episodes produced by the
   Reflection consolidation mechanism.
+* :attr:`ParentType.SCENE` — a group scene version in the episode table; its
+  ``parent_id`` is the scene id (docs/group-memory.md, section 7.7).
 
 The backend-neutral index schema (``schema_for``) has no ``Enum`` kind,
 so records declare
@@ -27,3 +29,4 @@ class ParentType(StrEnum):
     MEMCELL = "memcell"
     EPISODE = "episode"
     CLUSTER = "cluster"
+    SCENE = "scene"

@@ -1,4 +1,4 @@
-"""Group writers: ``group.md`` (meta + roster log) and the two group daily logs.
+"""Group writers: ``group.md`` (meta + roster log) and the group daily logs.
 
 ``group.md`` is append-only below its frontmatter: a roster change is a new
 entry, never an edit of an old one (docs/group-memory.md, section 4.3). The
@@ -35,6 +35,7 @@ from .._mds import (
     GroupEpisodeDailyFrontmatter,
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
+    GroupSceneDailyFrontmatter,
 )
 from .base import BaseDailyWriter
 
@@ -157,6 +158,34 @@ class GroupImageMemoryWriter(BaseDailyWriter):
             "id": f"group_image_log_{scope_id}_{date.isoformat()}",
             "type": "group_image_memory_daily",
             "file_type": "group_image_memory_daily",
+            "schema_version": 1,
+            "group_id": scope_id,
+            "track": "group",
+            "date": date.isoformat(),
+            "entry_count": next_count,
+            "last_appended_at": to_iso_format(get_now_with_timezone()),
+        }
+
+    async def _current_count(self, path: Path) -> int:
+        return await self._count_from_frontmatter(path)
+
+
+class GroupSceneWriter(BaseDailyWriter):
+    """Daily-log writer for group scene versions (``gsc_<YYYYMMDD>_<seq>``)."""
+
+    schema = GroupSceneDailyFrontmatter
+
+    def _frontmatter_updates(
+        self,
+        scope_id: str,
+        date: _dt.date,
+        *,
+        next_count: int,
+    ) -> Mapping[str, Any] | None:
+        return {
+            "id": f"group_scene_log_{scope_id}_{date.isoformat()}",
+            "type": "group_scene_daily",
+            "file_type": "group_scene_daily",
             "schema_version": 1,
             "group_id": scope_id,
             "track": "group",

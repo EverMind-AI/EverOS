@@ -34,6 +34,7 @@ from .group import (
     GroupImageMemoryDailyFrontmatter as GroupImageMemoryDailyFrontmatter,
 )
 from .group import GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter
+from .group import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from .image_memory import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from .knowledge_document import (
     KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
@@ -51,6 +52,7 @@ __all__ = [
     "GroupFrontmatter",
     "GroupImageMemoryDailyFrontmatter",
     "GroupMemberProfileFrontmatter",
+    "GroupSceneDailyFrontmatter",
     "ImageMemoryDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",

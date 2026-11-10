@@ -41,7 +41,9 @@ class Episode(IndexRecord):
     timestamp: _dt.datetime
 
     parent_type: str = ParentType.MEMCELL.value
-    """Source pointer — always :attr:`ParentType.MEMCELL` for episode."""
+    """Source pointer — :attr:`ParentType.MEMCELL` for an episode,
+    :attr:`ParentType.CLUSTER` for a Reflection merge, :attr:`ParentType.SCENE`
+    for a group scene version (``parent_id`` is then the scene id)."""
 
     parent_id: str
     """Source memcell id. The pipeline knows the memcell currently being

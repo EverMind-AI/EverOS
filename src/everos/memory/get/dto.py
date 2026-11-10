@@ -48,6 +48,8 @@ class GetMemoryType(StrEnum):
     PROFILE = "profile"
     AGENT_CASE = "agent_case"
     AGENT_SKILL = "agent_skill"
+    SCENE = "scene"
+    """A group's scene versions (group scopes only)."""
 
 
 # ── Request ──────────────────────────────────────────────────────────────
@@ -135,7 +137,8 @@ class GetRequest(BaseModel):
                 f"memory_type {self.memory_type.value!r} is not valid "
                 "when agent_id is set"
             )
-        if self.owner_type == "group" and self.memory_type != GetMemoryType.EPISODE:
+        group_kinds = {GetMemoryType.EPISODE, GetMemoryType.SCENE}
+        if self.owner_type == "group" and self.memory_type not in group_kinds:
             raise ValueError(
                 f"memory_type {self.memory_type.value!r} is not valid for a group scope"
             )
@@ -187,7 +190,7 @@ class GetEpisodeItem(BaseModel):
     summary: str
     subject: str
     episode: str
-    type: Literal["Conversation"]
+    type: Literal["Conversation", "Scene"]
 
 
 class GetProfileItem(BaseModel):
@@ -254,6 +257,8 @@ class GetData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     episodes: list[GetEpisodeItem] = Field(default_factory=list)
+    scenes: list[GetEpisodeItem] = Field(default_factory=list)
+    """A group's current scene versions (``memory_type = scene``)."""
     profiles: list[GetProfileItem] = Field(default_factory=list)
     agent_cases: list[GetAgentCaseItem] = Field(default_factory=list)
     agent_skills: list[GetAgentSkillItem] = Field(default_factory=list)

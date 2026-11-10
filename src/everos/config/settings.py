@@ -1037,11 +1037,14 @@ class GroupsSettings(BaseModel):
     ``member_profile_every``: a member's profile in a group is updated after
     this many new segments in which they spoke, and at every flush of the
     group; episodes are searchable at once, only the profile lags.
+    ``scenes``: build the group's scenes from its episodes (section 7.7) --
+    one narrative call each time an episode joins a scene of two or more.
     """
 
     implicit_create: bool = True
     implicit_join: bool = True
     member_profile_every: int = Field(default=5, ge=1)
+    scenes: bool = True
 
 
 class AccessSettings(BaseModel):

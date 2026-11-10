@@ -83,6 +83,7 @@ from .stores import OwnerDirDeletion as OwnerDirDeletion
 from .stores import OwnerDirStore as OwnerDirStore
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
+from .stores import SceneStore as SceneStore
 from .stores import SessionBufferStore as SessionBufferStore
 from .stores import SessionPurgeStore as SessionPurgeStore
 from .stores import SourceCheck as SourceCheck
@@ -150,6 +151,7 @@ __all__ = [
     "ProfileStore",
     "ReflectionReportStore",
     "Scalar",
+    "SceneStore",
     "Scope",
     "ScoredKnowledgeTopic",
     "SearchHit",

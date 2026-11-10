@@ -39,6 +39,10 @@ from .trigger_skill_clustering import (
 from .trigger_skill_clustering import (
     trigger_skill_clustering as trigger_skill_clustering,
 )
+from .update_group_scenes import (
+    UPDATE_GROUP_SCENES_SPEC as UPDATE_GROUP_SCENES_SPEC,
+)
+from .update_group_scenes import update_group_scenes as update_group_scenes
 from .update_member_profiles import (
     UPDATE_MEMBER_PROFILES_SPEC as UPDATE_MEMBER_PROFILES_SPEC,
 )
@@ -55,6 +59,7 @@ STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     REFLECT_EPISODES_SPEC,
     FINISH_REFLECTION_SPEC,
     UPDATE_MEMBER_PROFILES_SPEC,
+    UPDATE_GROUP_SCENES_SPEC,
 )
 """Every strategy the service registers, in registration order."""
 
@@ -69,6 +74,7 @@ __all__ = [
     "STRATEGY_SPECS",
     "TRIGGER_PROFILE_CLUSTERING_SPEC",
     "TRIGGER_SKILL_CLUSTERING_SPEC",
+    "UPDATE_GROUP_SCENES_SPEC",
     "UPDATE_MEMBER_PROFILES_SPEC",
     "extract_agent_case",
     "extract_agent_skill",
@@ -79,5 +85,6 @@ __all__ = [
     "reflect_episodes",
     "trigger_profile_clustering",
     "trigger_skill_clustering",
+    "update_group_scenes",
     "update_member_profiles",
 ]

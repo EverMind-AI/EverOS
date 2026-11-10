@@ -4846,6 +4846,13 @@
             "type": "array",
             "title": "Episodes"
           },
+          "scenes": {
+            "items": {
+              "$ref": "#/components/schemas/GetEpisodeItem"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
           "profiles": {
             "items": {
               "$ref": "#/components/schemas/GetProfileItem"
@@ -4981,7 +4988,10 @@
           },
           "type": {
             "type": "string",
-            "const": "Conversation",
+            "enum": [
+              "Conversation",
+              "Scene"
+            ],
             "title": "Type"
           }
         },
@@ -5005,7 +5015,8 @@
           "episode",
           "profile",
           "agent_case",
-          "agent_skill"
+          "agent_skill",
+          "scene"
         ],
         "title": "GetMemoryType",
         "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
@@ -6758,7 +6769,10 @@
           },
           "type": {
             "type": "string",
-            "const": "Conversation",
+            "enum": [
+              "Conversation",
+              "Scene"
+            ],
             "title": "Type"
           },
           "score": {
