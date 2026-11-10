@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.core.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp_ms
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
@@ -55,7 +55,7 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
     ) -> list[Episode] | list[dict[str, Any]]:
         predicate = all_of(
             eq("owner_id", owner_id),
-            gt("timestamp", from_timestamp(after_ts)),
+            gt("timestamp", from_timestamp_ms(after_ts)),
             eq("parent_type", parent_type),
             eq("app_id", app_id),
             eq("project_id", project_id),

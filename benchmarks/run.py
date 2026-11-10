@@ -2872,7 +2872,7 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
             and not k.endswith("API_KEY")
             and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
         }
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
+        for k in ("EVEROS_LLMMR_MAX_ROUNDS",):
             v = config.retrieval_env.get(k) or os.environ.get(k)
             if v is not None:
                 extra[k.lower()] = v
@@ -2895,9 +2895,9 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
             and not k.endswith("API_KEY")
             and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
         }
-        # These two decide whether a served decider behaves like the one in production;
-        # omitting them from a launch script silently changes what was measured.
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
+        # This decides whether a served decider behaves like the one in production;
+        # omitting it from a launch script silently changes what was measured.
+        for k in ("EVEROS_LLMMR_MAX_ROUNDS",):
             if role == "decider" and k in os.environ:
                 extra[k.lower()] = os.environ[k]
         roles.append(

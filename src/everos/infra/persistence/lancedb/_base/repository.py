@@ -481,6 +481,7 @@ class LanceRepoBase[T: IndexRecord]:
         *,
         source: TableSource | None = None,
         dim: int,
+        column_dims: tuple[tuple[str, int], ...] = (),
         timeouts: LanceTimeouts = LanceTimeouts(),  # noqa: B008 - frozen value
         sweep_husks: HuskSweep | None = None,
     ) -> None:
@@ -491,6 +492,7 @@ class LanceRepoBase[T: IndexRecord]:
         self._table_override = table
         self._source = source
         self._vector_dim = dim
+        self._column_dims = column_dims
         self._timeouts = timeouts
         self._sweep_husks: HuskSweep = sweep_husks or remove_empty_index_dirs
 
@@ -501,7 +503,9 @@ class LanceRepoBase[T: IndexRecord]:
         Lazy so a record with no ``PRIMARY_KEY`` is refused by the write path
         (``upsert``) with its own message rather than at construction.
         """
-        return schema_for(self.schema, dim=self._vector_dim)
+        return schema_for(
+            self.schema, dim=self._vector_dim, column_dims=self._column_dims
+        )
 
     @cached_property
     def arrow_schema(self) -> pa.Schema:
@@ -559,8 +563,9 @@ class LanceRepoBase[T: IndexRecord]:
                 if vector is not None and len(vector) != field.dimension:
                     raise IndexSchemaMismatchError(
                         f"table {self.table_name!r} column {field.name!r} expects "
-                        f"vectors of width {field.dimension} ([embedding] dim) but "
-                        f"got {len(vector)}; the embedding model and dim disagree"
+                        f"vectors of width {field.dimension} but got "
+                        f"{len(vector)}; the embedding model and the configured "
+                        f"width disagree"
                     )
 
     # ── Create ─────────────────────────────────────────────────────────────

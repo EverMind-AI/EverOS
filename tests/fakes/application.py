@@ -442,6 +442,7 @@ def make_providers(**overrides: Any) -> Providers:
         "decider": llm,
         "multimodal_llm": None,
         "embedding": None,
+        "vision_embedding": None,
         "rerank": None,
     }
     return Providers(**{**fields, **overrides})

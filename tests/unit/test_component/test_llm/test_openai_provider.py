@@ -279,3 +279,88 @@ async def test_cancellation_propagates() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+# ---------------------------------------------------------------------------
+# achat_raw -- the decider's unchecked call (parity check 2026-11-10, R1 + R2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("content", "finish_reason", "text"),
+    [
+        ("not json at all", "stop", "not json at all"),
+        ('{"text": "ok"}\nand then more', "length", '{"text": "ok"}\nand then more'),
+        (_VALID, "content_filter", _VALID),
+        (None, "stop", ""),
+    ],
+    ids=["unparseable", "length-after-json", "content-filter", "no-content"],
+)
+async def test_raw_reply_comes_back_unchecked_from_one_request(
+    content: str | None, finish_reason: str, text: str
+) -> None:
+    """No validation, no finish-reason check, no retry: the caller reads it."""
+    upstream = _Upstream(_completion(content, finish_reason=finish_reason))
+
+    reply = await _provider(upstream, invalid_reply_retries=3).achat_raw(
+        _prompt(), response_format=_Reply
+    )
+
+    assert (reply.text, reply.finish_reason) == (text, finish_reason)
+    assert len(upstream.bodies) == 1
+
+
+async def test_raw_reply_carries_the_token_counts() -> None:
+    observer = _RecordingObserver()
+    upstream = _Upstream(
+        _completion(
+            usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+        )
+    )
+
+    reply = await _provider(upstream, observer=observer).achat_raw(_prompt())
+
+    assert reply.usage == TokenUsage(input_tokens=7, output_tokens=3)
+    assert [call["attempt"] for call in observer.calls] == [1]
+
+
+async def test_raw_reply_without_a_choice_is_a_transport_failure() -> None:
+    upstream = _Upstream(_completion(choices=False))
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream).achat_raw(_prompt())
+    assert info.value.reason == "transport"
+    assert len(upstream.bodies) == 1
+
+
+async def test_raw_request_is_the_achat_request_without_a_format() -> None:
+    """Same body as ``achat`` builds, minus ``response_format`` when none is asked."""
+    configured = {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    raw_upstream, chat_upstream = _Upstream(_completion()), _Upstream(_completion())
+    await _provider(
+        raw_upstream, extra=configured, response_format_mode="prompt_only"
+    ).achat_raw(_prompt(), response_format=_Reply, temperature=0.0, max_tokens=512)
+    await _provider(
+        chat_upstream, extra=configured, response_format_mode="prompt_only"
+    ).achat(_prompt(), response_format=_Reply, temperature=0.0, max_tokens=512)
+
+    assert raw_upstream.bodies == chat_upstream.bodies
+    assert "response_format" not in raw_upstream.bodies[0]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("json_object", {"type": "json_object"}), ("json_schema", "json_schema")],
+)
+async def test_raw_request_asks_for_a_format_only_as_the_mode_says(
+    mode: str, expected: object
+) -> None:
+    upstream = _Upstream(_completion())
+    await _provider(upstream, response_format_mode=mode).achat_raw(
+        _prompt(), response_format=_Reply
+    )
+    sent = upstream.bodies[0]["response_format"]
+    assert sent == expected or sent["type"] == expected
+
+    unasked = _Upstream(_completion())
+    await _provider(unasked, response_format_mode=mode).achat_raw(_prompt())
+    assert "response_format" not in unasked.bodies[0]

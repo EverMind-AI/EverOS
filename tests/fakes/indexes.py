@@ -47,6 +47,11 @@ class _Unsearchable:
     ) -> list[SearchHit[Any]]:
         raise NotImplementedError
 
+    async def visual_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[SearchHit[Any]]:
+        raise NotImplementedError
+
 
 class InMemoryEpisodeIndex(_Unsearchable):
     """Seeded episodes; ``deprecated_by`` is tracked per entry id."""

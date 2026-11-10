@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
@@ -233,6 +233,7 @@ class CascadeOrchestrator:
         config: CascadeConfig | None = None,
         watcher_enabled: bool = True,
         fence: DeleteFence | None = None,
+        vision_embedding: VisionEmbeddingProvider | None = None,
     ) -> None:
         self._memory_root = memory_root
         self._watcher_enabled = watcher_enabled
@@ -246,6 +247,7 @@ class CascadeOrchestrator:
             knowledge_documents=sqlite.knowledge_document,
             knowledge_topics=sqlite.knowledge_topic,
             embedding=embedding,
+            vision_embedding=vision_embedding,
             fence=fence,
         )
         self._handlers = build_handlers(deps)

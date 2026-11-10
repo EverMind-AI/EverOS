@@ -25,9 +25,49 @@ machinery that keeps a deleted memory from coming back.
 - Metrics: `everos_lock_wait_seconds` / `everos_lock_hold_seconds` (by lock
   kind), `everos_lock_table_entries`, `everos_memory_delete_fence_entries` /
   `_runs`.
+- Configuration: `[ome] enabled` (default `true`). `false` starts the server
+  without the OME engine, for a server that only searches a store built
+  elsewhere; a memorize there fails when it publishes its events. The root
+  lock is still taken: one server per memory root.
+- **A picture memory can carry a vector of the picture itself**
+  (`[vision_embedding]`: a multimodal embedder such as Qwen3-VL-Embedding-8B,
+  behind an endpoint that applies the model's own recipe). The cascade embeds
+  each picture's bytes into `image_memory.visual_vector`, at its own width
+  (`[vision_embedding] dim`), and multi-round search adds a visual leg to
+  picture recall, fused with the description leg by RRF. An empty
+  `[vision_embedding]` keeps the description-only behaviour. Table schema
+  version 3 adds the column when a store is opened.
 
 ### Changed
 
+- **The multi-round decider is greedy and reads the full episode body.**
+  `[decider] temperature` (default `0.0`) is sent on every call. Left out, a
+  vLLM endpoint applied the model's `generation_config` (Qwen3.8-27B:
+  temperature 1.0), and byte-identical rounds repeated their picks only
+  30-47% of the time. The decider always sees the longer of `episode` and
+  `summary`, as the training and evaluation code does; the summary-only
+  switch is removed (see *Removed*).
+- **The multi-round decider asks and reads the way the exp code does.** Its
+  requests carry no `response_format` by default: `[decider]
+  response_format_mode` now defaults to `prompt_only` and is no longer
+  inherited from `[llm]` (`json_object` / `json_schema` remain an opt-in).
+  Its replies are parsed tolerantly -- JSON in prose or code fences, string
+  indices, a missing or null `next_queries`, a reply cut at `max_tokens`
+  after a complete object -- instead of being validated against a strict
+  schema, which spent eight requests on each such reply and then fell back
+  to the fixed top-3 core. One decider attempt is one request, and a failed
+  round's trace keeps its last raw reply and token counts.
+- **BM25 ties are ordered deterministically.** Episode, atomic-fact and
+  picture keyword recall fetch past the limit until the tie group at the cut
+  is complete, then order by score (to 5 decimals) and id, so a repeated
+  search returns the same list; LanceDB returns tied rows in no fixed order.
+- **`EVEROS_DISABLE_CASCADE`, `EVEROS_DISABLE_CASCADE_WATCHER` and
+  `EVEROS_DISABLE_OME` are honoured again**, as the evaluation harness sets
+  them (`1` / `true` / `yes`): each turns off `[cascade] enabled`,
+  `[cascade] watcher_enabled` or `[ome] enabled`, ahead of `EVEROS_*__*`
+  variables and the TOML. This reverses 1.6.0, which stopped reading them;
+  `EVEROS_OME_MAX_CONCURRENT_RUNS` / `EVEROS_OME_RUN_TIMEOUT_SECONDS` stay
+  unread.
 - Every markdown write of a memory owner holds that owner's lock and first
   checks that what it was derived from still exists; a write whose source was
   deleted is skipped and logged as `memory_write_skipped_source_gone`.
@@ -121,6 +161,32 @@ machinery that keeps a deleted memory from coming back.
   what every JPEG decoder shows, and its bytes are kept as sent, so the hash
   still names the file.
 
+- **Re-projecting a daily-log file no longer commits a LanceDB version per
+  entry.** Deprecation marks were written for every entry of every file on
+  every projection, one `update` and so one table version each, even when
+  nothing changed (a rebuilt store reached about 173k versions over three
+  tables, queued on the table's write lock until they timed out as
+  `VectorStoreBusyError`). Only rows whose stored mark differs from the file
+  are written, one update per distinct value; a kind without a
+  `deprecated_by` column is skipped.
+
+### Removed
+
+- `[decider] full_text` and `EVEROS_LLMMR_DECIDER_FULL_TEXT`. Its default
+  showed the decider only the stored `summary`, a 200-character prefix of the
+  body on most stores, which cost 9.3 points of LoCoMo core-only accuracy; a
+  value still set is ignored.
+- `[decider] invalid_reply_retries`. The decider reads its replies itself, so
+  an unusable reply is one failed attempt of `[decider] retries`; a value
+  still set for it is ignored.
+
+### Known issues
+
+- A decider reply whose `core` holds a string such as `"--1"` raises instead
+  of being skipped (it passes the digit check, then `int()` fails), and the
+  search fails. The exp code behaves the same; it is kept for parity and will
+  be fixed in both together.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME
@@ -186,7 +252,9 @@ both use the resulting `Application` through three facades:
   `run_timeout_seconds` (`0` disables the ceiling) replace
   `EVEROS_OME_MAX_CONCURRENT_RUNS` and `EVEROS_OME_RUN_TIMEOUT_SECONDS`.
   The old variables are no longer read; set the keys in `everos.toml`
-  instead.
+  instead. *(Reversed after 1.6.0 for the two `EVEROS_DISABLE_*` switches:
+  they are read again, as is the new `EVEROS_DISABLE_OME`; see
+  [Unreleased].)*
 - **Building the application requires `[llm]`.** `build_providers` (and so
   `build_application`) raises `LLMNotConfiguredError` when `[llm]` has no
   `api_key` or `base_url`, instead of building without an extraction LLM
@@ -523,7 +591,7 @@ described under *Changed* above:
 
 | If you | Then |
 |---|---|
-| set `EVEROS_DISABLE_CASCADE`, `EVEROS_DISABLE_CASCADE_WATCHER`, `EVEROS_OME_MAX_CONCURRENT_RUNS` or `EVEROS_OME_RUN_TIMEOUT_SECONDS` | move the values to `[cascade] enabled` / `watcher_enabled` and `[ome] max_concurrent_runs` / `run_timeout_seconds` in `everos.toml`; the variables are no longer read, so an unmoved `EVEROS_DISABLE_CASCADE` silently turns the cascade back on |
+| set `EVEROS_DISABLE_CASCADE`, `EVEROS_DISABLE_CASCADE_WATCHER`, `EVEROS_OME_MAX_CONCURRENT_RUNS` or `EVEROS_OME_RUN_TIMEOUT_SECONDS` | move the values to `[cascade] enabled` / `watcher_enabled` and `[ome] max_concurrent_runs` / `run_timeout_seconds` in `everos.toml`; the variables are no longer read, so an unmoved `EVEROS_DISABLE_CASCADE` silently turns the cascade back on (the `EVEROS_DISABLE_*` switches are read again after 1.6.0; see [Unreleased]) |
 | run `everos cascade …` on a root with no `[llm]` section | add `[llm]`; building the application now requires it, and the command exits 3 with the file to edit |
 | read `capabilities.llm` from `GET /health` | read `status` or `cascade.healthy` instead; the field is gone |
 | replaced a prompt template through the old prompt slots | move the requirements your template added to `config/custom_instructions/<operator>.yaml` (details below); the template itself is no longer loaded |

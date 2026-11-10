@@ -261,6 +261,17 @@ class BaseDailyLogHandler(Handler):
                     vectors=entry_vectors,
                 )
             )
+        return await self._attach_side_vectors(rows)
+
+    async def _attach_side_vectors(self, rows: list[Any]) -> list[Any]:
+        """Fill any embedding the text batch above could not produce.
+
+        The text batch embeds strings; a picture's own embedding has to be
+        produced from the *file*, which only the picture handler knows how to
+        locate. This is the seam: the base writes the text vector, the
+        subclass adds whatever else its row carries. Default is a no-op, so
+        every text-only kind keeps the exact behaviour it had.
+        """
         return rows
 
     async def _apply_lance_changes(
@@ -314,6 +325,22 @@ class BaseDailyLogHandler(Handler):
         bytes change only in the frontmatter, and without it the row would keep
         saying "superseded" forever.
 
+        Only rows whose stored value differs from the file's are written, one
+        update per distinct value. Every index update is a commit -- on
+        LanceDB each ``update`` call writes a new table version even when it
+        matches nothing or changes nothing -- so writing every entry of every
+        file on every projection grew rebuilt stores by one version per entry
+        per pass (MemLens 2.0: about 173k versions over three tables) and
+        queued as many writes on the table's write lock, which then timed out
+        as ``VectorStoreBusyError``. The stored values are read once per file,
+        after this run's upsert, so a re-embedded row whose mark the upsert
+        reset is written again.
+
+        A kind whose record has no ``deprecated_by`` column has nothing to
+        propagate and is skipped without touching the index. A row the index
+        does not hold (deleted, fenced, not yet indexed) is not written, as
+        before.
+
         Args:
             frontmatter: The file's frontmatter, typed or as a dict.
             owner_id: Whose entries these are.
@@ -323,19 +350,45 @@ class BaseDailyLogHandler(Handler):
                 the clear (a caller that does not know them must not clear
                 every row).
         """
+        schema = getattr(self.index_repo, "schema", None)
+        if schema is not None and "deprecated_by" not in schema.model_fields:
+            return
         deprecated = getattr(frontmatter, "deprecated_entries", None)
         if not deprecated and isinstance(frontmatter, dict):
             deprecated = frontmatter.get("deprecated_entries")
         marks = dict(deprecated or {})
+        wanted: dict[str, str | None] = {
+            entry_id: None for entry_id in (entry_ids or ()) if entry_id not in marks
+        }
+        wanted.update(marks)
+        if not wanted:
+            return
+        try:
+            rows = await self.index_repo.find_by_owner_entries(
+                owner_id,
+                list(wanted),
+                app_id=app_id,
+                project_id=project_id,
+                skip_vectors=True,
+            )
+        except Exception:
+            logger.warning(
+                "cascade_handler_deprecation_read_failed",
+                kind=self.kind,
+                owner_id=owner_id,
+                entries=len(wanted),
+                exc_info=True,
+            )
+            return
+        stored = {row.entry_id: row.deprecated_by for row in rows}
+        stale: dict[str | None, list[str]] = {}
+        for entry_id, value in wanted.items():
+            if entry_id in stored and stored[entry_id] != value:
+                stale.setdefault(value, []).append(entry_id)
         scope = (app_id, project_id)
         writes = [
-            self._mark_deprecated(owner_id, entry_id, deprecated_by_val, scope)
-            for entry_id, deprecated_by_val in marks.items()
-        ]
-        writes += [
-            self._mark_deprecated(owner_id, entry_id, None, scope)
-            for entry_id in (entry_ids or ())
-            if entry_id not in marks
+            self._mark_deprecated(owner_id, ids, value, scope)
+            for value, ids in stale.items()
         ]
         if writes:
             await asyncio.gather(*writes)
@@ -343,20 +396,19 @@ class BaseDailyLogHandler(Handler):
     async def _mark_deprecated(
         self,
         owner_id: str,
-        entry_id: str,
+        entry_ids: Sequence[str],
         deprecated_by: str | None,
         scope: tuple[str, str],
     ) -> None:
-        """Set (or, with ``None``, clear) ``deprecated_by`` on the row of ``entry_id``.
+        """Set (or, with ``None``, clear) ``deprecated_by`` on ``entry_ids``' rows.
 
-        Scoped to ``(app_id, project_id, owner_id, entry_id)`` to avoid
-        cross-space collisions. A missing row is silently ignored — the
-        entry may have been deleted or not yet indexed.
+        One update for the whole group, scoped to ``(app_id, project_id,
+        owner_id)`` plus the entry ids to avoid cross-space collisions.
         """
         app_id, project_id = scope
         predicate = all_of(
             eq("owner_id", owner_id),
-            eq("entry_id", entry_id),
+            one_of("entry_id", list(entry_ids)),
             eq("app_id", app_id),
             eq("project_id", project_id),
         )
@@ -368,7 +420,7 @@ class BaseDailyLogHandler(Handler):
         except Exception:
             logger.warning(
                 "failed to mark entry deprecated",
-                entry_id=entry_id,
+                entry_ids=list(entry_ids),
                 deprecated_by=deprecated_by,
                 kind=self.kind,
                 exc_info=True,

@@ -8,7 +8,13 @@ from typing import ClassVar
 from everos.memory.models import Episode
 from everos.memory.ports import EpisodeIndex, Filter, SearchHit, Stored, all_of, one_of
 
-from .base import RecallerDeps, RecallResult, from_hits, to_candidate
+from .base import (
+    RecallerDeps,
+    RecallResult,
+    from_hits,
+    stable_sparse_top,
+    to_candidate,
+)
 
 
 class EpisodeRecaller:
@@ -36,11 +42,16 @@ class EpisodeRecaller:
         owner-scoped corpora) cannot poison the entire query.
         Mirrors enterprise's ``bool.should + minimum_should_match=1``
         ES design.
+
+        The cut is :func:`~.base.stable_sparse_top`'s: score ties at ``limit``
+        are settled by id, so a repeated search recalls the same list.
         """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return RecallResult.empty()
-        hits = await self._index.sparse_search(terms, where, limit=limit)
+        hits = await stable_sparse_top(
+            lambda n: self._index.sparse_search(terms, where, limit=n), limit
+        )
         return from_hits(hits, source="keyword")
 
     async def dense_recall(

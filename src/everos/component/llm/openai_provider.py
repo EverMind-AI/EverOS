@@ -21,14 +21,20 @@ method per step:
    ``response_format``; a mismatch fails only this attempt (§7.1).
 5. ``_request_valid_reply`` -- at most ``1 + invalid_reply_retries`` attempts
    of the identical request, each completion reported to the observer.
+
+``achat_raw`` is the one call outside that contract: the same request, sent
+once, with the reply handed back unchecked as a :class:`RawReply`. It exists
+for a caller that reads the reply itself -- the multi-round retrieval decider,
+whose parse is tolerant on purpose -- and must not be given to an everalgo
+operator, which relies on ``achat``'s guarantees.
 """
 
 from __future__ import annotations
 
-__all__ = ["OpenAIProvider", "ResponseFormatMode"]
+__all__ = ["OpenAIProvider", "RawReply", "ResponseFormatMode"]
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple
 
 import openai
 from everalgo.llm import to_openai_response_format
@@ -54,6 +60,24 @@ _CUT_SHORT_REASONS: Final = frozenset({"length", "content_filter"})
 # vLLM-style gateways report these when the server gave up on a generation it
 # could have finished, so the identical request may well succeed.
 _ABORTED_REASONS: Final = frozenset({"abort", "error"})
+
+
+class RawReply(NamedTuple):
+    """One completion as the upstream sent it, before any check.
+
+    What :meth:`OpenAIProvider.achat_raw` returns. Its caller reads the text
+    itself, so it also gets what ``achat`` would have consumed on its behalf:
+    the finish reason, and the token counts for its own trace.
+
+    Attributes:
+        text: The reply content; ``""`` when the upstream sent none.
+        finish_reason: The upstream's finish reason, verbatim.
+        usage: Token counts the upstream reported, or ``None``.
+    """
+
+    text: str
+    finish_reason: str | None
+    usage: TokenUsage | None
 
 
 class _AttemptFailedError(Exception):
@@ -181,10 +205,75 @@ class OpenAIProvider:
         )
         return await self._request_valid_reply(request, response_format)
 
+    async def achat_raw(
+        self,
+        messages: list[LLMMessage],
+        *,
+        response_format: type[BaseModel] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **extra: Any,
+    ) -> RawReply:
+        """Send one request and hand the reply back unchecked.
+
+        Outside the everalgo contract on purpose. ``achat`` validates the reply
+        against ``response_format`` and raises on a ``length`` finish even when
+        the reply's JSON is complete; a caller that parses the text itself
+        wants neither. The multi-round decider is that caller: the parity check
+        against the exp tree (2026-11-10, deviation R2) measured ``achat``'s
+        checks failing rounds the exp decider -- which reads the raw text --
+        answers from one request, each failure costing eight requests and the
+        fixed fallback core.
+
+        The request is the one ``achat`` builds, so its bytes match; the format
+        is requested only as ``response_format_mode`` says, and ``None`` asks
+        for none. One attempt: no ``invalid_reply_retries``, no finish-reason,
+        refusal or content check -- retrying is the caller's call.
+
+        Raises:
+            LLMCallError: ``reason="transport"`` when the SDK gives up or the
+                upstream answers with no choice.
+        """
+        request = self._build_request(
+            messages,
+            response_format,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra=extra,
+        )
+        completion = await self._send(request)
+        self._observe(completion, 1)
+        if not completion.choices:
+            raise LLMCallError(
+                f"upstream returned no choices (model={completion.model!r})",
+                reason="transport",
+            )
+        choice = completion.choices[0]
+        text = choice.message.content or ""
+        if choice.finish_reason not in (None, "stop"):
+            # Returned all the same; logged so a decider that keeps hitting its
+            # cap is visible without reading the trace.
+            logger.warning(
+                "llm_raw_reply_non_stop_finish",
+                finish_reason=choice.finish_reason,
+                content_len=len(text),
+                model=completion.model,
+            )
+        usage = completion.usage
+        return RawReply(
+            text=text,
+            finish_reason=choice.finish_reason,
+            usage=(
+                TokenUsage(usage.prompt_tokens, usage.completion_tokens)
+                if usage is not None
+                else None
+            ),
+        )
+
     def _build_request(
         self,
         messages: list[LLMMessage],
-        response_format: type[BaseModel],
+        response_format: type[BaseModel] | None,
         *,
         temperature: float | None,
         max_tokens: int | None,
@@ -196,8 +285,10 @@ class OpenAIProvider:
                 temperature if temperature is not None else self._temperature
             ),
             "max_tokens": max_tokens if max_tokens is not None else self._max_tokens,
-            "response_format": to_openai_response_format(
-                response_format, self._response_format_mode
+            "response_format": (
+                to_openai_response_format(response_format, self._response_format_mode)
+                if response_format is not None
+                else None
             ),
         }
         return {

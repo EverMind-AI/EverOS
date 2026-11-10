@@ -204,3 +204,42 @@ async def test_indexed_search_returns_the_same_neighbours_as_the_scan(
     indexed = await _top5(bypass=False)
     assert indexed[0] == "r17"
     assert set(indexed) == set(flat)
+
+
+def test_a_column_may_carry_its_own_width() -> None:
+    """``image_memory`` holds two embeddings from two models.
+
+    ``vector`` is the description's text embedding at ``[embedding] dim``;
+    ``visual_vector`` is the picture's own embedding at the vision model's
+    native width. ``schema_for`` must be able to build both on one table.
+    """
+
+    class _TwoSpaces(IndexRecord):
+        PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+        TABLE_NAME: ClassVar[str] = "two_spaces"
+
+        id: str
+        body: str
+        vector: DenseVector | None = None  # type: ignore[valid-type]
+        visual_vector: DenseVector | None = None  # type: ignore[valid-type]
+
+    schema = schema_for(_TwoSpaces, dim=1024, column_dims=(("visual_vector", 4096),))
+
+    assert {f.name: f.dimension for f in schema.vector_fields} == {
+        "vector": 1024,
+        "visual_vector": 4096,
+    }
+
+
+def test_a_column_override_the_model_does_not_declare_is_ignored() -> None:
+    """Callers pass one override map to every table; only images have the column."""
+
+    schema = schema_for(_VecSpec, dim=1024, column_dims=(("visual_vector", 4096),))
+
+    assert [f.name for f in schema.vector_fields] == ["vector"]
+    assert schema.field("vector").dimension == 1024
+
+
+def test_a_non_positive_column_width_is_refused() -> None:
+    with pytest.raises(ValueError, match="visual_vector"):
+        schema_for(_VecSpec, dim=1024, column_dims=(("visual_vector", 0),))

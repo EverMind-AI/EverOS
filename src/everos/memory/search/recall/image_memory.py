@@ -1,22 +1,21 @@
-"""Image-memory recaller — BM25 over description+text, ANN over the picture.
+"""Image-memory recaller — BM25 over description+text, ANN over two vectors.
 
-The two routes are the same two episodes get, over the same vector space, which
-is the design's point: a text question can recall a picture directly, and a
-picture memory competes for a slot on the same terms as a narrative.
+Three routes, because a picture carries two embeddings from two models:
 
-The keyword route is not a fallback here, it is the load-bearing one for
-screenshots and signs: the words *in* the picture ("EST. 2019", "Transfer",
-"Total 28.00") exist in no other memory, and BM25 over the description and the
-transcribed text is the only way a lexical question reaches them.
+- BM25 over the description and the transcribed text. Not a fallback here, it
+  is the load-bearing one for screenshots and signs: the words *in* the
+  picture ("EST. 2019", "Transfer", "Total 28.00") exist in no other memory.
+- ANN over ``vector`` — the description embedded by the text model. Answers
+  "a question worded like the description".
+- ANN over ``visual_vector`` — the picture's bytes embedded by the vision
+  model, queried by that same model's text encoder. Answers "a question about
+  what the picture looks like", including pictures whose description never
+  names the thing asked about.
 
-The vector route embeds the *description*, not the picture bytes. That is a
-deliberate inversion of the design's target state, forced by the configured
-provider: ``[embedding]`` is a text endpoint (``Qwen3-Embedding-4B`` by
-default), so handing it pixels is not possible today. What the inversion costs
-is precision on questions whose words appear nowhere in the description; what
-it does not cost is the keyword route above. When the embedder becomes
-multimodal the producer switches to picture bytes and this class does not
-change at all.
+The two vector routes are never compared by score — different models,
+different spaces — only fused by rank upstream. ``visual_recall`` returns
+empty on a deployment with no ``[vision_embedding]``, which degrades this
+class to the previous behaviour exactly.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ from everos.memory.ports import (
     one_of,
 )
 
-from .base import RecallerDeps, RecallResult, from_hits
+from .base import RecallerDeps, RecallResult, from_hits, stable_sparse_top
 
 IMAGE_KIND = "image_memory"
 """``Candidate.metadata["kind"]`` stamped on every picture candidate.
@@ -64,11 +63,18 @@ class ImageMemoryRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[ImageMemory]:
-        """BM25 over description + in-picture text (OR-mode BooleanQuery)."""
+        """BM25 over description + in-picture text (OR-mode BooleanQuery).
+
+        Cut like the episodes' (:func:`~.base.stable_sparse_top`): score ties
+        are settled by id, so a repeated search recalls the same pictures in
+        the same order -- the rule the exp tree's 2.0 picture port applies.
+        """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return RecallResult.empty()
-        hits = await self._index.sparse_search(terms, where, limit=limit)
+        hits = await stable_sparse_top(
+            lambda n: self._index.sparse_search(terms, where, limit=n), limit
+        )
         return _tagged(from_hits(hits, source="keyword"))
 
     async def dense_recall(
@@ -78,6 +84,21 @@ class ImageMemoryRecaller:
         if not vector:
             return RecallResult.empty()
         hits = await self._index.dense_search(vector, where, limit=limit)
+        return _tagged(from_hits(hits, source="vector"))
+
+    async def visual_recall(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> RecallResult[ImageMemory]:
+        """ANN over the picture's own embedding; empty when none is stored.
+
+        ``vector`` must come from the *vision* embedder's text encoder, not
+        the text embedder: the two spaces are different models, and a cosine
+        between them means nothing. An empty result is the normal case on a
+        deployment with no ``[vision_embedding]``.
+        """
+        if not vector:
+            return RecallResult.empty()
+        hits = await self._index.visual_search(vector, where, limit=limit)
         return _tagged(from_hits(hits, source="vector"))
 
     async def fetch_by_entry_ids(

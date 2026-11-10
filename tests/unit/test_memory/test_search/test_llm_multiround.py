@@ -228,9 +228,22 @@ async def test_decider_retries_an_empty_completion() -> None:
     assert llm.call_count == 2  # empty reply consumed one attempt, then succeeded
 
 
-async def test_decider_retries_a_reply_that_fails_its_model() -> None:
-    """The reply is held to ``_DecisionReply``: a string index is not an index."""
-    llm = _script_llm(['{"core": ["2"], "next_queries": []}', _reply([2], [])])
+async def test_decider_reads_a_string_index_from_the_first_reply() -> None:
+    """A string index is an index, as the exp decider reads it.
+
+    The strict ``_DecisionReply`` the reply used to be held to rejected it and
+    spent another attempt; the exp decider -- the reading the decider policy was
+    trained and evaluated against -- coerces it (parity check 2026-11-10, R2).
+    """
+    llm = _script_llm(['{"core": ["2"], "next_queries": []}', _reply([0], [])])
+    d = await _decider(llm)("q", "(none)", "x", 3, 0)
+    assert d.core == [2] and d.failed is False
+    assert llm.call_count == 1
+
+
+async def test_decider_retries_a_reply_with_no_json_object() -> None:
+    """What the tolerant reading cannot use is still one failed attempt."""
+    llm = _script_llm(["I cannot decide.", _reply([2], [])])
     d = await _decider(llm)("q", "(none)", "x", 3, 0)
     assert d.core == [2] and d.failed is False
     assert llm.call_count == 2
@@ -259,9 +272,7 @@ def test_render_blocks_global_index_across_blocks() -> None:
         ("original question", [_cand(_ep("a", 0.9)), _cand(_ep("b", 0.8))]),
         ("sub one", [_cand(_ep("c", 0.7))]),
     ]
-    rendered, global_cands, index_meta = _render_blocks(
-        blocks, tuning_source=SearchConfigSource().tuning
-    )
+    rendered, global_cands, index_meta = _render_blocks(blocks)
     assert "[block: original question]" in rendered
     assert "[block: sub one]" in rendered
     # continuous global index 0,1,2 across the two blocks
@@ -276,17 +287,9 @@ def test_render_blocks_global_index_across_blocks() -> None:
 
 
 def test_render_core_so_far_tags_source() -> None:
-    assert (
-        _render_core_so_far([], {}, {}, tuning_source=SearchConfigSource().tuning)
-        == "(none)"
-    )
+    assert _render_core_so_far([], {}, {}) == "(none)"
     cand = {"alice__a": _cand(_ep("a", 0.9))}
-    out = _render_core_so_far(
-        ["alice__a"],
-        {"alice__a": "sub one"},
-        cand,
-        tuning_source=SearchConfigSource().tuning,
-    )
+    out = _render_core_so_far(["alice__a"], {"alice__a": "sub one"}, cand)
     assert out == '  - [from "sub one"] subject a - summary a'
 
 
@@ -487,44 +490,22 @@ async def test_trace_off_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None
     assert eps and eps[0].id == "alice__a"
 
 
-def test_decider_text_defaults_to_summary_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default is the historical summary-only view so an in-flight comparison
-    cannot silently change behaviour when the code is redeployed."""
-    monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "0")
-    meta = {"summary": "short 200-char preview", "episode": "the full body " * 50}
-    assert (
-        llm_multiround._decider_text(meta, tuning_source=SearchConfigSource().tuning)
-        == "short 200-char preview"
-    )
-
-
-def test_decider_text_full_mode_picks_the_longer_field(
+def test_decider_text_is_the_body_whichever_column_holds_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stores disagree on which column holds the body: LoCoMo / DeepSeek / Gemini
-    keep a 200-char prefix in ``summary`` and the body in ``episode``; the 27B and
-    GPT LongMemEval stores keep the body in ``summary`` with ``episode`` empty.
-    Picking the longer field is correct on both layouts without store detection.
+    """The decider reads what the answering model reads: the episode body.
+
+    Stores disagree on which column holds the body: LoCoMo / DeepSeek / Gemini keep a
+    200-char prefix in ``summary`` and the body in ``episode``; the 27B and GPT
+    LongMemEval stores keep the body in ``summary`` with ``episode`` empty. Picking
+    the longer field is correct on both layouts without store detection. The preview
+    switch is gone (2026-09-25), so its old env name changes nothing.
     """
-    monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "1")
+    monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "0")
     body = "the full body " * 50
-    assert (
-        llm_multiround._decider_text(
-            {"summary": "prefix", "episode": body},
-            tuning_source=SearchConfigSource().tuning,
-        )
-        == body
-    )
-    assert (
-        llm_multiround._decider_text(
-            {"summary": body, "episode": ""}, tuning_source=SearchConfigSource().tuning
-        )
-        == body
-    )
-    assert (
-        llm_multiround._decider_text({}, tuning_source=SearchConfigSource().tuning)
-        == ""
-    )
+    assert llm_multiround._decider_text({"summary": "prefix", "episode": body}) == body
+    assert llm_multiround._decider_text({"summary": body, "episode": ""}) == body
+    assert llm_multiround._decider_text({}) == ""
 
 
 async def test_injection_never_exceeds_top_k_when_core_is_large() -> None:
@@ -630,23 +611,39 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
     }
 
 
-def test_render_reads_injected_configuration_for_each_candidate() -> None:
-    snapshots = iter(
-        [
-            DeciderSettings(full_text=False),
-            DeciderSettings(full_text=True),
-        ]
-    )
-    candidates = [_cand(_ep("a", 0.9)), _cand(_ep("b", 0.8))]
-    for candidate in candidates:
-        candidate.metadata.update(summary="short", episode="long episode body")
-    rendered, _, _ = _render_blocks(
-        [("question", candidates)], tuning_source=lambda: next(snapshots)
-    )
-    assert "  0: " in rendered and rendered.splitlines()[1].endswith("short")
-    assert rendered.splitlines()[2].endswith("long episode body")
-    with pytest.raises(StopIteration):
-        next(snapshots)
+async def test_the_decider_is_greedy_by_default() -> None:
+    """Never left to the endpoint by default.
+
+    Left out of the request, a vLLM endpoint applies the model's generation_config
+    (Qwen3.8-27B: temperature 1.0), and byte-identical round-0 evidence reproduced
+    the same picks only 30-47% of the time (2026-11-10).
+    """
+    llm = _script_llm([_reply([0], [])])
+    await _decider(llm)("q", "(none)", "x", 1, 0)
+
+    (call,) = llm.calls
+    assert call.temperature == 0.0
+
+
+async def test_the_decider_temperature_is_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EVEROS_DECIDER__TEMPERATURE", "0.7")
+    llm = _script_llm([_reply([0], [])])
+    await _decider(llm)("q", "(none)", "x", 1, 0)
+
+    (call,) = llm.calls
+    assert call.temperature == 0.7
+
+
+async def test_a_temperature_in_extra_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``extra`` is merged last, as the provider merges it, instead of colliding."""
+    monkeypatch.setenv("EVEROS_DECIDER__EXTRA", '{"temperature": 0.3}')
+    llm = _script_llm([_reply([0], [])])
+    await _decider(llm)("q", "(none)", "x", 1, 0)
+
+    (call,) = llm.calls
+    assert call.temperature == 0.3
 
 
 async def test_search_keeps_configuration_and_trace_read_boundaries() -> None:
@@ -658,7 +655,8 @@ async def test_search_keeps_configuration_and_trace_read_boundaries() -> None:
         tune_count += 1
         reads.append("tuning")
         # The second core candidate still rereads the source even after top_k.
-        return DeciderSettings(max_rounds=1, core_overflow=tune_count == 5)
+        # Rendering reads no configuration: the decider always sees the body.
+        return DeciderSettings(max_rounds=1, core_overflow=tune_count == 3)
 
     def trace_path() -> str | None:
         reads.append("trace")
@@ -683,8 +681,6 @@ async def test_search_keeps_configuration_and_trace_read_boundaries() -> None:
     )
     assert len(result) == 2
     assert reads == [
-        "tuning",
-        "tuning",
         "tuning",
         "decision",
         "trace",

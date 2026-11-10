@@ -44,13 +44,23 @@ class MilvusIndexBackend:
 
     Args:
         connection: The application's Milvus connection.
-        dim: ``[embedding] dim`` -- the width of every dense vector field.
+        dim: ``[embedding] dim`` -- the default width of the dense vector
+            fields.
+        column_dims: Per-column width overrides, applied to every repository
+            (only the tables that declare the column use them).
     """
 
     name: ClassVar[str] = "milvus"
 
-    def __init__(self, connection: MilvusConnection, *, dim: int) -> None:
+    def __init__(
+        self,
+        connection: MilvusConnection,
+        *,
+        dim: int,
+        column_dims: tuple[tuple[str, int], ...] = (),
+    ) -> None:
         self._connection = connection
+        self._column_dims = column_dims
         self._episode = _EpisodeRepo(connection, dim=dim)
         self.repositories = IndexRepositories(
             episode=self._episode,
@@ -58,7 +68,7 @@ class MilvusIndexBackend:
             foresight=_ForesightRepo(connection, dim=dim),
             agent_case=_AgentCaseRepo(connection, dim=dim),
             agent_skill=_AgentSkillRepo(connection, dim=dim),
-            image_memory=_ImageMemoryRepo(connection, dim=dim),
+            image_memory=_ImageMemoryRepo(connection, dim=dim, column_dims=column_dims),
             user_profile=_UserProfileRepo(connection, dim=dim),
             knowledge_topic=_KnowledgeTopicRepo(connection, dim=dim),
         )

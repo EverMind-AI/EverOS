@@ -111,10 +111,17 @@ def resolve_decider_config(settings: Settings) -> DeciderClientConfig:
 
     ``model``, ``api_key`` and ``base_url`` each fall back to ``[llm]`` -- so pointing
     the decider at another hosted model needs only ``[decider].model``, and a config
-    that predates the section keeps the main model as its decider. ``timeout``,
-    ``max_retries`` and ``invalid_reply_retries`` always come from ``[decider]``: they
-    bound one round inside a live search, which is a different deadline from a
-    background extraction's.
+    that predates the section keeps the main model as its decider. ``timeout`` and
+    ``max_retries`` always come from ``[decider]``: they bound one round inside a live
+    search, which is a different deadline from a background extraction's.
+
+    ``response_format_mode`` always comes from ``[decider]`` too, and defaults to
+    asking for nothing: the parity check against the exp tree (2026-11-10, deviation
+    R1) found the decider inheriting ``[llm]``'s strict json_schema, which the exp
+    decider -- and so the decider policy's training and evaluation -- never sent.
+    ``invalid_reply_retries`` is 0 because the decider reads its replies itself, via
+    ``achat_raw``, and retries at its own level (``[decider].retries``); a provider
+    retry underneath would multiply with it, as SDK retries would.
 
     The decider is always its own provider instance, even when every field is
     inherited from ``[llm]``. Sharing the extraction provider looks equivalent
@@ -138,12 +145,11 @@ def resolve_decider_config(settings: Settings) -> DeciderClientConfig:
         raise LLMNotConfiguredError(
             missing_config_error("decider api_key and base_url", "decider")
         )
-    # `extra` is endpoint vocabulary and `response_format_mode` a model capability,
-    # so both travel with whichever section supplied the model: a decider on its own
-    # gateway must not inherit a field that gateway rejects, and a decider inheriting
-    # `[llm]` must not lose the field that endpoint requires -- dropping `[llm].extra`
-    # there would silently re-enable thinking on a Qwen deployment that configured it
-    # off once, for both roles.
+    # `extra` is endpoint vocabulary, so it travels with whichever section supplied
+    # the model: a decider on its own gateway must not inherit a field that gateway
+    # rejects, and a decider inheriting `[llm]` must not lose the field that endpoint
+    # requires -- dropping `[llm].extra` there would silently re-enable thinking on a
+    # Qwen deployment that configured it off once, for both roles.
     model_section = cfg if cfg.model else llm_cfg
     return DeciderClientConfig(
         model=model,
@@ -152,8 +158,8 @@ def resolve_decider_config(settings: Settings) -> DeciderClientConfig:
         timeout=cfg.timeout_seconds,
         max_retries=cfg.sdk_max_retries,
         extra=dict(model_section.extra),
-        response_format_mode=model_section.response_format_mode,
-        invalid_reply_retries=cfg.invalid_reply_retries,
+        response_format_mode=cfg.response_format_mode,
+        invalid_reply_retries=0,
         inherits_model=not cfg.model,
     )
 

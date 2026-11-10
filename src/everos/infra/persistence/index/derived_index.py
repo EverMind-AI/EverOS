@@ -31,9 +31,16 @@ class DerivedIndex:
             report it -- the width the backend builds its vector columns at.
     """
 
-    def __init__(self, backend: IndexBackend, *, embedding_dim: int) -> None:
+    def __init__(
+        self,
+        backend: IndexBackend,
+        *,
+        embedding_dim: int,
+        column_dims: tuple[tuple[str, int], ...] = (),
+    ) -> None:
         self._backend = backend
         self._embedding_dim = embedding_dim
+        self._column_dims = column_dims
 
     @property
     def name(self) -> str:
@@ -138,10 +145,16 @@ class DerivedIndex:
         check_primary_keys(
             (repo.schema for repo in self.repositories.all()),
             dim=self._embedding_dim,
+            column_dims=self._column_dims,
         )
 
 
-def check_primary_keys(schemas: Iterable[type[Any]], *, dim: int) -> None:
+def check_primary_keys(
+    schemas: Iterable[type[Any]],
+    *,
+    dim: int,
+    column_dims: tuple[tuple[str, int], ...] = (),
+) -> None:
     """Fail at startup, not at first write, when a table has no PRIMARY_KEY.
 
     For an undeclared table ``schema_for`` raises the same "has no
@@ -150,4 +163,4 @@ def check_primary_keys(schemas: Iterable[type[Any]], *, dim: int) -> None:
     the last line of defence.
     """
     for schema in schemas:
-        schema_for(schema, dim=dim)
+        schema_for(schema, dim=dim, column_dims=column_dims)

@@ -168,6 +168,7 @@ class ScriptedIndex:
     Args:
         sparse: Hits for ``sparse_search``.
         dense: Hits for ``dense_search``.
+        visual: Hits for ``visual_search`` (a picture's own embedding).
         subject: Hits for ``dense_search_subject``.
         found: Hits for ``find``.
         filter_found: Evaluate ``find``'s filter against each record, as
@@ -179,12 +180,14 @@ class ScriptedIndex:
         *,
         sparse: Sequence[Any] = (),
         dense: Sequence[Any] = (),
+        visual: Sequence[Any] = (),
         subject: Sequence[Any] = (),
         found: Sequence[Any] = (),
         filter_found: bool = False,
     ) -> None:
         self._sparse = list(sparse)
         self._dense = list(dense)
+        self._visual = list(visual)
         self._subject = list(subject)
         self._found = list(found)
         self._filter_found = filter_found
@@ -201,6 +204,12 @@ class ScriptedIndex:
     ) -> list[Any]:
         self.calls.append(("dense", list(vector), where, limit))
         return self._dense[:limit]
+
+    async def visual_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[Any]:
+        self.calls.append(("visual", list(vector), where, limit))
+        return self._visual[:limit]
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int

@@ -75,7 +75,11 @@ class MilvusRepoBase[T: BaseModel]:
 
     Args:
         connection: The application's Milvus connection.
-        dim: ``[embedding] dim`` -- the width of the dense vector fields.
+        dim: ``[embedding] dim`` -- the default width of the dense vector
+            fields.
+        column_dims: Per-column width overrides (see
+            :func:`~everos.infra.persistence.index.schema.schema_for`);
+            ``image_memory.visual_vector`` is the one column that sets one.
     """
 
     schema: type[T]
@@ -91,9 +95,15 @@ class MilvusRepoBase[T: BaseModel]:
     def table_name(self) -> str:
         return self.index_schema.table_name
 
-    def __init__(self, connection: MilvusConnection, *, dim: int) -> None:
+    def __init__(
+        self,
+        connection: MilvusConnection,
+        *,
+        dim: int,
+        column_dims: tuple[tuple[str, int], ...] = (),
+    ) -> None:
         self._connection = connection
-        self._index_schema = schema_for(self.schema, dim=dim)
+        self._index_schema = schema_for(self.schema, dim=dim, column_dims=column_dims)
         self._layout = CollectionLayout(self.index_schema)
         self._codec = RowCodec(self.schema, self.index_schema)
 

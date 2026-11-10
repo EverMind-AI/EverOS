@@ -76,20 +76,37 @@ class IndexSchema:
 
 
 @cache
-def schema_for(model: type[Any], *, dim: int) -> IndexSchema:
+def schema_for(
+    model: type[Any], *, dim: int, column_dims: tuple[tuple[str, int], ...] = ()
+) -> IndexSchema:
     """Build and validate the portable logical schema for ``model``.
 
     Args:
         model: The record model (an ``IndexRecord`` subclass).
-        dim: Width every ``DenseVector`` column gets.
+        dim: Width every ``DenseVector`` column gets by default.
+        column_dims: ``(column_name, width)`` overrides, for a table whose
+            vector columns come from different models. ``image_memory`` is
+            the one such table: ``vector`` is the description's text
+            embedding at ``[embedding] dim`` while ``visual_vector`` is the
+            picture's own embedding at ``[vision_embedding] dim``, which is
+            the vision model's native width. A tuple rather than a mapping
+            because this function is cached and its arguments must hash.
+            A name here that the model does not declare is ignored — the
+            caller passes the same overrides for every table.
     """
     if dim < 1:
         raise ValueError(f"vector dimension must be positive, got {dim}")
     table_name = _class_var(model, "TABLE_NAME")
     bm25_fields = tuple(_class_var(model, "BM25_FIELDS"))
     primary_key = tuple(_class_var(model, "PRIMARY_KEY"))
+    overrides = dict(column_dims)
+    for name, width in overrides.items():
+        if width < 1:
+            raise ValueError(
+                f"vector dimension for {name!r} must be positive, got {width}"
+            )
     fields = tuple(
-        _normalize_field(name, model_field, dim)
+        _normalize_field(name, model_field, overrides.get(name, dim))
         for name, model_field in model.model_fields.items()
     )
     declared = {field.name for field in fields}

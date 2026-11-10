@@ -15,13 +15,17 @@ A ``Candidate.id`` is the record's global index key, except where a
 recaller documents another key (the MaxSim parent fetches key episodes by
 ``entry_id``); ``stored_by_id`` is always keyed the same way as the
 candidates beside it.
+
+:func:`stable_sparse_top` is the BM25 cut the episode, atomic-fact and picture
+recallers take: the same hits in the same order on every call, whatever order
+the index returns tied hits in.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from typing import Any, ClassVar, Final, Literal, Protocol, runtime_checkable
 
 from everalgo.types import Candidate, RankInput
 from pydantic import BaseModel
@@ -156,6 +160,63 @@ def merge_by_id_max[T](
         candidates=list(by_id.values()),
         stored_by_id=merge_stored(primary, extra),
     )
+
+
+BM25_TIE_DECIMALS: Final = 5
+"""Two BM25 scores agreeing to this many decimals are a tie: LanceDB reports the
+same row's score with ~1e-6 of noise from call to call."""
+
+BM25_MAX_FETCH: Final = 32
+""":func:`stable_sparse_top` widens its fetch to at most this many times ``limit``
+while looking for the end of the tie group at the cut."""
+
+
+def _bm25_order(hit: SearchHit[Any]) -> tuple[float, str]:
+    """Score descending to :data:`BM25_TIE_DECIMALS`, then global id ascending."""
+    return (-round(hit.score or 0.0, BM25_TIE_DECIMALS), hit.stored.ref.id)
+
+
+async def stable_sparse_top[T](
+    search: Callable[[int], Awaitable[Sequence[SearchHit[T]]]], limit: int
+) -> list[SearchHit[T]]:
+    """The top ``limit`` BM25 hits, as the same hits in the same order on every call.
+
+    BM25 ties are the rule on short units: two utterances matching the same terms
+    at the same length score identically, LanceDB returns tied rows in no fixed
+    order, and it reports a row's score with ~1e-6 of noise from call to call. A
+    plain cut at ``limit`` therefore keeps a different subset of the tie group at
+    the boundary, and the RRF order downstream moves with it -- measured on a
+    Time-Dialog store (2026-10-23): 47% of questions saw a different round-0
+    candidate list across 4 identical concurrent searches.
+
+    So the cut is taken here: fetch past ``limit`` until the tie group at the
+    boundary is complete (the last fetched score is strictly lower), order by
+    (score rounded to :data:`BM25_TIE_DECIMALS`, id) and cut. Widening gives up
+    at :data:`BM25_MAX_FETCH` times ``limit`` and cuts what it has. This is the
+    exp tree's ``fts_rows`` rule, applied through the index port instead of on a
+    LanceDB table: the parity check of 2026-11-10 (deviation R3) found this tree
+    taking the engine's order, so the same search returned a different list
+    from call to call where the exp tree returned one. On a multi-column index
+    (a picture's description and text) the port merges the columns by best
+    score first; cutting the merged list here keeps the same hits, in the same
+    order, as cutting each column and then the merge, which is how the exp tree's
+    2.0 picture port does it.
+
+    Args:
+        search: Runs the index's BM25 search with the given row limit.
+        limit: How many hits to keep.
+    """
+    if limit <= 0:
+        return []
+    cap = limit * BM25_MAX_FETCH
+    fetch = min(max(2 * limit, limit + 32), cap)
+    while True:
+        hits = sorted(await search(fetch), key=_bm25_order)
+        if len(hits) < fetch or fetch >= cap:
+            return hits[:limit]
+        if _bm25_order(hits[-1])[0] > _bm25_order(hits[limit - 1])[0]:
+            return hits[:limit]  # the tie group at the cut is complete
+        fetch = min(fetch * 2, cap)
 
 
 def rank_input(

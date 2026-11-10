@@ -33,7 +33,6 @@ _TUNING = (
     "retries",
     "retry_backoff_seconds",
     "core_overflow",
-    "full_text",
     "fallback_core",
 )
 
@@ -59,7 +58,9 @@ def test_defaults_match_what_the_published_runs_used() -> None:
     assert (d.max_rounds, d.seed_topk, d.subq_topk, d.max_subqueries) == (3, 50, 20, 3)
     assert (d.rrf_k, d.no_new_core_patience, d.per_subquery_guarantee) == (60, 1, 1)
     assert (d.retries, d.retry_backoff_seconds, d.fallback_core) == (3, 0.5, 3)
-    assert d.core_overflow is False and d.full_text is False
+    assert d.core_overflow is False
+    # The decider policy was trained and evaluated greedy (2026-11-10).
+    assert d.temperature == 0.0
 
 
 def test_the_legacy_env_names_still_win(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,10 +70,10 @@ def test_the_legacy_env_names_still_win(monkeypatch: pytest.MonkeyPatch) -> None
     every script that already sets one the moment this landed.
     """
     monkeypatch.setenv("EVEROS_LLMMR_MAX_ROUNDS", "7")
-    monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "1")
+    monkeypatch.setenv("EVEROS_LLMMR_CORE_OVERFLOW", "1")
     monkeypatch.setenv("EVEROS_LLMMR_DECIDER_BACKOFF_S", "0.25")
     t = SearchConfigSource().tuning()
-    assert (t.max_rounds, t.full_text, t.retry_backoff_seconds) == (7, True, 0.25)
+    assert (t.max_rounds, t.core_overflow, t.retry_backoff_seconds) == (7, True, 0.25)
 
 
 def test_a_malformed_override_is_ignored_not_guessed(

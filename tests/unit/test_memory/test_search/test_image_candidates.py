@@ -92,8 +92,7 @@ def test_a_picture_line_is_marked_in_the_evidence() -> None:
                 "original question",
                 [_episode_candidate("ep_1"), _image_candidate("im_1", "a" * 64)],
             )
-        ],
-        tuning_source=_CONFIG.tuning,
+        ]
     )
 
     assert "Coffee - they talked about coffee" in rendered
@@ -103,10 +102,7 @@ def test_a_picture_line_is_marked_in_the_evidence() -> None:
 
 
 def test_the_description_is_what_the_decider_reads() -> None:
-    rendered, _, _ = _render_blocks(
-        [("q", [_image_candidate("im_1", "a" * 64)])],
-        tuning_source=_CONFIG.tuning,
-    )
+    rendered, _, _ = _render_blocks([("q", [_image_candidate("im_1", "a" * 64)])])
 
     assert "a latte with a heart on it" in rendered
 

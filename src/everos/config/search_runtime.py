@@ -25,7 +25,6 @@ _LEGACY_ENV: dict[str, str] = {
     "retries": "EVEROS_LLMMR_DECIDER_RETRIES",
     "retry_backoff_seconds": "EVEROS_LLMMR_DECIDER_BACKOFF_S",
     "core_overflow": "EVEROS_LLMMR_CORE_OVERFLOW",
-    "full_text": "EVEROS_LLMMR_DECIDER_FULL_TEXT",
     "fallback_core": "EVEROS_LLMMR_DECIDER_FALLBACK_CORE",
 }
 

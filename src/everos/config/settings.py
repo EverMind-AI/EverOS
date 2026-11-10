@@ -6,7 +6,10 @@ Loaded by :func:`load_settings`. Source priority (later wins):
     2. ``<root>/everos.toml`` (user config; optional; ``<root>`` resolved by
        :func:`resolve_root`)
     3. ``EVEROS_<SECTION>__<KEY>`` environment variables
-    4. Init args passed programmatically (highest priority)
+    4. The evaluation harness's read-only switches (``EVEROS_DISABLE_CASCADE``,
+       ``EVEROS_DISABLE_CASCADE_WATCHER``, ``EVEROS_DISABLE_OME``), each only
+       ever turning its setting off
+    5. Init args passed programmatically (highest priority)
 
 The memory root is resolved by :func:`resolve_root`:
 ``explicit arg > EVEROS_ROOT env > ~/.everos``.
@@ -286,6 +289,16 @@ class DeciderSettings(BaseModel):
     few dozen tokens, so this is a guard, not a budget: uncapped, a model that will
     not stop generates until the deadline and the round is lost to a timeout rather
     than to a parse failure that would have been visible."""
+    temperature: float | None = Field(default=0.0, ge=0)
+    """Sampling temperature of every decider call. ``None`` leaves it out of the
+    request, so the endpoint's own default applies.
+
+    0.0 because the decider's picks decide what the reader sees, and the training and
+    evaluation code the decider policy was built with sends 0.0. Left out, a vLLM
+    endpoint applies the model's ``generation_config.json`` -- for Qwen3.8-27B
+    temperature 1.0, top_k 20, top_p 0.95 -- and searches stop being repeatable:
+    measured 2026-11-10, byte-identical round-0 inputs reproduced the same picks only
+    30-47% of the time. ``None`` is for an endpoint that rejects the field."""
     sdk_max_retries: int | None = Field(default=0, ge=0)
     """Retries inside the OpenAI SDK. 0 because :attr:`retries` below already retries
     at this layer, and the two multiply -- see the note in ``OpenAIProvider``. None
@@ -294,13 +307,22 @@ class DeciderSettings(BaseModel):
     Bounded at zero: the SDK reads it as a count, so a negative value is not "fewer
     retries" but a misconfiguration that would reach ``AsyncOpenAI`` unexamined."""
 
-    response_format_mode: ResponseFormatMode = "json_schema"
-    """How the reply format is requested. See
-    :attr:`LLMSettings.response_format_mode`. Inherited from ``[llm]``
-    together with the model when ``model`` is empty."""
-    invalid_reply_retries: int = Field(default=1, ge=0)
-    """Extra attempts after an unusable reply. See
-    :attr:`LLMSettings.invalid_reply_retries`."""
+    response_format_mode: ResponseFormatMode = "prompt_only"
+    """How the decider's reply format is requested; never inherited from ``[llm]``.
+
+    ``prompt_only`` because that is how the decider policy was trained and
+    evaluated: the exp code asks for the JSON object in the prompt and sends no
+    ``response_format``. The parity check of 2026-11-10 (deviation R1) found this
+    tree sending a strict json_schema on every call instead, which a vLLM endpoint
+    enforces by grammar-constraining the decider -- different decoding from the one
+    its numbers were measured under. Inheriting ``[llm]``'s mode would bring that
+    back on every deployment whose decider runs the extraction model, since
+    ``[llm]`` defaults to ``json_schema``.
+
+    ``json_object`` / ``json_schema`` remain an explicit opt-in for an endpoint
+    that needs one. Either way the reply is parsed tolerantly, as the exp decider
+    parses it, so there is no ``invalid_reply_retries`` here: an unusable reply
+    is one failed attempt of :attr:`retries`."""
 
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)
@@ -332,14 +354,6 @@ class DeciderSettings(BaseModel):
     Measured at 316/1522 questions (20.8%) returning more items than asked for on
     SubtleMemory, up to 68 for ``top_k=20`` -- which breaks the ``top_k`` contract and
     invalidates any same-budget comparison. Set only to reproduce a pre-fix run."""
-    full_text: bool = False
-    """Show the decider the full episode text instead of the stored summary.
-
-    Stores disagree about which column holds the full text: some hold a 200-character
-    prefix in ``summary`` with the full text in ``episode``. On those, the decider picks
-    core from a preview roughly 7x shorter than what the answering model is shown, which
-    measurably costs core recall. Default off so an in-flight comparison cannot change
-    behaviour mid-run."""
     fallback_core: int = Field(default=3, ge=0)
     """Core size to fall back to when every decider attempt fails.
 
@@ -523,6 +537,57 @@ class EmbeddingSettings(BaseModel):
     queued without bound (p50 64 s); at 16 the same load held p50 0.42 s,
     p95 1.45 s. Size it as searches per second x per-call latency, with
     headroom."""
+
+
+class VisionEmbeddingSettings(BaseModel):
+    """``[vision_embedding]`` — the picture's own embedding endpoint.
+
+    A separate section rather than another field on ``[embedding]``: the two
+    have different models, endpoints and widths, and a deployment that runs
+    text-only must be able to leave this section empty without touching the
+    text configuration.
+
+    The endpoint is an OpenAI-protocol ``/embeddings`` that accepts chat-style
+    input, because a picture has to travel as an ``image_url`` content part,
+    and it must apply the model's own input recipe (for
+    ``Qwen3-VL-Embedding-*``: the system instruction and the generation
+    prompt, pooled at the last token). Stock vLLM 0.32's chat-embedding path
+    does not — it drops the prompt's last token and returns vectors with
+    cosine 0.35–0.56 to the reference — so check a server against the model
+    card's reference similarities before pointing this section at it.
+
+    Env binding:
+        EVEROS_VISION_EMBEDDING__MODEL
+        EVEROS_VISION_EMBEDDING__API_KEY
+        EVEROS_VISION_EMBEDDING__BASE_URL
+        EVEROS_VISION_EMBEDDING__DIM
+        EVEROS_VISION_EMBEDDING__TIMEOUT_SECONDS
+        EVEROS_VISION_EMBEDDING__MAX_RETRIES
+        EVEROS_VISION_EMBEDDING__BATCH_SIZE
+        EVEROS_VISION_EMBEDDING__MAX_CONCURRENT
+        EVEROS_VISION_EMBEDDING__QUERY_MAX_CONCURRENT
+    """
+
+    model: str | None = None
+    api_key: SecretStr | None = None
+    base_url: str | None = None
+    dim: int = Field(default=4096, ge=1)
+    """Width of the ``visual_vector`` column.
+
+    Defaults to the native width of ``Qwen3-VL-Embedding-8B``;
+    ``WeMM-Embedding-4B`` is 2560 and ``Qwen3-VL-Embedding-2B`` is 2048. A
+    longer vector is cut to this width client-side, which only keeps recall
+    for Matryoshka-trained models (``Qwen3-VL-Embedding`` is, 64–4096).
+    Changing it invalidates every stored visual vector
+    (``everos cascade rebuild``)."""
+    timeout_seconds: float = Field(default=60.0, gt=0)
+    """Longer than the text default: a picture is many more tokens than a
+    sentence, and an 8B encoder over one 1024px image is not a 30 s call."""
+    max_retries: int = Field(default=3, ge=0)
+    batch_size: int = Field(default=8, ge=1)
+    max_concurrent: int = Field(default=4, ge=1)
+    query_max_concurrent: int = Field(default=16, ge=1)
+    """Separate budget for the interactive query embed, as on ``[embedding]``."""
 
 
 class RerankSettings(BaseModel):
@@ -819,6 +884,10 @@ class CascadeSettings(BaseModel):
       limit reached``. Unlike ``enabled = false`` this keeps the worker, so md
       still reaches the index -- which an ingesting run cannot do without.
 
+    The evaluation harness's own names turn both off as well:
+    ``EVEROS_DISABLE_CASCADE`` and ``EVEROS_DISABLE_CASCADE_WATCHER`` (see
+    :class:`_ReadOnlySwitchSource`).
+
     The cadences below are *how often* each background job runs, not how long
     it is allowed to take — the deadlines that bound a hung call stay as
     constants next to the code they guard, sized from measurement, because a
@@ -878,6 +947,14 @@ class OmeSettings(BaseModel):
     Engine-wide knobs only. Per-strategy overrides (enable / gate / cron) live
     in ``<memory-root>/ome.toml``, a separate file the engine reads itself.
 
+    ``enabled``:
+      Whether the server starts the engine. Off is for a server that only
+      searches a store built elsewhere: no strategy runs, and a memorize on it
+      fails when it publishes its events (``emit: engine not started``) -- so
+      never on a server that ingests. The root lock is taken either way: one
+      server per memory root. ``EVEROS_DISABLE_OME`` (the evaluation harness's
+      name) turns it off too, as ``EVEROS_DISABLE_CASCADE`` does the cascade.
+
     ``max_concurrent_runs``:
       Engine-wide cap on concurrent strategy invocations. The default suits an
       interactive install; a bulk ingest of many conversations is throttled by
@@ -894,6 +971,7 @@ class OmeSettings(BaseModel):
       latency target.
     """
 
+    enabled: bool = True
     max_concurrent_runs: int = Field(default=20, gt=0)
     run_timeout_seconds: float | None = Field(default=1800.0, ge=0)
 
@@ -1009,6 +1087,48 @@ class ObservabilitySettings(BaseModel):
     recall_hit_threshold: float = 0.6
 
 
+_READ_ONLY_SWITCHES: dict[str, tuple[str, str]] = {
+    "EVEROS_DISABLE_CASCADE": ("cascade", "enabled"),
+    "EVEROS_DISABLE_CASCADE_WATCHER": ("cascade", "watcher_enabled"),
+    "EVEROS_DISABLE_OME": ("ome", "enabled"),
+}
+"""Each read-only switch the evaluation harness exports, and the setting it clears."""
+
+_TRUTHY: frozenset[str] = frozenset({"1", "true", "yes"})
+
+
+class _ReadOnlySwitchSource(PydanticBaseSettingsSource):
+    """The evaluation harness's read-only switches, as the settings they stand for.
+
+    The exp tree's evaluation harness (its ``benchmarks/run.py`` and the launch
+    scripts built on it) starts a search-only server with
+    ``EVEROS_DISABLE_CASCADE=1`` and ``EVEROS_DISABLE_OME=1``, and every server
+    with ``EVEROS_DISABLE_CASCADE_WATCHER=1``. This tree had replaced them with
+    ``[cascade] enabled`` / ``watcher_enabled`` and had no OME switch at all, so
+    the same launch here silently started both write-side subsystems on a
+    read-only server -- the cascade's periodic scan, which starved search on a
+    dense store, and the OME engine.
+
+    A switch is on exactly when the exp tree reads it as on (``1`` / ``true`` /
+    ``yes``, case- and space-insensitive) and then sets its setting to
+    ``false``; any other value, or none, leaves the setting to the other
+    sources, so ``EVEROS_CASCADE__ENABLED`` and the TOML keep working. It sits
+    just below init arguments: a switch exported for a run wins over a file or
+    another environment variable, as the legacy ``EVEROS_LLMMR_*`` names do.
+    """
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        """Unused: :meth:`__call__` builds the whole mapping at once."""
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        cleared: dict[str, dict[str, bool]] = {}
+        for env, (section, key) in _READ_ONLY_SWITCHES.items():
+            if os.getenv(env, "").strip().lower() in _TRUTHY:
+                cleared.setdefault(section, {})[key] = False
+        return cleared
+
+
 class Settings(BaseSettings):
     """Top-level application settings."""
 
@@ -1021,6 +1141,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = LLMSettings()
     decider: DeciderSettings = DeciderSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
+    vision_embedding: VisionEmbeddingSettings = VisionEmbeddingSettings()
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
@@ -1077,9 +1198,11 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Source order: init_args > env_vars > everos.toml > default.toml."""
+        """Source order: init_args > read-only switches > env_vars > everos.toml >
+        default.toml (see :class:`_ReadOnlySwitchSource` for the switches)."""
         sources: list[PydanticBaseSettingsSource] = [
             init_settings,
+            _ReadOnlySwitchSource(settings_cls),
             env_settings,
         ]
         # Attempt to load <root>/everos.toml if it exists.

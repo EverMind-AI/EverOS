@@ -113,10 +113,16 @@ def test_multimodal_section_reaches_the_factory() -> None:
     )
 
 
-def test_decider_mode_follows_the_section_that_supplies_the_model() -> None:
-    """Format support is a property of the model, so it is inherited with it."""
-    settings = _settings(response_format_mode="prompt_only")
+def test_the_decider_mode_is_its_own_and_asks_for_nothing_by_default() -> None:
+    """Never inherited from ``[llm]`` (parity check 2026-11-10, deviation R1).
+
+    The exp decider sends no ``response_format`` whatever ``[llm]`` uses; a
+    decider inheriting ``[llm]``'s json_schema had vLLM grammar-constrain it.
+    """
+    settings = _settings(response_format_mode="json_schema")
     assert resolve_decider_config(settings).response_format_mode == "prompt_only"
+    assert resolve_decider_config(settings).invalid_reply_retries == 0
 
     settings.decider.model = "other-model"
-    assert resolve_decider_config(settings).response_format_mode == "json_schema"
+    settings.decider.response_format_mode = "json_object"
+    assert resolve_decider_config(settings).response_format_mode == "json_object"

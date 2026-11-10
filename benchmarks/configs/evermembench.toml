@@ -82,7 +82,6 @@ openai = "openai"
 google = "google-ai-studio"
 
 [retrieval_env]                         # exported to the EverOS servers this harness starts
-EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
 # Thinking is left ON here deliberately, against the standing "qwen always no-think"
 # rule: every published reference number on this benchmark was measured with a
 # thinking-on qwen3.6-27B decider, and switching it changes the decider's output and

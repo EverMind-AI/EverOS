@@ -102,7 +102,7 @@ from .skill_hybrid import search_agent_skills_hybrid
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
-    from everos.component.embedding import EmbeddingProvider
+    from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvider
     from everos.component.rerank import RerankProvider
     from everos.component.tokenizer import Tokenizer
     from everos.memory.ports.images import ImageStore
@@ -186,6 +186,7 @@ class SearchManager:
         session_buffer: SessionBufferStore,
         cluster_store: ClusterStore,
         embedding: EmbeddingProvider | None,
+        vision_embedding: VisionEmbeddingProvider | None = None,
         reranker: RerankProvider | None,
         llm_client: LLMClient,
         decider_client: LLMClient,
@@ -213,6 +214,10 @@ class SearchManager:
         self._search_tokenizer = search_tokenizer
         self._images = image_recaller
         self._image_store = image_store
+        # The picture-side embedder, when configured. Its query encoder puts the
+        # user's question into the space the pictures' bytes live in; without
+        # it the visual route is skipped and search is exactly as before.
+        self._vision = vision_embedding
 
     # ── Public entry ────────────────────────────────────────────────
 
@@ -448,6 +453,9 @@ class SearchManager:
                 image_recaller=self._images,
                 image_store=self._image_store,
                 question_image_ids=question_image_ids,
+                visual_embed_query_fn=(
+                    self._vision.embed_query if self._vision is not None else None
+                ),
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")

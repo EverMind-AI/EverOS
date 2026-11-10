@@ -31,7 +31,7 @@ from everos.memory.ports import (
 )
 from everos.memory.search._candidates import FactCandidate
 
-from .base import RecallerDeps, RecallResult, from_hits
+from .base import RecallerDeps, RecallResult, from_hits, stable_sparse_top
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,11 +65,19 @@ class AtomicFactRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[AtomicFact]:
-        """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring)."""
+        """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring).
+
+        Cut like the episodes' (:func:`~.base.stable_sparse_top`): score ties
+        are settled by id, so a repeated search recalls the same facts in the
+        same order. Short facts tie often, and the exp tree applies this rule
+        to them too (its ``fts_rows``).
+        """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return RecallResult.empty()
-        hits = await self._index.sparse_search(terms, where, limit=limit)
+        hits = await stable_sparse_top(
+            lambda n: self._index.sparse_search(terms, where, limit=n), limit
+        )
         return from_hits(hits, source="keyword")
 
     async def dense_recall(

@@ -122,10 +122,20 @@ def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
 
 
-def _fake_table(nullable: bool, alter: Callable[..., Any] | None = None) -> Any:
-    """Minimal table stub exposing the two coroutines the migration uses."""
+def _fake_table(
+    nullable: bool,
+    alter: Callable[..., Any] | None = None,
+    *,
+    columns: tuple[str, ...] = ("vector",),
+) -> Any:
+    """Minimal table stub exposing the coroutines the migrations use.
+
+    ``columns`` is what the table already has: the v2 step reads
+    ``vector``'s nullability, the v3 step adds ``visual_vector`` only when
+    it is absent, so a stub that already carries it makes v3 a no-op.
+    """
     field = SimpleNamespace(nullable=nullable)
-    arrow_schema = SimpleNamespace(field=lambda _name: field)
+    arrow_schema = SimpleNamespace(field=lambda _name: field, names=list(columns))
 
     async def _schema() -> Any:
         return arrow_schema
@@ -133,9 +143,13 @@ def _fake_table(nullable: bool, alter: Callable[..., Any] | None = None) -> Any:
     async def _default_alter(*_alterations: Any) -> None:
         return None
 
+    async def _default_add_columns(*_args: Any) -> None:
+        return None
+
     return SimpleNamespace(
         schema=_schema,
         alter_columns=alter if alter is not None else _default_alter,
+        add_columns=_default_add_columns,
     )
 
 
@@ -289,7 +303,8 @@ async def test_concurrent_migrations_serialize_through_the_lock(
         tg.create_task(storage.backend.migrate_table_schemas())
 
     assert max_concurrent[0] == 1
-    # One task wrote the marker; the other saw it and short-circuited.
-    assert reached_work["n"] == len(lancedb_backend.BUSINESS_SCHEMAS_WITH_VECTOR)
+    # One task wrote the marker; the other saw it and short-circuited. The
+    # work section opens each v2 table once, then image_memory for v3.
+    assert reached_work["n"] == len(lancedb_backend.BUSINESS_SCHEMAS_WITH_VECTOR) + 1
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"
     assert int(marker.read_text().strip()) == _TABLE_SCHEMA_VERSION

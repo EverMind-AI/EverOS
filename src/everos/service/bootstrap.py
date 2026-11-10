@@ -45,7 +45,12 @@ from types import TracebackType
 
 from everalgo.llm import LLMClient
 
-from everos.component.embedding import EmbeddingProvider, build_embedding_provider
+from everos.component.embedding import (
+    EmbeddingProvider,
+    VisionEmbeddingProvider,
+    build_embedding_provider,
+    build_vision_embedding_provider,
+)
 from everos.component.images import ImageLimits
 from everos.component.llm import (
     LLMCaseJudge,
@@ -147,6 +152,7 @@ class Providers:
     decider: LLMClient
     multimodal_llm: LLMClient | None
     embedding: EmbeddingProvider | None
+    vision_embedding: VisionEmbeddingProvider | None
     rerank: RerankProvider | None
 
 
@@ -160,7 +166,8 @@ class Application:
     """What an entry point holds: three facades plus the provider snapshot.
 
     ``start`` brings up what a long-running server needs -- system DB,
-    index, cascade, OME, the ``async_mode`` queue -- in that order.
+    index, cascade, OME, the ``async_mode`` queue -- in that order; the
+    cascade and OME each stay down when their settings switch them off.
     ``aclose`` stops whatever was started in reverse, closes the storage
     connections whether or not ``start`` ran (a CLI command opens them
     without starting), and shuts tracing down; it is idempotent and safe
@@ -236,10 +243,17 @@ class Application:
         await self.ops.start()
         self._stack.push_async_callback(_shielded("cascade", self.ops.aclose))
 
-        self._root.ome_db.parent.mkdir(parents=True, exist_ok=True)
-        await self._engine.start()
-        self._stack.push_async_callback(_shielded("ome", self._engine.stop))
-        logger.info("ome_engine_started")
+        # `[ome] enabled = false` (or `EVEROS_DISABLE_OME=1`, the evaluation
+        # harness's switch) is a search-only server over a store built elsewhere,
+        # which the exp tree runs without the engine. The root lock above still
+        # holds: the switch removes the engine, not the one-server-per-root rule.
+        if self._settings.ome.enabled:
+            self._root.ome_db.parent.mkdir(parents=True, exist_ok=True)
+            await self._engine.start()
+            self._stack.push_async_callback(_shielded("ome", self._engine.stop))
+            logger.info("ome_engine_started")
+        else:
+            logger.info("ome_engine_disabled")
 
         await self.memory.start()
         self._stack.push_async_callback(_shielded("memory", self.memory.aclose))
@@ -305,6 +319,7 @@ def build_providers(settings: Settings) -> Providers:
             settings, "multimodal_llm", resolve_multimodal_config
         ),
         embedding=_embedding_or_none(settings),
+        vision_embedding=_vision_embedding_or_none(settings),
         rerank=_rerank_or_none(settings),
     )
 
@@ -356,6 +371,7 @@ def build_application(
         memory_root=root,
         tokenizer=tokenizer,
         embedding=providers.embedding,
+        vision_embedding=providers.vision_embedding,
         index=index,
         sqlite=sqlite,
         watcher_enabled=settings.cascade.watcher_enabled,
@@ -447,6 +463,23 @@ def _embedding_or_none(settings: Settings) -> EmbeddingProvider | None:
         # Unconfigured and misconfigured both surface as the same 422 later;
         # this line is the only place an operator can tell them apart.
         logger.warning("embedding_capability_build_failed", reason=str(exc))
+        return None
+
+
+def _vision_embedding_or_none(settings: Settings) -> VisionEmbeddingProvider | None:
+    """The picture-side provider, or ``None`` when the section is empty.
+
+    An empty ``[vision_embedding]`` is the normal text-only deployment, not a
+    misconfiguration: picture memories then carry only their description's
+    text vector and the visual route is skipped. A *half-filled* section
+    (model set, key missing) is a real error and logs as one.
+    """
+    if not settings.vision_embedding.model:
+        return None
+    try:
+        return build_vision_embedding_provider(settings.vision_embedding)
+    except ValueError as exc:
+        logger.warning("vision_embedding_capability_build_failed", reason=str(exc))
         return None
 
 
@@ -590,6 +623,7 @@ def _build_memory_service(
             session_buffer=stores.session_buffer,
             cluster_store=stores.cluster,
             embedding=providers.embedding,
+            vision_embedding=providers.vision_embedding,
             reranker=providers.rerank,
             llm_client=providers.llm,
             decider_client=providers.decider,

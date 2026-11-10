@@ -205,7 +205,63 @@ def test_the_ome_tunables_reach_the_engine(settings: Settings) -> None:
     assert config.run_timeout_seconds is None
 
 
+@pytest.mark.parametrize(
+    ("env", "reaches"),
+    [
+        ("EVEROS_DISABLE_CASCADE", lambda app: app.ops._run_cascade),
+        (
+            "EVEROS_DISABLE_CASCADE_WATCHER",
+            lambda app: app.ops._cascade._watcher_enabled,
+        ),
+    ],
+)
+def test_the_harness_cascade_switches_reach_the_cascade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: str, reaches: object
+) -> None:
+    """The evaluation harness's names, not only the settings' own."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "root"))
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", "test-key")
+    monkeypatch.setenv(env, "1")
+    load_settings.cache_clear()
+    try:
+        application = build_application(load_settings())
+    finally:
+        load_settings.cache_clear()
+    assert reaches(application) is False  # type: ignore[operator]
+
+
 # ── lifecycle ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "switch",
+    [("EVEROS_DISABLE_OME", "1"), ("EVEROS_OME__ENABLED", "false")],
+    ids=["harness-switch", "setting"],
+)
+async def test_a_search_only_server_starts_without_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, switch: tuple[str, str]
+) -> None:
+    """``[ome] enabled = false`` / ``EVEROS_DISABLE_OME=1``: everything but OME.
+
+    The exp tree runs a retrieval-only server with no OME engine; this tree had
+    no way to say so and always started it. The root lock still holds.
+    """
+    from everos.infra.ome import OmeLock
+
+    monkeypatch.setenv(*switch)
+    load_settings.cache_clear()
+    events: list[str] = []
+    application = make_application(root=tmp_path, lifecycle=events)
+
+    await application.start()
+    assert events == [e for e in _STARTED if e != "ome.start"]
+    assert not OmeLock(application._root.ome_db).is_free()
+
+    events.clear()
+    await application.aclose()
+    assert events == ["memory.aclose", "ops.aclose", "index.close", "sqlite.dispose"]
+    assert OmeLock(application._root.ome_db).is_free()
+    load_settings.cache_clear()
 
 
 async def test_start_brings_the_queue_up_last_and_aclose_unwinds_in_reverse(

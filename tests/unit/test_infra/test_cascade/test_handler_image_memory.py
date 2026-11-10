@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -239,3 +240,113 @@ async def test_an_unchanged_file_is_skipped_not_re_embedded(
 
     assert second.upserted == 0
     assert second.skipped == 1
+
+
+class _StubVisionEmbedder:
+    """Records the pictures it was asked to embed."""
+
+    dim = 4
+
+    def __init__(self) -> None:
+        self.images: list[bytes] = []
+
+    async def embed_images(self, images):  # type: ignore[no-untyped-def]
+        self.images.extend(image for image, _media in images)
+        return [[0.5, 0.5, 0.5, 0.5] for _ in images]
+
+    async def embed_image(self, image: bytes, media_type: str) -> list[float]:
+        self.images.append(image)
+        return [0.5, 0.5, 0.5, 0.5]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.5, 0.5, 0.5, 0.5]
+
+
+def _write_picture_file(memory_root: MemoryRoot, payload: bytes = b"png-bytes") -> None:
+    path = memory_root.root / "figures" / "cc" / f"{_IMAGE_ID}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def _handler_with_vision(
+    memory_root: MemoryRoot,
+    embedding: EmbeddingProvider | None,
+    vision: Any,
+) -> ImageMemoryHandler:
+    return ImageMemoryHandler(
+        handler_deps(
+            memory_root=memory_root,
+            tokenizer=_StubTokenizer(),
+            embedding=embedding,
+            vision_embedding=vision,
+        )
+    )
+
+
+async def test_the_picture_bytes_get_their_own_vector(
+    memory_root: MemoryRoot, fake_repo: _FakeImageRepo
+) -> None:
+    _write_picture_file(memory_root)
+    vision = _StubVisionEmbedder()
+    rel = await _write_entry(ImageMemoryWriter(memory_root), description="a latte")
+
+    await _handler_with_vision(
+        memory_root, _StubEmbedder(), vision
+    ).handle_added_or_modified(rel)
+
+    row = fake_repo.upserts[0][0]
+    # Two vectors, two models: the description's text embedding and the
+    # picture's own. They are never compared, only fused.
+    assert row.vector == [0.1] * 8
+    assert row.visual_vector == [0.5, 0.5, 0.5, 0.5]
+    assert vision.images == [b"png-bytes"]
+
+
+async def test_a_missing_picture_file_leaves_the_text_vector_usable(
+    memory_root: MemoryRoot, fake_repo: _FakeImageRepo
+) -> None:
+    vision = _StubVisionEmbedder()
+    rel = await _write_entry(ImageMemoryWriter(memory_root), description="a latte")
+
+    outcome = await _handler_with_vision(
+        memory_root, _StubEmbedder(), vision
+    ).handle_added_or_modified(rel)
+
+    assert outcome.upserted == 1
+    row = fake_repo.upserts[0][0]
+    assert row.vector == [0.1] * 8
+    assert row.visual_vector is None
+    assert vision.images == []
+
+
+async def test_one_picture_is_embedded_once_per_run(
+    memory_root: MemoryRoot, fake_repo: _FakeImageRepo
+) -> None:
+    _write_picture_file(memory_root)
+    writer = ImageMemoryWriter(memory_root)
+    # The same file referenced twice in one day's log: one file, two entries.
+    rel = await _write_entry(writer, description="a latte")
+    await _write_entry(writer, description="the same latte again")
+    vision = _StubVisionEmbedder()
+
+    await _handler_with_vision(
+        memory_root, _StubEmbedder(), vision
+    ).handle_added_or_modified(rel)
+
+    assert len(fake_repo.upserts[0]) == 2
+    assert vision.images == [b"png-bytes"]
+    assert [r.visual_vector for r in fake_repo.upserts[0]] == [
+        [0.5, 0.5, 0.5, 0.5],
+        [0.5, 0.5, 0.5, 0.5],
+    ]
+
+
+async def test_without_a_vision_embedder_no_picture_is_read(
+    memory_root: MemoryRoot, fake_repo: _FakeImageRepo
+) -> None:
+    _write_picture_file(memory_root)
+    rel = await _write_entry(ImageMemoryWriter(memory_root), description="a latte")
+
+    await _handler(memory_root, _StubEmbedder()).handle_added_or_modified(rel)
+
+    assert fake_repo.upserts[0][0].visual_vector is None

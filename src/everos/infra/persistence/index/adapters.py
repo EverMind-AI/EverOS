@@ -62,8 +62,6 @@ from .protocols import (
 
 logger = get_logger(__name__)
 
-_VECTOR_COLUMNS = frozenset({"vector", "subject_vector"})
-
 type Row = Mapping[str, Any]
 
 
@@ -262,7 +260,12 @@ class AgentSkillIndexAdapter(_SearchableIndex[AgentSkill]):
 
 
 class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
-    """Picture-memory index reads — the same two routes the episodes get.
+    """Picture-memory index reads — one route more than an episode gets.
+
+    ``dense_search`` scores ``vector`` (the description's text embedding);
+    :meth:`visual_search` scores ``visual_vector`` (the picture bytes' own
+    embedding). The two spaces are different models, so the caller fuses the
+    two result lists by rank.
 
     Args:
         repo: Image-memory derived-index repository.
@@ -270,6 +273,17 @@ class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
 
     def __init__(self, repo: IndexRepository[Any]) -> None:
         super().__init__(repo, _stored_image_memory)
+
+    async def visual_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[SearchHit[ImageMemory]]:
+        """ANN over the picture's own embedding; empty when none is stored."""
+        if not vector:
+            return []
+        rows = await self._repo.dense_search(
+            vector, where, limit=limit, vector_field="visual_vector"
+        )
+        return [self._hit(row, _cosine_similarity(row)) for row in rows]
 
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
@@ -389,12 +403,19 @@ def _cosine_similarity(row: Row) -> float:
 
 
 def _read_columns(schema: type[BaseModel]) -> list[str]:
-    """Every column a domain read needs: no vectors, no BM25 token columns."""
+    """Every column a domain read needs: no vectors, no BM25 token columns.
+
+    Vector columns are identified by declaration (:meth:`IndexRecord.
+    vector_columns`), not by a name list: ``image_memory`` now carries two
+    (``vector`` and ``visual_vector``) and they have different widths, so a
+    read that fetched them would hand the caller rows it cannot validate.
+    """
     tokens = set(getattr(schema, "BM25_FIELDS", ()))
+    vectors = set(schema.vector_columns())  # type: ignore[attr-defined]
     return [
         name
         for name in schema.model_fields
-        if name not in _VECTOR_COLUMNS and name not in tokens
+        if name not in vectors and name not in tokens
     ]
 
 

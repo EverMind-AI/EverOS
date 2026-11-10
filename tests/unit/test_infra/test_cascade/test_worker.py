@@ -507,7 +507,8 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
     """Sanity: HandlerDeps accepts the real provider Protocols.
 
     Every storage collaborator is injected here; embedding is a soft
-    dependency, ``None`` on a keyword-only deployment.
+    dependency, ``None`` on a keyword-only deployment, and so is the
+    picture-side embedder (``vision_embedding``).
     """
     # No instantiation needed — just verifies the dataclass shape.
     assert {
@@ -517,6 +518,7 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
         "knowledge_documents",
         "knowledge_topics",
         "embedding",
+        "vision_embedding",
         "fence",
     } == {f.name for f in HandlerDeps.__dataclass_fields__.values()}
 

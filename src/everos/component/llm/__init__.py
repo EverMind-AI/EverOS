@@ -5,7 +5,8 @@ The contract and its types (``LLMClient``, ``LLMMessage``, ``LLMOutputError``,
 This package exports only what EverOS itself defines:
 
 - :class:`OpenAIProvider` -- the one ``LLMClient`` implementation, over any
-  OpenAI-compatible Chat Completions endpoint.
+  OpenAI-compatible Chat Completions endpoint. Its ``achat_raw`` (returning a
+  :class:`RawReply`) is the one unchecked call, for the retrieval decider.
 - :class:`LLMCallError` -- what a failed call raises, with a ``reason``.
 - :class:`LLMCaseJudge` -- everalgo's agent-case gate question answered by
   an ``LLMClient``.
@@ -45,6 +46,7 @@ from .observer import LLMCallObserver as LLMCallObserver
 from .observer import NullObserver as NullObserver
 from .observer import TokenUsage as TokenUsage
 from .openai_provider import OpenAIProvider as OpenAIProvider
+from .openai_provider import RawReply as RawReply
 
 __all__ = [
     "DeciderClientConfig",
@@ -55,6 +57,7 @@ __all__ = [
     "LLMNotConfiguredError",
     "NullObserver",
     "OpenAIProvider",
+    "RawReply",
     "TokenUsage",
     "build_llm_provider",
     "observer_for",

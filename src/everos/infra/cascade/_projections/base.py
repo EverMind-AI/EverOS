@@ -19,7 +19,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import IndexRepositories
@@ -50,6 +50,7 @@ class HandlerDeps:
     knowledge_documents: KnowledgeDocumentRepo
     knowledge_topics: KnowledgeTopicRowRepo
     embedding: EmbeddingProvider | None = None
+    vision_embedding: VisionEmbeddingProvider | None = None
     fence: DeleteFence | None = None
 
 

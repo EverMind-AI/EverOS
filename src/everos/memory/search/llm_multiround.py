@@ -45,15 +45,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, runtime_checkable
 
 from everalgo.llm import (
     LLMMessage,
     StrictOutputModel,
     image_url_part_from_bytes,
-    parse_reply,
 )
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
@@ -73,7 +73,9 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
+    from pydantic import BaseModel
 
+    from everos.component.llm import RawReply, TokenUsage
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
@@ -146,9 +148,11 @@ class RoundDecision(NamedTuple):
     queries: list[str]
     core: list[int]
     usage: dict[str, object] | None = None
-    """Token usage a policy decider chooses to report (trace); the prompt-LLM
-    decider leaves it ``None`` because ``achat`` returns text only."""
-    raw: str | None = None  # decider raw reply text (trace)
+    """Token usage for the trace, keyed as the exp trace keys it
+    (``prompt_tokens`` / ``completion_tokens``). The prompt-LLM decider fills it
+    when its client returns a :class:`~everos.component.llm.RawReply`; a client
+    reached through ``achat``, which returns text only, leaves it ``None``."""
+    raw: str | None = None  # decider raw reply text, the last attempt's (trace)
     failed: bool = False
     """Every decider attempt failed; ``core`` is the deterministic fallback.
 
@@ -257,10 +261,43 @@ GLOBAL indices into the candidates above:
 
 
 class _DecisionReply(StrictOutputModel):
-    """The decider's reply: the skeleton the prompt's last line shows."""
+    """The reply shape the prompt's last line shows.
+
+    Sent as ``response_format`` only when ``[decider].response_format_mode``
+    asks for one, which by default it does not. Never used to judge a reply:
+    :func:`_parse_decision` reads it the way the exp decider does.
+    """
 
     core: list[int]
     next_queries: list[str]
+
+
+@runtime_checkable
+class RawChatClient(Protocol):
+    """An LLM client that hands a reply back unchecked, for the decider to read.
+
+    EverOS's ``OpenAIProvider`` is one (``achat_raw``), and the decider prefers
+    it to the everalgo ``achat`` contract. ``achat`` validates the reply against
+    the strict ``response_format`` model and fails a ``length`` finish even when
+    the JSON in it is complete; the parity check against the exp tree
+    (2026-11-10, deviation R2) measured both turning replies the exp decider
+    uses -- fenced JSON, prose around the object, a string index, a missing
+    ``next_queries`` -- into failed rounds: eight requests each, then the fixed
+    fallback core, which leaves the question nothing to score core-only.
+
+    A client without it (a test double, a policy's own client) is asked
+    through ``achat``, and the text it returns is read the same tolerant way.
+    """
+
+    async def achat_raw(
+        self,
+        messages: list[LLMMessage],
+        *,
+        response_format: type[BaseModel] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **extra: Any,
+    ) -> RawReply: ...
 
 
 class LLMRoundDecider:
@@ -275,7 +312,8 @@ class LLMRoundDecider:
     a future Phase-2 policy that learns the core-selection step — keep one
     contract. The ``core_so_far`` / ``evidence`` strings are built in
     :func:`_search_episodes_subq`; this class only formats the request and
-    reads the validated reply.
+    reads the reply, tolerantly, exactly as the exp decider the policy was
+    trained and evaluated with reads it (:func:`_parse_decision`).
 
     Args:
         llm: everalgo LLM client.
@@ -312,12 +350,19 @@ class LLMRoundDecider:
             evidence=evidence or "(no evidence retrieved this round)",
             max_sub=tune.max_subqueries,
         )
-        reply: _DecisionReply | None = None
+        data: dict[str, Any] | None = None
         raw: str | None = None
+        usage: dict[str, object] | None = None
         last_error = ""
         for attempt in range(tune.retries + 1):
             try:
-                raw, reply = await self._ask(prompt, tune, pictures)
+                raw, usage = await self._ask(prompt, tune, pictures)
+                # Reasoning deciders intermittently return an EMPTY completion
+                # (output budget spent on reasoning tokens). Name that case so the
+                # log tells "model said nothing" from "reply was unparseable".
+                if not raw.strip():
+                    raise ValueError("empty decider reply")
+                data = _parse_decision(raw)
                 break
             except Exception as err:
                 # Any failure degrades this round to the deterministic fallback
@@ -330,7 +375,7 @@ class LLMRoundDecider:
                 )
                 if attempt < tune.retries and tune.retry_backoff_seconds > 0:
                     await asyncio.sleep(tune.retry_backoff_seconds * (2**attempt))
-        if reply is None:
+        if data is None:
             # Every attempt failed. Fall back to a deterministic core (the evidence
             # list is in fused-score order) rather than returning an empty one: an
             # empty core silently disables core-first injection for this question
@@ -347,51 +392,148 @@ class LLMRoundDecider:
                 last_error=last_error[:200],
             )
             return RoundDecision(
-                stop=True, queries=[], core=fallback, raw=raw, failed=True
+                stop=True,
+                queries=[],
+                core=fallback,
+                usage=usage,
+                raw=raw,
+                failed=True,
             )
-        core = _coerce_core_indices(reply.core, n_candidates)
-        queries = [q.strip() for q in reply.next_queries if q.strip()][
+        core = _coerce_core_indices(data.get("core", []), n_candidates)
+        # A missing, null or non-list ``next_queries`` is a stop, and a query that
+        # is not a string is kept as its text -- as the exp decider reads them.
+        next_raw = data.get("next_queries")
+        if not isinstance(next_raw, list):
+            next_raw = []
+        queries = [str(q).strip() for q in next_raw if str(q).strip()][
             : tune.max_subqueries
         ]
-        return RoundDecision(stop=not queries, queries=queries, core=core, raw=raw)
+        return RoundDecision(
+            stop=not queries, queries=queries, core=core, usage=usage, raw=raw
+        )
 
     async def _ask(
         self,
         prompt: str,
         tune: DeciderSettings,
         pictures: Sequence[Picture] = (),
-    ) -> tuple[str, _DecisionReply]:
-        """One decider call: the raw reply text and its validated form.
+    ) -> tuple[str, dict[str, object] | None]:
+        """One decider call, one request: the reply text as sent, and its tokens.
 
-        ``max_tokens`` and ``extra`` come from ``[decider]``, not from the
-        client's defaults. ``extra`` is where a Qwen endpoint gets
+        ``max_tokens``, ``temperature`` and ``extra`` come from ``[decider]``, not
+        from the client's defaults; a key in ``extra`` wins over the two named ones.
+        ``extra`` is where a Qwen endpoint gets
         ``chat_template_kwargs.enable_thinking=false``: left on, an un-finetuned
         decider spends the whole deadline reasoning and the round is lost to a
         timeout (39.3% of rounds on Qwen3.5-0.8B).
 
-        Raises:
-            LLMOutputError: The reply is not a valid :class:`_DecisionReply`.
+        Nothing here judges the reply; :meth:`__call__` parses it. A
+        :class:`RawChatClient` is asked through ``achat_raw``, so the reply comes
+        back whatever it holds and whatever the finish reason, from exactly one
+        request -- the exp decider's request count. Any other client goes through
+        ``achat`` with :class:`_DecisionReply` as the format.
         """
-        text = await self._llm.achat(
-            [LLMMessage(role="user", content=_content(prompt, pictures, tune))],
-            response_format=_DecisionReply,
-            max_tokens=tune.max_tokens,
+        params: dict[str, Any] = {
+            "max_tokens": tune.max_tokens,
+            "temperature": tune.temperature,
             **tune.extra,
-        )
-        return text, parse_reply(
-            _DecisionReply, text, operator="llm_multiround decider"
-        )
+        }
+        messages = [LLMMessage(role="user", content=_content(prompt, pictures, tune))]
+        if isinstance(self._llm, RawChatClient):
+            reply = await self._llm.achat_raw(
+                messages, response_format=_DecisionReply, **params
+            )
+            return reply.text, _trace_tokens(reply.usage)
+        text = await self._llm.achat(messages, response_format=_DecisionReply, **params)
+        return text, None
 
 
-def _coerce_core_indices(raw: Sequence[int], n_evidence: int) -> list[int]:
-    """Keep a decider's ``core`` indices that address the evidence, each once.
+def _trace_tokens(usage: TokenUsage | None) -> dict[str, object] | None:
+    """A completion's token counts as the trace records them (exp's keys)."""
+    if usage is None:
+        return None
+    return {
+        "prompt_tokens": usage.input_tokens,
+        "completion_tokens": usage.output_tokens,
+    }
 
-    Out-of-range indices are dropped, and a repeated index keeps its first
-    position. An empty result makes the caller fall back to the unfiltered path.
+
+def _parse_decision(text: str) -> dict[str, Any]:
+    """Extract the JSON decision object from a decider reply, tolerant of prose.
+
+    Ported from the exp decider unchanged, because the decider policy was trained
+    and evaluated against this reading: the parity check of 2026-11-10
+    (deviation R2) found the strict model this replaced failing fenced JSON,
+    prose before or after the object, a ``<think>`` prefix and an extra key --
+    replies the exp decider takes as they are.
+
+    Tries the widest ``{...}`` span first (the common single-object reply); if
+    that fails to parse, falls back to the brace-balanced objects in order, so
+    a stray ``{`` / ``}`` in surrounding prose cannot corrupt the parse (the
+    greedy span would otherwise swallow it and raise).
+
+    Raises:
+        ValueError: No ``dict`` object can be recovered; the caller counts it as
+            one failed attempt.
     """
+    candidates: list[str] = []
+    greedy = re.search(r"\{.*\}", text, re.DOTALL)
+    if greedy:
+        candidates.append(greedy.group())
+    candidates.extend(_balanced_objects(text))
+    for cand in candidates:
+        try:
+            obj = json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise ValueError(f"no JSON object in decider reply: {text[:120]!r}")
+
+
+def _balanced_objects(text: str) -> list[str]:
+    """The brace-balanced ``{...}`` substrings of ``text``, outermost first."""
+    out: list[str] = []
+    depth = 0
+    start = -1
+    for i, ch in enumerate(text):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                out.append(text[start : i + 1])
+    return out
+
+
+def _coerce_core_indices(raw: object, n_evidence: int) -> list[int]:
+    """Coerce a decider's ``core`` field into valid, de-duplicated evidence indices.
+
+    The exp decider's rule (parity check 2026-11-10, deviation R2): ints and
+    int-like strings (``"2"``) count; anything out of range, non-integral or
+    repeated is dropped, a repeated index keeping its first position. ``bool``
+    is an ``int`` subclass and is rejected explicitly, and a float is not an
+    index even when integral. A non-list ``raw`` yields ``[]`` -- an empty
+    core, not a failed round.
+    """
+    if not isinstance(raw, list):
+        return []
     seen: set[int] = set()
     core: list[int] = []
-    for idx in raw:
+    for value in raw:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            idx = value
+        elif isinstance(value, str) and value.strip().lstrip("-").isdecimal():
+            # isdecimal(), not isdigit(): "²".isdigit() is True while
+            # int("²") raises, so a superscript index would crash the parse
+            # instead of being ignored. isdecimal() is exactly what int() takes.
+            idx = int(value)
+        else:
+            continue
         if 0 <= idx < n_evidence and idx not in seen:
             seen.add(idx)
             core.append(idx)
@@ -467,6 +609,7 @@ async def search_episodes_and_images_llm_multiround(
     image_recaller: ImageMemoryRecaller | None = None,
     image_store: ImageStore | None = None,
     question_image_ids: Sequence[str] = (),
+    visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
 ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """LLM-guided iterative multi-round search (per-sub-query RRF blocks).
 
@@ -493,7 +636,7 @@ async def search_episodes_and_images_llm_multiround(
         decider: Round-control hook. When given, it REPLACES the built-in
             :class:`LLMRoundDecider` and drives every round, which is how a
             Phase-2 RL policy reuses this loop as its environment.
-        tuning_source: Read settings at each existing loop/render/decision boundary.
+        tuning_source: Read settings at each existing loop/decision boundary.
         trace_path_source: Read the optional trace destination at each write boundary.
         image_recaller: Picture recall; ``None`` searches episodes only.
         image_store: Reads the thumbnails the decider looks at; required with
@@ -524,13 +667,12 @@ async def search_episodes_and_images_llm_multiround(
         image_recaller=image_recaller,
         image_store=image_store,
         question_image_ids=question_image_ids,
+        visual_embed_query_fn=visual_embed_query_fn,
     )
 
 
 def _render_blocks(
     blocks: list[tuple[str, list[Candidate]]],
-    *,
-    tuning_source: Callable[[], DeciderSettings],
 ) -> tuple[str, list[Candidate], list[dict[str, object]]]:
     """Render per-sub-query blocks into the decider text + a global-index map.
 
@@ -550,7 +692,7 @@ def _render_blocks(
         lines.append(f"[block: {sub_query}]")
         for rank, c in enumerate(cands):
             subject = str(c.metadata.get("subject", ""))
-            summary = _decider_text(c.metadata, tuning_source=tuning_source)
+            summary = _decider_text(c.metadata)
             if _is_picture(c):
                 summary = f"{summary}{_PICTURE_MARK}"
             lines.append(f"  {gi}: {subject} - {summary}")
@@ -571,8 +713,6 @@ def _render_core_so_far(
     core_order: list[str],
     core_source: dict[str, str],
     cand_by_id: dict[str, Candidate],
-    *,
-    tuning_source: Callable[[], DeciderSettings],
 ) -> str:
     """Render accumulated core for the decider, each item tagged with the
     sub-query that first surfaced it. Empty core renders as ``(none)``."""
@@ -582,7 +722,7 @@ def _render_core_so_far(
         if c is None:
             continue
         subject = str(c.metadata.get("subject", ""))
-        summary = _decider_text(c.metadata, tuning_source=tuning_source)
+        summary = _decider_text(c.metadata)
         src = core_source.get(cid, "original question")
         out.append(f'  - [from "{src}"] {subject} - {summary}')
     return "\n".join(out) or "(none)"
@@ -624,9 +764,10 @@ def _content(
 
     A text-only round keeps the plain string shape it has always sent, so a
     deployment with ``image_candidates_per_round = 0`` sends byte-identical
-    requests to what it sent before pictures existed — which matters because
-    a strict ``json_schema`` response format plus a multimodal content array
-    is a combination not every endpoint accepts.
+    requests to what it sent before pictures existed -- and to what the exp
+    decider sends -- which also matters because a ``response_format`` (when one
+    is opted into) plus a multimodal content array is a combination not every
+    endpoint accepts.
 
     Each picture is introduced by a text part naming its evidence index, so the
     decider can map "what does item 7 show" onto the right image rather than
@@ -726,18 +867,20 @@ def _is_picture(cand: Candidate) -> bool:
     return cand.metadata.get("kind") == IMAGE_KIND
 
 
-def _decider_text(meta: dict, *, tuning_source: Callable[[], DeciderSettings]) -> str:
-    """Text shown to the decider for one candidate.
+def _decider_text(meta: dict) -> str:
+    """Text shown to the decider for one candidate: the full episode body.
 
-    Stores disagree on which column carries the full episode body (see
-    ``[decider].full_text``), so prefer whichever is longer when full-text
-    mode is on: that picks the body on both layouts without needing to know
-    which store is loaded. Off (the default) keeps the historical
-    ``summary``-only view so in-flight comparisons stay reproducible.
+    The decider has to judge the text the answering model will read. ``summary`` is
+    not that on most stores -- everalgo falls back to the body's first 200 characters
+    when the extractor writes no summary -- and deciding from that preview cost 9.3 pp
+    of LoCoMo core-only accuracy (2026-08-06). There is deliberately no switch back to
+    the preview (decided 2026-09-25): the training and evaluation code the decider
+    policy was built with always shows the body. Stores also disagree on which column
+    holds the body (``episode`` on some, ``summary`` with ``episode`` empty on others),
+    so take the longer one: that is the body on both layouts without knowing which
+    store is loaded. A picture memory has no ``episode``, so its description shows.
     """
     summary = str(meta.get("summary", "") or "")
-    if not tuning_source().full_text:
-        return summary
     episode = str(meta.get("episode", "") or "")
     return episode if len(episode) > len(summary) else summary
 
@@ -854,6 +997,7 @@ async def _search_episodes_subq(
     image_recaller: ImageMemoryRecaller | None = None,
     image_store: ImageStore | None = None,
     question_image_ids: Sequence[str] = (),
+    visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
 ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
@@ -910,6 +1054,15 @@ async def _search_episodes_subq(
         # each sub-query's pair is fused with RRF INDEPENDENTLY below, not
         # merged into one pool first — so a facet-gold ranked #1 for one sub-query
         # is not diluted by the other sub-queries' consensus hits.
+        # Picture queries go to BOTH picture encoders when a vision embedder is
+        # configured: the text model's space (description) and the vision
+        # model's own (bytes). Their cosines are incomparable, so each is a
+        # separate ranked list, fused by rank below.
+        visual_vecs: list[list[float]] = []
+        if visual_embed_query_fn is not None and image_recaller is not None:
+            visual_vecs = await asyncio.gather(
+                *[visual_embed_query_fn(q) for q in cur_queries]
+            )
         recalls = await asyncio.gather(
             *[
                 asyncio.gather(
@@ -923,8 +1076,13 @@ async def _search_episodes_subq(
                     image_recaller.dense_recall(v, where, limit=_SEED_CANDIDATES)
                     if image_recaller is not None and v
                     else _no_recall(),
+                    image_recaller.visual_recall(
+                        visual_vecs[i], where, limit=_SEED_CANDIDATES
+                    )
+                    if image_recaller is not None and visual_vecs
+                    else _no_recall(),
                 )
-                for q, v in zip(cur_queries, vecs, strict=True)
+                for i, (q, v) in enumerate(zip(cur_queries, vecs, strict=True))
             ]
         )
         _ts_recall_done = time.monotonic()
@@ -935,13 +1093,27 @@ async def _search_episodes_subq(
             dense_result,
             image_sparse,
             image_dense,
+            image_visual,
         ) in zip(cur_queries, recalls, strict=True):
             episodes_by_id.update(sparse_result.stored_by_id)
             episodes_by_id.update(dense_result.stored_by_id)
             images_by_id.update(image_sparse.stored_by_id)
             images_by_id.update(image_dense.stored_by_id)
+            images_by_id.update(image_visual.stored_by_id)
             r_sparse = [*sparse_result.candidates, *image_sparse.candidates]
-            r_dense = [*dense_result.candidates, *image_dense.candidates]
+            # A picture has two vector routes; an episode has one. Fusing the
+            # picture's two vector lists FIRST keeps the per-kind weight equal
+            # — otherwise an image that both embedders liked would collect
+            # three votes against an episode's two and win blocks by channel
+            # count rather than by relevance. Inside the image pair, RRF is
+            # the right operator: the two spaces are different models, so
+            # their raw scores are not comparable.
+            image_dense_fused = (
+                rrf(image_dense.candidates, image_visual.candidates, k=tune.rrf_k)
+                if image_visual.candidates
+                else image_dense.candidates
+            )
+            r_dense = [*dense_result.candidates, *image_dense_fused]
             # Block LABEL shown to the decider (and stored as each candidate's
             # source): round 0 labels its one block "original question" — the raw
             # question is already displayed above it and the few-shot uses this
@@ -967,9 +1139,11 @@ async def _search_episodes_subq(
                     "sub_query": label,
                     "n_sparse": len(r_sparse),
                     "n_dense": len(r_dense),
+                    "n_visual": len(image_visual.candidates),
                     "topk_kept": len(block),
                     "sparse": _trace_cand_pool(r_sparse),
                     "dense": _trace_cand_pool(r_dense),
+                    "visual": _trace_cand_pool(image_visual.candidates),
                     "rrf_ranked": [
                         {
                             "id": c.id,
@@ -988,12 +1162,8 @@ async def _search_episodes_subq(
             return [], []
 
         # Render the blocked decider view + CORE-SO-FAR (global index across blocks).
-        rendered, global_cands, index_meta = _render_blocks(
-            blocks, tuning_source=tuning_source
-        )
-        core_so_far = _render_core_so_far(
-            core_order, core_source, cand_by_id, tuning_source=tuning_source
-        )
+        rendered, global_cands, index_meta = _render_blocks(blocks)
+        core_so_far = _render_core_so_far(core_order, core_source, cand_by_id)
         pictures = await _round_pictures(
             global_cands,
             store=image_store,

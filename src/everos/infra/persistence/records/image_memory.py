@@ -13,10 +13,22 @@ by vectors, and a perceptual hash only finds near-duplicates — so BM25 over
 these two fields is the only lexical route, and it is what answers "which
 sign said EST. 2019".
 
-``vector`` is the *original file's* embedding: the design puts pictures and
-text in one vector space, so a text query recalls a picture directly. It is
-``None`` whenever the configured embedder is text-only, which leaves the row
-keyword-searchable rather than dropping it.
+``vector`` is the description's text embedding — what a lexical-similarity
+question can match; ``visual_vector`` is the *picture's own* embedding, from a
+vision encoder (``[vision_embedding]``), so a question about what the picture
+looks like can recall it even when the description never says so. The two
+live in different vector spaces and are fused at query time rather than
+compared:
+
+- ``vector``: description text → text embedder (``[embedding]``), width
+  ``[embedding] dim``.
+- ``visual_vector``: the original file's bytes → vision embedder
+  (``[vision_embedding]``), width ``[vision_embedding] dim`` (the model's
+  native width — vision encoders are generally not Matryoshka-trained).
+
+Either may be ``None``: a text-only deployment leaves ``visual_vector`` null,
+a deployment with no embedder at all leaves both null, and the row stays
+keyword-searchable rather than dropping out of the index.
 """
 
 from __future__ import annotations
@@ -105,3 +117,12 @@ class ImageMemory(IndexRecord):
     re-extraction, or a description edit). ``NULL`` means current."""
 
     vector: DenseVector | None = None
+    """``description`` embedded by the text model (``[embedding]``)."""
+
+    visual_vector: DenseVector | None = None
+    """The picture's bytes embedded by the vision model
+    (``[vision_embedding]``), at that model's native width.
+
+    ``None`` when no vision embedder is configured or the file could not be
+    read. Not part of ``content_sha256``: the bytes are addressed by
+    ``image_id``, which already is in the digest."""

@@ -175,6 +175,7 @@ def handler_deps(
     knowledge_documents: Any = None,
     knowledge_topics: Any = None,
     embedding: Any = None,
+    vision_embedding: Any = None,
     fence: Any = None,
 ) -> HandlerDeps:
     """:class:`HandlerDeps` whose unset collaborators fail loudly when touched."""
@@ -185,5 +186,6 @@ def handler_deps(
         knowledge_documents=knowledge_documents or UnusedPort("knowledge_documents"),
         knowledge_topics=knowledge_topics or UnusedPort("knowledge_topics"),
         embedding=embedding,
+        vision_embedding=vision_embedding,
         fence=fence,
     )

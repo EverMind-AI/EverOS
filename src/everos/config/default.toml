@@ -105,10 +105,15 @@ base_url = "https://openrouter.ai/api/v1"
 model = ""
 api_key = ""
 base_url = ""
-# See [llm]. response_format_mode follows the model: with `model` empty it is
-# inherited from [llm] along with it.
-# response_format_mode = "json_schema"
-# invalid_reply_retries = 1
+# The decider asks for its JSON in the prompt only and reads the reply
+# tolerantly, as the decider policy was trained and evaluated; it does not
+# inherit [llm]'s mode. json_object / json_schema are opt-ins for an endpoint
+# that needs one (json_schema makes vLLM grammar-constrain every reply).
+response_format_mode = "prompt_only"
+# Sampling temperature of every decider call; the decider policy was trained and
+# evaluated at 0.0. Unset, a vLLM endpoint falls back to the model's
+# generation_config (Qwen3.8-27B: 1.0) and searches stop being repeatable.
+temperature = 0.0
 
 # Multi-round loop tuning. Every one of these is a real field, so `everos config`
 # prints it and a TOML can set it; the legacy EVEROS_LLMMR_* env names still take
@@ -123,7 +128,6 @@ per_subquery_guarantee = 1     # slots reserved per sub-query in the final fill
 retries = 3                    # decider retries before falling back
 retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
-full_text = false              # true = decider reads full episode text, not summary
 fallback_core = 3              # core size when every decider attempt fails
 image_candidates_per_round = 0 # pictures the decider may look at per round; 0 = none
 image_detail = "low"           # `detail` hint on each picture part
@@ -187,6 +191,33 @@ max_concurrent  = 10
 # Reserved budget for interactive query embeds, so a search is not queued
 # behind the cascade's background writes (issue #473). Searches per second
 # the endpoint can serve is about this value / per-call latency.
+query_max_concurrent = 16
+
+[vision_embedding]
+# The picture's own embedding endpoint -- an OpenAI-protocol /embeddings that
+# accepts chat-style input (a picture travels as an image_url content part, so
+# a plain text embedding endpoint cannot fill this role) and applies the
+# model's own input recipe. Stock vLLM 0.32's chat-embedding path does NOT:
+# it drops the prompt's last token and returns wrong vectors for
+# Qwen3-VL-Embedding-*. Check a server against the model card's reference
+# similarities before using it.
+#
+# Left empty, picture memories carry only their description's text vector and
+# the visual route is skipped -- the deployment still works, it just cannot
+# recall a picture by what it looks like.
+# Override via env: EVEROS_VISION_EMBEDDING__MODEL / __API_KEY / __BASE_URL / __DIM
+model     = ""
+api_key   = ""
+base_url  = ""
+# Width of the `visual_vector` column. Native widths: Qwen3-VL-Embedding-8B
+# 4096, WeMM-Embedding-4B 2560, Qwen3-VL-Embedding-2B 2048. A longer vector is
+# cut to this width, lossless only for Matryoshka models. Changing it
+# invalidates every stored visual vector (`everos cascade rebuild`).
+dim       = 4096
+timeout_seconds = 60.0
+max_retries     = 3
+batch_size      = 8
+max_concurrent  = 4
 query_max_concurrent = 16
 
 [rerank]
@@ -299,6 +330,8 @@ enabled = true
 # scan_interval_seconds later. Use it on a host whose inotify watch limit is
 # exhausted (the server would otherwise die at startup with Errno 28); unlike
 # enabled = false, md still reaches the index.
+# EVEROS_DISABLE_CASCADE=1 / EVEROS_DISABLE_CASCADE_WATCHER=1 (the evaluation
+# harness's switches) turn these two off as well.
 watcher_enabled = true
 # Maintenance cadences (seconds). Deadlines that bound a hung call are not
 # here on purpose — they live next to the code they guard and are sized from
@@ -323,6 +356,10 @@ delete_fence_warn_entries = 100000
 [ome]
 # Offline memory engine tunables. Not to be confused with <memory-root>/ome.toml,
 # which overrides individual strategies (enabled / gate / cron).
+# Start the engine. Off only for a server that searches a store built elsewhere:
+# no strategy runs, and a memorize there fails at its event publish. The root
+# lock is still taken. EVEROS_DISABLE_OME=1 turns it off as well.
+enabled = true
 # Engine-wide cap on concurrent strategy runs. Each slot mostly waits on a
 # remote extraction call, so a bulk ingest can afford far more than this.
 max_concurrent_runs = 20

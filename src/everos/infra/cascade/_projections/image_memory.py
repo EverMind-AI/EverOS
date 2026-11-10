@@ -32,14 +32,18 @@ assume):
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
 from everos.infra.persistence.records import ImageMemory, ParentType
 
 from ._common import optional_int, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
+
+logger = get_logger(__name__)
 
 
 class ImageMemoryHandler(BaseDailyLogHandler):
@@ -64,6 +68,58 @@ class ImageMemoryHandler(BaseDailyLogHandler):
         return VECTOR_PROJECTIONS[self.kind].texts(
             {"description": entry.structured.sections.get("Description", "").strip()}
         )
+
+    async def _attach_side_vectors(self, rows: list[Any]) -> list[Any]:
+        """Embed each picture's bytes into ``visual_vector``.
+
+        The text batch already wrote ``vector`` (the description's embedding).
+        This adds the second, independent embedding: the file itself, encoded
+        by the vision model, so a question about what the picture *looks like*
+        can reach it without the description having to name it.
+
+        Two details are load-bearing:
+
+        - The same picture recurs: one file, one row per appearance. Rows are
+          grouped by ``image_id`` so a picture is embedded once per run and
+          the vector is copied onto every occurrence.
+        - A missing file is not a failed row. The row's description is still
+          searchable, so the picture is written with ``visual_vector=None``
+          and the next cascade pass over its md retries it — that is the same
+          soft degradation a missing provider produces.
+        """
+        vision = self._deps.vision_embedding
+        if vision is None or not rows:
+            return rows
+        root = self._deps.memory_root.root
+        by_image: dict[str, tuple[bytes, str]] = {}
+        for image in rows:  # the base hands back the rows it built: ImageMemory
+            if image.visual_vector is not None or not image.original_path:
+                continue
+            if image.image_id in by_image:
+                continue
+            absolute = root / image.original_path
+            try:
+                data = await asyncio.to_thread(absolute.read_bytes)
+            except OSError as exc:
+                logger.warning(
+                    "cascade_image_visual_embed_unreadable",
+                    image_id=image.image_id,
+                    original_path=image.original_path,
+                    error=str(exc)[:200],
+                )
+                continue
+            by_image[image.image_id] = (data, image.media_type or "image/png")
+        if not by_image:
+            return rows
+        image_ids = list(by_image)
+        vectors = await vision.embed_images([by_image[i] for i in image_ids])
+        vec_by_id = dict(zip(image_ids, vectors, strict=True))
+        return [
+            row.model_copy(update={"visual_vector": vec_by_id[row.image_id]})
+            if row.image_id in vec_by_id and row.visual_vector is None
+            else row
+            for row in rows
+        ]
 
     async def _build_row(
         self,

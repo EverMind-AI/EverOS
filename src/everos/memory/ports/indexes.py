@@ -94,10 +94,13 @@ class EpisodeIndex(Protocol):
 class ImageMemoryIndex(Protocol):
     """Read side of the picture memories — a peer of :class:`EpisodeIndex`.
 
-    The two search routes are the same two the episodes use, over the same
-    vector space: BM25 across the description and the text in the picture, and
-    ANN over the picture's embedding. There is deliberately no third route --
-    a picture has no keyword surface of its own.
+    A picture has two embeddings of different provenance, so unlike an episode
+    it gets three ANN-comparable routes: BM25 across the description and the
+    text in the picture, ANN over the description's text embedding
+    (``vector``), and ANN over the picture bytes' own embedding
+    (``visual_vector``). The last two live in different vector spaces — a
+    cosine between them means nothing — so they are recalled separately and
+    fused by rank, never compared directly.
     """
 
     async def sparse_search(
@@ -107,6 +110,16 @@ class ImageMemoryIndex(Protocol):
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[SearchHit[ImageMemory]]: ...
+
+    async def visual_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[SearchHit[ImageMemory]]:
+        """ANN over ``visual_vector`` (the picture's own embedding).
+
+        Empty when no vision embedder is configured: every row's
+        ``visual_vector`` is NULL and the column has nothing to score.
+        """
+        ...
 
     async def find(
         self, where: Filter, *, limit: int | None = None

@@ -314,8 +314,8 @@ The cascade projects the markdown truth into the search index (see
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Run the cascade (watcher + scanner + worker) in the server. Off: md edits never become searchable — only for runs that never search, or that drive `everos cascade sync` themselves. |
-| `watcher_enabled` | bool | `true` | Run the filesystem watcher. Off: the scanner alone picks up md edits, one `scan_interval_seconds` later. For a host whose inotify watch limit is exhausted (the server would otherwise die at startup with `Errno 28`); unlike `enabled = false`, md still reaches the index. |
+| `enabled` | bool | `true` | Run the cascade (watcher + scanner + worker) in the server. Off: md edits never become searchable — only for runs that never search, or that drive `everos cascade sync` themselves. `EVEROS_DISABLE_CASCADE=1` (the evaluation harness's switch) also turns it off. |
+| `watcher_enabled` | bool | `true` | Run the filesystem watcher. Off: the scanner alone picks up md edits, one `scan_interval_seconds` later. For a host whose inotify watch limit is exhausted (the server would otherwise die at startup with `Errno 28`); unlike `enabled = false`, md still reaches the index. `EVEROS_DISABLE_CASCADE_WATCHER=1` also turns it off. |
 | `optimize_heartbeat_seconds` | float | `60.0` | Idle sweep offering every kind to the optimizer, so an unindexed tail left by a crash is merged without new writes. |
 | `optimize_prune_interval_seconds` | float | `300.0` | How often superseded dataset versions are reclaimed. |
 | `optimize_prune_retention_seconds` | float | `60.0` | Versions replaced longer ago than this become eligible for deletion. |
@@ -331,6 +331,7 @@ strategies and is hot-reloaded; these require a restart.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
+| `enabled` | bool | `true` | Start the engine in the server. Off only for a server that searches a store built elsewhere: no strategy runs, and a memorize on it fails when it publishes its events. The root lock is taken either way. `EVEROS_DISABLE_OME=1` (the evaluation harness's switch) also turns it off. |
 | `max_concurrent_runs` | int | `20` | Cap on concurrent strategy runs. Each slot mostly waits on a remote extraction call, so a bulk ingest can afford far more. |
 | `run_timeout_seconds` | float | `1800.0` | Wall-clock ceiling on one strategy attempt — a deadlock backstop, not a latency target; too low kills slow-but-healthy extractions. `0` disables it. |
 
