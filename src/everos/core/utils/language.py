@@ -1,11 +1,13 @@
-"""Which output language a piece of extracted text is written in.
+"""Which output language a piece of text is written in.
 
 Answers with an ``everalgo`` ``OutputLanguage`` value (the strings below), so
-the language an episode was written in can be pinned on the extractions that
-follow it. Decided by Unicode script, not a trained detector: the target set
+the language a conversation is held in can be named to the extractions that
+read it. Decided by Unicode script, not a trained detector: the target set
 is seven languages, and script ranges separate the non-Latin ones exactly.
 Within the Latin script English is the default; German and Spanish need two
-markers of their own, so a short German or Spanish text may read as English.
+markers of their own, and more of them than the text has English function
+words, so a short German or Spanish text may read as English, and an English
+text full of accented names ("Gaudí", "café", "Casa del Mar") stays English.
 """
 
 from __future__ import annotations
@@ -59,6 +61,20 @@ _LATIN_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _LATIN_MIN_MARKERS = 2
 """A single loanword ("café", "über") must not relabel English text."""
 
+_ENGLISH_MARKERS = re.compile(
+    r"\b(?:the|and|is|are|were|of|to|that|this|with|for|you|she|it|they|we|"
+    r"have|had|not|but|be|been|at|by|from|his|her|their|what|which|who|"
+    r"would|could|there|about|my|your|our|or|if|did|does)\b",
+    re.IGNORECASE,
+)
+"""English function words, chosen so none is also a common German or Spanish
+one ("was", "will", "an", "so", "me", "he", "has" are left out on purpose).
+
+A German or Spanish verdict must outnumber these as well as the other
+language's markers. Counting only the foreign markers made the verdict grow
+with the text's length rather than its language: any English narrative long
+enough to hold two accented names or a "del" read as Spanish."""
+
 
 def detect_output_language(text: str) -> str | None:
     """The ``OutputLanguage`` value ``text`` is written in.
@@ -101,10 +117,11 @@ def _within(point: int, ranges: _Ranges) -> bool:
 
 
 def _latin_language(text: str) -> str:
-    """German or Spanish on enough markers that outnumber the other, else English."""
+    """German or Spanish on enough markers that outnumber the rest, else English."""
     hits = {name: len(pattern.findall(text)) for name, pattern in _LATIN_MARKERS}
     best = max(hits, key=hits.__getitem__)
     others = [count for name, count in hits.items() if name != best]
+    others.append(len(_ENGLISH_MARKERS.findall(text)))
     if hits[best] >= _LATIN_MIN_MARKERS and all(hits[best] > c for c in others):
         return best
     return "English"

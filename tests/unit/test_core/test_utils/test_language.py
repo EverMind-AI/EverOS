@@ -43,6 +43,21 @@ def test_text_without_letters_has_no_language(text: str) -> None:
         ("東京大学の研究室で機械学習を研究している。", "Japanese"),
         # One loanword is not enough evidence for German.
         ("The user ordered a coffee über the counter.", "English"),
+        # Accented names and Spanish place names inside a long English
+        # narrative are not Spanish: English words outnumber the markers.
+        (
+            "Julian told the assistant that he had been reading about Gaudí and "
+            "the Sagrada Família, and that the café near Las Ramblas was his "
+            "favourite place to sketch. He asked who designed the Casa del Mar "
+            "and whether the architect had also worked on the old harbour.",
+            "English",
+        ),
+        # English loanwords do not relabel a German narrative.
+        (
+            "Der Nutzer hat das neue Update für sein Smartphone installiert und "
+            "war mit dem Ergebnis nicht zufrieden.",
+            "German",
+        ),
     ],
 )
 def test_mixed_text_follows_its_dominant_language(text: str, expected: str) -> None:
