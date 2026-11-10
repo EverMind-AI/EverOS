@@ -97,6 +97,15 @@ class DeleteByIdsRequest(BaseModel):
     memory_type: Literal["episode"]
     memory_ids: list[str] = Field(min_length=1, max_length=50)
     reason: DeleteReason | None = None
+    user_id: PathSafeId | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "If set, only episodes owned by this user are affected; other owners' "
+            "ids are treated as not found. Omit or use null for id-only deletion."
+        ),
+    )
 
     @field_validator("memory_ids")
     @classmethod
@@ -115,7 +124,13 @@ class DeleteByIdsRequest(BaseModel):
 
 
 class DeleteByIdsResponseData(BaseModel):
-    """``{"memory_type": "episode", "success": true}`` (Cloud's shape)."""
+    """Cloud-compatible result, counting requested episodes actually removed."""
 
     memory_type: Literal["episode"] = "episode"
     success: bool = True
+    deleted: int = Field(
+        description=(
+            "Requested episodes removed, excluding duplicates, absent ids, "
+            "other owners' ids when user_id is set, and cascade-only removals."
+        )
+    )

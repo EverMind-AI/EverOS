@@ -197,7 +197,8 @@ class MemoryService:
         ids: list[str],
         reason_code: str | None,
         note: str | None,
-    ) -> None:
+        user_id: str | None = None,
+    ) -> int:
         """Delete single memories by id (``/delete_by_ids``), shielded like
         :meth:`delete`."""
         task = self._extractions.supervise(
@@ -208,13 +209,14 @@ class MemoryService:
                 ids=ids,
                 reason_code=reason_code,
                 note=note,
+                user_id=user_id,
             ),
             session_id=None,
             memcell_ids=[],
             label="memory_delete_by_ids",
         )
         try:
-            await asyncio.shield(task)
+            return await asyncio.shield(task)
         except asyncio.CancelledError:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise

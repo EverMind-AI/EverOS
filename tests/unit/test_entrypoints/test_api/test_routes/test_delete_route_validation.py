@@ -131,6 +131,11 @@ _OK_ID = "u1_ep_20250514_0001"
             "reason": {"code": "other", "note": "x" * 257},
         },
         {"memory_type": "episode", "memory_ids": [_OK_ID], "extra": True},
+        *[
+            {"memory_type": "episode", "memory_ids": [_OK_ID], "user_id": owner}
+            for owner in ("", " ", ".", "..", "u/1", "x" * 129)
+        ],
+        {"memory_type": "episode", "memory_ids": [_OK_ID, "invalid"], "user_id": "u1"},
     ],
 )
 async def test_by_ids_invalid_request_is_422_and_deletes_nothing(
@@ -145,6 +150,7 @@ async def test_by_ids_invalid_request_is_422_and_deletes_nothing(
 async def test_by_ids_ok_dedupes_and_answers_cloud_shape(
     client: AsyncClient, memory: StubMemoryService
 ) -> None:
+    memory.delete_by_ids.return_value = 2
     other = "u.x@y+z_ep_20240229_0012"  # an owner with dots, @, +; a leap day
     resp = await client.post(
         "/api/v1/memory/delete_by_ids",
@@ -156,12 +162,17 @@ async def test_by_ids_ok_dedupes_and_answers_cloud_shape(
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    assert resp.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "deleted": 2,
+    }
     memory.delete_by_ids.assert_awaited_once_with(
         app_id="default",
         project_id="default",
         memory_type="episode",
         ids=[_OK_ID, other],
+        user_id=None,
         reason_code="privacy",
         note="n",
     )
