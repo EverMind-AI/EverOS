@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from everos.memory.models import AgentCase
-from everos.memory.ports import AgentCaseIndex, Filter
+from everos.memory.ports import AgentCaseIndex, Filter, Page
 
 from .base import RecallerDeps, RecallResult, from_hits
 
@@ -53,6 +53,11 @@ class AgentCaseRecaller:
             return RecallResult.empty()
         hits = await self._index.sparse_search(terms, where, limit=limit)
         return from_hits(hits, source="keyword")
+
+    async def has_any(self, where: Filter) -> bool:
+        """Whether any case matches ``where`` (one row is read at most)."""
+        page = await self._index.paginate(where, Page(sort_by="timestamp", size=1))
+        return page.total > 0
 
     async def dense_recall(
         self, vector: Sequence[float], where: Filter, *, limit: int

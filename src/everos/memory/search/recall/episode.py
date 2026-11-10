@@ -112,6 +112,10 @@ class EpisodeRecaller:
         hits = await self._index.find(full_where, limit=len(entry_ids))
         return _by_entry_id(hits, score=0.0)
 
+    async def has_any(self, where: Filter) -> bool:
+        """Whether any episode matches ``where`` (one row is read at most)."""
+        return bool(await self._index.find(where, limit=1))
+
     async def fetch_by_entry_ids(
         self, entry_ids: Sequence[str], where: Filter
     ) -> RecallResult[Episode]:

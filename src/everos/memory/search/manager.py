@@ -73,6 +73,8 @@ from everos.memory.ports import (
     SessionBufferStore,
     SessionKey,
     Stored,
+    all_of,
+    eq,
 )
 
 from .adapter import resolve_pipeline
@@ -401,8 +403,13 @@ class SearchManager:
         Returns ``[]`` unless ``filters`` carries a top-level ``session_id``
         eq scalar — buffer rows have no ``user_id`` / ``agent_id`` attribution
         (boundary detection runs before owner inference), so session is the
-        only meaningful query dimension. A group scope sees a bound session's
-        messages that lie inside the asker's windows, nothing else.
+        only meaningful query dimension.
+
+        Which of them a read sees is the access policy's (section 9.3, row 3):
+        a group scope sees a bound session's messages inside the asker's
+        windows; a personal or agent scope sees a session's buffer only when
+        its owner is a sender of that session, and never a group session's.
+        Before this, any owner id could read any session's buffer.
         """
         session_id = _extract_top_level_session_id(req.filters)
         if session_id is None:
@@ -411,15 +418,18 @@ class SearchManager:
             app_id=req.app_id, project_id=req.project_id, session_id=session_id
         )
         messages = await self._session_buffer.list(session)
-        if scope.is_group:
 
-            async def _never() -> bool:
-                return False
+        async def owner_has_memory() -> bool:
+            """Whether the owner took part in the session earlier: memory of
+            theirs from it, when nothing buffered is theirs."""
+            where = all_of(scope.predicate, eq("session_id", session_id))
+            recaller = self._case if scope.owner_type == "agent" else self._ep
+            return await recaller.has_any(where)
 
-            messages = await self._access.buffered_messages(
-                scope, session, messages, owner_has_memory=_never
-            )
-        return [_unprocessed_message_to_dto(m, session) for m in messages]
+        visible = await self._access.buffered_messages(
+            scope, session, messages, owner_has_memory=owner_has_memory
+        )
+        return [_unprocessed_message_to_dto(m, session) for m in visible]
 
     # ── Agent partition ─────────────────────────────────────────────
 
