@@ -37,6 +37,31 @@ machinery that keeps a deleted memory from coming back.
   picture recall, fused with the description leg by RRF. An empty
   `[vision_embedding]` keeps the description-only behaviour. Table schema
   version 3 adds the column when a store is opened.
+- **Group memory, first half** ([docs/group-memory.md](docs/group-memory.md),
+  Step 1 tasks 1-3):
+  - **A `group` owner** with its own tree (`groups/<group_id>/`) and a roster
+    of membership intervals (join, leave, rejoin, backdated join). The roster
+    is an append-only `group.md`, which the cascade folds into the
+    `group_meta`, `group_member` and `session_binding` tables. A rebuild from
+    the markdown restores identical rows.
+  - **Routes:** `PUT /api/v2/groups/{group_id}`,
+    `POST /api/v2/groups/{group_id}/roster` and `GET /api/v2/groups/{group_id}`.
+  - **`/memory/add`** takes `group_id`, `roster` and `message_id`. A session
+    binds to one group, and a batch for another group answers 409. An unknown
+    group is created at its first message and an unknown sender joins there
+    (`[groups] implicit_create` / `implicit_join`, both default `true`).
+  - **Search and get** take `group_id` or `group_ids`, `asker_id` and
+    `audience`.
+  - **One access policy for every read path.** A group record is returned
+    only to a current member whose membership windows cover all of the
+    record's sources. With `[access] identity_header` set, the asker is read
+    from the gateway's header.
+  - **Group messages are not extracted yet:** they are cut into memcells and
+    stop there. Group episodes and member-in-group profiles come in the next
+    step.
+  - **Table schema version 4** adds `subject_ids`, `origin`, `source_start`
+    and `source_end` to `episode` and `image_memory`, plus `sender_ids` to
+    `image_memory`. Existing rows read as one-to-one records.
 
 ### Changed
 
@@ -90,6 +115,10 @@ machinery that keeps a deleted memory from coming back.
   instead of rich's syntax-highlighted rendering, which blocked the event
   loop for seconds per exception on a loaded host. CLI and TUI logs share
   the same configuration.
+- **A picture's profile items go only to the person who posted it.** Before,
+  they went to every sender in the segment. In a one-to-one chat, a picture
+  posted by the assistant therefore no longer adds items to the user's
+  profile.
 
 ### Fixed
 
@@ -169,6 +198,11 @@ machinery that keeps a deleted memory from coming back.
   `VectorStoreBusyError`). Only rows whose stored mark differs from the file
   are written, one update per distinct value; a kind without a
   `deprecated_by` column is skipped.
+- **A session-filtered search no longer returns other people's unprocessed
+  messages.** The session's buffer is returned only to a sender of that
+  session.
+- **Picture bytes referenced by group memory are served only to askers who
+  can see them.** Anyone else gets the same 404 as for a missing picture.
 
 ### Removed
 
@@ -186,6 +220,12 @@ machinery that keeps a deleted memory from coming back.
   of being skipped (it passes the digit check, then `int()` fails), and the
   search fails. The exp code behaves the same; it is kept for parity and will
   be fixed in both together.
+- **Group scopes, until Step 2 of the group-memory design:**
+  - delete and forget answer 422;
+  - `agentic` search answers 422;
+  - there is no history route.
+- **Milvus stores** have no migration to table schema version 4. They report
+  schema drift and need `everos cascade rebuild`.
 
 ## [1.6.0] - 2026-10-28
 

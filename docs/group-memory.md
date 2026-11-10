@@ -597,7 +597,7 @@ new is embedded.
 | Store | What happens |
 |---|---|
 | Stores built by EverOS 1.x | 2.0 does not open them (the 2.0 store-version rule). Nothing to migrate. |
-| 2.0 stores built before group support | Open as before. SQLite gains the new tables and nullable columns at startup; LanceDB gains the new columns in one versioned step of `migrate_table_schemas` (`src/everos/infra/persistence/lancedb/backend.py:257`), fail-loud, with `everos cascade rebuild` as recovery. Existing rows read `subject_ids = []`, `origin = null`, `source_start = source_end = timestamp`. `.index/store_version` records the new minor version. |
+| 2.0 stores built before group support | Open as before. SQLite gains the new tables and nullable columns at startup; LanceDB gains the new columns in one versioned step of `migrate_table_schemas` (`src/everos/infra/persistence/lancedb/backend.py:257`), fail-loud, with `everos cascade rebuild` as recovery. Existing rows read `subject_ids = []`, `origin = null`, `source_start = source_end = timestamp`. The step is table schema version 4 (`_TABLE_SCHEMA_VERSION`). Milvus has no such step yet: a Milvus store reports schema drift and needs `everos cascade rebuild`. |
 | Stores where a whole group chat was ingested under one user id (for example benchmark stores built with one owner per conversation) | Not converted. The per-sender copies and cross-owner items cannot be split back reliably, and a converter would have to guess membership. Rebuild from the raw conversations with `group_id`. |
 
 The cascade's owner resolution must learn `groups/` (owner type `group`, id from
@@ -1318,6 +1318,40 @@ Ordered; each task lists its acceptance tests.
     - Knowledge reads require project membership when the project has groups.
 18. **GroupAssistBench L2 and ablations** as in [Section 13.1](#131-groupassistbench).
 19. **GateMem** as in [Section 13.3](#133-gatemem).
+
+### Implementation notes (Step 1, tasks 1-3)
+
+The first half of Step 1 differs from the text above in these places:
+
+- **Entry ids.** Group logs use the prefixes `gep_` and `gim_`. A row id is
+  `<owner>_<entry>`, so with `ep_` and `im_` a group whose id equals a user's
+  id would share that user's row ids.
+- **Creation time.** It is stored as `group_meta.group_created_at`, because
+  `created_at` is the row's own timestamp.
+- **Session bindings** are also logged in `group.md`, so a rebuild restores
+  them.
+- **Unknown groups.** Reading an unknown group answers 403, the same as a group
+  the asker is not in, so a probe cannot tell which ids exist. Clients treat
+  either answer as "not visible" and let the `PUT` decide.
+- **Implicit joins.** Some messages are accepted without changing the roster:
+  one older than a current member's join, and one from a former member that
+  falls inside or before an earlier interval.
+- **Inline roster events.** An event without `at` takes the batch's first
+  message time. It cuts only the batch's own session; the roster route cuts
+  every session of the group.
+- **Groups without an owner or admin** may be managed by any current member, so
+  an implicitly created group can always be administered.
+- **Route prefix.** The group routes are also mounted under `/api/v1`, like
+  every other v2 route.
+- **Picture bytes.** An asker who holds a personal memory of the same picture
+  (the same hash) may also fetch it.
+- **Not supported for group scopes yet:** `agentic` search answers 422.
+- **Client message ids** are kept only on group batches. They are not yet
+  persisted in memcells.
+- **Agent-scope buffer reads** follow the users' rule: the agent must be a
+  sender of the session, or hold cases from it.
+- **D17 also applies to one-to-one chats.** A picture the assistant posts adds
+  no items to the user's profile.
 
 ---
 
