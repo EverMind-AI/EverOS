@@ -883,7 +883,7 @@
           "memory"
         ],
         "summary": "Get Image",
-        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw.",
+        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A picture the asker may not see answers exactly as one that does not\nexist (docs/group-memory.md, section 9.1).",
         "operationId": "get_image_api_v1_memory_images__image_id__get",
         "parameters": [
           {
@@ -907,6 +907,24 @@
               "title": "Variant"
             },
             "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Who asks. Needed for a picture that group memory refers to: it is served to a member who can see one of those memories.",
+              "title": "Asker Id"
+            },
+            "description": "Who asks. Needed for a picture that group memory refers to: it is served to a member who can see one of those memories."
           }
         ],
         "responses": {
@@ -2424,7 +2442,7 @@
           "memory"
         ],
         "summary": "Get Image",
-        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw.",
+        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A picture the asker may not see answers exactly as one that does not\nexist (docs/group-memory.md, section 9.1).",
         "operationId": "get_image_api_v2_memory_images__image_id__get",
         "parameters": [
           {
@@ -2448,6 +2466,24 @@
               "title": "Variant"
             },
             "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Who asks. Needed for a picture that group memory refers to: it is served to a member who can see one of those memories.",
+              "title": "Asker Id"
+            },
+            "description": "Who asks. Needed for a picture that group memory refers to: it is served to a member who can see one of those memories."
           }
         ],
         "responses": {

@@ -120,6 +120,8 @@ class StubMemoryService:
         self.revise_image_memory = AsyncMock()
         self.forget_session = AsyncMock()
         self.undo_forget_session = AsyncMock()
+        # A stub serves every picture, as the route did before group memory.
+        self.picture_visible = AsyncMock(return_value=True)
 
     async def finish_interrupted_deletions(self) -> int:
         self.lifecycle.append("memory.finish_interrupted_deletions")

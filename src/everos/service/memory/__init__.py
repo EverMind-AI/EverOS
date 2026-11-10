@@ -48,11 +48,12 @@ from everos.component.images import ImageLimits
 from everos.core.errors import InvalidInputError, PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
+from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     keep_question_pictures,
 )
-from everos.memory.ports import Scope, SessionKey
+from everos.memory.ports import Scope, SessionKey, all_of, eq, is_null
 
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
@@ -139,8 +140,11 @@ class MemoryService:
         image_limits: ImageLimits | None = None,
         rosters: RosterManager | None = None,
         group_pipeline: Pipeline | None = None,
+        access: AccessPolicy | None = None,
     ) -> None:
         self._search_manager = search_manager
+        self._indexes = indexes
+        self._access = access or AccessPolicy(stores.groups)
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
         self._stores = stores
@@ -246,6 +250,28 @@ class MemoryService:
             req,
             question_image_ids=[image.image_id for image in stored],
             asserted_asker=asserted_asker,
+        )
+
+    async def picture_visible(
+        self, image_id: str, *, asker_id: str | None, asserted_asker: str | None
+    ) -> bool:
+        """Whether a picture's bytes may be served to this asker (row 7).
+
+        A hash only personal memories refer to is served as before; one a
+        live group picture memory refers to needs an asker who can see one of
+        them. The route answers an invisible picture exactly as a missing one.
+
+        Raises:
+            ForbiddenError: The identity header and ``asker_id`` disagree.
+        """
+        identity = resolve_identity(header=asserted_asker, body_asker=asker_id)
+        if self._indexes is None:
+            return True
+        hits = await self._indexes.image_memory.find(
+            all_of(eq("image_id", image_id), is_null("deprecated_by")), limit=1000
+        )
+        return await self._access.picture_visible(
+            identity, [hit.stored for hit in hits]
         )
 
     async def get(

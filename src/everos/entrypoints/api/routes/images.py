@@ -9,7 +9,9 @@ which is exactly the distinction an undo depends on.
 The two ``GET`` routes serve the decider's thumbnail and the answering model's
 original. They read only — a picture is written once, by ingest — and they
 never list what the store holds, so a reader cannot enumerate another user's
-pictures by guessing.
+pictures by guessing. A picture group memory refers to is served only to a
+member who can see one of those memories; to anyone else it is a 404 with the
+body of a picture that does not exist.
 """
 
 from __future__ import annotations
@@ -18,7 +20,11 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from everos.config import load_settings
-from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.dependencies import (
+    ApplicationDep,
+    AskerHeaderDep,
+    RequestIdDep,
+)
 from everos.entrypoints.api.schemas import (
     ErrorResponse,
     ForgetImageRequest,
@@ -234,19 +240,30 @@ async def undo_forget_image(
 async def get_image(
     image_id: str,
     app: ApplicationDep,
+    asker_header: AskerHeaderDep,
     variant: str = Query(
         default="original",
         pattern="^(original|thumbnail)$",
         description="``original`` for the answering model; ``thumbnail`` for a "
         "decider-sized copy, rendered on first request.",
     ),
+    asker_id: str | None = Query(
+        default=None,
+        description="Who asks. Needed for a picture that group memory refers "
+        "to: it is served to a member who can see one of those memories.",
+    ),
 ) -> Response:
     """One stored picture, by id, as bytes.
 
     ``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size
     the retrieval loop shows the decider — so a caller can preview exactly what
-    it saw.
+    it saw. A picture the asker may not see answers exactly as one that does not
+    exist (docs/group-memory.md, section 9.1).
     """
+    if not await app.memory.picture_visible(
+        image_id, asker_id=asker_id, asserted_asker=asker_header
+    ):
+        raise HTTPException(status_code=404, detail="no such picture")
     settings = load_settings()
     try:
         if variant == "thumbnail":

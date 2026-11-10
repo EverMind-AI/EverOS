@@ -23,7 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from tests.fakes import make_application
-from tests.helpers.groups import GroupWorld
+from tests.helpers.groups import GroupWorld, join
 
 _T0 = 1_772_323_200_000
 
@@ -181,3 +181,46 @@ def test_the_openapi_document_lists_the_group_surface() -> None:
     assert "message_id" in spec["components"]["schemas"]["MessageItemDTO"]["properties"]
     search = spec["components"]["schemas"]["SearchRequest"]["properties"]
     assert {"group_id", "group_ids", "asker_id", "audience"} <= set(search)
+
+
+async def test_a_group_picture_is_404_to_who_cannot_see_it(tmp_path: Path) -> None:
+    """Row 7: a hash a group picture memory refers to needs an asker who can
+    see one of them; anyone else gets the very body of a missing picture."""
+    async with GroupWorld.open(tmp_path) as world:
+        await world.roster(
+            "trip",
+            [
+                join("u_chen", 0),
+                join("u_evan", 5_000),
+            ],
+        )
+        early = await world.picture(world.scope("trip"), "plan", at=1_000, shade=20)
+        personal = await world.picture(
+            world.personal("u_ann"), "a cat", at=1_000, shade=30
+        )
+        await world.project()
+        app = create_app(
+            application=make_application(
+                memory=world.memory, images=world.stores.images
+            )
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://t"
+        ) as c:
+
+            async def fetch(image_id: str, **params: Any) -> Any:
+                return await c.get(f"/api/v2/memory/images/{image_id}", params=params)
+
+            assert (await fetch(early, asker_id="u_chen")).status_code == 200
+            hidden = [
+                await fetch(early),
+                await fetch(early, asker_id="u_evan"),  # joined after it
+                await fetch(early, asker_id="u_zoe"),
+            ]
+            missing = await fetch("cd" * 32, asker_id="u_chen")
+            assert {r.status_code for r in hidden} == {404}
+            assert {r.json()["error"]["message"] for r in hidden} == {
+                missing.json()["error"]["message"]
+            }
+            # A personal-only hash is served by hash, as it always was.
+            assert (await fetch(personal)).status_code == 200

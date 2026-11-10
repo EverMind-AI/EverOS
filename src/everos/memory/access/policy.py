@@ -8,7 +8,8 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
   the index query, never a filter applied to results afterwards, so a ranking
   (the multi-round decider above all) never sees a candidate the asker cannot.
 * :func:`visible` answers the same question for one record that does not come
-  through the index (a markdown read, a picture's bytes).
+  through the index (a markdown read); :meth:`AccessPolicy.picture_visible`
+  for a picture's bytes, served by content hash.
 * :meth:`AccessPolicy.buffered_messages` decides which in-flight messages of a
   session a read may see.
 * :func:`authorize_roster_change` and :func:`authorize_manage` decide roster
@@ -52,6 +53,7 @@ from everos.memory.models import (
     MANAGER_ROLES,
     CanonicalMessage,
     Group,
+    ImageMemory,
     Roster,
     RosterEvent,
 )
@@ -61,6 +63,7 @@ from everos.memory.ports import (
     OwnerType,
     Scope,
     SessionKey,
+    Stored,
     all_of,
     any_of,
     eq,
@@ -422,6 +425,51 @@ class AccessPolicy:
             audience=request.audience,
             groups=tuple(views),
         )
+
+    async def picture_visible(
+        self, identity: Identity, references: Sequence[Stored[ImageMemory]]
+    ) -> bool:
+        """Whether a picture's bytes may be served, given its live memories (row 7).
+
+        ``references`` are the current picture memories of one content hash,
+        across every space. A hash only personal memories refer to behaves as
+        before groups existed (served by hash). A hash a group picture memory
+        refers to needs an asker who can see one of them -- or who has a
+        personal memory of the same picture, which is theirs to see.
+        """
+        groups = [r for r in references if r.scope.owner_type == "group"]
+        if not groups:
+            return True
+        asker = identity.asker_id
+        if asker is None:
+            return False
+        if any(
+            r.scope.owner_type == "user" and r.scope.owner_id == asker
+            for r in references
+        ):
+            return True
+        for ref in groups:
+            try:
+                scope = await self.read_scope(
+                    identity,
+                    ScopeRequest(
+                        app_id=ref.scope.app_id,
+                        project_id=ref.scope.project_id,
+                        group_ids=(ref.scope.owner_id,),
+                    ),
+                )
+            except ForbiddenError:
+                continue
+            at = ref.item.timestamp
+            if visible(
+                scope,
+                owner_type="group",
+                owner_id=ref.scope.owner_id,
+                source_start=at,
+                source_end=at,
+            ):
+                return True
+        return False
 
     async def buffered_messages(
         self,

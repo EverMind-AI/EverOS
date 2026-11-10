@@ -651,6 +651,7 @@ def _build_memory_service(
             implicit_create=settings.groups.implicit_create,
             implicit_join=settings.groups.implicit_join,
         ),
+        access=access,
     )
 
 
