@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-10
+
 **Memory deletion.** Two endpoints aligned with the Cloud API, and the
 machinery that keeps a deleted memory from coming back.
+
+**One place builds the application.** Providers, storage adapters, the OME
+engine, the cascade and the domain objects are now assembled once, by
+`everos.service.build_application(settings)`, and the HTTP server and the CLI
+both use the resulting `Application` through three facades:
+`MemoryService`, `KnowledgeService` and `OpsService`.
 
 ### Added
 
@@ -19,108 +27,14 @@ machinery that keeps a deleted memory from coming back.
   `forget_session` now works against a self-hosted server.
 - **`POST /api/v2/memory/delete_by_ids`**: delete episodes by memory id, with
   what Reflection merged into them, their atomic facts and their cluster
-  membership.
+  membership. The optional `user_id` restricts deletion to that owner;
+  `deleted` reports the number actually removed, excluding missing,
+  duplicate, or other-owner ids.
 - Configuration: `[memorize] delete_wait_seconds` (default `10`),
   `[cascade] delete_fence_warn_entries` (default `100000`).
 - Metrics: `everos_lock_wait_seconds` / `everos_lock_hold_seconds` (by lock
   kind), `everos_lock_table_entries`, `everos_memory_delete_fence_entries` /
   `_runs`.
-
-### Changed
-
-- Every markdown write of a memory owner holds that owner's lock and first
-  checks that what it was derived from still exists; a write whose source was
-  deleted is skipped and logged as `memory_write_skipped_source_gone`.
-- User clustering and the Reflection finish embed before taking their locks.
-- A succeeded OME run no longer keeps the triggering event (the conversation
-  text) in `ome.db`; failed and dead-letter runs keep it for diagnosis.
-- `/get` lists an episode Reflection merged from several sessions with
-  `"session_id": null` instead of failing the page.
-- `/add`, `/flush` and `/memory/delete` refuse a `session_id` with leading or
-  trailing whitespace or a control character (`422`). A daily-log file
-  stores it as one trimmed line, so such an id was read back as another one
-  and could not be matched by a session filter or deleted.
-- A SQLite write that waited out `[sqlite] busy_timeout_ms` on another
-  writer's lock answers `503 EXTERNAL_SERVICE_UNAVAILABLE` with the fixed
-  message `"database is busy"` (retryable) instead of an unhandled `500`; the
-  failed statement, without its values, is logged as
-  `sqlite_lock_wait_timed_out`. A queued `/add` failing that way records
-  `last_error` `"StorageError: database is busy"`.
-- Server log tracebacks are plain text (innermost 15 frames, no locals)
-  instead of rich's syntax-highlighted rendering, which blocked the event
-  loop for seconds per exception on a loaded host. CLI and TUI logs share
-  the same configuration.
-
-### Fixed
-
-- Keep fresh installs on `watchdog<7`, matching the tested event semantics;
-  watchdog 7.1 can stop recursive Linux file notifications under
-  `PYTHONWARNINGS=error` when nested directories are created concurrently.
-- The filesystem watcher subscribes only to changes it handles, excluding
-  file-open/close notifications that could overflow Linux's inotify queue
-  during read-heavy searches and delay markdown indexing.
-- A fresh `uv pip install everos` now resolves the parser dependency without
-  requiring a global prerelease override. The base install pins the same
-  parser version as the tested algorithm packages and the multimodal extra.
-- `/add` and `/flush` no longer leave half-written state when a SQLite write
-  lock times out: boundary detection records the memcells, the session's
-  status and the remaining buffer in one transaction. Before, a timeout at
-  the second or third write left memcells that were never extracted, or
-  buffered messages behind a `500` the caller could not act on.
-- A burst of searches no longer fails with `Too many open files`: LanceDB
-  search queries are capped per process (`[lancedb] max_concurrent_queries`,
-  default `32`; metrics `everos_lancedb_query_wait_seconds`,
-  `everos_lancedb_queries_in_flight`), where one agentic search fanned out to
-  about 28 queries that each opened every data file of a table. The server
-  also raises its open-file soft limit to 8192 at start (capped at the hard
-  limit, never lowered; logged), from Linux's 1024 and macOS's 256.
-- Search results are no longer converted with their vector columns, which
-  every search caller discarded; the conversion ran on the event loop and was
-  most of its busy time under search load, holding other requests' SQLite
-  write transactions open.
-- A second server using the same memory root now refuses startup before
-  opening shared storage or resetting active cascade claims (#545). The
-  existing exclusive lock stays held through storage shutdown.
-
-- **On Windows, reading a memory file no longer fails while another write
-  replaces it.** An `open` that races `os.replace` of the same file can be
-  refused for a moment (`PermissionError`, errno 13). Writes already waited
-  that out; reads did not, so a deletion could fail with
-  `DeletionIncompleteError` (`500`) and a cascade projection could fail
-  permanently. Every markdown read now goes through
-  `MarkdownReader.read_text`, which retries with the writer's budget
-  (about 2.5 s). Other platforms are unaffected.
-
-- **A cluster's `count`, centroid and `last_ts` now include an episode that
-  joined it while Reflection was merging it**
-  ([#563](https://github.com/EverMind-AI/EverOS/issues/563)). Reflection
-  wrote them from the members it read before its LLM call, so the new
-  member stayed in the cluster but was not counted, and the user-profile
-  gate, which sums `count`, undercounted.
-
-- **One empty section no longer fails a daily-log file's whole batch.** The
-  four daily-log handlers send every changed entry's text in one
-  `embed_batch` call, and embedding endpoints reject an empty string inside
-  the input array — text-embeddings-inference answers
-  `400 Input validation error: inputs cannot be empty`. An entry whose
-  embedded section is blank (an `atomic_fact` scaffold the extractor left
-  behind before its sentence was written, a `foresight` with an empty
-  `Foresight`, …) therefore failed the call for the *entire file*, so its
-  other entries — already extracted, already on disk — never reached the
-  index, and the projection failed permanently over content the user never
-  sees. Blank texts are now left out of the request and written with
-  `vector = None`, the same soft-degrade a missing provider produces;
-  `vector_backfill` re-embeds the row once the md carries content.
-
-## [1.6.0] - 2026-10-28
-
-**One place builds the application.** Providers, storage adapters, the OME
-engine, the cascade and the domain objects are now assembled once, by
-`everos.service.build_application(settings)`, and the HTTP server and the CLI
-both use the resulting `Application` through three facades:
-`MemoryService`, `KnowledgeService` and `OpsService`.
-
-### Added
 
 - **An optional correctness gate for agent cases** (`[agent_memory]
   case_gate_enabled`, default `false`). On, the extraction LLM judges
@@ -152,6 +66,29 @@ both use the resulting `Application` through three facades:
   inference. The search index, the API and `/get` are unchanged.
 
 ### Changed
+
+- Every markdown write of a memory owner holds that owner's lock and first
+  checks that what it was derived from still exists; a write whose source was
+  deleted is skipped and logged as `memory_write_skipped_source_gone`.
+- User clustering and the Reflection finish embed before taking their locks.
+- A succeeded OME run no longer keeps the triggering event (the conversation
+  text) in `ome.db`; failed and dead-letter runs keep it for diagnosis.
+- `/get` lists an episode Reflection merged from several sessions with
+  `"session_id": null` instead of failing the page.
+- `/add`, `/flush` and `/memory/delete` refuse a `session_id` with leading or
+  trailing whitespace or a control character (`422`). A daily-log file
+  stores it as one trimmed line, so such an id was read back as another one
+  and could not be matched by a session filter or deleted.
+- A SQLite write that waited out `[sqlite] busy_timeout_ms` on another
+  writer's lock answers `503 EXTERNAL_SERVICE_UNAVAILABLE` with the fixed
+  message `"database is busy"` (retryable) instead of an unhandled `500`; the
+  failed statement, without its values, is logged as
+  `sqlite_lock_wait_timed_out`. A queued `/add` failing that way records
+  `last_error` `"StorageError: database is busy"`.
+- Server log tracebacks are plain text (innermost 15 frames, no locals)
+  instead of rich's syntax-highlighted rendering, which blocked the event
+  loop for seconds per exception on a loaded host. CLI and TUI logs share
+  the same configuration.
 
 - **Internal module layout: one convention across `infra` and `service`.**
   Every `infra` subpackage now keeps its implementation in private
@@ -479,12 +416,84 @@ both use the resulting `Application` through three facades:
   LanceDB Arrow schema comes from
   `everos.infra.persistence.lancedb.base.arrow_schema_for`.
 
+- On Linux with glibc, the CLI defaults to two malloc arenas to reduce
+  retained allocator memory. Explicit `MALLOC_ARENA_MAX` or
+  `GLIBC_TUNABLES=glibc.malloc.arena_max=...` settings take precedence;
+  importing EverOS as a library does not change the host's allocation policy.
+- Agentic search falls back to relevance-ranked hybrid recall of 50
+  candidates when its first-round cluster expansion exceeds 1,000 episodes.
+  Smaller expansions keep their existing behavior, and the second round
+  retains its 40-candidate cap. The guard bounds reranking work for unusually
+  large groups; it can change recall in that case and does not cap the
+  initial owner-wide corpus snapshot.
+
 ### Removed
 
 - **`everos.infra.ome.testing` is no longer shipped.** `StrategyTestHarness`
   was a test fixture; it now lives in the repository's own test helpers.
 
 ### Fixed
+
+- Keep fresh installs on `watchdog>=4.0.2,<7`, matching the tested event
+  semantics. The lower bound includes the macOS fix required for filtered
+  notifications; watchdog 7.1 can stop recursive Linux notifications under
+  `PYTHONWARNINGS=error` when nested directories are created concurrently.
+- The filesystem watcher subscribes only to changes it handles, excluding
+  file-open/close notifications that could overflow Linux's inotify queue
+  during read-heavy searches and delay markdown indexing.
+- A fresh `uv pip install everos` now resolves the parser dependency without
+  requiring a global prerelease override. The base install pins the same
+  parser version as the tested algorithm packages and the multimodal extra.
+- `/add` and `/flush` no longer leave half-written state when a SQLite write
+  lock times out: boundary detection records the memcells, the session's
+  status and the remaining buffer in one transaction. Before, a timeout at
+  the second or third write left memcells that were never extracted, or
+  buffered messages behind a `500` the caller could not act on.
+- A burst of searches no longer fails with `Too many open files`: LanceDB
+  search queries are capped per process (`[lancedb] max_concurrent_queries`,
+  default `32`; metrics `everos_lancedb_query_wait_seconds`,
+  `everos_lancedb_queries_in_flight`), where one agentic search fanned out to
+  about 28 queries that each opened every data file of a table. The server
+  also raises its open-file soft limit to 8192 at start (capped at the hard
+  limit, never lowered; logged), from Linux's 1024 and macOS's 256.
+- Searches that do not request vectors now omit unused vector columns in
+  the database query, before allocating result buffers or Python objects.
+  Vector search still uses vectors internally, and requests that explicitly
+  need vectors retain them. This reduces temporary allocations and work on
+  the event loop that can delay other requests' SQLite transactions.
+- A second server using the same memory root now refuses startup before
+  opening shared storage or resetting active cascade claims (#545). The
+  existing exclusive lock stays held through storage shutdown.
+
+- **On Windows, reading a memory file no longer fails while another write
+  replaces it.** An `open` that races `os.replace` of the same file can be
+  refused for a moment (`PermissionError`, errno 13). Writes already waited
+  that out; reads did not, so a deletion could fail with
+  `DeletionIncompleteError` (`500`) and a cascade projection could fail
+  permanently. Every markdown read now goes through
+  `MarkdownReader.read_text`, which retries with the writer's budget
+  (about 2.5 s). Other platforms are unaffected.
+
+- **A cluster's `count`, centroid and `last_ts` now include an episode that
+  joined it while Reflection was merging it**
+  ([#563](https://github.com/EverMind-AI/EverOS/issues/563)). Reflection
+  wrote them from the members it read before its LLM call, so the new
+  member stayed in the cluster but was not counted, and the user-profile
+  gate, which sums `count`, undercounted.
+
+- **One empty section no longer fails a daily-log file's whole batch.** The
+  four daily-log handlers send every changed entry's text in one
+  `embed_batch` call, and embedding endpoints reject an empty string inside
+  the input array — text-embeddings-inference answers
+  `400 Input validation error: inputs cannot be empty`. An entry whose
+  embedded section is blank (an `atomic_fact` scaffold the extractor left
+  behind before its sentence was written, a `foresight` with an empty
+  `Foresight`, …) therefore failed the call for the *entire file*, so its
+  other entries — already extracted, already on disk — never reached the
+  index, and the projection failed permanently over content the user never
+  sees. Blank texts are now left out of the request and written with
+  `vector = None`, the same soft-degrade a missing provider produces;
+  `vector_backfill` re-embeds the row once the md carries content.
 
 - **The agentic episode search reranks on the episode text.** Its
   cross-encoder read `metadata["episode"]`, which the bridge to everalgo's
@@ -495,6 +504,47 @@ both use the resulting `Application` through three facades:
   `trigger_skill_clustering` awaited `cluster_by_llm`, which is now a
   blocking bridge that refuses to run inside the event loop, so no case was
   clustered and no skill extracted; it now awaits `acluster_by_llm`.
+
+- **The case→skill bridge matches again.** On HYBRID + LLM-rerank agent
+  searches the bridge looked up skills by the matched cases' index row ids
+  (`<agent_id>_ac_…`), while a skill's `source_case_ids` holds the md-side
+  entry ids (`ac_…`), so no skill was ever bridged in (#478). The bridge is
+  now keyed by entry id, and `SearchAgentCaseItem` exposes `entry_id` so a
+  client can join cases to skills the same way.
+- **The first agent `/add` no longer downloads tiktoken's encoding.** The
+  algorithm library counts tokens with `o200k_base`, which tiktoken fetches
+  on first use; a fresh deployment paid for that download inside the first
+  agent write and answered a generic 500 when it failed (#277). The server
+  now warms the encoding at startup, before any storage is opened, and a
+  host that cannot load it fails to start with `TokenizerAssetError` naming
+  the cause and the `TIKTOKEN_CACHE_DIR` pre-cache option.
+- **OME crash recovery resumes every run of the previous process.** It
+  used to skip RUNNING rows younger than 30 minutes on the theory that
+  APScheduler might still own them; it never does (a one-shot job leaves
+  the jobstore when it is submitted), so a run cut short by a restart
+  inside that window was lost for good (#540). The engine holds the
+  jobstore lock before it recovers, so every RUNNING row is a crash:
+  all of them are marked CRASHED and re-enqueued.
+  `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
+  user-facing setting.
+- **`radius` is a pre-fusion cosine floor on every vector route.** It was
+  applied to the dense pool of `vector` and `hybrid` searches but also
+  passed into the ranker's input, which never read it, and the `agentic`
+  routes ignored it entirely (#394). The dead ranker field is gone and
+  the agentic dense recalls (cases, skills, episode facts) now apply the
+  same floor; the API reference states the semantics.
+- **A file restored with its old mtime is indexed again.** When the
+  cascade worker found an enqueued file gone it folded the row into a
+  deletion but left it saying `done / added`, so a scan that later saw
+  the file back with the same mtime took it for indexed (#541). The
+  worker now records the applied change (`deleted`), and the reconciler
+  re-emits a present file whose row says `deleted` whatever its mtime.
+
+- Background tasks waiting for a partition lock release their OME
+  execution slot and reclaim it before entering the protected work. A
+  backlog for one owner therefore no longer consumes every execution slot
+  while other owners wait. Active run records remain recoverable even when
+  the bounded completed-run history is full.
 
 ### Upgrade
 
@@ -545,43 +595,6 @@ release candidates: `everalgo-core 0.6.0`, `everalgo-boundary 0.4.1`,
 by knowledge ingestion in a base installation). The pins are exact (`==`), so `pip install
 everos` resolves them without any pre-release flag; upgrade them together,
 never one at a time.
-
-### Fixed
-
-- **The case→skill bridge matches again.** On HYBRID + LLM-rerank agent
-  searches the bridge looked up skills by the matched cases' index row ids
-  (`<agent_id>_ac_…`), while a skill's `source_case_ids` holds the md-side
-  entry ids (`ac_…`), so no skill was ever bridged in (#478). The bridge is
-  now keyed by entry id, and `SearchAgentCaseItem` exposes `entry_id` so a
-  client can join cases to skills the same way.
-- **The first agent `/add` no longer downloads tiktoken's encoding.** The
-  algorithm library counts tokens with `o200k_base`, which tiktoken fetches
-  on first use; a fresh deployment paid for that download inside the first
-  agent write and answered a generic 500 when it failed (#277). The server
-  now warms the encoding at startup, before any storage is opened, and a
-  host that cannot load it fails to start with `TokenizerAssetError` naming
-  the cause and the `TIKTOKEN_CACHE_DIR` pre-cache option.
-- **OME crash recovery resumes every run of the previous process.** It
-  used to skip RUNNING rows younger than 30 minutes on the theory that
-  APScheduler might still own them; it never does (a one-shot job leaves
-  the jobstore when it is submitted), so a run cut short by a restart
-  inside that window was lost for good (#540). The engine holds the
-  jobstore lock before it recovers, so every RUNNING row is a crash:
-  all of them are marked CRASHED and re-enqueued.
-  `OMEConfig.crash_recovery_timeout_seconds` is gone; it was not a
-  user-facing setting.
-- **`radius` is a pre-fusion cosine floor on every vector route.** It was
-  applied to the dense pool of `vector` and `hybrid` searches but also
-  passed into the ranker's input, which never read it, and the `agentic`
-  routes ignored it entirely (#394). The dead ranker field is gone and
-  the agentic dense recalls (cases, skills, episode facts) now apply the
-  same floor; the API reference states the semantics.
-- **A file restored with its old mtime is indexed again.** When the
-  cascade worker found an enqueued file gone it folded the row into a
-  deletion but left it saying `done / added`, so a scan that later saw
-  the file back with the same mtime took it for indexed (#541). The
-  worker now records the applied change (`deleted`), and the reconciler
-  re-emits a present file whose row says `deleted` whatever its mtime.
 
 ## [1.5.1] - 2026-10-22
 
@@ -2203,7 +2216,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/EverMind-AI/EverOS/compare/v1.5.1...v1.6.0
 [1.3.1]: https://github.com/EverMind-AI/everos/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/EverMind-AI/everos/compare/v1.2.3...v1.3.0
 [1.1.4]: https://github.com/EverMind-AI/everos/compare/v1.1.3...v1.1.4
