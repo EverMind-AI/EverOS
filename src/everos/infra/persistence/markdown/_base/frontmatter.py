@@ -16,11 +16,12 @@ Two complementary surfaces live here:
    ``sort_keys=False`` so caller-controlled key order is preserved).
 
 2. The L1 chassis classes — :class:`BaseFrontmatter`,
-   :class:`UserScopedFrontmatter`, :class:`AgentScopedFrontmatter` —
-   which fix the *absolute-readonly* fields (``id`` / ``type`` /
-   ``schema_version``) plus scope (``user_id`` / ``agent_id`` +
-   ``track``). Every business frontmatter schema in
-   ``infra/persistence/markdown/_mds/`` subclasses one of these.
+   :class:`UserScopedFrontmatter`, :class:`AgentScopedFrontmatter`,
+   :class:`GroupScopedFrontmatter` — which fix the *absolute-readonly*
+   fields (``id`` / ``type`` / ``schema_version``) plus scope
+   (``user_id`` / ``agent_id`` / ``group_id`` + ``track``). Every
+   business frontmatter schema in ``infra/persistence/markdown/_mds/``
+   subclasses one of these.
 
 Concrete business schemas (``UserMemcellDailyFrontmatter``,
 ``SkillFrontmatter``, …) live in ``infra``; they add per-record
@@ -395,6 +396,21 @@ class AgentScopedFrontmatter(BaseFrontmatter):
 
     agent_id: str
     track: Literal["agent"] = "agent"
+
+
+class GroupScopedFrontmatter(BaseFrontmatter):
+    """Records that belong to a group (track = ``group``).
+
+    The third owner type (docs/group-memory.md, D1): ``group_id`` is the
+    file-level scope the path already expresses, as ``user_id`` is for
+    :class:`UserScopedFrontmatter`. Who said what inside the group rides on
+    each entry (``sender_ids`` / ``subject_ids`` / ``origin``), never here.
+    """
+
+    SCOPE_DIR: ClassVar[str] = "groups"
+
+    group_id: str
+    track: Literal["group"] = "group"
 
 
 class KnowledgeScopedMixin:

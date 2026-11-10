@@ -15,6 +15,7 @@ __all__ = [
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
     "InMemoryForgetLogStore",
+    "InMemoryGroupStore",
     "InMemoryImageMemoryStore",
     "InMemoryImageStore",
     "InMemoryMemcellStore",
@@ -36,15 +37,20 @@ from everos.memory.models import (
     ClusterMemberType,
     Episode,
     Foresight,
+    Group,
     ImageMemory,
     MemCell,
     MemcellRecord,
     Profile,
     ReflectionReport,
+    Roster,
+    RosterEvent,
+    fold_roster,
 )
 from everos.memory.ports import (
     ForgetEntry,
     ForgetTarget,
+    GroupRecord,
     MemoryRef,
     NoSourceCheck,
     Scope,
@@ -742,3 +748,57 @@ class InMemoryImageStore:
     async def restore(self, image_id: str) -> bool:
         self.forgotten.discard(image_id)
         return image_id in self.images
+
+
+class InMemoryGroupStore:
+    """:class:`~everos.memory.ports.GroupStore` over dicts, with the real fold.
+
+    ``events`` holds every group's log in append order and ``bindings`` the
+    session bindings, so a test asserts on what the store was asked to keep.
+    ``saves`` counts writes (a conflict writes nothing).
+    """
+
+    def __init__(self) -> None:
+        self.groups: dict[tuple[str, str, str], Group] = {}
+        self.events: dict[tuple[str, str, str], list[RosterEvent]] = defaultdict(list)
+        self.bindings: dict[tuple[str, str, str], str] = {}
+        self.saves = 0
+
+    @staticmethod
+    def _key(scope: Scope) -> tuple[str, str, str]:
+        return (scope.app_id, scope.project_id, scope.owner_id)
+
+    def _record(self, key: tuple[str, str, str]) -> GroupRecord:
+        sessions = tuple(
+            session
+            for (app, project, session), group in self.bindings.items()
+            if (app, project, group) == key
+        )
+        return GroupRecord(
+            group=self.groups[key],
+            roster=Roster(intervals=fold_roster(self.events[key])),
+            sessions=sessions,
+        )
+
+    async def get(self, scope: Scope) -> GroupRecord | None:
+        key = self._key(scope)
+        return self._record(key) if key in self.groups else None
+
+    async def save(
+        self, scope: Scope, *, group: Group, events: Sequence[RosterEvent]
+    ) -> GroupRecord:
+        key = self._key(scope)
+        fold_roster([*self.events[key], *events])  # raises before keeping anything
+        self.groups[key] = group
+        self.events[key].extend(events)
+        self.saves += 1
+        return self._record(key)
+
+    async def binding(self, session: SessionKey) -> str | None:
+        return self.bindings.get(
+            (session.app_id, session.project_id, session.session_id)
+        )
+
+    async def bind(self, session: SessionKey, group_id: str, *, at: int) -> str:
+        key = (session.app_id, session.project_id, session.session_id)
+        return self.bindings.setdefault(key, group_id)

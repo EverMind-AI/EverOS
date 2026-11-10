@@ -16,6 +16,7 @@ __all__ = [
 from everos.config import Settings
 from everos.memory.deps import Indexes, Stores
 
+from .groups import GroupRosterStore
 from .images import FileImageStore
 from .index import DerivedIndex
 from .index.adapters import (
@@ -72,6 +73,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         reflection_report=SqliteReflectionReportStore(sqlite.reflection_report),
         owner_dir=MarkdownOwnerDirStore(root),
         session_purge=SqliteSessionPurgeStore(sqlite.session_purge),
+        groups=GroupRosterStore(root, sqlite.group_roster),
     )
 
 

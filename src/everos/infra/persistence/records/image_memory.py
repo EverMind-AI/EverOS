@@ -36,6 +36,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
+from pydantic import Field
+
 from everos.infra.persistence.records.base import IndexRecord
 
 from ._parent_type import ParentType
@@ -115,6 +117,16 @@ class ImageMemory(IndexRecord):
     deprecated_by: str | None = None
     """Set when a later entry supersedes this one (a forget-triggered
     re-extraction, or a description edit). ``NULL`` means current."""
+
+    # Group attribution and the membership-window columns
+    # (docs/group-memory.md, section 6.3); empty on a one-to-one row.
+    sender_ids: list[str] = Field(default_factory=list)
+    """Who posted the picture."""
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: str | None = None
+    source_start: _dt.datetime | None = None
+    source_end: _dt.datetime | None = None
+    """For one occurrence both are its ``timestamp``."""
 
     vector: DenseVector | None = None
     """``description`` embedded by the text model (``[embedding]``)."""

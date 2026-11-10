@@ -76,7 +76,18 @@ _DIM = 8
 _CUT_EVERY = 6
 """The scripted boundary cuts after every sixth message of the window."""
 
-ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {}
+_GROUP_COLUMNS: Mapping[str, object] = {
+    # docs/group-memory.md, section 6.3: empty on every one-to-one row.
+    "subject_ids": [],
+    "origin": None,
+    "source_start": None,
+    "source_end": None,
+}
+
+ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
+    "episode_row": _GROUP_COLUMNS,
+    "image_memory_row": {**_GROUP_COLUMNS, "sender_ids": []},
+}
 """Fields a later change added to a one-to-one output, with their empty default.
 
 Keyed by the output they appear in (``episode_row``, ``image_memory_row``,

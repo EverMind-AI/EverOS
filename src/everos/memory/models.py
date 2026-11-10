@@ -24,12 +24,15 @@ from everalgo.types import Foresight as AlgoForesight
 from everalgo.types import MemCell as MemCell
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from everos.core.errors import RosterConflictError
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 _Role = Literal["user", "assistant", "tool"]
 EpisodeParentType = Literal["memcell", "cluster"]
+Origin = Literal["member", "assistant", "mixed"]
+"""Whose messages a group record rests on (docs/group-memory.md, section 4.5)."""
 
 
 class ToolCall(BaseModel):
@@ -139,6 +142,18 @@ class Episode(BaseModel):
     """The ``OutputLanguage`` value the episode is written in, detected from
     its text; downstream extractions are pinned to it. ``None`` when unknown
     (an episode stored before it existed, or text with no letters)."""
+
+    # Group attribution (docs/group-memory.md, section 4.5). One-to-one
+    # episodes keep the defaults, and markdown writes none of the three then.
+    subject_ids: list[str] = Field(default_factory=list)
+    """Members the episode is about. Empty on a one-to-one episode."""
+    origin: Origin | None = None
+    """``member`` / ``assistant`` / ``mixed``: whose messages the segment holds.
+    ``None`` on a one-to-one episode."""
+    source_start: int | None = None
+    """Epoch ms of the segment's first message. ``None`` reads as ``timestamp``
+    (the segment's last message): a membership window must contain the whole
+    segment for a member to see it."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -386,6 +401,13 @@ class ImageMemory(BaseModel):
     status: Literal["current", "superseded", "forgotten"] = "current"
     superseded_by: str | None = None
     """Entry id of the record that replaced this one."""
+
+    # Group attribution (docs/group-memory.md, section 4.5); one-to-one keeps
+    # the defaults and markdown writes none of them.
+    sender_ids: list[str] = Field(default_factory=list)
+    """Who posted the picture (one id). Empty on a one-to-one picture memory."""
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: Origin | None = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -714,7 +736,222 @@ class ReflectionReport(BaseModel):
         return len(self.source_members)
 
 
+# ── Groups (docs/group-memory.md, sections 4.2-4.3) ─────────────────────
+
+MemberKind = Literal["human", "assistant"]
+AccessRole = Literal["owner", "admin", "member", "assistant"]
+"""The role the caller declares; it decides who manages the roster, never
+who reads more (section 9.1)."""
+RosterOp = Literal["join", "leave", "update"]
+RosterSource = Literal["api", "inline", "implicit"]
+HistoryVisibleFrom = Literal["join", "creation"]
+"""``join`` (default): a member sees what happened inside their membership
+windows. ``creation``: a current member sees the group's history from its start
+(section 15, open questions)."""
+
+MANAGER_ROLES: frozenset[str] = frozenset({"owner", "admin"})
+"""Access roles that may manage a group's roster and meta."""
+
+
+class Group(BaseModel):
+    """A group's meta: what ``group.md``'s frontmatter holds besides the log.
+
+    Attributes:
+        group_id: Path-safe id, unique within one ``(app_id, project_id)``.
+        name: Shown to the extraction model in the roster block.
+        description: Likewise.
+        created_at: Epoch ms; the first message's time for an implicit group.
+        created_by: Member id of the creator; ``None`` for an implicit group.
+        extra: Stored, never interpreted.
+        history_visible_from: See :data:`HistoryVisibleFrom`.
+    """
+
+    group_id: str
+    name: str = ""
+    description: str = ""
+    created_at: int
+    created_by: str | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)
+    history_visible_from: HistoryVisibleFrom = "join"
+
+
+class RosterEvent(BaseModel):
+    """One change to a group's roster, appended in order and never rewritten.
+
+    ``join`` opens an interval at ``at``; ``leave`` closes the open one;
+    ``update`` changes ``display_name`` / ``aliases`` / ``role`` / ``title``
+    from ``at`` on. Fields an event leaves ``None`` are not changed (a join
+    falls back to the member's previous interval, then to the defaults).
+
+    ``event_id`` is the entry id in ``group.md`` (``gr_<YYYYMMDD>_<seq>``),
+    set by the store when the event is written.
+    """
+
+    op: RosterOp
+    member_id: str
+    at: int
+    source: RosterSource = "api"
+    kind: MemberKind | None = None
+    display_name: str | None = None
+    aliases: list[str] | None = None
+    role: AccessRole | None = None
+    title: str | None = None
+    event_id: str | None = None
+
+
+class MembershipInterval(BaseModel):
+    """One member's half-open stay in a group: ``[joined_at, left_at)``.
+
+    ``left_at`` is ``None`` while the member is in the group. A member who left
+    and rejoined has two intervals; ``seq`` counts them from 1. The descriptive
+    fields carry the values in force at the end of the interval.
+    """
+
+    member_id: str
+    seq: int
+    kind: MemberKind
+    display_name: str
+    aliases: list[str] = Field(default_factory=list)
+    role: AccessRole
+    title: str = ""
+    joined_at: int
+    left_at: int | None = None
+    source: RosterSource = "api"
+
+    def contains(self, at: int) -> bool:
+        """Whether ``at`` (epoch ms) lies inside this interval."""
+        return self.joined_at <= at and (self.left_at is None or at < self.left_at)
+
+
+def fold_roster(events: Sequence[RosterEvent]) -> list[MembershipInterval]:
+    """The membership intervals ``events`` describe, validated.
+
+    Events apply in ``at`` order; events with the same ``at`` keep their log
+    order, so an importer's backdated join lands where it belongs while two
+    events of one request apply as sent. The result is sorted by
+    ``(member_id, seq)``.
+
+    Raises:
+        RosterConflictError: A ``join`` for a member with an open interval, or
+            a ``leave`` / ``update`` for one without (409, section 4.3).
+    """
+    ordered = sorted(enumerate(events), key=lambda pair: (pair[1].at, pair[0]))
+    open_by_member: dict[str, MembershipInterval] = {}
+    closed: list[MembershipInterval] = []
+    seqs: dict[str, int] = {}
+    last: dict[str, MembershipInterval] = {}
+    for _, event in ordered:
+        current = open_by_member.get(event.member_id)
+        if event.op == "join":
+            if current is not None:
+                raise RosterConflictError(
+                    f"{event.member_id!r} is already a member at {event.at}"
+                )
+            previous = last.get(event.member_id)
+            kind = event.kind or (previous.kind if previous else None)
+            if kind is None:
+                kind = "assistant" if event.role == "assistant" else "human"
+            role = event.role or (previous.role if previous else None)
+            if role is None:
+                role = "assistant" if kind == "assistant" else "member"
+            seqs[event.member_id] = seqs.get(event.member_id, 0) + 1
+            open_by_member[event.member_id] = MembershipInterval(
+                member_id=event.member_id,
+                seq=seqs[event.member_id],
+                kind=kind,
+                display_name=event.display_name
+                or (previous.display_name if previous else event.member_id),
+                aliases=list(
+                    event.aliases
+                    if event.aliases is not None
+                    else (previous.aliases if previous else [])
+                ),
+                role=role,
+                title=event.title
+                if event.title is not None
+                else (previous.title if previous else ""),
+                joined_at=event.at,
+                source=event.source,
+            )
+            continue
+        if current is None:
+            raise RosterConflictError(
+                f"{event.member_id!r} is not a member at {event.at}; cannot {event.op}"
+            )
+        if event.op == "leave":
+            ended = current.model_copy(update={"left_at": event.at})
+            closed.append(ended)
+            last[event.member_id] = ended
+            del open_by_member[event.member_id]
+            continue
+        changes = {
+            name: value
+            for name, value in (
+                ("display_name", event.display_name),
+                ("aliases", event.aliases),
+                ("role", event.role),
+                ("title", event.title),
+            )
+            if value is not None
+        }
+        open_by_member[event.member_id] = current.model_copy(update=changes)
+    for interval in open_by_member.values():
+        last[interval.member_id] = interval
+    return sorted(
+        [*closed, *open_by_member.values()], key=lambda i: (i.member_id, i.seq)
+    )
+
+
+class Roster(BaseModel):
+    """A group's membership intervals, with the questions every read asks.
+
+    Built from :func:`fold_roster`; holds no events, so it cannot answer "the
+    roster at time t" for the descriptive fields -- only who was a member when.
+    """
+
+    intervals: list[MembershipInterval] = Field(default_factory=list)
+
+    def current(self, member_id: str) -> MembershipInterval | None:
+        """The member's open interval, or ``None`` when they are not in the group."""
+        for interval in self.intervals:
+            if interval.member_id == member_id and interval.left_at is None:
+                return interval
+        return None
+
+    def is_current_member(self, member_id: str) -> bool:
+        return self.current(member_id) is not None
+
+    def current_members(self) -> list[MembershipInterval]:
+        return [i for i in self.intervals if i.left_at is None]
+
+    def intervals_of(self, member_id: str) -> list[MembershipInterval]:
+        return [i for i in self.intervals if i.member_id == member_id]
+
+    def interval_at(self, member_id: str, at: int) -> MembershipInterval | None:
+        """The member's interval that contains ``at``, if any."""
+        for interval in self.intervals_of(member_id):
+            if interval.contains(at):
+                return interval
+        return None
+
+    def windows_of(self, member_id: str) -> list[tuple[int, int | None]]:
+        """The member's windows ``[from, to)``, adjacent intervals merged."""
+        windows: list[tuple[int, int | None]] = []
+        for interval in sorted(self.intervals_of(member_id), key=lambda i: i.joined_at):
+            if windows and windows[-1][1] == interval.joined_at:
+                windows[-1] = (windows[-1][0], interval.left_at)
+            else:
+                windows.append((interval.joined_at, interval.left_at))
+        return windows
+
+    def has_managers(self) -> bool:
+        """Whether any current member holds an owner or admin role."""
+        return any(i.role in MANAGER_ROLES for i in self.current_members())
+
+
 __all__ = [
+    "MANAGER_ROLES",
+    "AccessRole",
     "AgentCase",
     "AgentSkill",
     "AlgoAgentCase",
@@ -731,14 +968,24 @@ __all__ = [
     "EpisodeParentType",
     "ExplicitInfoItem",
     "Foresight",
+    "Group",
+    "HistoryVisibleFrom",
     "ImageMemory",
     "ImplicitTraitItem",
     "IngestResult",
     "MemCell",
+    "MemberKind",
+    "MembershipInterval",
     "MemcellRecord",
     "MemorizeTask",
+    "Origin",
     "Profile",
     "ReflectionReport",
+    "Roster",
+    "RosterEvent",
+    "RosterOp",
+    "RosterSource",
     "ToolCall",
+    "fold_roster",
     "mint_cluster_id",
 ]

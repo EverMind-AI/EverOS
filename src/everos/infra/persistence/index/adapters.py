@@ -450,8 +450,18 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
             sender_ids=list(fields.get("sender_ids") or []),
             parent_id=fields["parent_id"],
             parent_type=fields.get("parent_type") or "memcell",
+            # Group attribution; a one-to-one row (and a row from before the
+            # columns existed) holds NULL and reads the defaults.
+            subject_ids=list(fields.get("subject_ids") or []),
+            origin=fields.get("origin"),
+            source_start=_ms_or_none(fields.get("source_start")),
         ),
     )
+
+
+def _ms_or_none(value: object) -> int | None:
+    """Epoch ms of a nullable timestamp column."""
+    return to_timestamp_ms(value) if value is not None else None  # type: ignore[arg-type]
 
 
 def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
@@ -476,6 +486,9 @@ def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
             md_path=fields.get("md_path"),
             status="superseded" if fields.get("deprecated_by") else "current",
             superseded_by=fields.get("deprecated_by"),
+            sender_ids=list(fields.get("sender_ids") or []),
+            subject_ids=list(fields.get("subject_ids") or []),
+            origin=fields.get("origin"),
         ),
     )
 

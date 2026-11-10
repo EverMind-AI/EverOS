@@ -177,6 +177,7 @@ def handler_deps(
     embedding: Any = None,
     vision_embedding: Any = None,
     fence: Any = None,
+    group_roster: Any = None,
 ) -> HandlerDeps:
     """:class:`HandlerDeps` whose unset collaborators fail loudly when touched."""
     return HandlerDeps(
@@ -188,4 +189,5 @@ def handler_deps(
         embedding=embedding,
         vision_embedding=vision_embedding,
         fence=fence,
+        group_roster=group_roster,
     )

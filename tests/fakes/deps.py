@@ -39,6 +39,7 @@ from .stores import (
     InMemoryEpisodeStore,
     InMemoryForesightStore,
     InMemoryForgetLogStore,
+    InMemoryGroupStore,
     InMemoryImageMemoryStore,
     InMemoryImageStore,
     InMemoryMemcellStore,
@@ -84,6 +85,7 @@ def make_stores(**overrides: Any) -> Stores:
         "reflection_report": InMemoryReflectionReportStore(),
         "owner_dir": UnusedPort("owner_dir"),
         "session_purge": UnusedPort("session_purge"),
+        "groups": InMemoryGroupStore(),
     }
     return Stores(**{**fields, **overrides})
 

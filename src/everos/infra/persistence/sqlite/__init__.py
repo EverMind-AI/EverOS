@@ -39,6 +39,7 @@ from ._repos import ClusterRepo as ClusterRepo
 from ._repos import DocumentListPage as DocumentListPage
 from ._repos import DocumentUpsertPayload as DocumentUpsertPayload
 from ._repos import ForgetLogRepo as ForgetLogRepo
+from ._repos import GroupRosterRepo as GroupRosterRepo
 from ._repos import ImageOriginalRepo as ImageOriginalRepo
 from ._repos import KnowledgeDocumentRepo as KnowledgeDocumentRepo
 from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
@@ -53,6 +54,8 @@ from ._tables import Cluster as Cluster
 from ._tables import ClusterMember as ClusterMember
 from ._tables import ConversationStatus as ConversationStatus
 from ._tables import ForgetLog as ForgetLog
+from ._tables import GroupMember as GroupMember
+from ._tables import GroupMeta as GroupMeta
 from ._tables import ImageOriginal as ImageOriginal
 from ._tables import KnowledgeDocumentRow as KnowledgeDocumentRow
 from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
@@ -60,6 +63,7 @@ from ._tables import MdChangeState as MdChangeState
 from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
 from ._tables import ReflectionReport as ReflectionReport
+from ._tables import SessionBinding as SessionBinding
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
 from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
 from .repositories import SqliteRepos as SqliteRepos
@@ -84,6 +88,9 @@ __all__ = [
     "Field",
     "ForgetLog",
     "ForgetLogRepo",
+    "GroupMember",
+    "GroupMeta",
+    "GroupRosterRepo",
     "ImageOriginal",
     "ImageOriginalRepo",
     "KnowledgeDocumentRepo",
@@ -102,6 +109,7 @@ __all__ = [
     "Relationship",
     "RepoBase",
     "SQLModel",
+    "SessionBinding",
     "SqliteClusterStore",
     "SqliteDatabase",
     "SqliteForgetLogStore",

@@ -190,7 +190,11 @@ class MarkdownOwnerDirStore:
     def _base(self, owner_type: str, app_id: str, project_id: str) -> Path:
         if owner_type == "user":
             return self._root.users_dir(app_id, project_id)
-        return self._root.agents_dir(app_id, project_id)
+        if owner_type == "agent":
+            return self._root.agents_dir(app_id, project_id)
+        # A group's directory is never deleted wholesale: group deletion is a
+        # propagated forget (docs/group-memory.md, section 9.4), not a rename.
+        raise ValueError(f"no owner directory deletion for {owner_type!r} owners")
 
     def _owner_dir(self, scope: Scope) -> Path:
         """The owner's directory; refuses one that resolves anywhere else.

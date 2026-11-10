@@ -11,6 +11,9 @@ from .cluster import Cluster as Cluster
 from .cluster import ClusterMember as ClusterMember
 from .conversation_status import ConversationStatus as ConversationStatus
 from .forget_log import ForgetLog as ForgetLog
+from .group import GroupMember as GroupMember
+from .group import GroupMeta as GroupMeta
+from .group import SessionBinding as SessionBinding
 from .image_original import ImageOriginal as ImageOriginal
 from .knowledge import KnowledgeDocumentRow as KnowledgeDocumentRow
 from .knowledge import KnowledgeTopicRow as KnowledgeTopicRow
@@ -25,6 +28,8 @@ __all__ = [
     "ClusterMember",
     "ConversationStatus",
     "ForgetLog",
+    "GroupMember",
+    "GroupMeta",
     "ImageOriginal",
     "KnowledgeDocumentRow",
     "KnowledgeTopicRow",
@@ -32,5 +37,6 @@ __all__ = [
     "Memcell",
     "MemorizeInbox",
     "ReflectionReport",
+    "SessionBinding",
     "UnprocessedBuffer",
 ]

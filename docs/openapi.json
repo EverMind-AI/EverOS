@@ -3808,6 +3808,7 @@
         "type": "string",
         "enum": [
           "NOT_FOUND",
+          "FORBIDDEN",
           "CONFLICT",
           "INVALID_INPUT",
           "EXTRACTION_EMPTY",

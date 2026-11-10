@@ -36,6 +36,7 @@ from .entries import split_entries as split_entries
 from .frontmatter import AgentScopedFrontmatter as AgentScopedFrontmatter
 from .frontmatter import BaseFrontmatter as BaseFrontmatter
 from .frontmatter import DailyLogPathMixin as DailyLogPathMixin
+from .frontmatter import GroupScopedFrontmatter as GroupScopedFrontmatter
 from .frontmatter import KnowledgeDocumentPathMixin as KnowledgeDocumentPathMixin
 from .frontmatter import KnowledgeScopedMixin as KnowledgeScopedMixin
 from .frontmatter import KnowledgeTopicPathMixin as KnowledgeTopicPathMixin
@@ -55,6 +56,7 @@ __all__ = [
     "DailyLogPathMixin",
     "Entry",
     "EntryId",
+    "GroupScopedFrontmatter",
     "KnowledgeDocumentPathMixin",
     "KnowledgeScopedMixin",
     "KnowledgeTopicPathMixin",

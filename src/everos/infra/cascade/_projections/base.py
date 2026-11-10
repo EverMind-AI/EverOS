@@ -23,7 +23,11 @@ from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvide
 from everos.component.tokenizer import Tokenizer
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import IndexRepositories
-from everos.infra.persistence.sqlite import KnowledgeDocumentRepo, KnowledgeTopicRowRepo
+from everos.infra.persistence.sqlite import (
+    GroupRosterRepo,
+    KnowledgeDocumentRepo,
+    KnowledgeTopicRowRepo,
+)
 
 from .._fence import DeleteFence
 from ..models import HandlerOutcome
@@ -52,6 +56,9 @@ class HandlerDeps:
     embedding: EmbeddingProvider | None = None
     vision_embedding: VisionEmbeddingProvider | None = None
     fence: DeleteFence | None = None
+    group_roster: GroupRosterRepo | None = None
+    """The roster mirror ``group.md`` projects into; ``None`` in tools that
+    run the projections without a system database."""
 
 
 class Handler(abc.ABC):

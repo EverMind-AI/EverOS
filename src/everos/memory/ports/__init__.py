@@ -22,6 +22,8 @@ from .events import ManualTick as ManualTick
 from .forget_log import ForgetEntry as ForgetEntry
 from .forget_log import ForgetLogStore as ForgetLogStore
 from .forget_log import ForgetTarget as ForgetTarget
+from .groups import GroupRecord as GroupRecord
+from .groups import GroupStore as GroupStore
 from .images import ImageStore as ImageStore
 from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
@@ -121,6 +123,8 @@ __all__ = [
     "ForgetEntry",
     "ForgetLogStore",
     "ForgetTarget",
+    "GroupRecord",
+    "GroupStore",
     "Idle",
     "IdleTick",
     "Immediate",

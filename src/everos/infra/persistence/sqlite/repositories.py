@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from ._repos import (
     ClusterRepo,
     ForgetLogRepo,
+    GroupRosterRepo,
     ImageOriginalRepo,
     KnowledgeDocumentRepo,
     KnowledgeTopicRowRepo,
@@ -29,6 +30,7 @@ class SqliteRepos:
 
     cluster: ClusterRepo
     forget_log: ForgetLogRepo
+    group_roster: GroupRosterRepo
     image_original: ImageOriginalRepo
     knowledge_document: KnowledgeDocumentRepo
     knowledge_topic: KnowledgeTopicRowRepo
@@ -47,6 +49,7 @@ class SqliteRepos:
         return cls(
             cluster=ClusterRepo(factory),
             forget_log=ForgetLogRepo(factory),
+            group_roster=GroupRosterRepo(factory),
             image_original=ImageOriginalRepo(factory),
             knowledge_document=KnowledgeDocumentRepo(factory),
             knowledge_topic=KnowledgeTopicRowRepo(factory),

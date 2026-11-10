@@ -249,6 +249,7 @@ class CascadeOrchestrator:
             embedding=embedding,
             vision_embedding=vision_embedding,
             fence=fence,
+            group_roster=sqlite.group_roster,
         )
         self._handlers = build_handlers(deps)
         self._scanner = CascadeScanner(

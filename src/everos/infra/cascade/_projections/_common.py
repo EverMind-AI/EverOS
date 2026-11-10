@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+from collections.abc import Mapping
 from pathlib import PurePosixPath
+from typing import Any
 
 from everos.core.utils.datetime import from_iso_format
 from everos.infra.persistence import app_id_from_dir, project_id_from_dir
@@ -38,24 +40,36 @@ def content_sha256(named_parts: dict[str, str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+_OWNER_BY_SCOPE_DIR: dict[str, tuple[str, str]] = {
+    "users": ("user", "user_id"),
+    "agents": ("agent", "agent_id"),
+    "groups": ("group", "group_id"),
+}
+"""Scope directory -> ``(owner_type, frontmatter field holding the owner id)``."""
+
+
 def resolve_owner(frontmatter: dict[str, object], md_path: str) -> tuple[str, str]:
     """Pull ``owner_id`` / ``owner_type`` from the frontmatter + path.
 
     Layout is ``<app>/<project>/<scope>/<owner>/...``, so ``owner_type`` is
-    encoded by the **scope segment** (path index 2: ``users`` → ``"user"``,
-    ``agents`` → ``"agent"``) — NOT the path prefix, which now leads with
-    ``<app>/<project>``. ``owner_id`` rides on the user_id / agent_id
-    frontmatter field.
+    encoded by the **scope segment** (path index 2: ``users`` -> ``"user"``,
+    ``agents`` -> ``"agent"``, ``groups`` -> ``"group"``) -- NOT the path
+    prefix, which leads with ``<app>/<project>``. ``owner_id`` rides on the
+    scope's own frontmatter field (``user_id`` / ``agent_id`` / ``group_id``).
+
+    Raises:
+        ValueError: The scope segment is none of the three. Indexing such a
+            file as a user (the old fallback) would give its rows an empty or
+            foreign owner id -- a group file would have landed in the index as
+            a user with no id -- so the worker records it as unrecoverable.
     """
     parts = PurePosixPath(md_path).parts
     scope_dir = parts[2] if len(parts) > 2 else ""
-    if scope_dir == "agents":
-        owner_type = "agent"
-        owner_id = str(frontmatter.get("agent_id", ""))
-    else:
-        owner_type = "user"
-        owner_id = str(frontmatter.get("user_id", ""))
-    return owner_id, owner_type
+    try:
+        owner_type, id_field = _OWNER_BY_SCOPE_DIR[scope_dir]
+    except KeyError:
+        raise ValueError(f"no owner scope directory in {md_path!r}") from None
+    return str(frontmatter.get(id_field, "")), owner_type
 
 
 def resolve_scope(md_path: str) -> tuple[str, str]:
@@ -118,3 +132,24 @@ def parse_inline_list(raw: str) -> list[str]:
     if not body:
         return []
     return [tok.strip() for tok in body.split(",") if tok.strip()]
+
+
+def group_columns(
+    owner_type: str, inline: Mapping[str, str], timestamp: _dt.datetime
+) -> dict[str, Any]:
+    """The attribution and window columns of one row (docs/group-memory.md, 6.3).
+
+    A group row always carries ``source_start`` / ``source_end`` -- falling
+    back to the entry's ``timestamp`` -- because a group read compares them
+    with the asker's membership windows. A one-to-one row gets none of them, so
+    it projects exactly as it did before groups existed and reads the defaults
+    (``[]``, ``None``, ``timestamp``).
+    """
+    if owner_type != "group":
+        return {}
+    return {
+        "subject_ids": parse_inline_list(inline.get("subject_ids", "")),
+        "origin": inline.get("origin") or None,
+        "source_start": optional_iso_timestamp(inline.get("source_start")) or timestamp,
+        "source_end": optional_iso_timestamp(inline.get("source_end")) or timestamp,
+    }

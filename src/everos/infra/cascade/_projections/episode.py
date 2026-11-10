@@ -21,6 +21,9 @@ writers must match):
   wrote before pictures existed has no such line, which reads as "none".
 - ``sender_ids``: ``[u_a, u_b]`` rendered shape from
   ``_render_value`` (optional; defaults to empty list).
+- ``source_start`` / ``subject_ids`` / ``origin`` (group episodes only, see
+  :func:`._common.group_columns`): the segment's first message, whom it is
+  about, whose messages it rests on.
 
 ``sections``:
 
@@ -43,12 +46,12 @@ from typing import Any
 from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
 from everos.infra.persistence.records import Episode, ParentType
 
-from ._common import parse_inline_list, require_iso_timestamp
+from ._common import group_columns, parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
 
 
 class EpisodeHandler(BaseDailyLogHandler):
-    """Cascade handler for ``users/<u>/episodes/episode-*.md``."""
+    """Cascade handler for ``users/<u>/`` and ``groups/<g>/episodes/episode-*.md``."""
 
     kind = "episode"
 
@@ -96,6 +99,7 @@ class EpisodeHandler(BaseDailyLogHandler):
         # BM25 tokenization covers both body and subject keywords.
         tokenize_source = f"{text} {subject_text}" if subject_text else text
         tokens = self._deps.tokenizer.tokenize(tokenize_source)
+        timestamp = require_iso_timestamp(s.inline.get("timestamp"))
 
         return Episode(
             id=f"{owner_id}_{entry.entry_id}",
@@ -105,7 +109,7 @@ class EpisodeHandler(BaseDailyLogHandler):
             app_id=app_id,
             project_id=project_id,
             session_id=s.inline.get("session_id"),
-            timestamp=require_iso_timestamp(s.inline.get("timestamp")),
+            timestamp=timestamp,
             parent_type=s.inline.get("parent_type") or ParentType.MEMCELL.value,
             parent_id=s.inline.get("parent_id", ""),
             sender_ids=parse_inline_list(s.inline.get("sender_ids", "")),
@@ -116,5 +120,6 @@ class EpisodeHandler(BaseDailyLogHandler):
             episode_tokens=" ".join(tokens),
             md_path=md_path,
             content_sha256=entry.content_sha256,
+            **group_columns(owner_type, s.inline, timestamp),
             **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

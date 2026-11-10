@@ -5,6 +5,7 @@ Single root directory holding all persisted memory:
     User-visible (no dot prefix, edited by humans / agents):
         agents/      per-agent records
         users/       per-user records
+        groups/      per-group records (group.md roster log, group episodes)
         knowledge/   global shared knowledge
 
     System-managed (dotfile prefix, hidden by default in ls / Finder):
@@ -141,6 +142,18 @@ class MemoryRoot:
     def users_dir(self, app_id: str = "default", project_id: str = "default") -> Path:
         """``<root>/<app>/<project>/users/`` — per-user records."""
         return self.root / app_dir_name(app_id) / project_dir_name(project_id) / "users"
+
+    def groups_dir(self, app_id: str = "default", project_id: str = "default") -> Path:
+        """``<root>/<app>/<project>/groups/`` -- per-group records.
+
+        A group is a third owner type next to users and agents
+        (docs/group-memory.md, D1): ``groups/<group_id>/group.md`` holds its
+        meta and roster log, and its episodes and picture memories sit under it
+        exactly as a user's do.
+        """
+        return (
+            self.root / app_dir_name(app_id) / project_dir_name(project_id) / "groups"
+        )
 
     def knowledge_dir(
         self, app_id: str = "default", project_id: str = "default"

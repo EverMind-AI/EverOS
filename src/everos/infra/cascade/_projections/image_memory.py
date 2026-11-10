@@ -40,14 +40,19 @@ from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import VECTOR_PROJECTIONS, IndexRepository
 from everos.infra.persistence.records import ImageMemory, ParentType
 
-from ._common import optional_int, require_iso_timestamp
+from ._common import (
+    group_columns,
+    optional_int,
+    parse_inline_list,
+    require_iso_timestamp,
+)
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
 
 logger = get_logger(__name__)
 
 
 class ImageMemoryHandler(BaseDailyLogHandler):
-    """Cascade handler for ``users/<u>/images/image-*.md``."""
+    """Cascade handler for ``users/<u>/`` and ``groups/<g>/images/image-*.md``."""
 
     kind = "image_memory"
 
@@ -135,6 +140,10 @@ class ImageMemoryHandler(BaseDailyLogHandler):
         s = entry.structured
         description = s.sections.get("Description", "").strip()
         ocr = s.sections.get("OCR", "").strip()
+        timestamp = require_iso_timestamp(s.inline.get("timestamp"))
+        group = group_columns(owner_type, s.inline, timestamp)
+        if group:
+            group["sender_ids"] = parse_inline_list(s.inline.get("sender_ids", ""))
 
         return ImageMemory(
             id=f"{owner_id}_{entry.entry_id}",
@@ -144,7 +153,7 @@ class ImageMemoryHandler(BaseDailyLogHandler):
             app_id=app_id,
             project_id=project_id,
             session_id=s.inline.get("session_id"),
-            timestamp=require_iso_timestamp(s.inline.get("timestamp")),
+            timestamp=timestamp,
             parent_type=s.inline.get("parent_type") or ParentType.MEMCELL.value,
             parent_id=s.inline.get("parent_id", ""),
             image_id=s.inline.get("image_id", ""),
@@ -159,5 +168,6 @@ class ImageMemoryHandler(BaseDailyLogHandler):
             ocr_tokens=" ".join(self._deps.tokenizer.tokenize(ocr)) if ocr else "",
             md_path=md_path,
             content_sha256=entry.content_sha256,
+            **group,
             **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

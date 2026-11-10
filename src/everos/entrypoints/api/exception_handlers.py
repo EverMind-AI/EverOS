@@ -93,6 +93,7 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
         log=("error", "memory_delete_incomplete"),
     ),
     errors.NotFoundError: _Rule(404, ErrorCode.NOT_FOUND),
+    errors.ForbiddenError: _Rule(403, ErrorCode.FORBIDDEN),
     errors.ConflictError: _Rule(409, ErrorCode.CONFLICT),
     errors.ExtractionEmptyError: _Rule(422, ErrorCode.EXTRACTION_EMPTY),
     errors.InvalidInputError: _Rule(422, ErrorCode.INVALID_INPUT),

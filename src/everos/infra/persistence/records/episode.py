@@ -89,5 +89,20 @@ class Episode(IndexRecord):
     consolidated into a cluster. Value is the cluster entry_id that
     supersedes this row. ``NULL`` means the row is still active."""
 
+    # Group attribution and the membership-window columns
+    # (docs/group-memory.md, section 6.3). Filled for ``owner_type = group``
+    # rows; a one-to-one row leaves them empty and reads ``source_start`` /
+    # ``source_end`` as ``timestamp``.
+    subject_ids: list[str] = Field(default_factory=list)
+    """Members the episode is about."""
+    origin: str | None = None
+    """``member`` / ``assistant`` / ``mixed``."""
+    source_start: _dt.datetime | None = None
+    """The segment's first message. A group read compares it with the asker's
+    window start: ``source_start >= from``."""
+    source_end: _dt.datetime | None = None
+    """The segment's last message (the episode's ``timestamp``); compared with
+    the window end: ``source_end < to``."""
+
     vector: DenseVector | None = None
     subject_vector: DenseVector | None = None

@@ -24,6 +24,9 @@ from everos.infra.persistence.markdown import (
     BaseFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
+    GroupEpisodeDailyFrontmatter,
+    GroupFrontmatter,
+    GroupImageMemoryDailyFrontmatter,
     ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
@@ -46,6 +49,7 @@ from ._projections import (
     AtomicFactHandler,
     EpisodeHandler,
     ForesightHandler,
+    GroupRosterHandler,
     Handler,
     HandlerDeps,
     ImageMemoryHandler,
@@ -139,6 +143,27 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=UserProfileFrontmatter,
         index_schema=UserProfile,
         handler_factory=UserProfileHandler,
+    ),
+    # Group-owned kinds (docs/group-memory.md, D1). The daily logs project
+    # into the same tables as the user kinds -- the owner columns tell them
+    # apart -- and group.md projects into the SQLite roster mirror only.
+    KindSpec(
+        name="group_episode",
+        frontmatter_schema=GroupEpisodeDailyFrontmatter,
+        index_schema=Episode,
+        handler_factory=EpisodeHandler,
+    ),
+    KindSpec(
+        name="group_image_memory",
+        frontmatter_schema=GroupImageMemoryDailyFrontmatter,
+        index_schema=ImageMemory,
+        handler_factory=ImageMemoryHandler,
+    ),
+    KindSpec(
+        name="group_roster",
+        frontmatter_schema=GroupFrontmatter,
+        handler_factory=GroupRosterHandler,
+        index_schema=None,
     ),
     KindSpec(
         name="knowledge_document",

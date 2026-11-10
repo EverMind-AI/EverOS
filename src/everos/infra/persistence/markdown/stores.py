@@ -61,6 +61,8 @@ from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
     ForesightWriter,
+    GroupEpisodeWriter,
+    GroupImageMemoryWriter,
     ImageMemoryWriter,
     ProfileWriter,
 )
@@ -98,10 +100,26 @@ class _DailyLogStore[T]:
         root: MemoryRoot,
         writer: BaseDailyWriter,
         to_entry: Callable[[T], EntryBody],
+        *,
+        group_writer: BaseDailyWriter | None = None,
     ) -> None:
         self._root = root
         self._writer = writer
+        self._group_writer = group_writer
         self._to_entry = to_entry
+
+    def _writer_for(self, scope: Scope) -> BaseDailyWriter:
+        """The writer of ``scope``'s owner type: its files and its id prefix.
+
+        A group owns only the kinds that declare a group writer (episodes and
+        picture memories); every other kind refuses a group scope, so nothing
+        can write, say, an atomic fact under ``groups/``.
+        """
+        if scope.owner_type != "group":
+            return self._writer
+        if self._group_writer is None:
+            raise ValueError(f"{self._KIND} has no group-owned records")
+        return self._group_writer
 
     async def _append_many(
         self,
@@ -114,7 +132,7 @@ class _DailyLogStore[T]:
         async with LOCKS.hold("owner", owner_lock(scope)):
             if not await self._sources_alive(scope, only_if, len(items)):
                 return []
-            eids = await self._writer.append_entries(
+            eids = await self._writer_for(scope).append_entries(
                 scope.owner_id,
                 [self._to_entry(item) for item in items],
                 app_id=scope.app_id,
@@ -137,7 +155,7 @@ class _DailyLogStore[T]:
             if not await self._sources_alive(scope, only_if, len(entries)):
                 return False
             for md_path, replaced in by_file.items():
-                await self._writer.patch_frontmatter(
+                await self._writer_for(scope).patch_frontmatter(
                     self._root.root / md_path, {"deprecated_entries": replaced}
                 )
         return True
@@ -187,7 +205,7 @@ class _DailyLogStore[T]:
         """Remove the selected entries of one file under the owner lock."""
         key = owner_lock(scope)
         async with LOCKS.hold("owner", key):
-            removed = await self._writer.remove_entries(path, drop)
+            removed = await self._writer_for(scope).remove_entries(path, drop)
             if removed:
                 LOCKS.bump_delete_count(key)
         md_path = _relative(self._root, path)
@@ -220,9 +238,11 @@ class _DailyLogStore[T]:
         return found
 
     def _folder(self, scope: Scope) -> Path:
-        return self._writer.path_for(
-            scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
-        ).parent
+        return (
+            self._writer_for(scope)
+            .path_for(scope.owner_id, app_id=scope.app_id, project_id=scope.project_id)
+            .parent
+        )
 
     async def _daily_files(self, scope: Scope) -> list[Path]:
         folder = anyio.Path(self._folder(scope))
@@ -247,12 +267,12 @@ class _DailyLogStore[T]:
             day = EntryId.parse(entry_id).date
         except ValueError:
             return None  # not an id this store ever minted
-        return self._writer.path_for(
+        return self._writer_for(scope).path_for(
             scope.owner_id, day, app_id=scope.app_id, project_id=scope.project_id
         )
 
     def _ref(self, scope: Scope, eid: EntryId) -> MemoryRef:
-        path = self._writer.path_for(
+        path = self._writer_for(scope).path_for(
             scope.owner_id,
             eid.date,
             app_id=scope.app_id,
@@ -267,7 +287,7 @@ class _DailyLogStore[T]:
 
 
 class MarkdownEpisodeStore(_DailyLogStore[Episode]):
-    """Episode daily logs (``users/<id>/episodes/``).
+    """Episode daily logs (``users/<id>/episodes/``, ``groups/<id>/episodes/``).
 
     Args:
         root: Memory root the files live under.
@@ -276,7 +296,12 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
     _KIND = "episode"
 
     def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, EpisodeWriter(root), _episode_entry)
+        super().__init__(
+            root,
+            EpisodeWriter(root),
+            _episode_entry,
+            group_writer=GroupEpisodeWriter(root),
+        )
 
     async def append(
         self,
@@ -366,7 +391,7 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             if not (await _deprecations(path)).keys() & wanted:
                 continue
             async with LOCKS.hold("owner", owner_lock(scope)):
-                await self._writer.drop_deprecations(path, wanted)
+                await self._writer_for(scope).drop_deprecations(path, wanted)
 
     async def _entries(self, scope: Scope, entry_ids: Collection[str]) -> list[Entry]:
         return [entry for _, entry in await self._entries_with_paths(scope, entry_ids)]
@@ -491,7 +516,7 @@ marks, so the two can never disagree about how many occurrences there were."""
 
 
 class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
-    """Image-memory daily logs (``users/<id>/images/``).
+    """Image-memory daily logs (``users/<id>/images/``, ``groups/<id>/images/``).
 
     A picture's memory is written once per occurrence and never edited in
     place: a superseded description is a new entry that points back at the old
@@ -506,7 +531,12 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
     _KIND = "image_memory"
 
     def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, ImageMemoryWriter(root), _image_memory_entry)
+        super().__init__(
+            root,
+            ImageMemoryWriter(root),
+            _image_memory_entry,
+            group_writer=GroupImageMemoryWriter(root),
+        )
 
     async def append(
         self,
@@ -555,7 +585,9 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
             if not await self._sources_alive(scope, only_if, len(entries)):
                 return False
             for md_path, keys in by_file.items():
-                await self._writer.drop_deprecations(self._root.root / md_path, keys)
+                await self._writer_for(scope).drop_deprecations(
+                    self._root.root / md_path, keys
+                )
         return True
 
     async def entries_for_session(
@@ -873,6 +905,13 @@ def _image_memory_entry(image: ImageMemory) -> EntryBody:
         inline["name"] = image.name
     if image.session_id is not None:
         inline["session_id"] = image.session_id
+    # Group attribution; absent on a one-to-one picture memory.
+    if image.sender_ids:
+        inline["sender_ids"] = list(image.sender_ids)
+    if image.subject_ids:
+        inline["subject_ids"] = list(image.subject_ids)
+    if image.origin is not None:
+        inline["origin"] = image.origin
     sections = {"Description": image.description}
     if image.ocr:
         sections["OCR"] = image.ocr
@@ -924,6 +963,14 @@ def _episode_entry(episode: Episode) -> EntryBody:
         inline["image_ids"] = list(episode.image_ids)
     if episode.language:
         inline["language"] = episode.language
+    # Group attribution (docs/group-memory.md, section 6.1). Absent on a
+    # one-to-one episode, whose entries therefore read exactly as before.
+    if episode.source_start is not None:
+        inline["source_start"] = _iso(episode.source_start)
+    if episode.subject_ids:
+        inline["subject_ids"] = list(episode.subject_ids)
+    if episode.origin is not None:
+        inline["origin"] = episode.origin
     sections: dict[str, str] = {}
     if episode.subject:
         sections["Subject"] = episode.subject
@@ -1009,6 +1056,13 @@ def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
         parent_id=inline.get("parent_id", ""),
         parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
         image_ids=_list_field(inline.get("image_ids")),
+        subject_ids=_list_field(inline.get("subject_ids")),
+        origin=inline.get("origin") or None,
+        source_start=(
+            to_timestamp_ms(from_iso_format(inline["source_start"]))
+            if inline.get("source_start")
+            else None
+        ),
     )
 
 

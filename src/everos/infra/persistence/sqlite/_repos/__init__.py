@@ -7,6 +7,7 @@ Each is built over the session factory of the application's
 
 from .cluster import ClusterRepo as ClusterRepo
 from .forget_log import ForgetLogRepo as ForgetLogRepo
+from .group import GroupRosterRepo as GroupRosterRepo
 from .image_original import ImageOriginalRepo as ImageOriginalRepo
 from .knowledge import DocumentListPage as DocumentListPage
 from .knowledge import DocumentUpsertPayload as DocumentUpsertPayload
@@ -29,6 +30,7 @@ __all__ = [
     "DocumentListPage",
     "DocumentUpsertPayload",
     "ForgetLogRepo",
+    "GroupRosterRepo",
     "ImageOriginalRepo",
     "KnowledgeDocumentRepo",
     "KnowledgeTopicRowRepo",

@@ -508,7 +508,8 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
 
     Every storage collaborator is injected here; embedding is a soft
     dependency, ``None`` on a keyword-only deployment, and so is the
-    picture-side embedder (``vision_embedding``).
+    picture-side embedder (``vision_embedding``). ``group_roster`` is the
+    SQLite mirror ``group.md`` projects into.
     """
     # No instantiation needed — just verifies the dataclass shape.
     assert {
@@ -520,6 +521,7 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
         "embedding",
         "vision_embedding",
         "fence",
+        "group_roster",
     } == {f.name for f in HandlerDeps.__dataclass_fields__.values()}
 
 

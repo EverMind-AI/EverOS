@@ -75,6 +75,7 @@ from .stores import InMemoryClusterStore as InMemoryClusterStore
 from .stores import InMemoryEpisodeStore as InMemoryEpisodeStore
 from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryForgetLogStore as InMemoryForgetLogStore
+from .stores import InMemoryGroupStore as InMemoryGroupStore
 from .stores import InMemoryImageMemoryStore as InMemoryImageMemoryStore
 from .stores import InMemoryImageStore as InMemoryImageStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
@@ -105,6 +106,7 @@ __all__ = [
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
     "InMemoryForgetLogStore",
+    "InMemoryGroupStore",
     "InMemoryImageMemoryIndex",
     "InMemoryImageMemoryStore",
     "InMemoryImageStore",

@@ -92,7 +92,7 @@ deployment and is written first; ``subject_vector`` comes from the same model
 and is not recorded separately.
 """
 
-_TABLE_SCHEMA_VERSION = 3
+_TABLE_SCHEMA_VERSION = 4
 """Bump when column nullability or presence changes on business tables.
 
 v2 = ``vector: DenseVector | None`` on the 6 business tables that carry
@@ -110,6 +110,13 @@ already has pictures is ``everos cascade rebuild`` (it re-projects from md
 into empty tables) rather than a restart. A deployment that never turns
 ``[vision_embedding]`` on never needs the column filled at all — the visual
 route skips NULL rows.
+
+v4 = the group-memory columns (docs/group-memory.md, section 6.3):
+``episode.subject_ids / origin / source_start / source_end`` and
+``image_memory.sender_ids / subject_ids / origin / source_start / source_end``.
+Added nullable; an existing row holds NULL and reads ``[]`` / ``None`` /
+``timestamp``. Only rows a group owns are ever compared on the window columns,
+and those are written with them.
 
 :meth:`migrate_table_schemas` dispatches through :data:`_MIGRATIONS`, one
 coroutine per version, so a new version is one entry — not an edit to a
@@ -388,6 +395,52 @@ class LanceIndexBackend:
                 f"stopped (it re-indexes from md)."
             ) from exc
 
+    async def _migrate_v4_group_columns(self) -> None:
+        """v4 -- add the group-memory columns to ``episode`` and ``image_memory``.
+
+        Additive and metadata-only, like v3. Each column is added nullable even
+        where the record declares a list: existing rows get NULL, which the read
+        side takes as the empty default. A column already there is skipped, so
+        a store created at v4 (or a retry after a partial step) is a no-op.
+        """
+        wanted = {
+            Episode: ("subject_ids", "origin", "source_start", "source_end"),
+            ImageMemory: (
+                "sender_ids",
+                "subject_ids",
+                "origin",
+                "source_start",
+                "source_end",
+            ),
+        }
+        for schema, names in wanted.items():
+            table = await self._open(schema)
+            on_disk = await table.schema()
+            expected = self._arrow_schema(schema)
+            missing = [
+                pa.field(name, expected.field(name).type, nullable=True)
+                for name in names
+                if name not in on_disk.names
+            ]
+            if not missing:
+                continue
+            try:
+                await table.add_columns(pa.schema(missing))
+            except Exception as exc:
+                logger.error(
+                    "table_schema_migration_add_column_failed",
+                    table=schema.TABLE_NAME,
+                    column=",".join(f.name for f in missing),
+                    error=str(exc),
+                )
+                raise LanceDBMigrationError(
+                    f"LanceDB v4 migration could not add the group columns to "
+                    f"{schema.TABLE_NAME!r}: {exc}. Startup aborted rather than "
+                    f"running against a table whose window columns are missing. "
+                    f"Retry; if it persists, run `everos cascade rebuild` with the "
+                    f"server stopped (it re-indexes from md)."
+                ) from exc
+
     # TODO(#477): BTree scalar index on `id` for the business tables — a 4x
     # win on keyed lookups at 100k rows, but it must join rebuild_indexes()
     # and `cascade rebuild` first and be soaked for index-directory growth.
@@ -530,6 +583,7 @@ class LanceIndexBackend:
 _MIGRATIONS: dict[int, Callable[[LanceIndexBackend], Awaitable[None]]] = {
     2: LanceIndexBackend._migrate_v2_nullable_vector,
     3: LanceIndexBackend._migrate_v3_visual_vector,
+    4: LanceIndexBackend._migrate_v4_group_columns,
 }
 """One coroutine per target version, run in order by
 :meth:`LanceIndexBackend.migrate_table_schemas`.

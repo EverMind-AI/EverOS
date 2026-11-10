@@ -37,6 +37,7 @@ from everos.memory.ports import (
     EpisodeStore,
     ForesightStore,
     ForgetLogStore,
+    GroupStore,
     ImageMemoryIndex,
     ImageMemoryStore,
     ImageStore,
@@ -75,6 +76,7 @@ class Stores:
     reflection_report: ReflectionReportStore
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
+    groups: GroupStore
 
 
 @dataclass(frozen=True)

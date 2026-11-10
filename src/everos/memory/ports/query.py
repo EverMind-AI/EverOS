@@ -53,7 +53,13 @@ from everos.memory.models import KnowledgeTopic
 
 type Scalar = str | int | float | bool | dt.datetime
 type ComparisonOperator = Literal["eq", "ne", "gt", "gte", "lt", "lte"]
-type OwnerType = Literal["user", "agent"]
+type OwnerType = Literal["user", "agent", "group"]
+"""Who a record belongs to: a user, an agent, or a group (docs/group-memory.md, D1).
+
+A group owns the memory its conversations produce under ``groups/<group_id>/``;
+``owner_id`` is then the ``group_id``. Which group records an asker may read is
+decided by :mod:`everos.memory.access`, never by the owner filter alone.
+"""
 
 
 # ── Filter tree ──────────────────────────────────────────────────────────

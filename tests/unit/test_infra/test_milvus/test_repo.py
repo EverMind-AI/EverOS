@@ -544,6 +544,11 @@ _EPISODE_PHYSICAL = (
     ("md_path", DataType.VARCHAR, "", 65535),
     ("content_sha256", DataType.VARCHAR, "", 65535),
     ("deprecated_by", DataType.VARCHAR, "nullable", 65535),
+    # Group attribution and the membership-window columns (group memory).
+    ("subject_ids", DataType.ARRAY, "", 512),
+    ("origin", DataType.VARCHAR, "nullable", 65535),
+    ("source_start_ms", DataType.INT64, "nullable", None),
+    ("source_end_ms", DataType.INT64, "nullable", None),
     ("vector", DataType.FLOAT_VECTOR, "", None),
     ("vector__present", DataType.BOOL),
     ("subject_vector", DataType.FLOAT_VECTOR, "", None),
@@ -573,7 +578,7 @@ def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
         assert _flag(field) == row[2], field.name
         assert field.max_length == row[3], field.name
 
-    for name in ("sender_ids", "image_ids"):
+    for name in ("sender_ids", "image_ids", "subject_ids"):
         array = next(f for f in actual if f.name == name)
         assert array.element_type is DataType.VARCHAR, name
         assert array.max_capacity == 256, name

@@ -29,6 +29,7 @@ class ErrorCode(StrEnum):
     """
 
     NOT_FOUND = "NOT_FOUND"
+    FORBIDDEN = "FORBIDDEN"
     CONFLICT = "CONFLICT"
     INVALID_INPUT = "INVALID_INPUT"
     EXTRACTION_EMPTY = "EXTRACTION_EMPTY"
@@ -74,8 +75,27 @@ class TopicNotFoundError(NotFoundError):
     """A knowledge topic with the given identifier was not found."""
 
 
+class ForbiddenError(DomainError):
+    """The asker may not perform this action, or may not read this scope.
+
+    Raised only where the asker is allowed to know that the target exists (a
+    group they named, a personal scope that is not theirs). A record or a
+    picture the asker cannot see is not forbidden but absent: that is a
+    :class:`NotFoundError` with the same message as a missing one
+    (docs/group-memory.md, section 9.1).
+    """
+
+
 class ConflictError(DomainError):
     """An operation conflicts with existing state (e.g. duplicate resource)."""
+
+
+class RosterConflictError(ConflictError):
+    """A roster event contradicts the membership intervals it would change.
+
+    A ``join`` for a member with an open interval, or a ``leave`` / ``update``
+    for one without; also a session already bound to another group.
+    """
 
 
 class DuplicateDocumentError(ConflictError):
