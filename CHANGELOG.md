@@ -165,14 +165,23 @@ machinery that keeps a deleted memory from coming back.
   profile language. The language is now resolved in code from the session's
   human messages and named in every prompt of the cell (episode on both
   routes, picture descriptions, picture profile items, atomic facts, profile,
-  foresight): one vote per message, picture references and code blocks
+  foresight): one vote per message, picture references, code blocks and links
   ignored, and a cell with too little text of its own (a picture with no
   caption) reads its session's earlier cells (`MemcellStore.recent_in_session`).
+  A group segment gets its language the same way, named to the group
+  episode on both routes and carried on to the poster's member-in-group
+  picture items, the member-in-group profile updates (an update on a flush
+  resolves it from the segments it reads) and the scene narratives.
   Only a session without a letter anywhere still leaves the choice to the
   model. An explicit language is honoured as before: a profile's stored
   `primary_language` still wins. Language detection also stopped reading long
   English text as Spanish or German on two accented names: German and Spanish
-  markers must now outnumber English function words too.
+  markers must now outnumber English function words too. The one-to-one
+  golden (`tests/fixtures/one_to_one_golden/golden.json`) is regenerated: its
+  fake model writes a digest of the prompt into the episode, so naming the
+  language changes the episode text and what derives from it (content
+  hashes, vector digests, search scores and order); its events, adds and
+  picture memories are unchanged.
 - `/add` and `/flush` no longer leave half-written state when a SQLite write
   lock times out: boundary detection records the memcells, the session's
   status and the remaining buffer in one transaction. Before, a timeout at

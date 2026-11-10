@@ -11,7 +11,10 @@ model. What these pin:
   segments, and a flush of the group runs every pending update;
 - two concurrent updates of one member lose no item (the per-member lock);
   updates of two members run in parallel;
-- a replayed event does not count its segment twice.
+- a replayed event does not count its segment twice;
+- the operator is told a language, never left to choose one: the event's
+  (the group pipeline's resolved language), a flush's resolved from the
+  segments it reads, a stored ``primary_language`` over either.
 """
 
 from __future__ import annotations
@@ -102,7 +105,9 @@ def _segment(deps: Any, memcell_id: str, at: int, *lines: tuple[str, str]) -> No
     )
 
 
-def _event(memcell_id: str, *speakers: str) -> GroupEpisodeExtracted:
+def _event(
+    memcell_id: str, *speakers: str, language: str | None = None
+) -> GroupEpisodeExtracted:
     return GroupEpisodeExtracted(
         memcell_id=memcell_id,
         episode_entry_id=f"gep_{memcell_id}",
@@ -112,7 +117,13 @@ def _event(memcell_id: str, *speakers: str) -> GroupEpisodeExtracted:
         app_id="default",
         project_id="p",
         speaker_ids=list(speakers),
+        language=language,
     )
+
+
+_FLUSHED = GroupFlushed(
+    group_id="trip", app_id="default", project_id="p", session_id="s"
+)
 
 
 @pytest.fixture
@@ -182,10 +193,7 @@ async def test_updates_wait_for_member_profile_every_and_run_at_flush(
     assert chen is not None and chen.pending_memcell_ids == ["mc_1", "mc_2"]
     assert chen.profile.explicit_info == [] and model.prompts == []
 
-    await update_member_profiles(
-        GroupFlushed(group_id="trip", app_id="default", project_id="p", session_id="s"),
-        deps,
-    )
+    await update_member_profiles(_FLUSHED, deps)
     chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
     assert chen is not None and chen.pending_memcell_ids == []
     assert len(chen.profile.explicit_info) == 1
@@ -229,3 +237,49 @@ async def test_updates_of_two_members_run_in_parallel(every: Any) -> None:
     assert sorted(model.waiting) == ["Betty", "Chen"]  # both calls in flight
     gate.set()
     await asyncio.wait_for(run, timeout=5)
+
+
+async def test_an_update_is_told_the_event_s_language(every: Any) -> None:
+    every(1)
+    model = _ProfileModel()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "I'll book the flights for all of us"))
+
+    await update_member_profiles(_event("mc_1", "u_chen", language="English"), deps)
+
+    (prompt,) = model.prompts
+    assert "Write every output field in English" in prompt
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.profile.primary_language == "English"
+
+
+async def test_a_flush_update_resolves_the_language_from_its_segments(
+    every: Any,
+) -> None:
+    """A flush brings no language; the segments it reads decide, in code."""
+    every(5)
+    model = _ProfileModel()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "我来订机票，大家记得带好护照和充电器。"))
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+    assert model.prompts == []  # queued, below member_profile_every
+
+    await update_member_profiles(_FLUSHED, deps)
+
+    (prompt,) = model.prompts
+    assert "Write every output field in Chinese" in prompt
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.profile.primary_language == "Chinese"
+
+
+async def test_a_stored_language_wins(every: Any) -> None:
+    every(1)
+    model = _ProfileModel()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "I'll book the flights for all of us"))
+    await update_member_profiles(_event("mc_1", "u_chen", language="German"), deps)
+    _segment(deps, "mc_2", 2_000, ("u_chen", "Bring your passports and chargers"))
+
+    await update_member_profiles(_event("mc_2", "u_chen", language="English"), deps)
+
+    assert "Write every output field in German" in model.prompts[-1]

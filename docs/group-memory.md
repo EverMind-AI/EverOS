@@ -1425,6 +1425,16 @@ The second half of Step 1 differs from the text above in these places:
 - **Episode reader.** Episodes read back from markdown now keep `sender_ids`
   and `language`. Scenes need the members' senders, and an undo used to drop
   both.
+- **Conversation language.** Every group extraction call is told the
+  conversation's language, resolved in code as on the one-to-one path: from
+  the segment's human messages, and from its session's earlier segments when
+  it has too little text of its own. The group episode on both routes, the
+  poster's picture profile items, the member-in-group profile updates (on a
+  flush, from the segments the update reads) and the scene narratives are
+  written in it. The one-to-one golden of
+  [Section 10](#10-one-to-one-conversations-stay-unchanged) was regenerated
+  for that fix; it differs only where its fake model echoes a digest of the
+  prompt.
 
 ---
 

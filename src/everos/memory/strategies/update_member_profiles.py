@@ -24,6 +24,12 @@ group's segments are.
   each other's items, and the members of one segment update in parallel.
 - **Sources.** Every new or rewritten item records the segments it was read
   from and their span; items the update dropped move to the history.
+- **Language.** A stored ``primary_language`` wins, as for ``user.md``. Until
+  one is stored, an update that a segment's event runs is told that event's
+  language -- the conversation's, resolved in code by the group pipeline --
+  and an update on :class:`GroupFlushed`, which brings no language, resolves
+  it the same way from the segments it reads. Never left to the model, unless
+  no segment has a letter in it.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import member_profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
+from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import (
     HISTORY_LIMIT,
@@ -152,7 +159,7 @@ async def _update(
     roster = record.roster if record is not None else Roster()
     existing = profile.profile
     old = existing if existing.explicit_info or existing.implicit_traits else None
-    output_language = existing.primary_language or language
+    output_language = existing.primary_language or language or _language_of(segments)
     extracted = await ProfileExtractor(llm=deps.llm).aextract(
         [label_cell(cell, roster) for _, cell in segments],
         sender_id=member_id,
@@ -183,6 +190,12 @@ async def _update(
             "history": [*replaced, *profile.history][:HISTORY_LIMIT],
         }
     )
+
+
+def _language_of(segments: list[tuple[str, MemCell]]) -> str | None:
+    """The segments' conversation language, newest first, as a cell's is read."""
+    found = conversation_language([cell for _, cell in reversed(segments)])
+    return None if found is None else str(found)
 
 
 def _first_message(cell: MemCell) -> int:

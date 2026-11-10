@@ -9,6 +9,8 @@ these pin:
   members of one origin keep it, mixed ones read ``mixed``;
 - a replay writes nothing new, and a retry after a failed narrative call
   still writes the version (the episode was placed before the call failed);
+- the narrative is written in the language the event names (the group
+  pipeline's resolved language), on INIT and on UPDATE;
 - without an embedder the strategy does nothing.
 """
 
@@ -78,7 +80,9 @@ async def _episode(deps: Any, n: int, *, origin: str, sender: str) -> str:
     return ref.entry_id
 
 
-def _event(entry_id: str, n: int) -> GroupEpisodeExtracted:
+def _event(
+    entry_id: str, n: int, *, language: str | None = None
+) -> GroupEpisodeExtracted:
     return GroupEpisodeExtracted(
         memcell_id=f"mc_{n}",
         episode_entry_id=entry_id,
@@ -87,6 +91,7 @@ def _event(entry_id: str, n: int) -> GroupEpisodeExtracted:
         group_id="trip",
         app_id="default",
         project_id="p",
+        language=language,
     )
 
 
@@ -134,6 +139,19 @@ async def test_a_retry_after_a_failed_narrative_writes_the_version() -> None:
     (v1,) = deps.stores.scene.versions
     assert v1.item.member_ids == [first, second]
     assert v1.item.origin == "member"
+
+
+async def test_the_narrative_is_written_in_the_event_s_language() -> None:
+    reflector = _Reflector()
+    deps = make_deps(llm=FakeLLMClient(handler=reflector), embedding=_Same())
+    for n in (1, 2, 3):
+        entry = await _episode(deps, n, origin="member", sender="u_chen")
+        await update_group_scenes(_event(entry, n, language="English"), deps)
+
+    assert len(reflector.calls) == 2  # INIT, then UPDATE
+    for prompt in reflector.calls:
+        assert "Write every output field in English" in prompt
+    assert {v.item.language for v in deps.stores.scene.versions} == {"English"}
 
 
 async def test_without_an_embedder_nothing_happens() -> None:

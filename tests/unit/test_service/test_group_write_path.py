@@ -16,6 +16,10 @@ scripted model (``tests/helpers/groups.py``). What these pin:
   ``users/``;
 - a picture writes one group picture memory with ``sender_ids = [poster]``,
   and its profile items reach only the poster's member-in-group profile;
+- the extraction call is told the group's language, resolved from its human
+  messages -- for a picture-only segment, from the session's earlier
+  segments -- and that language, not the reply's, is what the episode and
+  its event carry;
 - in agent mode a group cell also reaches the agent pipeline, and the event
   names the group, so a case learned from it carries ``source_group_id``.
 """
@@ -304,6 +308,34 @@ async def test_a_picture_is_one_group_memory_and_reaches_only_its_poster(
             "u_betty"
         ]
         assert not (tmp_path / "default_app" / PROJECT / "users").exists()
+
+
+async def test_a_picture_only_segment_is_told_the_group_s_language(
+    tmp_path: Path,
+) -> None:
+    # The reply drifts into Chinese; the conversation is English.
+    model = _Model("Betty 发来一张她的猫的照片（img-1）。")
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        await _roster(world)
+        await _send(world, "s_group", *_THREE)
+        picture = {
+            "type": "image",
+            "base64": base64.b64encode(png(90)).decode("ascii"),
+            "ext": "png",
+            "name": "cat.png",
+        }
+        await _send(world, "s_group", _message("u_betty", 9_000, [picture]))
+
+        assert len(model.episode_prompts) == 2
+        for prompt in model.episode_prompts:
+            assert "Write every output field in English" in prompt
+            assert "the language the participants use" not in prompt
+        episodes = await _group_episodes(world)
+        assert [e.language for e in episodes] == ["English", "English"]
+        languages = [
+            e.language for e in world.bus.events if isinstance(e, GroupEpisodeExtracted)
+        ]
+        assert languages == ["English", "English"]
 
 
 async def test_in_agent_mode_a_group_cell_reaches_the_agent_track_with_its_group(

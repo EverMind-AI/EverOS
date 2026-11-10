@@ -15,6 +15,15 @@ code sets the attribution fields (``sender_ids`` / ``subject_ids`` /
 ``origin``) and the segment's span (``source_start`` / ``timestamp``), which
 every read compares with the asker's membership windows.
 
+The language is the conversation's, resolved in code before the call exactly
+as on the one-to-one path (:mod:`everos.memory.extract.conversation_language`):
+the segment's human messages, and its session's earlier segments when it has
+too little text of its own. It is named to the model on both routes, so the
+picture descriptions and the poster's picture profile items get it too, and it
+pins the episode and its event, which carry it on to the member-in-group
+profiles and the scenes. Only a session without a letter anywhere leaves the
+choice to the model; then the language its episode was written in is pinned.
+
 Every cell announces its episode as :class:`GroupEpisodeExtracted`, which the
 group strategies consume (member-in-group profiles, scenes). None of the
 one-to-one events is published: those would run the personal strategies on
@@ -29,7 +38,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
-from everalgo.user_memory import EpisodeExtractor
+from everalgo.user_memory import EpisodeExtractor, OutputLanguage
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
@@ -37,6 +46,7 @@ from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import GroupEpisodeExtracted
+from everos.memory.extract.conversation_language import resolve_cell_language
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline import image_memory as image_extract
 from everos.memory.extract.pipeline import profile_delta
@@ -74,6 +84,7 @@ from everos.memory.ports import (
     MemcellStore,
     MemoryRef,
     Scope,
+    SessionKey,
 )
 from everos.memory.ports.images import ImageStore
 
@@ -154,6 +165,16 @@ class GroupMemoryPipeline:
             if record is not None
             else Group(group_id=scope.owner_id, created_at=cell.timestamp)
         )
+        # Named to the model, never left to it: the conversation's language,
+        # resolved from the human messages as on the one-to-one path.
+        named = await resolve_cell_language(
+            cell,
+            memcell_id=prepared.memcell_id,
+            session=SessionKey(
+                ingested.app_id, ingested.project_id, ingested.session_id
+            ),
+            memcells=self._memcell_store,
+        )
         pictures = await pictures_of(
             cell, images=self._images, limits=self._image_limits
         )
@@ -162,9 +183,15 @@ class GroupMemoryPipeline:
             roster_block(group, roster, cell),
         )
         algo_ep, described, ops = await self._extract(
-            ingested, prepared, label_cell(cell, roster), pictures, custom
+            ingested, prepared, label_cell(cell, roster), pictures, custom, named
         )
-        language = detect_output_language(algo_ep.episode)
+        # That language pins the episode, its picture profile items and its
+        # event, so the member-in-group profiles and the scenes follow it.
+        # Only a conversation without a letter in it left the choice to the
+        # model; then what it chose is read off the episode.
+        language = (
+            str(named) if named is not None else detect_output_language(algo_ep.episode)
+        )
         found = attribution(cell, roster, texts=(algo_ep.subject, algo_ep.episode))
         md_paths = await self._persist_images(
             scope, ingested, prepared, roster, pictures=pictures, described=described
@@ -216,8 +243,13 @@ class GroupMemoryPipeline:
         labelled: MemCell,
         pictures: Sequence[Picture],
         custom_instructions: str,
+        language: OutputLanguage | None,
     ) -> _Extraction:
-        """The one-to-one extraction call over the labelled cell."""
+        """The one-to-one extraction call over the labelled cell.
+
+        ``language`` is named to the model on either route; ``None`` leaves
+        it the choice.
+        """
         with memory_span(
             "everos.extract",
             observation_type="generation",
@@ -228,11 +260,12 @@ class GroupMemoryPipeline:
                 "memcell_id": prepared.memcell_id,
                 "group_id": ingested.group_id,
                 "pictures": len(pictures),
+                "output_language": None if language is None else str(language),
             },
         ) as extract_span:
             if pictures:
                 extraction = await self._extract_with_pictures(
-                    prepared, labelled, pictures, custom_instructions
+                    prepared, labelled, pictures, custom_instructions, language
                 )
             else:
 
@@ -241,6 +274,7 @@ class GroupMemoryPipeline:
                         labelled,
                         sender_id=None,
                         custom_instructions=custom_instructions,
+                        output_language=language,
                     )
 
                 episode = await retry_llm_output(
@@ -256,6 +290,7 @@ class GroupMemoryPipeline:
         labelled: MemCell,
         pictures: Sequence[Picture],
         custom_instructions: str,
+        language: OutputLanguage | None,
     ) -> _Extraction:
         labels = [(picture.label, picture.data, picture.mime) for picture in pictures]
         by_label = {picture.label: picture.image_id for picture in pictures}
@@ -266,7 +301,7 @@ class GroupMemoryPipeline:
                 labelled,
                 pictures=labels,
                 custom_instructions=custom_instructions,
-                output_language=None,
+                output_language=language,
             )
             return (
                 image_extract.to_episode(reply, labelled, labels=by_label),
