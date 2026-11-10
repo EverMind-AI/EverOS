@@ -27,7 +27,7 @@ from everalgo.types import MemCell
 from everos.config import BoundaryDetectionSettings
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.core.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp_ms
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
@@ -277,7 +277,7 @@ class BoundaryDetection:
                 )
             ],
             tail=slice_tail(merged, result.tail),
-            last_memcell_ts=from_timestamp(last_cell_ts) if last_cell_ts else None,
+            last_memcell_ts=from_timestamp_ms(last_cell_ts) if last_cell_ts else None,
         )
         return BoundaryOutcome(
             cells=list(result.cells),

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from pathlib import Path
 
 import pytest
 import structlog.testing
 
 from everos.core.locks import LOCKS, owner_key
+from everos.core.utils.datetime import from_iso_format, to_timestamp_ms
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
@@ -179,6 +181,28 @@ async def test_episode_append_returns_a_root_relative_ref(root: MemoryRoot) -> N
         "Summary": "short",
         "Content": "we talked",
     }
+
+
+async def test_episode_from_before_2001_keeps_its_date(root: MemoryRoot) -> None:
+    """Entry timestamps are epoch ms. Before 2001-09-09 the seconds/ms heuristic
+    read them as seconds (year ~32,700) and the append raised; the entry must
+    render the instant itself."""
+    when = dt.datetime(2000, 10, 6, 9, 30, tzinfo=dt.UTC)
+    episode = Episode(
+        owner_id="u1",
+        summary="",
+        episode="we talked",
+        timestamp=to_timestamp_ms(when),
+        session_id="s1",
+        parent_id="mc_1",
+    )
+
+    ref = await MarkdownEpisodeStore(root).append(
+        _user(), episode, only_if=NO_SOURCE_CHECK
+    )
+
+    entry = (await _entries(root, ref.md_path))[ref.entry_id]
+    assert from_iso_format(entry["inline"]["timestamp"]) == when
 
 
 async def test_merged_episode_has_cluster_parent_and_no_session(

@@ -26,7 +26,7 @@ from typing import Any, cast
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.core.utils.datetime import from_timestamp, get_utc_now
+from everos.core.utils.datetime import from_timestamp_ms, get_utc_now
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,
@@ -525,7 +525,7 @@ def _record_to_row(record: MemcellRecord, session: SessionKey) -> Memcell:
         message_ids_json=json.dumps(record.message_ids),
         sender_ids_json=json.dumps(record.sender_ids),
         payload_json=record.cell.model_dump_json(),
-        timestamp=from_timestamp(record.cell.timestamp),
+        timestamp=from_timestamp_ms(record.cell.timestamp),
     )
 
 

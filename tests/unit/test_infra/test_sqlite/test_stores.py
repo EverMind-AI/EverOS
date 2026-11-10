@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
-from everos.core.utils.datetime import get_utc_now
+from everos.core.utils.datetime import ensure_utc, get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     Memcell,
@@ -216,6 +216,33 @@ async def test_cut_records_the_cells_and_buffers_only_the_tail(
     assert status is not None
     assert status[0] == last_message  # cut leaves last_message_ts alone
     assert status[1] is not None
+
+
+async def test_cut_keeps_the_date_of_a_memcell_from_before_2001(
+    stores: _Stores,
+) -> None:
+    """A cell timestamp is epoch ms. Before 2001-09-09 that value is under the
+    1e12 seconds/ms threshold, and reading it through the heuristic raised (year
+    ~32,700); the memcell row must keep the instant instead."""
+    when = dt.datetime(2000, 10, 6, 9, 30, tzinfo=dt.UTC)
+    m1 = CanonicalMessage(
+        message_id="m1",
+        session_id="s1",
+        sender_id="u1",
+        role="user",
+        timestamp=when,
+        content_items=[{"type": "text", "text": "hi m1"}],
+        text="hi m1",
+    )
+    await stores.buffer.keep(_SESSION, [m1], last_message_ts=when)
+
+    await stores.buffer.cut(
+        _SESSION, [_record("mc_1", m1)], tail=[], last_memcell_ts=when
+    )
+
+    async with stores.factory() as s:
+        stored = (await s.execute(select(Memcell.timestamp))).scalar_one()
+    assert ensure_utc(stored) == when
 
 
 async def test_keep_leaves_the_last_memcell_stamp_alone(stores: _Stores) -> None:

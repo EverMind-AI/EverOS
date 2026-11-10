@@ -103,6 +103,14 @@ machinery that keeps a deleted memory from coming back.
   `vector = None`, the same soft-degrade a missing provider produces;
   `vector_backfill` re-embeds the row once the md carries content.
 
+- **A conversation dated before 2001-09-09 can be memorized.** Memcell and
+  entry timestamps are epoch milliseconds, and before 2001-09-09 such a value
+  is under the `1e12` threshold `from_timestamp` uses to tell seconds from
+  milliseconds: read through that heuristic it landed in year ~32,700 and
+  boundary detection raised `ValueError: year … is out of range`. Values
+  EverOS computes itself are now read back as milliseconds; the add API's own
+  `timestamp` keeps accepting seconds.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME

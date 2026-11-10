@@ -29,7 +29,7 @@ from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import (
     from_iso_format,
-    from_timestamp,
+    from_timestamp_ms,
     to_iso_format,
     to_timestamp_ms,
 )
@@ -900,7 +900,7 @@ def _known_language(value: str | None, *, owner_id: str) -> str | None:
 
 
 def _iso(timestamp_ms: int) -> str:
-    rendered = to_iso_format(from_timestamp(timestamp_ms))
+    rendered = to_iso_format(from_timestamp_ms(timestamp_ms))
     assert rendered is not None  # a concrete timestamp always renders
     return rendered
 
