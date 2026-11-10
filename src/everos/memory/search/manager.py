@@ -331,7 +331,9 @@ class SearchManager:
                 )
             else:  # "agent"
                 (cases, skills), unprocessed = await asyncio.gather(
-                    self._search_cases_and_skills(req, where),
+                    self._search_cases_and_skills(
+                        req, where, case_where=scope.cases_where(where)
+                    ),
                     self._load_unprocessed(req, scope),
                 )
                 data = SearchData(
@@ -392,6 +394,7 @@ class SearchManager:
                 agent_id=req.agent_id,
                 group_ids=req.scope_group_ids,
                 audience=req.audience,
+                context_group_id=req.context_group_id,
             ),
         )
 
@@ -434,24 +437,26 @@ class SearchManager:
     # ── Agent partition ─────────────────────────────────────────────
 
     async def _search_cases_and_skills(
-        self, req: SearchRequest, where: Filter
+        self, req: SearchRequest, where: Filter, *, case_where: Filter
     ) -> tuple[list[SearchAgentCaseItem], list[SearchAgentSkillItem]]:
         """Cases + skills, serial when bridging.
 
         HYBRID + LLM rerank runs serially: reranked cases feed the
         skill bridge. Every other method runs the two kinds in parallel
         with no bridge — the bridge only pays off after rerank has
-        produced high-quality case scores to inherit.
+        produced high-quality case scores to inherit. Cases are recalled
+        under ``case_where``: the read scope's group context decides which
+        of the cases the agent learned in groups join.
         """
         if _effective_llm_rerank(req):
-            cases = await self._search_agent_cases(req, where)
+            cases = await self._search_agent_cases(req, case_where)
             skills = await self._search_agent_skills(
                 req, where, case_scores={c.entry_id: c.score for c in cases}
             )
             return cases, skills
 
         cases, skills = await asyncio.gather(
-            self._search_agent_cases(req, where),
+            self._search_agent_cases(req, case_where),
             self._search_agent_skills(req, where),
         )
         return cases, skills

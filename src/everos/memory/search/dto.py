@@ -134,6 +134,11 @@ class SearchRequest(BaseModel):
     audience: Literal["asker", "group"] = "asker"
     """``asker`` (default): the asker's own view. ``group``: only what every
     current member can see -- for a reply posted to the whole group."""
+    context_group_id: str | None = Field(default=None, min_length=1)
+    """With ``agent_id`` only: read the agent's memory in this group's
+    context. Cases the agent learned in a group are returned only in that
+    group's context (docs/group-memory.md, section 9.1), to a current member
+    of it -- the agent itself unless ``asker_id`` names another."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB
@@ -190,6 +195,12 @@ class SearchRequest(BaseModel):
                 "exactly one of user_id / agent_id / group_id / group_ids "
                 "must be provided"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_context_group(self) -> SearchRequest:
+        if self.context_group_id is not None and self.agent_id is None:
+            raise ValueError("context_group_id is valid with agent_id only")
         return self
 
     @model_validator(mode="after")

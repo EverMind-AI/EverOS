@@ -616,7 +616,7 @@ class Memorizer:
             Exception: The first pipeline failure, after all cells ran.
         """
         if ingested.group_id is not None:
-            return await self._extract_group(payload, ingested, boundaries)
+            return await self._extract_group(payload, ingested, boundaries, mode=mode)
         pipelines: dict[str, Pipeline] = {"user_memory": self._user_pipeline}
         if mode == "agent":
             pipelines["agent_memory"] = self._agent_pipeline
@@ -654,13 +654,17 @@ class Memorizer:
         payload: dict[str, Any],
         ingested: IngestResult,
         boundaries: Sequence[BoundaryOutcome],
+        *,
+        mode: Mode,
     ) -> MemorizeResult:
-        """Group cells go to the group pipeline, and to nothing else.
+        """Group cells go to the group pipeline -- never the one-to-one one.
 
         The group write path (section 7): the group pipeline writes one group
-        episode per cell under ``groups/<g>/``. Without one the cells stay
-        memcells, unextracted, and the batch reads as accumulated -- never as
-        the one-to-one per-sender copies.
+        episode per cell under ``groups/<g>/``. In agent mode the agent
+        pipeline runs on the cell too, its event naming the group, so a case
+        the agent learns from it carries ``source_group_id`` (section 9.1).
+        Without a group pipeline the cells stay memcells, unextracted, and the
+        batch reads as accumulated -- never as the one-to-one copies.
         """
         cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
         count = len(payload.get("messages", []))
@@ -672,17 +676,25 @@ class Memorizer:
                 memcell_ids=[c.memcell_id for c in cells],
             )
             return MemorizeResult(message_count=count, status="accumulated")
+        pipelines: dict[str, Pipeline] = {"group_memory": self._group_pipeline}
+        if mode == "agent":
+            pipelines["agent_memory"] = self._agent_pipeline
         done: list[CellOutcome] = []
         first_error: BaseException | None = None
         for prepared in cells:
-            try:
-                result = await self._group_pipeline.run_cell(ingested, prepared)
-            except Exception as exc:  # one cell's failure; the next still runs
-                _log_cell_failure(ingested, prepared, "group_memory", exc)
-                first_error = first_error or exc
-                continue
-            done.append(result)
-            await self._bus.publish(result.events)
+            results = await asyncio.gather(
+                *(p.run_cell(ingested, prepared) for p in pipelines.values()),
+                return_exceptions=True,
+            )
+            for track, result in zip(pipelines, results, strict=True):
+                if isinstance(result, BaseException):
+                    # One cell's failure; the next cell (and track) still runs.
+                    _log_cell_failure(ingested, prepared, track, result)
+                    first_error = first_error or result
+                    continue
+                if track == "group_memory":
+                    done.append(result)
+                await self._bus.publish(result.events)
         if first_error is not None:
             raise first_error
         outcome = PipelineOutcome.from_cells("group_memory", done)

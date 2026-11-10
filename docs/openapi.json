@@ -5128,6 +5128,18 @@
             "title": "Audience",
             "default": "asker"
           },
+          "context_group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Group Id"
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -7158,6 +7170,18 @@
             ],
             "title": "Audience",
             "default": "asker"
+          },
+          "context_group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Group Id"
           },
           "app_id": {
             "type": "string",

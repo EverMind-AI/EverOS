@@ -97,6 +97,7 @@ class GetManager:
                 agent_id=req.agent_id,
                 group_ids=req.scope_group_ids,
                 audience=req.audience,
+                context_group_id=req.context_group_id,
             ),
         )
         where = compile_scoped_for_get(req.filters, scope.predicate)
@@ -124,7 +125,7 @@ class GetManager:
                     count=len(profiles),
                 )
             case GetMemoryType.AGENT_CASE:
-                cases = await self._case.paginate(where, page)
+                cases = await self._case.paginate(scope.cases_where(where), page)
                 items = [self._shape_agent_case(c) for c in cases.items]
                 data = GetData(
                     agent_cases=items,

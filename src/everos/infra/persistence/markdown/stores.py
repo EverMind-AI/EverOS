@@ -1107,7 +1107,11 @@ def _foresight_entry(foresight: Foresight) -> EntryBody:
 
 
 def _agent_case_entry(case: AgentCase) -> EntryBody:
-    """``quality_score`` rides inline so the cascade hashes it."""
+    """``quality_score`` rides inline so the cascade hashes it.
+
+    ``source_group_id`` is written only for a case learned in a group, so a
+    case from a session bound to no group reads exactly as before.
+    """
     inline: dict[str, object] = {
         "owner_id": case.owner_id,
         "session_id": case.session_id,
@@ -1116,6 +1120,8 @@ def _agent_case_entry(case: AgentCase) -> EntryBody:
         "parent_id": case.parent_id,
         "quality_score": case.quality_score,
     }
+    if case.source_group_id is not None:
+        inline["source_group_id"] = case.source_group_id
     sections = {"TaskIntent": case.task_intent, "Approach": case.approach}
     if case.key_insight:
         sections["KeyInsight"] = case.key_insight

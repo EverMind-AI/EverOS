@@ -14,6 +14,8 @@ md contract:
 - ``parent_id``: source memcell id (``parent_type`` defaults to
   ``"memcell"``).
 - ``quality_score``: float ``0.0–1.0`` (LLM-emitted).
+- ``source_group_id`` (optional): the group the case was learned in; absent
+  for a case from a session bound to no group.
 
 ``sections``:
 
@@ -97,6 +99,7 @@ class AgentCaseHandler(BaseDailyLogHandler):
             approach=approach,
             approach_tokens=" ".join(approach_tokens),
             key_insight=key_insight,
+            source_group_id=s.inline.get("source_group_id") or None,
             md_path=md_path,
             content_sha256=entry.content_sha256,
             **VECTOR_PROJECTIONS[self.kind].values(vectors),

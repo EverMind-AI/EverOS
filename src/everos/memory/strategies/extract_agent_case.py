@@ -142,6 +142,7 @@ async def _file_case(
         owner_id=agent_id,
         session_id=event.session_id,
         parent_id=event.memcell_id,
+        source_group_id=event.group_id,
     )
     scope = Scope(
         app_id=event.app_id,

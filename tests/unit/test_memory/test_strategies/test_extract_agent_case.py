@@ -224,3 +224,22 @@ async def test_case_dropped_when_memcell_gone() -> None:
 
     assert deps.stores.agent_case.records == []  # type: ignore[attr-defined]
     assert events == []
+
+
+async def test_a_case_from_a_group_segment_carries_its_group() -> None:
+    """docs/group-memory.md, task 4: the case remembers where it was learned."""
+    deps = seed_sources(make_deps(llm=agent_track_llm()), memcell_id="mc_a")
+    event = AgentPipelineStarted(
+        memcell_id="mc_a",
+        session_id="s1",
+        memcell=agent_trajectory(),
+        group_id="trip",
+    )
+    await extract_agent_case(event, deps)
+    (stored,) = deps.stores.agent_case.records
+    assert stored.item.source_group_id == "trip"
+
+    deps = seed_sources(make_deps(llm=agent_track_llm()), memcell_id="mc_a")
+    await extract_agent_case(_event(), deps)
+    (stored,) = deps.stores.agent_case.records
+    assert stored.item.source_group_id is None

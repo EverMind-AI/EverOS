@@ -547,6 +547,7 @@ def _stored_agent_case(fields: Row) -> Stored[AgentCase]:
             timestamp=to_timestamp_ms(fields["timestamp"]),
             session_id=fields["session_id"],
             parent_id=fields["parent_id"],
+            source_group_id=fields.get("source_group_id"),
         ),
     )
 

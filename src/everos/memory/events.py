@@ -39,6 +39,9 @@ class AgentPipelineStarted(Event):
     chat mode). Subscribers handle the agent-side processing chain
     (case extraction, agent-skill clustering) in parallel with the user
     chain. Payload mirrors :class:`UserPipelineStarted`.
+
+    ``group_id`` is the group the cell's session is bound to: a case learned
+    from it carries the group (docs/group-memory.md, section 9.1).
     """
 
     memcell_id: str
@@ -46,6 +49,7 @@ class AgentPipelineStarted(Event):
     app_id: str = "default"
     project_id: str = "default"
     memcell: MemCell
+    group_id: str | None = None
 
 
 class ReflectedEpisode(BaseModel):

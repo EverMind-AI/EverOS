@@ -24,7 +24,10 @@ Rules the implementation must keep (section 9.1):
   and ``source_end < to`` (no upper bound for the open window);
 * ``history_visible_from = creation`` gives a current member the whole history;
 * ``audience = group`` keeps only what every current member can see;
-* an owner or admin role grants roster management, never extra reading.
+* an owner or admin role grants roster management, never extra reading;
+* an agent's cases learned in a group (``source_group_id``) are read only in
+  that group's context, by a current member of it -- the agent itself unless
+  another asker is named (:attr:`ReadScope.case_filter`).
 """
 
 from __future__ import annotations
@@ -148,6 +151,8 @@ class ScopeRequest:
     agent_id: str | None = None
     group_ids: tuple[str, ...] = ()
     audience: Audience = "asker"
+    context_group_id: str | None = None
+    """An agent scope read in a group's context: the group's cases join."""
 
 
 @dataclass(frozen=True)
@@ -163,6 +168,8 @@ class ReadScope:
         groups: Per group, its roster and the windows in force.
         predicate: The owner, space, status and window conditions -- what
             replaces the owner part of every recall's ``where``.
+        case_filter: For an agent scope, the extra condition on its cases:
+            cases learned outside groups, plus the context group's.
     """
 
     app_id: str
@@ -173,6 +180,11 @@ class ReadScope:
     predicate: Filter
     audience: Audience = "asker"
     groups: tuple[GroupView, ...] = field(default_factory=tuple)
+    case_filter: Filter | None = None
+
+    def cases_where(self, where: Filter) -> Filter:
+        """``where`` narrowed to the agent cases this read may see."""
+        return where if self.case_filter is None else all_of(where, self.case_filter)
 
     @property
     def is_group(self) -> bool:
@@ -352,6 +364,7 @@ class AccessPolicy:
         """
         if request.group_ids:
             return await self._group_scope(identity, request)
+        case_filter: Filter | None = None
         if request.user_id is not None:
             if identity.asker_id is not None and identity.asker_id != request.user_id:
                 raise ForbiddenError("a personal memory is read by its owner only")
@@ -359,6 +372,9 @@ class AccessPolicy:
         else:
             assert request.agent_id is not None
             owner_id, owner_type = request.agent_id, "agent"
+            case_filter = await self._case_filter(
+                request, asker=identity.asker_id or owner_id
+            )
         return ReadScope(
             app_id=request.app_id,
             project_id=request.project_id,
@@ -371,7 +387,36 @@ class AccessPolicy:
                 app_id=request.app_id,
                 project_id=request.project_id,
             ),
+            case_filter=case_filter,
         )
+
+    async def _case_filter(self, request: ScopeRequest, *, asker: str) -> Filter:
+        """Which of an agent's cases a read sees (section 9.1, row 12).
+
+        Cases learned outside any group always; a group's cases only in that
+        group's context, and only for a current member of it.
+
+        Raises:
+            ForbiddenError: The asker is not a current member of the context
+                group (or it does not exist, which answers the same).
+        """
+        outside = is_null("source_group_id")
+        group_id = request.context_group_id
+        if group_id is None:
+            return outside
+        record = await self._groups.get(
+            Scope(
+                app_id=request.app_id,
+                project_id=request.project_id,
+                owner_id=group_id,
+                owner_type="group",
+            )
+        )
+        if record is None or not record.roster.is_current_member(asker):
+            raise ForbiddenError(
+                f"the asker is not a current member of group {group_id!r}"
+            )
+        return any_of(outside, eq("source_group_id", group_id))
 
     async def _group_scope(
         self, identity: Identity, request: ScopeRequest

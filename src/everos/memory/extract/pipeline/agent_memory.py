@@ -33,6 +33,7 @@ class AgentMemoryPipeline:
                     app_id=ingested.app_id,
                     project_id=ingested.project_id,
                     memcell=prepared.cell,
+                    group_id=ingested.group_id,
                 )
             ],
         )

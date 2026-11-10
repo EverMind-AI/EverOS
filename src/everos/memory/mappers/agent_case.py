@@ -10,17 +10,24 @@ from everos.memory.models import AgentCase
 
 
 def from_algo(
-    algo: AlgoAgentCase, *, owner_id: str, session_id: str, parent_id: str
+    algo: AlgoAgentCase,
+    *,
+    owner_id: str,
+    session_id: str,
+    parent_id: str,
+    source_group_id: str | None = None,
 ) -> AgentCase:
     """Domain case from an algo case plus the context only the caller knows.
 
-    The algo case carries no owner, session or source memcell, so the caller
-    supplies them. Its ``id`` is dropped: the case store mints the entry id
-    the case is addressed by. An empty ``key_insight`` becomes ``None`` so the
-    stored case omits the section. Algo extras other than ``case_gate`` are
-    dropped.
+    The algo case carries no owner, session, source memcell or group, so the
+    caller supplies them. Its ``id`` is dropped: the case store mints the
+    entry id the case is addressed by. An empty ``key_insight`` becomes
+    ``None`` so the stored case omits the section. Algo extras other than
+    ``case_gate`` are dropped.
     """
-    data = algo.model_dump(include=set(AgentCase.model_fields) - {"owner_id"})
+    data = algo.model_dump(
+        include=set(AgentCase.model_fields) - {"owner_id", "source_group_id"}
+    )
     return AgentCase.model_validate(
         {
             **data,
@@ -28,6 +35,7 @@ def from_algo(
             "session_id": session_id,
             "parent_id": parent_id,
             "key_insight": algo.key_insight or None,
+            "source_group_id": source_group_id,
         }
     )
 

@@ -78,6 +78,9 @@ class GetRequest(BaseModel):
     """Who asks: required for a group scope (or the identity header); with
     ``user_id`` optional and equal to it."""
     audience: Literal["asker", "group"] = "asker"
+    context_group_id: str | None = Field(default=None, min_length=1)
+    """With ``agent_id`` only: list the agent's cases in this group's context
+    (the cases learned in it join those learned outside groups)."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the query
@@ -108,6 +111,12 @@ class GetRequest(BaseModel):
                 "exactly one of user_id / agent_id / group_id / group_ids "
                 "must be provided"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_context_group(self) -> Self:
+        if self.context_group_id is not None and self.agent_id is None:
+            raise ValueError("context_group_id is valid with agent_id only")
         return self
 
     @model_validator(mode="after")

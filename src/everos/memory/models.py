@@ -337,6 +337,10 @@ class AgentCase(BaseModel):
     # everos engineering metadata.
     session_id: str
     parent_id: str
+    source_group_id: str | None = None
+    """The group whose segment the case was learned from; ``None`` for a case
+    from a session bound to no group. Such a case is returned only to reads
+    in that group's context (docs/group-memory.md, section 9.1)."""
 
     model_config = ConfigDict(extra="allow")
 

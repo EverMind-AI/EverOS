@@ -74,6 +74,11 @@ class AgentCase(IndexRecord):
     key_insight: str | None = None
     """≤ 40 tokens; pivotal strategy shift, optional."""
 
+    source_group_id: str | None = None
+    """The group whose segment the case was learned from; ``None`` for a case
+    from a session bound to no group. An agent read returns such a case only
+    in that group's context (docs/group-memory.md, section 9.1)."""
+
     md_path: str
     content_sha256: str
     """SHA-256 hex digest over the **content-bearing fields only** of

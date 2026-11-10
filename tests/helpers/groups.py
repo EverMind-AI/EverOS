@@ -107,7 +107,12 @@ class GroupWorld:
     @classmethod
     @contextlib.asynccontextmanager
     async def open(
-        cls, tmp_path: Path, *, llm: Any = None, settings: Settings | None = None
+        cls,
+        tmp_path: Path,
+        *,
+        llm: Any = None,
+        settings: Settings | None = None,
+        mode: str = "chat",
     ) -> AsyncIterator[GroupWorld]:
         base = settings or Settings()
         settings = base.model_copy(
@@ -116,7 +121,7 @@ class GroupWorld:
                 "lancedb": base.lancedb.model_copy(
                     update={"read_consistency_seconds": 0.0}
                 ),
-                "memorize": base.memorize.model_copy(update={"mode": "chat"}),
+                "memorize": base.memorize.model_copy(update={"mode": mode}),
             }
         )
         root = MemoryRoot(tmp_path)

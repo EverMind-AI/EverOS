@@ -119,9 +119,10 @@ Added nullable; an existing row holds NULL and reads ``[]`` / ``None`` /
 ``timestamp``. Only rows a group owns are ever compared on the window columns,
 and those are written with them.
 
-v5 = the member-in-group profiles (docs/group-memory.md, section 6.3):
-``user_profile.subject_id``, the member a ``group`` row is about. Added
-nullable; a personal profile row holds NULL, its subject being its owner.
+v5 = the rest of group memory's columns (docs/group-memory.md, sections 6.3
+and 9.1): ``user_profile.subject_id``, the member a ``group`` row is about,
+and ``agent_case.source_group_id``, the group a case was learned in. Added
+nullable; a personal profile row and a case from no group hold NULL.
 
 :meth:`migrate_table_schemas` dispatches through :data:`_MIGRATIONS`, one
 coroutine per version, so a new version is one entry — not an edit to a
@@ -422,12 +423,16 @@ class LanceIndexBackend:
             version=4,
         )
 
-    async def _migrate_v5_member_profiles(self) -> None:
-        """v5 -- add ``user_profile.subject_id`` (member-in-group profiles).
+    async def _migrate_v5_group_owned(self) -> None:
+        """v5 -- ``user_profile.subject_id`` and ``agent_case.source_group_id``.
 
-        Additive and metadata-only, like v4: a personal profile row reads NULL.
+        Additive and metadata-only, like v4: a personal profile row and a
+        case learned outside any group read NULL.
         """
-        await self._add_nullable_columns({UserProfile: ("subject_id",)}, version=5)
+        await self._add_nullable_columns(
+            {UserProfile: ("subject_id",), AgentCase: ("source_group_id",)},
+            version=5,
+        )
 
     async def _add_nullable_columns(
         self,
@@ -611,7 +616,7 @@ _MIGRATIONS: dict[int, Callable[[LanceIndexBackend], Awaitable[None]]] = {
     2: LanceIndexBackend._migrate_v2_nullable_vector,
     3: LanceIndexBackend._migrate_v3_visual_vector,
     4: LanceIndexBackend._migrate_v4_group_columns,
-    5: LanceIndexBackend._migrate_v5_member_profiles,
+    5: LanceIndexBackend._migrate_v5_group_owned,
 }
 """One coroutine per target version, run in order by
 :meth:`LanceIndexBackend.migrate_table_schemas`.
