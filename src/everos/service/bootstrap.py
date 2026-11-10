@@ -112,7 +112,11 @@ from everos.memory.access import AccessPolicy
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
-from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
+from everos.memory.extract.pipeline import (
+    AgentMemoryPipeline,
+    GroupMemoryPipeline,
+    UserMemoryPipeline,
+)
 from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
 from everos.memory.ports import EventBus, IndexEraser, StrategySpec
@@ -617,6 +621,19 @@ def _build_memory_service(
             profile_store=stores.profile,
         ),
         agent_pipeline=AgentMemoryPipeline(),
+        # One group episode per segment of a group session (docs/group-memory.md,
+        # section 7): the one-to-one pipelines never see a group cell.
+        group_pipeline=GroupMemoryPipeline(
+            episode_store=stores.episode,
+            memcell_store=stores.memcell,
+            groups=stores.groups,
+            instructions=deps.instructions,
+            llm_client=providers.llm,
+            image_store=stores.images,
+            image_memory_store=stores.image_memory,
+            image_limits=_image_limits(settings),
+            member_profiles=stores.member_profile,
+        ),
         bus=bus,
         search_manager=SearchManager(
             episode_recaller=EpisodeRecaller(recaller_deps, indexes.episode),

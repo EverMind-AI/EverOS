@@ -58,6 +58,21 @@ def user_cluster_lock(
     )
 
 
+def member_profile_lock(
+    app_id: str, project_id: str, group_id: str, member_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one member's profile in one group holds.
+
+    One per ``(group, member)`` (docs/group-memory.md, section 7.4): two
+    updates of one member's profile never lose each other's items, and
+    updates of different members run in parallel. The picture route's
+    poster-only items and the ``update_member_profiles`` strategy share it.
+    """
+    return get_partition_lock(
+        "update_member_profiles", f"{app_id}:{project_id}:{group_id}:{member_id}"
+    )
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
     LOCKS.reset()

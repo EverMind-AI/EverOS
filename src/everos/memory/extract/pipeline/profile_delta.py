@@ -39,7 +39,9 @@ from __future__ import annotations
 
 __all__ = [
     "PICTURE_PROFILE_RULES",
+    "SOURCE_IMAGE_KEYS",
     "ProfileItemOp",
+    "adds_anything",
     "apply_ops",
     "forget_images",
     "item_source_images",
@@ -184,6 +186,11 @@ def _validated(ops: Sequence[object]) -> list[ProfileItemOp]:
         op if isinstance(op, _AddOp | _NoOp) else _PROFILE_OP.validate_python(op)
         for op in ops
     ]
+
+
+def adds_anything(ops: Sequence[ProfileItemOp]) -> bool:
+    """Whether any of ``ops`` is an ``add`` (the only operation that writes)."""
+    return any(isinstance(op, _AddOp) for op in _validated(ops))
 
 
 def normalised(text: str) -> str:

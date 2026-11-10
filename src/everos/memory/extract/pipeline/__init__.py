@@ -2,8 +2,8 @@
 
 External usage:
     from everos.memory.extract.pipeline import (
-        AgentMemoryPipeline, CellOutcome, PipelineOutcome, PreparedCell,
-        UserMemoryPipeline,
+        AgentMemoryPipeline, CellOutcome, GroupMemoryPipeline, PipelineOutcome,
+        PreparedCell, UserMemoryPipeline,
     )
 
 Calls everalgo (the algorithm library) for synchronous Episode extraction.
@@ -17,11 +17,13 @@ from .base import CellOutcome as CellOutcome
 from .base import Pipeline as Pipeline
 from .base import PipelineOutcome as PipelineOutcome
 from .base import PreparedCell as PreparedCell
+from .group_memory import GroupMemoryPipeline as GroupMemoryPipeline
 from .user_memory import UserMemoryPipeline as UserMemoryPipeline
 
 __all__ = [
     "AgentMemoryPipeline",
     "CellOutcome",
+    "GroupMemoryPipeline",
     "Pipeline",
     "PipelineOutcome",
     "PreparedCell",

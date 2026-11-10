@@ -52,6 +52,12 @@ from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline import image_memory as image_extract
 from everos.memory.extract.pipeline import profile_delta
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
+from everos.memory.extract.pipeline.pictures import (
+    Picture,
+    memcell_alive,
+    ops_by_poster,
+    pictures_of,
+)
 from everos.memory.models import Episode, ImageMemory, IngestResult
 from everos.memory.ports import (
     EpisodeStore,
@@ -68,8 +74,6 @@ if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
 logger = get_logger(__name__)
-
-_IMAGE_REF_PREFIX = "[IMAGE: "
 
 _Extraction = tuple[
     AlgoEpisode,
@@ -153,7 +157,7 @@ class UserMemoryPipeline:
             # The model writes in the conversation's language; what it chose
             # pins every extraction downstream of this episode.
             language = detect_output_language(algo_ep.episode)
-            by_poster = _ops_by_poster(profile_ops, pictures)
+            by_poster = ops_by_poster(profile_ops, pictures)
             for sender_id in user_senders:
                 md_paths += await self._persist_images(
                     ingested,
@@ -210,7 +214,7 @@ class UserMemoryPipeline:
         self,
         ingested: IngestResult,
         prepared: PreparedCell,
-        pictures: Sequence[_Picture],
+        pictures: Sequence[Picture],
     ) -> _Extraction:
         """One whole-cell episode (and picture descriptions, and profile items).
 
@@ -265,7 +269,7 @@ class UserMemoryPipeline:
     async def _extract_with_pictures(
         self,
         prepared: PreparedCell,
-        pictures: Sequence[_Picture],
+        pictures: Sequence[Picture],
         custom_instructions: str | None,
     ) -> _Extraction:
         """The picture route: one call for the episode, the descriptions, the profile.
@@ -302,7 +306,7 @@ class UserMemoryPipeline:
         prepared: PreparedCell,
         *,
         ops: Sequence[profile_delta.ProfileItemOp],
-        pictures: Sequence[_Picture],
+        pictures: Sequence[Picture],
         owner_id: str,
         language: str | None,
     ) -> int:
@@ -330,7 +334,7 @@ class UserMemoryPipeline:
             language=language,
         )
 
-    async def _pictures_of(self, cell: AlgoMemCell) -> list[_Picture]:
+    async def _pictures_of(self, cell: AlgoMemCell) -> list[Picture]:
         """The cell's pictures, in conversation order, read and labelled.
 
         Labels (``img-1``, ``img-2``) are assigned per cell: they are local
@@ -338,57 +342,14 @@ class UserMemoryPipeline:
         that identifies the file. A reply that names ``img-1`` therefore cannot
         be confused with one from another cell.
         """
-        if self._images is None or self._image_limits is None:
-            return []
-        pictures: list[_Picture] = []
-        seen: dict[str, str] = {}
-        for item in cell.items:
-            text = str(getattr(item, "content", "") or "")
-            # Who posted it: a user's picture is evidence about that user; an
-            # assistant's (or a tool's) is evidence about no user at all.
-            poster = (
-                str(getattr(item, "sender_id", "") or "")
-                if getattr(item, "role", None) == "user"
-                else ""
-            )
-            for image_id in _image_ids_in(text):
-                if image_id in seen:
-                    continue
-                label = f"img-{len(seen) + 1}"
-                seen[image_id] = label
-                try:
-                    data = await self._images.read_derived(
-                        image_id,
-                        edge=self._image_limits.model_edge,
-                        quality=self._image_limits.cache_quality,
-                    )
-                except (FileNotFoundError, OSError, ValueError) as err:
-                    # The picture is gone (forgotten, or a store rebuilt without
-                    # its cache). The conversation is still worth remembering:
-                    # keep the reference in the text and extract without it.
-                    logger.warning(
-                        "memory.images.unreadable",
-                        image_id=image_id,
-                        error=f"{type(err).__name__}: {err}"[:160],
-                    )
-                    continue
-                pictures.append(
-                    _Picture(
-                        label=label,
-                        image_id=image_id,
-                        data=data,
-                        mime="image/jpeg",
-                        poster=poster,
-                    )
-                )
-        return pictures
+        return await pictures_of(cell, images=self._images, limits=self._image_limits)
 
     async def _persist_images(
         self,
         ingested: IngestResult,
         prepared: PreparedCell,
         *,
-        pictures: Sequence[_Picture],
+        pictures: Sequence[Picture],
         described: dict[str, tuple[str, str]],
         owner_id: str,
         session_id: str | None,
@@ -437,7 +398,7 @@ class UserMemoryPipeline:
                 owner_type="user",
             ),
             memories,
-            only_if=_memcell_alive(self._memcell_store, prepared.memcell_id),
+            only_if=memcell_alive(self._memcell_store, prepared.memcell_id),
         )
         return [ref.md_path for ref in refs]
 
@@ -449,9 +410,6 @@ class UserMemoryPipeline:
         ``None`` when the store skipped the write: the memcell was deleted
         (by a session deletion) while the episode was being extracted.
         """
-
-        async def memcell_alive() -> bool:
-            return bool(await self._memcell_store.find_by_ids([memcell_id]))
 
         with memory_span(
             "everos.persist.markdown",
@@ -471,7 +429,7 @@ class UserMemoryPipeline:
                     owner_type="user",
                 ),
                 ep,
-                only_if=memcell_alive,
+                only_if=memcell_alive(self._memcell_store, memcell_id),
             )
             if ref is None:
                 return None
@@ -479,85 +437,6 @@ class UserMemoryPipeline:
             # capture_content is on) — never the host absolute path.
             capture_output(persist_span, ref.md_path)
         return ref
-
-
-class _Picture:
-    """One picture of a cell, ready for the model.
-
-    Args:
-        label: Local name the reply refers to it by (``img-1``).
-        image_id: Content hash — what the memory records and a forget takes.
-        data: Bytes of the model-scaled copy.
-        mime: MIME type of those bytes.
-        poster: Sender of the message the picture first appeared in.
-    """
-
-    __slots__ = ("data", "image_id", "label", "mime", "poster")
-
-    def __init__(
-        self, *, label: str, image_id: str, data: bytes, mime: str, poster: str = ""
-    ) -> None:
-        self.label = label
-        self.image_id = image_id
-        self.data = data
-        self.mime = mime
-        self.poster = poster
-
-
-def _ops_by_poster(
-    ops: Sequence[profile_delta.ProfileItemOp], pictures: Sequence[_Picture]
-) -> dict[str, list[profile_delta.ProfileItemOp]]:
-    """Each picture-derived profile operation, under the picture's poster (D17).
-
-    An operation names its picture by content hash (``source_image_id`` after
-    :func:`profile_delta.retarget`); it goes to whoever posted that picture.
-    One that names none was read off the cell's pictures together: it goes to
-    their poster when they all have one, and to nobody when they do not --
-    giving it to every poster would hand one person's picture to another,
-    the leak this routing exists to close. An assistant's picture reaches no
-    one: the user track holds profiles of users only.
-    """
-    poster_of = {picture.image_id: picture.poster for picture in pictures}
-    posters = {picture.poster for picture in pictures}
-    routed: dict[str, list[profile_delta.ProfileItemOp]] = {}
-    dropped = 0
-    for op in ops:
-        source = getattr(op, "source_image_id", "")
-        if source in poster_of:
-            owner = poster_of[source]
-        elif len(posters) == 1:
-            (owner,) = posters
-        else:
-            dropped += 1
-            continue
-        routed.setdefault(owner, []).append(op)
-    if dropped:
-        logger.info("memory.images.profile_unattributed", dropped=dropped)
-    return routed
-
-
-def _image_ids_in(text: str) -> list[str]:
-    """Every ``[IMAGE: <id>]`` reference in ``text``, in order."""
-    found: list[str] = []
-    start = 0
-    while True:
-        index = text.find(_IMAGE_REF_PREFIX, start)
-        if index < 0:
-            return found
-        end = text.find("]", index)
-        if end < 0:
-            return found
-        found.append(text[index + len(_IMAGE_REF_PREFIX) : end])
-        start = end + 1
-
-
-def _memcell_alive(memcell_store: MemcellStore, memcell_id: str):
-    """The ``only_if`` shared by every write derived from this cell."""
-
-    async def check() -> bool:
-        return bool(await memcell_store.find_by_ids([memcell_id]))
-
-    return check
 
 
 def _unique_user_senders(cell: AlgoMemCell) -> list[str]:

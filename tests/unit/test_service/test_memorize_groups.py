@@ -33,9 +33,16 @@ _T0 = 1_772_323_200_000
 
 
 def _boundary_model(cut_after: int | None = None) -> FakeLLMClient:
-    """Cuts nowhere (or after the given message) and never closes the tail."""
+    """Cuts nowhere (or after the given message) and never closes the tail.
+
+    A cut segment is the group's episode: the group pipeline extracts it.
+    """
 
     def answer(messages: Any, *, response_format: type, **_kw: Any) -> str:
+        if response_format.__name__ == "_EpisodeReply":
+            return json.dumps(
+                {"title": "Plans", "summary": "The group talked.", "content": "Talk."}
+            )
         if response_format.__name__ != "_BatchReply":
             raise AssertionError(f"unexpected model call {response_format.__name__}")
         return json.dumps(

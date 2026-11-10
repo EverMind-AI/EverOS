@@ -116,6 +116,31 @@ class EpisodeExtracted(Event):
     event drives write in it. ``None`` lets each extractor infer its own."""
 
 
+class GroupEpisodeExtracted(Event):
+    """Fired once per group episode, after the group pipeline writes its md.
+
+    The group strategies run on it (docs/group-memory.md, section 7.1 step
+    6): the member-in-group profiles of ``speaker_ids`` and the group's
+    scenes. The one-to-one strategies never see it: a group segment is the
+    group's memory, not any sender's.
+
+    Attributes:
+        speaker_ids: The human members whose own (role ``user``) messages are
+            in the segment -- whose member-in-group profiles it can change.
+    """
+
+    memcell_id: str
+    episode_entry_id: str
+    episode_text: str
+    episode_timestamp_ms: int
+    group_id: str
+    session_id: str | None = None
+    app_id: str = "default"
+    project_id: str = "default"
+    speaker_ids: list[str] = Field(default_factory=list)
+    language: str | None = None
+
+
 class AtomicFactsExtracted(Event):
     """Fired by ``extract_atomic_facts`` once an episode's facts are written.
 

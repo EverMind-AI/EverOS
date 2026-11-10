@@ -21,8 +21,10 @@ admitted into its group (binding, inline roster, implicit joins; 409 / 403 /
 422 before anything is written), an inline roster change first cuts the
 session's open buffer (D18), and the cells go to the group pipeline -- never
 to the one-to-one pipelines, which would file group content as each sender's
-personal memory. Until the group pipeline is wired (``group_pipeline=None``)
-group cells are cut and kept as memcells, unextracted.
+personal memory. The bootstrap wires
+:class:`~everos.memory.extract.pipeline.GroupMemoryPipeline`; a build without
+one (``group_pipeline=None``) cuts group cells and keeps them as memcells,
+unextracted.
 """
 
 from __future__ import annotations
@@ -507,10 +509,10 @@ class Memorizer:
     ) -> MemorizeResult:
         """Group cells go to the group pipeline, and to nothing else.
 
-        The extension point of the group write path (section 7): the group
-        pipeline writes one group episode per cell under ``groups/<g>/``.
-        Without it the cells stay memcells, unextracted, and the batch reads
-        as accumulated -- never as the one-to-one per-sender copies.
+        The group write path (section 7): the group pipeline writes one group
+        episode per cell under ``groups/<g>/``. Without one the cells stay
+        memcells, unextracted, and the batch reads as accumulated -- never as
+        the one-to-one per-sender copies.
         """
         cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
         count = len(payload.get("messages", []))

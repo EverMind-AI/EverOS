@@ -1151,7 +1151,9 @@ def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
         session_id=inline.get("session_id") or None,
         parent_id=inline.get("parent_id", ""),
         parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
+        sender_ids=_list_field(inline.get("sender_ids")),
         image_ids=_list_field(inline.get("image_ids")),
+        language=inline.get("language") or None,
         subject_ids=_list_field(inline.get("subject_ids")),
         origin=inline.get("origin") or None,
         source_start=(
