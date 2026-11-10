@@ -80,33 +80,48 @@ async def update_group_scenes(
             cluster_mapper.to_algo(c)
             for c in await deps.stores.cluster.list_for_owner(scope, _KIND)
         ]
-        if any(event.episode_entry_id in c.members for c in existing):
-            return []  # a replay: the episode is placed already
-        settings = load_settings().clustering
-        single = AlgoCluster(
-            id=mint_cluster_id(),
-            centroid=vector,
-            count=1,
-            last_ts=event.episode_timestamp_ms,
-            preview=[event.episode_text],
-            members=[event.episode_entry_id],
+        # A replay (or a retry after the narrative call failed) finds the
+        # episode placed already; it still writes the version if it is due.
+        placed = next(
+            (c for c in existing if event.episode_entry_id in c.members), None
         )
-        cluster = (
-            cluster_by_geometry(
-                single,
-                existing,
-                threshold=settings.threshold,
-                time_window_days=settings.time_window_days,
-            )
-            or single
-        )
-        await deps.stores.cluster.upsert(
-            scope, _KIND, cluster_mapper.from_algo(cluster), member_type="episode"
-        )
+        cluster = placed or await _place(deps, scope, existing, vector, event)
         if len(cluster.members) >= 2:
             assert cluster.id is not None  # minted above or read back
             await _write_version(deps, scope, cluster.id, cluster.members, event)
     return []
+
+
+async def _place(
+    deps: MemoryDeps,
+    scope: Scope,
+    existing: list[AlgoCluster],
+    vector: np.ndarray,
+    event: GroupEpisodeExtracted,
+) -> AlgoCluster:
+    """Fold the episode into the group's scene clusters (or start one); persist."""
+    settings = load_settings().clustering
+    single = AlgoCluster(
+        id=mint_cluster_id(),
+        centroid=vector,
+        count=1,
+        last_ts=event.episode_timestamp_ms,
+        preview=[event.episode_text],
+        members=[event.episode_entry_id],
+    )
+    cluster = (
+        cluster_by_geometry(
+            single,
+            existing,
+            threshold=settings.threshold,
+            time_window_days=settings.time_window_days,
+        )
+        or single
+    )
+    await deps.stores.cluster.upsert(
+        scope, _KIND, cluster_mapper.from_algo(cluster), member_type="episode"
+    )
+    return cluster
 
 
 async def _write_version(
@@ -116,14 +131,20 @@ async def _write_version(
     member_ids: list[str],
     event: GroupEpisodeExtracted,
 ) -> None:
-    """Write the scene's next version over its current members."""
+    """Write the scene's next version over its current members.
+
+    Nothing is written when the newest version already holds the episode (a
+    replay of an event whose version was written).
+    """
+    previous = await deps.stores.scene.latest(scope, scene_id)
+    if previous is not None and event.episode_entry_id in previous.item.member_ids:
+        return
     members = sorted(
         await deps.stores.episode.read_many(scope, member_ids),
         key=lambda s: s.item.timestamp,
     )
     if len(members) < 2:
         return  # a member is gone from markdown; the next episode retries
-    previous = await deps.stores.scene.latest(scope, scene_id)
     reflector = EpisodeReflector(llm=deps.llm)
     custom = deps.instructions.load("reflect")
     if previous is None:
