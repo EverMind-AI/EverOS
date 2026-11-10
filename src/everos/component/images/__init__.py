@@ -229,6 +229,13 @@ def decode_image(data: bytes, *, limits: ImageLimits) -> StoredImage:
         raise ImageRejectedError("bytes are not an identifiable image") from exc
     except OSError as exc:
         raise ImageRejectedError(f"cannot read image: {exc}") from exc
+    if format_name == "MPO":
+        # A Multi-Picture Object (CIPA DC-007) is a baseline JPEG with more
+        # frames appended, which is how many phones and stereo cameras save a
+        # ``.jpg``. Every JPEG decoder shows its first frame, and so does
+        # :func:`scaled_copy`, so it is filed and served as the JPEG it starts
+        # with. The bytes are kept as sent, so the hash still names the file.
+        format_name = "JPEG"
     if format_name not in _EXTENSIONS:
         raise ImageRejectedError(f"unsupported image format {format_name!r}")
     if not limits.accepts(format_name):

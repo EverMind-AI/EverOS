@@ -46,6 +46,15 @@ def _png(colour: tuple[int, int, int] = (10, 120, 200), size: int = 64) -> bytes
     return buffer.getvalue()
 
 
+def _mpo() -> bytes:
+    """Two frames in one Multi-Picture Object, the way a phone saves a ``.jpg``."""
+    first = Image.new("RGB", (64, 48), (200, 30, 30))
+    second = Image.new("RGB", (64, 48), (30, 30, 200))
+    buffer = io.BytesIO()
+    first.save(buffer, format="MPO", save_all=True, append_images=[second])
+    return buffer.getvalue()
+
+
 async def _store(tmp_path: Path) -> FileImageStore:
     root = MemoryRoot(tmp_path)
     root.ensure()
@@ -137,6 +146,29 @@ async def test_an_unknown_id_is_not_found(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         await store.read("b" * 64)
     assert not await store.exists("b" * 64)
+
+
+async def test_an_mpo_picture_is_kept_as_the_jpeg_it_starts_with(
+    tmp_path: Path,
+) -> None:
+    """Pillow names a phone's multi-frame ``.jpg`` "MPO"; it is filed as a
+    JPEG, byte for byte, and its derived copy is the first frame."""
+    store = await _store(tmp_path)
+    data = _mpo()
+    with Image.open(io.BytesIO(data)) as probe:
+        assert probe.format == "MPO"
+
+    image = await store.store(data, limits=_limits())
+
+    assert image.image_id == hash_bytes(data)
+    path = await store.path_of(image.image_id)
+    assert path.name == f"{image.image_id}.jpeg"
+    assert path.read_bytes() == data
+    copy = await store.read_derived(image.image_id, edge=32, quality=85)
+    with Image.open(io.BytesIO(copy)) as rendered:
+        assert rendered.format == "JPEG"
+        red, _green, blue = rendered.convert("RGB").getpixel((5, 5))
+        assert red > blue  # the first frame, not the appended one
 
 
 async def test_a_non_image_is_refused(tmp_path: Path) -> None:

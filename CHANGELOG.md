@@ -116,6 +116,11 @@ machinery that keeps a deleted memory from coming back.
   pictures stayed searchable with no memcell behind them, and re-sending the
   session added a second copy. An owner delete inventories them too.
 
+- **A phone's multi-frame `.jpg` (MPO) is accepted.** Pillow reports such a
+  file as `MPO`; it is filed and served as the JPEG it starts with, which is
+  what every JPEG decoder shows, and its bytes are kept as sent, so the hash
+  still names the file.
+
 ## [1.6.0] - 2026-10-28
 
 **One place builds the application.** Providers, storage adapters, the OME
