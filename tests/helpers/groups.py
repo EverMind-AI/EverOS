@@ -1,11 +1,12 @@
-"""A real memory stack with group memory seeded in it, for read-path tests.
+"""A real memory stack with group memory seeded in it, for group tests.
 
-The group *write* path (one group episode per segment) is not built yet, so
-these tests write group records the way it will: through the episode and
-picture-memory stores with a group :class:`Scope`, then project the markdown
-with the cascade handlers into a real LanceDB index. Everything a read touches
-is real -- markdown, ``system.db``, the index, the bootstrap's memory service
--- and the model and embedder are deterministic doubles.
+Read-path tests seed group records directly, the way the group write path
+writes them: through the episode and picture-memory stores with a group
+:class:`Scope`, then project the markdown with the cascade handlers into a real
+LanceDB index. Write-path tests go through the bootstrap's memory service and
+run the group strategies on the events it published (:meth:`GroupWorld.run`),
+as the engine would. Everything is real -- markdown, ``system.db``, the index,
+the memory service -- and the model and embedder are deterministic doubles.
 
 Usage::
 
@@ -39,7 +40,13 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps, Stores
 from everos.memory.models import Episode, Group, ImageMemory, Profile, RosterEvent
-from everos.memory.ports import NoSourceCheck, Scope, SessionKey
+from everos.memory.ports import (
+    Immediate,
+    NoSourceCheck,
+    Scope,
+    SessionKey,
+    StrategySpec,
+)
 from everos.service import RosterEventInput
 from everos.service.bootstrap import _build_memory_service
 from tests.fakes import (
@@ -94,6 +101,8 @@ class GroupWorld:
     memory: Any
     embedding: FakeEmbeddingProvider
     bus: _Bus
+    deps: MemoryDeps
+    _ran: int = 0
 
     @classmethod
     @contextlib.asynccontextmanager
@@ -141,9 +150,31 @@ class GroupWorld:
                 memory=memory,
                 embedding=embedding,
                 bus=bus,
+                deps=deps,
             )
         finally:
             await storage.aclose()
+
+    async def run(self, *specs: StrategySpec) -> None:
+        """Run ``specs`` on every event published since the last run, in order.
+
+        What the engine does with an ``Immediate`` strategy, without the
+        engine: each matching event is handed to the strategy, and the events
+        a strategy returns are handled the same way.
+        """
+        queue = list(self.bus.events[self._ran :])
+        self._ran = len(self.bus.events)
+        while queue:
+            event = queue.pop(0)
+            for spec in specs:
+                trigger = spec.trigger
+                if not isinstance(trigger, Immediate):
+                    continue
+                if not isinstance(event, tuple(trigger.on)):
+                    continue
+                if callable(spec.applies_to) and not spec.applies_to(event, self.deps):
+                    continue
+                queue.extend(await spec.fn(event, self.deps))
 
     # ── seeding ──────────────────────────────────────────────────────────
 

@@ -11,8 +11,9 @@ scripted model (``tests/helpers/groups.py``). What these pin:
 - the extraction call sees the speakers by their roster names, the assistant
   as ``"<name> (assistant)"``, and the roster block where the operator's
   custom instructions go;
-- a group segment publishes ``GroupEpisodeExtracted`` and no one-to-one event,
-  and writes nothing under ``users/``;
+- a group segment publishes ``GroupEpisodeExtracted`` (and its flush
+  ``GroupFlushed``) and no one-to-one event, and writes nothing under
+  ``users/``;
 - a picture writes one group picture memory with ``sender_ids = [poster]``,
   and its profile items reach only the poster's member-in-group profile.
 """
@@ -218,10 +219,10 @@ async def test_attribution_of_a_mixed_segment(tmp_path: Path) -> None:
         assert "Chen (owner, Organiser), Betty (member)" in prompt
         assert '"Ava (assistant)" is the group\'s AI assistant.' in prompt
 
-        kinds = {type(e).__name__ for e in world.bus.events}
-        assert kinds == {"GroupEpisodeExtracted"}
-        (event,) = world.bus.events
-        assert event.speaker_ids == ["u_chen", "u_betty"]
+        # No one-to-one event: the segment and the flush are the group's.
+        kinds = [type(e).__name__ for e in world.bus.events]
+        assert kinds == ["GroupEpisodeExtracted", "GroupFlushed"]
+        assert world.bus.events[0].speaker_ids == ["u_chen", "u_betty"]
 
 
 async def test_an_assistant_only_segment(tmp_path: Path) -> None:

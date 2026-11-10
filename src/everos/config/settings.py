@@ -1027,17 +1027,21 @@ class KnowledgeSettings(BaseModel):
 
 
 class GroupsSettings(BaseModel):
-    """Group memory (``[groups]``, docs/group-memory.md section 5.2).
+    """Group memory (``[groups]``, docs/group-memory.md sections 5.2 and 7.4).
 
     ``implicit_create``: a ``/memory/add`` naming an unknown ``group_id``
     creates the group (its first message's time is its creation time).
     ``implicit_join``: a message from a sender who is not a member opens an
     interval at that message (``source = implicit``); off, such a batch is
     refused with 422.
+    ``member_profile_every``: a member's profile in a group is updated after
+    this many new segments in which they spoke, and at every flush of the
+    group; episodes are searchable at once, only the profile lags.
     """
 
     implicit_create: bool = True
     implicit_join: bool = True
+    member_profile_every: int = Field(default=5, ge=1)
 
 
 class AccessSettings(BaseModel):

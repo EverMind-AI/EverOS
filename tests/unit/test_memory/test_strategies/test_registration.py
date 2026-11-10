@@ -13,6 +13,7 @@ from everos.memory.strategies import (
     reflect_episodes,
     trigger_profile_clustering,
     trigger_skill_clustering,
+    update_member_profiles,
 )
 
 
@@ -29,4 +30,5 @@ def test_every_strategy_function_has_one_spec_under_its_name() -> None:
         "extract_user_profile": extract_user_profile,
         "reflect_episodes": reflect_episodes,
         "finish_reflection": finish_reflection,
+        "update_member_profiles": update_member_profiles,
     }

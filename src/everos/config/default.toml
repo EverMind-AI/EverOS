@@ -374,6 +374,9 @@ implicit_create = true
 # A message from a sender who is not a member opens an interval at that
 # message (source = implicit); false refuses such a batch with 422.
 implicit_join = true
+# A member's profile in a group is updated after this many new segments in
+# which they spoke, and at every flush of the group (section 7.4).
+member_profile_every = 5
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

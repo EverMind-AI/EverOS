@@ -45,6 +45,7 @@ from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory import IngestResult as _IngestResult
 from everos.memory.access import resolve_identity
+from everos.memory.events import GroupFlushed
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
 from everos.memory.groups import BatchMessage
@@ -207,6 +208,7 @@ class Memorizer:
                     defer_extraction=defer_extraction,
                 )
             if isinstance(prepared, MemorizeResult) and not elsewhere:
+                await self._announce_flush(payload, is_final=is_final)
                 return prepared
             # The cells exist, so their extraction must not die with a
             # cancelled request (a client that went away). The task is owned
@@ -218,7 +220,9 @@ class Memorizer:
                 for mid in b.memcell_ids
             ]
             extraction = self._extractions.supervise(
-                self._extract_cut(payload, prepared, elsewhere, mode=mode),
+                self._extract_cut(
+                    payload, prepared, elsewhere, mode=mode, is_final=is_final
+                ),
                 session_id=session_id,
                 memcell_ids=memcell_ids,
             )
@@ -342,6 +346,7 @@ class Memorizer:
         elsewhere: Sequence[tuple[IngestResult, BoundaryOutcome]],
         *,
         mode: Mode,
+        is_final: bool,
     ) -> MemorizeResult:
         """Extract the batch's own cells, then those cut from the group's others."""
         result = (
@@ -358,7 +363,36 @@ class Memorizer:
                 [closed],
                 mode=mode,
             )
+        await self._announce_flush(payload, is_final=is_final)
         return result
+
+    async def _announce_flush(self, payload: dict[str, Any], *, is_final: bool) -> None:
+        """Publish ``GroupFlushed`` after a flush of a session bound to a group.
+
+        Published whether or not the flush cut a segment: the member-in-group
+        profiles waiting on ``[groups] member_profile_every`` are brought up
+        to date on it (section 7.4).
+        """
+        if not is_final or self._rosters is None:
+            return
+        session = SessionKey(
+            app_id=payload.get("app_id") or "default",
+            project_id=payload.get("project_id") or "default",
+            session_id=payload["session_id"],
+        )
+        group_id = await self._rosters.store.binding(session)
+        if group_id is None:
+            return
+        await self._bus.publish(
+            [
+                GroupFlushed(
+                    group_id=group_id,
+                    session_id=session.session_id,
+                    app_id=session.app_id,
+                    project_id=session.project_id,
+                )
+            ]
+        )
 
     async def _cut(
         self,

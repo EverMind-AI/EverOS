@@ -27,6 +27,7 @@ __all__ = [
     "own_segments",
     "with_provenance",
     "write_member_picture_profile",
+    "wrote_in",
 ]
 
 import uuid
@@ -61,17 +62,18 @@ def mint_item_id() -> str:
     return f"pi_{uuid.uuid4().hex[:12]}"
 
 
+def wrote_in(cell: MemCell, member_id: str) -> bool:
+    """Whether ``member_id`` wrote a message of their own in the segment."""
+    return any(
+        getattr(item, "sender_id", None) == member_id
+        and getattr(item, "role", None) == "user"
+        for item in cell.items
+    )
+
+
 def own_segments(memcells: Sequence[MemCell], member_id: str) -> list[MemCell]:
     """The segments in which ``member_id`` wrote a message of their own."""
-    return [
-        cell
-        for cell in memcells
-        if any(
-            getattr(item, "sender_id", None) == member_id
-            and getattr(item, "role", None) == "user"
-            for item in cell.items
-        )
-    ]
+    return [cell for cell in memcells if wrote_in(cell, member_id)]
 
 
 def with_provenance(

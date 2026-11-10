@@ -141,6 +141,21 @@ class GroupEpisodeExtracted(Event):
     language: str | None = None
 
 
+class GroupFlushed(Event):
+    """Fired when a flush of a session bound to a group has run.
+
+    The member-in-group profiles waiting on ``[groups] member_profile_every``
+    are brought up to date on it (docs/group-memory.md, section 7.4): episodes
+    are searchable at once, and a flush is where a client says it wants the
+    rest current too. Fired whether or not the flush cut a segment.
+    """
+
+    group_id: str
+    session_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+
+
 class AtomicFactsExtracted(Event):
     """Fired by ``extract_atomic_facts`` once an episode's facts are written.
 
