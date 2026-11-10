@@ -1039,12 +1039,15 @@ class GroupsSettings(BaseModel):
     group; episodes are searchable at once, only the profile lags.
     ``scenes``: build the group's scenes from its episodes (section 7.7) --
     one narrative call each time an episode joins a scene of two or more.
+    ``asker_in_question``: a group scope's multi-round question names the
+    asker, ``"<display name>: <question>"`` (section 8.2).
     """
 
     implicit_create: bool = True
     implicit_join: bool = True
     member_profile_every: int = Field(default=5, ge=1)
     scenes: bool = True
+    asker_in_question: bool = True
 
 
 class AccessSettings(BaseModel):

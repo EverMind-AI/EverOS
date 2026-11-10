@@ -249,6 +249,21 @@ class SearchAtomicFactItem(BaseModel):
     score: float
 
 
+class SearchSource(BaseModel):
+    """Where a group record comes from: its segment and the span it covers.
+
+    ``from`` and ``to`` are epoch ms of the segment's first and last message
+    (a scene's: of its first member's first and its newest member's last);
+    ``memcell_id`` is the segment, ``None`` for a scene, which has several.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    memcell_id: str | None = None
+    from_: int = Field(alias="from")
+    to: int
+
+
 class SearchEpisodeItem(BaseModel):
     """Episode hit — always user-scoped in the current emission contract.
 
@@ -263,8 +278,13 @@ class SearchEpisodeItem(BaseModel):
     id: str
     user_id: str | None
     """Owning user; ``None`` for a group episode (and on malformed rows)."""
+    owner_type: Literal["group"] | None = None
+    """``group`` on a group episode; unset on one-to-one memory."""
     group_id: str | None = None
     """Owning group, for a group episode; ``None`` on one-to-one memory."""
+    source: SearchSource | None = None
+    """The group episode's segment and span (docs/group-memory.md, 5.3); unset
+    on one-to-one memory."""
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
@@ -359,7 +379,12 @@ class SearchImageItem(BaseModel):
 
 
 class SearchProfileItem(BaseModel):
-    """Owner profile — at most one per response, only for user owners.
+    """A profile attached with ``include_profile``.
+
+    On a user scope, the owner's profile (at most one). On a group scope, the
+    member-in-group profiles of the asker and of the members the query names
+    (``owner_type = group``, ``group_id``, ``member_id``), holding only the
+    items the asker's windows allow -- never a personal profile.
 
     ``score`` is ``None`` for direct fetches (``include_profile=true``
     on its own does no ranking); a future query-aware lookup may fill
@@ -370,6 +395,10 @@ class SearchProfileItem(BaseModel):
 
     id: str
     user_id: str | None
+    owner_type: Literal["group"] | None = None
+    group_id: str | None = None
+    member_id: str | None = None
+    """The member a group profile is about."""
     app_id: str = "default"
     project_id: str = "default"
     profile_data: dict[str, object]

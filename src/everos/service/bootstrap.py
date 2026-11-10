@@ -660,6 +660,7 @@ def _build_memory_service(
             agent_skill_index=indexes.agent_skill,
             profile_index=indexes.profile,
             access=access,
+            image_index=indexes.image_memory,
         ),
         indexes=indexes,
         image_limits=_image_limits(settings),

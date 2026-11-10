@@ -44,6 +44,7 @@ __all__ = [
     "intersect_windows",
     "owner_predicate",
     "visible",
+    "visible_profile",
 ]
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -57,6 +58,7 @@ from everos.memory.models import (
     CanonicalMessage,
     Group,
     ImageMemory,
+    Profile,
     Roster,
     RosterEvent,
 )
@@ -288,6 +290,46 @@ def visible(
     view = scope.group(owner_id)
     return view is not None and any(
         w.contains_span(source_start, source_end) for w in view.windows
+    )
+
+
+def visible_profile(
+    scope: ReadScope, group_id: str, profile: Profile
+) -> Profile | None:
+    """The part of a member-in-group profile ``scope`` may see (section 9.1).
+
+    An item is visible when the span of its sources (``source_start`` /
+    ``source_end``) lies in one of the asker's windows in the group; an item
+    without a span is not. The summary is written over every item, so it is
+    kept only when every item is visible. ``None`` when no item is.
+    """
+
+    def keep(item: object) -> bool:
+        extra = getattr(item, "model_extra", None) or {}
+        start, end = extra.get("source_start"), extra.get("source_end")
+        if not isinstance(start, int) or not isinstance(end, int):
+            return False
+        return visible(
+            scope,
+            owner_type="group",
+            owner_id=group_id,
+            source_start=start,
+            source_end=end,
+        )
+
+    explicit = [i for i in profile.explicit_info if keep(i)]
+    traits = [i for i in profile.implicit_traits if keep(i)]
+    if not explicit and not traits:
+        return None
+    whole = len(explicit) == len(profile.explicit_info) and len(traits) == len(
+        profile.implicit_traits
+    )
+    return profile.model_copy(
+        update={
+            "explicit_info": explicit,
+            "implicit_traits": traits,
+            "summary": profile.summary if whole else "",
+        }
     )
 
 

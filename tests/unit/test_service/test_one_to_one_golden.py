@@ -90,6 +90,9 @@ _GROUP_ITEM_FIELDS: Mapping[str, object] = {
     "group_id": None,
     "subject_ids": [],
     "origin": None,
+    "owner_type": None,
+    "source": None,
+    "member_id": None,
 }
 
 ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
@@ -98,7 +101,7 @@ ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
     # Section 6.3: the member a member-in-group profile row is about.
     "user_profile_row": {"subject_id": None},
     "search": {**_GROUP_ITEM_FIELDS, "sender_ids": [], "scope": None},
-    "get": {**_GROUP_ITEM_FIELDS, "scenes": []},
+    "get": {**_GROUP_ITEM_FIELDS, "scenes": [], "images": []},
 }
 """Fields a later change added to a one-to-one output, with their empty default.
 

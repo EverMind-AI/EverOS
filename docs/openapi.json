@@ -4853,6 +4853,13 @@
             "type": "array",
             "title": "Scenes"
           },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/GetImageItem"
+            },
+            "type": "array",
+            "title": "Images"
+          },
           "profiles": {
             "items": {
               "$ref": "#/components/schemas/GetProfileItem"
@@ -4907,6 +4914,18 @@
             ],
             "title": "User Id"
           },
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
           "group_id": {
             "anyOf": [
               {
@@ -4917,6 +4936,16 @@
               }
             ],
             "title": "Group Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "app_id": {
             "type": "string",
@@ -5007,7 +5036,129 @@
           "type"
         ],
         "title": "GetEpisodeItem",
-        "description": "Episode listing item — always user-scoped."
+        "description": "Episode (or group scene) listing item."
+      },
+      "GetImageItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "entry_id": {
+            "type": "string",
+            "title": "Entry Id"
+          },
+          "image_id": {
+            "type": "string",
+            "title": "Image Id"
+          },
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ocr": {
+            "type": "string",
+            "title": "Ocr",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "original_path": {
+            "type": "string",
+            "title": "Original Path",
+            "default": ""
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type",
+            "default": ""
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "default": 0
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "entry_id",
+          "image_id",
+          "group_id",
+          "timestamp",
+          "description"
+        ],
+        "title": "GetImageItem",
+        "description": "A group picture memory listing item -- one appearance of one picture."
       },
       "GetMemoryType": {
         "type": "string",
@@ -5016,7 +5167,9 @@
           "profile",
           "agent_case",
           "agent_skill",
-          "scene"
+          "scene",
+          "image_memory",
+          "member_profile"
         ],
         "title": "GetMemoryType",
         "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
@@ -5037,6 +5190,40 @@
               }
             ],
             "title": "User Id"
+          },
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
           },
           "app_id": {
             "type": "string",
@@ -5062,7 +5249,7 @@
           "profile_data"
         ],
         "title": "GetProfileItem",
-        "description": "Owner profile — at most one per response, only for user owners."
+        "description": "A user's profile, or a member's profile inside a group.\n\nA member-in-group profile (``owner_type = group``) holds only the items\nthe asker's windows allow."
       },
       "GetRequest": {
         "properties": {
@@ -5150,6 +5337,18 @@
               }
             ],
             "title": "Context Group Id"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
           },
           "app_id": {
             "type": "string",
@@ -6674,6 +6873,18 @@
             ],
             "title": "User Id"
           },
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
           "group_id": {
             "anyOf": [
               {
@@ -6684,6 +6895,16 @@
               }
             ],
             "title": "Group Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "app_id": {
             "type": "string",
@@ -7073,6 +7294,40 @@
             ],
             "title": "User Id"
           },
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -7108,7 +7363,7 @@
           "profile_data"
         ],
         "title": "SearchProfileItem",
-        "description": "Owner profile — at most one per response, only for user owners.\n\n``score`` is ``None`` for direct fetches (``include_profile=true``\non its own does no ranking); a future query-aware lookup may fill\nit in."
+        "description": "A profile attached with ``include_profile``.\n\nOn a user scope, the owner's profile (at most one). On a group scope, the\nmember-in-group profiles of the asker and of the members the query names\n(``owner_type = group``, ``group_id``, ``member_id``), holding only the\nitems the asker's windows allow -- never a personal profile.\n\n``score`` is ``None`` for direct fetches (``include_profile=true``\non its own does no ranking); a future query-aware lookup may fill\nit in."
       },
       "SearchRequest": {
         "properties": {
@@ -7349,6 +7604,37 @@
         ],
         "title": "SearchScope",
         "description": "The scope a group search was answered in (docs/group-memory.md, 5.3)."
+      },
+      "SearchSource": {
+        "properties": {
+          "memcell_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memcell Id"
+          },
+          "from": {
+            "type": "integer",
+            "title": "From"
+          },
+          "to": {
+            "type": "integer",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "SearchSource",
+        "description": "Where a group record comes from: its segment and the span it covers.\n\n``from`` and ``to`` are epoch ms of the segment's first and last message\n(a scene's: of its first member's first and its newest member's last);\n``memcell_id`` is the segment, ``None`` for a scene, which has several."
       },
       "SearchWindow": {
         "properties": {

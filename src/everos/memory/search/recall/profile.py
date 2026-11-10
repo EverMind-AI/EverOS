@@ -16,6 +16,8 @@ profile DTO shape).
 from __future__ import annotations
 
 from everos.core.observability.logging import get_logger
+from everos.memory.access import ReadScope, visible_profile
+from everos.memory.models import Profile
 from everos.memory.ports import ProfileIndex, Scope
 
 from ..dto import SearchProfileItem
@@ -62,14 +64,44 @@ class ProfileRecaller:
                 user_id=profile.owner_id,
                 app_id=stored.scope.app_id,
                 project_id=stored.scope.project_id,
-                profile_data={
-                    "summary": profile.summary,
-                    "explicit_info": [i.model_dump() for i in profile.explicit_info],
-                    "implicit_traits": [
-                        i.model_dump() for i in profile.implicit_traits
-                    ],
-                    "profile_timestamp_ms": profile.timestamp,
-                },
+                profile_data=profile_data(profile),
                 score=None,
             )
         ]
+
+    async def fetch_member(
+        self, read: ReadScope, group_id: str, member_id: str
+    ) -> SearchProfileItem | None:
+        """A member's profile in one group of ``read``, as the asker may see it.
+
+        Items whose sources lie outside the asker's windows are dropped (and
+        with them the summary); ``None`` when nothing is left, or when the
+        member has no profile in the group.
+        """
+        stored = await self._index.member(read.scope_of(group_id), member_id)
+        if stored is None:
+            return None
+        shown = visible_profile(read, group_id, stored.item)
+        if shown is None:
+            return None
+        return SearchProfileItem(
+            id=stored.ref.id,
+            user_id=None,
+            owner_type="group",
+            group_id=group_id,
+            member_id=member_id,
+            app_id=stored.scope.app_id,
+            project_id=stored.scope.project_id,
+            profile_data=profile_data(shown),
+            score=None,
+        )
+
+
+def profile_data(profile: Profile) -> dict[str, object]:
+    """The ``profile_data`` mapping a profile item carries."""
+    return {
+        "summary": profile.summary,
+        "explicit_info": [i.model_dump() for i in profile.explicit_info],
+        "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
+        "profile_timestamp_ms": profile.timestamp,
+    }

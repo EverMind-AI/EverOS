@@ -51,6 +51,7 @@ from .dto import (
     SearchAtomicFactItem,
     SearchEpisodeItem,
     SearchImageItem,
+    SearchSource,
 )
 
 logger = get_logger(__name__)
@@ -278,7 +279,9 @@ def _episode(
     return SearchEpisodeItem(
         id=stored.ref.id,
         user_id=None if group else episode.owner_id,
+        owner_type="group" if group else None,
         group_id=episode.owner_id if group else None,
+        source=group_source(episode) if group else None,
         app_id=stored.scope.app_id,
         project_id=stored.scope.project_id,
         session_id=episode.session_id,
@@ -293,6 +296,17 @@ def _episode(
         type="Scene" if episode.parent_type == "scene" else "Conversation",
         score=float(score),
         atomic_facts=atomic_facts or [],
+    )
+
+
+def group_source(episode: Episode) -> SearchSource:
+    """A group record's segment and span: first and last message, epoch ms."""
+    return SearchSource(
+        memcell_id=episode.parent_id if episode.parent_type == "memcell" else None,
+        from_=episode.source_start
+        if episode.source_start is not None
+        else episode.timestamp,
+        to=episode.timestamp,
     )
 
 

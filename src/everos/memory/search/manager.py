@@ -5,13 +5,17 @@ Hard partition by ``owner_type``:
 * ``user``  → ``episodes`` (+ ``profiles`` when ``include_profile=true``)
 * ``agent`` → ``agent_cases`` + ``agent_skills``
 * ``group`` → ``episodes`` and pictures of one or several groups, as one pool
+  (+ the asker's and named members' member-in-group ``profiles`` when
+  ``include_profile=true``)
 
 Every request first goes through the access policy
 (:mod:`everos.memory.access`): its read scope's predicate replaces the owner
 part of every recall's ``where``, so visibility is decided in the index query
 and no ranking -- the multi-round decider included -- sees a candidate the
 asker may not. A group scope recalls no atomic facts (there are none, and the
-fact table has no window columns) and attaches no personal profile.
+fact table has no window columns) and attaches no personal profile. Its
+multi-round question names the asker (``"<display name>: <question>"``,
+section 8.2), and ``include_profile`` attaches member-in-group profiles only.
 
 Per kind, :func:`memory.search.adapter.resolve_pipeline` decides whether
 the path is "single-route recall, no fusion" (``KEYWORD`` / ``VECTOR``)
@@ -65,6 +69,7 @@ from everos.memory.access import (
     ScopeRequest,
     resolve_identity,
 )
+from everos.memory.groups import named_members, roster_names
 from everos.memory.models import CanonicalMessage, ImageMemory
 from everos.memory.ports import (
     ClusterStore,
@@ -162,6 +167,10 @@ _AGENT_TOP_K_CAP = 10
 # pick 0.5 slightly looser because LanceDB cosine vs Milvus cosine score
 # distributions can drift a bit on the same model).
 _DEFAULT_UNLIMITED_RADIUS = 0.5
+
+# Members a group search attaches the profiles of, besides the asker's, when
+# the query names them (docs/group-memory.md, section 5.3).
+_NAMED_PROFILES_CAP = 3
 
 # ``maxsim_atomic`` recall pool sizing — atomic facts are ~28× denser than
 # episodes (one memcell → 1 episode + ~28 atomic facts), so the fact pool
@@ -299,10 +308,11 @@ class SearchManager:
             self._validate_components(req)
 
             if scope.is_group:
-                (episodes, images), unprocessed = await asyncio.gather(
+                (episodes, images), profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(
                         req, where, question_image_ids=question_image_ids, scope=scope
                     ),
+                    self._group_profiles(req, scope),
                     self._load_unprocessed(req, scope),
                 )
                 images = await self._resolve_episode_pictures(
@@ -311,6 +321,7 @@ class SearchManager:
                 data = SearchData(
                     episodes=episodes,
                     images=images,
+                    profiles=profiles,
                     unprocessed_messages=unprocessed,
                     scope=_scope_view(scope),
                 )
@@ -524,7 +535,7 @@ class SearchManager:
 
         if req.method == SearchMethod.LLM_MULTIROUND:
             return await search_episodes_and_images_llm_multiround(
-                req.query,
+                _question(req, scope),
                 owner_id=req.owner_id,
                 where=where,
                 app_id=req.app_id,
@@ -854,6 +865,37 @@ class SearchManager:
             req.owner_id, app_id=req.app_id, project_id=req.project_id
         )
 
+    async def _group_profiles(
+        self, req: SearchRequest, scope: ReadScope
+    ) -> list[SearchProfileItem]:
+        """The asker's member-in-group profiles and those of the members named.
+
+        Section 5.3: with ``include_profile``, every group of the scope
+        contributes the asker's profile in it and those of the members the
+        query names by roster name or alias -- at most
+        :data:`_NAMED_PROFILES_CAP` of them, in the order the query names
+        them. Each holds only the items the asker's windows allow; a personal
+        profile is never read.
+        """
+        if not req.include_profile or scope.asker_id is None:
+            return []
+        candidates = [
+            member
+            for view in scope.groups
+            for member in roster_names(view.roster)
+            if member.member_id != scope.asker_id
+        ]
+        named = named_members(req.query, candidates)[:_NAMED_PROFILES_CAP]
+        wanted = [scope.asker_id, *named]
+        fetched = await asyncio.gather(
+            *(
+                self._profile.fetch_member(scope, view.group_id, member)
+                for view in scope.groups
+                for member in wanted
+            )
+        )
+        return [item for item in fetched if item is not None]
+
     # ── Recall helpers ──────────────────────────────────────────────
 
     async def _single_route_recall(
@@ -1054,6 +1096,25 @@ class SearchManager:
             raise ProviderNotConfiguredError(
                 provider="rerank", feature="agentic_search"
             )
+
+
+def _question(req: SearchRequest, scope: ReadScope | None) -> str:
+    """The question the multi-round loop starts from (section 8.2).
+
+    On a group scope it names the asker -- ``"<display name>: <question>"``,
+    the line shape the decider reads candidates in -- so "what do I still
+    have to do?" is read as that member's question. ``[groups]
+    asker_in_question = false`` keeps the question as asked.
+    """
+    if scope is None or not scope.is_group or scope.asker_id is None:
+        return req.query
+    if not load_settings().groups.asker_in_question:
+        return req.query
+    for view in scope.groups:
+        current = view.roster.current(scope.asker_id)
+        if current is not None:
+            return f"{current.display_name}: {req.query}"
+    return req.query
 
 
 def _scope_view(scope: ReadScope) -> SearchScope:

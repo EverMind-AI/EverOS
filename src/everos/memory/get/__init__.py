@@ -29,6 +29,7 @@ from .dto import GetAgentCaseItem as GetAgentCaseItem
 from .dto import GetAgentSkillItem as GetAgentSkillItem
 from .dto import GetData as GetData
 from .dto import GetEpisodeItem as GetEpisodeItem
+from .dto import GetImageItem as GetImageItem
 from .dto import GetMemoryType as GetMemoryType
 from .dto import GetProfileItem as GetProfileItem
 from .dto import GetRequest as GetRequest
@@ -42,6 +43,7 @@ __all__ = [
     "GetAgentSkillItem",
     "GetData",
     "GetEpisodeItem",
+    "GetImageItem",
     "GetManager",
     "GetMemoryType",
     "GetProfileItem",

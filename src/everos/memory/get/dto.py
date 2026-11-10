@@ -8,6 +8,8 @@ ranked retrieval):
 
   - ``user`` → ``episode`` | ``profile``
   - ``agent`` → ``agent_case`` | ``agent_skill``
+  - ``group`` → ``episode`` | ``scene`` | ``image_memory`` | ``member_profile``
+    (the last with ``member_id``)
 
 * ``GetData`` always contains four kind arrays for symmetry with
   ``/search``; only the requested kind is populated. ``total_count``
@@ -29,7 +31,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from everos.memory.search import FilterNode
+from everos.memory.search import FilterNode, SearchSource
 
 
 class GetMemoryType(StrEnum):
@@ -50,6 +52,10 @@ class GetMemoryType(StrEnum):
     AGENT_SKILL = "agent_skill"
     SCENE = "scene"
     """A group's scene versions (group scopes only)."""
+    IMAGE_MEMORY = "image_memory"
+    """A group's picture memories (group scopes only)."""
+    MEMBER_PROFILE = "member_profile"
+    """One member's profile in the group(s), with ``member_id`` (group scopes)."""
 
 
 # ── Request ──────────────────────────────────────────────────────────────
@@ -83,6 +89,8 @@ class GetRequest(BaseModel):
     context_group_id: str | None = Field(default=None, min_length=1)
     """With ``agent_id`` only: list the agent's cases in this group's context
     (the cases learned in it join those learned outside groups)."""
+    member_id: str | None = Field(default=None, min_length=1)
+    """With ``memory_type = member_profile`` only: whose profile to list."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the query
@@ -137,11 +145,25 @@ class GetRequest(BaseModel):
                 f"memory_type {self.memory_type.value!r} is not valid "
                 "when agent_id is set"
             )
-        group_kinds = {GetMemoryType.EPISODE, GetMemoryType.SCENE}
+        group_kinds = {
+            GetMemoryType.EPISODE,
+            GetMemoryType.SCENE,
+            GetMemoryType.IMAGE_MEMORY,
+            GetMemoryType.MEMBER_PROFILE,
+        }
         if self.owner_type == "group" and self.memory_type not in group_kinds:
             raise ValueError(
                 f"memory_type {self.memory_type.value!r} is not valid for a group scope"
             )
+        if self.owner_type != "group" and self.memory_type in group_kinds - {
+            GetMemoryType.EPISODE
+        }:
+            raise ValueError(
+                f"memory_type {self.memory_type.value!r} needs a group scope"
+            )
+        wants_member = self.memory_type == GetMemoryType.MEMBER_PROFILE
+        if wants_member != (self.member_id is not None):
+            raise ValueError("member_id goes with memory_type member_profile, only")
         return self
 
     @property
@@ -171,14 +193,18 @@ class GetRequest(BaseModel):
 
 
 class GetEpisodeItem(BaseModel):
-    """Episode listing item — always user-scoped."""
+    """Episode (or group scene) listing item."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     user_id: str | None
+    owner_type: Literal["group"] | None = None
+    """``group`` on a group record; unset on one-to-one memory."""
     group_id: str | None = None
     """Owning group, for a group episode (``user_id`` is then ``None``)."""
+    source: SearchSource | None = None
+    """A group record's segment and span (epoch ms); unset on one-to-one."""
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
@@ -194,15 +220,48 @@ class GetEpisodeItem(BaseModel):
 
 
 class GetProfileItem(BaseModel):
-    """Owner profile — at most one per response, only for user owners."""
+    """A user's profile, or a member's profile inside a group.
+
+    A member-in-group profile (``owner_type = group``) holds only the items
+    the asker's windows allow.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     user_id: str | None
+    owner_type: Literal["group"] | None = None
+    group_id: str | None = None
+    member_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
     profile_data: dict[str, object]
+
+
+class GetImageItem(BaseModel):
+    """A group picture memory listing item -- one appearance of one picture."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    entry_id: str
+    image_id: str
+    group_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+    session_id: str | None = None
+    timestamp: _dt.datetime
+    sender_ids: list[str] = Field(default_factory=list)
+    """Who posted the picture."""
+    subject_ids: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
+    description: str
+    ocr: str = ""
+    name: str = ""
+    original_path: str = ""
+    media_type: str = ""
+    width: int = 0
+    height: int = 0
 
 
 class GetAgentCaseItem(BaseModel):
@@ -259,6 +318,8 @@ class GetData(BaseModel):
     episodes: list[GetEpisodeItem] = Field(default_factory=list)
     scenes: list[GetEpisodeItem] = Field(default_factory=list)
     """A group's current scene versions (``memory_type = scene``)."""
+    images: list[GetImageItem] = Field(default_factory=list)
+    """A group's picture memories (``memory_type = image_memory``)."""
     profiles: list[GetProfileItem] = Field(default_factory=list)
     agent_cases: list[GetAgentCaseItem] = Field(default_factory=list)
     agent_skills: list[GetAgentSkillItem] = Field(default_factory=list)

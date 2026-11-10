@@ -34,6 +34,7 @@ from .policy import authorize_roster_change as authorize_roster_change
 from .policy import intersect_windows as intersect_windows
 from .policy import owner_predicate as owner_predicate
 from .policy import visible as visible
+from .policy import visible_profile as visible_profile
 
 __all__ = [
     "AccessPolicy",
@@ -49,4 +50,5 @@ __all__ = [
     "owner_predicate",
     "resolve_identity",
     "visible",
+    "visible_profile",
 ]

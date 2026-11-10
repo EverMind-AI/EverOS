@@ -11,6 +11,9 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 * ``group`` + ``episode``      → ``data.episodes`` inside the asker's windows
 * ``group`` + ``scene``        → ``data.scenes``: the scene versions, which share
   the episode table (``parent_type = scene``) and its windows
+* ``group`` + ``image_memory`` → ``data.images`` inside the asker's windows
+* ``group`` + ``member_profile`` (``member_id``) → ``data.profiles``: the
+  member's profile in each group of the scope, its items cut to the windows
 
 Reads only — never writes. The owner part of every ``where`` is the access
 policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
@@ -24,12 +27,19 @@ from __future__ import annotations
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
-from everos.memory.access import AccessPolicy, ScopeRequest, resolve_identity
-from everos.memory.models import AgentCase, AgentSkill, Episode
+from everos.memory.access import (
+    AccessPolicy,
+    ReadScope,
+    ScopeRequest,
+    resolve_identity,
+    visible_profile,
+)
+from everos.memory.models import AgentCase, AgentSkill, Episode, ImageMemory, Profile
 from everos.memory.ports import (
     AgentCaseIndex,
     AgentSkillIndex,
     EpisodeIndex,
+    ImageMemoryIndex,
     Page,
     ProfileIndex,
     Scope,
@@ -38,12 +48,14 @@ from everos.memory.ports import (
     eq,
     ne,
 )
+from everos.memory.search import group_source
 
 from .dto import (
     GetAgentCaseItem,
     GetAgentSkillItem,
     GetData,
     GetEpisodeItem,
+    GetImageItem,
     GetMemoryType,
     GetProfileItem,
     GetRequest,
@@ -62,7 +74,9 @@ class GetManager:
         episode_index: Episode reads.
         agent_case_index: Agent-case reads.
         agent_skill_index: Agent-skill reads.
-        profile_index: User-profile reads.
+        profile_index: User and member-in-group profile reads.
+        image_index: Picture-memory reads (group listings); ``None`` refuses
+            them.
     """
 
     def __init__(
@@ -73,8 +87,10 @@ class GetManager:
         agent_skill_index: AgentSkillIndex,
         profile_index: ProfileIndex,
         access: AccessPolicy,
+        image_index: ImageMemoryIndex | None = None,
     ) -> None:
         self._access = access
+        self._images = image_index
         self._ep = episode_index
         self._case = agent_case_index
         self._skill = agent_skill_index
@@ -130,6 +146,20 @@ class GetManager:
                 )
                 items = [self._shape_episode(e) for e in scenes.items]
                 data = GetData(scenes=items, total_count=scenes.total, count=len(items))
+            case GetMemoryType.IMAGE_MEMORY:
+                if self._images is None:
+                    raise RuntimeError("picture listings need the picture index")
+                images = await self._images.paginate(where, page)
+                shaped = [_shape_image(i) for i in images.items]
+                data = GetData(
+                    images=shaped, total_count=images.total, count=len(shaped)
+                )
+            case GetMemoryType.MEMBER_PROFILE:
+                assert req.member_id is not None  # the request validates it
+                members = await self._member_profiles(scope, req.member_id)
+                data = GetData(
+                    profiles=members, total_count=len(members), count=len(members)
+                )
             case GetMemoryType.PROFILE:
                 profiles = await self._fetch_profile(req)
                 data = GetData(
@@ -177,7 +207,9 @@ class GetManager:
         return GetEpisodeItem(
             id=stored.ref.id,
             user_id=None if group else episode.owner_id,
+            owner_type="group" if group else None,
             group_id=episode.owner_id if group else None,
+            source=group_source(episode) if group else None,
             app_id=stored.scope.app_id,
             project_id=stored.scope.project_id,
             session_id=episode.session_id,
@@ -226,6 +258,36 @@ class GetManager:
 
     # ── Profile ──────────────────────────────────────────────────────
 
+    async def _member_profiles(
+        self, scope: ReadScope, member_id: str
+    ) -> list[GetProfileItem]:
+        """The member's profile in each group of ``scope``, cut to its windows."""
+        items: list[GetProfileItem] = []
+        for view in scope.groups:
+            stored = await self._profile.member(
+                scope.scope_of(view.group_id), member_id
+            )
+            shown = (
+                visible_profile(scope, view.group_id, stored.item)
+                if stored is not None
+                else None
+            )
+            if stored is None or shown is None:
+                continue
+            items.append(
+                GetProfileItem(
+                    id=stored.ref.id,
+                    user_id=None,
+                    owner_type="group",
+                    group_id=view.group_id,
+                    member_id=member_id,
+                    app_id=stored.scope.app_id,
+                    project_id=stored.scope.project_id,
+                    profile_data=_profile_data(shown),
+                )
+            )
+        return items
+
     async def _fetch_profile(self, req: GetRequest) -> list[GetProfileItem]:
         """Fetch the owner's single profile from the profile index (kept in
         sync with ``users/<id>/user.md`` by cascade).
@@ -250,18 +312,46 @@ class GetManager:
             logger.debug("get_profile_miss", owner_id=req.owner_id)
             return []
         profile = stored.item
-        profile_data: dict[str, object] = {
-            "summary": profile.summary,
-            "explicit_info": [i.model_dump() for i in profile.explicit_info],
-            "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
-            "profile_timestamp_ms": profile.timestamp,
-        }
         return [
             GetProfileItem(
                 id=stored.ref.id,
                 user_id=profile.owner_id,
                 app_id=stored.scope.app_id,
                 project_id=stored.scope.project_id,
-                profile_data=profile_data,
+                profile_data=_profile_data(profile),
             )
         ]
+
+
+def _profile_data(profile: Profile) -> dict[str, object]:
+    """The ``profile_data`` mapping a profile listing item carries."""
+    return {
+        "summary": profile.summary,
+        "explicit_info": [i.model_dump() for i in profile.explicit_info],
+        "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
+        "profile_timestamp_ms": profile.timestamp,
+    }
+
+
+def _shape_image(stored: Stored[ImageMemory]) -> GetImageItem:
+    image = stored.item
+    return GetImageItem(
+        id=stored.ref.id,
+        entry_id=stored.ref.entry_id,
+        image_id=image.image_id,
+        group_id=stored.scope.owner_id,
+        app_id=stored.scope.app_id,
+        project_id=stored.scope.project_id,
+        session_id=image.session_id,
+        timestamp=to_display_tz(from_timestamp_ms(image.timestamp)),
+        sender_ids=list(image.sender_ids),
+        subject_ids=list(image.subject_ids),
+        origin=image.origin,
+        description=image.description,
+        ocr=image.ocr,
+        name=image.name,
+        original_path=image.original_relpath,
+        media_type=image.media_type,
+        width=image.width,
+        height=image.height,
+    )
