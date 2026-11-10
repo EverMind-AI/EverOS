@@ -351,6 +351,21 @@ strategies and is hot-reloaded; these require a restart.
 | `lambda` | float | `0.1` | Interpolation weight. |
 | `top_k_cap` | int | `100` | Hard cap on returned results. |
 
+### `[groups]`
+
+Group memory ([group-memory.md](group-memory.md), section 5.2).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
+| `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
+
+### `[access]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `identity_header` | str \| null | unset | The header a gateway in front of EverOS sets to the asker's id ([group-memory.md](group-memory.md), section 9.2). When set, the asker is read from it and a request whose body `asker_id` differs is refused with 403. Unset: the body's `asker_id` is the asker. EverOS itself has no authentication. |
+
 ### `[logging]`
 
 | Field | Type | Default | Description |

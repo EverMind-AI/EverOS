@@ -37,6 +37,7 @@ business semantics the raw spec does not carry.
   - [POST /api/v2/memory/delete_by_ids](#post-apiv2memorydelete_by_ids)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
+  - [Groups](#groups)
 - [OpenAPI spec source](#openapi-spec-source)
 
 ## Overview
@@ -235,8 +236,9 @@ parsing the human-readable `message` field.
 
 | `error.code` | HTTP | Retryable? | When |
 |---|---|---|---|
-| `NOT_FOUND` | `404` | No | Requested resource does not exist |
-| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document) |
+| `NOT_FOUND` | `404` | No | Requested resource does not exist -- or exists but the asker may not see it (a group picture outside their membership windows answers exactly as a missing one) |
+| `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin |
+| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document; a session bound to another group; a roster event that conflicts with the member's open interval) |
 | `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` — and, on `/add` and `/flush`, a session whose buffered messages the model could not segment on three consecutive calls: the buffer is moved to the `quarantine` track of `unprocessed_buffer` so the session can continue, and `message` names the session and the number of messages set aside |
 | `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
@@ -1540,6 +1542,44 @@ Summary of available routes:
 | `GET` | `/api/v2/knowledge/categories` | List taxonomy categories |
 
 ---
+
+### Groups
+
+Group chats are a third memory owner next to users and agents
+([group-memory.md](group-memory.md)). A group has a roster of membership
+intervals (`[joined_at, left_at)`, epoch ms) kept as an append-only log in
+`groups/<group_id>/group.md` and mirrored into `system.db`.
+
+| Route | Who may | What |
+|---|---|---|
+| `PUT /api/v2/groups/{group_id}` | anyone to create; owners and admins to update | Create the group (a roster that names no owner makes the asker its owner) or update `name` / `description` / `extra` / `history_visible_from`; `roster` events are appended |
+| `POST /api/v2/groups/{group_id}/roster` | owners and admins; a member for their own `leave` | Append `join` / `leave` / `update` events. The open buffers of the group's sessions are cut first, so no segment spans the change |
+| `GET /api/v2/groups/{group_id}?project_id=&asker_id=&include_history=` | current members | Meta and current roster; every interval with `include_history=true` |
+
+A roster event: `op`, `member_id`, optional `kind` (`human` / `assistant`),
+`display_name`, `aliases`, `role` (`owner` / `admin` / `member` /
+`assistant`), `title`, `at` (epoch ms, default now). A `join` for a member who
+is in the group, or a `leave` / `update` for one who is not, is `409`.
+
+`/memory/add` takes `group_id` (the first batch binds the session; later
+batches inherit it; another group is `409`), `roster` (events applied before
+the messages; for an existing group the `asker_id` must be an owner or admin)
+and `messages[].message_id`. A sender who is not a member joins at their first
+message (`[groups] implicit_join`); an unknown group is created
+(`[groups] implicit_create`). Group messages never become per-sender personal
+memory.
+
+`/memory/search` and `/memory/get` take `group_id` or `group_ids` (one pool)
+with `asker_id` and `audience` (`asker`, default; `group`: only what every
+current member can see). The asker must be a current member of each group, and
+sees only records whose sources lie inside one of their membership windows;
+the search response carries a `scope` block with those windows. Group-scoped
+`/memory/delete` and forget routes answer `422` until group forget lands.
+
+**Identity.** EverOS has no authentication: `asker_id` is the caller's
+assertion. A deployment behind a gateway sets `[access] identity_header`; the
+asker is then read from that header and a body `asker_id` that differs is
+`403`. A one-to-one request without `asker_id` is read as asked by its owner.
 
 ## OpenAPI spec source
 

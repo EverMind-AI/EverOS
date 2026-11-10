@@ -44,6 +44,13 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │               ├── SKILL.md
 │       │               ├── references/               (optional)
 │       │               └── scripts/                  (optional)
+│       ├── groups/                                   group memory (group-memory.md)
+│       │   └── <group_id>/
+│       │       ├── group.md                          meta + append-only roster log
+│       │       ├── episodes/                         daily-log append (gep_ ids)
+│       │       │   └── episode-<YYYY-MM-DD>.md
+│       │       └── images/                           daily-log append (gim_ ids)
+│       │           └── image-<YYYY-MM-DD>.md
 │       └── knowledge/                                user-visible (shared / global)
 │
 ├── figures/                             picture originals, content-addressed

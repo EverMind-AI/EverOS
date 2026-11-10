@@ -14,7 +14,9 @@ idempotency, or upgrade guarantees; those require separate evidence.
 - `service/` (Application) — `bootstrap` (assembly) + the `MemoryService` /
   `KnowledgeService` / `OpsService` facades.
 - `memory/` (Domain) — models + ports + extract + search + custom_instructions
-  + reflection + strategies + get + events.
+  + reflection + strategies + get + events, plus `access` (the one policy
+  every read path asks: who may see which memory) and `groups` (group meta and
+  roster changes).
 - `infra/` (Adapters) — `persistence/` (markdown + sqlite + derived index)
   implementing `memory.ports`, and the cascade and OME engines.
 
@@ -420,8 +422,11 @@ index backend:
 - Entry-level diff (added / changed / removed)
 - Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
-- Handlers for all eight business kinds: episode, atomic_fact, foresight,
-  user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
+- Handlers for the business kinds: episode, atomic_fact, foresight,
+  image_memory, user_profile, agent_case, agent_skill, knowledge_document,
+  knowledge_topic, and the group kinds -- group_episode and
+  group_image_memory into the same tables, group_roster (``group.md``) into
+  the SQLite roster mirror
 
 ### `memory/custom_instructions/`
 
@@ -501,6 +506,10 @@ sound dependency structure.
     ├── agents/<agent_id>/
     │   ├── .cases/agent_case-<YYYY-MM-DD>.md           # hidden, framework-derived
     │   └── skills/skill_<name>/SKILL.md                # named-dir
+    ├── groups/<group_id>/                              # group memory (group-memory.md)
+    │   ├── group.md                                    # meta + append-only roster log
+    │   ├── episodes/episode-<YYYY-MM-DD>.md            # one entry per segment
+    │   └── images/image-<YYYY-MM-DD>.md                # one entry per picture
     └── knowledge/                                      # global shared knowledge
 ```
 
@@ -556,8 +565,10 @@ AppError
 │   ├── NotFoundError              → 404 NOT_FOUND
 │   │   ├── DocumentNotFoundError
 │   │   └── TopicNotFoundError
+│   ├── ForbiddenError             → 403 FORBIDDEN
 │   ├── ConflictError              → 409 CONFLICT
-│   │   └── DuplicateDocumentError
+│   │   ├── DuplicateDocumentError
+│   │   └── RosterConflictError
 │   ├── InvalidInputError          → 422 INVALID_INPUT
 │   │   ├── ExtractionEmptyError   → 422 EXTRACTION_EMPTY
 │   │   └── FilterError
