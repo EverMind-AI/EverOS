@@ -279,3 +279,57 @@ async def test_the_wire_shape_the_harnesses_read(tmp_path: Path) -> None:
         assert {p["owner_type"] for p in data["profiles"]} == {"group"}
     finally:
         await cm.__aexit__(None, None, None)
+
+
+async def test_named_members_are_counted_once_across_a_pool(tmp_path: Path) -> None:
+    """A member of several groups of the pool is one of the three named."""
+    world, cm = await _world(tmp_path)
+    try:
+        await world.roster("trip", [join("u_dan", T0, display_name="Dan")])
+        await world.roster(
+            "ops",
+            [
+                join("u_chen", T0, display_name="Chen"),
+                join("u_betty", T0, display_name="Betty"),
+            ],
+        )
+        for group, member in (
+            ("ops", "u_betty"),
+            ("trip", "u_dan"),
+            ("trip", "u_evan"),
+        ):
+            await world.stores.member_profile.write(
+                world.scope(group),
+                MemberProfile(
+                    group_id=group,
+                    member_id=member,
+                    profile=Profile(
+                        owner_id=member,
+                        summary="",
+                        timestamp=T0 + 9_000,
+                        explicit_info=[_item(f"{member} in {group}", 6_000, 7_000)],
+                    ),
+                ),
+            )
+        await world.project()
+        found = await world.memory.search(
+            SearchRequest(
+                app_id=APP,
+                project_id=PROJECT,
+                group_ids=["trip", "ops"],
+                asker_id="u_chen",
+                query="What do Betty, Dan and Evan still owe?",
+                method="keyword",
+                include_profile=True,
+            )
+        )
+        attached = sorted((p.group_id, p.member_id) for p in found.data.profiles)
+        assert attached == [
+            ("ops", "u_betty"),
+            ("trip", "u_betty"),
+            ("trip", "u_chen"),
+            ("trip", "u_dan"),
+            ("trip", "u_evan"),
+        ]
+    finally:
+        await cm.__aexit__(None, None, None)

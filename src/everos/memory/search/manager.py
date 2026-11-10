@@ -885,7 +885,10 @@ class SearchManager:
             for member in roster_names(view.roster)
             if member.member_id != scope.asker_id
         ]
-        named = named_members(req.query, candidates)[:_NAMED_PROFILES_CAP]
+        # A member of several groups of the pool is one name, named once.
+        named = list(dict.fromkeys(named_members(req.query, candidates)))[
+            :_NAMED_PROFILES_CAP
+        ]
         wanted = [scope.asker_id, *named]
         fetched = await asyncio.gather(
             *(
