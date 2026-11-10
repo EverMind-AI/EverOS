@@ -5,6 +5,7 @@ Paths (docs/group-memory.md, section 6.1)::
     groups/<group_id>/group.md                      meta + roster log
     groups/<group_id>/episodes/episode-<date>.md    one entry per segment
     groups/<group_id>/images/image-<date>.md        one entry per picture
+    groups/<group_id>/members/<member_id>.md        member-in-group profile
 
 ``group.md`` is a single file: its frontmatter is the group's meta, its body
 the roster as append-only entries (``gr_<YYYYMMDD>_<seq>``, the date being the
@@ -31,6 +32,8 @@ from everos.infra.persistence.markdown._base.frontmatter import (
     GroupScopedFrontmatter,
     ProfilePathMixin,
 )
+
+_MEMBERS_DIR = "members"
 
 
 class GroupFrontmatter(ProfilePathMixin, GroupScopedFrontmatter):
@@ -80,3 +83,35 @@ class GroupImageMemoryDailyFrontmatter(DailyLogPathMixin, GroupScopedFrontmatter
     entry_count: int = 0
     last_appended_at: _dt.datetime | None = None
     deprecated_entries: dict[str, str] = Field(default_factory=dict)
+
+
+class GroupMemberProfileFrontmatter(GroupScopedFrontmatter):
+    """Frontmatter of ``groups/<g>/members/<member_id>.md``.
+
+    The profile operator's document about one member, read from this group's
+    segments only (docs/group-memory.md, section 7.4), in the user profile's
+    shape plus the member and the provenance every item carries
+    (``item_id`` / ``source_memcell_ids`` / ``source_start`` /
+    ``source_end``). ``pending_memcell_ids`` are segments not read yet;
+    ``history`` the items an update replaced or dropped. The body is the
+    summary, for a human reader.
+    """
+
+    MEMBERS_DIR: ClassVar[str] = _MEMBERS_DIR
+
+    type: Literal["group_member_profile"] = "group_member_profile"
+    member_id: str
+    summary: str = ""
+    explicit_info: list[Any] = Field(default_factory=list)
+    implicit_traits: list[Any] = Field(default_factory=list)
+    profile_timestamp_ms: int = 0
+    primary_language: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    pending_memcell_ids: list[str] = Field(default_factory=list)
+    history: list[Any] = Field(default_factory=list)
+
+    @classmethod
+    def path_glob(cls) -> str:
+        # Leading ``*/*/`` matches the <app>/<project> scope prefix.
+        return f"*/*/{cls.SCOPE_DIR}/*/{cls.MEMBERS_DIR}/*.md"

@@ -54,6 +54,7 @@ from everos.memory.ports import (
     primary_key,
 )
 
+from ..records import member_profile_row_id
 from .protocols import (
     AgentSkillIndexRepository,
     EpisodeIndexRepository,
@@ -323,7 +324,11 @@ class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
 
 
 class ProfileIndexAdapter:
-    """The one profile row per user.
+    """The one profile row per user, and per member inside a group.
+
+    A member-in-group profile row is ``owner_type = group`` with the member
+    in ``subject_id`` (docs/group-memory.md, section 6.3); its row id can
+    never equal a user id, and :meth:`get` answers user rows only.
 
     Args:
         repo: User-profile derived-index repository.
@@ -339,19 +344,24 @@ class ProfileIndexAdapter:
         if row is None:
             return None
         fields = _fields(row)
-        return Stored(
-            ref=MemoryRef(
-                id=fields["id"], entry_id=fields["id"], md_path=fields["md_path"]
-            ),
-            scope=_scope(fields),
-            item=Profile.from_stored(
-                owner_id=fields["owner_id"],
-                summary=fields["summary"],
-                timestamp=fields["profile_timestamp_ms"],
-                explicit_info=_json_list(fields["explicit_info_json"]),
-                implicit_traits=_json_list(fields["implicit_traits_json"]),
-            ),
+        if fields["owner_type"] != "user":
+            return None
+        return _stored_profile(fields, subject=fields["owner_id"])
+
+    async def member(self, scope: Scope, member_id: str) -> Stored[Profile] | None:
+        row = await self._repo.find_one_where(
+            primary_key(
+                scope.app_id,
+                scope.project_id,
+                member_profile_row_id(scope.owner_id, member_id),
+            )
         )
+        if row is None:
+            return None
+        fields = _fields(row)
+        if fields["owner_type"] != "group" or fields.get("subject_id") != member_id:
+            return None
+        return _stored_profile(fields, subject=member_id)
 
 
 class KnowledgeTopicIndexAdapter:
@@ -489,6 +499,23 @@ def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
             sender_ids=list(fields.get("sender_ids") or []),
             subject_ids=list(fields.get("subject_ids") or []),
             origin=fields.get("origin"),
+        ),
+    )
+
+
+def _stored_profile(fields: Row, *, subject: str) -> Stored[Profile]:
+    """A profile row as the profile about ``subject``, in the row's scope."""
+    return Stored(
+        ref=MemoryRef(
+            id=fields["id"], entry_id=fields["id"], md_path=fields["md_path"]
+        ),
+        scope=_scope(fields),
+        item=Profile.from_stored(
+            owner_id=subject,
+            summary=fields["summary"],
+            timestamp=fields["profile_timestamp_ms"],
+            explicit_info=_json_list(fields["explicit_info_json"]),
+            implicit_traits=_json_list(fields["implicit_traits_json"]),
         ),
     )
 

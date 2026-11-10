@@ -2,8 +2,11 @@
 
 Profile is a single-file kind: one ``users/<user_id>/user.md`` per
 user, replaced wholesale on edit (mirrors ``AgentSkill`` for the
-upsert/single-row contract). The index row is a typed projection
-of the md frontmatter that the cascade keeps in sync; it carries no
+upsert/single-row contract). The same table holds the member-in-group
+profiles (``groups/<g>/members/<m>.md``, docs/group-memory.md section 6.3):
+``owner_type = group``, ``owner_id`` the group and ``subject_id`` the member,
+under the row id :func:`member_profile_row_id` gives. The index row is a
+typed projection of the md frontmatter that the cascade keeps in sync; it carries no
 vector / no BM25 because the recall surface is pure KV-by-owner
 (``fetch(owner_id)``) — when query-aware profile lookup ships later
 the schema will gain ``vector`` + ``*_tokens`` columns then.
@@ -21,6 +24,15 @@ from typing import ClassVar
 from everos.infra.persistence.records.base import IndexRecord
 
 
+def member_profile_row_id(group_id: str, member_id: str) -> str:
+    """The row id of a member's profile inside a group.
+
+    ``:`` is outside the id charset (letters, digits, ``_ . @ + -``), so no
+    user id -- the row id of a personal profile -- can ever equal it.
+    """
+    return f"{group_id}:{member_id}"
+
+
 class UserProfile(IndexRecord):
     """One ``users/<user_id>/user.md`` in the derived index."""
 
@@ -34,8 +46,13 @@ class UserProfile(IndexRecord):
 
     owner_id: str
     owner_type: str
-    """Always ``"user"`` for this schema; agent-side profiles would
-    live in a sibling table once that schema lands."""
+    """``"user"`` for a personal profile, ``"group"`` for a member's profile
+    inside a group; agent-side profiles would live in a sibling table once
+    that schema lands."""
+
+    subject_id: str | None = None
+    """The member a ``group`` row is about; ``None`` on a personal profile,
+    whose subject is its owner."""
 
     app_id: str = "default"
     project_id: str = "default"

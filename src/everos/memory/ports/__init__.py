@@ -75,6 +75,7 @@ from .stores import ForesightStore as ForesightStore
 from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
+from .stores import MemberProfileStore as MemberProfileStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import NoSourceCheck as NoSourceCheck
@@ -135,6 +136,7 @@ __all__ = [
     "KnowledgeStore",
     "KnowledgeTopicIndex",
     "ManualTick",
+    "MemberProfileStore",
     "MemcellStore",
     "MemorizeInboxStore",
     "MemoryRef",

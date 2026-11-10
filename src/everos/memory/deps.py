@@ -42,6 +42,7 @@ from everos.memory.ports import (
     ImageMemoryStore,
     ImageStore,
     KnowledgeTopicIndex,
+    MemberProfileStore,
     MemcellStore,
     MemorizeInboxStore,
     OwnerDirStore,
@@ -77,6 +78,7 @@ class Stores:
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
     groups: GroupStore
+    member_profile: MemberProfileStore
 
 
 @dataclass(frozen=True)

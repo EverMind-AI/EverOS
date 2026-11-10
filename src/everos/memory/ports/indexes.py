@@ -221,6 +221,15 @@ class AgentSkillIndex(Protocol):
 class ProfileIndex(Protocol):
     async def get(self, scope: Scope) -> Stored[Profile] | None: ...
 
+    async def member(self, scope: Scope, member_id: str) -> Stored[Profile] | None:
+        """A member's profile inside the group ``scope`` names; ``None`` if none.
+
+        The item is the profile about ``member_id`` (its ``owner_id``); the
+        stored scope is the group's. Its items keep their provenance keys, so
+        a read can drop those outside the asker's windows.
+        """
+        ...
+
 
 @runtime_checkable
 class KnowledgeTopicIndex(Protocol):

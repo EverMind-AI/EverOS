@@ -20,6 +20,7 @@ __all__ = [
     "ImageMemoryStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
+    "MemberProfileStore",
     "MemcellStore",
     "MemorizeInboxStore",
     "NoSourceCheck",
@@ -53,6 +54,7 @@ from everos.memory.models import (
     KnowledgeDocument,
     KnowledgeMemory,
     KnowledgeTopic,
+    MemberProfile,
     MemCell,
     MemcellRecord,
     MemorizeTask,
@@ -331,6 +333,24 @@ class ProfileStore(Protocol):
     async def read(self, scope: Scope) -> Profile | None: ...
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef: ...
+
+
+@runtime_checkable
+class MemberProfileStore(Protocol):
+    """The member-in-group profiles of a group (``groups/<g>/members/<m>.md``).
+
+    ``scope`` is the group's (``owner_type = group``). A member's profile in a
+    group is a document of its own: it is never the member's personal profile
+    and never another group's (docs/group-memory.md, D6).
+    """
+
+    async def read(self, scope: Scope, member_id: str) -> MemberProfile | None: ...
+
+    async def write(self, scope: Scope, profile: MemberProfile) -> MemoryRef: ...
+
+    async def members(self, scope: Scope) -> list[str]:
+        """The members of the group that have a profile document, sorted."""
+        ...
 
 
 # ── Agent track ──────────────────────────────────────────────────────────

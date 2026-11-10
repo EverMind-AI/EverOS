@@ -35,6 +35,7 @@ from .image_memory import ImageMemory as ImageMemory
 from .index_record import IndexRecordMeta as IndexRecordMeta
 from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
 from .user_profile import UserProfile as UserProfile
+from .user_profile import member_profile_row_id as member_profile_row_id
 from .vector import DenseVector as DenseVector
 from .vector import VectorColumn as VectorColumn
 from .vector import is_vector_field as is_vector_field
@@ -55,4 +56,5 @@ __all__ = [
     "UserProfile",
     "VectorColumn",
     "is_vector_field",
+    "member_profile_row_id",
 ]

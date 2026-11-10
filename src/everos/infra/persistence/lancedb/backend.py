@@ -42,6 +42,7 @@ from ..records import (
     ImageMemory,
     IndexRecord,
     KnowledgeTopic,
+    UserProfile,
 )
 from ._base import indexes
 from ._base.arrow import arrow_schema_for
@@ -92,7 +93,7 @@ deployment and is written first; ``subject_vector`` comes from the same model
 and is not recorded separately.
 """
 
-_TABLE_SCHEMA_VERSION = 4
+_TABLE_SCHEMA_VERSION = 5
 """Bump when column nullability or presence changes on business tables.
 
 v2 = ``vector: DenseVector | None`` on the 6 business tables that carry
@@ -117,6 +118,10 @@ v4 = the group-memory columns (docs/group-memory.md, section 6.3):
 Added nullable; an existing row holds NULL and reads ``[]`` / ``None`` /
 ``timestamp``. Only rows a group owns are ever compared on the window columns,
 and those are written with them.
+
+v5 = the member-in-group profiles (docs/group-memory.md, section 6.3):
+``user_profile.subject_id``, the member a ``group`` row is about. Added
+nullable; a personal profile row holds NULL, its subject being its owner.
 
 :meth:`migrate_table_schemas` dispatches through :data:`_MIGRATIONS`, one
 coroutine per version, so a new version is one entry — not an edit to a
@@ -403,16 +408,38 @@ class LanceIndexBackend:
         side takes as the empty default. A column already there is skipped, so
         a store created at v4 (or a retry after a partial step) is a no-op.
         """
-        wanted = {
-            Episode: ("subject_ids", "origin", "source_start", "source_end"),
-            ImageMemory: (
-                "sender_ids",
-                "subject_ids",
-                "origin",
-                "source_start",
-                "source_end",
-            ),
-        }
+        await self._add_nullable_columns(
+            {
+                Episode: ("subject_ids", "origin", "source_start", "source_end"),
+                ImageMemory: (
+                    "sender_ids",
+                    "subject_ids",
+                    "origin",
+                    "source_start",
+                    "source_end",
+                ),
+            },
+            version=4,
+        )
+
+    async def _migrate_v5_member_profiles(self) -> None:
+        """v5 -- add ``user_profile.subject_id`` (member-in-group profiles).
+
+        Additive and metadata-only, like v4: a personal profile row reads NULL.
+        """
+        await self._add_nullable_columns({UserProfile: ("subject_id",)}, version=5)
+
+    async def _add_nullable_columns(
+        self,
+        wanted: dict[type[IndexRecord], tuple[str, ...]],
+        *,
+        version: int,
+    ) -> None:
+        """Add the named columns, nullable, to each table that lacks them.
+
+        Raises:
+            LanceDBMigrationError: A table refused the new columns.
+        """
         for schema, names in wanted.items():
             table = await self._open(schema)
             on_disk = await table.schema()
@@ -434,11 +461,11 @@ class LanceIndexBackend:
                     error=str(exc),
                 )
                 raise LanceDBMigrationError(
-                    f"LanceDB v4 migration could not add the group columns to "
-                    f"{schema.TABLE_NAME!r}: {exc}. Startup aborted rather than "
-                    f"running against a table whose window columns are missing. "
-                    f"Retry; if it persists, run `everos cascade rebuild` with the "
-                    f"server stopped (it re-indexes from md)."
+                    f"LanceDB v{version} migration could not add the group "
+                    f"columns to {schema.TABLE_NAME!r}: {exc}. Startup aborted "
+                    f"rather than running against a table whose group columns "
+                    f"are missing. Retry; if it persists, run `everos cascade "
+                    f"rebuild` with the server stopped (it re-indexes from md)."
                 ) from exc
 
     # TODO(#477): BTree scalar index on `id` for the business tables — a 4x
@@ -584,6 +611,7 @@ _MIGRATIONS: dict[int, Callable[[LanceIndexBackend], Awaitable[None]]] = {
     2: LanceIndexBackend._migrate_v2_nullable_vector,
     3: LanceIndexBackend._migrate_v3_visual_vector,
     4: LanceIndexBackend._migrate_v4_group_columns,
+    5: LanceIndexBackend._migrate_v5_member_profiles,
 }
 """One coroutine per target version, run in order by
 :meth:`LanceIndexBackend.migrate_table_schemas`.

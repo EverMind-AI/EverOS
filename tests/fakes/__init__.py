@@ -78,6 +78,7 @@ from .stores import InMemoryForgetLogStore as InMemoryForgetLogStore
 from .stores import InMemoryGroupStore as InMemoryGroupStore
 from .stores import InMemoryImageMemoryStore as InMemoryImageMemoryStore
 from .stores import InMemoryImageStore as InMemoryImageStore
+from .stores import InMemoryMemberProfileStore as InMemoryMemberProfileStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
@@ -110,6 +111,7 @@ __all__ = [
     "InMemoryImageMemoryIndex",
     "InMemoryImageMemoryStore",
     "InMemoryImageStore",
+    "InMemoryMemberProfileStore",
     "InMemoryMemcellStore",
     "InMemoryProfileIndex",
     "InMemoryProfileStore",

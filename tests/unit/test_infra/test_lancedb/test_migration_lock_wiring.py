@@ -304,8 +304,8 @@ async def test_concurrent_migrations_serialize_through_the_lock(
 
     assert max_concurrent[0] == 1
     # One task wrote the marker; the other saw it and short-circuited. The
-    # work section opens each v2 table once, then image_memory for v3, then
-    # episode and image_memory for v4.
-    assert reached_work["n"] == len(lancedb_backend.BUSINESS_SCHEMAS_WITH_VECTOR) + 3
+    # work section opens each v2 table once, then image_memory for v3,
+    # episode and image_memory for v4, and user_profile for v5.
+    assert reached_work["n"] == len(lancedb_backend.BUSINESS_SCHEMAS_WITH_VECTOR) + 4
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"
     assert int(marker.read_text().strip()) == _TABLE_SCHEMA_VERSION

@@ -95,6 +95,8 @@ _GROUP_ITEM_FIELDS: Mapping[str, object] = {
 ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
     "episode_row": _GROUP_COLUMNS,
     "image_memory_row": {**_GROUP_COLUMNS, "sender_ids": []},
+    # Section 6.3: the member a member-in-group profile row is about.
+    "user_profile_row": {"subject_id": None},
     "search": {**_GROUP_ITEM_FIELDS, "sender_ids": [], "scope": None},
     "get": _GROUP_ITEM_FIELDS,
 }

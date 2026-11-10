@@ -289,10 +289,14 @@ def _image_fields(row: Stored[ImageMemory]) -> Mapping[str, Any]:
 
 
 class InMemoryProfileIndex:
-    """Seeded profiles by scope."""
+    """Seeded profiles by scope; member-in-group ones by ``(group scope, member)``."""
 
     def __init__(self) -> None:
         self.rows: dict[Scope, Stored[Profile]] = {}
+        self.members: dict[tuple[Scope, str], Stored[Profile]] = {}
 
     async def get(self, scope: Scope) -> Stored[Profile] | None:
         return self.rows.get(scope)
+
+    async def member(self, scope: Scope, member_id: str) -> Stored[Profile] | None:
+        return self.members.get((scope, member_id))

@@ -27,6 +27,7 @@ from everos.infra.persistence.markdown import (
     GroupEpisodeDailyFrontmatter,
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
+    GroupMemberProfileFrontmatter,
     ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
@@ -49,6 +50,7 @@ from ._projections import (
     AtomicFactHandler,
     EpisodeHandler,
     ForesightHandler,
+    GroupMemberProfileHandler,
     GroupRosterHandler,
     Handler,
     HandlerDeps,
@@ -158,6 +160,12 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=GroupImageMemoryDailyFrontmatter,
         index_schema=ImageMemory,
         handler_factory=ImageMemoryHandler,
+    ),
+    KindSpec(
+        name="group_member_profile",
+        frontmatter_schema=GroupMemberProfileFrontmatter,
+        index_schema=UserProfile,
+        handler_factory=GroupMemberProfileHandler,
     ),
     KindSpec(
         name="group_roster",

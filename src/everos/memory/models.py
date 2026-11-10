@@ -515,6 +515,45 @@ class Profile(BaseModel):
         )
 
 
+MEMBER_ITEM_KEYS: tuple[str, ...] = (
+    "item_id",
+    "source_memcell_ids",
+    "source_start",
+    "source_end",
+)
+"""The provenance keys every item of a :class:`MemberProfile` carries.
+
+``item_id`` stays while the item's description does; ``source_memcell_ids``
+are the group segments it was read from and ``source_start`` /
+``source_end`` (epoch ms) their span, which a read compares with the asker's
+membership windows (docs/group-memory.md, section 9.1)."""
+
+
+class MemberProfile(BaseModel):
+    """One member's profile inside one group (docs/group-memory.md, 7.4, D6).
+
+    ``profile`` is the profile operator's document about ``member_id``, read
+    only from this group's segments in which the member spoke; it never holds
+    the member's personal profile (``users/<m>/user.md``) or another group's.
+    Its items carry :data:`MEMBER_ITEM_KEYS` as extra keys.
+
+    Attributes:
+        group_id: The group.
+        member_id: Whom the profile is about.
+        profile: The document; ``profile.owner_id`` is ``member_id``.
+        pending_memcell_ids: Segments the member spoke in that no update has
+            read yet (the ``[groups] member_profile_every`` throttle).
+        history: Items a later update replaced or dropped, each with the
+            ``replaced_at`` epoch ms of that update.
+    """
+
+    group_id: str
+    member_id: str
+    profile: Profile
+    pending_memcell_ids: list[str] = Field(default_factory=list)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+
+
 _DROPPED_PREVIEW_CHARS = 80
 
 
@@ -959,6 +998,7 @@ class Roster(BaseModel):
 
 __all__ = [
     "MANAGER_ROLES",
+    "MEMBER_ITEM_KEYS",
     "AccessRole",
     "AgentCase",
     "AgentSkill",
@@ -983,6 +1023,7 @@ __all__ = [
     "IngestResult",
     "MemCell",
     "MemberKind",
+    "MemberProfile",
     "MembershipInterval",
     "MemcellRecord",
     "MemorizeTask",

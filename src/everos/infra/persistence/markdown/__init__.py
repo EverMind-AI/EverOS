@@ -61,6 +61,9 @@ from ._mds import GroupFrontmatter as GroupFrontmatter
 from ._mds import (
     GroupImageMemoryDailyFrontmatter as GroupImageMemoryDailyFrontmatter,
 )
+from ._mds import (
+    GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter,
+)
 from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from ._mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
 from ._mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
@@ -94,6 +97,7 @@ from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
 from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
 from .stores import MarkdownForesightStore as MarkdownForesightStore
 from .stores import MarkdownImageMemoryStore as MarkdownImageMemoryStore
+from .stores import MarkdownMemberProfileStore as MarkdownMemberProfileStore
 from .stores import MarkdownProfileStore as MarkdownProfileStore
 
 __all__ = [
@@ -124,6 +128,7 @@ __all__ = [
     "GroupFrontmatter",
     "GroupImageMemoryDailyFrontmatter",
     "GroupImageMemoryWriter",
+    "GroupMemberProfileFrontmatter",
     "GroupScopedFrontmatter",
     "GroupWriter",
     "ImageMemoryDailyFrontmatter",
@@ -141,6 +146,7 @@ __all__ = [
     "MarkdownForesightStore",
     "MarkdownImageMemoryStore",
     "MarkdownKnowledgeStore",
+    "MarkdownMemberProfileStore",
     "MarkdownOwnerDirStore",
     "MarkdownProfileStore",
     "MarkdownReader",

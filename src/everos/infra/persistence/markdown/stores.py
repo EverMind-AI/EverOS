@@ -14,6 +14,8 @@ __all__ = [
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
+    "MarkdownImageMemoryStore",
+    "MarkdownMemberProfileStore",
     "MarkdownProfileStore",
 ]
 
@@ -34,6 +36,7 @@ from everos.core.utils.datetime import (
     to_timestamp_ms,
 )
 from everos.infra.persistence.memory_root import MemoryRoot
+from everos.infra.persistence.records import member_profile_row_id
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
@@ -41,6 +44,7 @@ from everos.memory.models import (
     Episode,
     Foresight,
     ImageMemory,
+    MemberProfile,
     Profile,
 )
 from everos.memory.ports import (
@@ -51,8 +55,12 @@ from everos.memory.ports import (
     Stored,
 )
 
-from ._base import Entry, EntryId, MarkdownReader
-from ._mds import AgentSkillFrontmatter, UserProfileFrontmatter
+from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
+from ._mds import (
+    AgentSkillFrontmatter,
+    GroupMemberProfileFrontmatter,
+    UserProfileFrontmatter,
+)
 from ._readers import AgentSkillReader, ProfileReader
 from ._writers import (
     AgentCaseWriter,
@@ -716,6 +724,94 @@ class MarkdownProfileStore:
             entry_id=frontmatter.id,
             md_path=_relative(self._root, path),
         )
+
+
+class MarkdownMemberProfileStore:
+    """``groups/<g>/members/<member_id>.md``: a member's profile in one group.
+
+    One file per member, rewritten whole on every update, under the group's
+    owner lock like every other markdown write of the group. Reads go to the
+    file (the truth): the strategy that updates a profile reads it there, and
+    the search side reads the index row the cascade projects from it.
+
+    Args:
+        root: Memory root the groups live under.
+    """
+
+    def __init__(self, root: MemoryRoot) -> None:
+        self._root = root
+        self._writer = MarkdownWriter(root)
+
+    async def read(self, scope: Scope, member_id: str) -> MemberProfile | None:
+        path = self._path(scope, member_id)
+        if not await anyio.Path(path).is_file():
+            return None
+        parsed = await MarkdownReader.read(path)
+        fm = GroupMemberProfileFrontmatter.model_validate(parsed.frontmatter)
+        return MemberProfile(
+            group_id=scope.owner_id,
+            member_id=member_id,
+            profile=Profile.from_stored(
+                owner_id=member_id,
+                summary=fm.summary,
+                timestamp=fm.profile_timestamp_ms,
+                explicit_info=list(fm.explicit_info),
+                implicit_traits=list(fm.implicit_traits),
+                primary_language=_known_language(
+                    fm.primary_language, owner_id=member_id
+                ),
+            ),
+            pending_memcell_ids=list(fm.pending_memcell_ids),
+            history=[dict(item) for item in fm.history if isinstance(item, dict)],
+        )
+
+    async def write(self, scope: Scope, profile: MemberProfile) -> MemoryRef:
+        path = self._path(scope, profile.member_id)
+        document = profile.profile
+        frontmatter = GroupMemberProfileFrontmatter(
+            id=f"member_profile_{scope.owner_id}_{profile.member_id}",
+            group_id=scope.owner_id,
+            member_id=profile.member_id,
+            summary=document.summary,
+            explicit_info=[i.model_dump() for i in document.explicit_info],
+            implicit_traits=[i.model_dump() for i in document.implicit_traits],
+            profile_timestamp_ms=document.timestamp,
+            primary_language=document.primary_language,
+            pending_memcell_ids=list(profile.pending_memcell_ids),
+            history=list(profile.history),
+        )
+        body = (
+            document.summary
+            if document.summary.endswith("\n")
+            else (f"{document.summary}\n")
+        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            await self._writer.write_markdown(
+                path, frontmatter=frontmatter.model_dump(), body=body
+            )
+        return MemoryRef(
+            id=member_profile_row_id(scope.owner_id, profile.member_id),
+            entry_id=frontmatter.id,
+            md_path=_relative(self._root, path),
+        )
+
+    async def members(self, scope: Scope) -> list[str]:
+        folder = anyio.Path(self._folder(scope))
+        if not await folder.is_dir():
+            return []
+        return sorted([Path(str(f)).stem async for f in folder.glob("*.md")])
+
+    def _folder(self, scope: Scope) -> Path:
+        if scope.owner_type != "group":
+            raise ValueError("a member profile belongs to a group scope")
+        return (
+            self._root.groups_dir(scope.app_id, scope.project_id)
+            / scope.owner_id
+            / GroupMemberProfileFrontmatter.MEMBERS_DIR
+        )
+
+    def _path(self, scope: Scope, member_id: str) -> Path:
+        return self._folder(scope) / f"{member_id}.md"
 
 
 class MarkdownAgentSkillStore:
