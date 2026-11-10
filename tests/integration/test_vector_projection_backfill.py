@@ -16,6 +16,7 @@ from everos.infra.cascade._projections import (
     EpisodeHandler,
     ForesightHandler,
     HandlerDeps,
+    ImageMemoryHandler,
     KnowledgeTopicHandler,
 )
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
@@ -89,6 +90,7 @@ async def _normal_row(
         "atomic_fact": AtomicFactHandler,
         "foresight": ForesightHandler,
         "agent_case": AgentCaseHandler,
+        "image_memory": ImageMemoryHandler,
     }
     entry = ParsedEntry(
         entry_id="entry",
@@ -107,6 +109,7 @@ async def _normal_row(
                 "Foresight": "future plan",
                 "TaskIntent": "case intent",
                 "Approach": "not the embedding source",
+                "Description": "picture description",
             },
         ),
     )
