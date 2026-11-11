@@ -13,10 +13,8 @@ __all__ = [
     "REPLAYS_EXHAUSTED_PREFIX",
     "AgentCaseStore",
     "AgentSkillStore",
-    "AtomicFactStore",
     "ClusterStore",
     "EpisodeStore",
-    "ForesightStore",
     "ImageMemoryStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
@@ -43,13 +41,11 @@ from typing import Any, Final, Protocol, final, runtime_checkable
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     CanonicalMessage,
     Cluster,
     ClusterKind,
     ClusterMemberType,
     Episode,
-    Foresight,
     ImageMemory,
     KnowledgeCategory,
     KnowledgeDocument,
@@ -263,72 +259,6 @@ class ImageMemoryStore(Protocol):
 
 
 @runtime_checkable
-class AtomicFactStore(Protocol):
-    """Atomic-fact truth: append-only daily logs per owner (``only_if``: above)."""
-
-    async def append_many(
-        self,
-        scope: Scope,
-        facts: Sequence[AtomicFact],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]: ...
-
-    async def deprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        replaced_by: str,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
-
-        The adapter groups references for storage; failures propagate after any
-        earlier writes, without an all-or-nothing guarantee.
-
-        Returns:
-            Whether the references were marked (``False``: ``only_if`` failed).
-        """
-        ...
-
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id``; their refs.
-
-        Takes the owner lock once first (a barrier), then rewrites each file
-        under it. The caller deletes the session's memcells before.
-        """
-        ...
-
-    async def remove_by_parents(
-        self, scope: Scope, parent_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        """Remove the owner's facts of these parent episodes; their refs."""
-        ...
-
-
-@runtime_checkable
-class ForesightStore(Protocol):
-    """Foresight truth: append-only daily logs per owner (``only_if``: above)."""
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]: ...
-
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id``; their refs.
-
-        Takes the owner lock once first (a barrier), then rewrites each file
-        under it. The caller deletes the session's memcells before.
-        """
-        ...
-
-
-@runtime_checkable
 class ProfileStore(Protocol):
     """The single profile document of one user."""
 
@@ -421,7 +351,7 @@ class OwnerDirDeletion:
 
     Attributes:
         refs: The daily-log entries, by index table (``episode``,
-            ``atomic_fact``, ``foresight``, ``agent_case``).
+            ``image_memory``, ``agent_case``).
         count: Entries, plus one per skill directory, plus one for
             ``user.md``.
     """

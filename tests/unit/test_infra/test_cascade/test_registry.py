@@ -1,9 +1,10 @@
 """Tests for the cascade kind registry.
 
-Verify the 5 registered kinds' globs match the right paths and reject
-noise (random ``.md``, swp files, profile-style paths). ``match_kind``
-must walk the registry in declared order and pick the first matching
-spec.
+Verify the registered kinds' globs match the right paths and reject
+noise (random ``.md``, swp files, profile-style paths, and the atomic-fact /
+foresight logs a store written before EverOS 2.0 still holds).
+``match_kind`` must walk the registry in declared order and pick the first
+matching spec.
 """
 
 from __future__ import annotations
@@ -21,14 +22,6 @@ from everos.infra.cascade import KIND_REGISTRY, match_kind
             "episode",
         ),
         ("claude_code/oss/users/u_jason/episodes/episode-2026-01-01.md", "episode"),
-        (
-            "default_app/default_project/users/u1/.atomic_facts/atomic_fact-2026-05-14.md",
-            "atomic_fact",
-        ),
-        (
-            "default_app/default_project/users/u1/.foresights/foresight-2026-05-14.md",
-            "foresight",
-        ),
         (
             "default_app/default_project/agents/a1/.cases/agent_case-2026-05-14.md",
             "agent_case",
@@ -58,19 +51,21 @@ def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -
         # rejected so a prefix-less path can never silently match (the scanner
         # would otherwise find nothing while the watcher matched, a split brain).
         "users/u1/episodes/episode-2026-05-14.md",
+        # Logs of the kinds EverOS 2.0 removed: an older store still has them
+        # on disk, and the cascade must leave them alone.
+        "default_app/default_project/users/u1/.atomic_facts/atomic_fact-2026-05-14.md",
+        "default_app/default_project/users/u1/.foresights/foresight-2026-05-14.md",
     ],
 )
 def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_fourteen_kinds() -> None:
+def test_registry_has_exactly_twelve_kinds() -> None:
     """The registry pins the cascade surface — no silent registration."""
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
         "episode",
-        "atomic_fact",
-        "foresight",
         "agent_case",
         "agent_skill",
         "image_memory",

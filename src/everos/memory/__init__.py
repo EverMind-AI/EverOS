@@ -21,20 +21,16 @@ business logic (extract / search / reflection / custom_instructions).
 
 from ._partition_locks import user_cluster_lock as user_cluster_lock
 from .models import AgentCase as AgentCase
-from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
 from .models import Episode as Episode
-from .models import Foresight as Foresight
 from .models import IngestResult as IngestResult
 from .models import MemCell as MemCell
 from .models import ToolCall as ToolCall
 
 __all__ = [
     "AgentCase",
-    "AtomicFact",
     "CanonicalMessage",
     "Episode",
-    "Foresight",
     "IngestResult",
     "MemCell",
     "ToolCall",

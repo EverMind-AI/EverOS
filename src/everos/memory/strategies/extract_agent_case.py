@@ -37,7 +37,7 @@ Algo limitation (recorded in
 ``local/notes/2026-05-18-write-read-loop-status.md``): the LLM only
 sees a flat ``"assistant"`` role label — per-agent serialisation +
 per-agent output is a future algo-side change. Until then, broadcast
-is the right md-layer fan-out (mirrors Episode/atomic_fact).
+is the right md-layer fan-out (mirrors Episode).
 """
 
 from __future__ import annotations

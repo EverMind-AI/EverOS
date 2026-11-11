@@ -13,7 +13,6 @@ from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
     SkillClusterUpdated,
-    UserPipelineStarted,
 )
 
 _FROZEN_PAYLOADS = (
@@ -55,12 +54,19 @@ def test_frozen_skill_cluster_payload_keeps_omitted_defaults() -> None:
 
 
 def test_frozen_pipeline_payload_preserves_nested_memcell() -> None:
+    """The frozen pipeline-start payload still reads as ``AgentPipelineStarted``.
+
+    It was frozen for the user pipeline's start event (since removed), whose
+    payload ``AgentPipelineStarted`` mirrored field for field at the frozen
+    commit; it is the one remaining event that carries a MemCell.
+    """
     payload = (_FROZEN_PAYLOADS / "user_pipeline_started.json").read_text()
 
-    event = UserPipelineStarted.model_validate_json(payload)
+    event = AgentPipelineStarted.model_validate_json(payload)
 
     assert event.event_id == "frozen-user-pipeline-event"
     assert (event.app_id, event.project_id) == ("default", "default")
+    assert event.group_id is None
     assert event.memcell_id == "mc-frozen"
     assert event.session_id == "session-frozen"
     assert event.memcell.timestamp == 1_700_000_000_123
@@ -94,31 +100,27 @@ def _sample_memcell() -> MemCell:
     )
 
 
-def test_user_pipeline_started_topic_is_module_qualified() -> None:
-    assert UserPipelineStarted.topic() == "everos.memory.events:UserPipelineStarted"
-
-
 def test_agent_pipeline_started_topic_is_module_qualified() -> None:
     assert AgentPipelineStarted.topic() == "everos.memory.events:AgentPipelineStarted"
 
 
-def test_user_pipeline_started_roundtrip_json() -> None:
-    event = UserPipelineStarted(
+def test_agent_pipeline_started_roundtrip_json() -> None:
+    event = AgentPipelineStarted(
         memcell_id="mc_a", session_id="s1", memcell=_sample_memcell()
     )
-    restored = UserPipelineStarted.model_validate_json(event.model_dump_json())
+    restored = AgentPipelineStarted.model_validate_json(event.model_dump_json())
     assert restored.memcell_id == "mc_a"
     assert restored.session_id == "s1"
 
 
-def test_user_pipeline_started_is_frozen_and_extra_forbid() -> None:
-    event = UserPipelineStarted(
+def test_agent_pipeline_started_is_frozen_and_extra_forbid() -> None:
+    event = AgentPipelineStarted(
         memcell_id="mc_a",
         session_id="s1",
         memcell=_sample_memcell(),
     )
     with pytest.raises(pydantic.ValidationError):
-        UserPipelineStarted(  # type: ignore[call-arg]
+        AgentPipelineStarted(  # type: ignore[call-arg]
             memcell_id="mc_a",
             session_id="s1",
             memcell=_sample_memcell(),
@@ -128,8 +130,8 @@ def test_user_pipeline_started_is_frozen_and_extra_forbid() -> None:
         event.memcell_id = "mc_b"  # type: ignore[misc]
 
 
-def test_user_pipeline_started_carries_memcell() -> None:
-    event = UserPipelineStarted(
+def test_agent_pipeline_started_carries_memcell() -> None:
+    event = AgentPipelineStarted(
         memcell_id="mc_a",
         session_id="s1",
         memcell=_sample_memcell(),
@@ -138,13 +140,13 @@ def test_user_pipeline_started_carries_memcell() -> None:
     assert event.memcell.items[1].sender_id == "agent"
 
 
-def test_user_pipeline_started_nested_roundtrip_json() -> None:
-    event = UserPipelineStarted(
+def test_agent_pipeline_started_nested_roundtrip_json() -> None:
+    event = AgentPipelineStarted(
         memcell_id="mc_a",
         session_id="s1",
         memcell=_sample_memcell(),
     )
-    restored = UserPipelineStarted.model_validate_json(event.model_dump_json())
+    restored = AgentPipelineStarted.model_validate_json(event.model_dump_json())
     assert restored.memcell.items[0].id == "m1"
     assert restored.memcell.items[1].content == "hi back"
     assert restored.memcell.timestamp == 1_700_000_001_000

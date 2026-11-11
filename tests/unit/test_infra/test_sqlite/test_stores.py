@@ -521,7 +521,6 @@ async def test_reflection_reports(stores: _Stores) -> None:
         mode="init",
         source_members=[("ep_1", "episode"), ("ep_2", "episode")],
         merged_entry_id="ep_m",
-        deprecated_fact_count=3,
     )
 
     await stores.report.create(report)

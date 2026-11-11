@@ -24,16 +24,14 @@ from collections.abc import Collection
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import Episode as AlgoEpisode
 
 from everos.core.locks import LOCKS, owner_key
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownReader,
 )
@@ -45,14 +43,13 @@ from everos.memory.events import (
 from everos.memory.models import Cluster, Episode, MemCell
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
-from everos.memory.strategies import extract_atomic_facts, trigger_profile_clustering
+from everos.memory.strategies import trigger_profile_clustering
 from tests.fakes import make_deps, make_indexes, make_stores
 from tests.fakes.stores import InMemoryMemcellStore
 
 _TS = 1_747_216_800_000
 _USER = Scope(app_id="app", project_id="proj", owner_id="u1", owner_type="user")
 _OWNER = owner_key("app", "proj", "user", "u1")
-_FACTS = "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
 _GONE = "ep_20250514_0099"
 """An entry id no file holds: what a deleted episode looks like to a reader."""
 
@@ -100,37 +97,6 @@ def _episode_event(ref: MemoryRef, *, memcell_id: str) -> EpisodeExtracted:
         app_id="app",
         project_id="proj",
     )
-
-
-async def test_fact_dropped_when_memcell_deleted_even_if_episode_present(
-    root: MemoryRoot,
-) -> None:
-    """MD_Abl_NoFactMemcell / spec 1 R4.
-
-    A session deletion removes the memcell row first, then rewrites the
-    owner's files. A fact extraction whose episode file the deletion has not
-    reached yet sees its parent episode still in md; only the memcell check
-    stops it from writing into a file the deletion's scan already passed.
-    """
-    episodes = MarkdownEpisodeStore(root)
-    facts = MarkdownAtomicFactStore(root)
-    memcells = InMemoryMemcellStore()
-    ref = await _write_episode(episodes, memcell_id="mc_1")
-    # The deletion's first step: the memcell row is gone, md not yet rewritten.
-    deps = make_deps(
-        stores=make_stores(episode=episodes, atomic_fact=facts, memcell=memcells)
-    )
-
-    with patch(_FACTS) as extractor_cls:
-        extractor_cls.return_value.aextract_from_text = AsyncMock(
-            return_value=[AlgoAtomicFact(owner_id=None, content="x", timestamp=_TS)]
-        )
-        (event,) = await extract_atomic_facts(
-            _episode_event(ref, memcell_id="mc_1"), deps
-        )
-
-    assert event.fact_entry_ids == []
-    assert not list((root.root / "app").rglob(".atomic_facts/*.md"))
 
 
 class _ReadThenDelete(MarkdownEpisodeStore):
@@ -264,8 +230,6 @@ async def _finish(
     finisher = ReflectionFinisher(
         cluster_store=stores.cluster,
         episode_store=stores.episode,
-        atomic_fact_store=stores.atomic_fact,
-        atomic_fact_index=make_indexes().atomic_fact,
         report_store=stores.reflection_report,
         embedder=make_deps().embedding,  # type: ignore[arg-type]
     )

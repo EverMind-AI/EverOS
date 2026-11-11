@@ -13,7 +13,6 @@ from __future__ import annotations
 __all__ = [
     "AgentCaseIndexAdapter",
     "AgentSkillIndexAdapter",
-    "AtomicFactIndexAdapter",
     "EpisodeIndexAdapter",
     "ImageMemoryIndexAdapter",
     "KnowledgeTopicIndexAdapter",
@@ -31,7 +30,6 @@ from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     EpisodeParentType,
     ImageMemory,
@@ -183,17 +181,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
         rows = await self._episodes.find_where(where, limit=limit, skip_vectors=True)
         return [_stored_episode(_fields(r)) for r in rows]
-
-
-class AtomicFactIndexAdapter(_SearchableIndex[AtomicFact]):
-    """Atomic-fact index reads.
-
-    Args:
-        repo: Atomic-fact derived-index repository.
-    """
-
-    def __init__(self, repo: IndexRepository[Any]) -> None:
-        super().__init__(repo, _stored_atomic_fact)
 
 
 class AgentCaseIndexAdapter(_SearchableIndex[AgentCase]):
@@ -516,20 +503,6 @@ def _stored_profile(fields: Row, *, subject: str) -> Stored[Profile]:
             timestamp=fields["profile_timestamp_ms"],
             explicit_info=_json_list(fields["explicit_info_json"]),
             implicit_traits=_json_list(fields["implicit_traits_json"]),
-        ),
-    )
-
-
-def _stored_atomic_fact(fields: Row) -> Stored[AtomicFact]:
-    return Stored(
-        ref=_daily_ref(fields),
-        scope=_scope(fields),
-        item=AtomicFact(
-            owner_id=fields["owner_id"],
-            content=fields["fact"],
-            timestamp=to_timestamp_ms(fields["timestamp"]),
-            session_id=fields.get("session_id"),
-            parent_id=fields["parent_id"],
         ),
     )
 

@@ -3,8 +3,8 @@
 Each storage strategy from the EverOS Markdown First spec gets a class
 here:
 
-    * :class:`BaseDailyWriter` — daily-log append (episode / atomic
-      fact / foresight / agent case). Subclass and bind ``schema``.
+    * :class:`BaseDailyWriter` — daily-log append (episode / image
+      memory / agent case). Subclass and bind ``schema``.
     * :class:`AgentSkillWriter` — directory + progressive disclosure
       (``skills/skill_<name>/{SKILL.md, references/, scripts/}``).
       Single class, no subclassing.
@@ -26,10 +26,8 @@ External usage::
 
 from .agent_case_writer import AgentCaseWriter as AgentCaseWriter
 from .agent_skill_writer import AgentSkillWriter as AgentSkillWriter
-from .atomic_fact_writer import AtomicFactWriter as AtomicFactWriter
 from .base import BaseDailyWriter as BaseDailyWriter
 from .episode_writer import EpisodeWriter as EpisodeWriter
-from .foresight_writer import ForesightWriter as ForesightWriter
 from .group_writer import GroupEpisodeWriter as GroupEpisodeWriter
 from .group_writer import GroupImageMemoryWriter as GroupImageMemoryWriter
 from .group_writer import GroupSceneWriter as GroupSceneWriter
@@ -41,10 +39,8 @@ from .profile_writer import ProfileWriter as ProfileWriter
 __all__ = [
     "AgentCaseWriter",
     "AgentSkillWriter",
-    "AtomicFactWriter",
     "BaseDailyWriter",
     "EpisodeWriter",
-    "ForesightWriter",
     "GroupEpisodeWriter",
     "GroupImageMemoryWriter",
     "GroupSceneWriter",

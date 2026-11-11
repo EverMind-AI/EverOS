@@ -17,15 +17,11 @@ the closest in-process equivalent to a real restart with new config.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from pathlib import Path
 
 import pytest
 
-from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill import run_backfill
-from everos.infra.persistence.index import eq
-from everos.infra.persistence.records import AtomicFact
 from tests.fakes import FakeOmeLock, make_backfill_deps, make_ops
 
 from .conftest import (
@@ -34,7 +30,6 @@ from .conftest import (
     add_payload,
     cascade_progress,
     episode_rows,
-    tier_storage,
 )
 
 _N_ITEMS = 4
@@ -50,49 +45,6 @@ async def _wait_for_episode_rows(
             if len(rows) >= expected:
                 return rows
             await asyncio.sleep(0.1)
-
-
-async def _atomic_fact_rows(owner_id: str) -> list[dict]:
-    rows = await tier_storage().repos.atomic_fact.scan(
-        eq("owner_id", owner_id), with_vectors=True
-    )
-    return [row.model_dump(mode="python") for row in rows]
-
-
-async def _seed_unvectorized_fact(episode_row: dict) -> None:
-    """Seed one ``vector=NULL`` atomic fact for an episode.
-
-    Real Tier 1 usage never populates ``atomic_fact`` (this suite's fake
-    LLM only satisfies the boundary/episode JSON contract, not
-    ``AtomicFactExtractor``'s -- see ``seed_atomic_fact_for_episode`` in
-    conftest.py for the full rationale). Seeding an unvectorized row
-    directly exercises Phase 1's *other* re-embedded table and is what
-    makes the post-upgrade VECTOR search assertion meaningful: that
-    method recalls via atomic_fact MaxSim, not a direct episode scan.
-    """
-    entry_id = f"af_seed_{episode_row['entry_id']}"
-    owner_id = episode_row["owner_id"]
-    await tier_storage().repos.atomic_fact.add(
-        [
-            AtomicFact(
-                id=f"{owner_id}_{entry_id}",
-                entry_id=entry_id,
-                owner_id=owner_id,
-                owner_type=episode_row["owner_type"],
-                app_id=episode_row["app_id"],
-                project_id=episode_row["project_id"],
-                session_id=episode_row.get("session_id"),
-                timestamp=get_utc_now(),
-                parent_id=episode_row["entry_id"],
-                sender_ids=episode_row["sender_ids"],
-                fact="Alice enjoys hiking in the mountains.",
-                fact_tokens="alice enjoys hiking in the mountains",
-                md_path=f"users/{owner_id}/.atomic_facts/atomic_fact-seed.md",
-                content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
-                vector=None,
-            )
-        ]
-    )
 
 
 async def test_tier1_to_tier2_upgrade_via_backfill(
@@ -140,9 +92,6 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "Tier 1 (no embed) must write every episode with vector=NULL"
         )
 
-        for row in rows:
-            await _seed_unvectorized_fact(row)
-
         health = await client.get("/health")
         assert health.json()["capabilities"]["embed"] is False
 
@@ -187,12 +136,6 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "every pre-upgrade episode must carry a vector after backfill"
         )
         assert all(len(r["vector"]) == 1024 for r in post_episode_rows)
-
-        post_fact_rows = await _atomic_fact_rows("u_alice")
-        assert len(post_fact_rows) == _N_ITEMS
-        assert all(r["vector"] is not None for r in post_fact_rows), (
-            "atomic_fact rows are also re-embedded by the vectors phase"
-        )
 
         # The upgraded deployment searches: multi-round retrieval needs the
         # embedder Tier 1 lacked, and recalls the backfilled episodes by

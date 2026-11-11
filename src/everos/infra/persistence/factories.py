@@ -22,7 +22,6 @@ from .index import DerivedIndex
 from .index.adapters import (
     AgentCaseIndexAdapter,
     AgentSkillIndexAdapter,
-    AtomicFactIndexAdapter,
     EpisodeIndexAdapter,
     ImageMemoryIndexAdapter,
     KnowledgeTopicIndexAdapter,
@@ -32,9 +31,7 @@ from .lancedb import LanceDbConnection, LanceIndexBackend
 from .markdown import (
     MarkdownAgentCaseStore,
     MarkdownAgentSkillStore,
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
-    MarkdownForesightStore,
     MarkdownImageMemoryStore,
     MarkdownMemberProfileStore,
     MarkdownOwnerDirStore,
@@ -58,8 +55,6 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
     """Markdown truth under ``root`` plus the SQLite state behind ``sqlite``."""
     return Stores(
         episode=MarkdownEpisodeStore(root),
-        atomic_fact=MarkdownAtomicFactStore(root),
-        foresight=MarkdownForesightStore(root),
         image_memory=MarkdownImageMemoryStore(root),
         images=FileImageStore(root, sqlite.image_original),
         forget_log=SqliteForgetLogStore(sqlite.forget_log),
@@ -116,7 +111,6 @@ def build_indexes(index: DerivedIndex) -> Indexes:
     repos = index.repositories
     return Indexes(
         episode=EpisodeIndexAdapter(repos.episode),
-        atomic_fact=AtomicFactIndexAdapter(repos.atomic_fact),
         agent_case=AgentCaseIndexAdapter(repos.agent_case),
         agent_skill=AgentSkillIndexAdapter(repos.agent_skill),
         image_memory=ImageMemoryIndexAdapter(repos.image_memory),

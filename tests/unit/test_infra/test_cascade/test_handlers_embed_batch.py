@@ -17,18 +17,13 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade._projections import (
-    AgentCaseHandler,
-    AtomicFactHandler,
-    ForesightHandler,
-    HandlerDeps,
-)
+from everos.infra.cascade._projections import AgentCaseHandler, HandlerDeps
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import Comparison, Predicate
 from everos.infra.persistence.markdown import (
-    AtomicFactWriter,
+    AgentCaseWriter,
     EpisodeWriter,
     StructuredEntry,
 )
@@ -122,15 +117,9 @@ def _entry(sections: dict[str, str]) -> ParsedEntry:
 @pytest.mark.parametrize(
     ("handler_cls", "sections", "expected_texts"),
     [
-        (AtomicFactHandler, {"Fact": " the fact "}, ("the fact",)),
-        (
-            ForesightHandler,
-            {"Foresight": "will book lunch", "Evidence": "said so"},
-            ("will book lunch",),
-        ),
         (
             AgentCaseHandler,
-            {"TaskIntent": "scan contract", "Approach": "read pages"},
+            {"TaskIntent": " scan contract ", "Approach": "read pages"},
             ("scan contract",),
         ),
         (
@@ -196,7 +185,6 @@ async def test_one_file_pass_issues_one_embed_batch(  # type: ignore[no-untyped-
 ) -> None:
     embedder = _RecordingEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AtomicFactHandler, "index_repo", repo)
     monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
     rel = await _write_episodes(
@@ -221,7 +209,6 @@ async def test_missing_provider_writes_null_vectors_through_batch_path(  # type:
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = _FakeRepo()
-    monkeypatch.setattr(AtomicFactHandler, "index_repo", repo)
     monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
     deps = _deps(tmp_path, None)
     rel = await _write_episodes(deps.memory_root, [("aa", "S1"), ("bbbb", None)])
@@ -233,43 +220,38 @@ async def test_missing_provider_writes_null_vectors_through_batch_path(  # type:
     assert {r.episode_tokens for r in repo.rows} == {"aa S1", "bbbb"}
 
 
-async def test_atomic_facts_of_one_file_go_out_in_one_batch(  # type: ignore[no-untyped-def]
+async def test_agent_cases_of_one_file_go_out_in_one_batch(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The issue's shape: ~20 atomic facts per turn, one request chunked by
-    the provider instead of twenty. Second witness for the batching contract
-    next to the episode test above."""
+    """A file holding many entries (here a day's twenty agent cases) goes out
+    as one request the provider chunks, not twenty. Second witness for the
+    batching contract next to the episode test above, on a kind that embeds
+    one text per entry."""
     embedder = _RecordingEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AtomicFactHandler, "index_repo", repo)
-    monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
+    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    writer = AtomicFactWriter(deps.memory_root)
-    facts = [f"fact number {i}" for i in range(20)]
-    for fact in facts:
+    writer = AgentCaseWriter(deps.memory_root)
+    intents = [f"task intent number {i}" for i in range(20)]
+    for intent in intents:
         await writer.append_entry(
-            "u1",
+            "a1",
             inline={
-                "owner_id": "u1",
+                "owner_id": "a1",
                 "session_id": "s1",
                 "timestamp": "2026-05-14T10:00:00+00:00",
                 "parent_id": "mc_1",
-                "sender_ids": ["u1"],
+                "quality_score": 0.5,
             },
-            sections={"Fact": fact},
+            sections={"TaskIntent": intent, "Approach": "read pages"},
             date=_dt.date(2026, 5, 14),
         )
-    path = (
-        deps.memory_root.users_dir()
-        / "u1"
-        / ".atomic_facts"
-        / "atomic_fact-2026-05-14.md"
-    )
+    path = deps.memory_root.agents_dir() / "a1" / ".cases" / "agent_case-2026-05-14.md"
     rel = path.relative_to(deps.memory_root.root).as_posix()
 
-    outcome = await AtomicFactHandler(deps).handle_added_or_modified(rel)
+    outcome = await AgentCaseHandler(deps).handle_added_or_modified(rel)
 
     assert outcome.upserted == 20
     assert embedder.single == []
-    assert embedder.batches == [facts]
-    assert [row.vector[0] for row in repo.rows] == [float(len(f)) for f in facts]
+    assert embedder.batches == [intents]
+    assert [row.vector[0] for row in repo.rows] == [float(len(t)) for t in intents]

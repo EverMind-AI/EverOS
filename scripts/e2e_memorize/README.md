@@ -83,11 +83,13 @@ sqlite3 ~/.everos/.index/sqlite/system.db \
 
 After `flush` the buffer should be empty for the test session.
 
-### 5. OME async output (only if subscribers exist)
+### 5. OME async output
 
-- `users/<owner>/atomic_facts/atomic_fact-YYYY-MM-DD.md` (always; `extract_atomic_facts` is registered)
-- `users/<owner>/foresights/foresight-YYYY-MM-DD.md` (always; `extract_foresight` is registered)
-- `agents/<agent>/agent_cases/agent_case-YYYY-MM-DD.md` (**only after `extract_agent_cases` strategy is written + registered** — currently absent, the emit is a no-op)
+- `users/<owner>/user.md` — the profile (`extract_user_profile`; with an
+  embedding provider it runs after `trigger_profile_clustering`)
+- Agent mode: `agents/<agent>/.cases/agent_case-YYYY-MM-DD.md`
+  (`extract_agent_case`) and, once a case cluster forms,
+  `agents/<agent>/skills/skill_<name>/SKILL.md` (`extract_agent_skill`)
 
 ### 6. Reset between runs
 

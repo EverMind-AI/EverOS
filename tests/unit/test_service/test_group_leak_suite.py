@@ -552,7 +552,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
         )
         await world.run(*STRATEGY_SPECS)
         kinds = {type(e).__name__ for e in world.bus.events}
-        assert not kinds & {"UserPipelineStarted", "EpisodeExtracted"}
+        assert "EpisodeExtracted" not in kinds
         group_cells = {
             e.memcell_id
             for e in world.bus.events

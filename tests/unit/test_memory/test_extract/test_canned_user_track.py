@@ -18,7 +18,6 @@ from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
 from everalgo.user_memory import (
-    AtomicFactExtractor,
     EpisodeExtractor,
     EpisodeReflector,
     ProfileExtractor,
@@ -90,16 +89,6 @@ async def test_blank_episode_script_is_unusable() -> None:
         await EpisodeExtractor(llm=user_track_llm(episode="episode_blank")).aextract(
             _CELL, sender_id=None
         )
-
-
-@pytest.mark.parametrize(
-    ("script", "count"), [("atomic_facts", 3), ("atomic_facts_empty", 0)]
-)
-async def test_atomic_fact_scripts(script: str, count: int) -> None:
-    facts = await AtomicFactExtractor(
-        llm=user_track_llm(atomic_facts=script)
-    ).aextract_from_text("Alice plans a Kyoto trip.", timestamp=_TS)
-    assert len(facts) == count
 
 
 @pytest.mark.parametrize(

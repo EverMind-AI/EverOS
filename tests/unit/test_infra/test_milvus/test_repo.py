@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import ClassVar
 
 import pytest
 from pymilvus import DataType, FunctionType
@@ -27,7 +28,7 @@ from everos.infra.persistence.milvus.repository import (
     MilvusRepoBase,
     MilvusValueLimitError,
 )
-from everos.infra.persistence.records import Episode
+from everos.infra.persistence.records import Episode, IndexRecord
 from tests.fakes import TEST_DIM
 
 
@@ -602,24 +603,37 @@ def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     assert actual["summary"].nullable is False
 
 
+class _OptionalBm25Input(IndexRecord):
+    """A table whose BM25 input is optional."""
+
+    TABLE_NAME: ClassVar[str] = "optional_bm25_input"
+    BM25_FIELDS: ClassVar[list[str]] = ["note_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+
+    id: str
+    note: str | None = None
+    note_tokens: str | None = None
+
+
 def test_nullable_bm25_input_is_declared_not_null() -> None:
-    """``foresight.evidence_tokens`` is the only nullable BM25 column.
+    """An optional BM25 input is a NOT NULL column on the Milvus side.
 
     A BM25 input feeds an analyzer, so it is stored as "" rather than null —
     which means the physical column must be declared NOT NULL even though the
-    logical field is optional. Episode and user_profile cannot cover this
-    interaction, so it is asserted where it actually occurs.
+    logical field is optional. No business table declares an optional BM25
+    input today, so a stand-in table carries the interaction; the adapter
+    still has to get it right for the next one that does.
     """
-    logical = _milvus().foresight.index_schema
-    assert logical.field("evidence_tokens").nullable is True
-    assert "evidence_tokens" in logical.bm25_fields
+    logical = schema_for(_OptionalBm25Input, dim=TEST_DIM)
+    assert logical.field("note_tokens").nullable is True
+    assert "note_tokens" in logical.bm25_fields
 
-    physical = {f.name: f for f in _milvus().foresight._layout.physical_fields()}  # type: ignore[attr-defined]
-    assert physical["evidence_tokens"].nullable is False
-    assert physical["evidence_tokens"].enable_analyzer is True
-    # "evidence" is the same optional text without the analyzer attached, so
-    # it stays nullable — the NOT NULL above is caused by BM25, nothing else.
-    assert physical["evidence"].nullable is True
+    physical = {f.name: f for f in layout.CollectionLayout(logical).physical_fields()}
+    assert physical["note_tokens"].nullable is False
+    assert physical["note_tokens"].enable_analyzer is True
+    # "note" is the same optional text without the analyzer attached, so it
+    # stays nullable — the NOT NULL above is caused by BM25, nothing else.
+    assert physical["note"].nullable is True
 
 
 async def test_search_topk_is_clamped_to_the_milvus_window(

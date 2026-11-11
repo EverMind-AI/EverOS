@@ -1,20 +1,20 @@
 """P1: memory deletion against every writer that can race it, in random order.
 
 Real markdown and SQLite stores on a temporary root; the real /add episode
-pipeline, fact extraction, user clustering, Reflection merge and finish,
-profile and skill extraction, and the four deletions (one session, one
-owner's session, a whole user or agent, by id). Every
-store call first yields for a random moment, models and embedders take a
-random time, and the plan adds the environment: the process dying between
-two phases (in-memory state dropped, stores rebuilt over the same files,
-interrupted deletions resent and background runs redelivered), a client
-cancelling a deletion, a full disk failing one rewrite.
+pipeline, user clustering, Reflection merge and finish, profile and skill
+extraction, and the four deletions (one session, one owner's session, a
+whole user or agent, by id). Every store call first yields for a random
+moment, models and embedders take a random time, and the plan adds the
+environment: the process dying between two phases (in-memory state dropped,
+stores rebuilt over the same files, interrupted deletions resent and
+background runs redelivered), a client cancelling a deletion, a full disk
+failing one rewrite.
 
 Checked once everything settled (the stable point; between steps the files
 may be mid-change):
 
 * I1a / J1a -- nothing a returned deletion removed is in md afterwards: no
-  episode of a purged memcell, no fact of a removed episode, no deleted id;
+  episode of a purged memcell, no deleted id;
 * I4 -- every entry ever written that is gone was the target of a deletion;
 * J2 -- a returned by-id deletion left none of its targets in a cluster;
 
@@ -51,7 +51,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from everalgo.agent_memory import OpOutcome, SkillExtractionResult
 from everalgo.types import AgentSkill as AlgoAgentSkill
-from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
@@ -77,7 +76,6 @@ from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from everos.memory.strategies import (
     extract_agent_skill,
-    extract_atomic_facts,
     extract_user_profile,
     trigger_profile_clustering,
 )
@@ -103,7 +101,6 @@ settings.register_profile(
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 _DEEP = os.environ.get("HYPOTHESIS_PROFILE") == "deep"
-_FACTS = "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
 _PROFILE = "everos.memory.strategies.extract_user_profile.ProfileExtractor"
 _SKILL = "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
 _TS = 1_747_216_800_000
@@ -181,8 +178,6 @@ class _World:
         default_factory=dict
     )
     """(owner, episode entry id) -> (session, memcell id)."""
-    facts: dict[tuple[str, str], str] = dataclasses.field(default_factory=dict)
-    """(owner, fact entry id) -> parent episode entry id."""
     purged: set[str] = dataclasses.field(default_factory=set)
     owner_sessions: set[tuple[str, str]] = dataclasses.field(default_factory=set)
     by_ids: set[tuple[str, str]] = dataclasses.field(default_factory=set)
@@ -246,7 +241,6 @@ class _World:
         self.stores = dataclasses.replace(
             stores,
             episode=_Jitter(stores.episode, self.rng),
-            atomic_fact=_Jitter(stores.atomic_fact, self.rng),
             memcell=_Jitter(stores.memcell, self.rng),
             cluster=_Jitter(stores.cluster, self.rng),
             session_purge=_RecordingPurge(),
@@ -416,34 +410,8 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
     for ev in outcome.events:
         if isinstance(ev, EpisodeExtracted):
             world.written[(ev.owner_id, ev.episode_entry_id)] = (session, memcell_id)
-    if len(outcome.events) == 1:
+    if not outcome.events:
         _event("add: episode skipped, memcell gone")
-
-
-async def _facts(world: _World, owner: str, entry: str | None = None) -> None:
-    """Fact extraction for one of the owner's episodes (redelivery included)."""
-    mine = [(e, m) for (o, e), m in world.written.items() if o == owner]
-    if not mine:
-        return
-    if entry is not None:
-        mine = [(e, m) for e, m in mine if e == entry]
-    entry, (session, memcell) = world.rng.choice(mine)
-    deps = make_deps(stores=world.stores, embedding=_Embedder(world))
-    event = EpisodeExtracted(
-        memcell_id=memcell,
-        episode_entry_id=entry,
-        episode_text="t",
-        episode_timestamp_ms=_TS,
-        owner_id=owner,
-        session_id=session,
-        app_id="a",
-        project_id="p",
-    )
-    (out,) = await extract_atomic_facts(event, deps)
-    for fact_id in out.fact_entry_ids:
-        world.facts[(owner, fact_id)] = entry
-    if not out.fact_entry_ids:
-        _event("facts: skipped, source gone")
 
 
 async def _cluster(world: _World, owner: str, entry: str | None = None) -> None:
@@ -486,11 +454,6 @@ class _MdIndex:
         return await self.world.stores.episode.read_many(scope, entry_ids)
 
 
-class _NoFacts:
-    async def find(self, *args: Any, **kwargs: Any) -> list[Any]:
-        return []
-
-
 async def _reflect(world: _World, owner: str) -> None:
     """A Reflection merge of the owner's clusters, then its finish."""
     stores = world.stores
@@ -520,8 +483,6 @@ async def _reflect(world: _World, owner: str) -> None:
     finisher = ReflectionFinisher(
         cluster_store=stores.cluster,
         episode_store=stores.episode,
-        atomic_fact_store=stores.atomic_fact,
-        atomic_fact_index=_NoFacts(),  # type: ignore[arg-type]
         report_store=stores.reflection_report,
         embedder=_Embedder(world),  # type: ignore[arg-type]
     )
@@ -628,7 +589,6 @@ _ACTIONS = st.one_of(
         st.sampled_from(SESSIONS),
         st.sampled_from([("u1",), ("u2",), ("u3",), ("u1", "u2"), ("u2", "u3")]),
     ),
-    st.tuples(st.just("facts"), st.sampled_from(OWNERS)),
     st.tuples(st.just("cluster"), st.sampled_from(OWNERS)),
     st.tuples(st.just("reflect"), st.sampled_from(OWNERS)),
     st.tuples(st.just("del_session"), st.sampled_from(SESSIONS), st.booleans()),
@@ -705,7 +665,6 @@ def _start(world: _World, action: tuple[Any, ...]) -> Any:
     kind, *args = action
     return {
         "add": _add,
-        "facts": _facts,
         "cluster": _cluster,
         "reflect": _reflect,
         "del_session": _delete_session,
@@ -745,14 +704,11 @@ async def _phase(
             raise r
 
 
-async def _md_entries(
-    world: _World,
-) -> tuple[dict[tuple[str, str], dict[str, str]], dict[tuple[str, str], str]]:
-    """Every episode (owner, id) -> inline, and every fact (owner, id) -> parent."""
+async def _md_entries(world: _World) -> dict[tuple[str, str], dict[str, str]]:
+    """Every episode (owner, id) -> inline."""
     episodes: dict[tuple[str, str], dict[str, str]] = {}
-    facts: dict[tuple[str, str], str] = {}
     for md in world.root.rglob("*.md"):
-        if ".tmp" in md.parts or md.parent.name not in ("episodes", ".atomic_facts"):
+        if ".tmp" in md.parts or md.parent.name != "episodes":
             continue
         owner = md.parent.parent.name
         try:
@@ -760,23 +716,18 @@ async def _md_entries(
         except FileNotFoundError:  # a whole-owner deletion moved it meanwhile
             continue
         for e in doc.entries:
-            inline = dict(e.as_structured().inline)
-            if md.parent.name == "episodes":
-                episodes[(owner, e.id)] = inline
-            elif md.parent.name == ".atomic_facts":
-                facts[(owner, e.id)] = inline.get("parent_id", "")
-    return episodes, facts
+            episodes[(owner, e.id)] = dict(e.as_structured().inline)
+    return episodes
 
 
 async def _seed(world: _World) -> None:
-    """Phase 0, in order: episodes in both sessions, clustered, with facts --
-    something for every later actor to race over."""
+    """Phase 0, in order: episodes in both sessions, clustered -- something
+    for every later actor to race over."""
     for i in range(4):
         for owner in SEEDED:
             await _add(world, SESSIONS[i % 2], (owner,))
     for owner, entry in list(world.written):
         await _cluster(world, owner, entry)
-        await _facts(world, owner, entry)
     world.skill_cluster = mint_cluster_id()
     await world.stores.cluster.upsert(
         Scope(app_id="a", project_id="p", owner_id=AGENT, owner_type="agent"),
@@ -799,7 +750,7 @@ def _closure(world: _World, owner: str, target: str) -> set[str]:
 async def _no_write_back(world: _World) -> None:
     """What a returned session or whole-owner deletion removed is not in md,
     at any moment (md files are replaced whole, so any moment is readable)."""
-    episodes, _ = await _md_entries(world)
+    episodes = await _md_entries(world)
     for (owner, entry), inline in episodes.items():
         assert inline.get("parent_id") not in world.returned_purged, (
             "written back after a session deletion",
@@ -816,16 +767,12 @@ async def _no_write_back(world: _World) -> None:
 async def _check(world: _World) -> None:
     assert not world.violations, world.violations
     await _no_write_back(world)
-    episodes, facts = await _md_entries(world)
-    # I1a: no episode of a purged memcell; no fact of a missing episode.
+    episodes = await _md_entries(world)
+    # I1a: no episode of a purged memcell.
     for (owner, entry), inline in episodes.items():
         if inline.get("parent_id") in world.known_gap:
             continue  # deviation 7, open: reported, not fixed
         assert inline.get("parent_id") not in world.purged, (owner, entry, inline)
-    for (owner, fact), parent in facts.items():
-        if world.written.get((owner, parent), ("", ""))[1] in world.known_gap:
-            continue  # deviation 7
-        assert (owner, parent) in episodes, ("fact outlived its episode", owner, fact)
     # J1a / J2: a returned by-id deletion left its closure nowhere.
     clusters = world.stores.cluster
     for owner, target in world.returned_by_ids:
@@ -846,15 +793,6 @@ async def _check(world: _World) -> None:
             or (owner, entry) in by_id
             or owner in world.owner_deleting
         ), ("an episode vanished with no deletion", owner, entry)
-    for (owner, fact), parent in world.facts.items():
-        if (owner, fact) not in facts and owner not in world.owner_deleting:
-            assert (owner, parent) not in episodes or world.written[(owner, parent)][
-                1
-            ] in world.purged, (
-                "a fact vanished with its episode still there",
-                owner,
-                fact,
-            )
     if world.purged:
         _event("check: a session deletion purged memcells")
 
@@ -891,17 +829,10 @@ async def _run(
         world.build()
         await world.storage.create_schema()
         _watch_locks(world)
-        facts = [AlgoAtomicFact(owner_id=None, content="f", timestamp=_TS)]
         with (
-            patch(_FACTS) as extractor_cls,
             patch(_PROFILE) as profile_cls,
             patch(_SKILL) as skill_cls,
         ):
-
-            async def extract(*args: Any, **kwargs: Any) -> list[AlgoAtomicFact]:
-                _no_lock_for_models(world, "fact model")
-                await asyncio.sleep(world.rng.random() * 0.004)
-                return facts
 
             async def profile(*args: Any, **kwargs: Any) -> AlgoProfile:
                 await asyncio.sleep(world.rng.random() * 0.004)
@@ -914,7 +845,6 @@ async def _run(
                 skill = AlgoAgentSkill(id="k", name="tidy", content="c", confidence=0.5)
                 return SkillExtractionResult(None, {}, [OpOutcome(0, skill, None, {})])
 
-            extractor_cls.return_value.aextract_from_text = extract
             profile_cls.return_value.aextract = profile
             skill_cls.return_value.aextract_with_reason = skills
             await _seed(world)
@@ -951,7 +881,6 @@ def _conditions_were_reached() -> Iterator[None]:
             "profile: ran",
             "skill: ran",
             "add: episode skipped, memcell gone",
-            "facts: skipped, source gone",
             "reflect: merged",
             "env: process died mid-phase",
             "env: client cancelled a deletion",

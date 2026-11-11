@@ -15,7 +15,6 @@ from typing import Any
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     KnowledgeTopic,
 )
@@ -69,21 +68,6 @@ def stored_episode(
             sender_ids=[owner_id],
             parent_id=parent_id,
             parent_type=parent_type,  # type: ignore[arg-type]
-        ),
-    )
-
-
-def stored_fact(
-    entry_id: str, *, parent_id: str, owner_id: str = "alice", md_path: str = "f.md"
-) -> Stored[AtomicFact]:
-    return Stored(
-        ref=_ref(owner_id, entry_id, md_path=md_path),
-        scope=scope(owner_id),
-        item=AtomicFact(
-            owner_id=owner_id,
-            content=f"fact {entry_id}",
-            timestamp=TS_MS,
-            parent_id=parent_id,
         ),
     )
 

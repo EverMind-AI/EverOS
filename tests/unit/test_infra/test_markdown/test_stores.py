@@ -15,9 +15,8 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
     MarkdownAgentSkillStore,
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
-    MarkdownForesightStore,
+    MarkdownImageMemoryStore,
     MarkdownProfileStore,
     MarkdownReader,
     parse_structured_entry,
@@ -25,18 +24,14 @@ from everos.infra.persistence.markdown import (
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     Profile,
 )
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
     AgentCaseStore,
     AgentSkillStore,
-    AtomicFactStore,
     EpisodeStore,
-    ForesightStore,
     ProfileStore,
     Scope,
 )
@@ -146,8 +141,6 @@ async def test_profile_and_skill_writes_hold_the_owner_lock(root: MemoryRoot) ->
 
 def test_adapters_satisfy_their_ports(root: MemoryRoot) -> None:
     assert isinstance(MarkdownEpisodeStore(root), EpisodeStore)
-    assert isinstance(MarkdownAtomicFactStore(root), AtomicFactStore)
-    assert isinstance(MarkdownForesightStore(root), ForesightStore)
     assert isinstance(MarkdownAgentCaseStore(root), AgentCaseStore)
     assert isinstance(MarkdownProfileStore(root), ProfileStore)
     assert isinstance(MarkdownAgentSkillStore(root), AgentSkillStore)
@@ -283,45 +276,7 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
     assert parsed.frontmatter["deprecated_entries"] == {ref.entry_id: "ep_merged"}
 
 
-async def test_atomic_facts_append_and_deprecate(root: MemoryRoot) -> None:
-    store = MarkdownAtomicFactStore(root)
-    facts = [
-        AtomicFact(owner_id="u1", content=f"fact {i}", timestamp=_TS, parent_id="ep_1")
-        for i in range(2)
-    ]
-
-    refs = await store.append_many(_user(), facts, only_if=NO_SOURCE_CHECK)
-    await store.deprecate(
-        _user(),
-        entries=[(refs[0].md_path, refs[0].entry_id)],
-        replaced_by="ep_m",
-        only_if=NO_SOURCE_CHECK,
-    )
-
-    assert len({r.entry_id for r in refs}) == 2
-    entries = await _entries(root, refs[0].md_path)
-    assert entries[refs[1].entry_id]["sections"] == {"Fact": "fact 1"}
-    assert entries[refs[0].entry_id]["inline"]["parent_type"] == "episode"
-    parsed = await MarkdownReader.read(root.root / refs[0].md_path)
-    assert parsed.frontmatter["deprecated_entries"] == {refs[0].entry_id: "ep_m"}
-
-
-async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> None:
-    (foresight_ref,) = await MarkdownForesightStore(root).append_many(
-        _user(),
-        [
-            Foresight(
-                owner_id="u1",
-                foresight="will travel",
-                evidence="said so",
-                timestamp=_TS,
-                duration_days=3,
-                session_id="s1",
-                parent_id="mc_1",
-            )
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
+async def test_agent_case_lands_in_its_log(root: MemoryRoot) -> None:
     case_ref = await MarkdownAgentCaseStore(root).append(
         _agent(),
         AgentCase(
@@ -336,10 +291,7 @@ async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> 
         only_if=NO_SOURCE_CHECK,
     )
 
-    foresight = (await _entries(root, foresight_ref.md_path))[foresight_ref.entry_id]
     case = (await _entries(root, case_ref.md_path))[case_ref.entry_id]
-    assert foresight["inline"]["duration_days"] == "3"
-    assert foresight["sections"] == {"Foresight": "will travel", "Evidence": "said so"}
     assert case_ref.md_path.startswith("app/proj/agents/a1/")
     assert case["sections"] == {"TaskIntent": "fix bug", "Approach": "bisect"}
 
@@ -476,12 +428,12 @@ async def test_agent_skill_name_is_sanitized_for_storage(root: MemoryRoot) -> No
     assert ref.id == f"a1_{ref.entry_id}"
 
 
-@pytest.mark.parametrize("store_type", [MarkdownEpisodeStore, MarkdownAtomicFactStore])
+@pytest.mark.parametrize("store_type", [MarkdownEpisodeStore, MarkdownImageMemoryStore])
 @pytest.mark.parametrize("fail_path", [None, "b.md"])
 async def test_deprecation_groups_in_first_seen_order_and_preserves_partial_writes(
     root: MemoryRoot,
     monkeypatch: pytest.MonkeyPatch,
-    store_type: type[MarkdownEpisodeStore] | type[MarkdownAtomicFactStore],
+    store_type: type[MarkdownEpisodeStore] | type[MarkdownImageMemoryStore],
     fail_path: str | None,
 ) -> None:
     """Grouping retains duplicate collapse, patch merge, and stop-on-error behavior."""

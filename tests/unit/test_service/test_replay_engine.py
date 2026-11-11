@@ -5,7 +5,7 @@ Pins PR #361 review finding M10: the throw-away engines
 clusters and skills phases share the server's ``ome.db`` jobstore path.
 If ``engine.start()`` ran ``_run_crash_recovery`` on them, a stale
 RUNNING row for a strategy the backfill engine does NOT register
-(e.g. ``extract_atomic_facts`` left over from a crashed server) would
+(e.g. ``extract_agent_case`` left over from a crashed server) would
 be re-enqueued into the backfill engine's own APS scheduler, hit
 ``StrategyRegistry.get`` with an unknown name at dispatch, and be
 permanently lost.
@@ -73,7 +73,7 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
     rec_store = RunRecordStore(storage=storage, max_records_per_strategy=1000)
     await rec_store.mark_running(
         run_id="r_server_stale",
-        strategy_name="extract_atomic_facts",
+        strategy_name="extract_agent_case",
         attempt=0,
         event_topic="everos.memory.events:MemCellCommitted",
         event_payload="{}",

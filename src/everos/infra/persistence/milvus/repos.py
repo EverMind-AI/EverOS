@@ -9,9 +9,7 @@ from everos.core.utils.datetime import from_timestamp_ms
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     ImageMemory,
     KnowledgeTopic,
     UserProfile,
@@ -72,14 +70,6 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
             return rows
         projection = list(dict.fromkeys([*columns, "timestamp"]))
         return [{name: getattr(row, name) for name in projection} for row in rows]
-
-
-class _AtomicFactRepo(MilvusRepoBase[AtomicFact]):
-    schema = AtomicFact
-
-
-class _ForesightRepo(MilvusRepoBase[Foresight]):
-    schema = Foresight
 
 
 class _AgentCaseRepo(MilvusRepoBase[AgentCase]):

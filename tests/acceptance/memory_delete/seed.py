@@ -17,10 +17,8 @@ from everos.infra.persistence.factories import build_stores
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Cluster,
     Episode,
-    Foresight,
     MemcellRecord,
     Profile,
     ReflectionReport,
@@ -113,35 +111,6 @@ async def _seed_world(root: Path) -> Seeded:
                     only_if=NO_SOURCE_CHECK,
                 )
                 seeded.add(who, "episode", ep.entry_id)
-                (fact,) = await stores.atomic_fact.append_many(
-                    user(who),
-                    [
-                        AtomicFact(
-                            owner_id=who,
-                            content=f"fact of {who} in {session}",
-                            timestamp=TS,
-                            session_id=session,
-                            parent_id=ep.entry_id,
-                        )
-                    ],
-                    only_if=NO_SOURCE_CHECK,
-                )
-                seeded.add(who, "atomic_fact", fact.entry_id)
-                (fs,) = await stores.foresight.append_many(
-                    user(who),
-                    [
-                        Foresight(
-                            owner_id=who,
-                            foresight=f"{who} will return after {session}",
-                            evidence="said so",
-                            timestamp=TS,
-                            session_id=session,
-                            parent_id=memcell_id,
-                        )
-                    ],
-                    only_if=NO_SOURCE_CHECK,
-                )
-                seeded.add(who, "foresight", fs.entry_id)
             case = await stores.agent_case.append(
                 agent("a1"),
                 AgentCase(
@@ -200,7 +169,6 @@ async def _seed_world(root: Path) -> Seeded:
                 mode="init",
                 source_members=[],
                 merged_entry_id="none",
-                deprecated_fact_count=0,
             )
         )
     finally:
@@ -210,7 +178,7 @@ async def _seed_world(root: Path) -> Seeded:
 
 def seed_world(root: Path) -> Seeded:
     """Seed ``root``: users u1, u2 and agent a1; sessions s1 (all three) and
-    s2 (u1, a1); every daily-log kind, profiles, two skills, clusters, a
+    s2 (u1, a1); episodes and agent cases, profiles, two skills, clusters, a
     Reflection report and the memcells."""
     return asyncio.run(_seed_world(root))
 
@@ -381,36 +349,11 @@ def seed_cluster(
     return ids
 
 
-def write_fact(root: Path, owner: str, day: str, parent_id: str, text: str) -> str:
-    """Append one atomic fact of episode ``parent_id`` to ``day``'s file."""
-    import datetime as dt
-
-    from everos.core.utils.datetime import from_timestamp_ms, to_iso_format
-    from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.markdown import AtomicFactWriter
-
-    inline = {
-        "owner_id": owner,
-        "timestamp": to_iso_format(from_timestamp_ms(TS)),
-        "parent_type": "episode",
-        "parent_id": parent_id,
-    }
-    eid = asyncio.run(
-        AtomicFactWriter(MemoryRoot(root)).append_entry(
-            owner,
-            inline=inline,
-            sections={"Fact": text},
-            date=dt.date.fromisoformat(day),
-        )
-    )
-    return eid.format()
-
-
 def seed_two_rounds(root: Path) -> dict[str, str]:
     """Two rounds of Reflection for u1, as the finisher leaves them: M1 merged
-    e1 and e2, M2 merged M1 and e3 (each on its own day, each with one fact),
-    the merge marks in the episode files' frontmatter, and the cluster now
-    holding M2. Returns the episode and fact ids by name (``e1``, ``f_e1`` ...)."""
+    e1 and e2, M2 merged M1 and e3 (each on its own day), the merge marks in
+    the episode files' frontmatter, and the cluster now holding M2. Returns
+    the episode ids by name (``e1`` ... ``m2``)."""
     from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.markdown import MarkdownWriter
 
@@ -428,7 +371,6 @@ def seed_two_rounds(root: Path) -> dict[str, str]:
             parent_id="cl_m" if merged else f"mc_{name}",
             text=name,
         )
-        ids[f"f_{name}"] = write_fact(root, "u1", day, ids[name], f"fact of {name}")
     episodes = root / "default_app/default_project/users/u1/episodes"
     writer = MarkdownWriter(MemoryRoot(root))
     for src, merged in (("e1", "m1"), ("e2", "m1"), ("m1", "m2"), ("e3", "m2")):

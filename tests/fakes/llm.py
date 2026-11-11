@@ -54,7 +54,6 @@ _WINDOW = re.compile(r'<messages count="(\d+)">')
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
     "episode": "_EpisodeReply",
-    "atomic_facts": "_AtomicFactsReply",
     "profile_init": "_ProfileItems",
     "profile_update": "_MemCellUpdateOutput",
     "reflect": "_ReflectOutput",

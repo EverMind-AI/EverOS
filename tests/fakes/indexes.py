@@ -10,7 +10,6 @@ from __future__ import annotations
 __all__ = [
     "InMemoryAgentCaseIndex",
     "InMemoryAgentSkillIndex",
-    "InMemoryAtomicFactIndex",
     "InMemoryEpisodeIndex",
     "InMemoryImageMemoryIndex",
     "InMemoryProfileIndex",
@@ -22,7 +21,6 @@ from typing import Any
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     ImageMemory,
     Profile,
@@ -124,39 +122,6 @@ class InMemoryEpisodeIndex(_Unsearchable):
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
         return [r for r in self.rows if matches(where, self._fields(r))][:limit]
-
-
-class InMemoryAtomicFactIndex(_Unsearchable):
-    """Seeded atomic facts; ``deprecated_by`` is tracked per entry id."""
-
-    def __init__(self) -> None:
-        self.rows: list[Stored[AtomicFact]] = []
-        self.deprecated_by: dict[str, str] = {}
-
-    def seed(self, *rows: Stored[AtomicFact]) -> None:
-        self.rows.extend(rows)
-
-    def _fields(self, row: Stored[AtomicFact]) -> Mapping[str, Any]:
-        return {
-            **row.item.model_dump(),
-            "id": row.ref.id,
-            "entry_id": row.ref.entry_id,
-            "md_path": row.ref.md_path,
-            "app_id": row.scope.app_id,
-            "project_id": row.scope.project_id,
-            "owner_type": row.scope.owner_type,
-            "deprecated_by": self.deprecated_by.get(row.ref.entry_id),
-        }
-
-    async def find(
-        self, where: Filter, *, limit: int | None = None
-    ) -> list[SearchHit[AtomicFact]]:
-        hits = [
-            SearchHit(stored=row, score=None)
-            for row in self.rows
-            if matches(where, self._fields(row))
-        ]
-        return hits if limit is None else hits[:limit]
 
 
 class InMemoryAgentCaseIndex(_Unsearchable):

@@ -8,7 +8,7 @@ no way at all to reach a gateway's own request fields.
 
 That combination is what made a reasoning model unusable as an extraction
 backbone. Served over an OpenAI-compatible endpoint it thinks by default, and
-thinking is billed against ``max_tokens``, so an atomic-facts prompt spent the
+thinking is billed against ``max_tokens``, so an extraction prompt spent the
 whole budget reasoning and returned an empty ``content``. Measured through the
 real client on one gateway: knob nested correctly = 12.7s / 2264 characters;
 knob omitted = 42.4s / **zero** characters. Every attempt then passed the 60s

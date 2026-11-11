@@ -32,13 +32,6 @@
  "events": [
   {
    "app_id": "default",
-   "memcell_id": "mc_<1>",
-   "project_id": "default",
-   "session_id": "s_locomo",
-   "type": "UserPipelineStarted"
-  },
-  {
-   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000001",
    "episode_timestamp_ms": 1683554310000,
    "language": "English",
@@ -60,13 +53,6 @@
    "session_id": "s_locomo",
    "source": "pipeline",
    "type": "EpisodeExtracted"
-  },
-  {
-   "app_id": "default",
-   "memcell_id": "mc_<2>",
-   "project_id": "default",
-   "session_id": "s_locomo",
-   "type": "UserPipelineStarted"
   },
   {
    "app_id": "default",
@@ -94,13 +80,6 @@
   },
   {
    "app_id": "default",
-   "memcell_id": "mc_<3>",
-   "project_id": "default",
-   "session_id": "s_locomo",
-   "type": "UserPipelineStarted"
-  },
-  {
-   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000003",
    "episode_timestamp_ms": 1683554670000,
    "language": "English",
@@ -125,13 +104,6 @@
   },
   {
    "app_id": "default",
-   "memcell_id": "mc_<4>",
-   "project_id": "default",
-   "session_id": "s_locomo",
-   "type": "UserPipelineStarted"
-  },
-  {
-   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000004",
    "episode_timestamp_ms": 1685020920000,
    "language": "English",
@@ -153,13 +125,6 @@
    "session_id": "s_locomo",
    "source": "pipeline",
    "type": "EpisodeExtracted"
-  },
-  {
-   "app_id": "default",
-   "memcell_id": "mc_<5>",
-   "project_id": "default",
-   "session_id": "s_solo",
-   "type": "UserPipelineStarted"
   },
   {
    "app_id": "default",
@@ -175,13 +140,6 @@
   },
   {
    "app_id": "default",
-   "memcell_id": "mc_<6>",
-   "project_id": "default",
-   "session_id": "s_solo",
-   "type": "UserPipelineStarted"
-  },
-  {
-   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000002",
    "episode_timestamp_ms": 1751698830000,
    "language": "English",
@@ -191,13 +149,6 @@
    "session_id": "s_solo",
    "source": "pipeline",
    "type": "EpisodeExtracted"
-  },
-  {
-   "app_id": "default",
-   "memcell_id": "mc_<7>",
-   "project_id": "default",
-   "session_id": "s_solo",
-   "type": "UserPipelineStarted"
   },
   {
    "app_id": "default",
@@ -213,13 +164,6 @@
   },
   {
    "app_id": "default",
-   "memcell_id": "mc_<8>",
-   "project_id": "default",
-   "session_id": "s_solo",
-   "type": "UserPipelineStarted"
-  },
-  {
-   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000004",
    "episode_timestamp_ms": 1752465630000,
    "language": "English",
@@ -229,13 +173,6 @@
    "session_id": "s_solo",
    "source": "pipeline",
    "type": "EpisodeExtracted"
-  },
-  {
-   "app_id": "default",
-   "memcell_id": "mc_<9>",
-   "project_id": "default",
-   "session_id": "s_picture",
-   "type": "UserPipelineStarted"
   },
   {
    "app_id": "default",

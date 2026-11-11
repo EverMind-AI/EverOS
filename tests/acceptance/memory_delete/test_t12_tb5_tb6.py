@@ -140,18 +140,20 @@ def _user() -> Any:
 
 def test_tb6_1_two_rounds_of_merges_go_together(make_server: Any) -> None:
     """B6: M2 merged M1 and e3, M1 merged e1 and e2 (different days); deleting
-    M2 by id removes all five, their facts, their marks and M2's cluster
-    membership (the cluster, left empty, goes)."""
+    M2 by id removes all five, their marks and M2's cluster membership (the
+    cluster, left empty, goes)."""
     srv = make_server()
     ids = seed_two_rounds(srv.root)
     srv.start()
     wait_converged(srv.base)
     before = md_entries(srv.root)
-    assert len([e for e in before if e["kind"] == ".atomic_facts"]) == 5
+    assert len([e for e in before if e["kind"] == "episodes"]) == 5
     assert rows(system_db(srv.root), "SELECT member_id FROM cluster_member") == [
         (ids["m2"],)
     ]
-    assert lance_ids(srv.root, "atomic_fact"), "positive control: facts indexed"
+    assert f"u1_{ids['m2']}" in lance_ids(srv.root, "episode"), (
+        "positive control: M2 indexed"
+    )
 
     assert srv.delete_by_ids([f"u1_{ids['m2']}"]).status_code == 200
 
@@ -161,8 +163,7 @@ def test_tb6_1_two_rounds_of_merges_go_together(make_server: Any) -> None:
     assert rows(system_db(srv.root), "SELECT COUNT(*) FROM cluster_member") == [(0,)]
     assert rows(system_db(srv.root), "SELECT COUNT(*) FROM cluster") == [(0,)]
     wait_converged(srv.base)
-    for table in ("episode", "atomic_fact"):
-        assert {i for i in lance_ids(srv.root, table) if i.startswith("u1_")} == set()
+    assert {i for i in lance_ids(srv.root, "episode") if i.startswith("u1_")} == set()
 
 
 def test_t24_1_b_unwritable_dir_is_500_and_the_resend_finishes(

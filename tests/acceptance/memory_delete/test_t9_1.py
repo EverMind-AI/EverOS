@@ -1,12 +1,12 @@
 """T9.1 <- A9 (main journey): a session deleted while its memories are being
-extracted never gets them back. Two groups of 25 rounds:
+extracted never gets them back. 25 rounds of E1: the /add's episode
+extraction is held when the deletion runs. (E2 held the episode's fact
+extraction, an OME run; EverOS 2.0 extracts no facts, and no other OME run
+writes entries of the session.)
 
-* E1 -- the /add's episode extraction is held when the deletion runs;
-* E2 -- the /add returned; the fact extraction (an OME run) is held.
-
-Each group's first round is the positive control: the same window, no
-deletion, and the entries do appear. A round counts only if its call was
-held; fewer than 20 of 25 is "not manufactured", not a pass.
+The first round is the positive control: the same window, no deletion, and
+the entries do appear. A round counts only if its call was held; fewer than
+20 of 25 is "not manufactured", not a pass.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import pytest
 
 from .conftest import chat
 from .observe import md_entries, wait_idle
-from .proxy import EPISODE, FACTS, Rule, llm_call
+from .proxy import EPISODE, Rule, llm_call
 
 pytestmark = pytest.mark.acceptance
 
@@ -85,36 +85,5 @@ def test_t9_1_e1_episode_extraction_in_flight(server: Any) -> None:
     wait_idle(srv.base, srv.root)
     for r in range(1, ROUNDS):
         assert not _entries(srv, f"e1s{r}")
-    print(f"window hit {hits}/{ROUNDS}")
-    assert hits >= 20, f"window hit {hits}/{ROUNDS}: not manufactured"
-
-
-def test_t9_1_e2_fact_extraction_in_flight(server: Any) -> None:
-    srv = server
-    hits = 0
-    for r in range(ROUNDS):
-        session, token = f"e2s{r}", f"elk{r}q"
-        rule = srv.proxy.add(Rule("llm", llm_call(FACTS, token), "hold", times=1))
-        assert srv.add(session, chat("u1", token)).status_code == 200
-        assert srv.flush(session).status_code == 200
-        if not srv.proxy.wait_held("llm", timeout=60):
-            rule.release.set()
-            srv.proxy.clear()
-            continue
-        hits += 1
-        if r == 0:  # positive control: the held fact extraction writes facts
-            rule.release.set()
-            wait_idle(srv.base, srv.root)
-            kinds = {e["kind"] for e in _entries(srv, session)}
-            assert {"episodes", ".atomic_facts"} <= kinds, kinds
-            srv.proxy.clear()
-            continue
-        assert srv.delete(session_id=session).status_code == 200
-        rule.release.set()
-        _watch_empty(srv, session)
-        srv.proxy.clear()
-    wait_idle(srv.base, srv.root)
-    for r in range(1, ROUNDS):
-        assert not _entries(srv, f"e2s{r}")
     print(f"window hit {hits}/{ROUNDS}")
     assert hits >= 20, f"window hit {hits}/{ROUNDS}: not manufactured"

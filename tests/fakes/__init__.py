@@ -6,8 +6,8 @@ seed and inspect. :func:`make_deps` assembles them into a
 :class:`~everos.memory.deps.MemoryDeps` for calling a strategy directly::
 
     deps = make_deps()
-    events = await extract_atomic_facts(event, deps)
-    assert deps.stores.atomic_fact.records
+    events = await extract_user_profile(event, deps)
+    assert await deps.stores.profile.read(scope) is not None
 
 :func:`make_application` does the same one level up: an
 :class:`~everos.service.Application` whose facades are recording stubs.
@@ -40,7 +40,6 @@ from .deps import unscripted_llm as unscripted_llm
 from .embedding import FakeEmbeddingProvider as FakeEmbeddingProvider
 from .indexes import InMemoryAgentCaseIndex as InMemoryAgentCaseIndex
 from .indexes import InMemoryAgentSkillIndex as InMemoryAgentSkillIndex
-from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
 from .indexes import InMemoryImageMemoryIndex as InMemoryImageMemoryIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
@@ -70,10 +69,8 @@ from .storage import make_storage as make_storage
 from .storage import open_storage_view as open_storage_view
 from .stores import InMemoryAgentCaseStore as InMemoryAgentCaseStore
 from .stores import InMemoryAgentSkillStore as InMemoryAgentSkillStore
-from .stores import InMemoryAtomicFactStore as InMemoryAtomicFactStore
 from .stores import InMemoryClusterStore as InMemoryClusterStore
 from .stores import InMemoryEpisodeStore as InMemoryEpisodeStore
-from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryForgetLogStore as InMemoryForgetLogStore
 from .stores import InMemoryGroupStore as InMemoryGroupStore
 from .stores import InMemoryImageMemoryStore as InMemoryImageMemoryStore
@@ -101,12 +98,9 @@ __all__ = [
     "InMemoryAgentCaseStore",
     "InMemoryAgentSkillIndex",
     "InMemoryAgentSkillStore",
-    "InMemoryAtomicFactIndex",
-    "InMemoryAtomicFactStore",
     "InMemoryClusterStore",
     "InMemoryEpisodeIndex",
     "InMemoryEpisodeStore",
-    "InMemoryForesightStore",
     "InMemoryForgetLogStore",
     "InMemoryGroupStore",
     "InMemoryImageMemoryIndex",

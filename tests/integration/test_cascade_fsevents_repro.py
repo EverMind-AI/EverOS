@@ -1,6 +1,6 @@
 """Repro: high-frequency atomic-replace bursts vs. cascade drain.
 
-Drives N successive ``AtomicFactWriter.append_entries`` calls against the
+Drives N successive ``EpisodeWriter.append_entries`` calls against the
 same daily-log md, simulating multiple OME memcells landing in the same
 owner+day bucket within a few ms of each other.
 
@@ -28,8 +28,8 @@ from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import AtomicFactWriter, MarkdownReader
-from everos.infra.persistence.records.atomic_fact import AtomicFact
+from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
+from everos.infra.persistence.records.episode import Episode
 from tests.fakes.storage import Storage
 
 
@@ -79,7 +79,7 @@ async def _wait_drain(storage: Storage, deadline: float = 15.0) -> None:
 
 
 async def _count_lance_rows(storage: Storage, md_path: str) -> int:
-    table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
+    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
     return await table.count_rows(filter=f"md_path = '{md_path}'")
 
 
@@ -99,7 +99,7 @@ async def _count_md_entries(absolute: Path) -> int:
         (10, 3, 5.0),
     ],
 )
-async def test_high_freq_atomic_fact_append_no_loss(
+async def test_high_freq_episode_append_no_loss(
     cascade_runtime: MemoryRoot,
     n_calls: int,
     items_per_call: int,
@@ -125,7 +125,7 @@ async def test_high_freq_atomic_fact_append_no_loss(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         bucket = _dt.date(2026, 5, 19)
         owner_id = "bob"
         total = 0
@@ -139,7 +139,7 @@ async def test_high_freq_atomic_fact_append_no_loss(
                         "parent_id": f"mc_{i}",
                         "sender_ids": [owner_id],
                     },
-                    {"Fact": f"fact body call={i} item={j}"},
+                    {"Summary": "s", "Content": f"episode body call={i} item={j}"},
                 )
                 for j in range(items_per_call)
             ]
@@ -158,8 +158,8 @@ async def test_high_freq_atomic_fact_append_no_loss(
         await _wait_drain(storage, deadline=15.0)
 
         md_path = (
-            f"default_app/default_project/users/{owner_id}/.atomic_facts/"
-            f"atomic_fact-{bucket.isoformat()}.md"
+            f"default_app/default_project/users/{owner_id}/episodes/"
+            f"episode-{bucket.isoformat()}.md"
         )
         absolute = memory_root.root / md_path
         md_entries = await _count_md_entries(absolute)

@@ -28,9 +28,7 @@ first access; row population is the cascade daemon's job (see
 from ..records import EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY
 from ..records import AgentCase as AgentCase
 from ..records import AgentSkill as AgentSkill
-from ..records import AtomicFact as AtomicFact
 from ..records import Episode as Episode
-from ..records import Foresight as Foresight
 from ..records import KnowledgeTopic as KnowledgeTopic
 from ..records import ParentType as ParentType
 from ..records import UserProfile as UserProfile
@@ -52,9 +50,7 @@ __all__ = [
     "EMBEDDING_MODEL_KEY",
     "AgentCase",
     "AgentSkill",
-    "AtomicFact",
     "Episode",
-    "Foresight",
     "KnowledgeTopic",
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",

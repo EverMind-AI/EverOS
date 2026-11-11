@@ -45,8 +45,6 @@ async def finish_reflection(event: EpisodeExtracted, deps: MemoryDeps) -> list[E
     finisher = ReflectionFinisher(
         cluster_store=deps.stores.cluster,
         episode_store=deps.stores.episode,
-        atomic_fact_store=deps.stores.atomic_fact,
-        atomic_fact_index=deps.indexes.atomic_fact,
         report_store=deps.stores.reflection_report,
         embedder=deps.embedding,
     )

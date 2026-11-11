@@ -188,8 +188,6 @@ class Deleter:
             }
         return {
             "episode": await stores.episode.remove_session(scope, session_id),
-            "atomic_fact": await stores.atomic_fact.remove_session(scope, session_id),
-            "foresight": await stores.foresight.remove_session(scope, session_id),
             # A picture memory names its session like the kinds above. Left out,
             # a deleted session kept its pictures searchable with no memcell
             # behind them, and re-sending the session added a second copy.
@@ -242,10 +240,9 @@ class Deleter:
            in md, so none can be marked after this;
         2. what was merged into them, transitively (read from the merge
            marks, so it still works on a resend after step 1);
-        3. the atomic facts of all of those;
-        4. those episodes out of their clusters, under the clustering lock;
-        5. the merge marks keyed by them -- last, a resend after 1 needs them;
-        6. their index rows.
+        3. those episodes out of their clusters, under the clustering lock;
+        4. the merge marks keyed by them -- last, a resend after 1 needs them;
+        5. their index rows.
 
         ``note`` is never logged.
         """
@@ -275,8 +272,8 @@ class Deleter:
         )
 
     async def _delete_episodes(self, scope: Scope, targets: Sequence[str]) -> list[str]:
-        """Steps 1-6 for one owner; the requested entries that were in md."""
-        episodes, facts = self._stores.episode, self._stores.atomic_fact
+        """Steps 1-5 for one owner; the requested entries that were in md."""
+        episodes = self._stores.episode
         requested = set(targets)
         first = await episodes.remove(scope, requested)
         failpoint("by_ids.after_step1")
@@ -286,14 +283,11 @@ class Deleter:
             frontier = await episodes.merged_into(scope, frontier) - closure
             closure |= frontier
         merged = await episodes.remove(scope, closure - requested)
-        fact_refs = await facts.remove_by_parents(scope, closure)
-        failpoint("by_ids.after_step3")
+        failpoint("by_ids.after_step2")
         await self._detach_from_clusters(scope, closure)
         await episodes.clear_deprecations(scope, closure)
-        failpoint("by_ids.after_step5")
-        await self._eraser.erase(
-            scope, {"episode": [*first, *merged], "atomic_fact": fact_refs}
-        )
+        failpoint("by_ids.after_step4")
+        await self._eraser.erase(scope, {"episode": [*first, *merged]})
         return [ref.entry_id for ref in first]
 
     async def _detach_from_clusters(self, scope: Scope, gone: set[str]) -> None:

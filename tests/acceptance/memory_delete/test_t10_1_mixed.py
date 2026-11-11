@@ -27,7 +27,9 @@ pytestmark = pytest.mark.acceptance
 
 _SECONDS = 600
 _USERS = ("m1", "m2", "m3")
-_TABLES = 4  # episode, atomic_fact, foresight, agent_case
+_TABLES = 3
+"""Index tables one deletion erases from: episode, image_memory and agent_case
+(user_profile in place of agent_case for a whole user)."""
 _REWRITE_S = 4.6
 """Ten times the slowest plain session deletion measured in T18.1."""
 _ADD_CALLS = 2

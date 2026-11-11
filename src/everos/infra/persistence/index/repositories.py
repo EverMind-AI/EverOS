@@ -10,9 +10,7 @@ from typing import Any
 from ..records import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     ImageMemory,
     KnowledgeTopic,
     UserProfile,
@@ -25,8 +23,6 @@ from .protocols import (
 
 BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     Episode,
-    AtomicFact,
-    Foresight,
     AgentCase,
     AgentSkill,
     ImageMemory,
@@ -47,8 +43,6 @@ class IndexRepositories:
     """
 
     episode: EpisodeIndexRepository[Any]
-    atomic_fact: IndexRepository[Any]
-    foresight: IndexRepository[Any]
     agent_case: IndexRepository[Any]
     agent_skill: AgentSkillIndexRepository[Any]
     image_memory: IndexRepository[Any]

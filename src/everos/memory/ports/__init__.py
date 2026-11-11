@@ -27,7 +27,6 @@ from .groups import GroupStore as GroupStore
 from .images import ImageStore as ImageStore
 from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
-from .indexes import AtomicFactIndex as AtomicFactIndex
 from .indexes import EpisodeIndex as EpisodeIndex
 from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
@@ -68,10 +67,8 @@ from .stores import NO_SOURCE_CHECK as NO_SOURCE_CHECK
 from .stores import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
 from .stores import AgentCaseStore as AgentCaseStore
 from .stores import AgentSkillStore as AgentSkillStore
-from .stores import AtomicFactStore as AtomicFactStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
-from .stores import ForesightStore as ForesightStore
 from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
@@ -108,8 +105,6 @@ __all__ = [
     "All",
     "AnyOf",
     "AppliesTo",
-    "AtomicFactIndex",
-    "AtomicFactStore",
     "ClusterStore",
     "Comparison",
     "Contains",
@@ -121,7 +116,6 @@ __all__ = [
     "Event",
     "EventBus",
     "Filter",
-    "ForesightStore",
     "ForgetEntry",
     "ForgetLogStore",
     "ForgetTarget",

@@ -194,9 +194,16 @@ def test_every_backend_satisfies_the_ports(
     assert all(isinstance(repo, IndexRepository) for repo in repos)
 
 
-def test_the_registered_repository_set_is_the_eight_business_tables() -> None:
-    names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS}
-    assert len(names) == len(BUSINESS_SCHEMAS) == 8
+def test_the_registered_repository_set_is_the_six_business_tables() -> None:
+    names = [schema.TABLE_NAME for schema in BUSINESS_SCHEMAS]
+    assert names == [
+        "episode",
+        "agent_case",
+        "agent_skill",
+        "image_memory",
+        "user_profile",
+        "knowledge_topic",
+    ]
 
 
 def test_all_logical_schemas_are_portable_and_validate_bm25_fields() -> None:
@@ -315,8 +322,6 @@ async def test_count_duplicate_keys_uses_the_key_only_backend_read(
         assert await derived.repositories.episode.count_duplicate_keys() == 1
     assert set(counts) == {
         "episode",
-        "atomic_fact",
-        "foresight",
         "agent_case",
         "agent_skill",
         "image_memory",
@@ -447,7 +452,7 @@ def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
 async def test_bulk_reads_can_skip_vector_columns(derived: DerivedIndex) -> None:
     """Cascade diffs and agent-skill / reflection hydration read
     thousands of rows but never touch the vectors; materialising them as
-    Python floats cost ~1.2 GB per pass on a 25k-row daily atomic_fact log.
+    Python floats cost ~1.2 GB per pass on a 25k-row daily log.
     """
     rows = [_episode(number) for number in range(3)]
     for row in rows:

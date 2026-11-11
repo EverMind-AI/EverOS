@@ -26,7 +26,6 @@ from .embedding import FakeEmbeddingProvider
 from .indexes import (
     InMemoryAgentCaseIndex,
     InMemoryAgentSkillIndex,
-    InMemoryAtomicFactIndex,
     InMemoryEpisodeIndex,
     InMemoryImageMemoryIndex,
     InMemoryProfileIndex,
@@ -34,10 +33,8 @@ from .indexes import (
 from .stores import (
     InMemoryAgentCaseStore,
     InMemoryAgentSkillStore,
-    InMemoryAtomicFactStore,
     InMemoryClusterStore,
     InMemoryEpisodeStore,
-    InMemoryForesightStore,
     InMemoryForgetLogStore,
     InMemoryGroupStore,
     InMemoryImageMemoryStore,
@@ -72,8 +69,6 @@ def make_stores(**overrides: Any) -> Stores:
     """Fresh in-memory stores; keyword arguments replace single stores."""
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeStore(),
-        "atomic_fact": InMemoryAtomicFactStore(),
-        "foresight": InMemoryForesightStore(),
         "image_memory": InMemoryImageMemoryStore(),
         "images": InMemoryImageStore(),
         "forget_log": InMemoryForgetLogStore(),
@@ -98,7 +93,6 @@ def make_indexes(**overrides: Any) -> Indexes:
     """Fresh in-memory indexes; keyword arguments replace single indexes."""
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeIndex(),
-        "atomic_fact": InMemoryAtomicFactIndex(),
         "agent_case": InMemoryAgentCaseIndex(),
         "agent_skill": InMemoryAgentSkillIndex(),
         "image_memory": InMemoryImageMemoryIndex(),
