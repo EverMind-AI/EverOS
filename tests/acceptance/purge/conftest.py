@@ -165,3 +165,33 @@ def make_purge_server(
     yield make
     for srv in made:
         srv.stop()
+
+
+@pytest.fixture
+def make_world(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    make_purge_server: Callable[..., PurgeServer],
+    fake: FakeUpstream,
+) -> Iterator[Callable[..., Any]]:
+    """``make_world(case, **env)``: a started server over the seeded world
+    (four scopes, P0 checked), with evidence kept under ``case``."""
+    from .journey import Evidence, World, evidence_base, p0
+    from .observe import wait_idle
+    from .seed import WORLD, seed_purge_world
+
+    made: list[Evidence] = []
+
+    def make(case: str, *, seed: bool = True, **env: str) -> World:
+        srv = make_purge_server(**env)
+        ev = Evidence(case, evidence_base(tmp_path), [srv])
+        made.append(ev)
+        log = seed_purge_world(srv, fake, WORLD) if seed else None
+        if seed:
+            wait_idle(srv.base, srv.root, timeout=300)
+            ev.json("p0", p0(srv.root))
+        return World(srv, fake, log, ev)  # type: ignore[arg-type]
+
+    yield make
+    for ev in made:
+        ev.close()

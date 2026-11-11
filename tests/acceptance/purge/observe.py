@@ -20,6 +20,7 @@ from everos.infra.persistence.markdown import MarkdownReader
 from everos.infra.persistence.memory_root import app_dir_name, project_dir_name
 from tests.acceptance.memory_delete.observe import (  # noqa: F401 - re-exported
     health,
+    nothing_deleted_snapshot,
     rows,
     system_db,
     wait_converged,
@@ -53,7 +54,7 @@ MD_KINDS = (
     "agent_case",
     "user_profile",
     "agent_skill",
-    "knowledge",
+    "knowledge_document",
 )
 
 
@@ -65,14 +66,17 @@ def _md_kind(rel: Path) -> str | None:
     """Which kind a file under a scope dir holds (``None``: not counted)."""
     if rel.name == ".taxonomy.md" or rel.suffix != ".md":
         return None
-    if rel.parts[0] == "knowledge":
-        return "knowledge"
+    if rel.parts[0] == "knowledge":  # a document is its index.md
+        return "knowledge_document" if rel.name == "index.md" else None
+    if rel.parts[0] not in ("users", "agents"):
+        return None  # a file of the user's own in the project directory
     if rel.name == "user.md":
         return "user_profile"
     if rel.name == "SKILL.md":
         return "agent_skill"
     # A daily log: users|agents/<owner>/<dir>/<kind>-<YYYY-MM-DD>.md
-    return rel.stem.rsplit("-", 3)[0]
+    kind = rel.stem.rsplit("-", 3)[0]
+    return kind if kind in MD_KINDS else None
 
 
 def md_counts(root: Path, app: str, project: str) -> Counter[str]:
@@ -86,7 +90,7 @@ def md_counts(root: Path, app: str, project: str) -> Counter[str]:
         kind = _md_kind(f.relative_to(base))
         if kind is None:
             continue
-        if kind in ("knowledge", "user_profile", "agent_skill"):
+        if kind in ("knowledge_document", "user_profile", "agent_skill"):
             counts[f"md.{kind}"] += 1
             continue
         parsed = MarkdownReader.parse(f.read_text(encoding="utf-8"))
