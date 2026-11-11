@@ -15,6 +15,9 @@ group's segments are.
   :class:`GroupEpisodeExtracted` names the human speakers of each segment,
   and :func:`~everos.memory.extract.pipeline.member_profile.wrote_in`
   drops any segment without a message of the member's own (the source check).
+  Each segment is read without its forgotten messages
+  (:func:`~everos.memory.groups.readable_segments`, section 9.4), so a
+  forget that queued a segment again has its rewrite read the rest only.
 - **Throttle.** A segment is queued on the member's profile
   (``pending_memcell_ids``); the profile is updated after
   ``[groups] member_profile_every`` of them, and on :class:`GroupFlushed`
@@ -56,6 +59,7 @@ from everos.memory.extract.pipeline.member_profile import (
     with_provenance,
     wrote_in,
 )
+from everos.memory.groups import readable_segments
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import MemberProfile, MemCell, Profile, Roster
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
@@ -159,7 +163,11 @@ async def _update(
     member_id = profile.member_id
     pending = profile.pending_memcell_ids
     async with reads:
-        cells = await deps.stores.memcell.cells_by_id(pending)
+        # Forgotten messages are not read (section 9.4): the payload keeps
+        # them for an undo, the profile never sees them.
+        cells = await readable_segments(
+            deps.stores.message_forget, await deps.stores.memcell.cells_by_id(pending)
+        )
         # A segment that is gone (its session deleted) or holds no message of
         # the member's own is not read: no item may rest on others' words alone.
         segments = sorted(

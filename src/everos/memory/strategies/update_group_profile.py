@@ -12,7 +12,10 @@ dissent, roles -- kept by one model call per batch of the group's segments
   nothing queued does nothing.
 - **Input.** Only this group's queued segments, never another group's and
   never a member's personal memory; a segment that is gone (its session
-  deleted) is not read. Speakers carry their roster names.
+  deleted) is not read. Speakers carry their roster names. Each segment is
+  read without its forgotten messages (section 9.4), so no evidence can cite
+  one: a forget that left an item stale queues the item's other segments,
+  and this update rewrites it from them.
 - **Checks.** Every operation the model returns is verified, and a failing
   one is dropped and counted by reason (:func:`verify`); items are built from
   the verified evidence alone.
@@ -28,6 +31,7 @@ dissent, roles -- kept by one model call per batch of the group's segments
 from __future__ import annotations
 
 from everalgo.llm import LLMOutputError, parse_reply
+from everalgo.types import ChatMessage
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
@@ -51,7 +55,8 @@ from everos.memory.extract.group_profile import (
 )
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.pictures import memcell_alive
-from everos.memory.models import Roster
+from everos.memory.groups import readable_segments
+from everos.memory.models import MemCell, Roster
 from everos.memory.ports import Event, Idle, IdleTick, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
@@ -93,9 +98,17 @@ async def update_group_profile(
 
 async def _update(deps: MemoryDeps, scope: Scope, pending: list[str]) -> None:
     """Read the batch into new items; the caller holds the group's lock."""
-    cells = await deps.stores.memcell.cells_by_id(pending)
+    # Forgotten messages are not read (section 9.4); a segment left with no
+    # message is not shown at all.
+    cells = await readable_segments(
+        deps.stores.message_forget, await deps.stores.memcell.cells_by_id(pending)
+    )
     segments = sorted(
-        (Segment(memcell_id=m, cell=cells[m]) for m in pending if m in cells),
+        (
+            Segment(memcell_id=m, cell=cells[m])
+            for m in pending
+            if m in cells and _has_messages(cells[m])
+        ),
         key=lambda s: s.cell.timestamp,
     )
     if not segments:
@@ -164,6 +177,10 @@ async def _update(deps: MemoryDeps, scope: Scope, pending: list[str]) -> None:
         written=len(refs),
         dropped=drop_summary(checked.dropped),
     )
+
+
+def _has_messages(cell: MemCell) -> bool:
+    return any(isinstance(item, ChatMessage) for item in cell.items)
 
 
 UPDATE_GROUP_PROFILE_SPEC = StrategySpec(
