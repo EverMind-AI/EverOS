@@ -15,7 +15,10 @@ both deciders on identical inputs and found two deviations on this side:
 Every case below is one of the differential harness's scenarios (S5a-S5r), run
 through the ``OpenAIProvider`` the bootstrap builds for ``[decider]``, over
 ``httpx.MockTransport``. The decision and the number of requests are the exp
-decider's, read off its run.
+decider's, read off its run. One case differs since 2026-11-11, when
+``[decider].salvage_truncated_core`` became the default: a reply cut after its core
+list (S5l) keeps that core, as the exp decider does with the same switch on
+(EverOS-train@c9711b5). Switched off, it falls back exactly as before.
 """
 
 from __future__ import annotations
@@ -137,8 +140,9 @@ _EXP_DECISIONS = [
     ("S5j_empty_reply", "", "stop", _FALLBACK, [], True, 4),
     ("S5k_prose_only", "I cannot decide from these items.", "stop",
      _FALLBACK, [], True, 4),
+    # Salvaged (on by default): the complete core indices, after every attempt.
     ("S5l_truncated_length", '{"core": [0, 2], "next_queries": ["abc', "length",
-     _FALLBACK, [], True, 4),
+     [0, 2], [], False, 4),
     ("S5m_json_then_length",
      '{"core": [0, 2], "next_queries": []}\nNow let me explain my reasoning',
      "length", [0, 2], [], False, 1),
@@ -173,6 +177,20 @@ async def test_the_decision_and_the_request_count_are_the_exp_deciders(
     assert decision.stop is (not queries)
     assert decision.failed is failed
     assert len(endpoint.bodies) == requests
+
+
+async def test_switched_off_a_truncated_reply_falls_back_as_the_exp_decider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S5l with ``[decider].salvage_truncated_core = false``: the f06d67b behaviour."""
+    monkeypatch.setenv("EVEROS_DECIDER__SALVAGE_TRUNCATED_CORE", "false")
+    endpoint = _Endpoint(('{"core": [0, 2], "next_queries": ["abc', "length"))
+
+    decision = await _decider(endpoint)("q?", "(none)", "x", _N, 0)
+
+    assert (decision.core, decision.queries) == (_FALLBACK, [])
+    assert decision.failed is True and decision.salvaged is None
+    assert len(endpoint.bodies) == 4
 
 
 async def test_one_attempt_is_one_request() -> None:

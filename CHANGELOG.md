@@ -140,6 +140,23 @@ machinery that keeps a deleted memory from coming back.
     `GET /api/v2/projects/{project_id}/profile` read them. A project's
     knowledge base is read by its members only once the project has groups
     (the knowledge reads take `asker_id`).
+- **Two recoveries for a failed multi-round decider round**, both on by
+  default. Each acts only on a round that would otherwise fall back, so a
+  round that fits the window and parses is sent and recorded as before. Set
+  either to `false` to reproduce a run from before 2026-11-11; off, requests
+  and traces are byte-identical to before.
+  - `[decider] fit_to_window`: when the decider endpoint rejects a round
+    prompt as longer than its window, the prompt is re-rendered to fit
+    `window - max_tokens` tokens, counted by the endpoint itself (vLLM's
+    `/tokenize`, through the new `OpenAIProvider.acount_prompt_tokens`).
+    CORE SO FAR texts are cut first (one shared cap, longest first), then
+    candidate texts, then the last candidates are dropped. The round trace
+    records what was cut (`decider_fit`). On BEAM 500K / 1M / 10M this
+    rejection cost the RL decider up to 4.7% of its questions.
+  - `[decider] salvage_truncated_core`: when every attempt fails to parse and
+    a reply had already emitted its core list (`{"core": [0, 3],` and
+    nothing after it), those indices become the round's core and the loop
+    stops there. The round trace records it (`decider_salvaged`).
 
 
 ### Changed

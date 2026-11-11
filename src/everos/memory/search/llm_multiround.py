@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -166,6 +167,12 @@ class RoundDecision(NamedTuple):
 
     Kept explicit so a degraded round is countable in the trace instead of
     looking like a decider that chose to stop with nothing."""
+    fit: dict[str, object] | None = None
+    """What ``[decider].fit_to_window`` did this round: set only when an attempt was
+    rejected for its length and a fit was tried (``fitted`` says whether it worked)."""
+    salvaged: dict[str, object] | None = None
+    """Set only when ``[decider].salvage_truncated_core`` took this round's core from a
+    reply that was cut short; ``raw`` is then that reply."""
 
 
 class RoundDecider(Protocol):
@@ -350,6 +357,22 @@ class RawChatClient(Protocol):
     ) -> RawReply: ...
 
 
+@runtime_checkable
+class PromptTokenCounter(Protocol):
+    """An LLM client that can ask its endpoint how long a prompt is.
+
+    What ``[decider].fit_to_window`` needs: the token count of the exact request the
+    decider would send, rendered by the endpoint's own chat template, and the
+    endpoint's window. EverOS's ``OpenAIProvider`` asks vLLM's ``/tokenize``. A
+    client without it, or an endpoint that cannot answer (``None``), leaves an
+    over-long round as it was.
+    """
+
+    async def acount_prompt_tokens(
+        self, messages: list[LLMMessage], **extra: Any
+    ) -> tuple[int, int] | None: ...
+
+
 class LLMRoundDecider:
     """Prompt-LLM decider: select core across per-sub-query blocks by global index.
 
@@ -392,6 +415,7 @@ class LLMRoundDecider:
         round_idx: int,
         *,
         pictures: Sequence[Picture] = (),
+        fit_view: _FitView | None = None,
     ) -> RoundDecision:
         tune = self._tuning_source()
         prompt = self._prompt.format(
@@ -400,13 +424,33 @@ class LLMRoundDecider:
             evidence=evidence or "(no evidence retrieved this round)",
             max_sub=tune.max_subqueries,
         )
+        if fit_view is not None and _render_fit_view(fit_view) != (
+            core_so_far,
+            evidence,
+        ):
+            # The view must re-render the exact strings it stands for, or a fit would
+            # change more than the trimmed items. Never expected; refuse to fit.
+            logger.warning("llm_multiround_fit_view_mismatch", round_idx=round_idx)
+            fit_view = None
         data: dict[str, Any] | None = None
         raw: str | None = None
         usage: dict[str, object] | None = None
         last_error = ""
-        for attempt in range(tune.retries + 1):
+        # [decider].fit_to_window / .salvage_truncated_core (both on by default): what
+        # they did this round. Untouched while both are off.
+        n_shown = n_candidates  # candidates the sent prompt shows (a fit may drop some)
+        fit_record: dict[str, object] | None = None
+        salvage: tuple[int, str, dict[str, object] | None, list[object]] | None = None
+        # A while loop rather than `for attempt in range(...)` so a fitted prompt can
+        # be resent without spending an attempt (the rejected one never ran). With
+        # both switches off the requests, logs and backoff sleeps are the for loop's.
+        attempt = 0
+        while True:
+            reply: str | None = None  # this attempt's reply, for the salvage
+            reply_usage: dict[str, object] | None = None
             try:
                 raw, usage = await self._ask(prompt, tune, pictures)
+                reply, reply_usage = raw, usage
                 # Reasoning deciders intermittently return an EMPTY completion
                 # (output budget spent on reasoning tokens). Name that case so the
                 # log tells "model said nothing" from "reply was unparseable".
@@ -423,8 +467,57 @@ class LLMRoundDecider:
                     error=last_error[:200],
                     attempt=attempt,
                 )
-                if attempt < tune.retries and tune.retry_backoff_seconds > 0:
+                if (
+                    tune.salvage_truncated_core
+                    and salvage is None
+                    and reply is not None
+                    and (got := _salvage_core(reply)) is not None
+                ):
+                    salvage = (attempt, reply, reply_usage, got)
+                if (
+                    fit_view is not None
+                    and fit_record is None
+                    and _is_context_overflow(err)
+                ):
+                    fitted, fit_record = await _fit_prompt(
+                        self._prompt,
+                        question,
+                        fit_view,
+                        tune,
+                        self._token_counter(tune, pictures),
+                    )
+                    logger.warning(
+                        "llm_multiround_prompt_fit",
+                        round_idx=round_idx,
+                        **{
+                            k: v
+                            for k, v in fit_record.items()
+                            if k != "dropped_indices"
+                        },
+                    )
+                    if fitted is not None:
+                        prompt, n_shown = fitted
+                        continue  # resend at once, same attempt number
+                if attempt >= tune.retries:
+                    break
+                if tune.retry_backoff_seconds > 0:
                     await asyncio.sleep(tune.retry_backoff_seconds * (2**attempt))
+                attempt += 1
+        salvaged_record: dict[str, object] | None = None
+        if data is None and salvage is not None:
+            # Every attempt failed to parse, and one reply had emitted its core before
+            # it stopped. Keep those indices; no next_queries were emitted, so stop.
+            s_attempt, s_reply, s_usage, s_core = salvage
+            data = {"core": s_core}
+            raw, usage = s_reply, s_usage
+            salvaged_record = {"attempt": s_attempt, "n_indices": len(s_core)}
+            logger.warning(
+                "llm_multiround_decider_salvaged",
+                round_idx=round_idx,
+                attempt=s_attempt,
+                n_indices=len(s_core),
+                reply=s_reply[:120],
+            )
         if data is None:
             # Every attempt failed. Fall back to a deterministic core (the evidence
             # list is in fused-score order) rather than returning an empty one: an
@@ -448,8 +541,11 @@ class LLMRoundDecider:
                 usage=usage,
                 raw=raw,
                 failed=True,
+                fit=fit_record,
             )
-        core = _coerce_core_indices(data.get("core", []), n_candidates)
+        # n_shown == n_candidates unless a fit dropped candidates: an index the sent
+        # prompt never showed is not a choice the decider made.
+        core = _coerce_core_indices(data.get("core", []), n_shown)
         # A missing, null or non-list ``next_queries`` is a stop, and a query that
         # is not a string is kept as its text -- as the exp decider reads them.
         next_raw = data.get("next_queries")
@@ -459,8 +555,30 @@ class LLMRoundDecider:
             : tune.max_subqueries
         ]
         return RoundDecision(
-            stop=not queries, queries=queries, core=core, usage=usage, raw=raw
+            stop=not queries,
+            queries=queries,
+            core=core,
+            usage=usage,
+            raw=raw,
+            fit=fit_record,
+            salvaged=salvaged_record,
         )
+
+    def _token_counter(
+        self, tune: DeciderSettings, pictures: Sequence[Picture]
+    ) -> Callable[[str], Awaitable[tuple[int, int] | None]] | None:
+        """Count a prompt as this decider would send it, or ``None`` if it cannot."""
+        if not isinstance(self._llm, PromptTokenCounter):
+            return None
+        client = self._llm
+
+        async def count(prompt: str) -> tuple[int, int] | None:
+            messages = [
+                LLMMessage(role="user", content=_content(prompt, pictures, tune))
+            ]
+            return await client.acount_prompt_tokens(messages, **tune.extra)
+
+        return count
 
     async def _ask(
         self,
@@ -588,6 +706,296 @@ def _coerce_core_indices(raw: object, n_evidence: int) -> list[int]:
             seen.add(idx)
             core.append(idx)
     return core
+
+
+# ── Window fit and core salvage ([decider].fit_to_window / .salvage_truncated_core) ──
+
+_CORE_LIST_HEAD = re.compile(r'"core"\s*:\s*\[')
+
+
+def _salvage_core(text: str) -> list[object] | None:
+    """The complete ``core`` entries of a reply that was cut short, or ``None``.
+
+    For replies the normal parse rejects, typically ``{"core": [0, 3],`` with nothing
+    after it. A closed list yields every entry. An unclosed one (``{"core": [0, 21, 2``)
+    yields only the entries followed by a comma: the last may be a number cut in half
+    (``2`` of ``26``). ``None`` when there is no ``"core": [`` or an unclosed list holds
+    no complete entry. Entries come back as JSON values (or raw strings when they are
+    not JSON); :func:`_coerce_core_indices` then keeps the valid indices.
+    """
+    head = _CORE_LIST_HEAD.search(text)
+    if head is None:
+        return None
+    body = text[head.end() :]
+    end = body.find("]")
+    if end >= 0:
+        parts = body[:end].split(",")
+    else:
+        parts = body.split(",")[:-1]
+        if not parts:
+            return None
+    out: list[object] = []
+    for part in parts:
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            out.append(json.loads(token))
+        except json.JSONDecodeError:
+            out.append(token)
+    return out
+
+
+_CONTEXT_OVERFLOW = re.compile(
+    r"maximum context length|context_length_exceeded", re.IGNORECASE
+)
+
+
+def _is_context_overflow(err: BaseException) -> bool:
+    """Whether a decider call failed because its prompt is longer than the window.
+
+    Matches the endpoint's message (vLLM: "This model's maximum context length is N
+    tokens. However, your prompt contains at least M input tokens"; OpenAI:
+    ``context_length_exceeded``) on the error or the SDK error it wraps.
+    """
+    seen: BaseException | None = err
+    for _ in range(3):
+        if seen is None:
+            return False
+        if _CONTEXT_OVERFLOW.search(str(seen)):
+            return True
+        seen = seen.__cause__
+    return False
+
+
+class _FitView(NamedTuple):
+    """One round's decider view as items, so a too-long prompt can be re-rendered.
+
+    ``core`` and each block's items are ``(prefix, text, suffix)``; a rendered line
+    is ``prefix + text + suffix`` and only ``text`` is ever cut (the suffix is the
+    picture mark). Rendered without caps it reproduces :func:`_render_core_so_far`
+    and :func:`_render_blocks` exactly, which the decider checks before using it.
+    """
+
+    core: list[tuple[str, str, str]]
+    blocks: list[tuple[str, list[tuple[str, str, str]]]]
+
+
+_FIT_MARK = " [...]"
+"""Appended to a truncated text, so the decider can tell it was cut."""
+_FIT_CORE_FLOOR = 200
+"""Shortest a CORE SO FAR text is cut to before candidate texts are touched."""
+_FIT_CAND_FLOOR = 400
+"""Shortest a candidate text is cut to before candidates are dropped."""
+_FIT_MAX_ROUNDS = 6
+"""Re-render + recount passes before the fit gives up."""
+
+
+def _build_fit_view(
+    blocks: list[tuple[str, list[Candidate]]],
+    core_order: list[str],
+    core_source: dict[str, str],
+    cand_by_id: dict[str, Candidate],
+) -> _FitView:
+    """The items behind :func:`_render_core_so_far` and :func:`_render_blocks`."""
+    core: list[tuple[str, str, str]] = []
+    for cid in core_order:
+        c = cand_by_id.get(cid)
+        if c is None:
+            continue
+        subject = str(c.metadata.get("subject", ""))
+        src = core_source.get(cid, "original question")
+        core.append((f'  - [from "{src}"] {subject} - ', _decider_text(c.metadata), ""))
+    out: list[tuple[str, list[tuple[str, str, str]]]] = []
+    gi = 0
+    for sub_query, cands in blocks:
+        items: list[tuple[str, str, str]] = []
+        for c in cands:
+            subject = str(c.metadata.get("subject", ""))
+            mark = _PICTURE_MARK if _is_picture(c) else ""
+            items.append((f"  {gi}: {subject} - ", _decider_text(c.metadata), mark))
+            gi += 1
+        out.append((f"[block: {sub_query}]", items))
+    return _FitView(core, out)
+
+
+def _cap_text(text: str, cap: int | None) -> str:
+    if cap is None or len(text) <= cap + len(_FIT_MARK):
+        return text
+    return text[:cap] + _FIT_MARK
+
+
+def _render_fit_view(
+    view: _FitView,
+    *,
+    core_cap: int | None = None,
+    cand_cap: int | None = None,
+    n_keep: int | None = None,
+) -> tuple[str, str]:
+    """``(core_so_far, evidence)`` with texts capped and candidates ``>= n_keep`` left
+    out (a block that loses every item loses its header too)."""
+    core = (
+        "\n".join(p + _cap_text(t, core_cap) + s for p, t, s in view.core) or "(none)"
+    )
+    lines: list[str] = []
+    gi = 0
+    for header, items in view.blocks:
+        kept: list[str] = []
+        for prefix, text, suffix in items:
+            if n_keep is None or gi < n_keep:
+                kept.append(prefix + _cap_text(text, cand_cap) + suffix)
+            gi += 1
+        if kept or not items:
+            lines.append(header)
+            lines.extend(kept)
+    return core, "\n".join(lines)
+
+
+def _chars_cut(lengths: list[int], cap: int) -> int:
+    """Characters a cap removes from texts of these lengths (net of the marker)."""
+    mark = len(_FIT_MARK)
+    return sum(n - cap - mark for n in lengths if n > cap + mark)
+
+
+def _waterfill(lengths: list[int], need: int, floor: int) -> tuple[int | None, int]:
+    """The largest cap ``>= floor`` that removes at least ``need`` characters.
+
+    Returns ``(cap, removed)``. Only the longest texts are cut, all to the same length.
+    When even ``floor`` removes less than ``need`` the cap is ``floor`` (or ``None``
+    when ``floor`` removes nothing), with what it does remove.
+    """
+    if need <= 0:
+        return None, 0
+    at_floor = _chars_cut(lengths, floor)
+    if at_floor < need:
+        return (floor if at_floor > 0 else None), at_floor
+    lo, hi = floor, max(lengths)  # _chars_cut(lo) >= need; _chars_cut(hi) == 0 < need
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if _chars_cut(lengths, mid) >= need:
+            lo = mid
+        else:
+            hi = mid
+    return lo, _chars_cut(lengths, lo)
+
+
+def _plan_fit(view: _FitView, cut: int) -> tuple[int | None, int | None, int]:
+    """``(core_cap, cand_cap, n_keep)`` removing at least ``cut`` characters in total.
+
+    In order, each stage only when the previous one cannot remove enough: cap CORE SO
+    FAR texts (already kept, so the decider reads them only to judge what is still
+    missing), then candidate texts, then drop candidates from the end of the global
+    index, keeping at least one.
+    """
+    core_lens = [len(text) for _, text, _ in view.core]
+    cands = [item for _, items in view.blocks for item in items]
+    n_total = len(cands)
+    core_cap: int | None = None
+    removed = 0
+    if core_lens:
+        core_cap, removed = _waterfill(core_lens, cut, _FIT_CORE_FLOOR)
+    if removed >= cut:
+        return core_cap, None, n_total
+    cand_cap: int | None = None
+    if cands:
+        cand_cap, more = _waterfill(
+            [len(text) for _, text, _ in cands], cut - removed, _FIT_CAND_FLOOR
+        )
+        removed += more
+    n_keep = n_total
+    while removed < cut and n_keep > 1:
+        n_keep -= 1
+        prefix, text, suffix = cands[n_keep]
+        removed += len(prefix) + len(_cap_text(text, cand_cap)) + len(suffix) + 1
+    return core_cap, cand_cap, n_keep
+
+
+async def _fit_prompt(
+    template: str,
+    question: str,
+    view: _FitView,
+    tune: DeciderSettings,
+    count: Callable[[str], Awaitable[tuple[int, int] | None]] | None,
+) -> tuple[tuple[str, int] | None, dict[str, object]]:
+    """Re-render a rejected round prompt to fit the decider's window.
+
+    Returns ``((prompt, n_shown), record)`` on success and ``(None, record)`` when the
+    endpoint cannot count tokens or the prompt cannot be brought under the budget.
+    Each pass counts the whole request as the endpoint renders it (``count``),
+    converts the excess tokens to characters at that prompt's own characters per
+    token, and widens the cut; the budget is ``window - max_tokens``, so the reply
+    keeps its full output allowance.
+    """
+    n_total = sum(len(items) for _, items in view.blocks)
+
+    def render(core_cap: int | None, cand_cap: int | None, n_keep: int) -> str:
+        core, evidence = _render_fit_view(
+            view, core_cap=core_cap, cand_cap=cand_cap, n_keep=n_keep
+        )
+        return template.format(
+            question=question,
+            core_so_far=core or "(none)",
+            evidence=evidence or "(no evidence retrieved this round)",
+            max_sub=tune.max_subqueries,
+        )
+
+    prompt = render(None, None, n_total)
+    record: dict[str, object] = {
+        "fitted": False,
+        "n_candidates": n_total,
+        "n_core_items": len(view.core),
+        "chars_before": len(prompt),
+    }
+    counted = await count(prompt) if count is not None else None
+    if counted is None:
+        record["reason"] = "the decider endpoint gave no token count"
+        return None, record
+    tokens, window = counted
+    budget = window - (tune.max_tokens or 0)
+    record.update(tokens_before=tokens, window=window, budget=budget)
+    if tokens <= budget:
+        record["reason"] = "the endpoint counts the prompt within the budget"
+        return None, record
+    cut = 0
+    state: tuple[int | None, int | None, int] = (None, None, n_total)
+    for passes in range(1, _FIT_MAX_ROUNDS + 1):
+        cut += math.ceil((tokens - budget) * len(prompt) / tokens * 1.02) + 16
+        state = _plan_fit(view, cut)
+        prompt = render(*state)
+        counted = await count(prompt)
+        if counted is None:
+            record["reason"] = "the decider endpoint gave no token count"
+            return None, record
+        tokens = counted[0]
+        record["passes"] = passes
+        if tokens <= budget:
+            break
+    core_cap, cand_cap, n_keep = state
+    mark = len(_FIT_MARK)
+    record.update(
+        tokens_after=tokens,
+        chars_after=len(prompt),
+        core_cap=core_cap,
+        core_items_cut=sum(
+            1
+            for _, t, _ in view.core
+            if core_cap is not None and len(t) > core_cap + mark
+        ),
+        cand_cap=cand_cap,
+        cand_items_cut=sum(
+            1
+            for _, items in view.blocks
+            for _, t, _ in items
+            if cand_cap is not None and len(t) > cand_cap + mark
+        ),
+        n_shown=n_keep,
+        dropped_indices=list(range(n_keep, n_total)),
+    )
+    if tokens > budget:
+        record["reason"] = "still over the budget after the last pass"
+        return None, record
+    record["fitted"] = True
+    return (prompt, n_keep), record
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────
@@ -842,25 +1250,23 @@ async def _decide(
     n_candidates: int,
     round_idx: int,
     pictures: Sequence[Picture],
+    fit_view: _FitView | None = None,
 ) -> RoundDecision:
-    """Call the decider, passing ``pictures`` only when there are some.
+    """Call the decider, passing ``pictures`` / ``fit_view`` only when there are some.
 
     A policy written against the five-argument signature — every decider that
     existed before pictures, and an RL policy compiling its own call — keeps
     working unchanged. Passing an empty ``pictures=`` to it would be a
     ``TypeError`` for no gain, and only a round that actually shows a picture
-    needs the extra argument.
+    needs the extra argument. ``fit_view`` is built only for the built-in
+    :class:`LLMRoundDecider` with ``[decider].fit_to_window`` on.
     """
-    if not pictures:
-        return await decide(query, core_so_far, rendered, n_candidates, round_idx)
-    return await decide(
-        query,
-        core_so_far,
-        rendered,
-        n_candidates,
-        round_idx,
-        pictures=pictures,
-    )
+    kwargs: dict[str, Any] = {}
+    if pictures:
+        kwargs["pictures"] = pictures
+    if fit_view is not None:
+        kwargs["fit_view"] = fit_view
+    return await decide(query, core_so_far, rendered, n_candidates, round_idx, **kwargs)
 
 
 def _content(
@@ -1081,6 +1487,12 @@ def _build_round_trace(
         # deterministic fallback, not a decider choice. Recorded so analysis can
         # count or exclude these instead of silently mixing them with real rounds.
         record["decider_failed"] = True
+    # Present only when [decider].fit_to_window / .salvage_truncated_core acted on
+    # this round, so a run with both off writes the same records as before.
+    if decision.fit is not None:
+        record["decider_fit"] = decision.fit
+    if decision.salvaged is not None:
+        record["decider_salvaged"] = decision.salvaged
     return record
 
 
@@ -1307,6 +1719,10 @@ async def _search_episodes_subq(
             len(global_cands),
             round_idx,
             pictures,
+            # The built-in decider only: an injected policy keeps its own contract.
+            _build_fit_view(blocks, core_order, core_source, cand_by_id)
+            if tune.fit_to_window and isinstance(decide, LLMRoundDecider)
+            else None,
         )
 
         # Accumulate new core (global index -> id, dedup against already-cored).
