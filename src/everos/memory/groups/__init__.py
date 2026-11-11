@@ -9,7 +9,8 @@ names by their roster names and aliases (attribution, and the members a query
 names); :func:`record_audience` who was there when a record's sources were
 said, and who joined since (section 8.6). :func:`without_forgotten` reads a
 segment without the messages a live forget names -- what every reader of a
-group segment does (section 9.4).
+group segment does (section 9.4). :func:`verbatim_part` is the one test of
+whether a model's quote copies a group message (sections 7.5 and 8.4).
 
 External usage::
 
@@ -36,6 +37,8 @@ from .names import NamedMember as NamedMember
 from .names import named_members as named_members
 from .names import names_of as names_of
 from .names import roster_names as roster_names
+from .quotes import normalise_space as normalise_space
+from .quotes import verbatim_part as verbatim_part
 
 __all__ = [
     "BatchAdmission",
@@ -48,9 +51,11 @@ __all__ = [
     "implicit_joins",
     "named_members",
     "names_of",
+    "normalise_space",
     "readable_segments",
     "record_audience",
     "roster_names",
+    "verbatim_part",
     "without_forgotten",
     "without_pictures",
 ]

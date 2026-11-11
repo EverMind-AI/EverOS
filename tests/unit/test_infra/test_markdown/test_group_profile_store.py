@@ -41,7 +41,7 @@ from everos.infra.persistence.markdown import (
     render_group_profile_entry,
 )
 from everos.memory.models import FORGOTTEN_MARK, GroupProfileItem, ProfileSource
-from everos.memory.ports import GroupProfileStore, NoSourceCheck, Scope
+from everos.memory.ports import GroupProfileStore, NoSourceCheck, PendingBatch, Scope
 
 _GROUP = Scope(app_id="default", project_id="p", owner_id="trip", owner_type="group")
 _USER = Scope(app_id="default", project_id="p", owner_id="u_chen", owner_type="user")
@@ -338,6 +338,44 @@ async def test_the_pending_batch_round_trips_beside_the_logs(tmp_path: Path) -> 
     assert len(await store.items(_GROUP)) == 1  # pending.md is no daily log
     await store.set_pending(_GROUP, [])
     assert await store.pending(_GROUP) == []
+
+
+async def test_the_batch_keeps_its_failed_updates(tmp_path: Path) -> None:
+    store = MarkdownGroupProfileStore(MemoryRoot(tmp_path))
+    assert await store.pending_batch(_GROUP) == PendingBatch()
+
+    await store.set_pending(_GROUP, ["mc_1"], failures=2, retry_at=1_234)
+
+    assert await store.pending_batch(_GROUP) == PendingBatch(
+        memcell_ids=("mc_1",), failures=2, retry_at=1_234
+    )
+    parsed = await MarkdownReader.read(tmp_path / _PROFILE_DIR / "pending.md")
+    assert (parsed.frontmatter["failures"], parsed.frontmatter["retry_at"]) == (
+        2,
+        1_234,
+    )
+    # A plain rewrite of the queue clears the record.
+    await store.set_pending(_GROUP, ["mc_1", "mc_2"])
+    assert await store.pending_batch(_GROUP) == PendingBatch(
+        memcell_ids=("mc_1", "mc_2")
+    )
+
+
+async def test_a_pending_file_from_before_the_record_reads_as_none(
+    tmp_path: Path,
+) -> None:
+    store = MarkdownGroupProfileStore(MemoryRoot(tmp_path))
+    await store.set_pending(_GROUP, ["mc_1"])
+    path = tmp_path / _PROFILE_DIR / "pending.md"
+    text = path.read_text(encoding="utf-8")
+    old = "\n".join(
+        line
+        for line in text.splitlines()
+        if not line.startswith(("failures:", "retry_at:"))
+    )
+    path.write_text(old + "\n", encoding="utf-8")
+
+    assert await store.pending_batch(_GROUP) == PendingBatch(memcell_ids=("mc_1",))
 
 
 async def test_no_cascade_kind_indexes_the_pending_batch(tmp_path: Path) -> None:

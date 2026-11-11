@@ -7,6 +7,12 @@ What these pin:
   fingerprint pinned) and names the conversation's language, resolved in
   code; it shows the segments under their markers, one ``[id] time speaker:
   text`` line per message, and the current items with their ids;
+- a reply in loose form -- keys of unused fields left out, one id where a list
+  is expected -- is read, and the verifier still judges what it says;
+- a call that yields nothing usable is not raised: it is counted, the batch
+  stays queued and no trigger tries it again before its back-off has passed
+  (the idle tick fired on every scan used to call again each time), and the
+  third failure in a row drops the batch;
 - a batch runs after ``[groups] group_profile_batch`` segments, at a flush,
   and on the idle tick; a replayed segment counts once; nothing runs when the
   switch is off or nothing is queued;
@@ -18,19 +24,24 @@ What these pin:
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 
+from everos.component.llm import LLMCallError
 from everos.config import load_settings
+from everos.core.observability.metrics import get_metrics_registry
+from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.models import Group, RosterEvent
-from everos.memory.ports import IdleTick, Scope
+from everos.memory.ports import IdleTick, PendingBatch, Scope
 from everos.memory.strategies import (
     UPDATE_GROUP_PROFILE_IDLE_SPEC,
     update_group_profile,
@@ -347,3 +358,162 @@ async def test_a_dropped_operation_writes_nothing(groups: Any) -> None:
     assert (
         '"Ava (assistant)"' in model.prompts[0] or "Ava (assistant)" in model.prompts[0]
     )
+
+
+async def test_a_reply_in_loose_form_is_read(groups: Any) -> None:
+    groups(group_profile_batch=1)
+    cite = [{"segment": "mc_1", "message": "m-1", "quote": "Let's fly out on May 1"}]
+    loose = [
+        # Only the fields a topic uses.
+        {"op": "topic.new", "name": "Travel", "status": "exploring", "evidence": cite},
+        # One id where a list is expected, and a null.
+        {
+            "op": "decision.new",
+            "statement": "Fly out on May 1.",
+            "decided_by": "u_chen",
+            "agreed_by": None,
+            "evidence": cite,
+        },
+        # Still judged: Betty's own message is not cited.
+        {
+            "op": "decision.new",
+            "statement": "Betty decided May 1.",
+            "decided_by": "u_betty",
+            "evidence": cite,
+        },
+        # No evidence at all: dropped, not repaired.
+        {"op": "role.add", "member_id": "u_chen", "role": "coordinator"},
+    ]
+    model = _Model(loose)
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "Let's fly out on May 1."))
+
+    await update_group_profile(_extracted("mc_1"), deps)
+
+    topic, decision = await _items(deps)
+    assert (topic.kind, topic.name, topic.summary) == ("topic", "Travel", "")
+    assert decision.decided_by == ["u_chen"] and decision.agreed_by == []
+    assert await deps.stores.group_profile.pending(_SCOPE) == []
+
+
+class _Failing:
+    """Fails every call as the provider fails one with no valid reply, then
+    answers once ``ok_after`` calls have failed."""
+
+    def __init__(self, ok_after: int | None = None) -> None:
+        self.calls = 0
+        self.ok_after = ok_after
+
+    async def __call__(self, messages: Any, **_: Any) -> str:
+        self.calls += 1
+        if self.ok_after is not None and self.calls > self.ok_after:
+            return json.dumps({"operations": []})
+        raise LLMCallError("no usable reply", reason="invalid_reply")
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
+    """The strategy's clock, moved by hand."""
+    now = [from_timestamp_ms(1_000_000)]
+    module = importlib.import_module("everos.memory.strategies.update_group_profile")
+    monkeypatch.setattr(module, "get_utc_now", lambda: now[0])
+    return now
+
+
+def _failures(outcome: str, reason: str = "invalid_reply") -> float:
+    value = get_metrics_registry().get_sample_value(
+        "everos_group_profile_update_failures_total",
+        {"reason": reason, "outcome": outcome},
+    )
+    return value or 0.0
+
+
+def _tick() -> IdleTick:
+    return IdleTick(
+        strategy_name=UPDATE_GROUP_PROFILE_IDLE_SPEC.name,
+        bucket_key=_extracted("mc_1").group_key,
+        idle_seconds=600,
+    )
+
+
+async def test_an_unusable_reply_backs_off_then_drops_the_batch(
+    groups: Any, clock: list[datetime]
+) -> None:
+    groups(group_profile_batch=1, group_profile_idle_seconds=600)
+    model = _Failing()
+    deps = make_deps(llm=FakeLLMClient(handler=model))
+    deps.stores.groups.groups[("default", "p", "trip")] = Group(
+        group_id="trip", created_at=0
+    )
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
+    _segment(deps, "mc_2", 2_000, ("m-2", "u_chen", "more"))
+    backed_off, dropped = _failures("backed_off"), _failures("dropped")
+
+    async def scans(n: int = 10) -> None:
+        """The scheduler's idle ticks, and flushes, while the group stays idle."""
+        for _ in range(n):
+            await update_group_profile(_tick(), deps)
+            await update_group_profile(_FLUSHED, deps)
+
+    await update_group_profile(_extracted("mc_1"), deps)  # not raised
+    batch = await deps.stores.group_profile.pending_batch(_SCOPE)
+    assert model.calls == 1 and batch.memcell_ids == ("mc_1",)
+    assert (batch.failures, batch.retry_at) == (1, to_timestamp_ms(clock[0]) + 600_000)
+    await scans()
+    await update_group_profile(_extracted("mc_2"), deps)  # queued, not read
+    assert model.calls == 1
+    batch = await deps.stores.group_profile.pending_batch(_SCOPE)
+    assert batch.memcell_ids == ("mc_1", "mc_2") and batch.failures == 1
+
+    clock[0] += timedelta(seconds=600)
+    await scans()
+    batch = await deps.stores.group_profile.pending_batch(_SCOPE)
+    assert model.calls == 2 and batch.failures == 2
+    assert batch.retry_at == to_timestamp_ms(clock[0]) + 1_200_000  # twice as long
+
+    clock[0] += timedelta(seconds=1_200)
+    await scans()
+    assert model.calls == 3
+    assert await deps.stores.group_profile.pending_batch(_SCOPE) == PendingBatch()
+    clock[0] += timedelta(days=1)
+    await scans()
+    assert model.calls == 3  # nothing left to try
+    assert await _items(deps) == []
+    assert _failures("backed_off") - backed_off == 2
+    assert _failures("dropped") - dropped == 1
+
+
+async def test_a_later_try_that_works_clears_the_record(
+    groups: Any, clock: list[datetime]
+) -> None:
+    groups(group_profile_batch=1, group_profile_idle_seconds=600)
+    model = _Failing(ok_after=1)
+    deps = make_deps(llm=FakeLLMClient(handler=model))
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
+
+    await update_group_profile(_extracted("mc_1"), deps)
+    clock[0] += timedelta(seconds=601)
+    await update_group_profile(_tick(), deps)
+
+    assert model.calls == 2
+    assert await deps.stores.group_profile.pending_batch(_SCOPE) == PendingBatch()
+
+
+async def test_a_reply_that_never_parses_is_a_failure_too(
+    groups: Any, clock: list[datetime]
+) -> None:
+    groups(group_profile_batch=1)
+    calls: list[int] = []
+
+    def garbage(messages: Any, **_: Any) -> str:
+        calls.append(1)
+        return "not json"
+
+    deps = make_deps(llm=FakeLLMClient(handler=garbage))
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
+
+    await update_group_profile(_extracted("mc_1"), deps)
+
+    assert len(calls) == 3  # the operator's own attempts, then the back-off
+    batch = await deps.stores.group_profile.pending_batch(_SCOPE)
+    assert batch.memcell_ids == ("mc_1",) and batch.failures == 1

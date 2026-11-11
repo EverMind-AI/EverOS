@@ -61,6 +61,7 @@ from everos.memory.ports import (
     GroupRecord,
     MemoryRef,
     NoSourceCheck,
+    PendingBatch,
     Scope,
     SessionKey,
     SourceCheck,
@@ -438,7 +439,7 @@ class InMemoryGroupProfileStore:
     def __init__(self) -> None:
         self.rows: list[Stored[GroupProfileItem]] = []
         self.marks: dict[str, str] = {}
-        self.queued: dict[Scope, list[str]] = {}
+        self.queued: dict[Scope, PendingBatch] = {}
 
     @staticmethod
     def _check(scope: Scope) -> None:
@@ -502,12 +503,24 @@ class InMemoryGroupProfileStore:
         return True
 
     async def pending(self, scope: Scope) -> list[str]:
-        self._check(scope)
-        return list(self.queued.get(scope, []))
+        return list((await self.pending_batch(scope)).memcell_ids)
 
-    async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
+    async def pending_batch(self, scope: Scope) -> PendingBatch:
         self._check(scope)
-        self.queued[scope] = list(memcell_ids)
+        return self.queued.get(scope, PendingBatch())
+
+    async def set_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        self._check(scope)
+        self.queued[scope] = PendingBatch(
+            memcell_ids=tuple(memcell_ids), failures=failures, retry_at=retry_at
+        )
 
 
 class InMemoryMemberProfileStore:

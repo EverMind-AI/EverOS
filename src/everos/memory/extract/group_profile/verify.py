@@ -8,7 +8,9 @@ any check is dropped -- never repaired -- and counted by reason
 * ``unknown_segment`` / ``unknown_message``: a cited segment is not one of
   the batch's, or the message is not in it;
 * ``quote_not_verbatim``: a quote is not part of that message's text after
-  whitespace normalisation (an empty quote is not one either);
+  whitespace normalisation, curly quotation marks read as straight ones
+  (:func:`everos.memory.groups.verbatim_part`; an empty quote is not one
+  either);
 * ``assistant_only_decision``: a ``decision.*`` operation whose evidence
   holds no human member's message;
 * ``ungrounded_member``: ``decided_by`` / ``agreed_by`` / ``held_by`` /
@@ -24,8 +26,9 @@ any check is dropped -- never repaired -- and counted by reason
 * ``duplicate``: a second operation on the same target in one reply, or a
   role the member already holds.
 
-Speakers and times are copied from the cited messages; the attribution fields
-and the span of an item come from its verified evidence alone.
+Speakers and times are copied from the cited messages, and a quote is stored
+as the message's own words; the attribution fields and the span of an item
+come from its verified evidence alone.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from typing import cast, get_args
 from everalgo.types import ChatMessage
 
 from everos.core.observability.metrics import Counter as MetricCounter
+from everos.memory.groups import verbatim_part
 from everos.memory.models import (
     GroupProfileItem,
     MemberKind,
@@ -381,8 +385,8 @@ class _Checker:
             message = messages.get(evidence.message)
             if message is None:
                 raise _DroppedError("unknown_message")
-            quote = _normalise(evidence.quote)
-            if not quote or quote not in _normalise(str(message.content or "")):
+            quote = verbatim_part(evidence.quote, str(message.content or ""))
+            if quote is None:
                 raise _DroppedError("quote_not_verbatim")
             source = ProfileSource(
                 memcell_id=evidence.segment,
@@ -423,10 +427,6 @@ class _Checker:
         if not intervals:
             return None
         return max(intervals, key=lambda i: i.joined_at).kind
-
-
-def _normalise(text: str) -> str:
-    return " ".join(text.split())
 
 
 def _origin(kinds: set[MemberKind]) -> Origin | None:

@@ -84,6 +84,7 @@ from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import NoSourceCheck as NoSourceCheck
 from .stores import OwnerDirDeletion as OwnerDirDeletion
 from .stores import OwnerDirStore as OwnerDirStore
+from .stores import PendingBatch as PendingBatch
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SceneStore as SceneStore
@@ -155,6 +156,7 @@ __all__ = [
     "OwnerType",
     "Page",
     "PageResult",
+    "PendingBatch",
     "ProfileIndex",
     "ProfileStore",
     "ReflectionReportStore",

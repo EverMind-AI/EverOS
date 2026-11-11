@@ -10,15 +10,28 @@ repairs -- one that fails:
 * ``unknown_constraint``: it names no constraint of the block, or one a
   previous binding already bound (a duplicate);
 * ``unknown_message`` / ``quote_not_verbatim``: the cited message is not in
-  the constraint's or the core's segments, or the quote is not a verbatim
-  part of it after whitespace normalisation;
+  the named segment (one of the constraint's or the core's), or the quote is
+  not a verbatim part of it (:func:`everos.memory.groups.verbatim_part`:
+  whitespace normalised, curly quotation marks read as straight ones);
 * ``unknown_member``: ``applies_to`` names someone not in the group's
-  roster.
+  roster, or a binding that applies leaves it empty.
 
-A constraint without a surviving binding keeps what the rules layer gave it.
-Drops are counted in ``everos_constraint_bindings_dropped_total``. The call
-is zero-shot and names the conversation's language, resolved in code from
-the cited segments; the prompt is registered with an id, a version and a
+A binding that applies cites a message and states its scope. One that does
+not (``applies: false``) may leave both empty -- no message, no quote, an
+empty ``applies_to`` -- and then keeps the constraint's rules-layer source
+and scope; whatever it does fill in is checked in full. One member id where
+a list is expected reads as a list of it. A bound constraint gains
+``applies`` and the binding's scope, and its quote is the message's own
+words.
+
+A constraint without a surviving binding keeps what the rules layer gave it,
+and so does every constraint when the call itself yields nothing usable (an
+invalid reply, a failed call): the search answers with the rules layer's
+block, and the failure is counted in
+``everos_constraint_bind_failures_total`` by reason. Dropped bindings are
+counted in ``everos_constraint_bindings_dropped_total``. The call is
+zero-shot and names the conversation's language, resolved in code from the
+cited segments; the prompt is registered with an id, a version and a
 fingerprint, pinned by tests.
 """
 
@@ -36,13 +49,19 @@ from everalgo.user_memory._language import (
     PARTICIPANT_LANGUAGE_RULE,
     build_language_rule,
 )
+from pydantic import field_validator
 
 from everos.core.observability.logging import get_logger
 from everos.core.observability.metrics import Counter as MetricCounter
 from everos.memory.access import ReadScope
 from everos.memory.extract.conversation_language import conversation_language
-from everos.memory.extract.llm_retry import retry_llm_output
-from everos.memory.prompts import PromptTemplate
+from everos.memory.extract.llm_retry import (
+    UNUSABLE_CALL,
+    failure_reason,
+    retry_llm_output,
+)
+from everos.memory.groups import normalise_space, verbatim_part
+from everos.memory.prompts import LENIENT_REPLY, PromptTemplate
 
 from ..dto import ConstraintItem, ConstraintScopeItem, ConstraintSourceItem
 
@@ -98,17 +117,37 @@ _dropped = MetricCounter(
     labelnames=("reason",),
     namespace="everos",
 )
+_failed = MetricCounter(
+    name="constraint_bind_failures_total",
+    description=(
+        "Constraint-binding calls that yielded nothing usable; "
+        "the block kept its rules form."
+    ),
+    labelnames=("reason",),
+    namespace="everos",
+)
 
 
 class Binding(StrictOutputModel):
-    """One constraint's binding as the model states it."""
+    """One constraint's binding as the model states it.
+
+    The citation reads as empty when its keys are left out or ``null``: a
+    binding that does not apply may carry none.
+    """
+
+    model_config = LENIENT_REPLY
 
     constraint: str
     applies: bool
     applies_to: str | list[str]
-    segment: str
-    message: str
-    quote: str
+    segment: str = ""
+    message: str = ""
+    quote: str = ""
+
+    @field_validator("segment", "message", "quote", mode="before")
+    @classmethod
+    def _null_is_empty(cls, value: object) -> object:
+        return "" if value is None else value
 
 
 class BindReply(StrictOutputModel):
@@ -127,7 +166,8 @@ async def bind_constraints(
 
     ``cells`` are the segments the constraints and the core rest on, by
     memcell id, their speakers labelled by roster name: what the call is
-    shown and what every quote is checked against.
+    shown and what every quote is checked against. A call that yields
+    nothing usable leaves ``constraints`` as they are.
     """
     if not constraints:
         return [], Counter()
@@ -157,7 +197,16 @@ async def bind_constraints(
         text = await llm.achat(messages, response_format=BindReply)
         return parse_reply(BindReply, text, operator="constraint binding")
 
-    reply = await retry_llm_output(attempt, operator="constraint_bind")
+    try:
+        reply = await retry_llm_output(attempt, operator="constraint_bind")
+    except UNUSABLE_CALL as err:
+        # Only a refinement failed: the rules layer's block stands.
+        reason = failure_reason(err)
+        _failed.labels(reason=reason).inc()
+        logger.warning(
+            "constraint_bind_failed", reason=reason, constraints=len(constraints)
+        )
+        return list(constraints), Counter()
     return _apply(reply.bindings, constraints, scope=scope, cells=cells)
 
 
@@ -195,29 +244,32 @@ def _check(
     constraint = by_id.get(binding.constraint)
     if constraint is None or binding.constraint in bound:
         return "unknown_constraint", None
-    allowed = {constraint.source.memcell_id, *cells}
-    cell = cells.get(binding.segment) if binding.segment in allowed else None
-    message = next(
-        (
-            m
-            for m in (cell.items if cell is not None else [])
-            if isinstance(m, ChatMessage) and m.id == binding.message
-        ),
-        None,
-    )
-    if message is None:
-        return "unknown_message", None
-    quote = " ".join(binding.quote.split())
-    if not quote or quote not in " ".join(str(message.content or "").split()):
-        return "quote_not_verbatim", None
-    applies_to: str | list[str] = "group"
-    if isinstance(binding.applies_to, list):
-        view = scope.group(constraint.scope.group_id)
-        known = {i.member_id for i in view.roster.intervals} if view else set()
-        if not binding.applies_to or any(m not in known for m in binding.applies_to):
-            return "unknown_member", None
-        applies_to = list(dict.fromkeys(binding.applies_to))
-    elif binding.applies_to != "group":
+    source = constraint.source
+    if binding.applies or binding.message.strip() or binding.quote.strip():
+        allowed = {constraint.source.memcell_id, *cells}
+        cell = cells.get(binding.segment) if binding.segment in allowed else None
+        message = next(
+            (
+                m
+                for m in (cell.items if cell is not None else [])
+                if isinstance(m, ChatMessage) and m.id == binding.message
+            ),
+            None,
+        )
+        if message is None:
+            return "unknown_message", None
+        quote = verbatim_part(binding.quote, str(message.content or ""))
+        if quote is None:
+            return "quote_not_verbatim", None
+        source = ConstraintSourceItem(
+            memcell_id=binding.segment,
+            message_id=message.id,
+            speaker_id=message.sender_id,
+            at=message.timestamp,
+            quote=quote,
+        )
+    applies_to = _applies_to(binding, constraint, scope)
+    if applies_to is None:
         return "unknown_member", None
     return None, constraint.model_copy(
         update={
@@ -225,15 +277,34 @@ def _check(
             "scope": ConstraintScopeItem(
                 group_id=constraint.scope.group_id, applies_to=applies_to
             ),
-            "source": ConstraintSourceItem(
-                memcell_id=binding.segment,
-                message_id=message.id,
-                speaker_id=message.sender_id,
-                at=message.timestamp,
-                quote=quote,
-            ),
+            "source": source,
         }
     )
+
+
+def _applies_to(
+    binding: Binding, constraint: ConstraintItem, scope: ReadScope
+) -> str | list[str] | None:
+    """The binding's scope; ``None`` when it names an unknown member or none.
+
+    ``"group"`` is the whole group, and one id reads as a list of it. A
+    binding that does not apply may leave the scope empty: the constraint's
+    own scope stands.
+    """
+    value = binding.applies_to
+    if value == "group":
+        return "group"
+    if isinstance(value, str):
+        members = [value] if value.strip() else []
+    else:
+        members = list(value)
+    if not members:
+        return None if binding.applies else constraint.scope.applies_to
+    view = scope.group(constraint.scope.group_id)
+    known = {i.member_id for i in view.roster.intervals} if view else set()
+    if any(m not in known for m in members):
+        return None
+    return list(dict.fromkeys(members))
 
 
 def _render(constraint: ConstraintItem) -> str:
@@ -265,7 +336,7 @@ def _conversation(cells: Mapping[str, MemCell]) -> str:
         lines = [f"=== SEGMENT {memcell_id} ==="]
         for item in cell.items:
             if isinstance(item, ChatMessage):
-                text = " ".join(str(item.content or "").split())
+                text = normalise_space(str(item.content or ""))
                 lines.append(
                     f"[{item.id}] {item.sender_name or item.sender_id}: {text}"
                 )

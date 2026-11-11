@@ -320,3 +320,45 @@ def test_a_dissent_is_resolved_by_a_new_version() -> None:
     assert resolved.resolved and resolved.supersedes == "gp_3"
     assert resolved.held_by == ["u_betty"] and resolved.resolved_by == ["u_betty"]
     assert resolved.own_status() == "resolved" and dissent.own_status() == "open"
+
+
+def test_curly_and_straight_quotation_marks_match_either_way() -> None:
+    segment = Segment(
+        memcell_id="mc_q",
+        cell=MemCell(
+            items=[
+                _message(
+                    "m-1", "u_chen", "The “delivery timeline” was vague; we’ll fix.", 1
+                ),
+                _message("m-2", "u_betty", 'He said "maybe" and it\'s fine.', 2),
+            ],
+            timestamp=2,
+        ),
+    )
+    topic = {"name": "Delivery", "status": "exploring"}
+
+    result = verify(
+        [
+            _op(
+                "topic.new",
+                ("mc_q", "m-1", 'The "delivery timeline" was vague; we\'ll fix'),
+                **topic,
+            ),
+            _op(
+                "topic.new", ("mc_q", "m-2", "He said “maybe” and it’s fine."), **topic
+            ),
+            # A changed word is still not verbatim, whatever the marks.
+            _op("topic.new", ("mc_q", "m-1", "The “delivery date” was vague"), **topic),
+        ],
+        group_id="trip",
+        segments=[segment],
+        roster=_ROSTER,
+        profile=GroupProfileView(),
+        observed_at=2,
+    )
+
+    first, second = result.items
+    # The quote kept is the message's own words, with its own marks.
+    assert first.sources[0].quote == "The “delivery timeline” was vague; we’ll fix"
+    assert second.sources[0].quote == 'He said "maybe" and it\'s fine.'
+    assert result.dropped == {"quote_not_verbatim": 1}

@@ -128,6 +128,9 @@ class GroupProfilePendingFrontmatter(GroupScopedFrontmatter):
 
     Frontmatter only, rewritten whole. Its name is outside the daily logs'
     ``group_profile-*.md`` glob on purpose: the file is never indexed.
+    ``failures`` and ``retry_at`` (epoch ms) record the batch's failed
+    updates and when the next may try; both are absent from a file written
+    before they existed, and read as none.
     """
 
     DIR_NAME: ClassVar[str] = _DIR_NAME
@@ -135,6 +138,8 @@ class GroupProfilePendingFrontmatter(GroupScopedFrontmatter):
 
     type: Literal["group_profile_pending"] = "group_profile_pending"
     pending_memcell_ids: list[str] = Field(default_factory=list)
+    failures: int = 0
+    retry_at: int = 0
 
 
 _STATEMENT = "Statement"

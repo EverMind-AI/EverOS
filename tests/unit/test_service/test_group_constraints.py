@@ -15,7 +15,12 @@ seeded as the update strategy writes them. What these pin:
   best-matching message;
 - the model layer runs only when ``[search] constraints = "model"``; its
   bindings are checked and a failing one is dropped, leaving the rules
-  layer's constraint as it was.
+  layer's constraint as it was; a binding that does not apply may cite
+  nothing, one that cites anything is checked in full;
+- a binding call that yields nothing usable leaves the rules layer's block
+  and is counted -- the search does not fail;
+- quotes match with curly or straight quotation marks, and what is returned
+  is the message's own words.
 """
 
 from __future__ import annotations
@@ -29,7 +34,9 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage
 
+from everos.component.llm import LLMCallError
 from everos.config import Settings
+from everos.core.observability.metrics import get_metrics_registry
 from everos.memory.models import ProfileSource
 from everos.service import SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
@@ -66,16 +73,27 @@ def _cites(memcell: str, quote: str) -> list[ProfileSource]:
 
 
 class _Model:
-    """Decider-free LLM: answers the binding call, records it."""
+    """Decider-free LLM: answers the binding call, records it.
 
-    def __init__(self, bindings: list[dict[str, Any]] | None = None) -> None:
+    ``fail`` makes every call fail as the provider fails one whose replies
+    never validate.
+    """
+
+    def __init__(
+        self, bindings: list[dict[str, Any]] | None = None, *, fail: bool = False
+    ) -> None:
         self.bindings = bindings or []
+        self.fail = fail
         self.calls = 0
+        self.prompts: list[str] = []
 
     def __call__(self, messages: Any, **kwargs: Any) -> str:
         fmt = kwargs.get("response_format")
         assert fmt is not None and fmt.__name__ == "BindReply", fmt
         self.calls += 1
+        self.prompts.append("\n".join(str(m.content) for m in messages))
+        if self.fail:
+            raise LLMCallError("no usable reply", reason="invalid_reply")
         return json.dumps({"bindings": self.bindings})
 
 
@@ -294,3 +312,97 @@ async def test_the_model_layer_runs_only_when_configured(tmp_path: Path) -> None
         assert first.source.quote == "May 1 is sold out."
         assert second.applies is None and second.scope.applies_to == "group"
         await _assert_verbatim(world, constraints)
+
+
+async def test_a_binding_that_does_not_apply_needs_no_citation(tmp_path: Path) -> None:
+    bindings = [
+        # Beside the point, nothing cited, no scope: bound, its source and
+        # scope kept.
+        {"constraint": "c1", "applies": False, "applies_to": ""},
+        # A quote without a message: a citation, checked in full, dropped.
+        {
+            "constraint": "c2",
+            "applies": False,
+            "applies_to": "group",
+            "segment": "",
+            "message": "",
+            "quote": "Offsite flights on April 30 are too early.",
+        },
+        # One member id as a string, and a curly apostrophe where the message
+        # has a straight one: bound to that member, with the message's words.
+        {
+            "constraint": "c3",
+            "applies": True,
+            "applies_to": "u_chen",
+            "segment": "mc_new",
+            "message": "m-6",
+            "quote": "Let’s leave on April 30 instead.",
+        },
+        # It applies, but to no one: dropped.
+        {
+            "constraint": "c4",
+            "applies": True,
+            "applies_to": [],
+            "segment": "mc_old",
+            "message": "m-1",
+            "quote": "we fly out on May 1",
+        },
+    ]
+    model = _Model(bindings)
+    async for world in _world(tmp_path, model, layer="model"):
+        first, second, third, fourth = await _constraints(world, "u_chen")
+
+        assert first.applies is False and first.scope.applies_to == "group"
+        assert first.source.message_id == "m-6"
+        assert first.source.quote == "Let's leave on April 30 instead"
+        assert second.applies is None
+        assert third.applies is True and third.scope.applies_to == ["u_chen"]
+        assert third.source.message_id == "m-6"
+        assert third.source.quote == "Let's leave on April 30 instead."
+        assert fourth.applies is None
+        await _assert_verbatim(world, [first, second, third, fourth])
+
+
+def _bind_failures(reason: str) -> float:
+    value = get_metrics_registry().get_sample_value(
+        "everos_constraint_bind_failures_total", {"reason": reason}
+    )
+    return value or 0.0
+
+
+async def test_a_failed_binding_call_leaves_the_rules_block(tmp_path: Path) -> None:
+    before = _bind_failures("invalid_reply")
+    async for world in _world(tmp_path, _Model()):
+        expected = await _constraints(world, "u_chen")
+    model = _Model(fail=True)
+    async for world in _world(tmp_path / "model", model, layer="model"):
+        constraints = await _constraints(world, "u_chen")
+
+        assert model.calls == 1
+        assert [c.model_dump(exclude={"audience"}) for c in constraints] == [
+            c.model_dump(exclude={"audience"}) for c in expected
+        ]
+        assert all(c.applies is None for c in constraints)
+    assert _bind_failures("invalid_reply") - before == 1
+
+
+async def test_a_stored_quote_matches_with_curly_marks(
+    rules: tuple[GroupWorld, _Model],
+) -> None:
+    world, _ = rules
+    await world.profile_item(
+        "trip",
+        "Let’s leave on April 30 instead",
+        start=T0 + 6_000,
+        end=T0 + 6_000,
+        memcell_id="mc_new",
+        statement="Leave on April 30.",
+        sources=_cites("mc_new", "Let’s leave on April 30 instead"),
+    )
+    await world.project()
+
+    constraints = await _constraints(world, "u_chen")
+
+    (item,) = [c for c in constraints if c.statement == "Leave on April 30."]
+    assert item.source.quote == "Let's leave on April 30 instead"
+    await _assert_verbatim(world, constraints)

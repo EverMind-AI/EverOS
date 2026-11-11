@@ -17,9 +17,10 @@ Built once the search loop has stopped, from its core:
 Every quote is checked once more against the message it cites, in the
 segment's stored cell read without its forgotten messages: a constraint whose
 quote is no longer a verbatim part of a readable message (its segment gone,
-or the message forgotten) is left out. Every lookup carries
-the read scope's predicate, so a constraint never rests on an item the asker
-cannot see.
+or the message forgotten) is left out. The check is the write path's
+(:func:`everos.memory.groups.verbatim_part`), and the quote returned is the
+message's own words. Every lookup carries the read scope's predicate, so a
+constraint never rests on an item the asker cannot see.
 """
 
 from __future__ import annotations
@@ -32,8 +33,8 @@ from collections.abc import Sequence
 from everalgo.types import ChatMessage, MemCell
 
 from everos.memory.access import ReadScope
-from everos.memory.groups import readable_segments
-from everos.memory.models import GroupProfileItem
+from everos.memory.groups import normalise_space, readable_segments, verbatim_part
+from everos.memory.models import GroupProfileItem, ProfileSource
 from everos.memory.ports import (
     GroupProfileIndex,
     MemcellStore,
@@ -201,16 +202,10 @@ def _from_item(
     cells: dict[str, MemCell],
     scope: ReadScope,
 ) -> ConstraintItem | None:
-    source = next(
-        (
-            s
-            for s in item.sources
-            if _verbatim(cells.get(s.memcell_id), s.message_id, s.quote)
-        ),
-        None,
-    )
-    if source is None:
+    cited = _cited(item, cells)
+    if cited is None:
         return None
+    source, quote = cited
     status = item.status or item.own_status()
     if item.kind == "decision" and status == "current" and item.item_id in disputed:
         status = "disputed"
@@ -237,7 +232,7 @@ def _from_item(
             message_id=source.message_id,
             speaker_id=source.speaker_id,
             at=source.at,
-            quote=source.quote,
+            quote=quote,
         ),
         audience=audience_of(
             scope, group_id, start=item.source_start, end=item.source_end
@@ -275,7 +270,7 @@ def _from_record(
             message_id=message.id,
             speaker_id=message.sender_id,
             at=message.timestamp,
-            quote=_normalise(str(message.content or ""))[:QUOTE_CHARS],
+            quote=normalise_space(str(message.content or ""))[:QUOTE_CHARS],
         ),
         audience=audience_of(scope, record.group_id, start=start, end=end),
     )
@@ -298,14 +293,25 @@ def _best_message(cell: MemCell, text: str) -> ChatMessage | None:
     return best
 
 
-def _verbatim(cell: MemCell | None, message_id: str, quote: str) -> bool:
-    """Whether ``quote`` is still a verbatim part of the message it cites."""
-    if cell is None or not quote:
-        return False
+def _cited(
+    item: GroupProfileItem, cells: dict[str, MemCell]
+) -> tuple[ProfileSource, str] | None:
+    """The item's first source still quoted verbatim, with the message's words."""
+    for source in item.sources:
+        quote = _verbatim(cells.get(source.memcell_id), source.message_id, source.quote)
+        if quote is not None:
+            return source, quote
+    return None
+
+
+def _verbatim(cell: MemCell | None, message_id: str, quote: str) -> str | None:
+    """The part of the cited message ``quote`` still copies, if it does."""
+    if cell is None:
+        return None
     for message in cell.items:
         if isinstance(message, ChatMessage) and message.id == message_id:
-            return quote in _normalise(str(message.content or ""))
-    return False
+            return verbatim_part(quote, str(message.content or ""))
+    return None
 
 
 def _statement(item: GroupProfileItem) -> str:
@@ -321,7 +327,3 @@ def _segment(record: CoreRecord) -> str | None:
 
 def _words(text: str) -> list[str]:
     return [w.lower() for w in _WORD.findall(text)]
-
-
-def _normalise(text: str) -> str:
-    return " ".join(text.split())

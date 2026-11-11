@@ -137,6 +137,26 @@ class Withdrawal:
     released: tuple[tuple[str, str, str], ...] = ()
 
 
+# ── A group profile's pending batch ──────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PendingBatch:
+    """The segments a group's next profile update reads, and its failed tries.
+
+    Attributes:
+        memcell_ids: The queued segments, oldest first.
+        failures: Updates of this batch in a row whose call yielded nothing
+            usable (docs/group-memory.md, section 14, Step 2 notes).
+        retry_at: Epoch ms before which no update tries the batch again;
+            ``0`` when nothing is waited for.
+    """
+
+    memcell_ids: tuple[str, ...] = ()
+    failures: int = 0
+    retry_at: int = 0
+
+
 # ── User-track daily logs ────────────────────────────────────────────────
 
 
@@ -548,8 +568,19 @@ class GroupProfileStore(Protocol):
         """The segments queued for the next update, oldest first."""
         ...
 
-    async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
-        """Replace the queued segments."""
+    async def pending_batch(self, scope: Scope) -> PendingBatch:
+        """The queued segments with the record of their failed updates."""
+        ...
+
+    async def set_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        """Replace the queued segments and their failure record (none by default)."""
         ...
 
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:

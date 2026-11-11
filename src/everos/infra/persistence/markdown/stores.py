@@ -55,6 +55,7 @@ from everos.memory.models import (
 from everos.memory.ports import (
     MemoryRef,
     NoSourceCheck,
+    PendingBatch,
     Scope,
     SourceCheck,
     Stored,
@@ -1159,19 +1160,35 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
         )
 
     async def pending(self, scope: Scope) -> list[str]:
+        return list((await self.pending_batch(scope)).memcell_ids)
+
+    async def pending_batch(self, scope: Scope) -> PendingBatch:
         path = self._pending_path(scope)
         if not await anyio.Path(path).is_file():
-            return []
+            return PendingBatch()
         parsed = await MarkdownReader.read(path)
         frontmatter = GroupProfilePendingFrontmatter.model_validate(parsed.frontmatter)
-        return list(frontmatter.pending_memcell_ids)
+        return PendingBatch(
+            memcell_ids=tuple(frontmatter.pending_memcell_ids),
+            failures=frontmatter.failures,
+            retry_at=frontmatter.retry_at,
+        )
 
-    async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
+    async def set_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
         path = self._pending_path(scope)
         frontmatter = GroupProfilePendingFrontmatter(
             id=f"group_profile_pending_{scope.owner_id}",
             group_id=scope.owner_id,
             pending_memcell_ids=list(memcell_ids),
+            failures=failures,
+            retry_at=retry_at,
         )
         async with LOCKS.hold("owner", owner_lock(scope)):
             await self._markdown.write_markdown(
