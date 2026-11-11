@@ -131,7 +131,7 @@ async def test_health_reports_tier3_capabilities(tier3_runtime: AsyncClient) -> 
     # this suite actually configures.
     disabled = set(body["disabled_features"])
     assert disabled.isdisjoint(
-        {"memory_search", "reflection", "skill_extraction", "knowledge"}
+        {"vector_recall", "reflection", "skill_extraction", "knowledge"}
     )
 
     # Cascade readiness block is present on a real app that ran the cascade

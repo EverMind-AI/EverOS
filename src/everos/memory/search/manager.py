@@ -23,9 +23,10 @@ question names the asker (``"<display name>: <question>"``, section 8.2), its
 loop follows the core's stored links (``[search] expansion``), and
 ``include_profile`` attaches member-in-group profiles only.
 
-The embedding provider is the one component guard: multi-round recall runs
-BM25 and vector recall for every sub-query, so a request without an embedder
-is refused (422) before any recall.
+Recall needs no embedding provider. Multi-round recall runs BM25 and vector
+recall for every sub-query; a deployment without an embedder runs BM25 alone
+(keyword recall), and the loop, the decider and the ranking are otherwise the
+same.
 
 The manager never writes to storage; it only reads the derived index and
 markdown.
@@ -40,7 +41,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from everos.config import GroupSearchSettings, load_settings
 from everos.config.settings import DeciderSettings
 from everos.core.context import resolve_request_id
-from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
+from everos.core.errors import ConfigurationError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
     capture_input,
@@ -85,7 +86,6 @@ from .dto import (
     SearchEpisodeItem,
     SearchGroupProfile,
     SearchImageItem,
-    SearchMethod,
     SearchProfileItem,
     SearchRequest,
     SearchResponse,
@@ -240,7 +240,6 @@ class SearchManager:
         Raises:
             ForbiddenError: The asker may not read the scope (403).
             InvalidInputError: A group scope without an asker (422).
-            ProviderNotConfiguredError: No embedding provider (422).
         """
         request_id = resolve_request_id()
         with memory_span(
@@ -263,11 +262,9 @@ class SearchManager:
             )
             # The read scope first: who may see what decides every ``where``.
             # Then the filters: a malformed `filters` payload is a user input
-            # error (422) and should surface before the server-side component
-            # guard. The two steps are independent.
+            # error (422).
             scope = await self._read_scope(req, asserted_asker)
             where = compile_scoped(req.filters, scope.predicate)
-            self._validate_components()
 
             if scope.is_group:
                 ranked, profiles, unprocessed, group_profile = await asyncio.gather(
@@ -401,7 +398,6 @@ class SearchManager:
         public search route's former hybrid pipeline rather than
         ``llm_multiround``'s per-sub-query ``rrf(sparse, dense)[:topk]``.
         """
-        self._validate_components()
         scope = await self._read_scope(req, None)
         where = compile_scoped(req.filters, scope.predicate)
         ranked = await self._search_episodes(req, where, decider=decider, scope=scope)
@@ -659,6 +655,7 @@ class SearchManager:
     # ── Embedding / limits ──────────────────────────────────────────
 
     async def _embed_query(self, query: str) -> list[float]:
+        """The query vector; ``[]`` without an embedder, which skips vector recall."""
         if self._embedding is None:
             return []
         vector = await self._embedding.embed_query(query)
@@ -686,22 +683,6 @@ class SearchManager:
     def _top_k(top_k: int) -> int:
         """Resolve ``-1`` to :data:`_DEFAULT_TOP_K_CAP`; pass others through."""
         return _DEFAULT_TOP_K_CAP if top_k == -1 else top_k
-
-    # ── Component guards ────────────────────────────────────────────
-
-    def _validate_components(self) -> None:
-        """Fail fast when the embedding provider is missing.
-
-        Multi-round recall embeds every sub-query, so without an embedder the
-        request is refused with :class:`ProviderNotConfiguredError` -> HTTP
-        422 and a toml-pointing message, instead of an opaque
-        ``AttributeError('NoneType')`` deep in recall. The LLM is never
-        checked: the application is not built without one.
-        """
-        if self._embedding is None:
-            raise ProviderNotConfiguredError(
-                provider="embedding", feature=SearchMethod.LLM_MULTIROUND.value
-            )
 
 
 def _question(req: SearchRequest, scope: ReadScope | None) -> str:

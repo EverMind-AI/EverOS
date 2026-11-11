@@ -25,7 +25,6 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.component.tokenizer import Tokenizer
-from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.access import AccessPolicy
 from everos.memory.models import CanonicalMessage, ImageMemory
 from everos.memory.ports import MemoryRef, Scope, SearchHit, SessionKey, Stored
@@ -194,12 +193,24 @@ async def test_every_recall_is_pinned_to_the_owner() -> None:
         assert "owner_type = 'user'" in rendered
 
 
-async def test_search_requires_embedding() -> None:
-    mgr = _build_manager(episodes=[_episode_row("ep_1")], embedding=False)
-    with pytest.raises(ProviderNotConfiguredError) as excinfo:
-        await mgr.search(_user_req())
-    assert excinfo.value.provider == "embedding"
-    assert excinfo.value.feature == "llm_multiround"
+async def test_search_without_embedding_recalls_by_keyword_only() -> None:
+    """A deployment without an embedding model searches by BM25 alone.
+
+    It used to refuse every search (422 ``PROVIDER_NOT_CONFIGURED``). The loop,
+    the decider and the ranking are the same; only the vector leg is absent.
+    """
+    index = ScriptedIndex(
+        sparse=[_episode_row("ep_1")], dense=[_episode_row("ep_dense_only")]
+    )
+    decider = _Decider()
+    mgr = _build_manager(index=index, embedding=False, decider=decider)
+
+    resp = await mgr.search(_user_req())
+
+    assert [e.id for e in resp.data.episodes] == ["ep_1"]
+    assert resp.data.degraded == []
+    assert {call[0] for call in index.calls} == {"sparse"}
+    assert decider.prompts, "the decider still decides"
 
 
 async def test_embed_query_rejects_a_width_that_disagrees_with_dim() -> None:

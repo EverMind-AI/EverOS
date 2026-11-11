@@ -96,14 +96,15 @@ async def test_a_removed_method_returns_422_naming_multiround(
     assert repr(method) in error["message"]
 
 
-async def test_without_an_embedder_a_valid_search_is_refused_by_the_guard(
+async def test_without_an_embedder_a_valid_search_is_answered(
     client: AsyncClient,
 ) -> None:
+    """No embedder is a keyword-only deployment, not a refused search."""
     resp = await client.post(
         "/api/v2/memory/search", json=_body(method="llm_multiround")
     )
-    assert resp.status_code == 422
-    assert resp.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["episodes"] == []
 
 
 async def test_top_k_zero_returns_422(client: AsyncClient) -> None:

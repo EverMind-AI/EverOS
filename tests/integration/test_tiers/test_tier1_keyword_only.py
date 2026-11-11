@@ -1,20 +1,23 @@
-"""Tier 1 (LLM only) end-to-end acceptance test.
+"""Tier 1 (LLM only) end-to-end acceptance test: a deployment without an
+embedding model.
 
-Pins the behavior every Task in the embed-soft-dependency refactor
-promises for a user who has configured only an LLM: writes still work,
-everything that needs embedding/rerank -- memory search included, since
-multi-round retrieval embeds every sub-query -- fails fast with a 422
-instead of a silent 200 or a 500, and the background strategy engine never
-registers a strategy it cannot run.
+Pins the behavior promised to a user who has configured only an LLM:
+writes still work (markdown, cascade rows with no vector, the user profile
+by its direct path), memory search recalls by keyword (BM25) alone through
+the same multi-round loop, what needs embedding/rerank -- knowledge --
+fails fast with a 422 instead of a silent 200 or a 500, and the background
+strategy engine never registers a strategy it cannot run.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from httpx import AsyncClient
 
 from everos.service import Application
 
-from .conftest import add_and_flush, episode_rows
+from .conftest import add_and_flush, episode_rows, tier_storage
 
 # ---------------------------------------------------------------------------
 # 1. POST /memory/add -> md write + LanceDB vector=NULL
@@ -31,22 +34,47 @@ async def test_add_memory_writes_null_vector(tier1_runtime: AsyncClient) -> None
 
 
 # ---------------------------------------------------------------------------
-# 2. Memory search needs the embedder: 422 with the right feature tag
+# 2. Memory search recalls by keyword (BM25) alone
 # ---------------------------------------------------------------------------
 
 
-async def test_search_without_embedding_422(tier1_runtime: AsyncClient) -> None:
+async def test_search_recalls_by_keyword_without_an_embedder(
+    tier1_runtime: AsyncClient,
+) -> None:
     await add_and_flush(tier1_runtime, session_id="s_tier1_search")
 
     resp = await tier1_runtime.post(
-        "/api/v1/memory/search",
+        "/api/v2/memory/search",
         json={"user_id": "u_alice", "query": "hiking", "method": "llm_multiround"},
     )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
-    assert "embedding" in body["error"]["message"]
-    assert "llm_multiround" in body["error"]["message"]
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert [e["subject"] for e in data["episodes"]] == ["Hiking"]
+    assert data["degraded"] == []
+
+    # A word the episode does not hold recalls nothing: there is no vector leg
+    # to bring back a near miss.
+    resp = await tier1_runtime.post(
+        "/api/v2/memory/search",
+        json={"user_id": "u_alice", "query": "zebra", "method": "llm_multiround"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["episodes"] == []
+
+
+async def test_the_profile_takes_its_direct_path(tier1_runtime: AsyncClient) -> None:
+    """Without clusters (no embedder) the profile is written from the episode."""
+    await add_and_flush(tier1_runtime, session_id="s_tier1_profile")
+
+    from everos.infra.persistence.index import eq
+
+    rows: list[object] = []
+    for _ in range(200):
+        rows = await tier_storage().repos.user_profile.scan(eq("owner_id", "u_alice"))
+        if rows:
+            break
+        await asyncio.sleep(0.1)
+    assert rows, "the profile strategy wrote no profile row"
 
 
 # ---------------------------------------------------------------------------
@@ -90,12 +118,13 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
 
     disabled = set(body["disabled_features"])
     expected_subset = {
-        "memory_search",
+        "vector_recall",
         "reflection",
         "skill_extraction",
         "knowledge",
     }
     assert expected_subset <= disabled
+    assert "memory_search" not in disabled
 
 
 # ---------------------------------------------------------------------------

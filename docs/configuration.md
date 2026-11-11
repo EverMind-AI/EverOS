@@ -249,6 +249,23 @@ every entry from markdown and records the new model.
 Deployments with no embedding configured (no `api_key`, for instance) are
 unaffected: nothing is probed, compared, or recorded.
 
+#### Running without an embedding model
+
+Set `model = ""` (or `EVEROS_EMBEDDING__MODEL=""`) to deploy without one. A
+section that names a model but cannot build -- no `api_key`, say -- ends up
+the same, with a warning at startup. Such a deployment:
+
+- searches by keyword: every multi-round recall is BM25 alone, through the same
+  loop and decider (`GET /health` lists `vector_recall` in
+  `disabled_features`);
+- writes as usual: markdown, the cascade's index rows (with no vector), and the
+  user profile, which takes its direct path instead of clustering;
+- runs no reflection and no skill extraction, and refuses knowledge (`422`);
+- makes no embedding calls at all.
+
+Adding an embedder later is `everos cascade backfill`: it embeds the rows that
+have no vector and runs the clustering they never had.
+
 ### `[rerank]`
 
 | Field | Type | Default | Required | Description |

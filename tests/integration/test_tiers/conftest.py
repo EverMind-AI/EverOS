@@ -21,15 +21,12 @@ LLM stubbing notes:
   ``FakeLLMClient``: every OME strategy, the memorize pipeline and the
   search manager receive it, and ``Application.start`` sees an LLM and
   never touches settings.
-- Search holds that same LLM only to satisfy the
-  ``enable_llm_rerank=True`` non-None guard in
-  ``SearchManager._validate_components``. That LLM is never actually
-  invoked in this suite: ``everalgo.rank.rerank._basic_arank`` only
-  calls the LLM when ``enable_rerank and scored`` — and these tests
-  never seed agent_case/agent_skill data, so ``scored`` is always empty.
-  The memorize fake therefore serves search too;
-  if that assumption ever breaks, the fake raises loudly instead of
-  silently degrading the test.
+- Search uses that same LLM as its multi-round decider: the memorize
+  fake answers a decider round by keeping the first ten candidates and
+  stopping, and every tier searches the same way -- Tier 1 recalls by
+  keyword (BM25) alone. Anything the fake was not scripted for gets an
+  unusable reply, so a new model call fails loudly instead of silently
+  degrading the test.
 """
 
 from __future__ import annotations

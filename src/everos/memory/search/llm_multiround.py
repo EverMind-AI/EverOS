@@ -10,10 +10,11 @@ in one shot:
      gap coverage), grounded in the core carried forward.
 
 Retrieval substrate — the design's defining choice. Every current sub-query is
-recalled (BM25 + vector) and fused with RRF **independently**, so a facet-gold
-ranked #1 for a single sub-query is never diluted by the other sub-queries'
-consensus hits (the failure mode of merging every sub-query into one pool). The
-decider sees one labelled block per sub-query (round 0 = a single
+recalled (BM25 + vector; BM25 alone when no embedder is configured, whose query
+encoder returns an empty vector) and fused with RRF **independently**, so a
+facet-gold ranked #1 for a single sub-query is never diluted by the other
+sub-queries' consensus hits (the failure mode of merging every sub-query into one
+pool). The decider sees one labelled block per sub-query (round 0 = a single
 original-question block) with a single GLOBAL index, plus a CORE-SO-FAR section
 tagging each kept item with the sub-query that surfaced it. There is **no
 cross-encoder** anywhere — RRF is the only ranking (the CE was measured

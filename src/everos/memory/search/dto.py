@@ -49,7 +49,8 @@ class SearchMethod(StrEnum):
     core-first + each sub-query's top-1 guarantee + max-RRF-score fill; there
     is no cross-encoder anywhere. The decider is pluggable -- a prompted LLM
     by default, a trained policy in Phase 2, which makes this loop the RL
-    environment. Needs an LLM + embedding provider. User and group memory.
+    environment. Needs an LLM; without an embedding provider every recall is
+    BM25 only (keyword recall). User and group memory.
     """
 
 

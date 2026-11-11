@@ -170,8 +170,9 @@ api_key = "<DASHSCOPE_API_KEY>"
 base_url = "https://dashscope.aliyuncs.com"
 ```
 
-Embedding 会启用多轮检索（multi-round retrieval，`llm_multiround`，唯一的搜索
-方式）；DashScope rerank 会进一步启用 Knowledge Wiki。共享 DashScope
+多轮检索（multi-round retrieval，`llm_multiround`，唯一的搜索方式）不配
+Embedding 也能用，这时只用关键词（BM25）召回；Embedding 会加上向量召回；
+DashScope rerank 会进一步启用 Knowledge Wiki。共享 DashScope
 host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
 
 如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
@@ -253,7 +254,8 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 
 | 配置 | 可用能力 |
 | --- | --- |
-| 百炼 `[llm]` + `[embedding]` + `[rerank]` | 多轮检索（`llm_multiround`）；reflection、skill extraction、Knowledge Wiki |
+| 只配百炼 `[llm]` | 写入、Markdown、索引，以及只用关键词（BM25）召回的多轮检索 |
+| 百炼 `[llm]` + `[embedding]` + `[rerank]` | 多轮检索加上向量召回；reflection、skill extraction、Knowledge Wiki |
 | 再添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
 
 `/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会

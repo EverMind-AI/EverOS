@@ -244,7 +244,9 @@ class Application:
         await self.memory.finish_interrupted_deletions()
 
         await self._admin.start_index()
-        if self._admin.backend == "lancedb":
+        # Rows without a vector are the normal state of a keyword-only store;
+        # the hint is for one that has since gained an embedder.
+        if self._admin.backend == "lancedb" and self.capabilities.embedding:
             await _log_unbackfilled_hint(self._admin)
         logger.info("derived_index_ready", backend=self._admin.backend)
 
@@ -485,12 +487,25 @@ def _llm_or_none(
 
 
 def _embedding_or_none(settings: Settings) -> EmbeddingProvider | None:
+    """The embedding provider, or ``None`` for a keyword-only deployment.
+
+    ``[embedding] model = ""`` is the deliberate way to run without one: memory
+    search then recalls by keyword (BM25) only, the cascade writes rows with no
+    vector, and the user profile takes its direct path. A section that names a
+    model but cannot build (no key, no URL) is the same deployment by accident,
+    and logs as a warning.
+    """
+    if not settings.embedding.model:
+        logger.info("embedding_not_configured", search="keyword (BM25) recall only")
+        return None
     try:
         return build_embedding_provider(settings.embedding)
     except ValueError as exc:
-        # Unconfigured and misconfigured both surface as the same 422 later;
-        # this line is the only place an operator can tell them apart.
-        logger.warning("embedding_capability_build_failed", reason=str(exc))
+        logger.warning(
+            "embedding_capability_build_failed",
+            reason=str(exc),
+            search="keyword (BM25) recall only",
+        )
         return None
 
 

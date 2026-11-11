@@ -202,9 +202,9 @@ The response should contain an episode whose summary mentions Yosemite or El
 Cap. If the first search is empty, wait a moment for cascade indexing and retry.
 
 > [!IMPORTANT]
-> `llm_multiround` is the default and the only search method. It needs
-> `[embedding]`: in the one-key tier the search returns HTTP 422
-> `PROVIDER_NOT_CONFIGURED`.
+> `llm_multiround` is the default and the only search method. Without
+> `[embedding]` (the one-key tier) it recalls by keyword (BM25) only; add an
+> embedding endpoint for vector recall.
 
 Each round recalls the question (and later the decider's sub-queries) from the
 local BM25 index and the vector index, and the decider model picks the

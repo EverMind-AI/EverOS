@@ -364,9 +364,10 @@ async def test_add_flush_get_on_canned_user_track(
     LanceDB), Tier 1 (no embedding), every model call answered from
     ``tests/fakes/llm_scripts/user_track``. The add buffers (the boundary
     reply judges the tail still open), the flush cuts one cell, and the canned
-    episode and profile become readable through the API. ``/search`` is
-    refused: multi-round retrieval, the only search method, embeds every
-    sub-query, and this deployment has no embedder.
+    episode and profile become readable through the API. ``/search`` finds
+    the episode by keyword (BM25) alone, as a deployment without an embedder
+    does; the canned track scripts no decider reply, so the round falls back
+    and the response says so (``degraded``).
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
@@ -440,8 +441,10 @@ async def test_add_flush_get_on_canned_user_track(
             "/api/v1/memory/search",
             json={"user_id": "u_alice", "query": "Kyoto ryokan"},
         )
-        assert search.status_code == 422, search.text
-        assert search.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
+        assert search.status_code == 200, search.text
+        found = search.json()["data"]
+        assert [e["subject"] for e in found["episodes"]] == [episode["title"]]
+        assert [d["outcome"] for d in found["degraded"]] == ["fallback"]
 
     replies = [call.response_format.__name__ for call in llm.calls]
     assert replies.count("_BatchReply") == 2  # the add and the flush

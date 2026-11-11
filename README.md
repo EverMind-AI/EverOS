@@ -157,10 +157,10 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
-This is the smallest Tier 1 setup: memory add, flush, Markdown persistence and
-cascade indexing. To search (step 5), also fill the `[embedding]` section with
-an OpenAI-compatible embedding endpoint — see
-[config.example.toml](config.example.toml) and
+This is the smallest Tier 1 setup: memory add, flush, Markdown persistence,
+cascade indexing and multi-round search by keyword (BM25) recall. To add
+vector recall, also fill the `[embedding]` section with an OpenAI-compatible
+embedding endpoint — see [config.example.toml](config.example.toml) and
 [docs/configuration.md](docs/configuration.md).
 
 Use `everos init --root <path>` if you want a different memory root. Pass the
@@ -247,13 +247,14 @@ For annotated responses and the Markdown files EverOS creates, see
 ### What works with one key?
 
 The OpenRouter one-key setup is EverOS Tier 1. It supports server startup,
-memory add and flush, durable Markdown storage and cascade indexing. Add
-optional providers when you need the features below:
+memory add and flush, durable Markdown storage, cascade indexing and
+multi-round search with keyword (BM25) recall. Add optional providers when you
+need the features below:
 
 | Configuration | Adds |
 | --- | --- |
-| `[llm]` only | Core memory flow (add, flush, Markdown, indexing) |
-| Add `[embedding]` | Multi-round search, reflection, and skill extraction |
+| `[llm]` only | Core memory flow (add, flush, Markdown, indexing) and multi-round search by keyword |
+| Add `[embedding]` | Vector recall in multi-round search, reflection, and skill extraction |
 | Add `[rerank]` too | Knowledge Wiki |
 | Add `[multimodal]` and parser extra | Image, PDF, audio, and office-file ingestion |
 

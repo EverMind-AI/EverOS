@@ -21,11 +21,12 @@ class TestComputeDisabledFeatures:
         disabled = compute_disabled_features(caps)
         assert disabled == []
 
-    def test_embedding_unavailable_disables_memory_search(
+    def test_embedding_unavailable_disables_vector_recall(
         self,
     ) -> None:
-        """When embedding is unavailable, memory search (multi-round embeds
-        every sub-query), reflection and skill extraction are disabled."""
+        """When embedding is unavailable, memory search recalls by keyword
+        only (``vector_recall`` off) and reflection and skill extraction are
+        disabled. Memory search itself stays on."""
         caps = {
             "embed": False,
             "rerank": True,
@@ -33,8 +34,9 @@ class TestComputeDisabledFeatures:
             "parser": True,
         }
         disabled = compute_disabled_features(caps)
-        expected = {"memory_search", "reflection", "skill_extraction", "knowledge"}
+        expected = {"vector_recall", "reflection", "skill_extraction", "knowledge"}
         assert set(disabled) == expected
+        assert "memory_search" not in disabled
 
     def test_rerank_unavailable_leaves_memory_search_on(self) -> None:
         """Multi-round retrieval has no cross-encoder stage: without rerank
@@ -90,9 +92,9 @@ class TestComputeDisabledFeatures:
             "parser": False,
         }
         disabled = compute_disabled_features(caps)
-        # Tier 1 disables: memory search/reflection/skill/knowledge/multimodal
+        # Tier 1 disables: vector recall/reflection/skill/knowledge/multimodal
         expected = {
-            "memory_search",
+            "vector_recall",
             "reflection",
             "skill_extraction",
             "knowledge",
@@ -120,7 +122,7 @@ class TestComputeDisabledFeatures:
                     "multimodal_llm": True,
                     "parser": True,
                 },
-                ["memory_search", "reflection", "skill_extraction", "knowledge"],
+                ["vector_recall", "reflection", "skill_extraction", "knowledge"],
                 id="no_embed",
             ),
             param(
@@ -200,7 +202,7 @@ async def test_health_endpoint_includes_capabilities() -> None:
             False,
             False,
             {
-                "memory_search",
+                "vector_recall",
                 "reflection",
                 "skill_extraction",
                 "knowledge",

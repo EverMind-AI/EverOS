@@ -200,13 +200,18 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
-- **Memory search needs an embedding provider.** Multi-round retrieval embeds
-  every sub-query, so an LLM-only deployment (Tier 1) no longer searches: a
-  search answers `422 PROVIDER_NOT_CONFIGURED` (feature `llm_multiround`).
-  `GET /health` reports `memory_search` among `disabled_features` without
-  `[embedding]`; `vector_search`, `hybrid_search` and `agentic_search` are no
-  longer reported, and a missing rerank provider now disables `knowledge`
-  only.
+- **Memory search runs without an embedding provider.** A deployment with no
+  embedding model (`[embedding] model = ""`, or a section that cannot build)
+  searches by keyword: every multi-round recall is BM25 alone, and the loop,
+  the decider and the ranking are otherwise unchanged. Ingest, the cascade
+  (rows with no vector) and the user profile (its direct path) work as
+  before; reflection and skill extraction stay off. `GET /health` reports
+  `vector_recall` among `disabled_features` instead of `memory_search`;
+  `vector_search`, `hybrid_search` and `agentic_search` are no longer
+  reported, and a missing rerank provider disables `knowledge` only. The
+  startup hint about rows without a vector is logged only when an embedder
+  is configured. Cost: no embedding calls at all on such a deployment; the
+  decider prompt is the same size.
 - **A Reflection merge finishes on the merged episode itself.**
   `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
   and deprecates the replaced members at once; it used to wait for the

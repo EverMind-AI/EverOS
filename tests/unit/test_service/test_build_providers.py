@@ -3,8 +3,9 @@
 Without ``[llm]`` the build raises -- the application exists to extract
 memory. The bootstrap is the one place that decides what an unconfigured
 optional provider means. Unconfigured and misconfigured both become ``None``
--- they surface as the same 422 later -- so the warning logged here is the
-only place an operator can tell the two apart.
+-- they behave the same later -- so the log line here is the only place an
+operator can tell the two apart: ``[embedding] model = ""`` is a deliberate
+keyword-only deployment (info), a section that cannot build is a warning.
 """
 
 from __future__ import annotations
@@ -36,9 +37,13 @@ class _RecordingLogger:
 
     def __init__(self) -> None:
         self.warnings: list[dict[str, Any]] = []
+        self.infos: list[dict[str, Any]] = []
 
     def warning(self, event: str, **fields: Any) -> None:
         self.warnings.append({"event": event, **fields})
+
+    def info(self, event: str, **fields: Any) -> None:
+        self.infos.append({"event": event, **fields})
 
 
 @pytest.fixture
@@ -131,11 +136,26 @@ def test_a_factory_failure_is_logged_with_its_reason(
         raise ValueError("cohere provider not supported")
 
     monkeypatch.setattr(bootstrap_mod, factory, _raise)
+    # A section that names a model: one that names none is a deliberate
+    # keyword-only deployment and never reaches the factory (next test).
+    settings = _unconfigured().model_copy(
+        update={"embedding": EmbeddingSettings(model="m", api_key=None)}
+    )
 
-    build_providers(_unconfigured())
+    build_providers(settings)
 
     failures = [log for log in logs.warnings if log["event"] == event]
     assert [log["reason"] for log in failures] == ["cohere provider not supported"]
+
+
+def test_no_embedding_model_is_a_keyword_only_deployment_not_a_failure(
+    logs: _RecordingLogger,
+) -> None:
+    providers = build_providers(_unconfigured())  # [embedding] model unset
+
+    assert providers.embedding is None
+    assert [log["event"] for log in logs.infos] == ["embedding_not_configured"]
+    assert not [log for log in logs.warnings if log["event"].startswith("embedding")]
 
 
 def test_only_the_optional_multimodal_llm_is_logged_as_not_configured(

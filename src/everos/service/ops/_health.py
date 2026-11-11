@@ -3,15 +3,17 @@
 Two feature-name vocabularies exist and deliberately do not share a source
 of truth:
 
-- ``ProviderNotConfiguredError.feature`` (raised per request by search and
-  the knowledge endpoints): a granular tag for the one search mode or
-  endpoint that failed -- ``"llm_multiround"`` | ``"knowledge"`` |
-  ``"skill_extraction_backfill"``. It appears in the HTTP 422 ``message``.
+- ``ProviderNotConfiguredError.feature`` (raised per request by the
+  knowledge endpoints and backfill): a granular tag for the one endpoint
+  that failed -- ``"knowledge"`` | ``"skill_extraction_backfill"``. It
+  appears in the HTTP 422 ``message``.
 - :func:`compute_disabled_features`: a capability-level tag for a whole
-  feature category the current tier disables -- ``"memory_search"`` |
+  feature category the current tier disables -- ``"vector_recall"`` |
   ``"reflection"`` | ``"skill_extraction"`` | ``"knowledge"`` |
   ``"multimodal_upload"``. It appears in ``GET /health``'s
-  ``disabled_features``.
+  ``disabled_features``. Memory search is never disabled: without an
+  embedder it recalls by keyword (BM25) only, which ``"vector_recall"``
+  says.
 
 Both are stable client contracts; unifying them needs a coordinated client
 migration.
@@ -123,13 +125,13 @@ def compute_disabled_features(caps: Mapping[str, bool]) -> list[str]:
             and ``"parser"``.
 
     Returns:
-        A subset of ``"memory_search"`` (multi-round retrieval embeds every
-        sub-query), ``"reflection"``, ``"skill_extraction"``, ``"knowledge"``
-        and ``"multimodal_upload"``.
+        A subset of ``"vector_recall"`` (multi-round search recalls by keyword
+        only), ``"reflection"``, ``"skill_extraction"``, ``"knowledge"`` and
+        ``"multimodal_upload"``.
     """
     disabled: list[str] = []
     if not caps["embed"]:
-        disabled.extend(["memory_search", "reflection", "skill_extraction"])
+        disabled.extend(["vector_recall", "reflection", "skill_extraction"])
     if not (caps["embed"] and caps["rerank"]):
         disabled.append("knowledge")
     if not (caps["multimodal_llm"] and caps["parser"]):
