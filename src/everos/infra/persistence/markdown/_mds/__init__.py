@@ -56,6 +56,7 @@ from .knowledge_document import (
 )
 from .knowledge_topic import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from .profile import UserProfileFrontmatter as UserProfileFrontmatter
+from .scene import SceneDailyFrontmatter as SceneDailyFrontmatter
 
 __all__ = [
     "AgentCaseDailyFrontmatter",
@@ -71,6 +72,7 @@ __all__ = [
     "ImageMemoryDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
+    "SceneDailyFrontmatter",
     "UserProfileFrontmatter",
     "group_profile_item_from_entry",
     "render_group_profile_entry",

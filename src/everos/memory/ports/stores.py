@@ -232,6 +232,11 @@ class EpisodeStore(Protocol):
         """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
         ...
 
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the entry they retire: a successor's
+        entry id, or the forget marker."""
+        ...
+
     async def read_for_segments(
         self, scope: Scope, memcell_ids: Collection[str]
     ) -> list[Stored[Episode]]:
@@ -382,7 +387,8 @@ class ProfileStore(Protocol):
 
 @runtime_checkable
 class SceneStore(Protocol):
-    """A group's scene versions (``groups/<g>/scenes/``), append-only."""
+    """Scene versions, append-only: a user's (``users/<u>/scenes/``) or a
+    group's (``groups/<g>/scenes/``)."""
 
     async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
         """The newest version of one scene, or ``None`` when it has none."""
@@ -400,7 +406,33 @@ class SceneStore(Protocol):
         ...
 
     async def versions(self, scope: Scope) -> list[Stored[Scene]]:
-        """Every version of every scene of the group."""
+        """Every version of every scene of the owner."""
+        ...
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Mark ``(md_path, entry_id)`` entries replaced by ``replaced_by``
+        (a successor's entry id, or the forget marker)."""
+        ...
+
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the entry they retire."""
+        ...
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from the owner's marks (an undo of a forget)."""
+        ...
+
+    async def remove_naming(
+        self, scope: Scope, episode_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        """Remove every version whose members include one of ``episode_ids``."""
         ...
 
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
@@ -733,9 +765,19 @@ class ClusterStore(Protocol):
         ...
 
     async def find_cluster_for_member(
-        self, scope: Scope, member_type: ClusterMemberType, member_id: str
+        self,
+        scope: Scope,
+        member_type: ClusterMemberType,
+        member_id: str,
+        *,
+        kind: ClusterKind | None = None,
     ) -> str | None:
-        """The cluster a memory already belongs to, or ``None``."""
+        """The cluster a memory already belongs to, or ``None``.
+
+        An episode can sit in two clusters of its owner -- the profile's
+        (``user_memory``) and its scene's (``user_scene``) -- so a caller
+        that means one names its ``kind``.
+        """
         ...
 
     async def members(self, cluster_id: str) -> list[tuple[str, str]]:

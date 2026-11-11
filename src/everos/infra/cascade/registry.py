@@ -31,6 +31,7 @@ from everos.infra.persistence.markdown import (
     ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
+    SceneDailyFrontmatter,
     UserProfileFrontmatter,
 )
 from everos.infra.persistence.records import (
@@ -131,6 +132,15 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=UserProfileFrontmatter,
         index_schema=UserProfile,
         handler_factory=UserProfileHandler,
+    ),
+    # A user's scene versions are rows of the episode table (parent_type =
+    # scene): they compete with the user's episodes in every recall, rendered
+    # and scored like them (docs/scenes.md).
+    KindSpec(
+        name="scene",
+        frontmatter_schema=SceneDailyFrontmatter,
+        index_schema=Episode,
+        handler_factory=EpisodeHandler,
     ),
     # Group-owned kinds (docs/group-memory.md, D1). The daily logs project
     # into the same tables as the user kinds -- the owner columns tell them

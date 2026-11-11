@@ -830,6 +830,35 @@ class ClusteringSettings(_Section):
     time_window_days: float = Field(default=7.0, gt=0)
 
 
+class ScenesSettings(_Section):
+    """``[scenes]`` -- a user's scenes, built from their episodes.
+
+    A scene is the user's episodes about one matter (close in vector and in
+    time, the ``[clustering]`` geometry) with one narrative written over them.
+    ``enabled``: build them; one capped narrative call each time an episode
+    joins a scene, none for an episode that joins none. Off by default until
+    its cost is accepted. ``min_members``: a cluster becomes a scene at this
+    many episodes. ``narrative_max_words``: the narrative's length cap -- the
+    prompt asks for it and code clips a reply past it, so neither the
+    narrative nor the next call's prompt grows with the scene.
+    ``max_new_episodes`` / ``episode_max_chars``: the episodes one call reads
+    (the newest ones) and each one's clip.
+
+    Env binding:
+        EVEROS_SCENES__ENABLED
+        EVEROS_SCENES__MIN_MEMBERS
+        EVEROS_SCENES__NARRATIVE_MAX_WORDS
+        EVEROS_SCENES__MAX_NEW_EPISODES
+        EVEROS_SCENES__EPISODE_MAX_CHARS
+    """
+
+    enabled: bool = False
+    min_members: int = Field(default=2, ge=2)
+    narrative_max_words: int = Field(default=300, ge=50)
+    max_new_episodes: int = Field(default=4, ge=1)
+    episode_max_chars: int = Field(default=4000, ge=200)
+
+
 class LanceDBSettings(_Section):
     """LanceDB tunables.
 
@@ -1464,6 +1493,7 @@ class Settings(BaseSettings):
     memorize: MemorizeSettings = MemorizeSettings()
     agent_memory: AgentMemorySettings = AgentMemorySettings()
     clustering: ClusteringSettings = ClusteringSettings()
+    scenes: ScenesSettings = ScenesSettings()
     cascade: CascadeSettings = CascadeSettings()
     ome: OmeSettings = OmeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()

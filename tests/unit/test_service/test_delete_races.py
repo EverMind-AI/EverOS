@@ -152,9 +152,9 @@ async def test_a_clustering_run_in_flight_cannot_keep_a_deleted_episode(
         def __getattr__(self, name: str) -> Any:
             return getattr(stores.cluster, name)
 
-        async def find_cluster_for_member(self, *args: Any) -> str | None:
+        async def find_cluster_for_member(self, *args: Any, **kw: Any) -> str | None:
             looked.set()
-            return await stores.cluster.find_cluster_for_member(*args)
+            return await stores.cluster.find_cluster_for_member(*args, **kw)
 
     run = asyncio.ensure_future(clustering())
     await checked.wait()

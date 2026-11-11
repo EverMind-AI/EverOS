@@ -100,11 +100,11 @@ async def test_versions_span_their_members_and_supersede() -> None:
     deps = make_deps(llm=FakeLLMClient(handler=reflector), embedding=_Same())
     first = await _episode(deps, 1, origin="member", sender="u_chen")
     await update_group_scenes(_event(first, 1), deps)
-    assert deps.stores.scene.versions == []  # one episode is not a scene
+    assert deps.stores.scene.written == []  # one episode is not a scene
 
     second = await _episode(deps, 2, origin="assistant", sender="bot_ava")
     await update_group_scenes(_event(second, 2), deps)
-    (v1,) = deps.stores.scene.versions
+    (v1,) = deps.stores.scene.written
     assert v1.item.version == 1 and v1.item.narrative == "Narrative 1"
     assert v1.item.member_ids == [first, second]
     assert (v1.item.source_start, v1.item.timestamp) == (1_000, 2_500)
@@ -113,7 +113,7 @@ async def test_versions_span_their_members_and_supersede() -> None:
 
     third = await _episode(deps, 3, origin="member", sender="u_betty")
     await update_group_scenes(_event(third, 3), deps)
-    v2 = deps.stores.scene.versions[-1]
+    v2 = deps.stores.scene.written[-1]
     assert v2.item.version == 2 and v2.item.scene_id == v1.item.scene_id
     assert deps.stores.scene.superseded == {v1.ref.entry_id: v2.ref.entry_id}
     # UPDATE mode: the old narrative and only the new episode.
@@ -122,7 +122,7 @@ async def test_versions_span_their_members_and_supersede() -> None:
     assert "Episode 1" not in reflector.calls[-1]
 
     await update_group_scenes(_event(third, 3), deps)  # a replay
-    assert len(deps.stores.scene.versions) == 2
+    assert len(deps.stores.scene.written) == 2
 
 
 async def test_a_retry_after_a_failed_narrative_writes_the_version() -> None:
@@ -134,9 +134,9 @@ async def test_a_retry_after_a_failed_narrative_writes_the_version() -> None:
     second = await _episode(deps, 2, origin="member", sender="u_chen")
     with pytest.raises(RuntimeError):
         await update_group_scenes(_event(second, 2), deps)
-    assert deps.stores.scene.versions == []
+    assert deps.stores.scene.written == []
     await update_group_scenes(_event(second, 2), deps)  # the engine's retry
-    (v1,) = deps.stores.scene.versions
+    (v1,) = deps.stores.scene.written
     assert v1.item.member_ids == [first, second]
     assert v1.item.origin == "member"
 
@@ -151,11 +151,11 @@ async def test_the_narrative_is_written_in_the_event_s_language() -> None:
     assert len(reflector.calls) == 2  # INIT, then UPDATE
     for prompt in reflector.calls:
         assert "Write every output field in English" in prompt
-    assert {v.item.language for v in deps.stores.scene.versions} == {"English"}
+    assert {v.item.language for v in deps.stores.scene.written} == {"English"}
 
 
 async def test_without_an_embedder_nothing_happens() -> None:
     deps = make_deps(embedding=None)
     first = await _episode(deps, 1, origin="member", sender="u_chen")
     assert await update_group_scenes(_event(first, 1), deps) == []
-    assert deps.stores.scene.versions == []
+    assert deps.stores.scene.written == []

@@ -3,7 +3,9 @@
 Hard partition by ``(owner_type, memory_type)`` (validated by
 :class:`GetRequest`):
 
-* ``user`` + ``episode``       → ``data.episodes``
+* ``user`` + ``episode``       → ``data.episodes`` (never a scene version)
+* ``user`` + ``scene``         → ``data.scenes``: the user's current scene
+  versions, rows of the episode table (``parent_type = scene``)
 * ``user`` + ``profile``       → ``data.profiles`` (one-row KV fetch
   from the ``user_profile`` table; at most one item)
 * ``agent`` + ``agent_case``   → ``data.agent_cases``
@@ -143,8 +145,8 @@ class GetManager:
 
         match req.memory_type:
             case GetMemoryType.EPISODE:
-                if scope.is_group:
-                    where = all_of(where, ne("parent_type", "scene"))
+                # Scene versions share the episode table; they list as scenes.
+                where = all_of(where, ne("parent_type", "scene"))
                 episodes = await self._ep.paginate(where, page)
                 items = [self._shape_episode(e) for e in episodes.items]
                 data = GetData(

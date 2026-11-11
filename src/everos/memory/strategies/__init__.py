@@ -50,10 +50,13 @@ from .update_member_profiles import (
     UPDATE_MEMBER_PROFILES_SPEC as UPDATE_MEMBER_PROFILES_SPEC,
 )
 from .update_member_profiles import update_member_profiles as update_member_profiles
+from .update_user_scenes import UPDATE_USER_SCENES_SPEC as UPDATE_USER_SCENES_SPEC
+from .update_user_scenes import update_user_scenes as update_user_scenes
 
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     EXTRACT_AGENT_CASE_SPEC,
     EXTRACT_USER_PROFILE_SPEC,
+    UPDATE_USER_SCENES_SPEC,
     TRIGGER_SKILL_CLUSTERING_SPEC,
     EXTRACT_AGENT_SKILL_SPEC,
     TRIGGER_PROFILE_CLUSTERING_SPEC,
@@ -79,6 +82,7 @@ __all__ = [
     "UPDATE_GROUP_PROFILE_SPEC",
     "UPDATE_GROUP_SCENES_SPEC",
     "UPDATE_MEMBER_PROFILES_SPEC",
+    "UPDATE_USER_SCENES_SPEC",
     "extract_agent_case",
     "extract_agent_skill",
     "extract_user_profile",
@@ -89,4 +93,5 @@ __all__ = [
     "update_group_profile",
     "update_group_scenes",
     "update_member_profiles",
+    "update_user_scenes",
 ]

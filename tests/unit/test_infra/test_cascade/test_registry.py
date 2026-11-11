@@ -34,6 +34,11 @@ from everos.infra.cascade import KIND_REGISTRY, match_kind
             "default_app/p/groups/trip/profile/group_profile-2026-03-02.md",
             "group_profile",
         ),
+        (
+            "default_app/default_project/users/u1/scenes/scene-2026-05-14.md",
+            "scene",
+        ),
+        ("default_app/p/groups/trip/scenes/scene-2026-03-02.md", "group_scene"),
     ],
 )
 def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -> None:
@@ -68,7 +73,7 @@ def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_thirteen_kinds() -> None:
+def test_registry_has_exactly_fourteen_kinds() -> None:
     """The registry pins the cascade surface — no silent registration."""
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
@@ -77,6 +82,7 @@ def test_registry_has_exactly_thirteen_kinds() -> None:
         "agent_skill",
         "image_memory",
         "user_profile",
+        "scene",
         "group_episode",
         "group_image_memory",
         "group_scene",

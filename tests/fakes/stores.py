@@ -344,17 +344,37 @@ class InMemoryProfileStore:
 
 
 class InMemorySceneStore:
-    """Scene versions per group scope, in write order; marks kept beside them."""
+    """Scene versions per scope (a user's or a group's), in write order.
+
+    ``written`` holds every version; ``superseded`` the marks beside them,
+    keyed by the version they retire -- a successor's entry id, or
+    ``FORGOTTEN_MARK``. A user's versions get ``sc_`` ids, a group's ``gsc_``.
+    """
 
     def __init__(self) -> None:
-        self.versions: list[Stored[Scene]] = []
+        self.written: list[Stored[Scene]] = []
         self.superseded: dict[str, str] = {}
+
+    @staticmethod
+    def _md_path(scope: Scope) -> str:
+        return f"{scope.owner_type}s/{scope.owner_id}/scenes/scene.md"
+
+    def current(self, scope: Scope) -> list[Stored[Scene]]:
+        """The scope's versions no mark retires, in write order."""
+        return [
+            v
+            for v in self.written
+            if v.scope == scope and v.ref.entry_id not in self.superseded
+        ]
 
     async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
         mine = [
-            v for v in self.versions if v.scope == scope and v.item.scene_id == scene_id
+            v for v in self.written if v.scope == scope and v.item.scene_id == scene_id
         ]
         return max(mine, key=lambda v: v.item.version) if mine else None
+
+    async def versions(self, scope: Scope) -> list[Stored[Scene]]:
+        return [v for v in self.written if v.scope == scope]
 
     async def append(
         self,
@@ -366,16 +386,52 @@ class InMemorySceneStore:
     ) -> MemoryRef | None:
         if not isinstance(only_if, NoSourceCheck) and not await only_if():
             return None
-        entry_id = f"gsc_{len(self.versions) + 1:08d}"
+        prefix = "gsc" if scope.owner_type == "group" else "sc"
+        entry_id = f"{prefix}_{len(self.written) + 1:08d}"
         ref = MemoryRef(
             id=f"{scope.owner_id}_{entry_id}",
             entry_id=entry_id,
-            md_path=f"groups/{scope.owner_id}/scenes/scene.md",
+            md_path=self._md_path(scope),
         )
-        self.versions.append(Stored(ref=ref, scope=scope, item=scene))
+        self.written.append(Stored(ref=ref, scope=scope, item=scene))
         if supersedes is not None:
             self.superseded[supersedes.ref.entry_id] = entry_id
         return ref
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        if not await _alive(only_if):
+            return False
+        for _md_path, entry_id in entries:
+            self.superseded[entry_id] = replaced_by
+        return True
+
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        mine = {v.ref.entry_id for v in self.written if v.ref.md_path == md_path}
+        return {k: v for k, v in self.superseded.items() if k in mine}
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        mine = {v.ref.entry_id for v in self.written if v.scope == scope}
+        for key in set(keys) & mine:
+            self.superseded.pop(key, None)
+
+    async def remove_naming(
+        self, scope: Scope, episode_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        wanted = set(episode_ids)
+        gone = [
+            v
+            for v in self.written
+            if v.scope == scope and wanted.intersection(v.item.member_ids)
+        ]
+        self.written = [v for v in self.written if v not in gone]
+        return [v.ref for v in gone]
 
 
 class InMemoryGroupProfileStore:
@@ -639,7 +695,12 @@ class InMemoryClusterStore:
         self.upserts.append(cluster)
 
     async def find_cluster_for_member(
-        self, scope: Scope, member_type: ClusterMemberType, member_id: str
+        self,
+        scope: Scope,
+        member_type: ClusterMemberType,
+        member_id: str,
+        *,
+        kind: ClusterKind | None = None,
     ) -> str | None:
         raise NotImplementedError
 

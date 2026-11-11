@@ -36,6 +36,7 @@ from .group_writer import GroupWriter as GroupWriter
 from .image_memory_writer import ImageMemoryWriter as ImageMemoryWriter
 from .knowledge_writer import KnowledgeWriter as KnowledgeWriter
 from .profile_writer import ProfileWriter as ProfileWriter
+from .scene_writer import SceneWriter as SceneWriter
 
 __all__ = [
     "AgentCaseWriter",
@@ -50,4 +51,5 @@ __all__ = [
     "ImageMemoryWriter",
     "KnowledgeWriter",
     "ProfileWriter",
+    "SceneWriter",
 ]

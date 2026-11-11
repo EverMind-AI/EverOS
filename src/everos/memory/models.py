@@ -426,20 +426,21 @@ class Profile(BaseModel):
 
 
 class Scene(BaseModel):
-    """One version of a group scene (docs/group-memory.md, section 7.7).
+    """One version of a scene: a user's (``users/<u>/scenes/``) or a group's.
 
-    A scene is a group's episodes about one thing with a narrative written
-    over them. It links to its episodes (``member_ids``, their entry ids) and
-    never changes them. A change is a new version that supersedes the
-    previous one; the old version stays readable in markdown.
+    A scene is an owner's episodes about one thing with a narrative written
+    over them (docs/scenes.md; a group's, docs/group-memory.md, section 7.7).
+    It links to its episodes (``member_ids``, their entry ids) and never
+    changes them. A change is a new version that supersedes the previous one;
+    the old version stays readable in markdown.
 
     Its span runs from its first member's first message (``source_start``)
-    to its newest member's last (``timestamp``): a read shows the scene only
-    to an asker whose window contains all of it.
+    to its newest member's last (``timestamp``): a group read shows the scene
+    only to an asker whose window contains all of it.
     """
 
     owner_id: str
-    """The group."""
+    """The user or the group."""
     scene_id: str
     version: int
     member_ids: list[str]
@@ -893,7 +894,7 @@ class KnowledgeTopic(BaseModel):
     updated_at: dt.datetime
 
 
-ClusterKind = Literal["user_memory", "agent_case", "group_scene"]
+ClusterKind = Literal["user_memory", "agent_case", "group_scene", "user_scene"]
 ClusterMemberType = Literal["episode", "case"]
 
 

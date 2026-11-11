@@ -328,6 +328,23 @@ top_k_cap = 100
 threshold = 0.65
 time_window_days = 7.0
 
+[scenes]
+# A user's scenes (users/<u>/scenes/): their episodes about one matter --
+# close in vector and in time, the [clustering] geometry -- with one narrative
+# over them, ending on where things stand. Scenes compete with episodes in the
+# same search pool. One capped narrative call each time an episode joins a
+# scene of min_members episodes or more; an episode that joins no scene costs
+# none. Off by default until its cost is accepted. Override via
+# EVEROS_SCENES__ENABLED.
+enabled = false
+min_members = 2
+# The narrative's cap: the prompt asks for at most this many words and a reply
+# past it is clipped, so the narrative and the next call's prompt stay bounded.
+narrative_max_words = 300
+# One call reads at most this many joining episodes (the newest), each clipped.
+max_new_episodes = 4
+episode_max_chars = 4000
+
 
 [cascade]
 # Run the cascade (watcher + scanner + worker) that projects md into the index.

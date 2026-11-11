@@ -13,6 +13,9 @@ from it, then their index rows.
 * ``user_id`` / ``agent_id`` alone -- the owner's whole directory, its
   clusters and (for a user) its Reflection reports.
 
+A user's scene versions that name a deleted episode go with it
+(docs/scenes.md): what a deleted episode said must not stay in a narrative.
+
 ``POST /memory/delete_by_ids`` deletes single episodes by memory id, with
 what was merged into them, their facts, and their cluster membership (see
 :meth:`Deleter.delete_by_ids`).
@@ -39,7 +42,8 @@ from everos.core.errors import (
 from everos.core.failpoints import failpoint
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
-from everos.memory import user_cluster_lock
+from everos.memory import user_cluster_lock, user_scenes_lock
+from everos.memory.extract.scene import remove_scenes_naming
 from everos.memory.models import Episode
 from everos.memory.ports import MemoryRef, Scope, SessionKey
 
@@ -186,8 +190,13 @@ class Deleter:
             return {
                 "agent_case": await stores.agent_case.remove_session(scope, session_id)
             }
+        episodes = await stores.episode.remove_session(scope, session_id)
+        scenes = await remove_scenes_naming(
+            stores.scene, scope, [ref.entry_id for ref in episodes]
+        )
         return {
-            "episode": await stores.episode.remove_session(scope, session_id),
+            # A scene version is a row of the episode table.
+            "episode": [*episodes, *scenes],
             # A picture memory names its session like the kinds above. Left out,
             # a deleted session kept its pictures searchable with no memcell
             # behind them, and re-sending the session added a second copy.
@@ -209,6 +218,8 @@ class Deleter:
             ):
                 await _incomplete(stores.cluster.delete_for_owner(scope, "user_memory"))
                 await _incomplete(stores.reflection_report.delete_for_owner(scope))
+            async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+                await _incomplete(stores.cluster.delete_for_owner(scope, "user_scene"))
             tables = ["user_profile"]
         else:
             await _incomplete(stores.cluster.delete_for_owner(scope, "agent_case"))
@@ -284,10 +295,11 @@ class Deleter:
             closure |= frontier
         merged = await episodes.remove(scope, closure - requested)
         failpoint("by_ids.after_step2")
+        scenes = await remove_scenes_naming(self._stores.scene, scope, closure)
         await self._detach_from_clusters(scope, closure)
         await episodes.clear_deprecations(scope, closure)
         failpoint("by_ids.after_step4")
-        await self._eraser.erase(scope, {"episode": [*first, *merged]})
+        await self._eraser.erase(scope, {"episode": [*first, *merged, *scenes]})
         return [ref.entry_id for ref in first]
 
     async def _detach_from_clusters(self, scope: Scope, gone: set[str]) -> None:
@@ -309,7 +321,9 @@ class Deleter:
             pass
         cluster_ids: set[str] = set()
         for entry_id in sorted(gone):
-            found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
+            found = await clusters.find_cluster_for_member(
+                scope, "episode", entry_id, kind="user_memory"
+            )
             if found is not None:
                 cluster_ids.add(found)
         for cluster_id in sorted(cluster_ids):

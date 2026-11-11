@@ -334,8 +334,8 @@ class SearchEpisodeItem(BaseModel):
     subject: str
     episode: str
     type: Literal["Conversation", "Scene"]
-    """``Scene`` for a group scene version: a narrative over several of the
-    group's episodes, competing with them in the same ranking."""
+    """``Scene`` for a scene version -- a user's or a group's: a narrative over
+    several of the owner's episodes, competing with them in the same ranking."""
     score: float
     audience: AudienceItem | None = None
     """Who heard it, on a group episode (section 8.6); unset otherwise."""

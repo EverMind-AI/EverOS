@@ -39,11 +39,15 @@ from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
     ImageMemoryWriter,
+    SceneWriter,
 )
 from .stores import owner_lock
 
 logger = get_logger(__name__)
 
+_TABLE_OF = {"scene": "episode"}
+"""The index table of a daily-log kind whose rows live in another kind's
+table (a user's scene versions are rows of the episode table)."""
 _TRASH_PREFIX = "delete-"
 _MANIFEST = "scope.json"
 _MOVED = "owner"
@@ -65,6 +69,7 @@ class MarkdownOwnerDirStore:
             "user": {
                 "episode": EpisodeWriter(root),
                 "image_memory": ImageMemoryWriter(root),
+                "scene": SceneWriter(root),
             },
             "agent": {"agent_case": AgentCaseWriter(root)},
         }
@@ -263,7 +268,7 @@ class MarkdownOwnerDirStore:
         owner_dir = self._owner_dir(scope)
         refs: dict[str, list[MemoryRef]] = {}
         count = 0
-        for table, writer in self._logs[scope.owner_type].items():
+        for kind, writer in self._logs[scope.owner_type].items():
             folder = writer.path_for(
                 scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
             ).parent.relative_to(owner_dir)
@@ -280,7 +285,7 @@ class MarkdownOwnerDirStore:
                             md_path=md_path.as_posix(),
                         )
                     )
-            refs[table] = found
+            refs.setdefault(_TABLE_OF.get(kind, kind), []).extend(found)
             count += len(found)
         if (moved / UserProfileFrontmatter.PROFILE_FILENAME).is_file():
             count += 1

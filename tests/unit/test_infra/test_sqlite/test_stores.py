@@ -478,6 +478,28 @@ async def test_cluster_lifecycle(stores: _Stores) -> None:
     )
 
 
+async def test_cluster_reverse_lookup_names_the_kind(stores: _Stores) -> None:
+    """An episode sits in its profile cluster and its scene's; a kind picks one."""
+    for cluster_id, kind in (("cl_p", "user_memory"), ("cl_s", "user_scene")):
+        await stores.cluster.upsert(
+            _USER,
+            kind,  # type: ignore[arg-type]
+            Cluster(
+                id=cluster_id,
+                centroid=(1.0, 0.0),
+                count=1,
+                last_ts=1,
+                preview=["p"],
+                members=["ep_1"],
+            ),
+            member_type="episode",
+        )
+    find = stores.cluster.find_cluster_for_member
+    assert await find(_USER, "episode", "ep_1", kind="user_memory") == "cl_p"
+    assert await find(_USER, "episode", "ep_1", kind="user_scene") == "cl_s"
+    assert await find(_USER, "episode", "ep_1", kind="agent_case") is None
+
+
 async def test_memorize_inbox_queue_flow(stores: _Stores) -> None:
     task = await stores.inbox.enqueue(
         _SESSION,

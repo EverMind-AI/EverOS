@@ -14,6 +14,7 @@ from everos.memory.strategies import (
     update_group_profile,
     update_group_scenes,
     update_member_profiles,
+    update_user_scenes,
 )
 
 
@@ -26,6 +27,7 @@ def test_every_strategy_function_has_one_spec_under_its_name() -> None:
         "extract_agent_skill": extract_agent_skill,
         "trigger_profile_clustering": trigger_profile_clustering,
         "extract_user_profile": extract_user_profile,
+        "update_user_scenes": update_user_scenes,
         "reflect_episodes": reflect_episodes,
         "finish_reflection": finish_reflection,
         "update_member_profiles": update_member_profiles,

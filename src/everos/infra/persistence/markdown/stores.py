@@ -81,6 +81,7 @@ from ._writers import (
     GroupSceneWriter,
     ImageMemoryWriter,
     ProfileWriter,
+    SceneWriter,
 )
 
 logger = get_logger(__name__)
@@ -887,14 +888,15 @@ class MarkdownProfileStore:
 
 
 class MarkdownSceneStore(_DailyLogStore[Scene]):
-    """Scene versions of a group (``groups/<id>/scenes/scene-<date>.md``).
+    """Scene versions of a user (``users/<id>/scenes/scene-<date>.md``) or a
+    group (``groups/<id>/scenes/scene-<date>.md``).
 
     Append-only, like the picture memories: a new version is a new entry, and
     the version it replaces is listed in its file's ``deprecated_entries``
     against the new one, in the same locked step -- which the cascade turns
-    into ``deprecated_by`` on the old row, so only the newest competes. The
-    rows live in the episode table (``parent_type = scene``). A scene belongs
-    to a group: any other scope is refused.
+    into ``deprecated_by`` on the old row, so only the newest competes. A
+    forget marks a version with the forget marker instead. The rows live in
+    the episode table (``parent_type = scene``). An agent has no scenes.
 
     Args:
         root: Memory root the files live under.
@@ -903,8 +905,9 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
     _KIND = "scene"
 
     def __init__(self, root: MemoryRoot) -> None:
-        writer = GroupSceneWriter(root)
-        super().__init__(root, writer, _scene_entry, group_writer=writer)
+        super().__init__(
+            root, SceneWriter(root), _scene_entry, group_writer=GroupSceneWriter(root)
+        )
 
     async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
         newest: Stored[Scene] | None = None
@@ -956,8 +959,8 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
         supersedes: Stored[Scene] | None,
         only_if: SourceCheck | NoSourceCheck,
     ) -> MemoryRef | None:
-        if scope.owner_type != "group":
-            raise ValueError("a scene belongs to a group scope")
+        if scope.owner_type not in ("user", "group"):
+            raise ValueError("a scene belongs to a user or a group scope")
         writer = self._writer_for(scope)
         async with LOCKS.hold("owner", owner_lock(scope)):
             if not await self._sources_alive(scope, only_if, 1):
@@ -974,6 +977,53 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
                     {"deprecated_entries": {supersedes.ref.entry_id: eid.format()}},
                 )
         return self._ref(scope, eid)
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        return await self._deprecate(
+            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the version they retire."""
+        return await _deprecations(self._root.root / md_path)
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from every scene file's ``deprecated_entries``."""
+        wanted = set(keys)
+        for path in await self._daily_files(scope):
+            if not (await _deprecations(path)).keys() & wanted:
+                continue
+            async with LOCKS.hold("owner", owner_lock(scope)):
+                await self._writer_for(scope).drop_deprecations(path, wanted)
+
+    async def remove_naming(
+        self, scope: Scope, episode_ids: Collection[str]
+    ) -> list[MemoryRef]:
+        """Remove every version whose ``member_ids`` include one of ``episode_ids``.
+
+        Only the files that mention one of the ids are rewritten, each under
+        the owner lock; an entry matches on its parsed member list, never on
+        a text prefix.
+        """
+        wanted = set(episode_ids)
+        if not wanted:
+            return []
+
+        def names_one(entry: Entry) -> bool:
+            members = _list_field(entry.as_structured().inline.get("member_ids"))
+            return bool(wanted.intersection(members))
+
+        removed: list[MemoryRef] = []
+        for path in await self._files_mentioning(scope, *sorted(wanted)):
+            removed += await self._rewrite(scope, path, names_one)
+        return removed
 
 
 class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):

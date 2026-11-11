@@ -6,7 +6,7 @@ ranked retrieval):
 
 * ``owner_type`` × ``memory_type`` are strictly paired:
 
-  - ``user`` → ``episode`` | ``profile``
+  - ``user`` → ``episode`` | ``profile`` | ``scene``
   - ``agent`` → ``agent_case`` | ``agent_skill``
   - ``group`` → ``episode`` | ``scene`` | ``image_memory`` | ``member_profile``
     (the last with ``member_id``)
@@ -51,7 +51,7 @@ class GetMemoryType(StrEnum):
     AGENT_CASE = "agent_case"
     AGENT_SKILL = "agent_skill"
     SCENE = "scene"
-    """A group's scene versions (group scopes only)."""
+    """An owner's current scene versions (user and group scopes)."""
     IMAGE_MEMORY = "image_memory"
     """A group's picture memories (group scopes only)."""
     MEMBER_PROFILE = "member_profile"
@@ -139,7 +139,11 @@ class GetRequest(BaseModel):
     def _validate_owner_memory_type_pair(self) -> Self:
         # Runs after the xor validator (declaration order), so ``owner_type``
         # is well-defined here.
-        user_kinds = {GetMemoryType.EPISODE, GetMemoryType.PROFILE}
+        user_kinds = {
+            GetMemoryType.EPISODE,
+            GetMemoryType.PROFILE,
+            GetMemoryType.SCENE,
+        }
         agent_kinds = {GetMemoryType.AGENT_CASE, GetMemoryType.AGENT_SKILL}
         if self.owner_type == "user" and self.memory_type not in user_kinds:
             raise ValueError(
@@ -162,9 +166,7 @@ class GetRequest(BaseModel):
             raise ValueError(
                 f"memory_type {self.memory_type.value!r} is not valid for a group scope"
             )
-        if self.owner_type != "group" and self.memory_type in group_kinds - {
-            GetMemoryType.EPISODE
-        }:
+        if self.owner_type != "group" and self.memory_type in group_kinds - user_kinds:
             raise ValueError(
                 f"memory_type {self.memory_type.value!r} needs a group scope"
             )
@@ -329,7 +331,7 @@ class GetData(BaseModel):
 
     episodes: list[GetEpisodeItem] = Field(default_factory=list)
     scenes: list[GetEpisodeItem] = Field(default_factory=list)
-    """A group's current scene versions (``memory_type = scene``)."""
+    """An owner's current scene versions (``memory_type = scene``)."""
     images: list[GetImageItem] = Field(default_factory=list)
     """A group's picture memories (``memory_type = image_memory``)."""
     profiles: list[GetProfileItem] = Field(default_factory=list)

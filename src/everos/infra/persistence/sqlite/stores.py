@@ -257,7 +257,12 @@ class SqliteClusterStore:
         )
 
     async def find_cluster_for_member(
-        self, scope: Scope, member_type: ClusterMemberType, member_id: str
+        self,
+        scope: Scope,
+        member_type: ClusterMemberType,
+        member_id: str,
+        *,
+        kind: ClusterKind | None = None,
     ) -> str | None:
         return await self._repo.find_cluster_id_for_member(
             member_type,
@@ -265,6 +270,7 @@ class SqliteClusterStore:
             app_id=scope.app_id,
             project_id=scope.project_id,
             owner_id=scope.owner_id,
+            kind=kind,
         )
 
     async def members(self, cluster_id: str) -> list[tuple[str, str]]:

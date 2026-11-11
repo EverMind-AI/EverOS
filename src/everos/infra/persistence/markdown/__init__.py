@@ -68,6 +68,7 @@ from ._mds import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from ._mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
 from ._mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
+from ._mds import SceneDailyFrontmatter as SceneDailyFrontmatter
 from ._mds import UserProfileFrontmatter as UserProfileFrontmatter
 from ._mds import group_profile_item_from_entry as group_profile_item_from_entry
 from ._mds import render_group_profile_entry as render_group_profile_entry
@@ -90,6 +91,7 @@ from ._writers import GroupWriter as GroupWriter
 from ._writers import ImageMemoryWriter as ImageMemoryWriter
 from ._writers import KnowledgeWriter as KnowledgeWriter
 from ._writers import ProfileWriter as ProfileWriter
+from ._writers import SceneWriter as SceneWriter
 from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
 from .owner_dir import MarkdownOwnerDirStore as MarkdownOwnerDirStore
 from .stores import MarkdownAgentCaseStore as MarkdownAgentCaseStore
@@ -155,6 +157,8 @@ __all__ = [
     "ProfilePathMixin",
     "ProfileReader",
     "ProfileWriter",
+    "SceneDailyFrontmatter",
+    "SceneWriter",
     "SkillPathMixin",
     "StructuredEntry",
     "UserProfileFrontmatter",

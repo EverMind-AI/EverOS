@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from everos.core.observability.logging import get_logger
 from everos.memory import user_profile_lock
 from everos.memory.extract.pipeline import profile_items
+from everos.memory.extract.scene import restore_revived_scenes
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import ForgetEntry, MemoryRef, Scope, Stored
 from everos.service.memory._forget import (
@@ -217,6 +218,13 @@ class UndoManager:
 
         restored_episodes = await self._restore_session_episodes(scope, session_id)
         restored_images = await self._restore_session_images(scope, session_id)
+        # A scene the forget took with its last episode comes back with it.
+        stores = self._stores
+        scenes = (
+            await restore_revived_scenes(stores.episode, stores.scene, scope)
+            if scope.owner_type == "user" and restored_episodes
+            else []
+        )
         images = tuple(
             dict.fromkeys(
                 row.item.image_id for row in restored_images if row.item.image_id
@@ -230,6 +238,8 @@ class UndoManager:
         )
         if restored_episodes:
             await self._eraser.requeue("episode", restored_episodes)
+        if scenes:
+            await self._eraser.requeue("scene", {s.ref.md_path for s in scenes})
         # Under the profile lock until the log says "remembered", as the forget.
         async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
             profiles = await self._restore_session_profile(scope, session_id, entry)
@@ -245,6 +255,7 @@ class UndoManager:
             image_memories=len(restored_images),
             episodes=len(restored_episodes),
             profiles=profiles,
+            scenes=len(scenes),
         )
         return SessionUndoResult(
             session_id=session_id,

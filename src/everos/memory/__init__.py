@@ -25,6 +25,7 @@ from ._partition_locks import group_scenes_lock as group_scenes_lock
 from ._partition_locks import member_profile_lock as member_profile_lock
 from ._partition_locks import user_cluster_lock as user_cluster_lock
 from ._partition_locks import user_profile_lock as user_profile_lock
+from ._partition_locks import user_scenes_lock as user_scenes_lock
 from .models import AgentCase as AgentCase
 from .models import CanonicalMessage as CanonicalMessage
 from .models import Episode as Episode
@@ -45,4 +46,5 @@ __all__ = [
     "member_profile_lock",
     "user_cluster_lock",
     "user_profile_lock",
+    "user_scenes_lock",
 ]

@@ -25,6 +25,11 @@ prompt forbids restating a picture's description in the body (the picture has
 its own memory for that), so removing the reference is a text edit that needs
 no model — and a model call would risk rewriting facts the user never asked to
 change, which is exactly what a forget must not do.
+
+A user's scene narrative is written from those episode bodies, so it can carry
+the reference too: a scene whose current version names the picture gets the
+same text edit as a new version (docs/scenes.md). Its members keep their ids;
+a read follows each to the version the forget wrote.
 """
 
 from __future__ import annotations
@@ -35,10 +40,20 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory import user_profile_lock
+from everos.memory import user_profile_lock, user_scenes_lock
 from everos.memory.extract.pipeline import profile_items
+from everos.memory.extract.scene import newest_versions
 from everos.memory.models import Episode
-from everos.memory.ports import Filter, MemoryRef, Scope, Stored, all_of, eq, is_null
+from everos.memory.ports import (
+    Filter,
+    MemoryRef,
+    Scope,
+    Stored,
+    all_of,
+    eq,
+    is_null,
+    ne,
+)
 
 if TYPE_CHECKING:
     from everos.memory.deps import Indexes, Stores
@@ -157,6 +172,7 @@ class ForgetManager:
 
         referring = await self._referring_episodes(scope, image_id)
         written = await self._rewrite_episodes(scope, referring, image_id)
+        scenes = await self._rewrite_scenes(scope, image_id)
         # The profile lock is held until the log says "forgotten": an update
         # waiting on it then leaves the picture out, and none in flight writes
         # back what this takes out.
@@ -187,6 +203,7 @@ class ForgetManager:
             owner_id=scope.owner_id,
             occurrences=len(occurrences),
             episodes=len(written),
+            scenes=len(scenes),
             profiles=profiles,
             reason=reason,
         )
@@ -332,6 +349,39 @@ class ForgetManager:
             )
         return refs
 
+    async def _rewrite_scenes(self, scope: Scope, image_id: str) -> list[MemoryRef]:
+        """A new version, without the picture, of each scene that names it.
+
+        Only a user's current versions: a superseded or forgotten one is out
+        of every default read already. The edit is the episodes' own, under
+        the owner's scene lock, so a scene update in flight finishes first.
+        """
+        if scope.owner_type != "user":
+            return []
+        written: list[MemoryRef] = []
+        async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+            for version, mark in await newest_versions(self._stores.scene, scope):
+                scene = version.item
+                if mark is not None or (
+                    image_id not in scene.narrative and image_id not in scene.summary
+                ):
+                    continue
+                ref = await self._stores.scene.append(
+                    scope,
+                    scene.model_copy(
+                        update={
+                            "version": scene.version + 1,
+                            "narrative": _strip_reference(scene.narrative, image_id),
+                            "summary": _strip_reference(scene.summary, image_id),
+                        }
+                    ),
+                    supersedes=version,
+                    only_if=_always,
+                )
+                if ref is not None:
+                    written.append(ref)
+        return written
+
 
 def _strip_reference(text: str, image_id: str) -> str:
     """Remove every reference to ``image_id`` and the empty brackets it leaves.
@@ -399,11 +449,16 @@ def _by_image(scope: Scope, image_id: str) -> Filter:
 
 
 def _current(scope: Scope) -> Filter:
-    """The owner's live episodes, across every session."""
+    """The owner's live episodes, across every session.
+
+    Scene versions share the episode table; they are rewritten as scenes
+    (:meth:`ForgetManager._rewrite_scenes`), never as episodes.
+    """
     return all_of(
         eq("owner_id", scope.owner_id),
         eq("owner_type", scope.owner_type),
         eq("app_id", scope.app_id),
         eq("project_id", scope.project_id),
         is_null("deprecated_by"),
+        ne("parent_type", "scene"),
     )

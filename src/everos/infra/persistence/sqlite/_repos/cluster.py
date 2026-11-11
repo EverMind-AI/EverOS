@@ -110,9 +110,11 @@ class ClusterRepo(RepoBase[Cluster]):
         app_id: str,
         project_id: str,
         owner_id: str,
+        kind: str | None = None,
     ) -> str | None:
         """Reverse lookup: ``(member_type, member_id) → cluster_id`` scoped
-        to ``(app_id, project_id, owner_id)``.
+        to ``(app_id, project_id, owner_id)``, and to ``kind`` when given
+        (an episode is a member of its profile cluster and its scene's).
 
         ``member_id`` (e.g. episode ``entry_id`` like
         ``ep_20260517_00000001``) is only per-owner unique — see
@@ -143,9 +145,10 @@ class ClusterRepo(RepoBase[Cluster]):
                 .where(Cluster.app_id == app_id)
                 .where(Cluster.project_id == project_id)
                 .where(Cluster.owner_id == owner_id)
-                .limit(1)
             )
-            return (await s.execute(stmt)).scalar_one_or_none()
+            if kind is not None:
+                stmt = stmt.where(Cluster.kind == kind)
+            return (await s.execute(stmt.limit(1))).scalar_one_or_none()
 
     # ── Lightweight queries ───────────────────────────────────────────────
 

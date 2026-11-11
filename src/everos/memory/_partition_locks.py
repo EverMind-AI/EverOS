@@ -115,6 +115,18 @@ def group_scenes_lock(
     )
 
 
+def user_scenes_lock(
+    app_id: str, project_id: str, owner_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one user's scenes holds (docs/scenes.md).
+
+    The scene strategy places an episode and writes a version under it; a
+    forget (or its undo) that reaches the user's scenes, and a deletion that
+    removes episodes, change them under it.
+    """
+    return get_partition_lock("update_user_scenes", f"{app_id}:{project_id}:{owner_id}")
+
+
 def group_forget_lock(
     app_id: str, project_id: str, group_id: str
 ) -> AbstractAsyncContextManager[None]:

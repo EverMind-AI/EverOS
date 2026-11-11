@@ -157,7 +157,7 @@ async def _emit_synthetic_events(
         # so a same-day, same-seq episode under a different owner does
         # not falsely match this owner's cluster (or vice versa).
         existing = await clusters.find_cluster_for_member(
-            _row_scope(raw, "user"), "episode", raw["entry_id"]
+            _row_scope(raw, "user"), "episode", raw["entry_id"], kind="user_memory"
         )
         if existing is None:
             await engine.emit(_episode_row_to_event(raw))
@@ -166,7 +166,7 @@ async def _emit_synthetic_events(
             presenter.emit_progress(emitted, total)
     for raw in cases:
         existing = await clusters.find_cluster_for_member(
-            _row_scope(raw, "agent"), "case", raw["entry_id"]
+            _row_scope(raw, "agent"), "case", raw["entry_id"], kind="agent_case"
         )
         if existing is None:
             await engine.emit(_agent_case_row_to_event(raw))

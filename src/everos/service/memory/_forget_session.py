@@ -26,6 +26,10 @@ replaced value in its history, goes once every segment it rests on is forgotten,
 this conversation's or one the owner forgot before. The forget log keeps what
 went, for the undo, and the profile update never reads a segment of a forgotten
 conversation.
+
+The forget follows the episodes into the owner's scenes (docs/scenes.md): a
+scene none of whose episodes is alive any more is marked forgotten too, and its
+index row erased; a scene that still has a live episode stays.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from typing import TYPE_CHECKING
 from everos.core.observability.logging import get_logger
 from everos.memory import user_profile_lock
 from everos.memory.extract.pipeline import profile_items
+from everos.memory.extract.scene import forget_orphaned_scenes
 from everos.memory.ports import MemoryRef, Scope, SessionKey
 from everos.service.memory._forget import FORGET_REASON, _always
 
@@ -62,6 +67,8 @@ class SessionForgetResult:
             same session reverses.
         profiles: Profile items taken out of ``user.md`` because every segment
             they rest on is now forgotten.
+        scenes: Entry ids of the scene versions marked forgotten because none
+            of their episodes is alive any more.
     """
 
     session_id: str
@@ -70,6 +77,7 @@ class SessionForgetResult:
     images: Sequence[str]
     forget_id: str
     profiles: int = 0
+    scenes: Sequence[str] = ()
 
 
 class SessionForgetManager:
@@ -111,10 +119,20 @@ class SessionForgetManager:
                 only_if=_always,
             )
         files = await self._release_files(scope, pictures)
+        stores = self._stores
+        scenes = (
+            await forget_orphaned_scenes(stores.episode, stores.scene, scope)
+            if scope.owner_type == "user" and episodes
+            else []
+        )
 
         erased: dict[str, list[MemoryRef]] = {}
-        if episodes:
-            erased["episode"] = [_ref(scope, path, entry) for path, entry in episodes]
+        if episodes or scenes:
+            # A scene version is a row of the episode table.
+            erased["episode"] = [
+                *(_ref(scope, path, entry) for path, entry in episodes),
+                *(scene.ref for scene in scenes),
+            ]
         if pictures:
             erased["image_memory"] = [
                 _ref(scope, path, entry) for path, entry, _ in pictures
@@ -150,6 +168,7 @@ class SessionForgetManager:
             image_memories=len(pictures),
             images=len(files),
             profiles=profiles,
+            scenes=len(scenes),
             reason=reason,
         )
         return SessionForgetResult(
@@ -159,6 +178,7 @@ class SessionForgetManager:
             images=files,
             forget_id=entry.forget_id,
             profiles=profiles,
+            scenes=[scene.ref.entry_id for scene in scenes],
         )
 
     async def _forget_profile(
