@@ -19,6 +19,7 @@ from everalgo.llm import LLMMessage, StrictOutputModel
 from pydantic import ValidationError
 
 from everos.component.llm import LLMCallError, OpenAIProvider, TokenUsage
+from everos.core.observability.metrics import get_metrics_registry
 
 _VALID = '{"text": "ok"}'
 
@@ -113,6 +114,87 @@ async def test_cut_short_raises_without_retry(finish_reason: str) -> None:
         )
     assert info.value.reason == "cut_short"
     assert len(upstream.bodies) == 1
+
+
+# ---------------------------------------------------------------------------
+# A cut on a call whose cap guards against a runaway (retry_cut)
+# ---------------------------------------------------------------------------
+
+
+def _cut_replies(outcome: str) -> float:
+    value = get_metrics_registry().get_sample_value(
+        "everos_llm_cut_replies_total", {"outcome": outcome}
+    )
+    return value or 0.0
+
+
+async def test_a_cut_reply_is_retried_once_at_the_retry_temperature() -> None:
+    """At 0.0 a reply that repeats itself to the cap tends to do so again."""
+    retried = _cut_replies("retried")
+    upstream = _Upstream(_completion(_VALID, finish_reason="length"), _completion())
+    text = await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+        _prompt(), response_format=_Reply, max_tokens=3072, retry_cut=True
+    )
+    assert text == _VALID
+    assert [body["temperature"] for body in upstream.bodies] == [0.0, 0.3]
+    assert [body["max_tokens"] for body in upstream.bodies] == [3072, 3072]
+    assert _cut_replies("retried") == retried + 1
+
+
+async def test_a_second_cut_fails_the_call_as_cut_short() -> None:
+    failed = _cut_replies("failed")
+    upstream = _Upstream(
+        _completion(_VALID, finish_reason="length"),
+        _completion(_VALID, finish_reason="length"),
+    )
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+            _prompt(), response_format=_Reply, max_tokens=3072, retry_cut=True
+        )
+    assert info.value.reason == "cut_short"
+    assert len(upstream.bodies) == 2
+    assert _cut_replies("failed") == failed + 1
+
+
+async def test_a_cut_without_retry_cut_still_fails_at_once_and_is_counted() -> None:
+    failed = _cut_replies("failed")
+    upstream = _Upstream(_completion(_VALID, finish_reason="length"))
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+            _prompt(), response_format=_Reply, max_tokens=3072
+        )
+    assert info.value.reason == "cut_short"
+    assert len(upstream.bodies) == 1
+    assert _cut_replies("failed") == failed + 1
+
+
+async def test_a_content_filter_is_never_retried() -> None:
+    upstream = _Upstream(_completion(_VALID, finish_reason="content_filter"))
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream, invalid_reply_retries=3).achat(
+            _prompt(), response_format=_Reply, retry_cut=True
+        )
+    assert info.value.reason == "cut_short"
+    assert len(upstream.bodies) == 1
+
+
+async def test_a_normal_reply_is_untouched_by_retry_cut() -> None:
+    upstream = _Upstream(_completion())
+    text = await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+        _prompt(), response_format=_Reply, max_tokens=3072, retry_cut=True
+    )
+    assert text == _VALID
+    assert len(upstream.bodies) == 1
+    assert upstream.bodies[0]["temperature"] == 0.0
+    assert "retry_cut" not in upstream.bodies[0]
+
+
+async def test_a_calls_max_tokens_lowers_the_configured_one_never_raises_it() -> None:
+    upstream = _Upstream(_completion(), _completion(), _completion())
+    provider = _provider(upstream, extra={"max_tokens": 32768})
+    for max_tokens in (3072, 65536, None):
+        await provider.achat(_prompt(), response_format=_Reply, max_tokens=max_tokens)
+    assert [body["max_tokens"] for body in upstream.bodies] == [3072, 32768, 32768]
 
 
 async def test_absent_content_raises_no_content() -> None:

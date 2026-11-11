@@ -10,13 +10,15 @@ method per step:
 
 1. ``_build_request`` -- build the request once; every attempt sends it as is,
    so no retry can raise ``max_tokens`` (§3.1). ``None`` falls back to the
-   configured default and is otherwise left out. Messages go out via
-   ``model_dump()``, multimodal parts included (§3.2).
+   configured default and is otherwise left out; a call's ``max_tokens`` can
+   lower one a deployment sets in ``extra``, never raise it. Messages go out
+   via ``model_dump()``, multimodal parts included (§3.2).
 2. ``_send`` -- one SDK call; transport retries are the SDK's ``max_retries``.
    ``asyncio.CancelledError`` is never caught (§3.3).
 3. ``_check_upstream`` -- a flagged refusal, ``length`` / ``content_filter``
    or absent content raises (§3.4, §3.5); no choice and ``abort`` / ``error``
-   fail only this attempt.
+   fail only this attempt, and so does ``length`` on a call that passes
+   ``retry_cut=True`` (its cap guards against a runaway, see ``achat``).
 4. ``_validate`` -- ``model_validate_json`` against the caller's
    ``response_format``; a mismatch fails only this attempt (§7.1).
 5. ``_request_valid_reply`` -- at most ``1 + invalid_reply_retries`` attempts
@@ -43,6 +45,7 @@ from everalgo.llm import to_openai_response_format
 from pydantic import BaseModel, ValidationError
 
 from everos.core.observability.logging import get_logger
+from everos.core.observability.metrics import Counter as MetricCounter
 
 from .errors import LLMCallError
 from .observer import LLMCallObserver, NullObserver, TokenUsage
@@ -61,6 +64,16 @@ _CUT_SHORT_REASONS: Final = frozenset({"length", "content_filter"})
 # vLLM-style gateways report these when the server gave up on a generation it
 # could have finished, so the identical request may well succeed.
 _ABORTED_REASONS: Final = frozenset({"abort", "error"})
+
+_cut_replies = MetricCounter(
+    name="llm_cut_replies_total",
+    description=(
+        "Replies cut at max_tokens (finish_reason length), by what followed: "
+        "retried at retry_temperature, or the call failed."
+    ),
+    labelnames=("outcome",),
+    namespace="everos",
+)
 
 
 class RawReply(NamedTuple):
@@ -94,11 +107,11 @@ class _AttemptFailedError(Exception):
         self,
         message: str,
         *,
-        reason: Literal["invalid_reply", "transport"],
+        reason: Literal["invalid_reply", "transport", "cut_short"],
         error_count: int | None = None,
     ) -> None:
         super().__init__(message)
-        self.reason: Literal["invalid_reply", "transport"] = reason
+        self.reason: Literal["invalid_reply", "transport", "cut_short"] = reason
         self.error_count = error_count
 
 
@@ -122,7 +135,9 @@ class OpenAIProvider:
             SDK default. It multiplies with every retry layered above.
         extra: Request fields merged into every call; a call's ``**extra``
             wins on a key collision. Non-standard fields must sit under
-            ``extra_body`` -- the SDK rejects unknown top-level names.
+            ``extra_body`` -- the SDK rejects unknown top-level names. A
+            ``max_tokens`` here is a ceiling: a call's own ``max_tokens`` can
+            lower it for that call, never raise it.
         response_format_mode: How the reply format is requested --
             ``json_schema`` sends the strict schema, ``json_object`` JSON mode,
             ``prompt_only`` nothing (the prompt alone asks for JSON).
@@ -189,9 +204,22 @@ class OpenAIProvider:
         response_format: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        retry_cut: bool = False,
         **extra: Any,
     ) -> str:
         """Send one chat request; see :meth:`everalgo.llm.LLMClient.achat`.
+
+        Args:
+            retry_cut: Treat a reply cut at ``max_tokens`` (``finish_reason``
+                ``length``) like one that fails validation: it fails only this
+                attempt, and the next one -- at most ``invalid_reply_retries``
+                more, each sampled at ``retry_temperature`` -- may answer the
+                call. For a call whose ``max_tokens`` guards against a runaway
+                (a reply that repeats itself until the cap) rather than
+                bounding a reply that is legitimately long: at temperature 0 a
+                runaway tends to recur, a warmer sample does not. Off, a cut
+                fails the call at once (``cut_short``), as the contract says.
+            Every other argument as in the contract.
 
         Returns:
             The reply text, already validated against ``response_format``.
@@ -212,7 +240,9 @@ class OpenAIProvider:
             max_tokens=max_tokens,
             extra=extra,
         )
-        return await self._request_valid_reply(request, response_format)
+        return await self._request_valid_reply(
+            request, response_format, retry_cut=retry_cut
+        )
 
     async def achat_raw(
         self,
@@ -348,16 +378,25 @@ class OpenAIProvider:
                 else None
             ),
         }
-        return {
+        request = {
             "model": self._model,
             "messages": [message.model_dump() for message in messages],
             **{key: value for key, value in optional.items() if value is not None},
             **self._extra,
             **extra,
         }
+        # A max_tokens in the configured extra is the deployment's ceiling; the
+        # call's own can only lower it (the picture route's runaway guard).
+        if max_tokens is not None and isinstance(request.get("max_tokens"), int):
+            request["max_tokens"] = min(request["max_tokens"], max_tokens)
+        return request
 
     async def _request_valid_reply(
-        self, request: dict[str, Any], response_format: type[BaseModel]
+        self,
+        request: dict[str, Any],
+        response_format: type[BaseModel],
+        *,
+        retry_cut: bool = False,
     ) -> str:
         """Send ``request`` until a reply passes every check, a bounded number of times.
 
@@ -369,10 +408,15 @@ class OpenAIProvider:
         for attempt in range(1, attempts + 1):
             sent = request if attempt == 1 else self._retry_request(request)
             try:
-                return await self._attempt(sent, response_format, attempt)
+                return await self._attempt(
+                    sent, response_format, attempt, retry_cut=retry_cut
+                )
             except _AttemptFailedError as exc:
                 failure = exc
                 self._log_failed_attempt(exc, attempt, attempts)
+                if exc.reason == "cut_short":
+                    outcome = "retried" if attempt < attempts else "failed"
+                    _cut_replies.labels(outcome=outcome).inc()
         # Chained to the last ValidationError, if that is what failed last.
         raise LLMCallError(
             f"no usable reply in {attempts} attempts (model={self._model!r}, "
@@ -390,7 +434,12 @@ class OpenAIProvider:
         return {**request, "temperature": retry}
 
     async def _attempt(
-        self, request: dict[str, Any], response_format: type[BaseModel], attempt: int
+        self,
+        request: dict[str, Any],
+        response_format: type[BaseModel],
+        attempt: int,
+        *,
+        retry_cut: bool = False,
     ) -> str:
         """Run one attempt: send, report the completion, check it, validate it.
 
@@ -400,7 +449,14 @@ class OpenAIProvider:
         """
         completion = await self._send(request)
         self._observe(completion, attempt)
-        text = _check_upstream(completion)
+        try:
+            text = _check_upstream(
+                completion, retry_cut=retry_cut, max_tokens=request.get("max_tokens")
+            )
+        except LLMCallError as exc:
+            if exc.reason == "cut_short":
+                _cut_replies.labels(outcome="failed").inc()
+            raise
         _validate(text, response_format)
         return text
 
@@ -445,11 +501,14 @@ class OpenAIProvider:
         )
 
 
-def _check_upstream(completion: ChatCompletion) -> str:
+def _check_upstream(
+    completion: ChatCompletion, *, retry_cut: bool = False, max_tokens: object = None
+) -> str:
     """Return the reply text unless the upstream reported it unusable.
 
     Raises:
-        _AttemptFailedError: No choice, or a generation aborted upstream.
+        _AttemptFailedError: No choice, a generation aborted upstream, or one
+            cut at ``max_tokens`` when ``retry_cut``.
         LLMCallError: A flagged refusal, a cut-short generation, or no content.
     """
     # OpenRouter answers some upstream rejections with a 200 and no choices.
@@ -465,6 +524,12 @@ def _check_upstream(completion: ChatCompletion) -> str:
             f"upstream refused (model={completion.model!r})", reason="refusal"
         )
     # Before the content too: a reply cut right after its closing brace parses.
+    if choice.finish_reason == "length" and retry_cut:
+        raise _AttemptFailedError(
+            f"generation cut short (model={completion.model!r}, "
+            f"finish_reason='length', max_tokens={max_tokens!r})",
+            reason="cut_short",
+        )
     if choice.finish_reason in _CUT_SHORT_REASONS:
         raise LLMCallError(
             f"generation cut short (model={completion.model!r}, "

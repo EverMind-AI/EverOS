@@ -268,6 +268,44 @@ machinery that keeps a deleted memory from coming back.
   the reply that creates it. Four fresh groups on DeepSeek V4.1 Flash: 9 of
   9 decisions linked to their topic (0 of 8 before); still one call per
   batch, 61 more prompt tokens per call.
+- **A picture call that repeats itself is cut early and sampled again, instead
+  of running to the output limit and losing its cell.** At temperature 0
+  (the extraction default since this release), a picture call on a
+  text-dense picture could transcribe it into `ocr` over and over: on
+  2026-11-11 two or three of MemEye's 168 picture calls (comic pages) did so
+  in each of three builds, each ran to the 32,768 output tokens the builds
+  allowed (57 times an average reply, 12-14% of the whole build's cost), and
+  the cut reply failed its cell, which kept neither an episode nor picture
+  memories. A picture call now asks for at most 2,048 + 1,024 output tokens
+  per picture, never above 32,768 (`image_memory.reply_token_cap`; the
+  longest of 914 complete replies measured was 2,423 tokens, for 8
+  pictures), and a reply cut there is retried once at
+  `[llm] retry_temperature`, with the same cap, like a reply that fails
+  validation; a second cut fails the cell as before. The first attempt keeps
+  the configured temperature. `OpenAIProvider.achat` takes `retry_cut` for
+  this, and a call's `max_tokens` now lowers a larger one set in `[llm]
+  extra` instead of being overridden by it. Cut replies are counted in
+  `everos_llm_cut_replies_total` (`outcome`: `retried` or `failed`) and each
+  cut attempt is logged as `llm_attempt_failed` with `reason=cut_short`.
+- **A picture call is no longer paid twice for a slip of form in its reply.**
+  On the picture route, 7 of MemEye's 168 extraction replies (4.2%, DeepSeek
+  V4.1 Flash in JSON mode at the then-default temperature 1.0; 3 of CUE-Mem's
+  125 at temperature 0) failed the reply schema, and each failure resent the
+  call with every picture attached, although none said anything a valid reply
+  would not have: an unknown key left empty (`"profile": []` inside a
+  picture's entry, `"ocr_note": ""`, `"action_note": ""`), a profile operation
+  whose closing brace was left off before the next one or the array's `]`,
+  and a reply split into two objects. The reply is now read leniently in
+  form: an unknown key whose value is empty reads as absent, `null` reads as
+  empty (`ocr`, `source_image_id`) or as no entries (`images`, `profile`),
+  one entry given bare reads as a list of it, and a reply that is not valid
+  JSON only because an array element was left open or the reply was split
+  into objects with distinct keys is mended before it is validated
+  (`everos.memory.extract.reply_form`). Meaning stays strict: an unknown key
+  that carries anything, a missing description or episode, a wrong type and
+  any other syntax error still fail and are retried as before. The prompt
+  and the JSON schema the call sends are unchanged; on the measured replies
+  the schema failures drop from 7 to 0 (MemEye) and 3 to 1 (CUE-Mem).
 - **A group flush no longer saturates the SQLite pool.** Each member's
   pending segments are read in one query, and at most `[sqlite] pool_size`
   members read at a time; the profiles written are unchanged.
