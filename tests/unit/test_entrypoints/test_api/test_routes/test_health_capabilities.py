@@ -61,3 +61,82 @@ async def test_embed_follows_the_probe_not_the_capability() -> None:
     source says yes, the probe says no, and the route has to follow the probe.
     """
     assert await _embed_from_the_route(probed=False, embedding=True) is False
+
+
+# ── the decider (the model every search round asks) ─────────────────────────
+
+
+class _DeciderEndpoint:
+    """A decider reached through ``achat_raw``; fails with ``error`` when set."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls = 0
+
+    async def achat_raw(self, messages: Any, **params: Any) -> Any:
+        from everos.component.llm.openai_provider import RawReply
+
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return RawReply(text="O", finish_reason="length", usage=None)
+
+
+def _decider_status(endpoint: _DeciderEndpoint) -> Any:
+    from everos.memory.search import DeciderStatus
+    from tests.fakes import static_tuning
+
+    return DeciderStatus(
+        endpoint,
+        model="qwen3.5-9b-decider",
+        base_url="http://127.0.0.1:9999/v1",
+        tuning_source=static_tuning(),
+    )
+
+
+async def test_health_lists_the_decider_and_its_probe() -> None:
+    status = _decider_status(_DeciderEndpoint())
+    await status.probe()
+    application = make_application(capabilities=_NEUTRAL)
+    application.ops.decider = status
+
+    response: Any = await health_route.health(application)
+
+    assert response.capabilities.decider is True
+    assert response.decider.model == "qwen3.5-9b-decider"
+    assert response.decider.base_url == "http://127.0.0.1:9999/v1"
+    assert response.decider.reachable is True
+    assert response.decider.probe_error is None
+
+
+async def test_an_unreachable_decider_reads_false_with_the_reason() -> None:
+    status = _decider_status(_DeciderEndpoint(RuntimeError("Connection refused")))
+    await status.probe()
+    application = make_application(capabilities=_NEUTRAL)
+    application.ops.decider = status
+
+    response: Any = await health_route.health(application)
+
+    assert response.capabilities.decider is False
+    assert response.decider.reachable is False
+    assert response.decider.probe_error == "RuntimeError: Connection refused"
+
+
+async def test_ops_start_probes_the_decider_in_the_background() -> None:
+    import asyncio
+
+    from tests.fakes.application import make_ops
+
+    endpoint = _DeciderEndpoint()
+    ops = make_ops(decider=_decider_status(endpoint))
+    await ops.start()
+    for _ in range(50):
+        if (await ops.health()).decider.reachable is not None:
+            break
+        await asyncio.sleep(0.01)
+    report = await ops.health()
+    await ops.aclose()
+
+    assert endpoint.calls == 1
+    assert report.providers.decider is True
+    assert report.decider.reachable is True

@@ -46,6 +46,8 @@ its flat-DSL variant without forking the field allow-list.
 """
 
 from .audience import with_audience as with_audience
+from .decider_health import DeciderHealth as DeciderHealth
+from .decider_health import DeciderStatus as DeciderStatus
 from .dto import AudienceItem as AudienceItem
 from .dto import FilterNode as FilterNode
 from .dto import GroupProfileEntry as GroupProfileEntry
@@ -76,6 +78,8 @@ __all__ = [
     "ALLOWED_FIELDS",
     "RESERVED_FIELDS",
     "AudienceItem",
+    "DeciderHealth",
+    "DeciderStatus",
     "FilterError",
     "FilterNode",
     "GroupProfileEntry",

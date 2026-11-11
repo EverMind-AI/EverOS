@@ -180,6 +180,17 @@ machinery that keeps a deleted memory from coming back.
   and its reason was only in the server log. The round trace gains
   `decider_error`, and a group scope's `coverage` reads `partial` instead of
   `complete` when the loop ended on such a round. No extra model call.
+- **`GET /health` lists the multi-round decider and checks it.** A `decider`
+  block names its `model` and `base_url` (credentials and query stripped) and
+  says whether it answered one request sent in the background at startup
+  (`reachable`, `probe_error`, `probed_at`; `capabilities.decider` mirrors
+  `reachable`). The searches keep it current at no cost: `rounds`,
+  `failed_rounds`, `last_failure`, `last_failure_at`, and the metric
+  `everos_decider_rounds_total{outcome}` (`decided`, `fallback`,
+  `salvaged`). The probe is one request with `max_tokens = 1` and the
+  decider's own `temperature` / `extra`, sent only through a client with a
+  raw call (the production provider); its cost is about ten input tokens
+  and one output token per server start.
 
 
 ### Changed

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from everos.infra.persistence.sqlite import QueueSummary
+    from everos.memory.search import DeciderHealth
     from everos.service.memory import QueueHealth
 
 
@@ -40,17 +41,19 @@ class Capabilities:
 
 @dataclasses.dataclass(frozen=True)
 class ProviderStatus:
-    """The four provider flags ``GET /health`` reports.
+    """The provider flags ``GET /health`` reports.
 
     ``embed`` is the startup dimension probe's verdict, not whether a
-    provider was built. There is no ``llm`` flag: the server does not start
-    without an extraction LLM.
+    provider was built; ``decider`` is the startup decider probe's (false
+    while it runs, and for a client that cannot be probed). There is no
+    ``llm`` flag: the server does not start without an extraction LLM.
     """
 
     embed: bool
     rerank: bool
     multimodal_llm: bool
     parser: bool
+    decider: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,6 +86,9 @@ class HealthReport:
     disabled_features: list[str]
     cascade: CascadeHealthReport | None
     memorize_queue: QueueHealth | None
+    decider: DeciderHealth | None = None
+    """The decider's identity, startup probe and round counts; ``None`` when
+    the application was assembled without a decider status."""
 
 
 @dataclasses.dataclass(frozen=True)

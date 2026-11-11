@@ -121,6 +121,7 @@ from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
 from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
+from everos.memory.search import DeciderStatus
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     EpisodeRecaller,
@@ -388,6 +389,8 @@ def build_application(
     # The one access policy every read path asks (docs/group-memory.md, D9),
     # shared by the memory reads and the project's knowledge base.
     access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
+    # Searches count the decider's rounds into it; /health reports it.
+    decider_status = _decider_status(settings, providers)
     memory = _build_memory_service(
         settings,
         providers,
@@ -396,6 +399,7 @@ def build_application(
         OmeEventBus(engine),
         eraser,
         access=access,
+        decider_status=decider_status,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -442,6 +446,7 @@ def build_application(
             ),
             capabilities=capabilities,
             queue_health=memory.queue_health,
+            decider=decider_status,
         ),
         capabilities=capabilities,
         _settings=settings,
@@ -512,6 +517,27 @@ def _rerank_or_none(settings: Settings) -> RerankProvider | None:
     except ValueError as exc:
         logger.warning("rerank_capability_build_failed", reason=str(exc))
         return None
+
+
+def _decider_status(settings: Settings, providers: Providers) -> DeciderStatus:
+    """The decider's status: what it is, for ``/health``, over the client it is.
+
+    The identity is the one the client was built from. Injected providers (a
+    test, a host embedding EverOS) need not come with a usable ``[decider]`` /
+    ``[llm]`` key; their identity is then read from the two sections directly.
+    """
+    try:
+        resolved = resolve_decider_config(settings)
+        model, base_url = resolved.model, resolved.base_url
+    except LLMNotConfiguredError:
+        model = settings.decider.model or settings.llm.model
+        base_url = settings.decider.base_url or settings.llm.base_url or ""
+    return DeciderStatus(
+        providers.decider,
+        model=model,
+        base_url=base_url,
+        tuning_source=SearchConfigSource().tuning,
+    )
 
 
 def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
@@ -642,6 +668,7 @@ def _build_memory_service(
     index_eraser: IndexEraser,
     *,
     access: AccessPolicy | None = None,
+    decider_status: DeciderStatus | None = None,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
@@ -705,6 +732,7 @@ def _build_memory_service(
             message_forget=stores.message_forget,
             scenes=stores.scene,
             group_search=settings.search,
+            decider_status=decider_status,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,

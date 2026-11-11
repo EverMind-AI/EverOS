@@ -41,6 +41,8 @@ __all__ = [
     "format_tokens",
 ]
 
+import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
 from . import _cascade, _ome, _tasks
@@ -77,6 +79,7 @@ if TYPE_CHECKING:
     from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.sqlite import MdChangeState
     from everos.memory.ports import MemorizeInboxStore
+    from everos.memory.search import DeciderStatus
     from everos.service.memory import TaskItem, TaskPage
 
 
@@ -97,6 +100,8 @@ class OpsService:
         capabilities: The providers the application was assembled with.
         queue_health: The memorize queue's health probe, reported by
             :meth:`health`; ``None`` while the queue is not running.
+        decider: The multi-round decider's status: :meth:`start` probes it
+            once in the background, :meth:`health` reports it.
     """
 
     def __init__(
@@ -113,6 +118,7 @@ class OpsService:
         backfill: BackfillDeps,
         capabilities: Capabilities,
         queue_health: QueueHealthProbe = no_queue,
+        decider: DeciderStatus | None = None,
     ) -> None:
         self._settings = settings
         self._root = root
@@ -125,6 +131,8 @@ class OpsService:
         self._backfill = backfill
         self._capabilities = capabilities
         self._queue_health = queue_health
+        self._decider = decider
+        self._decider_probe: asyncio.Task[None] | None = None
         self._cascade_attached = False
 
     @property
@@ -134,14 +142,27 @@ class OpsService:
     # ── server lifecycle ───────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the cascade subsystem unless ``[cascade] enabled`` is false."""
+        """Start the cascade subsystem unless ``[cascade] enabled`` is false.
+
+        Also sends the decider its startup probe, in the background: the
+        server does not wait for the decider endpoint to come up.
+        """
         self._cascade_attached = await _cascade.start(
             self._cascade,
             enabled=self._run_cascade,
             embedding=self._capabilities.embedding,
         )
+        if self._decider is not None and self._decider_probe is None:
+            self._decider_probe = asyncio.create_task(
+                self._decider.probe(), name="everos-decider-probe"
+            )
 
     async def aclose(self) -> None:
+        if self._decider_probe is not None:
+            self._decider_probe.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._decider_probe
+            self._decider_probe = None
         if self._cascade_attached:
             await self._cascade.stop()
             self._cascade_attached = False
@@ -149,12 +170,14 @@ class OpsService:
     # ── health ─────────────────────────────────────────────────────────────
 
     async def health(self) -> HealthReport:
-        """Provider flags, disabled features, and the cascade / queue blocks."""
+        """Provider flags, disabled features, and the cascade / queue / decider
+        blocks."""
         return await health_report(
             admin=self._admin,
             capabilities=self._capabilities,
             cascade=self._cascade if self._cascade_attached else None,
             queue_health=self._queue_health,
+            decider=self._decider,
         )
 
     # ── tasks ──────────────────────────────────────────────────────────────

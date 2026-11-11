@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.\n\nThe ``decider`` block names the multi-round decider and says whether it\nanswered the startup probe, and how many rounds failed since.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -4652,6 +4652,100 @@
         "title": "ContentItemDTO",
         "description": "Content piece (v1 API brief appendix A)."
       },
+      "DeciderHealthBlock": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "The model every round names."
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url",
+            "description": "Its endpoint (scheme, host, port and path only)."
+          },
+          "reachable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reachable",
+            "description": "Whether it answered the startup probe; null while the probe runs or when the client cannot be probed."
+          },
+          "probe_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Error",
+            "description": "Why the probe failed, when it did."
+          },
+          "probed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probed At"
+          },
+          "rounds": {
+            "type": "integer",
+            "title": "Rounds",
+            "description": "Rounds asked of it since the server started.",
+            "default": 0
+          },
+          "failed_rounds": {
+            "type": "integer",
+            "title": "Failed Rounds",
+            "description": "Of those, the rounds that fell back or were salvaged.",
+            "default": 0
+          },
+          "last_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure",
+            "description": "The newest failed round's reason."
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "base_url",
+          "reachable"
+        ],
+        "title": "DeciderHealthBlock",
+        "description": "The multi-round decider: what it is, its startup probe, its rounds since.\n\n``reachable`` is the startup probe's verdict and never changes afterwards\n(a polled endpoint must not call a model). ``failed_rounds`` and\n``last_failure`` come from the searches themselves, so a decider that\nstopped answering after startup shows there. A failed round still answers\nthe search (``data.degraded`` names it); it is not an outage of search."
+      },
       "DeleteByIdsRequest": {
         "properties": {
           "app_id": {
@@ -7150,6 +7244,12 @@
           "parser": {
             "type": "boolean",
             "title": "Parser"
+          },
+          "decider": {
+            "type": "boolean",
+            "title": "Decider",
+            "description": "Whether the multi-round decider answered the startup probe (one request with max_tokens=1, sent in the background when the server starts). A snapshot like `embed`: false while the probe runs; see the `decider` block for why it failed and for the rounds since.",
+            "default": false
           }
         },
         "type": "object",
@@ -7160,7 +7260,7 @@
           "parser"
         ],
         "title": "HealthCapabilities",
-        "description": "Availability flags for the four capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+        "description": "Availability flags for the capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
       },
       "HealthResponse": {
         "properties": {
@@ -7196,6 +7296,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MemorizeQueueHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeciderHealthBlock"
               },
               {
                 "type": "null"

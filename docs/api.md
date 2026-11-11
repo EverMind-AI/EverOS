@@ -65,6 +65,15 @@ answered a dimension probe **when the process started**, not whether it is
 reachable now -- a service that recovers later keeps reading `false` until
 the next restart. There is no `capabilities.llm`: the server does not start
 without an extraction LLM, so a running server always has one.
+`capabilities.decider` and the `decider` block name the multi-round decider
+(`model`, `base_url` without credentials) and say whether it answered one
+request (`max_tokens = 1`) sent in the background when the server started
+(`reachable`, `probe_error`, `probed_at`; `reachable` is `null` while that
+probe runs). Like `embed`, that verdict is a startup snapshot. The searches
+themselves keep it current: `rounds` and `failed_rounds` count the decider
+rounds since start, and `last_failure` / `last_failure_at` name the newest
+round that fell back, so a decider that stops answering later shows there
+without `/health` calling a model.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy

@@ -44,6 +44,7 @@ from everos.service.ops._models import (
 
 if TYPE_CHECKING:
     from everos.infra.cascade import CascadeAdmin, CascadeHealth, CascadeOrchestrator
+    from everos.memory.search import DeciderStatus
 
 logger = get_logger("everos.service.ops")
 
@@ -61,8 +62,9 @@ async def health_report(
     capabilities: Capabilities,
     cascade: CascadeOrchestrator | None,
     queue_health: QueueHealthProbe,
+    decider: DeciderStatus | None = None,
 ) -> HealthReport:
-    """Provider flags, disabled features, and the cascade / queue blocks.
+    """Provider flags, disabled features, and the cascade / queue / decider blocks.
 
     ``cascade`` is ``None`` while the server is not running it. A probe that
     raises (a locked or full SQLite, say) is reported as an unhealthy block
@@ -70,11 +72,13 @@ async def health_report(
     is a liveness signal, and turning it into a 500 would get the process
     restarted, which fixes neither.
     """
+    decider_health = decider.snapshot() if decider is not None else None
     providers = ProviderStatus(
         embed=admin.embedding_probed(),
         rerank=capabilities.rerank,
         multimodal_llm=capabilities.multimodal_llm,
         parser=capabilities.parser,
+        decider=decider_health is not None and decider_health.reachable is True,
     )
     return HealthReport(
         providers=providers,
@@ -87,6 +91,7 @@ async def health_report(
         ),
         cascade=await _probe_cascade(cascade),
         memorize_queue=await _probe_queue(queue_health),
+        decider=decider_health,
     )
 
 

@@ -10,6 +10,7 @@ from everos import __version__
 from everos.entrypoints.api.dependencies import ApplicationDep
 from everos.entrypoints.api.schemas import (
     CascadeHealthBlock,
+    DeciderHealthBlock,
     HealthCapabilities,
     HealthResponse,
     MemorizeQueueHealthBlock,
@@ -31,6 +32,9 @@ async def health(app: ApplicationDep) -> HealthResponse:
     stalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is
     a data-quality backlog reported as an informational count that does
     not flip ``healthy``. Alert on ``cascade.healthy``.
+
+    The ``decider`` block names the multi-round decider and says whether it
+    answered the startup probe, and how many rounds failed since.
     """
     report = await app.ops.health()
     return HealthResponse(
@@ -47,5 +51,10 @@ async def health(app: ApplicationDep) -> HealthResponse:
             None
             if report.memorize_queue is None
             else MemorizeQueueHealthBlock(**report.memorize_queue.model_dump())
+        ),
+        decider=(
+            None
+            if report.decider is None
+            else DeciderHealthBlock(**dataclasses.asdict(report.decider))
         ),
     )

@@ -34,6 +34,15 @@ async def test_user_search_succeeds(tier3_runtime: AsyncClient) -> None:
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"]["episodes"], "multi-round search must find it"
+    assert resp.json()["data"]["degraded"] == []
+
+    # /health counts the round the search asked of the decider. The fake client
+    # has no raw call, so the startup probe is skipped (reachable null).
+    decider = (await tier3_runtime.get("/health")).json()["decider"]
+    assert decider["rounds"] >= 1
+    assert decider["failed_rounds"] == 0
+    assert decider["reachable"] is None
+    assert decider["model"]
 
 
 async def test_deletions_take_their_index_rows(tier3_runtime: AsyncClient) -> None:

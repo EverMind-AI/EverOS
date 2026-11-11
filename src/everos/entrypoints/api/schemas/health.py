@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class HealthCapabilities(BaseModel):
-    """Availability flags for the four capability probes.
+    """Availability flags for the capability probes.
 
     Field order matches the health-endpoint payload contract; clients
     key off these names to decide whether to expose optional features.
@@ -34,6 +34,53 @@ class HealthCapabilities(BaseModel):
     rerank: bool
     multimodal_llm: bool
     parser: bool
+    decider: bool = Field(
+        default=False,
+        description=(
+            "Whether the multi-round decider answered the startup probe (one "
+            "request with max_tokens=1, sent in the background when the "
+            "server starts). A snapshot like `embed`: false while the probe "
+            "runs; see the `decider` block for why it failed and for the "
+            "rounds since."
+        ),
+    )
+
+
+class DeciderHealthBlock(BaseModel):
+    """The multi-round decider: what it is, its startup probe, its rounds since.
+
+    ``reachable`` is the startup probe's verdict and never changes afterwards
+    (a polled endpoint must not call a model). ``failed_rounds`` and
+    ``last_failure`` come from the searches themselves, so a decider that
+    stopped answering after startup shows there. A failed round still answers
+    the search (``data.degraded`` names it); it is not an outage of search.
+    """
+
+    model: str = Field(description="The model every round names.")
+    base_url: str = Field(
+        description="Its endpoint (scheme, host, port and path only)."
+    )
+    reachable: bool | None = Field(
+        description=(
+            "Whether it answered the startup probe; null while the probe "
+            "runs or when the client cannot be probed."
+        )
+    )
+    probe_error: str | None = Field(
+        default=None, description="Why the probe failed, when it did."
+    )
+    probed_at: datetime | None = None
+    rounds: int = Field(
+        default=0, description="Rounds asked of it since the server started."
+    )
+    failed_rounds: int = Field(
+        default=0,
+        description="Of those, the rounds that fell back or were salvaged.",
+    )
+    last_failure: str | None = Field(
+        default=None, description="The newest failed round's reason."
+    )
+    last_failure_at: datetime | None = None
 
 
 class CascadeHealthBlock(BaseModel):
@@ -123,3 +170,6 @@ class HealthResponse(BaseModel):
     otherwise (disabled, or the application was never started)."""
     memorize_queue: MemorizeQueueHealthBlock | None = None
     """Present while the started application runs the memorize queue."""
+    decider: DeciderHealthBlock | None = None
+    """The multi-round decider; ``None`` only for an application assembled
+    without one."""

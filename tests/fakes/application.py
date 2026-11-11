@@ -277,6 +277,7 @@ class StubOpsService:
         self.cascade: Any = None
         self.probed = False
         self.queue_health = queue_health
+        self.decider: Any = None
         self.ome_trigger = AsyncMock()
         self.cascade_quiesce = AsyncMock(return_value=None)
 
@@ -292,6 +293,7 @@ class StubOpsService:
             capabilities=self.capabilities,
             probed=self.probed,
             queue_health=self.queue_health,
+            decider=self.decider,
         )
         return await ops.health()
 
@@ -534,6 +536,7 @@ def make_ops(
     probed: bool = False,
     queue_health: Callable[[], Awaitable[QueueHealth | None]] | None = None,
     ome_lock: Any = None,
+    decider: Any = None,
 ) -> OpsService:
     """A real :class:`OpsService` over only the collaborators a test passes.
 
@@ -556,6 +559,7 @@ def make_ops(
         inbox=inbox,
         backfill=backfill,
         capabilities=capabilities,
+        decider=decider,
         **extra,
     )
     ops._cascade_attached = cascade is not None

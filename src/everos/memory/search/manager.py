@@ -76,6 +76,7 @@ from everos.memory.ports import (
 
 from .audience import with_audience
 from .constraints import bind_constraints, build_constraints
+from .decider_health import DeciderStatus
 from .dto import (
     ConstraintItem,
     FilterNode,
@@ -183,8 +184,12 @@ class SearchManager:
         message_forget: MessageForgetStore | None = None,
         scenes: SceneStore | None = None,
         group_search: GroupSearchSettings | None = None,
+        decider_status: DeciderStatus | None = None,
     ) -> None:
         self._access = access
+        # Counts the built-in decider's rounds for GET /health; an injected
+        # policy's rounds are not the configured decider's and are not counted.
+        self._decider_status = decider_status
         # Group scopes (docs/group-memory.md, sections 8.3-8.6): the group
         # profile's items, the segments constraints quote, the scenes
         # expansion follows, and the switches that decide all three.
@@ -440,6 +445,8 @@ class SearchManager:
             expander=expander,
             link_slots=self._group_search.link_slots if expander else 0,
         )
+        if decider is None and self._decider_status is not None:
+            self._decider_status.record(result.rounds, result.failures)
         return _Ranked(
             result.episodes,
             result.images,

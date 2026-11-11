@@ -41,6 +41,7 @@ from .groups import RosterChangeRequest as RosterChangeRequest
 from .groups import RosterChangeResponseData as RosterChangeResponseData
 from .groups import RosterEventDTO as RosterEventDTO
 from .health import CascadeHealthBlock as CascadeHealthBlock
+from .health import DeciderHealthBlock as DeciderHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
 from .health import MemorizeQueueHealthBlock as MemorizeQueueHealthBlock
@@ -87,6 +88,7 @@ __all__ = [
     "CategoryDTO",
     "CategoryListResponse",
     "ContentItemDTO",
+    "DeciderHealthBlock",
     "DeleteByIdsRequest",
     "DeleteByIdsResponseData",
     "DeleteRequest",
