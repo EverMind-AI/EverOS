@@ -105,14 +105,17 @@ machinery that keeps a deleted memory from coming back.
   - **The group profile.** Topics, decisions, dissent and observed roles as
     append-only items in `groups/<group_id>/profile/` and the new
     `group_profile_item` table (no vector). One model call per batch of
-    segments (prompt `chat.group_profile_update` v1, in EverOS), after
+    segments (prompt `chat.group_profile_update` v2, in EverOS), after
     `[groups] group_profile_batch` segments (default `5`), after
     `[groups] group_profile_idle_seconds` without one (default `600`) and at
     every flush; `[groups] group_profile` switches it off. Code checks every
     operation the model returns -- the cited segment and message exist, the
     quote is verbatim, a decision rests on a member's message, the people it
     names wrote the evidence, the ids it replaces are current -- and drops a
-    failing one, counted in `everos_group_profile_ops_dropped_total`.
+    failing one, counted in `everos_group_profile_ops_dropped_total`. A call
+    that yields nothing usable is counted in
+    `everos_group_profile_update_failures_total` and retried after a
+    back-off; the third failure in a row drops the batch.
     `/memory/get` lists the items (`memory_type: group_profile`, with
     `include_superseded`).
   - **Forget and delete inside a group.** `/memory/forget` and its undo take
@@ -125,7 +128,9 @@ machinery that keeps a deleted memory from coming back.
   - **Group search** adds relational expansion to the multi-round loop
     (`[search] expansion`, `[search] link_slots`, default `5`), a constraint
     block (`constraints`, `[search] constraints = "rules"` or `"model"`, prompt
-    `search.constraint_bind` v1), the visible current group profile
+    `search.constraint_bind` v2; a failed binding call leaves the rules
+    block, counted in `everos_constraint_bind_failures_total`), the visible
+    current group profile
     (`include_group_profile`, `[search] group_profile_cap`), `coverage`, and
     an `audience` on every group record. Requests and responses of user and
     agent scopes are unchanged; the new response fields hold their empty
