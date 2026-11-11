@@ -230,6 +230,11 @@ async def test_cluster_path_unaffected_by_dual_trigger_refactor() -> None:
             members=["ep_20260101_0001"],
         ),
     )
+    deps.stores.episode.seed(
+        _ALICE,
+        "ep_20260101_0001",
+        _indexed_episode("ep_20260101_0001", "mc_aaaaaaaaaaa1").item,
+    )
     # The supplement row would be picked up only by the timestamp selector.
     deps.indexes.episode.seed(
         _indexed_episode("ep_20260101_0001", "mc_aaaaaaaaaaa1"),

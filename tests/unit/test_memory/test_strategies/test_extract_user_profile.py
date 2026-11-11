@@ -1,7 +1,7 @@
 """Tests for :func:`extract_user_profile` (cluster path).
 
 The strategy reads the profile and clusters from their stores, resolves
-memcells through the episode index and the memcell store, and runs
+memcells through the episode store and the memcell store, and runs
 ``ProfileExtractor`` (patched). In-memory doubles from :mod:`tests.fakes`
 stand in for every port, so the assertions are on what was stored.
 """
@@ -104,13 +104,15 @@ def _seed(
     memcell_id: str,
     last_ts: int,
 ) -> None:
-    """One cluster → one indexed episode → one stored memcell."""
+    """One cluster → one durable/indexed episode → one stored memcell."""
     deps.stores.cluster.seed(
         scope,
         "user_memory",
         _cluster(cluster_id=cluster_id, members=[entry_id], last_ts=last_ts),
     )
-    deps.indexes.episode.seed(_indexed_episode(scope, entry_id, memcell_id))
+    episode = _indexed_episode(scope, entry_id, memcell_id)
+    deps.stores.episode.seed(scope, entry_id, episode.item)
+    deps.indexes.episode.seed(episode)
     deps.stores.memcell.seed(
         memcell_id, _memcell(memcell_id, sender_id=scope.owner_id, ts_ms=last_ts)
     )

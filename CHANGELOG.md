@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Profile extraction reads persisted cluster episodes without waiting for the
+  asynchronous search index, so a first conversation can produce its profile
+  before indexing finishes. Deleted episodes are excluded when a queued
+  cluster-triggered profile task selects its source conversations.
+
 ## [1.6.0] - 2026-11-11
 
 EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including

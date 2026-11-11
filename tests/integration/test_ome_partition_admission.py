@@ -9,15 +9,17 @@ from everalgo.testing import FakeLLMClient
 
 from everos.core.locks import LOCKS
 from everos.infra.ome import OfflineEngine, OMEConfig, RunStatus, to_ome_strategy
-from everos.memory.models import Cluster
+from everos.memory.models import Cluster, Profile
+from everos.memory.ports import MemoryRef, Scope
 from everos.memory.strategies import (
     EXTRACT_USER_PROFILE_SPEC,
     TRIGGER_PROFILE_CLUSTERING_SPEC,
 )
-from tests.fakes import make_deps, seed_sources
+from tests.fakes import InMemoryProfileStore, make_deps, make_stores, seed_sources
 from tests.fakes.llm import user_track_script
 from tests.unit.test_memory.test_strategies.test_extract_user_profile import (
     _event,
+    _memcell,
     _scope,
     _seed,
 )
@@ -36,6 +38,7 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
 ) -> None:
     """The model gate stays closed until Bob's cluster is stored and SUCCESS."""
     release_model = asyncio.Event()
+    bob_finished = asyncio.Event()
     all_arrived = asyncio.Event()
     calls = 0
     active = 0
@@ -55,7 +58,8 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
         active += 1
         peak = max(peak, active)
         try:
-            await release_model.wait()
+            if "u_bob" not in messages[-1].content:
+                await release_model.wait()
             return user_track_script(
                 {
                     "_ProfileItems": "profile_init_empty",
@@ -65,7 +69,18 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
         finally:
             active -= 1
 
-    deps = make_deps(llm=FakeLLMClient(handler=answer), embedding=LocalEmbedding())
+    class Profiles(InMemoryProfileStore):
+        async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
+            ref = await super().write(scope, profile)
+            if scope.owner_id == "u_bob":
+                bob_finished.set()
+            return ref
+
+    deps = make_deps(
+        llm=FakeLLMClient(handler=answer),
+        embedding=LocalEmbedding(),
+        stores=make_stores(profile=Profiles()),
+    )
     entries = [f"ep_20260101_{i + 1:04d}" for i in range(20)]
     cells = [f"mc_{i + 1:012x}" for i in range(20)]
     for i, (entry, cell) in enumerate(zip(entries, cells, strict=True)):
@@ -93,6 +108,10 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
         memcell_id="mc_bbbbbbbbbbb1",
         episode_entry_id="ep_20260101_0002",
         owner_id="u_bob",
+    )
+    deps.stores.memcell.seed(
+        "mc_bbbbbbbbbbb1",
+        _memcell("mc_bbbbbbbbbbb1", sender_id="u_bob", ts_ms=1_700_000_001_000),
     )
     config = OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
     assert config.max_concurrent_runs == 20
@@ -131,8 +150,10 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
             )
             assert len(clusters) == 1
             assert "ep_20260101_0002" in clusters[0].members
+            await asyncio.wait_for(bob_finished.wait(), timeout=2)
+            assert await deps.stores.profile.read(_scope("u_bob")) is not None
             assert not release_model.is_set()
-            assert calls == 1
+            assert calls == 2
             release_model.set()
             assert await engine.wait_idle(timeout=5)
             records = await engine.list_runs(
@@ -140,8 +161,8 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
             ) + await engine.list_runs("trigger_profile_clustering")
             assert len(records) == 22
             assert all(r.status == RunStatus.SUCCESS for r in records)
-            assert calls == 20 and peak == 1
-            assert len(deps.stores.profile.writes) == 20
+            assert calls == 21 and peak == 2
+            assert len(deps.stores.profile.writes) == 21
             assert await deps.stores.profile.read(_scope()) is not None
     finally:
         release_model.set()
