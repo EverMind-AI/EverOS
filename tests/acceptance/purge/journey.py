@@ -18,6 +18,9 @@ from .seed import WORLD, SeedLog
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
+_STARTED: set[Path] = set()
+
+
 @dataclass
 class Evidence:
     """``$PURGE_EVIDENCE_DIR/<case>/`` (default: under the test's tmp dir)."""
@@ -25,6 +28,18 @@ class Evidence:
     case: str
     base: Path
     servers: list[PurgeServer] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Start the case afresh: an earlier run's requests and logs would
+        # read as this run's. Mutation records are kept (written separately).
+        path = self.base / self.case
+        if path in _STARTED:
+            return
+        _STARTED.add(path)
+        if path.is_dir():
+            for old in path.iterdir():
+                if old.is_file() and not old.name.startswith("mutation"):
+                    old.unlink()
 
     @property
     def dir(self) -> Path:
@@ -44,11 +59,19 @@ class Evidence:
     def close(self) -> None:
         for i, srv in enumerate(self.servers):
             srv.dump_journal(self.dir / "requests.jsonl")
-            log = srv.log_path
-            if log is not None and log.exists():
-                self.text(
-                    f"server-{i}.log", _ANSI.sub("", log.read_text(errors="replace"))
+            if srv.log_path is None:
+                continue
+            # One log per start: a restart case keeps the run before the kill.
+            own = re.compile(rf"server-{re.escape(srv.root.name)}-(\d+)\.log")
+            logs = sorted(
+                (p for p in srv.log_path.parent.iterdir() if own.fullmatch(p.name)),
+                key=lambda p: int(own.fullmatch(p.name)[1]),
+            )
+            for n, log in enumerate(logs):
+                name = (
+                    f"server-{i}.log" if len(logs) == 1 else f"server-{i}-start{n}.log"
                 )
+                self.text(name, _ANSI.sub("", log.read_text(errors="replace")))
         rerun = os.environ.get("PYTEST_CURRENT_TEST", "").split(" ")[0]
         self.text("rerun.txt", f"uv run pytest '{rerun}' -m acceptance -v\n")
 

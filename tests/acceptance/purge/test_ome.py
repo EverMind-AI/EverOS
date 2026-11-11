@@ -167,7 +167,8 @@ def test_t24_1_app_tombstone_covers_its_projects(
     wait_idle(srv.base, srv.root, timeout=180)
     at = from_iso_format(job["created_at"])
     world.ev.json("runs_after_t", _after(_runs(srv.root), at))
-    _assert_backlog_dropped(srv, at, e0, "a1", "p1")
+    world.ev.json("s_after", _assert_backlog_dropped(srv, at, e0, "a1", "p1"))
+    world.ev.json("runs_after_t", _after(_runs(srv.root), at))
 
 
 def test_t24_2_latest_purge_of_a_scope_wins(make_world: Any, purge_proxy: Any) -> None:
@@ -187,7 +188,8 @@ def test_t24_2_latest_purge_of_a_scope_wins(make_world: Any, purge_proxy: Any) -
     purge_proxy.clear()
     wait_idle(srv.base, srv.root, timeout=180)
     at = from_iso_format(job["created_at"])
-    _assert_backlog_dropped(srv, at, e0, "a1", "p1")
+    world.ev.json("s_after", _assert_backlog_dropped(srv, at, e0, "a1", "p1"))
+    world.ev.json("runs_after_t", _after(_runs(srv.root), at))
 
 
 def test_t15_1_failed_runs_keep_rows_lose_content(make_world: Any, fake: Any) -> None:
@@ -237,6 +239,14 @@ def test_t15_1_failed_runs_keep_rows_lose_content(make_world: Any, fake: Any) ->
     assert finish(srv, job_id)["status"] == "succeeded"
     after = {r["run_id"]: r for r in _runs(root)}
     world.ev.json("dead_rows", {f"{a}/{p}": sorted(v) for (a, p), v in ids.items()})
+    world.ev.json(
+        "payloads",
+        {
+            run_id: {"before": before[run_id], "after": after[run_id]["event_payload"]}
+            for v in ids.values()
+            for run_id in v
+        },
+    )
     marker = json.dumps({"purged_by": job_id}, separators=(",", ":"))
     for run_id in ids[("a1", "p1")]:
         assert after[run_id]["status"] == "dead_letter"
@@ -402,4 +412,7 @@ def test_t13_1_waiting_runs_survive_a_kill(make_world: Any, purge_proxy: Any) ->
         ), same
     assert md_counts(root, "a2", "p1")["md.atomic_fact"] > facts
     s_left = scope_counts(root, "a1", "p1")
-    assert all(n == 0 for k, n in s_left.items() if k.startswith("index."))
+    ids = {w["event_id"] for w in waiting}
+    world.ev.json("s_after", s_left)
+    world.ev.json("final_rows_of_waiting", [r for r in final if r["event_id"] in ids])
+    assert all(n == 0 for n in s_left.values()), s_left

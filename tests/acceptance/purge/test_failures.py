@@ -59,8 +59,12 @@ def test_t18_1_delete_failures(
     job_id, _ = purge(srv, **S)
     job = finish(srv, job_id, timeout=120)
     world.ev.json("job", job)
+    row = _job_row(srv.root)
+    world.ev.json(
+        "purge_job_row", dict(zip(("attempts", "status", "retries"), row, strict=True))
+    )
     assert job["status"] == status, job
-    assert _job_row(srv.root)[:2] == (attempts, status)
+    assert row[:2] == (attempts, status)
     if status == "failed":
         index_step = next(s for s in job["steps"] if s["store"] == "lancedb")
         assert index_step["state"] == "failed" and index_step["error"], job

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from .journey import finish, purge
+from .journey import Evidence, evidence_base, finish, purge
 from .observe import (
     nothing_deleted_snapshot,
     release,
@@ -56,7 +58,9 @@ def test_t5_1_invalid_nonces_delete_nothing(make_world: Any) -> None:
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "PURGE_NONCE_INVALID"
     assert four.status_code == 422
-    assert nothing_deleted_snapshot(root) == before
+    after = nothing_deleted_snapshot(root)
+    world.ev.json("snapshot", {"before": before, "after": after})
+    assert after == before
     assert {s: scope_dump(root, *s) for s in WORLD} == dumps
     assert _jobs(root) == []
     # 3: a used nonce (on an empty range, so the snapshots above stay valid)
@@ -95,22 +99,34 @@ def test_t5_2_one_nonce_confirmed_twice_at_once(make_world: Any) -> None:
     assert len(_jobs(srv.root)) == 1
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"scope": "space", "app_id": "a1"},
-        {"scope": "project", "app_id": "a1"},
-        {"scope": "app"},
-        {"scope": "app", "app_id": "default_app"},
-        {"scope": "project", "app_id": "a1", "project_id": "p1", "x": 1},
-        {"scope": "tenant"},
-    ],
-)
-def test_t6_1_invalid_requests_get_no_nonce(make_purge_server: Any, body: Any) -> None:
+_INVALID = [
+    {"scope": "space", "app_id": "a1"},
+    {"scope": "project", "app_id": "a1"},
+    {"scope": "app"},
+    {"scope": "app", "app_id": "default_app"},
+    {"scope": "project", "app_id": "a1", "project_id": "p1", "x": 1},
+    {"scope": "tenant"},
+]
+
+
+def test_t6_1_invalid_requests_get_no_nonce(
+    make_purge_server: Any, tmp_path: Path
+) -> None:
     srv = make_purge_server()
-    resp = srv.post("/memory/purge", body)
-    assert resp.status_code == 422, resp.text
-    assert "nonce" not in resp.text
+    ev = Evidence("T6.1-invalid", evidence_base(tmp_path), [srv])
+    try:
+        answers = []
+        for body in _INVALID:
+            resp = srv.post("/memory/purge", body)
+            answers.append(
+                {"body": body, "status": resp.status_code, "response": resp.json()}
+            )
+        ev.json("answers", answers)
+        assert [a["status"] for a in answers] == [422] * len(_INVALID), answers
+        assert all("nonce" not in json.dumps(a["response"]) for a in answers)
+        assert _jobs(srv.root) == []
+    finally:
+        ev.close()
 
 
 def test_t6_1_default_maps_to_reserved_dirs(make_world: Any) -> None:

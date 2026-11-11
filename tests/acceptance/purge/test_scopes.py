@@ -127,7 +127,9 @@ def test_t3_1_space_purge_keeps_config_and_user_files(make_world: Any) -> None:
     assert len(kept) == 4 + len(WORLD)
     hashes = {str(p.relative_to(root)): _sha(p) for p in kept}
     job = _purge_and_check(world, {"scope": "space"})
-    assert {str(p.relative_to(root)): _sha(p) for p in kept} == hashes
+    after = {str(p.relative_to(root)): _sha(p) for p in kept}
+    world.ev.json("kept_sha256", {"before": hashes, "after": after})
+    assert after == hashes
     jobs = rows(system_db(root), "SELECT job_id, status FROM purge_job")
     assert jobs == [(job["job_id"], "succeeded")]
 

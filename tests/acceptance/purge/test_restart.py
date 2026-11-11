@@ -61,6 +61,7 @@ def test_t12_1_killed_at_step3_resumes_on_restart(
     wait_idle(srv.base, root, timeout=300)
     world.ev.json("job", job)
     row = rows(system_db(root), "SELECT attempts, status FROM purge_job")
+    world.ev.json("purge_job_rows", row)
     assert row == [(2, "succeeded")]
     assert _zero(scope_counts(root, "a1", "p1")) == {}
     e0_rows = [r for r in _runs(root) if (r["event_id"], r["strategy_name"]) == e0]
@@ -151,6 +152,10 @@ def test_t16_3_delete_stopped_mid_way_keeps_counters(make_world: Any) -> None:
     release(srv.fp_dir, "delete_owner.after_rename")
     deleting.join(timeout=60)
     assert finish(srv, job_id)["status"] == "succeeded"
+    wait_idle(srv.base, root, timeout=300)
+    after_purge = scope_counts(root, "a1", "p1")
+    world.ev.json("after_purge_counts", after_purge)
+    assert _zero(after_purge) == {}
     world.ev.json(
         "delete_response",
         {"status": deleted["r"].status_code, "body": deleted["r"].text[:500]},
