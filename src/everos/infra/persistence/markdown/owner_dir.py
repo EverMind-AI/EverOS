@@ -25,7 +25,7 @@ from pathlib import Path
 import anyio
 
 from everos.core.errors import PathTraversalError
-from everos.core.failpoints import failpoint
+from everos.core.failpoints import afailpoint
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import today_with_timezone
@@ -109,9 +109,9 @@ class MarkdownOwnerDirStore:
             encoding="utf-8",
         )
         await anyio.Path(owner_dir).rename(trash / _MOVED)
-        failpoint("delete_owner.after_rename")
+        await afailpoint("delete_owner.after_rename")
         await self._keep_today_counters(scope, trash / _MOVED)
-        failpoint("delete_owner.after_restore")
+        await afailpoint("delete_owner.after_restore")
 
     async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
         """Inventory the trash folders, then remove them."""

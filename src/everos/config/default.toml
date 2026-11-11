@@ -305,6 +305,22 @@ max_concurrent_runs = 20
 # not a latency target -- too low kills slow-but-healthy extractions. 0 disables.
 run_timeout_seconds = 1800.0
 
+[purge]
+# Online clearing (POST /api/v2/memory/purge). While a purge runs every write
+# to this memory root is refused with 409 PURGE_IN_PROGRESS.
+# How long a purge waits for work already in flight when it was confirmed
+# (a memorize, an extraction, an index projection) before it deletes again.
+settle_wait_seconds = 60.0
+# Total running time of one purge across retries; past it the job ends
+# `failed` and writes are allowed again. Time the server is stopped is not
+# counted.
+run_budget_seconds = 7200.0
+# How long the nonce returned by POST /memory/purge can be confirmed.
+nonce_ttl_seconds = 300.0
+# Per-store limit on counting the summary; a store that takes longer reads
+# null and the summary says complete=false.
+count_timeout_seconds = 30.0
+
 [logging]
 # Console log level: DEBUG | INFO | WARNING | ERROR. `everos server start
 # --log-level` (or EVEROS_LOG_LEVEL) overrides it for the server; interactive

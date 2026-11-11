@@ -86,6 +86,9 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     errors.QueueSaturatedError: _Rule(429, ErrorCode.QUEUE_SATURATED),
     # A deletion that found its session busy deleted nothing: retry later.
     errors.SessionBusyError: _Rule(503, ErrorCode.SESSION_BUSY),
+    # A purge holds every write off until it ends; poll the job and retry.
+    errors.PurgeInProgressError: _Rule(409, ErrorCode.PURGE_IN_PROGRESS),
+    errors.PurgeNonceInvalidError: _Rule(404, ErrorCode.PURGE_NONCE_INVALID),
     errors.DeletionIncompleteError: _Rule(
         500,
         ErrorCode.INTERNAL_ERROR,

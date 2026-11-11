@@ -42,6 +42,8 @@ class ErrorCode(StrEnum):
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     QUEUE_SATURATED = "QUEUE_SATURATED"
     SESSION_BUSY = "SESSION_BUSY"
+    PURGE_IN_PROGRESS = "PURGE_IN_PROGRESS"
+    PURGE_NONCE_INVALID = "PURGE_NONCE_INVALID"
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +166,22 @@ class SessionBusyError(DomainError):
 
     Nothing was deleted. The API layer maps it to HTTP 503 ``SESSION_BUSY``;
     the caller retries later.
+    """
+
+
+class PurgeInProgressError(DomainError):
+    """A purge of the memory root is running; writes are refused until it ends.
+
+    The API layer maps it to HTTP 409 ``PURGE_IN_PROGRESS``; the message names
+    the job to poll. A write refused this way left nothing behind.
+    """
+
+
+class PurgeNonceInvalidError(DomainError):
+    """A purge confirmation named an unknown, expired or already-used nonce.
+
+    Nothing was deleted. The API layer maps it to HTTP 404
+    ``PURGE_NONCE_INVALID``; the caller requests a new nonce.
     """
 
 

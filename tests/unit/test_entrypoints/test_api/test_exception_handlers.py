@@ -23,6 +23,8 @@ from everos.core.errors import (
     MultimodalNotEnabledError,
     PathTraversalError,
     PayloadTooLargeError,
+    PurgeInProgressError,
+    PurgeNonceInvalidError,
     QueueSaturatedError,
     StorageError,
     UnsupportedModalityError,
@@ -45,6 +47,14 @@ def _make_app() -> FastAPI:
     @app.get("/raise/not-found")
     async def _not_found() -> None:
         raise DocumentNotFoundError("doc_abc123")
+
+    @app.get("/raise/purge-in-progress")
+    async def _purge_in_progress() -> None:
+        raise PurgeInProgressError("purge j1 in progress")
+
+    @app.get("/raise/purge-nonce-invalid")
+    async def _purge_nonce_invalid() -> None:
+        raise PurgeNonceInvalidError("unknown nonce")
 
     @app.get("/raise/conflict")
     async def _conflict() -> None:
@@ -169,6 +179,23 @@ async def test_queue_saturated_returns_429(client: AsyncClient) -> None:
     data = resp.json()
     assert data["error"]["code"] == "QUEUE_SATURATED"
     _assert_envelope(data, path="/raise/queue-saturated")
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "code"),
+    [
+        ("/raise/purge-in-progress", 409, "PURGE_IN_PROGRESS"),
+        ("/raise/purge-nonce-invalid", 404, "PURGE_NONCE_INVALID"),
+    ],
+)
+async def test_purge_errors_map_to_409_404(
+    client: AsyncClient, path: str, status: int, code: str
+) -> None:
+    resp = await client.get(path)
+    assert resp.status_code == status
+    data = resp.json()
+    assert data["error"]["code"] == code
+    _assert_envelope(data, path=path)
 
 
 async def test_conflict_returns_409(client: AsyncClient) -> None:

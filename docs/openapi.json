@@ -3214,7 +3214,9 @@
           "PROVIDER_NOT_CONFIGURED",
           "PAYLOAD_TOO_LARGE",
           "QUEUE_SATURATED",
-          "SESSION_BUSY"
+          "SESSION_BUSY",
+          "PURGE_IN_PROGRESS",
+          "PURGE_NONCE_INVALID"
         ],
         "title": "ErrorCode",
         "description": "Machine-readable error codes returned in the API error envelope.\n\nEach code maps to exactly one HTTP status code. Clients can switch on\nthis value to decide retry / display / routing behaviour without parsing\nthe human-readable ``message`` field."
