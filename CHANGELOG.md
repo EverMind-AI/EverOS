@@ -547,18 +547,31 @@ configuration and Python API changes.
   while other owners wait. Active run records remain recoverable even when
   the bounded completed-run history is full.
 
+### Known limitations
+
+- Profile extraction can miss a newly saved conversation if it runs before the
+  asynchronous episode index catches up. The conversation and extracted memories
+  remain searchable; a later conversation may refresh the profile. This also
+  exists in 1.5.1 and is deferred to 1.6.1.
+- Agent case and skill extraction can overstate an unverified outcome as
+  successful. One smoke-test trajectory exhibited this with the default
+  correctness gate disabled. Review generated procedural memories against their
+  source evidence.
+
 ### Upgrade
 
 One command, then a restart:
 
 ```bash
-uv pip install -U everos      # or: pip install -U everos
+pip install --upgrade everos
+# With uv, allow the pinned pre-release algorithm dependencies:
+uv pip install --upgrade --prerelease=allow everos
 ```
 
 (`'everos[multimodal]'` if that extra was installed.) The everalgo packages
-are pinned exactly, so they move to the new contract line with it, with no
-pre-release flag. The first start after upgrading migrates `system.db` on
-its own (see below); Markdown, the index and the OME jobstore are untouched.
+are pinned exactly, so they move to the new contract line with it. Pip resolves
+these exact pins without `--pre`; uv needs `--prerelease=allow`. The first start
+after upgrading migrates `system.db` on its own (see below); Markdown, the index and the OME jobstore are untouched.
 
 Four things a running deployment may have to change by hand; each is also
 described under *Changed* above:
