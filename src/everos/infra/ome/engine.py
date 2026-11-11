@@ -651,6 +651,28 @@ class OfflineEngine:
             raise OMEError("list_runs_by_event_id: engine not started")
         return await self._run_record_store.list_by_event_id(event_id)
 
+    async def running_runs(self) -> list[RunRecord]:
+        """Every run in RUNNING right now (read-only).
+
+        Raises:
+            OMEError: Engine has not been started.
+        """
+        if not self._started:
+            raise OMEError("running_runs: engine not started")
+        return await self._run_record_store.find_running()
+
+    async def redact_payloads(self, match: Callable[[str], bool], marker: str) -> int:
+        """Replace the stored event of finished, unsuccessful runs ``match``
+        accepts with ``marker``; rows rewritten. ``match`` gets the raw
+        payload: the engine does not know what a scope is.
+
+        Raises:
+            OMEError: Engine has not been started.
+        """
+        if not self._started:
+            raise OMEError("redact_payloads: engine not started")
+        return await self._run_record_store.redact_payloads(match, marker)
+
     async def wait_for_event(
         self,
         event_id: str,

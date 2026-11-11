@@ -659,3 +659,36 @@ async def test_search_topk_is_clamped_to_the_milvus_window(
     # A limit inside the window is passed through untouched.
     await milvus_repo.dense_search([0.1] * 1024, None, limit=25)
     assert seen["limit"] == 25
+
+
+async def test_delete_all_sends_an_explicit_always_true_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    milvus_repo = _milvus().episode
+    deletes: list[tuple[str, str]] = []
+
+    class _FakeClient:
+        def has_collection(self, name: str) -> bool:
+            return True
+
+        def describe_collection(self, name: str):  # type: ignore[no-untyped-def]
+            return _describe_response(milvus_repo)
+
+        def list_indexes(self, name: str):  # type: ignore[no-untyped-def]
+            return list(_index_descriptions(_describe_response(milvus_repo)))
+
+        def describe_index(self, name: str, index_name: str):  # type: ignore[no-untyped-def]
+            return _index_descriptions(_describe_response(milvus_repo))[index_name]
+
+        def delete(self, collection_name: str, *, filter: str) -> dict[str, int]:
+            deletes.append((collection_name, filter))
+            return {"delete_count": 0}
+
+    client = _FakeClient()
+
+    async def _fake_get_client(_connection):  # type: ignore[no-untyped-def]
+        return client
+
+    monkeypatch.setattr(MilvusConnection, "client", _fake_get_client)
+    await milvus_repo.delete_all()
+    assert deletes == [(milvus_repo.collection_name, '__pk != ""')]
