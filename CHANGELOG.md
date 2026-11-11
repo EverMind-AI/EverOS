@@ -257,6 +257,14 @@ machinery that keeps a deleted memory from coming back.
   2026-11-11), re-adding what was on file and sending 63 of 82 updates on to
   REGROUP; the profile was 85% of the text write cost. Member-in-group
   profiles keep `[groups] member_profile_every` and use the same prompts.
+  Measured on 2026-11-11 (DeepSeek V4.1 Flash, thinking off, temperature 0;
+  cold estimate per 1,000 messages, off-peak / peak): LoCoMo conversations
+  0-1 $0.200 / $0.400 before, $0.101 / $0.201 now, the profile 84.5% of it
+  before and 69.4% now; MemEye's eight conversations $0.186 / $0.372 before,
+  $0.155 / $0.309 now. The update prompt is bounded by the profile, not the
+  history: 2.9K to 7.2K tokens on LoCoMo (17.3K before). Reading the poster's
+  pictures adds 10% to the update prompt on MemEye, $0.042 per 1,000
+  pictures off-peak.
   `extract_user_profile` now triggers on the pipeline's `EpisodeExtracted`
   with or without an embedding provider and skips a segment an item already
   rests on; the clusters no longer drive it (`trigger_profile_clustering`
