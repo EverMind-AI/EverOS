@@ -200,6 +200,20 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **EverOS 2 opens only the stores EverOS 2 built.** `.index/store_version`
+  holds the store's major (`2`). The server, every `everos cascade` command
+  and backfill check it before anything in the root changes: a new root is
+  stamped; a root from before the marker is adopted only when something in it
+  can have been written by EverOS 2 alone (index table schema v3 or later, the
+  `image_memory` / `group_profile_item` index tables, a 2.0 system table,
+  `figures/`); an EverOS 1.x store -- or a marker naming another major -- is
+  refused, unchanged, with `StoreVersionError` (CLI exit code 3). A 1.x store
+  is therefore no longer migrated in place (LanceDB v2 to v5): serve it with
+  1.x, or rebuild it with 2.0 from the source conversations. A root with
+  markdown but no store state (hand-written, or a wiped `.index`) is a new
+  store and is indexed as before. No model call; one small file read per
+  start.
+
 - **Memory search runs without an embedding provider.** A deployment with no
   embedding model (`[embedding] model = ""`, or a section that cannot build)
   searches by keyword: every multi-round recall is BM25 alone, and the loop,

@@ -597,7 +597,7 @@ new is embedded.
 
 | Store | What happens |
 |---|---|
-| Stores built by EverOS 1.x | 2.0 does not open them (the 2.0 store-version rule). Nothing to migrate. |
+| Stores built by EverOS 1.x | 2.0 does not open them: the store-version gate (`.index/store_version`, [storage_layout.md](storage_layout.md#store-version)) refuses them before anything in the root changes. Nothing to migrate. |
 | 2.0 stores built before group support | Open as before. SQLite gains the new tables and nullable columns at startup; LanceDB gains the new columns in one versioned step of `migrate_table_schemas` (`src/everos/infra/persistence/lancedb/backend.py:257`), fail-loud, with `everos cascade rebuild` as recovery. Existing rows read `subject_ids = []`, `origin = null`, `source_start = source_end = timestamp`. The step is table schema version 4 (`_TABLE_SCHEMA_VERSION`). Milvus has no such step yet: a Milvus store reports schema drift and needs `everos cascade rebuild`. |
 | Stores where a whole group chat was ingested under one user id (for example benchmark stores built with one owner per conversation) | Not converted. The per-sender copies and cross-owner items cannot be split back reliably, and a converter would have to guess membership. Rebuild from the raw conversations with `group_id`. |
 

@@ -29,6 +29,7 @@ __all__ = [
     "index_repositories",
     "make_storage",
     "open_storage_view",
+    "stamp_store_version",
 ]
 
 import dataclasses
@@ -39,7 +40,7 @@ import pyarrow as pa
 
 from everos.config import Settings, load_settings
 from everos.infra.cascade._projections import HandlerDeps
-from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence import STORE_VERSION, MemoryRoot
 from everos.infra.persistence.factories import build_derived_index
 from everos.infra.persistence.index import (
     DerivedIndex,
@@ -91,8 +92,14 @@ class Storage:
 def make_storage(
     root: MemoryRoot | Path | str, settings: Settings | None = None
 ) -> Storage:
-    """LanceDB-backed storage over ``root``; settings default to the configured ones."""
+    """LanceDB-backed storage over ``root``; settings default to the configured ones.
+
+    The root is stamped with this build's store version, as the application's
+    first open stamps it: what a test writes through this storage is a store
+    this build made, and an application started over it must open it.
+    """
     root = root if isinstance(root, MemoryRoot) else MemoryRoot(root)
+    stamp_store_version(root)
     settings = settings or load_settings()
     database = SqliteDatabase(root, settings.sqlite)
     lance = LanceDbConnection(root, settings.lancedb)
@@ -105,6 +112,14 @@ def make_storage(
         backend=backend,
         index=DerivedIndex(backend, embedding_dim=settings.embedding.dim),
     )
+
+
+def stamp_store_version(root: MemoryRoot) -> None:
+    """Write ``.index/store_version`` unless the root already has one."""
+    marker = root.index_dir / "store_version"
+    if not marker.exists():
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{STORE_VERSION}\n")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,9 +154,11 @@ def open_storage_view(
     LanceDB is opened with a zero read-consistency interval: every read
     re-checks the table version, so rows another connection commits -- the
     application's -- are visible at once instead of after the default
-    never-refresh snapshot.
+    never-refresh snapshot. A test may seed rows through it before the
+    application starts, so the root is stamped as :func:`make_storage` does.
     """
     root = root if isinstance(root, MemoryRoot) else MemoryRoot(root)
+    stamp_store_version(root)
     settings = settings or load_settings()
     settings = settings.model_copy(
         update={

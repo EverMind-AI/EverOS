@@ -303,6 +303,16 @@ class IndexSchemaMismatchError(ConfigurationError):
     """
 
 
+class StoreVersionError(ConfigurationError):
+    """The memory root was built by another EverOS major than this one.
+
+    EverOS 2 opens only stores it built (``<root>/.index/store_version``):
+    a 1.x store is refused before anything in it is changed, and so is one
+    whose marker names another version. The message says what was found and
+    what to do; there is no in-place migration across majors.
+    """
+
+
 class EmbeddingProvenanceError(ConfigurationError):
     """The configured embedding does not match what this index was built with.
 

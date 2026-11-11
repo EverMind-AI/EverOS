@@ -13,7 +13,8 @@ from __future__ import annotations
 
 __all__ = ["CascadeAdmin"]
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING, Any
 
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
@@ -30,6 +31,9 @@ from everos.infra.persistence.sqlite import (
 
 from .registry import match_kind
 
+if TYPE_CHECKING:
+    from everos.infra.persistence import StoreVersion
+
 logger = get_logger(__name__)
 
 
@@ -42,6 +46,8 @@ class CascadeAdmin:
         index: The derived index.
         provenance: The embedding check every index open runs; it also keeps
             the width its probe measured.
+        store_version: The store-version gate; ``None`` opens any root (a
+            test over its own storage).
     """
 
     def __init__(
@@ -51,21 +57,34 @@ class CascadeAdmin:
         ledger: MdChangeStateRepo,
         index: DerivedIndex,
         provenance: EmbeddingProvenance,
+        store_version: StoreVersion | None = None,
     ) -> None:
         self._database = database
         self._ledger = ledger
         self._index = index
         self._provenance = provenance
+        self._store_version = store_version
 
     # ── system DB ──────────────────────────────────────────────────────────
 
     async def create_schema(self) -> int:
-        """Create every registered SQLite table that does not exist yet, and
-        add the columns an older ``system.db`` lacks.
+        """Pass the store-version gate, then create every registered SQLite
+        table that does not exist yet and add the columns an older
+        ``system.db`` lacks.
+
+        The gate runs here because this is the first step of every process
+        that opens a root -- the server, each ``everos cascade`` command,
+        backfill -- so a refused store is refused before anything in it
+        changes.
 
         Returns:
             The number of registered tables.
+
+        Raises:
+            StoreVersionError: The root holds a store this EverOS does not open.
         """
+        if self._store_version is not None:
+            await asyncio.to_thread(self._store_version.check)
         return await self._database.create_schema()
 
     async def dispose(self) -> None:

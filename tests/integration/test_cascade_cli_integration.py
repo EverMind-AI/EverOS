@@ -32,6 +32,7 @@ from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.service import OpsService
 from tests.fakes import arrow_schema, make_storage
+from tests.fakes.storage import stamp_store_version
 
 
 @pytest.fixture
@@ -173,6 +174,9 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
 
     root = MemoryRoot.resolve()
     root.ensure()
+    # The drifted table below is written by hand: declare the store this
+    # build's, as its first open would have.
+    stamp_store_version(root)
     owner_id = "a_rebuild"
     bucket = _dt.date(2026, 5, 18)
     md_path = (

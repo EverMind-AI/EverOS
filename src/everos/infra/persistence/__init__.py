@@ -22,10 +22,14 @@ from .memory_root import app_dir_name as app_dir_name
 from .memory_root import app_id_from_dir as app_id_from_dir
 from .memory_root import project_dir_name as project_dir_name
 from .memory_root import project_id_from_dir as project_id_from_dir
+from .store_version import STORE_VERSION as STORE_VERSION
+from .store_version import StoreVersion as StoreVersion
 
 __all__ = [
+    "STORE_VERSION",
     "LockError",
     "MemoryRoot",
+    "StoreVersion",
     "app_dir_name",
     "app_id_from_dir",
     "memory_root_lock",

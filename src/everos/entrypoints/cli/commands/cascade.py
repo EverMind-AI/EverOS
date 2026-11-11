@@ -47,6 +47,7 @@ from everos.core.errors import (
     IndexSchemaMismatchError,
     LLMNotConfiguredError,
     MemoryRootLockedError,
+    StoreVersionError,
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_display_tz
@@ -171,7 +172,11 @@ async def _runtime(
             err=True,
         )
         raise typer.Exit(code=3) from None
-    except (IndexSchemaMismatchError, EmbeddingProvenanceError) as exc:
+    except (
+        IndexSchemaMismatchError,
+        EmbeddingProvenanceError,
+        StoreVersionError,
+    ) as exc:
         # The operator has one thing to go and do, so say what drifted and
         # stop. Without this the startup guards reach the user as a bare
         # traceback and exit 1 -- and 1 already means "no everos.toml here",

@@ -89,7 +89,7 @@ from everos.infra.ome import (
     OmeLock,
     to_ome_strategy,
 )
-from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence import MemoryRoot, StoreVersion
 from everos.infra.persistence.factories import (
     build_derived_index,
     build_indexes,
@@ -375,6 +375,7 @@ def build_application(
         provenance=EmbeddingProvenance(
             settings.embedding, configured=providers.embedding is not None
         ),
+        store_version=StoreVersion(root),
     )
     fence = DeleteFence(warn_entries=settings.cascade.delete_fence_warn_entries)
     cascade = CascadeOrchestrator(

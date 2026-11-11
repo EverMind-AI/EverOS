@@ -61,6 +61,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │   └── .cache/<sha256>-<edge>.jpeg       derived copies, rebuildable
 │
 ├── .index/                              system-managed, rebuildable (gitignore)
+│   ├── store_version                    the store's EverOS major (`2`); see below
 │   ├── sqlite/
 │   │   ├── system.db                    state / cascade queue (md_change_state) / buffer / audit / LSN  (+ -wal / -shm)
 │   │   ├── ome.db                        Offline Memory Engine state
@@ -231,7 +232,24 @@ strategies is dropped with a warning. They can be deleted by hand.
 Both layers are **fully derivable from markdown** — wipe `.index/`
 and the in-process cascade subsystem re-builds everything by scanning the
 user-visible tree (the durable `md_change_state` SQLite queue covers
-crash-recovery replay).
+crash-recovery replay). A root with markdown and no `.index/` is opened as a
+new store (see below); `everos cascade rebuild` re-indexes without losing the
+SQLite state (the buffer of unprocessed messages, the cascade ledger).
+
+### Store version
+
+`.index/store_version` holds the store's EverOS major, one integer. EverOS 2
+opens only the stores it built: every process that opens a root -- the
+server, every `everos cascade` command, backfill -- checks it before anything
+in the root changes.
+
+| The root | What happens |
+|---|---|
+| holds `2` | Opens. Changes inside the major keep migrating as before (LanceDB `.table_schema_version`, SQLite added columns). |
+| holds another number (an EverOS 1.x root someone stamped, a newer major) or no number | Refused, unchanged. |
+| has no store state -- no `system.db`, no index table | A new store: `2` is written. Markdown already there (hand-written, or left after `.index/` was wiped) is indexed by this build: markdown carries no store state. |
+| has store state but no marker, and something only EverOS 2 writes (index table schema v3 or later, the `image_memory` / `group_profile_item` index tables, a 2.0 system table such as `image_original`, `figures/`) | A 2.0 store from before the marker: adopted (`store_version_adopted`, with the evidence) and stamped. |
+| has store state but no marker and none of that | An EverOS 1.x store: refused, unchanged (`StoreVersionError`; the CLI exits 3). 2.0's extraction and prompts changed, so a 1.x store is rebuilt from its source conversations, not upgraded in place. |
 
 ## 6. Atomic write semantics
 
