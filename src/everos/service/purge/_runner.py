@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any
 
 import sqlalchemy.exc
 
-from everos.core.errors import InfrastructureError, VectorStoreBusyError
+from everos.core.errors import (
+    AppError,
+    InfrastructureError,
+    VectorStoreBusyError,
+    VectorStoreError,
+)
 from everos.core.failpoints import afailpoint
 from everos.core.locks import NamedLocks
 from everos.core.observability.logging import get_logger
@@ -336,12 +341,21 @@ class PurgeRunner:
         where = scope_filter(run.scope)
         deleted = 0
         for repo in self._index.all():
-            count = await (repo.count() if where is None else repo.count_where(where))
-            await afailpoint("purge.step3.delete")
-            if where is None:
-                await repo.delete_all()
-            else:
-                await repo.delete(where)
+            try:
+                count = await (
+                    repo.count() if where is None else repo.count_where(where)
+                )
+                await afailpoint("purge.step3.delete")
+                if where is None:
+                    await repo.delete_all()
+                else:
+                    await repo.delete(where)
+            except AppError:
+                raise
+            except Exception as exc:
+                # A backend's own error type (pymilvus raises its own): an
+                # index that cannot be reached reruns the attempt.
+                raise VectorStoreError(f"index: {exc!r}"[:300]) from exc
             deleted += count
         return deleted
 

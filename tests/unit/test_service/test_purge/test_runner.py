@@ -129,6 +129,29 @@ async def test_retryable_error_reruns_from_step1(
     assert (row.attempts, row.retries) == (2, 1)
 
 
+async def test_index_backend_error_reruns_the_attempt(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p, job_id = await _confirmed(storage)
+
+    class BackendDownError(Exception):  # a backend's own type, as pymilvus raises
+        pass
+
+    repo = next(iter(storage.repos.all()))
+    real_delete, calls = repo.delete, []
+
+    async def delete(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            raise BackendDownError("server unavailable")
+        return await real_delete(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "delete", delete)
+    assert await p.run_to_end(job_id) == "succeeded"
+    row = await _row(p, job_id)
+    assert (row.attempts, row.retries) == (2, 1)
+
+
 async def test_fast_failing_attempts_reach_failed(
     storage: Storage, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
