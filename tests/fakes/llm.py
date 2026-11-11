@@ -52,7 +52,7 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "episode": "_EpisodeReply",
     "atomic_facts": "_AtomicFactsReply",
     "profile_init": "_ProfileItems",
-    "profile_update": "_MemCellUpdateOutput",
+    "profile_update": "_UpdateOutput",
     "reflect": "_ReflectOutput",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""

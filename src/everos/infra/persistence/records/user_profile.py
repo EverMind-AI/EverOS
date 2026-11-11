@@ -56,8 +56,8 @@ class UserProfile(IndexRecord):
     preference bucket."""
 
     profile_timestamp_ms: int
-    """Algo-emitted profile timestamp (ms epoch) — pinned to the
-    timestamp of the freshest MemCell that fed into the synthesis.
+    """Algo-emitted profile timestamp (ms epoch) — the timestamp of the
+    newest episode that fed into the synthesis.
     Mirrored from :attr:`UserProfileFrontmatter.profile_timestamp_ms`
     so downstream code can compare freshness without re-reading md."""
 

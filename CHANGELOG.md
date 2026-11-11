@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The user profile is built from episodes, one at a time.** Every pipeline
+  `EpisodeExtracted` now folds that one episode's narrative into its owner's
+  `user.md` through everalgo's `ProfileExtractor.aextract_from_episodes`,
+  instead of re-reading raw memcells selected through the owner's clusters
+  (with an embedding provider) or through the episode index (without one).
+  The profile no longer depends on clustering, and an episode is no longer
+  sent to the profile again on a later run. The event now carries
+  `owner_name` — the label the owner's chat lines had (`sender_name`, else
+  `sender_id`) — and the profile finds the owner in the narrative by it; an
+  episode whose narrative does not name them is skipped with a
+  `profile_episode_skipped` warning. `ProfileClusterUpdated` is removed:
+  `trigger_profile_clustering` still clusters episodes for agentic search and
+  Reflection, and no longer emits an event.
+
 ## [1.6.0] - 2026-11-11
 
 EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including

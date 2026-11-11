@@ -29,11 +29,13 @@ import asyncio
 import json
 import os
 import shutil
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
+from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence.markdown import (
     AtomicFactDailyFrontmatter,
@@ -124,7 +126,7 @@ def _maybe_snapshot_memory_root(memory_root: Path) -> None:
 
 @pytest.mark.slow
 @pytest.mark.live_llm
-# Retries cover transient real-LLM flakes: OME profile clustering
+# Retries cover transient real-LLM flakes: OME profile extraction
 # occasionally fails to emit user.md within the cascade-drain deadline
 # (LLM timeout, empty response, or async race), but is reliably stable
 # on retry. reruns_delay leaves the cascade workers idle between
@@ -291,8 +293,7 @@ async def test_long_conversation_produces_all_memory_types(
             if candidate.exists():
                 profile_files.append(candidate)
     assert profile_files, (
-        f"no {profile_filename} written — extract_user_profile / "
-        "trigger_profile_clustering did not emit"
+        f"no {profile_filename} written — extract_user_profile did not run"
     )
     # At least one profile file has non-trivial content.
     assert any(f.read_text().strip() for f in profile_files), (
@@ -368,11 +369,38 @@ async def test_async_client_starts_and_health_responds(
 
 _ALICE_TS = 1_775_116_800_000  # 2026-04-02 08:00 UTC
 
+# Alice is named as the canned episode narrative names her: the profile reads
+# her in the narrative by the label her chat lines carry.
 _CONVERSATION = [
-    ("u_alice", "user", "I'm planning a trip to Kyoto at the end of April."),
-    ("assistant", "assistant", "Lovely! Do you prefer a hotel or a ryokan?"),
-    ("u_alice", "user", "I'd rather stay in a ryokan, somewhere quiet."),
+    ("u_alice", "Alice", "user", "I'm planning a trip to Kyoto at the end of April."),
+    ("assistant", None, "assistant", "Lovely! Do you prefer a hotel or a ryokan?"),
+    ("u_alice", "Alice", "user", "I'd rather stay in a ryokan, somewhere quiet."),
 ]
+
+
+@asynccontextmanager
+async def _canned_user_track_client(
+    monkeypatch: pytest.MonkeyPatch, llm: FakeLLMClient
+) -> AsyncIterator[httpx.AsyncClient]:
+    """The real application, Tier 1 (no embedding), behind an ASGI client."""
+    from everos.config import load_settings
+    from everos.entrypoints.api.app import create_app
+    from everos.service import build_application
+
+    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
+    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
+    load_settings.cache_clear()
+    providers = make_providers(llm=llm, embedding=None, rerank=None)
+    app = create_app(
+        application=build_application(load_settings(), providers=providers)
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        yield client
 
 
 async def _poll_until(
@@ -396,26 +424,11 @@ async def test_add_flush_search_get_on_canned_user_track(
     reply judges the tail still open), the flush cuts one cell, and the canned
     episode, atomic facts and profile all become readable through the API.
     """
-    from everos.config import load_settings
-    from everos.entrypoints.api.app import create_app
-    from everos.service import build_application
-
-    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
-    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
-    load_settings.cache_clear()
-    settings = load_settings()
     llm = user_track_llm(boundary="boundary_empty")
-    providers = make_providers(llm=llm, embedding=None, rerank=None)
-    app = create_app(application=build_application(settings, providers=providers))
     episode = json.loads(user_track_script("episode"))
     profile = json.loads(user_track_script("profile_init"))
 
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client,
-    ):
+    async with _canned_user_track_client(monkeypatch, llm) as client:
         add = await client.post(
             "/api/v1/memory/add",
             json={
@@ -423,11 +436,12 @@ async def test_add_flush_search_get_on_canned_user_track(
                 "messages": [
                     {
                         "sender_id": sender,
+                        "sender_name": name,
                         "role": role,
                         "timestamp": _ALICE_TS + i * 60_000,
                         "content": text,
                     }
-                    for i, (sender, role, text) in enumerate(_CONVERSATION)
+                    for i, (sender, name, role, text) in enumerate(_CONVERSATION)
                 ],
             },
         )

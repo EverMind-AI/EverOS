@@ -103,6 +103,11 @@ class EpisodeExtracted(Event):
     episode_text: str
     episode_timestamp_ms: int
     owner_id: str
+    owner_name: str | None = None
+    """How the owner's chat lines were labelled in the source memcell -- their
+    ``sender_name``, else ``owner_id`` -- so the narrative names the owner by
+    it. ``None`` where no pipeline run labelled them (Reflection's merged
+    episodes, backfill's synthesized events, a payload from before the field)."""
     session_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
@@ -165,23 +170,6 @@ class AgentCaseExtracted(Event):
     case_gate: dict[str, Any] | None = None
     """The case's admission decision when a correctness gate admitted it;
     ``None`` when no gate ran (see :attr:`AgentCase.case_gate`)."""
-
-
-class ProfileClusterUpdated(Event):
-    """Fired after the user-memory cluster strategy has merged a new
-    memcell into a cluster.
-
-    Drives the profile-extraction strategy; ``cluster_id`` is the new
-    or merged cluster the source memcell now belongs to.
-    """
-
-    memcell_id: str
-    cluster_id: str
-    owner_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    language: str | None = None
-    """Carried over from the triggering :class:`EpisodeExtracted`."""
 
 
 class SkillClusterUpdated(Event):

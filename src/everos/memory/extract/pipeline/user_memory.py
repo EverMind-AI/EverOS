@@ -102,6 +102,7 @@ class UserMemoryPipeline:
                         episode_text=ep.episode,
                         episode_timestamp_ms=ep.timestamp,
                         owner_id=ep.owner_id,
+                        owner_name=_sender_label(cell, sender_id),
                         session_id=ingested.session_id,
                         app_id=ingested.app_id,
                         project_id=ingested.project_id,
@@ -209,3 +210,16 @@ def _unique_user_senders(cell: AlgoMemCell) -> list[str]:
         if sid and sid not in senders:
             senders.append(sid)
     return senders
+
+
+def _sender_label(cell: AlgoMemCell, sender_id: str) -> str:
+    """How the episode operator labelled the sender's lines.
+
+    Each chat line is rendered under its ``sender_name``, else its
+    ``sender_id``; ingestion gives every line of one sender the same name.
+    """
+    for item in cell.items:
+        name = getattr(item, "sender_name", None)
+        if getattr(item, "sender_id", None) == sender_id and name and name.strip():
+            return name.strip()
+    return sender_id
