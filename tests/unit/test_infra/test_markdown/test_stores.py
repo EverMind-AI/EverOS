@@ -314,6 +314,34 @@ async def test_profile_round_trips(root: MemoryRoot) -> None:
     assert ref.md_path == "app/proj/users/u1/user.md"
 
 
+async def test_profile_history_round_trips_and_is_left_out_while_empty(
+    root: MemoryRoot,
+) -> None:
+    store = MarkdownProfileStore(root)
+    empty = await store.write(
+        _user(), Profile(owner_id="u1", summary="likes tea", timestamp=_TS)
+    )
+    assert "history" not in (root.root / empty.md_path).read_text()
+
+    profile = Profile(
+        owner_id="u1",
+        summary="likes tea",
+        timestamp=_TS,
+        explicit_info=[{"description": "drinks green tea", "item_id": "pi_2"}],
+        history=[
+            {
+                "description": "drinks black tea",
+                "item_id": "pi_1",
+                "replaced_at": _TS,
+                "superseded_by": "pi_2",
+            }
+        ],
+    )
+    await store.write(_user(), profile)
+
+    assert await store.read(_user()) == profile
+
+
 async def test_profile_primary_language_round_trips(root: MemoryRoot) -> None:
     store = MarkdownProfileStore(root)
     profile = Profile(

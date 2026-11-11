@@ -272,6 +272,81 @@ async def test_the_profile_language_is_frozen_once_known() -> None:
     assert "Write every output field in English" in str(model.sent[1][0].content)
 
 
+def _modify(ref: str, description: str) -> dict[str, Any]:
+    return {
+        "action": "modify",
+        "ref": ref,
+        "data": {"evidence": "e", "description": description, "category": "c"},
+        "sources": ["s1"],
+        "pictures": [],
+    }
+
+
+async def test_a_new_value_links_the_old_one_and_keeps_it_in_the_history() -> None:
+    """Nothing is lost in place: the old value moves to ``user.md``'s history."""
+    model = _Model(
+        json.dumps({"operations": [_add("Lives in Paris.")]}),
+        json.dumps({"operations": [_modify("e1", "Lives in Lyon.")]}),
+    )
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    deps.stores.memcell.seed(
+        "mc_2", _memcell(("u_alice", "We moved to Lyon."), ts=_TS + 10_000)
+    )
+
+    await extract_user_profile(_event(), deps)
+    first = await deps.stores.profile.read(_scope())
+    assert first is not None and first.history == []
+    old_id = (first.explicit_info[0].model_extra or {})["item_id"]
+    await extract_user_profile(_event("mc_2"), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None
+    (item,) = stored.explicit_info
+    extra = item.model_extra or {}
+    (old,) = stored.history
+    assert item.description == "Lives in Lyon."
+    assert extra["item_id"] != old_id
+    assert (extra["supersedes"], extra["since"]) == (old_id, _TS + 10_001)
+    assert extra["source_memcell_ids"] == ["mc_2"]
+    assert old["description"] == "Lives in Paris."
+    assert (old["item_id"], old["superseded_by"]) == (old_id, extra["item_id"])
+    assert old["source_memcell_ids"] == ["mc_1"]
+    assert old["replaced_at"] == _TS + 10_001
+
+
+async def test_a_deprecated_item_moves_to_the_history_with_its_reason() -> None:
+    model = _Model(
+        json.dumps({"operations": [_add("Has a car.")]}),
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "deprecate",
+                        "ref": "e1",
+                        "reason": "sold it",
+                        "sources": ["s1"],
+                    }
+                ]
+            }
+        ),
+    )
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I have a car.")))
+    deps.stores.memcell.seed(
+        "mc_2", _memcell(("u_alice", "I sold my car."), ts=_TS + 10_000)
+    )
+
+    await extract_user_profile(_event(), deps)
+    await extract_user_profile(_event("mc_2"), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.explicit_info == []
+    (old,) = stored.history
+    assert old["description"] == "Has a car."
+    assert (old["deprecated_by"], old["reason"]) == (["mc_2"], "sold it")
+
+
 async def _probe(owner_a: str, owner_b: str) -> list[str]:
     log: list[str] = []
 

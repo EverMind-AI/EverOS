@@ -19,6 +19,12 @@ emissions (list of small dicts mixed with strings). LanceDB has no
 ``list[dict]`` column type, so the handler json-encodes both into
 ``explicit_info_json`` / ``implicit_traits_json`` columns and the
 recaller decodes them back at the DTO boundary.
+
+``history`` (the values updates replaced) is not projected; what a read needs
+of it goes onto the items, as on a member's profile: an item that replaced
+others carries the values it replaced
+(:func:`~everos.memory.models.with_previous_values`), so an entry a forget
+takes out of the history leaves the row with the file.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from typing import Any, ClassVar
 from everos.infra.persistence.index import IndexRepository, primary_key
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.infra.persistence.records import UserProfile
+from everos.memory.models import with_previous_values
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -73,8 +80,12 @@ class UserProfileHandler(Handler):
         app_id, project_id = resolve_scope(md_path)
 
         summary = str(fm.get("summary", ""))
-        explicit_info_json = _dump_json(fm.get("explicit_info", []))
-        implicit_traits_json = _dump_json(fm.get("implicit_traits", []))
+        history = fm.get("history")
+        replaced = history if isinstance(history, list) else []
+        explicit_info_json = _dump_json(_shown(fm.get("explicit_info", []), replaced))
+        implicit_traits_json = _dump_json(
+            _shown(fm.get("implicit_traits", []), replaced)
+        )
         profile_timestamp_ms = int(fm.get("profile_timestamp_ms", 0))
 
         digest = compute_content_sha256(
@@ -129,6 +140,11 @@ class UserProfileHandler(Handler):
             deleted=deleted,
             skipped=0,
         )
+
+
+def _shown(items: Any, history: list[Any]) -> Any:
+    """A bucket as a read shows it: each item with the values it replaced."""
+    return with_previous_values(items, history) if isinstance(items, list) else items
 
 
 def _dump_json(value: Any) -> str:

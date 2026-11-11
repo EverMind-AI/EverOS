@@ -82,6 +82,7 @@ async def _write_profile(
     explicit_info: list,
     implicit_traits: list,
     profile_timestamp_ms: int = 1_700_000_000_000,
+    history: list | None = None,
 ) -> str:
     writer = ProfileWriter(memory_root)
     fm = UserProfileFrontmatter(
@@ -91,6 +92,7 @@ async def _write_profile(
         explicit_info=explicit_info,
         implicit_traits=implicit_traits,
         profile_timestamp_ms=profile_timestamp_ms,
+        history=history or [],
     )
     await writer.write(user_id, frontmatter=fm, body="display text")
     return f"default_app/default_project/users/{user_id}/user.md"
@@ -285,3 +287,44 @@ async def test_second_project_same_owner_is_a_new_row(
     outcome = await _handler(memory_root, fake_repo).handle_added_or_modified(second)
     assert (outcome.upserted, outcome.skipped) == (1, 0)
     assert fake_repo.upserts[1][0].project_id == "beta"
+
+
+async def test_an_item_shows_the_value_it_replaced_and_the_history_is_not_projected(
+    memory_root: MemoryRoot, fake_repo: _FakeProfileRepo
+) -> None:
+    """As on a member's profile: the read sees ``previous``, never the history."""
+    md_path = await _write_profile(
+        memory_root,
+        "u_1",
+        summary="s",
+        explicit_info=[
+            {"description": "Lives in Lyon", "item_id": "pi_2", "supersedes": "pi_1"}
+        ],
+        implicit_traits=[],
+        history=[
+            {
+                "description": "Lives in Paris",
+                "item_id": "pi_1",
+                "superseded_by": "pi_2",
+                "replaced_at": 50,
+                "source_start": 10,
+                "source_end": 20,
+            },
+            {"description": "Sold the car", "item_id": "pi_0", "replaced_at": 40},
+        ],
+    )
+
+    await _handler(memory_root, fake_repo).handle_added_or_modified(md_path)
+
+    row = fake_repo.rows["u_1"]
+    (item,) = json.loads(row.explicit_info_json)
+    assert item["previous"] == [
+        {
+            "item_id": "pi_1",
+            "description": "Lives in Paris",
+            "until": 50,
+            "source_start": 10,
+            "source_end": 20,
+        }
+    ]
+    assert "Sold the car" not in row.explicit_info_json + row.implicit_traits_json

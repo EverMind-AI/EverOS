@@ -382,17 +382,20 @@ class UndoManager:
         return written
 
     async def _restore_profile(self, scope: Scope, entry: ForgetEntry) -> int:
-        """Merge the profile items the forget removed back into ``user.md``."""
+        """Merge the items and replaced values the forget removed back into ``user.md``.
+
+        Returns the number of items; a replaced value is history, not an item.
+        """
         if not entry.removed_profile_items:
             return 0
         existing = await self._stores.profile.read(scope)
-        profile, restored = profile_items.restore_items(
+        profile, restored, replaced = profile_items.restore_items(
             existing,
             list(entry.removed_profile_items),
             owner_id=scope.owner_id,
             timestamp=_newest_observed_at(entry.removed_profile_items),
         )
-        if not restored:
+        if not (restored or replaced):
             return 0
         await self._stores.profile.write(scope, profile)
         return restored

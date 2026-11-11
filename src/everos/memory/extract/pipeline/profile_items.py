@@ -26,8 +26,8 @@ that into what EverOS keeps on the items:
   ``reason`` alone (a consolidation dropped it). :func:`bounded_history` keeps
   :data:`HISTORY_LIMIT` entries.
 
-A forgotten picture reaches the items read off it alone (:func:`forget_images`),
-and an undo puts them back (:func:`restore_items`).
+A forgotten picture reaches the items, and the replaced values, read off it
+alone (:func:`forget_images`), and an undo puts them back (:func:`restore_items`).
 """
 
 from __future__ import annotations
@@ -346,48 +346,48 @@ def bounded_history(
 
 def forget_images(
     existing: Profile | None, image_ids: Sequence[str]
-) -> tuple[Profile | None, list[tuple[str, BaseModel]], int]:
-    """Drop every profile item that rests on forgotten pictures alone.
+) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
+    """Drop every item and replaced value that rests on forgotten pictures alone.
 
     An item records the pictures it was read from. Forgetting one of them
     retires the item only when **every** picture behind it is gone: a fact two
     photos established between them survives forgetting either one, and an
-    item with no picture source (a text-derived one) is never touched.
+    item with no picture source (a text-derived one) is never touched. A
+    replaced value in the profile's history goes by the same rule, so what the
+    picture showed surfaces from neither.
 
     Returns:
         ``(profile, removed, count)`` -- the profile to write back (``None``
-        when the owner had none), the removed ``(bucket, item)`` pairs for an
-        undo, and how many items went.
+        when the owner had none), the removed ``(bucket, entry)`` pairs for an
+        undo (bucket ``history`` for a replaced value), and how many items
+        went.
     """
     if existing is None:
         return None, [], 0
     gone = set(image_ids)
 
-    def survives(item: BaseModel) -> bool:
-        sources = item_source_images(item)
+    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
+        sources = item_source_images(entry)
         return not sources or bool(set(sources) - gone)
 
-    removed: list[tuple[str, BaseModel]] = [
-        *(
-            ("explicit_info", item)
-            for item in existing.explicit_info
+    removed: list[tuple[str, dict[str, Any]]] = []
+    kept: dict[str, list[Any]] = {}
+    for bucket in ("explicit_info", "implicit_traits"):
+        items: list[_Item] = getattr(existing, bucket)
+        kept[bucket] = [item for item in items if survives(item)]
+        removed += [
+            (bucket, item.model_dump(mode="json"))
+            for item in items
             if not survives(item)
-        ),
-        *(
-            ("implicit_traits", item)
-            for item in existing.implicit_traits
-            if not survives(item)
-        ),
+        ]
+    count = len(removed)
+    removed += [
+        ("history", dict(entry)) for entry in existing.history if not survives(entry)
     ]
     if not removed:
         return existing, [], 0
-    kept = existing.model_copy(
-        update={
-            "explicit_info": [i for i in existing.explicit_info if survives(i)],
-            "implicit_traits": [i for i in existing.implicit_traits if survives(i)],
-        }
-    )
-    return kept, removed, len(removed)
+    history = [entry for entry in existing.history if survives(entry)]
+    return existing.model_copy(update={**kept, "history": history}), removed, count
 
 
 def restore_items(
@@ -396,16 +396,19 @@ def restore_items(
     *,
     owner_id: str,
     timestamp: int,
-) -> tuple[Profile, int]:
-    """Put items a forget removed back into the profile, once.
+) -> tuple[Profile, int, int]:
+    """Put what a forget removed back into the profile, once.
 
     An item is identified by its folded description, the identity the merge
     uses, so an undo after the item was re-established from another source
     does not duplicate it. The item comes back as it was stored, with its
-    ``observed_at`` and its provenance intact.
+    ``observed_at`` and its provenance intact. A replaced value (bucket
+    ``history``) goes back into the history in its place by ``replaced_at``,
+    newest first, unless the history still holds it.
 
     Returns:
-        ``(profile, restored_count)``.
+        ``(profile, items, replaced)`` -- how many items and how many replaced
+        values came back.
     """
     profile = (
         existing.model_copy(deep=True)
@@ -417,9 +420,16 @@ def restore_items(
         for item in (*profile.explicit_info, *profile.implicit_traits)
         if item.description
     }
-    restored = 0
+    held = {_history_key(entry) for entry in profile.history}
+    restored = replaced = 0
     for bucket, item in removed:
         data = dict(item) if isinstance(item, Mapping) else item.model_dump()
+        if bucket == "history":
+            if _history_key(data) not in held:
+                held.add(_history_key(data))
+                profile.history.append(data)
+                replaced += 1
+            continue
         identity = normalised(str(data.get("description") or ""))
         if not identity or identity in known:
             continue
@@ -429,7 +439,23 @@ def restore_items(
         else:
             profile.explicit_info.append(ExplicitInfoItem.model_validate(data))
         restored += 1
-    return profile, restored
+    if replaced:  # newest first; a stable sort keeps the order of equal times
+        profile.history.sort(key=_replaced_at, reverse=True)
+    return profile, restored, replaced
+
+
+def _history_key(entry: Mapping[str, Any]) -> tuple[str, str, object]:
+    """What tells one replaced value from another: its item, text and time."""
+    return (
+        str(entry.get("item_id") or ""),
+        normalised(str(entry.get("description") or "")),
+        entry.get("replaced_at"),
+    )
+
+
+def _replaced_at(entry: Mapping[str, Any]) -> int:
+    value = entry.get("replaced_at")
+    return value if isinstance(value, int) else 0
 
 
 def _merged(*groups: object) -> list[str]:

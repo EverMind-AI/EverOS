@@ -273,6 +273,14 @@ machinery that keeps a deleted memory from coming back.
   the update. A member profile's history entry now also says what replaced
   the item: `superseded_by`, `deprecated_by` and `reason`, `merged_into`, or
   `reason` for a consolidation drop.
+- **The one-to-one profile keeps what it replaced**, as a member profile
+  does. A fact given a new value is a new item linked to the old one
+  (`supersedes`, `since`), and every item an update or a consolidation takes
+  out moves to a `history` list in `user.md` with what replaced it, at most
+  200 entries (left out of the file while empty); an item changes in place
+  only to gain evidence and sources. A read shows an item's replaced values
+  under `previous`. Forgetting a picture also takes the replaced values read
+  off it alone, and the undo puts them back.
 - **A Reflection merge finishes on the merged episode itself.**
   `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
   and deprecates the replaced members at once; it used to wait for the

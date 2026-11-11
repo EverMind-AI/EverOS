@@ -23,6 +23,9 @@ def to_algo(profile: Profile) -> AlgoProfile:
     """Algo profile validated from the domain profile's fields.
 
     ``primary_language`` stays behind: it is everos bookkeeping, passed to
-    the extractor as ``output_language`` instead.
+    the extractor as ``output_language`` instead; so does ``history``, which
+    the extractor never reads.
     """
-    return AlgoProfile.model_validate(profile.model_dump(exclude={"primary_language"}))
+    return AlgoProfile.model_validate(
+        profile.model_dump(exclude={"primary_language", "history"})
+    )

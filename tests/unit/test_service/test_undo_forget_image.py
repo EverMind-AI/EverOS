@@ -215,6 +215,38 @@ async def test_a_profile_item_the_picture_established_comes_back() -> None:
     assert kept[0].observed_at == _TS
 
 
+async def test_a_replaced_value_the_picture_established_goes_and_comes_back() -> None:
+    """``user.md``'s history holds old values; the picture surfaces from neither."""
+    profile = Profile(
+        owner_id="u1",
+        summary="",
+        timestamp=_TS,
+        explicit_info=[{"description": "Has a dog named Rex", "observed_at": _TS}],
+        history=[
+            {
+                "description": "Has a cat named Biscuit",
+                "replaced_at": _TS,
+                "source_image_ids": [_IMAGE_ID],
+            }
+        ],
+    )
+    forget, undo, stores, _ = _manager(images=(_picture("im_1"),), profile=profile)
+
+    forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
+    assert forgotten.profiles == 0  # no item went; a replaced value did
+    after = stores.profile.profiles[_scope()]
+    assert after.history == []
+    assert [item.description for item in after.explicit_info] == ["Has a dog named Rex"]
+
+    result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
+
+    assert result.profiles == 0
+    back = stores.profile.profiles[_scope()]
+    assert [entry["description"] for entry in back.history] == [
+        "Has a cat named Biscuit"
+    ]
+
+
 async def test_a_second_undo_restores_nothing() -> None:
     forget, undo, _, _ = _manager(images=(_picture("im_1"),))
     await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)

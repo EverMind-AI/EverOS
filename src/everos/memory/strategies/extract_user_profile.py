@@ -21,7 +21,10 @@ reading them again only re-adds it.
 - **Items.** Every item carries its id, its source segments and their span,
   and the pictures it was read off
   (:mod:`~everos.memory.extract.pipeline.profile_items`), so forgetting a
-  picture reaches the items resting on it alone.
+  picture reaches the items resting on it alone. As on a member profile, a
+  fact given a new value is a new item linked to the old one (``supersedes``,
+  ``since``), and every item the update took out moves to ``user.md``'s
+  history with what replaced it: nothing is lost in place.
 - **Language.** A stored ``primary_language`` wins and is never changed
   automatically; until one is stored, the segment's language (resolved in
   code by the pipeline) is used and then frozen.
@@ -36,7 +39,7 @@ from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline.pictures import profile_pictures
-from everos.memory.extract.pipeline.profile_items import stamp_update
+from everos.memory.extract.pipeline.profile_items import bounded_history, stamp_update
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import Profile
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
@@ -114,12 +117,15 @@ async def extract_user_profile(
             custom_instructions=deps.instructions.load("profile_extract"),
             output_language=language,
         )
-        profile, _replaced = stamp_update(
+        profile, replaced = stamp_update(
             existing,
             update,
             cells={event.memcell_id: found[0]},
             replaced_at=found[0].timestamp,
             primary_language=language,
+        )
+        profile.history = bounded_history(
+            replaced, existing.history if existing else [], profile
         )
         await deps.stores.profile.write(scope, profile)
     logger.info(

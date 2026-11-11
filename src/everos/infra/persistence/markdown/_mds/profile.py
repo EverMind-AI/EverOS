@@ -5,9 +5,9 @@ Path: ``users/<user_id>/user.md``.
 Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
 two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
 (``explicit_info`` / ``implicit_traits``). ``profile_timestamp_ms``
-mirrors :attr:`everalgo.types.Profile.timestamp` so the
-``extract_user_profile`` strategy can compare per-user freshness against
-cluster ``last_ts`` without re-parsing the body.
+mirrors :attr:`everalgo.types.Profile.timestamp`, and ``history`` keeps the
+items updates replaced or retired, as a member's profile in a group does
+(docs/group-memory.md, 7.4).
 """
 
 from __future__ import annotations
@@ -39,13 +39,15 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     """Algo-side ``implicit_traits`` bucket (LLM-inferred preferences)."""
 
     profile_timestamp_ms: int = 0
-    """Algo-emitted profile timestamp (ms epoch); equals the timestamp of
-    the most recent MemCell that fed into the synthesis. Compared with
-    :attr:`everos.infra.persistence.sqlite.Cluster.last_ts_ms` to decide
-    whether a cluster is fresh enough to drive a profile re-extraction."""
+    """Algo-emitted profile timestamp (ms epoch): the timestamp of the most
+    recent segment an update read."""
 
     primary_language: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     """The ``OutputLanguage`` value the profile is frozen to; left out of the
     file while unknown, and absent from profiles written before it."""
+
+    history: list[Any] = Field(default_factory=list, exclude_if=lambda value: not value)
+    """Items an update replaced or retired, newest first, each with
+    ``replaced_at`` and what replaced it; left out of the file while empty."""

@@ -157,7 +157,7 @@ class ForgetManager:
         referring = await self._referring_episodes(scope, image_id)
         written = await self._rewrite_episodes(scope, referring, image_id)
         profile_removed = await self._forget_profile(scope, image_id)
-        profiles = len(profile_removed)
+        profiles = sum(1 for bucket, _ in profile_removed if bucket != "history")
         entry = await self._stores.forget_log.record(
             target="image",
             target_id=image_id,
@@ -231,25 +231,24 @@ class ForgetManager:
     async def _forget_profile(
         self, scope: Scope, image_id: str
     ) -> tuple[tuple[str, dict[str, object]], ...]:
-        """Take the profile items that rested on this picture alone out of ``user.md``.
+        """Take what rested on this picture alone out of ``user.md``.
 
         A profile item records the pictures that established it. The item goes
         only when every one of them is forgotten (see
         :func:`profile_items.forget_images`); a fact a photo and a sentence
         both established keeps the sentence's ground and stays. An item with no
         picture source is never touched, which is why a forget cannot quietly
-        erase a text-derived fact.
+        erase a text-derived fact. A replaced value in the profile's history
+        goes by the same rule, so the picture surfaces from neither.
 
-        The profile document is rewritten rather than versioned: ``user.md`` is
-        everalgo's output shape, the whole profile is replaced by every
-        synthesis, and there is no per-item markdown log to append to. What
-        makes the removal reversible is the caller's undo, which re-merges the
-        items this returned — so the item list is logged here at info level and
-        the caller's own response carries the count.
+        The document is rewritten in place. What makes the removal reversible
+        is the forget log, which keeps every removed item and replaced value
+        for the undo to merge back -- so the list is logged here at info level
+        and the caller's own response carries the item count.
         """
         existing = await self._stores.profile.read(scope)
         next_profile, removed, count = profile_items.forget_images(existing, [image_id])
-        if not count or next_profile is None:
+        if not removed or next_profile is None:
             return ()
         await self._stores.profile.write(scope, next_profile)
         logger.info(
@@ -259,9 +258,10 @@ class ForgetManager:
             owner_id=scope.owner_id,
             image_id=image_id,
             removed=count,
+            history=len(removed) - count,
             buckets=[bucket for bucket, _ in removed],
         )
-        return tuple((bucket, item.model_dump(mode="json")) for bucket, item in removed)
+        return tuple(removed)
 
     async def _referring_episodes(
         self, scope: Scope, image_id: str

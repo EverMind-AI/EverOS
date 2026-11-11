@@ -20,6 +20,20 @@ def test_algo_profile_round_trips_through_the_domain() -> None:
     assert profile.to_algo(profile.from_algo(algo)) == algo
 
 
+def test_the_history_never_reaches_everalgo() -> None:
+    stored = Profile(
+        owner_id="u1",
+        summary="s",
+        timestamp=1,
+        history=[{"description": "Lived in Paris", "replaced_at": 1}],
+    )
+
+    algo = profile.to_algo(stored)
+
+    assert "history" not in algo.model_dump()
+    assert profile.from_algo(algo).history == []
+
+
 def test_domain_profile_items_keep_host_extras() -> None:
     algo = AlgoProfile(
         owner_id="u1",

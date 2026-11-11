@@ -216,7 +216,9 @@ and write their markdown when ready:
 - `extract_user_profile` — the owner's `user.md`, updated once per new
   segment from that segment only (with the pictures the owner posted in it):
   one update call, and a consolidation call only when a part of the profile is
-  over its cap and has grown since it was last consolidated
+  over its cap and has grown since it was last consolidated. Every item keeps
+  its id and source segments; a replaced or retired item moves to the file's
+  `history`, and a new value names the item it replaced
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design, and the
   `agent_case_skipped` log line says which check skipped them). With

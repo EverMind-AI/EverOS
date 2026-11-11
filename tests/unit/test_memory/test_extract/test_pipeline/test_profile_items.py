@@ -14,8 +14,8 @@ What these pin (``everos.memory.extract.pipeline.profile_items``):
 - an item a consolidation wrote takes the union of what it came from, and is
   read off pictures only when every part of it was;
 - the history bound keeps the values a current item still shows as replaced;
-- a forgotten picture takes the items resting on it alone, and an undo puts
-  them back once.
+- a forgotten picture takes the items and the replaced values resting on it
+  alone, and an undo puts them back once, history in its place.
 """
 
 from __future__ import annotations
@@ -428,10 +428,60 @@ def test_an_undo_puts_the_item_back_whole_and_once() -> None:
         _pictured("Has a cat named Biscuit", sources=[_CAT]), [_CAT]
     )
 
-    profile, restored = restore_items(None, removed, owner_id="u1", timestamp=1)
-    assert restored == 1
+    profile, restored, replaced = restore_items(
+        None, removed, owner_id="u1", timestamp=1
+    )
+    assert (restored, replaced) == (1, 0)
     assert _extra(profile.explicit_info[0])[SOURCE_IMAGE_KEYS] == [_CAT]
 
-    again, restored = restore_items(profile, removed, owner_id="u1", timestamp=1)
-    assert restored == 0
+    again, restored, replaced = restore_items(
+        profile, removed, owner_id="u1", timestamp=1
+    )
+    assert (restored, replaced) == (0, 0)
     assert len(again.explicit_info) == 1
+
+
+def _replaced(description: str, replaced_at: int, **extra: object) -> dict[str, Any]:
+    return {"description": description, "replaced_at": replaced_at, **extra}
+
+
+def test_a_forget_takes_a_replaced_value_its_picture_alone_established() -> None:
+    profile = _profile(_item("Works in Python"))
+    profile.history = [
+        _replaced("Had a black cat", 30, **{SOURCE_IMAGE_KEYS: [_CAT]}),
+        _replaced("Lived in Paris", 20, source_memcell_ids=["mc_1"]),
+        _replaced("Had a grey cat", 10, **{SOURCE_IMAGE_KEYS: [_CAT, _CITY]}),
+    ]
+
+    after, removed, count = forget_images(profile, [_CAT])
+
+    assert after is not None
+    assert count == 0  # a replaced value is history, not an item
+    assert [entry["description"] for entry in after.history] == [
+        "Lived in Paris",
+        "Had a grey cat",
+    ]
+    assert removed == [("history", profile.history[0])]
+    assert [i.description for i in after.explicit_info] == ["Works in Python"]
+
+
+def test_an_undo_puts_a_replaced_value_back_in_its_place_once() -> None:
+    profile = _profile(_item("Works in Python"))
+    profile.history = [
+        _replaced("Lived in Lyon", 30),
+        _replaced("Had a black cat", 20, **{SOURCE_IMAGE_KEYS: [_CAT]}),
+        _replaced("Lived in Paris", 10),
+    ]
+    after, removed, _ = forget_images(profile, [_CAT])
+
+    back, restored, replaced = restore_items(after, removed, owner_id="u1", timestamp=1)
+    assert (restored, replaced) == (0, 1)
+    assert [entry["description"] for entry in back.history] == [
+        "Lived in Lyon",
+        "Had a black cat",
+        "Lived in Paris",
+    ]
+
+    again, _, replaced = restore_items(back, removed, owner_id="u1", timestamp=1)
+    assert replaced == 0
+    assert len(again.history) == 3

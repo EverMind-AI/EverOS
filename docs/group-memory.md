@@ -1477,14 +1477,14 @@ The second half of Step 1 differs from the text above in these places:
   (`memory/extract/pipeline/group_render.py`): id `chat.group_roster_block`,
   version 1, with a fingerprint the tests pin.
 - **Member-in-group profile format.** There is no 2.0 profile format on this
-  line. A member's profile uses `user.md`'s fields plus `group_id`,
-  `member_id`, `pending_memcell_ids` (the throttle) and `history`. Each item
+  line. A member's profile uses `user.md`'s fields, `history` included, plus
+  `group_id`, `member_id` and `pending_memcell_ids` (the throttle). Each item
   carries `item_id`, `source_memcell_ids` and the span `source_start` /
-  `source_end`. The profile operator does not say which segment an item came
-  from, so an item's sources are all the segments of the update that added or
-  rewrote it. The index row id is `<group_id>:<member_id>`. A new value of an
-  item carries `supersedes` and `since`, its history entry `superseded_by`;
-  the index row's items carry `previous` (section 7.4).
+  `source_end`; its sources are the segments its own operation named. The
+  index row id is `<group_id>:<member_id>`. A new value of an item carries
+  `supersedes` and `since`, its history entry `superseded_by`; the index
+  row's items carry `previous` (section 7.4). The one-to-one `user.md` keeps
+  its items, history and links the same way.
 - **Member-profile visibility.** An item is shown when the span of its
   sources lies in one of the asker's windows. The summary is written over
   every item, so it is shown only when every item is.

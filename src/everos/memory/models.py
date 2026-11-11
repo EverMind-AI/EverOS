@@ -379,6 +379,12 @@ class Profile(BaseModel):
     primary_language: str | None = None
     """The ``OutputLanguage`` value the profile is written in, frozen by the
     first extraction that knew it and never changed automatically after."""
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    """The one-to-one profile's history part (``user.md``): items an update
+    replaced or retired, newest first, each with ``replaced_at`` and what
+    replaced it (``superseded_by``, ``deprecated_by`` and ``reason``,
+    ``merged_into``, or ``reason``). A member-in-group profile keeps its own on
+    :attr:`MemberProfile.history` and leaves this empty."""
 
     @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod
@@ -397,6 +403,7 @@ class Profile(BaseModel):
         explicit_info: Sequence[object],
         implicit_traits: Sequence[object],
         primary_language: str | None = None,
+        history: Sequence[object] = (),
     ) -> Profile:
         """A stored profile, without the items that are no longer items.
 
@@ -414,6 +421,7 @@ class Profile(BaseModel):
                 ImplicitTraitItem, implicit_traits, owner_id
             ),
             primary_language=primary_language,
+            history=[dict(entry) for entry in history if isinstance(entry, dict)],
         )
 
 
@@ -460,20 +468,21 @@ are the group segments it was read from and ``source_start`` /
 membership windows (docs/group-memory.md, section 9.1)."""
 
 MEMBER_VERSION_KEYS: tuple[str, ...] = ("supersedes", "since")
-"""The keys a member-profile fact carries when it is a new value of another.
+"""The keys a profile fact carries when it is a new value of another.
 
 ``supersedes`` is the ``item_id`` of the ``explicit_info`` item an update
 rewrote into this one and ``since`` the epoch ms of that update; the replaced
 item's ``history`` entry names this one in ``superseded_by``
-(docs/group-memory.md, 7.4)."""
+(docs/group-memory.md, 7.4). The personal profile (``user.md``) links its
+facts the same way."""
 
 MEMBER_PREVIOUS_KEY = "previous"
-"""The key under which a read of a member profile lists the values an item
+"""The key under which a read of a profile lists the values an item
 replaced, newest first: ``item_id``, ``description``, ``until`` (epoch ms)
 and the old item's ``source_start`` / ``source_end`` each."""
 
 MEMBER_PREVIOUS_LIMIT = 2
-"""Replaced values a read shows per member-profile item."""
+"""Replaced values a read shows per profile item."""
 
 
 class MemberProfile(BaseModel):
@@ -509,7 +518,7 @@ def replaced_chains(
     *,
     limit: int = MEMBER_PREVIOUS_LIMIT,
 ) -> list[list[Mapping[str, Any]]]:
-    """For each member-profile item, the history entries of the values it replaced.
+    """For each profile item, the history entries of the values it replaced.
 
     Newest first, at most ``limit``: the entry its ``supersedes`` names, then
     the one that entry names, and so on. A link is followed only to an entry
@@ -545,7 +554,7 @@ def with_previous_values(
     *,
     limit: int = MEMBER_PREVIOUS_LIMIT,
 ) -> list[object]:
-    """Member-profile items as a read shows them, each with the values it replaced.
+    """Profile items as a read shows them, each with the values it replaced.
 
     An item that replaced others gains :data:`MEMBER_PREVIOUS_KEY`, read from
     ``history`` through :func:`replaced_chains`; every other item, and
