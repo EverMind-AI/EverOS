@@ -4,11 +4,40 @@
       "action": "add",
       "type": "explicit_info",
       "data": {
-        "evidence": "Alice: I'd like to see the cherry blossoms.",
-        "description": "Wants to see the cherry blossoms in Kyoto.",
+        "evidence": "Alice: I'm planning a trip to Kyoto at the end of April.",
+        "description": "Plans a trip to Kyoto in late April 2026.",
         "category": "travel"
-      }
+      },
+      "sources": [
+        "s1"
+      ],
+      "pictures": []
+    },
+    {
+      "action": "add",
+      "type": "explicit_info",
+      "data": {
+        "evidence": "Alice: I'd rather stay in a ryokan than a hotel.",
+        "description": "Prefers a traditional ryokan over a hotel.",
+        "category": "travel"
+      },
+      "sources": [
+        "s1"
+      ],
+      "pictures": []
+    },
+    {
+      "action": "add",
+      "type": "implicit_traits",
+      "data": {
+        "basis": "Asks for quiet areas and traditional lodging.",
+        "description": "Values quiet, traditional settings when travelling.",
+        "trait": "travel style"
+      },
+      "sources": [
+        "s1"
+      ],
+      "pictures": []
     }
-  ],
-  "update_note": "Added the cherry-blossom wish."
+  ]
 }

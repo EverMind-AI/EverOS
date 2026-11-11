@@ -3,9 +3,8 @@
 Cells / memcell_ids / message_id-mapping / sender lists are produced by
 :mod:`everos.memory.extract.boundary` (which also writes the single ``memcell``
 sqlite row per cell). This pipeline only handles the user-perspective output of
-one cell: the Episode md, one image-memory md per picture the cell carried, the
-profile items the pictures established, and the ``EpisodeExtracted`` events
-that announce the episodes.
+one cell: the Episode md, one image-memory md per picture the cell carried, and
+the ``EpisodeExtracted`` events that announce the episodes.
 
 Two extraction routes, chosen per cell by whether it carries a picture:
 
@@ -29,16 +28,10 @@ the episode, its event and so every extraction downstream. Only a session
 without a letter anywhere leaves the model the choice, and the language its
 episode was written in is pinned instead, as before.
 
-A picture is evidence about its sender as well as a memory of its own, so the
-picture route also merges the reply's profile items into ``user.md`` before the
-episode is published -- into the poster's ``user.md`` only (D17): a picture one
-sender posted says nothing about the other senders of the cell. That runs
-here rather than in the ``extract_user_profile`` strategy because a
-conversation carried by photos would otherwise never move the portrait, and
-it shares that strategy's partition lock so the two writers of ``user.md``
-cannot lose each other's items. The strategy still runs
-afterwards and reads the merged profile, so picture items and text items end up
-in one document with one merge rule between them.
+A picture is evidence about its sender as well as a memory of its own; what
+it says about its poster reaches ``user.md`` through the profile update, which
+reads the segment's pictures itself (``extract_user_profile``), so this
+pipeline writes no profile item.
 """
 
 from __future__ import annotations
@@ -59,12 +52,10 @@ from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.conversation_language import resolve_cell_language
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline import image_memory as image_extract
-from everos.memory.extract.pipeline import profile_delta
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.extract.pipeline.pictures import (
     Picture,
     memcell_alive,
-    ops_by_poster,
     pictures_of,
 )
 from everos.memory.models import Episode, ImageMemory, IngestResult
@@ -74,7 +65,6 @@ from everos.memory.ports import (
     ImageMemoryStore,
     MemcellStore,
     MemoryRef,
-    ProfileStore,
     Scope,
     SessionKey,
 )
@@ -85,15 +75,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_Extraction = tuple[
-    AlgoEpisode,
-    dict[str, tuple[str, str]],
-    list[profile_delta.ProfileItemOp],
-]
-"""What one cell's extraction answers: the episode, each picture's
-``(description, ocr)`` by label, and the profile operations the pictures
-produced (empty on the text route). One tuple because the three are readings of
-the same call and splitting them would let them drift apart."""
+_Extraction = tuple[AlgoEpisode, dict[str, tuple[str, str]]]
+"""What one cell's extraction answers: the episode, and each picture's
+``(description, ocr)`` by label (empty on the text route). One tuple because
+the two are readings of the same call and splitting them would let them drift
+apart."""
 
 
 class UserMemoryPipeline:
@@ -111,8 +97,6 @@ class UserMemoryPipeline:
             ``image_store``.
         image_limits: ``[images]`` — the size a picture is scaled to before the
             model sees it.
-        profile_store: Where the profile items the pictures established are
-            merged. ``None`` keeps the picture route's profile half off.
     """
 
     def __init__(
@@ -125,7 +109,6 @@ class UserMemoryPipeline:
         image_store: ImageStore | None = None,
         image_memory_store: ImageMemoryStore | None = None,
         image_limits: ImageLimits | None = None,
-        profile_store: ProfileStore | None = None,
     ) -> None:
         self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
@@ -135,7 +118,6 @@ class UserMemoryPipeline:
         self._images = image_store
         self._image_memory_store = image_memory_store
         self._image_limits = image_limits
-        self._profile_store = profile_store
 
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
@@ -160,7 +142,7 @@ class UserMemoryPipeline:
                 memcells=self._memcell_store,
             )
             pictures = await self._pictures_of(cell)
-            algo_ep, described, profile_ops = await self._extract(
+            algo_ep, described = await self._extract(
                 ingested, prepared, pictures, named
             )
             # That language pins every extraction downstream of this episode.
@@ -171,7 +153,6 @@ class UserMemoryPipeline:
                 if named is not None
                 else detect_output_language(algo_ep.episode)
             )
-            by_poster = ops_by_poster(profile_ops, pictures)
             for sender_id in user_senders:
                 md_paths += await self._persist_images(
                     ingested,
@@ -180,16 +161,6 @@ class UserMemoryPipeline:
                     described=described,
                     owner_id=sender_id,
                     session_id=ingested.session_id,
-                )
-                # D17: what a picture says about a person is about its poster;
-                # another sender of the cell gets none of it.
-                await self._persist_profile(
-                    ingested,
-                    prepared,
-                    ops=by_poster.get(sender_id, []),
-                    pictures=[p for p in pictures if p.poster == sender_id],
-                    owner_id=sender_id,
-                    language=language,
                 )
                 ep = Episode.from_algo(
                     algo_ep,
@@ -231,7 +202,7 @@ class UserMemoryPipeline:
         pictures: Sequence[Picture],
         language: OutputLanguage | None,
     ) -> _Extraction:
-        """One whole-cell episode (and picture descriptions, and profile items).
+        """One whole-cell episode (and picture descriptions).
 
         ``sender_id=None`` binds the episode to no user; the fan-out to one copy
         per sender happens in markdown only, so a cell costs one call. An
@@ -253,16 +224,15 @@ class UserMemoryPipeline:
             },
         ) as extract_span:
             if pictures:
-                algo_ep, described, ops = await self._extract_with_pictures(
+                algo_ep, described = await self._extract_with_pictures(
                     prepared, pictures, custom_instructions, language
                 )
             else:
-                algo_ep, described, ops = (
-                    *await self._extract_text(prepared, custom_instructions, language),
-                    [],
+                algo_ep, described = await self._extract_text(
+                    prepared, custom_instructions, language
                 )
             capture_output(extract_span, algo_ep.episode)
-        return algo_ep, described, ops
+        return algo_ep, described
 
     async def _extract_text(
         self,
@@ -294,13 +264,7 @@ class UserMemoryPipeline:
         custom_instructions: str | None,
         language: OutputLanguage | None,
     ) -> _Extraction:
-        """The picture route: one call for the episode, the descriptions, the profile.
-
-        The reply's profile operations name a picture by its per-cell label
-        (``img-1``); :func:`profile_delta.retarget` turns those into content
-        hashes before anything is written, because the label means nothing
-        outside this cell and a later forget knows only the hash.
-        """
+        """The picture route: one call for the episode and the descriptions."""
         labels = [(picture.label, picture.data, picture.mime) for picture in pictures]
         by_label = {picture.label: picture.image_id for picture in pictures}
 
@@ -315,45 +279,10 @@ class UserMemoryPipeline:
             return (
                 image_extract.to_episode(reply, prepared.cell, labels=by_label),
                 {fact.ref: (fact.description, fact.ocr) for fact in reply.images},
-                profile_delta.retarget(reply.profile, by_label),
             )
 
         return await retry_llm_output(
             attempt, operator="image_memory", memcell_id=prepared.memcell_id
-        )
-
-    async def _persist_profile(
-        self,
-        ingested: IngestResult,
-        prepared: PreparedCell,
-        *,
-        ops: Sequence[profile_delta.ProfileItemOp],
-        pictures: Sequence[Picture],
-        owner_id: str,
-        language: str | None,
-    ) -> int:
-        """Merge the pictures' profile items into ``owner_id``'s profile.
-
-        Skipped when the route produced none (every text-only cell) and when no
-        store was injected. The write is serialised with the
-        ``extract_user_profile`` strategy on the owner's partition lock, so the
-        strategy that runs just after this cell sees the merged items instead
-        of overwriting them.
-        """
-        if self._profile_store is None or not ops:
-            return 0
-        return await profile_delta.write_picture_profile(
-            store=self._profile_store,
-            scope=Scope(
-                app_id=ingested.app_id,
-                project_id=ingested.project_id,
-                owner_id=owner_id,
-                owner_type="user",
-            ),
-            ops=ops,
-            observed_at=prepared.cell.timestamp,
-            image_ids=[picture.image_id for picture in pictures],
-            language=language,
         )
 
     async def _pictures_of(self, cell: AlgoMemCell) -> list[Picture]:

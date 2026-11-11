@@ -205,8 +205,10 @@ class ProfileClusterUpdated(Event):
     """Fired after the user-memory cluster strategy has merged a new
     memcell into a cluster.
 
-    Drives the profile-extraction strategy; ``cluster_id`` is the new
-    or merged cluster the source memcell now belongs to.
+    ``cluster_id`` is the new or merged cluster the source memcell now
+    belongs to. No strategy consumes it since the profile update reads each
+    new segment from its :class:`EpisodeExtracted` directly; Reflection reads
+    the clusters from their store.
     """
 
     memcell_id: str

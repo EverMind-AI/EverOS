@@ -261,9 +261,11 @@ async def test_skill_chain_e2e(
 async def test_profile_chain_e2e(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
-    """Chain: EpisodeExtracted → trigger_profile_clustering (sqlite) →
-    ProfileClusterUpdated → extract_user_profile → SUCCESS.
+    """Chain: EpisodeExtracted → trigger_profile_clustering (sqlite) and,
+    from the same event, extract_user_profile → SUCCESS for both.
 
+    The profile update reads the event's segment itself; the clustering still
+    runs (Reflection reads the clusters) and no longer drives the profile.
     Real ``cluster_by_geometry`` (cosine + time-window) with a hash-based
     deterministic embedder so the geometry stage operates on well-spread
     unit vectors. Real sqlite cluster store. The memcell store and the
@@ -273,6 +275,7 @@ async def test_profile_chain_e2e(
     """
 
     from everalgo.types import Profile as AlgoProfile
+    from everalgo.user_memory.profile import ItemOrigin, ProfileUpdate
 
     from everos.infra.ome.records import RunStatus
 
@@ -355,7 +358,15 @@ async def test_profile_chain_e2e(
             },
             indexes={"episode": episode_index},
         )
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        mock_extractor_cls.return_value.aupdate = AsyncMock(
+            return_value=ProfileUpdate(
+                profile=new_profile,
+                explicit_info=(
+                    ItemOrigin(change="added", sources=("mc_aaaaaaaaaaa1",)),
+                ),
+                implicit_traits=(),
+            )
+        )
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")
@@ -401,4 +412,4 @@ async def test_profile_chain_e2e(
     assert cluster_logs, "expected profile_cluster_updated log line"
     assert profile_logs, "expected user_profile_extracted log line"
     assert profile_logs[0]["owner_id"] == "u_alice"
-    assert profile_logs[0]["mode"] == "INIT"
+    assert profile_logs[0]["mode"] == "FIRST"

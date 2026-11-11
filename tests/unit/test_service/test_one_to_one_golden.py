@@ -18,8 +18,11 @@ golden file produced at the commit *before* group memory:
 The conversations are a LoCoMo excerpt (two human senders in one session: the
 per-sender fan-out), the tracked solo assistant chat (one user and an
 assistant: the LongMemEval shape) and a one-sender chat with a picture, which
-runs the picture route and its profile items (D17: with one sender the poster
-is that sender, so nothing may move).
+runs the picture route. Since the profile's two-prompt change the picture call
+writes no profile item (the profile update reads the pictures itself, and
+this test runs the pipeline, not the profile strategy), so the picture chat
+writes no ``user.md``; that, and the picture prompt without its profile
+block, are the one change the golden was regenerated for.
 
 Fields added after the golden was recorded are allowed in the responses and
 rows only when they are listed in :data:`ADDED_FIELDS` and carry their empty
@@ -192,19 +195,6 @@ def _picture_reply(prompt: str) -> str:
             "content": f"{episode['content']} {refs}".strip(),
             "images": [
                 {"ref": label, "description": f"A tabby cat on a sill ({label})"}
-                for label in labels
-            ],
-            "profile": [
-                {
-                    "action": "add",
-                    "type": "explicit_info",
-                    "source_image_id": label,
-                    "data": {
-                        "category": "pets",
-                        "description": f"Has a tabby cat ({label})",
-                        "evidence": "the photo shows the cat at home",
-                    },
-                }
                 for label in labels
             ],
         }
@@ -622,9 +612,10 @@ def test_the_golden_covers_every_one_to_one_shape() -> None:
     assert any("/users/melanie/episodes/" in p for p in paths)
     # The assistant of the solo chat owns nothing on the user track.
     assert not any("/users/robot_001/" in p for p in paths)
-    # The picture route: a picture memory and a profile item for the poster.
+    # The picture route: a picture memory, and no profile item -- the profile
+    # update reads the pictures itself (the strategy, not this pipeline).
     assert any("/users/u_pic/images/" in p for p in paths)
-    assert any(p.endswith("/users/u_pic/user.md") for p in paths)
+    assert not any(p.endswith("/users/u_pic/user.md") for p in paths)
     assert golden["rows"]["image_memory"]
     assert golden["search"]["caroline:session_buffer"]["unprocessed_messages"]
-    assert golden["search"]["u_pic:profile"]["profiles"]
+    assert golden["search"]["u_pic:profile"]["profiles"] == []

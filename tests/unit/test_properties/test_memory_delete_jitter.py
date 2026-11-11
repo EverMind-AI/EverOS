@@ -54,6 +54,7 @@ from everalgo.types import AgentSkill as AlgoAgentSkill
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
+from everalgo.user_memory.profile import ProfileUpdate
 from hypothesis import HealthCheck, given, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
@@ -67,7 +68,6 @@ from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory import IngestResult
 from everos.memory.events import (
     EpisodeExtracted,
-    ProfileClusterUpdated,
     SkillClusterUpdated,
 )
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
@@ -603,21 +603,25 @@ _ACTIONS = st.one_of(
 
 
 async def _profile(world: _World, owner: str) -> None:
-    """Profile extraction from the owner's clusters: its partition lock, the
+    """Profile update from one of the owner's segments: its partition lock, the
     model under it, then the owner lock for the write."""
-    clusters = await world.stores.cluster.list_for_owner(_scope(owner), "user_memory")
-    if not clusters:
+    mine = [(e, m) for (o, e), m in world.written.items() if o == owner]
+    if not mine:
         return
+    entry, (session, memcell) = world.rng.choice(mine)
     deps = make_deps(
         stores=world.stores,
         embedding=_Embedder(world),
         indexes=make_indexes(episode=_MdIndex(world)),
     )
     await extract_user_profile(
-        ProfileClusterUpdated(
-            memcell_id="mc_0",
-            cluster_id=world.rng.choice(clusters).id or "",
+        EpisodeExtracted(
+            memcell_id=memcell,
+            episode_entry_id=entry,
+            episode_text="t",
+            episode_timestamp_ms=_TS,
             owner_id=owner,
+            session_id=session,
             app_id="a",
             project_id="p",
         ),
@@ -834,10 +838,14 @@ async def _run(
             patch(_SKILL) as skill_cls,
         ):
 
-            async def profile(*args: Any, **kwargs: Any) -> AlgoProfile:
+            async def profile(*args: Any, **kwargs: Any) -> ProfileUpdate:
                 await asyncio.sleep(world.rng.random() * 0.004)
-                return AlgoProfile(
-                    owner_id=kwargs["sender_id"], summary="p", timestamp=_TS
+                return ProfileUpdate(
+                    profile=AlgoProfile(
+                        owner_id=kwargs["sender_id"], summary="p", timestamp=_TS
+                    ),
+                    explicit_info=(),
+                    implicit_traits=(),
                 )
 
             async def skills(*args: Any, **kwargs: Any) -> SkillExtractionResult:
@@ -845,7 +853,7 @@ async def _run(
                 skill = AlgoAgentSkill(id="k", name="tidy", content="c", confidence=0.5)
                 return SkillExtractionResult(None, {}, [OpOutcome(0, skill, None, {})])
 
-            profile_cls.return_value.aextract = profile
+            profile_cls.return_value.aupdate = profile
             skill_cls.return_value.aextract_with_reason = skills
             await _seed(world)
             await _phase(world, first, crash)

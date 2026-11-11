@@ -36,7 +36,6 @@ _REPLY = json.dumps(
         "summary": "A comic page.",
         "title": "Champ Comics Page 1",
         "images": [{"ref": "img-1", "description": "a comic page", "ocr": "POW"}],
-        "profile": [],
     }
 )
 _LOOP = '{"content": "c", "summary": "s", "title": "t", "images": [{"ref": "img-1", '

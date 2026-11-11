@@ -1,29 +1,42 @@
-"""Tests for :func:`extract_user_profile` (cluster path).
+"""Tests for :func:`extract_user_profile`: one new segment per update.
 
-The strategy reads the profile and clusters from their stores, resolves
-memcells through the episode index and the memcell store, and runs
-``ProfileExtractor`` (patched). In-memory doubles from :mod:`tests.fakes`
-stand in for every port, so the assertions are on what was stored.
+The strategy reads the profile and the event's segment from their stores,
+attaches the pictures the owner posted in it, runs everalgo's
+``ProfileExtractor.aupdate`` against a scripted model and writes the stamped
+profile. In-memory doubles from :mod:`tests.fakes` stand in for every port,
+so the assertions are on what the model was sent and what was stored.
 """
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+import json
+from typing import Any
 
 import pytest
+from everalgo.llm import ImageUrlPart, LLMMessage
+from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
-from everalgo.types import Profile as AlgoProfile
 
+from everos.component.images import ImageLimits
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import ProfileClusterUpdated
-from everos.memory.models import Cluster, Episode, Profile
-from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.events import EpisodeExtracted
+from everos.memory.models import ExplicitInfoItem, Profile
+from everos.memory.ports import Scope
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
 from tests.fakes import make_deps
 
-_EXTRACTOR = "everos.memory.strategies.extract_user_profile.ProfileExtractor"
+_TS = 1_700_000_000_000
+_LIMITS = ImageLimits(
+    max_bytes=1 << 20,
+    max_per_message=4,
+    max_request_bytes=1 << 22,
+    max_per_request=8,
+    formats=("jpeg",),
+)
+_CAT = "c" * 64
+_DOG = "d" * 64
 
 
 @pytest.fixture(autouse=True)
@@ -38,401 +51,253 @@ def _scope(owner_id: str = "u_alice") -> Scope:
 
 
 def _event(
+    memcell_id: str = "mc_1",
     *,
     owner_id: str = "u_alice",
-    memcell_id: str = "mc_aaaaaaaaaaa1",
-    cluster_id: str = "cl_user00000001",
-    language: str | None = None,
-) -> ProfileClusterUpdated:
-    return ProfileClusterUpdated(
+    source: str = "pipeline",
+    language: str | None = "English",
+) -> EpisodeExtracted:
+    return EpisodeExtracted(
         memcell_id=memcell_id,
-        cluster_id=cluster_id,
+        episode_entry_id=f"ep_{memcell_id}",
+        episode_text="...",
+        episode_timestamp_ms=_TS,
         owner_id=owner_id,
+        source=source,
         language=language,
     )
 
 
-def _cluster(*, cluster_id: str, members: list[str], last_ts: int) -> Cluster:
-    return Cluster(
-        id=cluster_id,
-        centroid=(0.0,) * 8,
-        count=len(members),
-        last_ts=last_ts,
-        members=members,
-    )
-
-
-def _indexed_episode(scope: Scope, entry_id: str, memcell_id: str) -> Stored[Episode]:
-    return Stored(
-        ref=MemoryRef(
-            id=f"{scope.owner_id}_{entry_id}", entry_id=entry_id, md_path="ep.md"
-        ),
-        scope=scope,
-        item=Episode(
-            owner_id=scope.owner_id,
-            episode="...",
-            summary="",
-            timestamp=1_700_000_000_000,
-            parent_id=memcell_id,
-            parent_type="memcell",
-        ),
-    )
-
-
-def _memcell(memcell_id: str, *, sender_id: str, ts_ms: int) -> MemCell:
+def _memcell(*lines: tuple[str, str], ts: int = _TS) -> MemCell:
     return MemCell(
         items=[
             ChatMessage(
-                id=f"{memcell_id}_m1",
+                id=f"m{i}_{ts}",
                 role="user",
-                content=f"hi from {sender_id}",
-                timestamp=ts_ms,
-                sender_id=sender_id,
-            ),
+                content=text,
+                timestamp=ts + i,
+                sender_id=sender,
+                sender_name=sender.removeprefix("u_").title(),
+            )
+            for i, (sender, text) in enumerate(lines)
         ],
-        timestamp=ts_ms,
+        timestamp=ts + len(lines),
     )
 
 
-def _seed(
-    deps: MemoryDeps,
-    scope: Scope,
-    *,
-    cluster_id: str,
-    entry_id: str,
-    memcell_id: str,
-    last_ts: int,
-) -> None:
-    """One cluster → one indexed episode → one stored memcell."""
-    deps.stores.cluster.seed(
-        scope,
-        "user_memory",
-        _cluster(cluster_id=cluster_id, members=[entry_id], last_ts=last_ts),
-    )
-    deps.indexes.episode.seed(_indexed_episode(scope, entry_id, memcell_id))
-    deps.stores.memcell.seed(
-        memcell_id, _memcell(memcell_id, sender_id=scope.owner_id, ts_ms=last_ts)
-    )
+def _add(description: str, *, pictures: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "action": "add",
+        "type": "explicit_info",
+        "data": {"evidence": "e", "description": description, "category": "c"},
+        "sources": ["s1"],
+        "pictures": pictures or [],
+    }
 
 
-def test_spec() -> None:
+class _Model:
+    """A scripted model that records what each call was sent."""
+
+    def __init__(self, *replies: str) -> None:
+        self.replies = list(replies)
+        self.sent: list[list[LLMMessage]] = []
+        self.llm = FakeLLMClient(handler=self._answer)
+
+    def _answer(self, messages: list[LLMMessage], **_kwargs: Any) -> str:
+        self.sent.append(messages)
+        return self.replies.pop(0)
+
+    def user_text(self, call: int = 0) -> str:
+        content = self.sent[call][1].content
+        if isinstance(content, str):
+            return content
+        return "\n".join(p.text for p in content if not isinstance(p, ImageUrlPart))
+
+    def images(self, call: int = 0) -> int:
+        content = self.sent[call][1].content
+        return (
+            0
+            if isinstance(content, str)
+            else sum(isinstance(p, ImageUrlPart) for p in content)
+        )
+
+
+def _deps(model: _Model, **kwargs: Any) -> MemoryDeps:
+    return make_deps(llm=model.llm, **kwargs)
+
+
+def test_spec_listens_to_pipeline_episodes_only() -> None:
     spec = EXTRACT_USER_PROFILE_SPEC
     assert spec.name == "extract_user_profile"
-    assert ProfileClusterUpdated in spec.trigger.on
-    assert spec.emits == frozenset()
+    assert list(spec.trigger.on) == [EpisodeExtracted]  # type: ignore[union-attr]
+    assert spec.applies_to is not None
+    assert spec.applies_to(_event(), make_deps())
+    assert spec.applies_to(_event(), make_deps(embedding=None))
+    assert not spec.applies_to(_event(source="reflection"), make_deps())
     assert spec.max_retries == 2
 
 
-async def test_init_mode_writes_profile_when_no_existing() -> None:
-    """No prior profile → ProfileExtractor invoked without ``old_profile``."""
-    deps = make_deps()
-    _seed(
-        deps,
+async def test_a_first_update_writes_items_resting_on_the_segment() -> None:
+    model = _Model(json.dumps({"operations": [_add("Lives in Paris.")]}))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+
+    await extract_user_profile(_event(), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None
+    (item,) = stored.explicit_info
+    extra = item.model_extra or {}
+    assert item.description == "Lives in Paris."
+    assert extra["item_id"].startswith("pi_")
+    assert extra["source_memcell_ids"] == ["mc_1"]
+    assert (extra["source_start"], extra["source_end"]) == (_TS, _TS + 1)
+    assert stored.primary_language == "English"
+    assert '<segment id="s1">' in model.user_text()
+
+
+async def test_an_update_reads_only_the_new_segment_against_the_stored_profile() -> (
+    None
+):
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "Old talk about Paris.")))
+    deps.stores.memcell.seed(
+        "mc_2", _memcell(("u_alice", "New talk about Lyon."), ts=_TS + 10_000)
+    )
+    await deps.stores.profile.write(
         _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_001_000,
-    )
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "Alice is a hiker.",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [{"description": "lives in tokyo"}],
-            "implicit_traits": [{"description": "adventurous"}],
-        }
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        events = await extract_user_profile(_event(), deps)
-
-    assert events == []
-    # INIT mode — old_profile is None.
-    extractor_call = extractor_cls.return_value.aextract.call_args
-    assert extractor_call.kwargs["old_profile"] is None
-    assert extractor_call.kwargs["sender_id"] == "u_alice"
-    assert [mc.timestamp for mc in extractor_call.args[0]] == [1_700_000_001_000]
-
-    # The freshly extracted profile is stored under the owner's scope.
-    stored = deps.stores.profile.profiles[_scope()]
-    assert stored.summary == "Alice is a hiker."
-    assert stored.timestamp == 1_700_000_001_000
-    assert [i.description for i in stored.explicit_info] == ["lives in tokyo"]
-    assert [i.description for i in stored.implicit_traits] == ["adventurous"]
-
-
-async def test_update_mode_rehydrates_old_profile() -> None:
-    """Existing profile → algo Profile rehydrated and passed as old_profile."""
-    deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
-    deps.stores.profile.profiles[_scope()] = Profile(
-        owner_id="u_alice",
-        summary="prior summary",
-        timestamp=1_700_000_000_000,
-        explicit_info=["prior fact"],
-        implicit_traits=["prior trait"],
-    )
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "updated summary",
-            "timestamp": 1_700_000_002_000,
-            "explicit_info": [
-                {"description": "prior fact"},
-                {"description": "new fact"},
-            ],
-            "implicit_traits": [{"description": "prior trait"}],
-        }
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        await extract_user_profile(_event(), deps)
-
-    # UPDATE mode — old_profile is the rehydrated algo type carrying prior fields.
-    old = extractor_cls.return_value.aextract.call_args.kwargs["old_profile"]
-    assert isinstance(old, AlgoProfile)
-    assert old.summary == "prior summary"
-    assert old.timestamp == 1_700_000_000_000
-    assert [i.description for i in old.explicit_info] == ["prior fact"]
-    assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
-
-
-# ── primary language (frozen once known) ─────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("stored", "event_language", "expected"),
-    [
-        pytest.param(None, "Chinese", "Chinese", id="no-profile-init-freezes"),
-        pytest.param("English", "Chinese", "English", id="frozen-wins-unchanged"),
-        pytest.param("", "Chinese", "Chinese", id="unfrozen-takes-event"),
-        pytest.param("", None, None, id="unknown-stays-unknown"),
-    ],
-)
-async def test_profile_language_is_frozen_once_known(
-    stored: str | None, event_language: str | None, expected: str | None
-) -> None:
-    """``stored``: ``None`` = no profile yet, ``""`` = one with no language."""
-    deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
-    if stored is not None:
-        deps.stores.profile.profiles[_scope()] = Profile(
+        Profile(
             owner_id="u_alice",
-            summary="prior",
-            timestamp=1_700_000_000_000,
-            primary_language=stored or None,
-        )
-    new_profile = AlgoProfile.model_validate(
-        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        await extract_user_profile(_event(language=event_language), deps)
-
-    call = extractor_cls.return_value.aextract.call_args
-    assert call.kwargs["output_language"] == expected
-    assert deps.stores.profile.profiles[_scope()].primary_language == expected
-
-
-async def test_primary_language_does_not_reach_the_algo_profile() -> None:
-    """The frozen language is passed as ``output_language``, not as profile data."""
-    deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
-    deps.stores.profile.profiles[_scope()] = Profile(
-        owner_id="u_alice",
-        summary="prior",
-        timestamp=1_700_000_000_000,
-        primary_language="English",
-    )
-    new_profile = AlgoProfile.model_validate(
-        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        await extract_user_profile(_event(), deps)
-
-    old = extractor_cls.return_value.aextract.call_args.kwargs["old_profile"]
-    assert "primary_language" not in old.model_dump()
-
-
-async def test_the_triggering_memcell_counts_before_the_index_has_it() -> None:
-    """The cluster path does not wait for the cascade to index the new episode.
-
-    Measured 2026-11-11 on a two-owner audio transcript: the owner whose whole
-    conversation was one memcell logged ``profile_extraction_below_min_memcells
-    memcell_count=0`` and never got a profile, because the episode that triggered
-    the run was not in the index yet. The event's memcell is read from the
-    ledger instead.
-    """
-    deps = make_deps()
-    scope = _scope()
-    # The cluster holds the new episode, which the index does not have yet;
-    # only the memcell ledger has its memcell.
-    deps.stores.cluster.seed(
-        scope,
-        "user_memory",
-        _cluster(
-            cluster_id="cl_user00000001",
-            members=["ep_20260101_0001"],
-            last_ts=1_700_000_001_000,
+            summary="s",
+            timestamp=_TS,
+            explicit_info=[
+                ExplicitInfoItem(
+                    description="Lives in Paris.",
+                    category="Home",
+                    item_id="pi_1",
+                    source_memcell_ids=["mc_1"],
+                )
+            ],
         ),
     )
-    deps.stores.memcell.seed(
-        "mc_aaaaaaaaaaa1",
-        _memcell("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_001_000),
-    )
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "s",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [{"description": "lives in tokyo"}],
-            "implicit_traits": [],
-        }
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        await extract_user_profile(_event(), deps)
 
-    call = extractor_cls.return_value.aextract.call_args
-    assert call is not None, "the single-memcell owner got no profile"
-    assert [mc.timestamp for mc in call.args[0]] == [1_700_000_001_000]
-    assert call.kwargs["old_profile"] is None
-    stored = deps.stores.profile.profiles[scope]
-    assert [i.description for i in stored.explicit_info] == ["lives in tokyo"]
+    await extract_user_profile(_event("mc_2"), deps)
+
+    user = model.user_text()
+    assert "New talk about Lyon." in user
+    assert "Old talk about Paris." not in user
+    assert '<item ref="e1">' in user and "Lives in Paris." in user
+    assert "pi_1" not in user and "mc_1" not in user
 
 
-async def test_the_triggering_memcell_joins_the_indexed_members() -> None:
-    """An older, indexed member and the new, unindexed one are both read once."""
-    deps = make_deps()
-    _seed(
-        deps,
+async def test_a_segment_already_read_is_not_read_again() -> None:
+    model = _Model()
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    await deps.stores.profile.write(
         _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_001_000,
-    )
-    deps.stores.memcell.seed(
-        "mc_bbbbbbbbbbb2",
-        _memcell("mc_bbbbbbbbbbb2", sender_id="u_alice", ts_ms=1_700_000_002_000),
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(
-            return_value=AlgoProfile(
-                owner_id="u_alice",
-                summary="s",
-                timestamp=1_700_000_002_000,
-                explicit_info=[],
-                implicit_traits=[],
-            )
-        )
-        await extract_user_profile(_event(memcell_id="mc_bbbbbbbbbbb2"), deps)
-        # The indexed member's own event: its memcell is not read twice.
-        await extract_user_profile(_event(memcell_id="mc_aaaaaaaaaaa1"), deps)
-
-    first, second = extractor_cls.return_value.aextract.call_args_list
-    assert [mc.timestamp for mc in first.args[0]] == [
-        1_700_000_001_000,
-        1_700_000_002_000,
-    ]
-    assert [mc.timestamp for mc in second.args[0]] == [1_700_000_001_000]
-
-
-async def test_skips_when_no_members() -> None:
-    """An empty target cluster set (no fresh clusters) → no extractor call."""
-    # Existing profile timestamp newer than every cluster's last_ts → no
-    # target_cluster matches `last_ts > last_profile_ts`, and the current
-    # cluster_id names a cluster that does not exist, so only the event's own
-    # memcell is selected -- and the ledger does not hold it (deleted).
-    deps = make_deps()
-    deps.stores.cluster.seed(
-        _scope(),
-        "user_memory",
-        _cluster(
-            cluster_id="cl_other000001",
-            members=["ep_other00000"],
-            last_ts=1_600_000_000_000,
+        Profile(
+            owner_id="u_alice",
+            summary="s",
+            timestamp=_TS,
+            explicit_info=[
+                ExplicitInfoItem(description="x", source_memcell_ids=["mc_1"])
+            ],
         ),
     )
-    deps.stores.profile.profiles[_scope()] = Profile(
-        owner_id="u_alice", summary="prior", timestamp=1_900_000_000_000
+
+    await extract_user_profile(_event(), deps)
+
+    assert model.sent == []
+
+
+async def test_a_deleted_segment_is_skipped() -> None:
+    model = _Model()
+
+    await extract_user_profile(_event("mc_gone"), _deps(model))
+
+    assert model.sent == []
+
+
+async def test_the_owners_pictures_are_attached_and_another_senders_are_not() -> None:
+    model = _Model(json.dumps({"operations": [_add("Has a cat.", pictures=["img-1"])]}))
+    deps = _deps(model, picture_limits=_LIMITS)
+    deps.stores.images.images[_CAT] = (b"cat", "jpeg")
+    deps.stores.images.images[_DOG] = (b"dog", "jpeg")
+    deps.stores.memcell.seed(
+        "mc_1",
+        _memcell(
+            ("u_alice", f"My cat [IMAGE: {_CAT}]"),
+            ("u_bob", f"My dog [IMAGE: {_DOG}]"),
+        ),
     )
-    with patch(_EXTRACTOR) as extractor_cls:
-        await extract_user_profile(_event(cluster_id="cl_unknown00000"), deps)
 
-    extractor_cls.assert_not_called()
-    assert deps.stores.profile.writes == []
+    await extract_user_profile(_event(), deps)
+
+    user = model.user_text()
+    assert "My cat [IMAGE: img-1]" in user
+    assert "My dog [IMAGE]" in user and _DOG not in user
+    assert model.images() == 1
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None
+    assert (stored.explicit_info[0].model_extra or {})["source_image_ids"] == [_CAT]
 
 
-# ── partition lock (owner_id-level serialisation) ────────────────────────
+async def test_without_vision_no_picture_is_attached() -> None:
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model)
+    deps.stores.images.images[_CAT] = (b"cat", "jpeg")
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", f"My cat [IMAGE: {_CAT}]")))
+
+    await extract_user_profile(_event(), deps)
+
+    assert model.images() == 0
 
 
-async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
-    """Drive two extract_user_profile runs and record entry/exit order."""
+async def test_the_profile_language_is_frozen_once_known() -> None:
+    model = _Model(
+        json.dumps({"operations": [_add("Lives in Paris.")]}),
+        json.dumps({"operations": [{"action": "none"}]}),
+    )
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    deps.stores.memcell.seed("mc_2", _memcell(("u_alice", "Hola."), ts=_TS + 10))
+
+    await extract_user_profile(_event(language="English"), deps)
+    await extract_user_profile(_event("mc_2", language="Spanish"), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.primary_language == "English"
+    assert "Write every output field in English" in str(model.sent[1][0].content)
+
+
+async def _probe(owner_a: str, owner_b: str) -> list[str]:
     log: list[str] = []
 
-    async def slow_aextract(_memcells, *, sender_id, **_kwargs):
-        log.append(f"enter:{sender_id}")
-        await asyncio.sleep(0.01)
-        log.append(f"leave:{sender_id}")
-        return AlgoProfile(
-            owner_id=sender_id,
-            summary="summary",
-            timestamp=1_700_000_000_000,
-            explicit_info=[],
-            implicit_traits=[],
-        )
+    async def slow(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        owner = "u_alice" if "u_alice" in str(messages[0].content) else "u_bob"
+        log.append(f"enter:{owner}")
+        await asyncio.sleep(0.02)
+        log.append(f"leave:{owner}")
+        return json.dumps({"operations": [{"action": "none"}]})
 
-    deps = make_deps()
-    for owner, tag in ((owner_a, "a"), (owner_b, "b")):
-        _seed(
-            deps,
-            _scope(owner),
-            cluster_id=f"cl_{tag}",
-            entry_id=f"ep_{tag}",
-            memcell_id=f"mc_{tag}",
-            last_ts=1_700_000_000_000,
-        )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = slow_aextract
-        await asyncio.gather(
-            extract_user_profile(_event(owner_id=owner_a, cluster_id="cl_a"), deps),
-            extract_user_profile(_event(owner_id=owner_b, cluster_id="cl_b"), deps),
-        )
+    deps = make_deps(llm=FakeLLMClient(handler=slow))
+    for n, owner in enumerate((owner_a, owner_b)):
+        deps.stores.memcell.seed(f"mc_{n}", _memcell((owner, "hello"), ts=_TS + n))
+    await asyncio.gather(
+        extract_user_profile(_event("mc_0", owner_id=owner_a), deps),
+        extract_user_profile(_event("mc_1", owner_id=owner_b), deps),
+    )
     return log
 
 
 async def test_partition_lock_serialises_runs_on_same_owner() -> None:
-    """Two runs sharing ``owner_id`` must not overlap critical sections."""
-    log = await _run_serialisation_probe("u_alice", "u_alice")
+    log = await _probe("u_alice", "u_alice")
     assert log == ["enter:u_alice", "leave:u_alice", "enter:u_alice", "leave:u_alice"]
 
 
 async def test_partition_lock_lets_different_owners_run_in_parallel() -> None:
-    """Runs on distinct ``owner_id`` must overlap (no false serialisation)."""
-    log = await _run_serialisation_probe("u_alice", "u_bob")
+    log = await _probe("u_alice", "u_bob")
     assert log.index("enter:u_alice") < log.index("leave:u_bob")
     assert log.index("enter:u_bob") < log.index("leave:u_alice")

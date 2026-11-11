@@ -25,10 +25,12 @@ Two rules keep the results coherent with the rest of the store:
 - The episode body **refers to** a picture by its id and never restates its
   description. Replacing a picture's description then costs one entry, not a
   rewrite of the episode that mentions it.
-- What the pictures say about **their sender** leaves the call as profile
-  operations (see :mod:`.profile_delta`), so a conversation carried by photos
-  still moves the portrait. Those operations are add-only: this call never sees
-  the stored profile, and an index it cannot see is an index it cannot address.
+
+What a picture says about its sender reaches the profile through the profile
+update, which reads the segment's pictures itself
+(:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`): the 2.0
+design has one profile writer, and every prompt that reads raw conversation
+takes its pictures. This call writes no profile item.
 
 Numbers on the reply side are the same as the episode prompt's (``content`` /
 ``summary`` / ``title``), so the caller can hand the episode half to
@@ -36,8 +38,8 @@ Numbers on the reply side are the same as the episode prompt's (``content`` /
 
 The reply is read leniently in form and strictly in meaning
 (:mod:`everos.memory.extract.reply_form`): an unknown key left empty reads as
-absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images`` /
-``profile`` (one entry given bare reads as a list of it), and a reply with an
+absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images``
+(one entry given bare reads as a list of it), and a reply with an
 array element left open or split in two objects is mended before it is
 validated. Each of those cost a second call carrying every picture again
 (2026-11-11, 4.2% of MemEye's picture calls). The JSON schema a call sends is
@@ -75,10 +77,6 @@ from everalgo.utils import paragraphs, render_chat_line, tagged
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from everos.core.observability.logging import get_logger
-from everos.memory.extract.pipeline.profile_delta import (
-    PICTURE_PROFILE_RULES,
-    ProfileItemOp,
-)
 from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 
 logger = get_logger(__name__)
@@ -143,26 +141,19 @@ class ImageFact(StrictOutputModel):
 
 
 class ImageEpisodeReply(StrictOutputModel):
-    """The one reply that carries the episode, every picture's memory, and the profile.
-
-    ``profile`` is the write-time half of the design's "the picture call also
-    emits a profile change": a photo of a pet, a home or a hobby reaches the
-    portrait in the request that produced it, not in a later text-driven update
-    that a picture-heavy conversation may never trigger.
-    """
+    """The one reply that carries the episode and every picture's memory."""
 
     content: str
     summary: str
     title: str
     images: list[ImageFact] = Field(default_factory=list)
-    profile: list[ProfileItemOp] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
     def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
         return drop_empty_unknown_keys(cls, value)
 
-    @field_validator("images", "profile", mode="before")
+    @field_validator("images", mode="before")
     @classmethod
     def _one_or_none_reads_as_a_list(cls, value: object) -> object:
         if value is None:
@@ -213,9 +204,6 @@ was sent.
   (img-2)" — not what the signboard says. The reason is exact: forgetting that
   picture must remove its content from the memory, and text you copied into the
   episode is no longer the picture's.
-- The same restriction applies to "evidence" in <profile>: quote only what the
-  conversation states, and let a picture-derived item describe the visible fact
-  without re-quoting the picture's text.
 - For every label, add one entry to "images" describing what the picture itself
   shows: the subject, the setting, the people visible, and the one detail that
   tells this picture apart from another. The description must be readable on its
@@ -246,10 +234,7 @@ in that picture's own "ocr", nowhere else."""
 _IMAGE_REPLY_FORMAT = """\
 Reply with one JSON object, nothing else:
 {"content": "...", "summary": "...", "title": "...",
- "images": [{"ref": "img-1", "description": "...", "ocr": "..."}],
- "profile": [{"action": "add", "type": "explicit_info",
-              "source_image_id": "img-1",
-              "data": {"category": "...", "description": "...", "evidence": "..."}}]}"""
+ "images": [{"ref": "img-1", "description": "...", "ocr": "..."}]}"""
 
 
 def build_system_prompt(
@@ -268,7 +253,6 @@ def build_system_prompt(
     return paragraphs(
         base,
         tagged("pictures", _IMAGE_RULES),
-        tagged("profile", PICTURE_PROFILE_RULES),
         tagged(
             "output_language",
             build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE),

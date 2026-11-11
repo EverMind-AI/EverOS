@@ -65,12 +65,13 @@ class _ObservedCells(InMemoryMemcellStore):
 
 async def _model(messages: Any, *, response_format: type, **_: Any) -> str:
     text = "\n".join(str(m.content) for m in messages)
-    target = re.search(r"TARGET USER: ([^*\n]+)\*\*", text)
+    target = re.search(r"The target user is (.+?), the speaker", text)
     who = target.group(1).strip() if target else "?"
     item = {"evidence": f"{who} said so", "description": f"About {who}"}
     item["category"] = "plans"
-    if response_format.__name__ == "_ProfileItems":
-        return json.dumps({"explicit_info": [item], "implicit_traits": []})
+    if response_format.__name__ == "_ProfileUpdateReply":
+        op = {"action": "add", "type": "explicit_info", "data": item}
+        return json.dumps({"operations": [op]})
     raise AssertionError(response_format.__name__)
 
 

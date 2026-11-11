@@ -6,11 +6,13 @@ commitments, expertise. It is a document of its own (D6): the member's
 personal ``users/<m>/user.md`` is never read or written here, and no other
 group's segments are.
 
-- **Operator.** everalgo's ``ProfileExtractor``, called with
-  ``sender_id = member_id`` over the member's new segments in this group,
-  speakers labelled by their roster names. Its prompt scopes extraction to
-  the target speaker and keeps assistant suggestions out of the person's
-  traits.
+- **Operator.** everalgo's ``ProfileExtractor.aupdate`` -- the same two
+  prompts as the one-to-one profile (update, then a consolidation only for a
+  part over its cap that has grown) -- called with ``sender_id = member_id``
+  over the member's new segments in this group, speakers labelled by their
+  roster names, and the pictures the member posted in them (D17: a picture
+  says something about its poster only). Its prompt scopes extraction to the
+  target speaker and keeps assistant suggestions out of the person's traits.
 - **Input.** Only this group's segments in which the member spoke:
   :class:`GroupEpisodeExtracted` names the human speakers of each segment,
   and :func:`~everos.memory.extract.pipeline.member_profile.wrote_in`
@@ -31,9 +33,11 @@ group's segments are.
   ``[sqlite] pool_size`` members read storage at a time (their model calls
   stay parallel). Without the bound one flush asked for a connection per
   pending segment of every member at once and saturated the pool.
-- **Sources.** Every new or rewritten item records the segments it was read
-  from and their span; items the update dropped move to the history.
-- **Versions.** A fact the UPDATE rewrote by its own index becomes a new
+- **Sources.** Every new or rewritten item records the segments its
+  operation named and their span, and the pictures it was read off; items the
+  update retired move to the history with what replaced them
+  (:mod:`~everos.memory.extract.pipeline.profile_items`).
+- **Versions.** A fact the update's ``modify`` gave a new value becomes a new
   value of it: the new item names the old one (``supersedes``) and the end of
   this update's span (``since``), and the old one's history entry names the
   new one (``superseded_by``). The history keeps the values a current item
@@ -59,10 +63,11 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
-from everos.memory.extract.pipeline.member_profile import (
+from everos.memory.extract.pipeline.member_profile import wrote_in
+from everos.memory.extract.pipeline.pictures import profile_pictures
+from everos.memory.extract.pipeline.profile_items import (
     bounded_history,
-    with_provenance,
-    wrote_in,
+    stamp_update,
 )
 from everos.memory.groups import readable_segments
 from everos.memory.mappers import profile as profile_mapper
@@ -197,30 +202,39 @@ async def _update(
     existing = profile.profile
     old = existing if existing.explicit_info or existing.implicit_traits else None
     output_language = existing.primary_language or language or _language_of(segments)
-    extracted = await ProfileExtractor(llm=deps.llm).aextract(
-        [label_cell(cell, roster) for _, cell in segments],
+    async with reads:
+        cells, pictures = await profile_pictures(
+            [label_cell(cell, roster) for _, cell in segments],
+            member_id,
+            images=deps.stores.images,
+            limits=deps.picture_limits,
+        )
+    update = await ProfileExtractor(llm=deps.llm).aupdate(
+        cells,
         sender_id=member_id,
         old_profile=profile_mapper.to_algo(old) if old is not None else None,
+        segment_ids=[memcell_id for memcell_id, _ in segments],
+        pictures=pictures,
         custom_instructions=deps.instructions.load("profile_extract"),
         output_language=output_language,
     )
-    new = profile_mapper.from_algo(extracted, primary_language=output_language)
-    span = (_first_message(segments[0][1]), segments[-1][1].timestamp)
-    stamped, replaced = with_provenance(
+    stamped, replaced = stamp_update(
         old,
-        new,
-        sources=[memcell_id for memcell_id, _ in segments],
-        span=span,
-        replaced_at=span[1],
+        update,
+        cells=dict(segments),
+        replaced_at=segments[-1][1].timestamp,
+        primary_language=output_language,
     )
     logger.info(
         "member_profile_updated",
         group_id=scope.owner_id,
         member_id=member_id,
         segments=len(segments),
-        mode="UPDATE" if old is not None else "INIT",
+        pictures=len(pictures),
+        mode="UPDATE" if old is not None else "FIRST",
         replaced=len(replaced),
         superseded=sum(1 for entry in replaced if "superseded_by" in entry),
+        consolidated=len(update.consolidated),
     )
     return done.model_copy(
         update={
@@ -234,11 +248,6 @@ def _language_of(segments: list[tuple[str, MemCell]]) -> str | None:
     """The segments' conversation language, newest first, as a cell's is read."""
     found = conversation_language([cell for _, cell in reversed(segments)])
     return None if found is None else str(found)
-
-
-def _first_message(cell: MemCell) -> int:
-    times = [t for t in (getattr(i, "timestamp", 0) for i in cell.items) if t]
-    return min(times) if times else cell.timestamp
 
 
 UPDATE_MEMBER_PROFILES_SPEC = StrategySpec(

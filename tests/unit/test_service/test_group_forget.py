@@ -49,7 +49,7 @@ _GP_LINE = re.compile(
     r"^\[([^\]]+)\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} ([^:\n]+): (.*)$", re.MULTILINE
 )
 _GP_SEGMENT = re.compile(r"^=== SEGMENT (\S+) ===$", re.MULTILINE)
-_TARGET = re.compile(r"TARGET USER: ([^*\n]+)\*\*")
+_TARGET = re.compile(r"The target user is (.+?), the speaker")
 
 
 def _prompt(messages: Any) -> str:
@@ -89,22 +89,20 @@ class _Model:
                     "content": f"The group talked about {said}.",
                 }
             )
-        if name in ("_ProfileItems", "_MemCellUpdateOutput"):
+        if name == "_ProfileUpdateReply":
             found = _TARGET.search(prompt)
             who = found.group(1).strip() if found else "?"
+            said = ", ".join(_markers(prompt))
             item = {
-                "evidence": f"{who} said {', '.join(_markers(prompt))}",
-                "description": f"{who} cares about {', '.join(_markers(prompt))}",
+                "evidence": f"{who} said {said}",
+                "description": f"{who} cares about {said}",
                 "category": "plans",
             }
-            if name == "_ProfileItems":
-                return json.dumps({"explicit_info": [item], "implicit_traits": []})
             return json.dumps(
                 {
                     "operations": [
                         {"action": "add", "type": "explicit_info", "data": item}
-                    ],
-                    "update_note": "n",
+                    ]
                 }
             )
         if name == "GroupProfileReply":

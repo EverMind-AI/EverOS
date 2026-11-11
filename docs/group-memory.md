@@ -676,46 +676,61 @@ the sample shows misses.
 
 A picture in a group segment is stored once in `figures/` (unchanged) and gets
 one image memory per occurrence under `groups/<group_id>/images/`, with
-`sender_ids = [poster]`. Profile items the picture call returns are merged into
-the **poster's** member-in-group profile only. The same routing (poster only)
-also applies on the one-to-one and legacy paths, which removes the leak at
-`user_memory.py:163-170` without changing any single-sender result.
+`sender_ids = [poster]`. The picture call writes no profile item: what a picture
+says about a person reaches the profile through the profile update, which is
+handed the pictures its target posted in the segments it reads, and nobody
+else's (section 7.4). The same routing (poster only) applies on the one-to-one
+path, which removes the leak at `user_memory.py:163-170` without changing any
+single-sender result.
 
 ### 7.4 Member-in-group profile
 
 `groups/<group_id>/members/<member_id>.md` holds what the group's conversations
 say about one member: preferences, constraints, commitments, expertise.
 
-- **Operator.** The existing profile operator (everalgo `ProfileExtractor`),
-  called with `sender_id = member_id` over the member's new segments in this
-  group. Its prompt already scopes extraction to the target speaker and tells
-  the model not to treat assistant suggestions as the person's traits.
-- **Input.** Only this group's segments in which the member spoke. Never the
-  member's personal memory, never another group.
+- **Operator.** The profile operator every profile shares (everalgo
+  `ProfileExtractor.aupdate`, two prompts): one update call reads the stored
+  profile and only the member's new segments and replies `add` / `modify` /
+  `deprecate` / `none`, each operation naming the segments and pictures it
+  rests on; a consolidation call follows only for a part of the profile over
+  its cap (60 items, 8 under one name) that has grown since it was last
+  consolidated (15 items, 4 under the name). It is called with
+  `sender_id = member_id`; its prompt scopes extraction to the target speaker
+  and tells the model not to treat assistant suggestions as the person's
+  traits.
+- **Input.** Only this group's segments in which the member spoke, and the
+  pictures the member posted in them (D17). Never the member's personal
+  memory, never another group.
 - **Throttle.** A member's profile is updated after `[groups] member_profile_every`
   new segments in which they spoke (default 5), and when the group's buffer is
   flushed. Episodes are searchable immediately; only the profile lags.
 - **Lock.** One lock per `(group_id, member_id)`, so updates for different members
   run in parallel and two updates for one member never lose each other's items.
-- **Sources.** Every item records its source memcells (the 2.0 profile format).
-  A check rejects an item none of whose sources contains a message by the member.
-- **Versions.** When the operator's UPDATE rewrites a fact (`explicit_info`)
-  by its index, the new item is a new value of the old one. It records the
-  old item's id (`supersedes`) and the time of the update (`since`, the end
-  of the update's span); the old item moves to the history with
-  `replaced_at` and the new one's id (`superseded_by`). The link is exact:
-  everalgo keeps a host's keys on the item an UPDATE op patches, so the
-  rewritten item still carries the old `item_id`. No text is compared, and
-  the prompt and the model's output are unchanged. A rewrite that only
-  re-punctuates is not a new value, and an implicit trait is an inferred
-  pattern, not a stated value: a rewrite of one sharpens the inference and is
-  not linked. COMPACT and REGROUP write items without host keys and a dedupe
-  keeps the item already on file, so neither is shown as a value change; a
-  `delete` with an `add` is not linked either, since the reply does not say
-  they are one fact, and neither is an `add` the model chose where an
-  `update` would have fit. When COMPACT or REGROUP runs in the same call as
-  the UPDATE that rewrote an item, the rewritten item comes back without host
-  keys and is not linked.
+- **Sources.** Every item records its source memcells (the 2.0 profile format):
+  the segments its operation named, not every segment of the update, and the
+  pictures it was read off (`source_image_ids`). Fresh evidence for an item adds
+  its segments to the item's; an item a consolidation wrote takes the union of
+  the items it came from. A check rejects an item none of whose sources
+  contains a message by the member. A stored item the update took out moves to
+  the history with `replaced_at` and what replaced it: `superseded_by` (a new
+  value), `deprecated_by` and `reason` (the segments that showed it no longer
+  true), `merged_into` (the items a consolidation merged it into), or `reason`
+  alone (a consolidation dropped it).
+- **Versions.** When the update's `modify` gives a fact (`explicit_info`) a
+  new value, the new item is a new value of the old one. It records the old
+  item's id (`supersedes`) and the time of the update (`since`, the end of the
+  update's span); the old item moves to the history with `replaced_at` and the
+  new one's id (`superseded_by`). The link is exact: everalgo applies a
+  `modify` in place, by the ref the prompt showed the item under, so the
+  rewritten item still carries the old `item_id`, and its lineage says which
+  stored item it replaced. No text is compared. The prompt tells the model that
+  a changed value is a `modify` of the item holding the old one, never a second
+  item. A rewrite that only re-punctuates is not a new value, and an implicit
+  trait is an inferred pattern, not a stated value: a rewrite of one sharpens
+  the inference and is not linked. A `deprecate` with an `add` is not linked,
+  since the reply does not say they are one fact. A consolidation that leaves
+  an item as it is, or only re-files it, keeps the item and its link; one that
+  merges items writes a new item that is no new value of any of them.
 - **Reading versions.** The cascade puts the values an item replaced on the
   item in the index row: `previous`, newest first, at most two, each with
   `item_id`, `description`, `until` and the old item's span. A read shows
@@ -822,7 +837,7 @@ Per segment with `s` distinct human senders:
 | Episode embeddings (body and subject) | `2s` | 2 |
 | Picture memories per picture | `s` | 1 |
 | Scene updates | `s` | 1 |
-| Profile extraction calls | `s` | `s / member_profile_every`, amortised |
+| Profile update calls | `s` | `s / member_profile_every`, amortised |
 | Group-profile calls (Step 2) | none | `1 / group_profile_batch`, amortised |
 
 The [GroupAssistBench](#131-groupassistbench) cost probe measures the real
@@ -1509,7 +1524,7 @@ The second half of Step 1 differs from the text above in these places:
   conversation's language, resolved in code as on the one-to-one path: from
   the segment's human messages, and from its session's earlier segments when
   it has too little text of its own. The group episode on both routes, the
-  poster's picture profile items, the member-in-group profile updates (on a
+  member-in-group profile updates (on a
   flush, from the segments the update reads) and the scene narratives are
   written in it. The one-to-one golden of
   [Section 10](#10-one-to-one-conversations-stay-unchanged) was regenerated

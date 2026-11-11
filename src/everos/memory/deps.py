@@ -25,6 +25,7 @@ from everalgo.agent_memory import CaseJudge
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider
+from everos.component.images import ImageLimits
 from everos.memory.ports import (
     AgentCaseIndex,
     AgentCaseStore,
@@ -108,6 +109,9 @@ class MemoryDeps:
         instructions: Custom instructions appended to the operators' rules.
         case_judge: Answers the agent-case gate question; ``None`` runs
             agent-case extraction without the gate.
+        picture_limits: ``[images]``, the scale a profile update reads a
+            segment's pictures at; ``None`` when ``llm`` reads no images
+            (``[extraction] vision`` off), and the update then reads text only.
     """
 
     llm: LLMClient
@@ -116,3 +120,4 @@ class MemoryDeps:
     indexes: Indexes
     instructions: CustomInstructions
     case_judge: CaseJudge | None = None
+    picture_limits: ImageLimits | None = None

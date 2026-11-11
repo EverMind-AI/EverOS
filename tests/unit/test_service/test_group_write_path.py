@@ -15,7 +15,8 @@ scripted model (``tests/helpers/groups.py``). What these pin:
   ``GroupFlushed``) and no one-to-one event, and writes nothing under
   ``users/``;
 - a picture writes one group picture memory with ``sender_ids = [poster]``,
-  and its profile items reach only the poster's member-in-group profile;
+  and only the poster's member-profile update reads it: the items read off it
+  reach the poster's member-in-group profile and nobody else's;
 - the extraction call is told the group's language, resolved from its human
   messages -- for a picture-only segment, from the session's earlier
   segments -- and that language, not the reply's, is what the episode and
@@ -37,6 +38,7 @@ from everalgo.testing import FakeLLMClient
 from everos.infra.persistence.index import eq
 from everos.memory.events import GroupEpisodeExtracted
 from everos.memory.models import Episode
+from everos.memory.strategies import UPDATE_MEMBER_PROFILES_SPEC
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, png
 
 T0 = 1_772_323_200_000
@@ -73,21 +75,21 @@ class _Model:
                         {"ref": label, "description": "A tabby cat on a sill"}
                         for label in labels
                     ],
-                    "profile": [
-                        {
-                            "action": "add",
-                            "type": "explicit_info",
-                            "source_image_id": label,
-                            "data": {
-                                "category": "pets",
-                                "description": "Has a tabby cat",
-                                "evidence": "the photo shows the cat at home",
-                            },
-                        }
-                        for label in labels
-                    ],
                 }
             )
+        if name == "_ProfileUpdateReply":
+            # Only the poster's update is attached the picture.
+            labels = sorted(set(re.findall(r"label: (img-\d+)", texts[-1])))
+            cat = {
+                "category": "pets",
+                "description": "Has a tabby cat",
+                "evidence": "the photo shows the cat at home",
+            }
+            ops = [
+                {"action": "add", "type": "explicit_info", "data": cat, "pictures": [x]}
+                for x in labels
+            ]
+            return json.dumps({"operations": ops or [{"action": "none"}]})
         raise AssertionError(f"unexpected model call {name}")
 
 
@@ -296,6 +298,7 @@ async def test_a_picture_is_one_group_memory_and_reaches_only_its_poster(
         assert rows[0].sender_ids == ["u_betty"]
         assert rows[0].origin == "member"
 
+        await world.run(UPDATE_MEMBER_PROFILES_SPEC)
         betty = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
         assert betty is not None
         (item,) = betty.profile.explicit_info
@@ -303,10 +306,9 @@ async def test_a_picture_is_one_group_memory_and_reaches_only_its_poster(
         extra = item.model_extra or {}
         assert extra["source_memcell_ids"]
         assert extra["source_image_ids"] == [rows[0].image_id]
-        # Nobody else's profile, in the group or outside it.
-        assert await world.stores.member_profile.members(world.scope("trip")) == [
-            "u_betty"
-        ]
+        # Nobody else's profile reads it, in the group or outside it.
+        chen = await world.stores.member_profile.read(world.scope("trip"), "u_chen")
+        assert chen is not None and chen.profile.explicit_info == []
         assert not (tmp_path / "default_app" / PROJECT / "users").exists()
 
 

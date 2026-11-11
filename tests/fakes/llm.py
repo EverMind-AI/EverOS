@@ -56,8 +56,8 @@ records (``memory.extract.boundary.prompt_order``)."""
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
     "episode": "_EpisodeReply",
-    "profile_init": "_ProfileItems",
-    "profile_update": "_MemCellUpdateOutput",
+    "profile_update": "_ProfileUpdateReply",
+    "profile_consolidate": "_ConsolidateReply",
     "reflect": "_ReflectOutput",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""

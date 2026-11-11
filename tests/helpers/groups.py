@@ -62,7 +62,7 @@ from everos.memory.ports import (
     StrategySpec,
 )
 from everos.service import RosterEventInput
-from everos.service.bootstrap import _build_memory_service
+from everos.service.bootstrap import _build_memory_service, _image_limits
 from tests.fakes import (
     FakeEmbeddingProvider,
     bundled_instructions,
@@ -163,6 +163,10 @@ class GroupWorld:
             stores=stores,
             indexes=build_indexes(storage.index),
             instructions=bundled_instructions(),
+            # As the bootstrap sets it: a profile update reads its pictures.
+            picture_limits=_image_limits(settings)
+            if settings.extraction.vision
+            else None,
         )
         bus = _Bus()
         # The eraser a forget erases index rows through, as the bootstrap

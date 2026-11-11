@@ -3,9 +3,8 @@
 The group twin of ``test_user_memory_language.py``. A group segment is
 extracted by the one-to-one call, so it had the one-to-one defect: no
 language named, a picture segment of an English group answered in Chinese
-(episode, picture descriptions and the poster's picture profile items), and
-that reply's language pinned on the event the member-in-group profiles and
-the scenes read.
+(episode and picture descriptions), and that reply's language pinned on the
+event the member-in-group profiles and the scenes read.
 
 The contract now:
 
@@ -13,8 +12,9 @@ The contract now:
   from its session's earlier segments when it has too little text of its
   own, then named on both routes: a picture-only segment of an English group
   gets an English instruction.
-- The resolved language, not the reply's, is what the group episode, its
-  ``GroupEpisodeExtracted`` and the poster's member-in-group profile carry.
+- The resolved language, not the reply's, is what the group episode and its
+  ``GroupEpisodeExtracted`` carry -- and with the event, the member-in-group
+  profiles.
 - Only a session without a letter anywhere leaves the choice to the model,
   and then, as before, the reply's language is what gets pinned.
 """
@@ -32,22 +32,18 @@ from everos.memory import IngestResult
 from everos.memory.events import GroupEpisodeExtracted
 from everos.memory.extract.pipeline import GroupMemoryPipeline, PreparedCell
 from everos.memory.models import Group, MemcellRecord, RosterEvent
-from everos.memory.ports import MemoryRef, Scope, SessionKey
+from everos.memory.ports import MemoryRef, SessionKey
 from tests.fakes import bundled_instructions
 from tests.fakes.stores import (
     InMemoryGroupStore,
     InMemoryImageMemoryStore,
     InMemoryImageStore,
-    InMemoryMemberProfileStore,
     InMemoryMemcellStore,
 )
 
 _T0 = 1_700_000_000_000
 _IMAGE_ID = "9f" + "0" * 62
 _SESSION = SessionKey("default", "default", "s_group")
-_GROUP = Scope(
-    app_id="default", project_id="default", owner_id="trip", owner_type="group"
-)
 _INGESTED = IngestResult(session_id="s_group", messages=[], group_id="trip")
 _REF = MemoryRef(
     id="trip_gep_20260517_00000001",
@@ -62,18 +58,6 @@ _CHINESE_PICTURE_REPLY = {
     "summary": "Betty 分享了猫的照片。",
     "title": "猫的照片",
     "images": [{"ref": "img-1", "description": "窗台上的一只虎斑猫", "ocr": ""}],
-    "profile": [
-        {
-            "action": "add",
-            "type": "explicit_info",
-            "source_image_id": "img-1",
-            "data": {
-                "category": "pets",
-                "description": "养了一只虎斑猫",
-                "evidence": "照片里的猫在她家",
-            },
-        }
-    ],
 }
 _CHINESE_EPISODE_REPLY = {
     "content": "Chen 把出发日期改到了四月三十日。",
@@ -119,7 +103,7 @@ def _replying(reply: dict) -> FakeLLMClient:
 
 async def _pipeline(
     llm: FakeLLMClient, *cells: tuple[str, MemCell]
-) -> tuple[GroupMemoryPipeline, MagicMock, InMemoryMemberProfileStore]:
+) -> tuple[GroupMemoryPipeline, MagicMock]:
     episodes = MagicMock()
     episodes.append = AsyncMock(return_value=_REF)
     memcells = InMemoryMemcellStore()
@@ -148,7 +132,6 @@ async def _pipeline(
     pictures = InMemoryImageStore()
     pictures.images[_IMAGE_ID] = (b"picture bytes", "png")
     pictures.refs[_IMAGE_ID] = 1
-    members = InMemoryMemberProfileStore()
     pipeline = GroupMemoryPipeline(
         episode_store=episodes,  # type: ignore[arg-type]  # recording double
         memcell_store=memcells,
@@ -158,9 +141,8 @@ async def _pipeline(
         image_store=pictures,
         image_memory_store=InMemoryImageMemoryStore(),
         image_limits=_limits(),
-        member_profiles=members,
     )
-    return pipeline, episodes, members
+    return pipeline, episodes
 
 
 def _system_prompt(llm: FakeLLMClient) -> str:
@@ -170,7 +152,7 @@ def _system_prompt(llm: FakeLLMClient) -> str:
 
 async def test_an_english_group_s_picture_only_segment_is_told_english() -> None:
     llm = _replying(_CHINESE_PICTURE_REPLY)
-    pipeline, _, _ = await _pipeline(llm, ("mc_1", _EARLIER), ("mc_2", _PICTURE_ONLY))
+    pipeline, _ = await _pipeline(llm, ("mc_1", _EARLIER), ("mc_2", _PICTURE_ONLY))
 
     await pipeline.run_cell(
         _INGESTED,
@@ -185,7 +167,7 @@ async def test_an_english_group_s_picture_only_segment_is_told_english() -> None
 async def test_the_conversation_s_language_is_pinned_not_the_reply_s() -> None:
     """A reply that drifted into Chinese does not drag the group's records after it."""
     llm = _replying(_CHINESE_PICTURE_REPLY)
-    pipeline, episodes, members = await _pipeline(
+    pipeline, episodes = await _pipeline(
         llm, ("mc_1", _EARLIER), ("mc_2", _PICTURE_ONLY)
     )
 
@@ -198,15 +180,11 @@ async def test_the_conversation_s_language_is_pinned_not_the_reply_s() -> None:
     (written,) = [call.args[1] for call in episodes.append.await_args_list]
     assert event.language == "English"
     assert written.language == "English"
-    # The poster's picture profile items freeze the profile's language.
-    betty = await members.read(_GROUP, "u_betty")
-    assert betty is not None
-    assert betty.profile.primary_language == "English"
 
 
 async def test_a_text_segment_is_told_its_language_too() -> None:
     llm = _replying(_CHINESE_EPISODE_REPLY)
-    pipeline, _, _ = await _pipeline(llm, ("mc_1", _EARLIER))
+    pipeline, _ = await _pipeline(llm, ("mc_1", _EARLIER))
 
     outcome = await pipeline.run_cell(
         _INGESTED,
@@ -226,7 +204,7 @@ async def test_a_chinese_group_is_told_chinese() -> None:
         _message("u_betty", "我没问题，我来订四月三十号开始的酒店。", at=_T0 + 1),
     )
     llm = _replying(_CHINESE_EPISODE_REPLY)
-    pipeline, _, _ = await _pipeline(llm, ("mc_1", chinese))
+    pipeline, _ = await _pipeline(llm, ("mc_1", chinese))
 
     outcome = await pipeline.run_cell(
         _INGESTED,
@@ -241,7 +219,7 @@ async def test_a_chinese_group_is_told_chinese() -> None:
 async def test_a_group_session_without_text_leaves_the_choice_to_the_model() -> None:
     """Nothing to resolve from: the participant rule, and the reply's language."""
     llm = _replying(_CHINESE_PICTURE_REPLY)
-    pipeline, _, _ = await _pipeline(llm, ("mc_2", _PICTURE_ONLY))
+    pipeline, _ = await _pipeline(llm, ("mc_2", _PICTURE_ONLY))
 
     outcome = await pipeline.run_cell(
         _INGESTED,

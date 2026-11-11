@@ -663,15 +663,15 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             )
         if name == "_EpisodeReply":
             return json.dumps({"title": "Plan", "summary": "Plan.", "content": "Plan."})
-        if name == "_ProfileItems":
+        if name == "_ProfileUpdateReply":
             prompt = "\n".join(str(m.content) for m in messages)
             assert "personal marker" not in prompt
+            item = {"evidence": "x", "description": "Plans", "category": "plans"}
             return json.dumps(
                 {
-                    "explicit_info": [
-                        {"evidence": "x", "description": "Plans", "category": "plans"}
-                    ],
-                    "implicit_traits": [],
+                    "operations": [
+                        {"action": "add", "type": "explicit_info", "data": item}
+                    ]
                 }
             )
         raise AssertionError(name)

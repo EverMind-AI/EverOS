@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory.extract.pipeline import profile_delta
+from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import ForgetEntry, MemoryRef, Scope, Stored
 from everos.service.memory._forget import (
@@ -386,7 +386,7 @@ class UndoManager:
         if not entry.removed_profile_items:
             return 0
         existing = await self._stores.profile.read(scope)
-        profile, restored = profile_delta.restore_items(
+        profile, restored = profile_items.restore_items(
             existing,
             list(entry.removed_profile_items),
             owner_id=scope.owner_id,

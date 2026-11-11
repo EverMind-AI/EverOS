@@ -93,12 +93,14 @@ async def test_blank_episode_script_is_unusable() -> None:
 
 @pytest.mark.parametrize(
     ("script", "explicit", "implicit"),
-    [("profile_init", 2, 1), ("profile_init_empty", 0, 0)],
+    [("profile_update", 2, 1), ("profile_update_empty", 0, 0)],
 )
-async def test_profile_init_scripts(script: str, explicit: int, implicit: int) -> None:
-    profile = await ProfileExtractor(llm=user_track_llm(profile_init=script)).aextract(
-        [_CELL], sender_id="u_alice"
-    )
+async def test_profile_first_update_scripts(
+    script: str, explicit: int, implicit: int
+) -> None:
+    profile = await ProfileExtractor(
+        llm=user_track_llm(profile_update=script)
+    ).aextract([_CELL], sender_id="u_alice")
     assert (len(profile.explicit_info), len(profile.implicit_traits)) == (
         explicit,
         implicit,
@@ -106,7 +108,7 @@ async def test_profile_init_scripts(script: str, explicit: int, implicit: int) -
 
 
 @pytest.mark.parametrize(
-    ("script", "explicit"), [("profile_update", 2), ("profile_update_empty", 1)]
+    ("script", "explicit"), [("profile_update", 3), ("profile_update_empty", 1)]
 )
 async def test_profile_update_scripts(script: str, explicit: int) -> None:
     old = AlgoProfile(

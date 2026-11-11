@@ -17,6 +17,7 @@ from typing import Any
 from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
+from everos.component.images import ImageLimits
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
 from everos.memory.models import Episode, MemCell
@@ -116,13 +117,15 @@ def make_deps(
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
     case_judge: CaseJudge | None = None,
+    picture_limits: ImageLimits | None = None,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
     ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
     :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
     unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
-    gate) unless given.
+    gate) unless given; ``picture_limits`` stays ``None`` (a profile update
+    reads no pictures) unless given.
     """
     return MemoryDeps(
         llm=unscripted_llm() if llm is _DEFAULT else llm,
@@ -131,6 +134,7 @@ def make_deps(
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
         case_judge=case_judge,
+        picture_limits=picture_limits,
     )
 
 

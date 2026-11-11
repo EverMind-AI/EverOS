@@ -242,6 +242,37 @@ machinery that keeps a deleted memory from coming back.
   startup hint about rows without a vector is logged only when an embedder
   is configured. Cost: no embedding calls at all on such a deployment; the
   decider prompt is the same size.
+
+- **The profile reads each segment once, with two prompts** (everalgo
+  `ProfileExtractor.aupdate`; the 2.0 design approved on 2026-10-30). Every
+  new segment updates the profile of each user who spoke in it from that
+  segment only, with the pictures that user posted in it; the update replies
+  `add` / `modify` / `deprecate` / `none`, each naming the segments and
+  pictures it rests on, and a changed value is a `modify` of the item holding
+  the old one. A consolidation call (drop, merge, split, re-file) runs only for
+  the whole profile past 60 items or one name past 8, and runs again on the
+  same part only once it has grown by 15 / 4 items, so the regroup loop is
+  gone. It used to re-send every segment of every cluster newer than the
+  profile on every update (67 lines for a 17-line segment, measured
+  2026-11-11), re-adding what was on file and sending 63 of 82 updates on to
+  REGROUP; the profile was 85% of the text write cost. Member-in-group
+  profiles keep `[groups] member_profile_every` and use the same prompts.
+  `extract_user_profile` now triggers on the pipeline's `EpisodeExtracted`
+  with or without an embedding provider and skips a segment an item already
+  rests on; the clusters no longer drive it (`trigger_profile_clustering`
+  still runs, for Reflection).
+- **One profile writer.** The picture call no longer writes profile items:
+  its `profile` reply field and prompt block are gone (the picture prompt is
+  shorter), and `profile_delta` with them. The profile update reads the
+  segment's pictures itself, the poster's only (D17); `[extraction] vision`
+  off attaches none.
+- **Every profile item carries its provenance.** A one-to-one item now
+  carries `item_id`, `source_memcell_ids`, `source_start` / `source_end` and,
+  when read off a picture, `source_image_ids`, as a member-profile item does;
+  an item records the segments its own operation named, not every segment of
+  the update. A member profile's history entry now also says what replaced
+  the item: `superseded_by`, `deprecated_by` and `reason`, `merged_into`, or
+  `reason` for a consolidation drop.
 - **A Reflection merge finishes on the merged episode itself.**
   `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
   and deprecates the replaced members at once; it used to wait for the

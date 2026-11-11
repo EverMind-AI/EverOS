@@ -213,14 +213,18 @@ derived later by the OME, an in-process async strategy engine. When
 extraction carves a MemCell, it emits an event; OME strategies pick it up
 and write their markdown when ready:
 
-- `extract_user_profile` — the aggregated `user.md`
+- `extract_user_profile` — the owner's `user.md`, updated once per new
+  segment from that segment only (with the pictures the owner posted in it):
+  one update call, and a consolidation call only when a part of the profile is
+  over its cap and has grown since it was last consolidated
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design, and the
   `agent_case_skipped` log line says which check skipped them). With
   `[agent_memory] case_gate_enabled`, an LLM judgement of whether the work
   was completed correctly decides instead
 - `extract_agent_skill` — clusters related cases into a named skill
-- `trigger_profile_clustering` — triggers user profile clustering
+- `trigger_profile_clustering` — clusters the owner's episodes (Reflection
+  reads the clusters; the profile no longer does)
 - `trigger_skill_clustering` — triggers agent skill clustering
 - `reflect_episodes` (cron, default off) — offline memory consolidation.
   Merges fragmented episodes within a cluster into a single coherent

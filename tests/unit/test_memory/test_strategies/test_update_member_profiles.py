@@ -15,10 +15,13 @@ model. What these pin:
 - the operator is told a language, never left to choose one: the event's
   (the group pipeline's resolved language), a flush's resolved from the
   segments it reads, a stored ``primary_language`` over either;
-- through everalgo's own merge: an UPDATE op that rewrites an item by its
-  index makes the new item name the old one (``supersedes``, ``since``) and
-  the old one's history entry name it back; a delete with an add, and a
-  REGROUP rewrite, link nothing; the version keys never reach the model.
+- through everalgo's lineage: a ``modify`` that gives a fact a new value
+  makes the new item name the old one (``supersedes``, ``since``) and the old
+  one's history entry name it back; a deprecation with an add links nothing; a
+  consolidation keeps the link of an item it leaves as it is and links none of
+  the items it merges (their history entries name what they merged into); the
+  version keys never reach the model;
+- the member's pictures in the segments are read with them, nobody else's.
 """
 
 from __future__ import annotations
@@ -46,7 +49,7 @@ _SCOPE = Scope(app_id="default", project_id="p", owner_id="trip", owner_type="gr
 
 
 class _ProfileModel:
-    """INIT: one item naming the target; UPDATE: adds one more item.
+    """Every update adds one item naming the target.
 
     ``gate`` (optional) holds every call until ``release`` is set, recording
     which targets are waiting -- how a test sees two calls in flight.
@@ -61,7 +64,7 @@ class _ProfileModel:
     async def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
         text = "\n".join(str(m.content) for m in messages)
         self.prompts.append(text)
-        target = re.search(r"TARGET USER: ([^*\n]+)\*\*", text)
+        target = re.search(r"The target user is (.+?), the speaker", text)
         who = target.group(1).strip() if target else "?"
         self.counter += 1
         if self.gate is not None:
@@ -72,11 +75,9 @@ class _ProfileModel:
             "description": f"Fact {self.counter} about {who}",
             "category": "plans",
         }
-        if response_format.__name__ == "_ProfileItems":
-            return json.dumps({"explicit_info": [item], "implicit_traits": []})
-        if response_format.__name__ == "_MemCellUpdateOutput":
+        if response_format.__name__ == "_ProfileUpdateReply":
             op = {"action": "add", "type": "explicit_info", "data": item}
-            return json.dumps({"operations": [op], "update_note": "added"})
+            return json.dumps({"operations": [op]})
         raise AssertionError(response_format.__name__)
 
 
@@ -177,7 +178,7 @@ async def test_each_speaker_gets_a_profile_from_their_own_segments(every: Any) -
             sources = set((item.model_extra or {})["source_memcell_ids"])
             assert sources and sources <= spoke[member]
     # The operator read roster names, and Betty's update never saw mc_2.
-    betty_prompt = next(p for p in model.prompts if "TARGET USER: Betty" in p)
+    betty_prompt = next(p for p in model.prompts if "target user is Betty" in p)
     assert "Bring passports" not in betty_prompt
     assert "Betty(user_id:u_betty)" in betty_prompt
     assert chen.pending_memcell_ids == []
@@ -296,30 +297,30 @@ def _fact(description: str, category: str = "residence") -> dict[str, str]:
 
 
 class _ScriptedModel:
-    """INIT returns ``init``; each UPDATE returns the next ``updates`` reply."""
+    """The first update adds ``first``; each later one returns the next ``updates``."""
 
     def __init__(
         self,
-        init: list[dict[str, str]],
+        first: list[dict[str, str]],
         *updates: list[dict[str, Any]],
-        regroup: list[dict[str, str]] | None = None,
+        consolidation: dict[str, Any] | None = None,
     ) -> None:
-        self.init = init
-        self.updates = list(updates)
-        self.regroup = regroup
+        self.replies = [[_added(item) for item in first], *updates]
+        self.consolidation = consolidation
         self.calls: list[str] = []
 
     def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
         name = response_format.__name__
         self.calls.append(name)
-        if name == "_ProfileItems":
-            return json.dumps({"explicit_info": self.init, "implicit_traits": []})
-        if name == "_MemCellUpdateOutput":
-            ops = self.updates.pop(0)
-            return json.dumps({"operations": ops, "update_note": "n"})
-        if name == "_MemCellRegroupOutput" and self.regroup is not None:
-            return json.dumps({"items": self.regroup, "regroup_note": "n"})
+        if name == "_ProfileUpdateReply":
+            return json.dumps({"operations": self.replies.pop(0)})
+        if name == "_ConsolidateReply" and self.consolidation is not None:
+            return json.dumps(self.consolidation)
         raise AssertionError(name)
+
+
+def _added(item: dict[str, str]) -> dict[str, Any]:
+    return {"action": "add", "type": "explicit_info", "data": item, "sources": ["s1"]}
 
 
 async def _two_updates(model: _ScriptedModel) -> Any:
@@ -335,12 +336,7 @@ async def _two_updates(model: _ScriptedModel) -> Any:
 
 async def test_an_update_op_rewriting_a_fact_links_the_new_value(every: Any) -> None:
     every(1)
-    rewrite = {
-        "action": "update",
-        "type": "explicit_info",
-        "index": 0,
-        "data": _fact("Lives in Berlin"),
-    }
+    rewrite = {"action": "modify", "ref": "e1", "data": _fact("Lives in Berlin")}
     model = _ScriptedModel(
         [_fact("Lives in Paris"), _fact("Cycles to work", "habits")], [rewrite]
     )
@@ -359,37 +355,56 @@ async def test_an_update_op_rewriting_a_fact_links_the_new_value(every: Any) -> 
     assert not {"supersedes", "since"} & set(bike.model_extra or {})
 
 
-async def test_a_delete_with_an_add_and_a_regroup_link_nothing(every: Any) -> None:
+async def test_a_deprecation_with_an_add_links_nothing(every: Any) -> None:
     every(1)
     replace = [
-        {"action": "delete", "type": "explicit_info", "index": 0, "reason": "moved"},
+        {"action": "deprecate", "ref": "e1", "reason": "moved"},
         {"action": "add", "type": "explicit_info", "data": _fact("Lives in Berlin")},
     ]
     chen = await _two_updates(_ScriptedModel([_fact("Lives in Paris")], replace))
     assert [i.description for i in chen.profile.explicit_info] == ["Lives in Berlin"]
     assert "supersedes" not in (chen.profile.explicit_info[0].model_extra or {})
-    assert "superseded_by" not in chen.history[0]
+    (paris,) = chen.history
+    assert "superseded_by" not in paris
+    assert (paris["reason"], paris["deprecated_by"]) == ("moved", ["mc_2"])
 
-    # Nine plans: the UPDATE rewrites one by its index and adds a tenth, so the
-    # group passes its cap and REGROUP rewrites it without any host key.
-    plans = [_fact(f"Plan {n}", "plans") for n in range(9)]
+
+async def test_a_consolidation_keeps_a_link_and_merges_without_one(every: Any) -> None:
+    every(1)
+    # Eight plans fill their name; the update gives one a new value and adds a
+    # ninth, so the name passes its cap and is consolidated in the same call.
+    plans = [_fact(f"Plan {n}", "plans") for n in range(8)]
+    may = _fact("Plan 0, moved to May", "plans")
     rewrite_and_add = [
-        {"action": "update", "type": "explicit_info", "index": 0,
-         "data": _fact("Plan 0, moved to May", "plans")},
-        {"action": "add", "type": "explicit_info", "data": _fact("Plan 9", "plans")},
-    ]  # fmt: skip
-    regrouped = [_fact("Plan 0, moved to May", "plans"), _fact("Plans 1-9", "plans")]
-    model = _ScriptedModel(plans, rewrite_and_add, regroup=regrouped)
-    chen = await _two_updates(model)
-    assert "_MemCellRegroupOutput" in model.calls
-    assert [i.description for i in chen.profile.explicit_info] == [
-        "Plan 0, moved to May",
-        "Plans 1-9",
+        {"action": "modify", "ref": "e1", "data": may},
+        {"action": "add", "type": "explicit_info", "data": _fact("Plan 8", "plans")},
     ]
-    for item in chen.profile.explicit_info:
-        assert not {"supersedes", "since"} & set(item.model_extra or {})
-    assert len(chen.history) == 9
-    assert all("superseded_by" not in entry for entry in chen.history)
+    consolidation = {
+        "items": [
+            {"from": ["e1"], **_fact("Plan 0, moved to May", "plans")},
+            {"from": [f"e{n}" for n in range(2, 10)], **_fact("Plans 1-8", "plans")},
+        ],
+        "dropped": [],
+    }
+    model = _ScriptedModel(plans, rewrite_and_add, consolidation=consolidation)
+    chen = await _two_updates(model)
+    assert "_ConsolidateReply" in model.calls
+    may, merged = chen.profile.explicit_info
+    assert [may.description, merged.description] == [
+        "Plan 0, moved to May",
+        "Plans 1-8",
+    ]
+    # The new value the update linked keeps its link through a re-filing ...
+    assert (may.model_extra or {})["supersedes"]
+    # ... and an item merged from others is no new value of any of them.
+    assert not {"supersedes", "since"} & set(merged.model_extra or {})
+    linked = [e for e in chen.history if "superseded_by" in e]
+    assert [e["description"] for e in linked] == ["Plan 0"]
+    into = [e for e in chen.history if "merged_into" in e]
+    assert len(into) == 7  # Plans 1-7 as stored; Plan 8 was added by this update
+    assert {tuple(e["merged_into"]) for e in into} == {
+        ((merged.model_extra or {})["item_id"],)
+    }
 
 
 async def test_the_version_keys_never_reach_the_model() -> None:
@@ -419,7 +434,7 @@ async def test_the_version_keys_never_reach_the_model() -> None:
 
     def model(messages: Any, *, response_format: type, **_: Any) -> str:
         prompts.append("\n".join(str(m.content) for m in messages))
-        return json.dumps({"operations": [{"action": "none"}], "update_note": "n"})
+        return json.dumps({"operations": [{"action": "none"}]})
 
     cell = MemCell(
         items=[

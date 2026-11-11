@@ -1,9 +1,10 @@
 """Forgetting a picture inside a group, and the message that carried one.
 
 docs/group-memory.md, section 9.4 (a picture; a message's pictures) and 7.3.
-A group batch with a picture goes through the bootstrap's memory service, the
-picture route writes the group episode, one picture memory and the poster's
-picture profile item; then the picture is forgotten. What these pin:
+A group batch with a picture goes through the bootstrap's memory service: the
+picture route writes the group episode and one picture memory, and the poster's
+member-profile update reads the picture and writes an item off it; then the
+picture is forgotten. What these pin:
 
 - only the poster (or an owner / admin) may forget a picture of the group;
 - its group picture memories go, the episodes that referred to it are
@@ -73,26 +74,29 @@ class _Model:
                         {"ref": label, "description": f"A {WORDS[2]} of a cat"}
                         for label in labels
                     ],
-                    "profile": [
-                        {
-                            "action": "add",
-                            "type": "explicit_info",
-                            "source_image_id": label,
-                            "data": {
-                                "category": "pets",
-                                "description": f"Has a cat ({WORDS[2]})",
-                                "evidence": "the photo",
-                            },
-                        }
-                        for label in labels
-                    ],
                 }
             )
-        if name in ("_ProfileItems", "_MemCellUpdateOutput"):
+        if name == "_ProfileUpdateReply":
             item = {"evidence": "x", "description": "Talks pets", "category": "pets"}
-            if name == "_ProfileItems":
-                return json.dumps({"explicit_info": [item], "implicit_traits": []})
-            return json.dumps({"operations": [], "update_note": "n"})
+            ops: list[dict[str, Any]] = [
+                {"action": "add", "type": "explicit_info", "data": item}
+            ]
+            # The poster's own update is attached the picture and reads it.
+            for label in sorted(set(re.findall(r"label: (img-\d+)", prompt))):
+                cat = {
+                    "category": "pets",
+                    "description": f"Has a cat ({WORDS[2]})",
+                    "evidence": "the photo",
+                }
+                ops.append(
+                    {
+                        "action": "add",
+                        "type": "explicit_info",
+                        "data": cat,
+                        "pictures": [label],
+                    }
+                )
+            return json.dumps({"operations": ops})
         if name == "GroupProfileReply":
             return json.dumps({"operations": []})
         raise AssertionError(f"unexpected model call {name}")

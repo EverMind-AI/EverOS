@@ -9,12 +9,12 @@ the same way and route what a picture says about a person the same way
   name a reply can refer to, deliberately distinct from the content hash that
   identifies the file;
 * a picture's **sender** is the sender of the message it first appears in;
-  its **poster**, the one its profile items may reach, is that sender only
+  its **poster**, the one whose profile it may reach, is that sender only
   when it is a user: an assistant's (or a tool's) picture is evidence about no
   user at all;
-* :func:`ops_by_poster` routes each profile operation to the poster of the
-  picture it names, and drops one that cannot be pinned to a single poster --
-  giving it to everyone would hand one person's photo to another.
+* :func:`profile_pictures` hands a profile update the pictures one person
+  posted in its segments, and nobody else's: a picture says something about
+  its poster only (D17).
 """
 
 from __future__ import annotations
@@ -23,15 +23,17 @@ __all__ = [
     "Picture",
     "image_ids_in",
     "memcell_alive",
-    "ops_by_poster",
     "pictures_of",
+    "profile_pictures",
 ]
 
 from collections.abc import Sequence
 
+from everalgo.llm import image_url_part_from_bytes
+from everalgo.user_memory.profile import ProfilePicture
+
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
-from everos.memory.extract.pipeline import profile_delta
 from everos.memory.models import MemCell
 from everos.memory.ports import MemcellStore, SourceCheck
 from everos.memory.ports.images import ImageStore
@@ -123,33 +125,71 @@ async def pictures_of(
     return pictures
 
 
-def ops_by_poster(
-    ops: Sequence[profile_delta.ProfileItemOp], pictures: Sequence[Picture]
-) -> dict[str, list[profile_delta.ProfileItemOp]]:
-    """Each picture-derived profile operation, under the picture's poster (D17).
+async def profile_pictures(
+    cells: Sequence[MemCell],
+    owner_id: str,
+    *,
+    images: ImageStore | None,
+    limits: ImageLimits | None,
+    detail: str = "high",
+) -> tuple[list[MemCell], list[ProfilePicture]]:
+    """The cells as a profile update reads them, and the pictures ``owner_id`` posted.
 
-    An operation names its picture by content hash (``source_image_id`` after
-    :func:`profile_delta.retarget`); it goes to whoever posted that picture.
-    One that names none was read off the cell's pictures together: it goes to
-    their poster when they all have one, and to nobody when they do not.
+    Each picture the owner posted is labelled once for the whole batch
+    (``img-1``, ``img-2`` in conversation order) and its ``[IMAGE: <hash>]``
+    reference in the text becomes ``[IMAGE: <label>]``, the name the update
+    and its reply use; the hash is the id the lineage reports back. A picture
+    someone else posted, or one that cannot be read (forgotten, or a store
+    rebuilt without its cache), is not attached, and its reference becomes a
+    bare ``[IMAGE]``: the update sees that a picture was sent, never what it
+    shows. ``detail`` is the image parts' hint, as the picture route sends.
+
+    Without a picture store or limits (the extraction model reads no images),
+    the cells come back unchanged and no picture is attached.
     """
-    poster_of = {picture.image_id: picture.poster for picture in pictures}
-    posters = {picture.poster for picture in pictures}
-    routed: dict[str, list[profile_delta.ProfileItemOp]] = {}
-    dropped = 0
-    for op in ops:
-        source = getattr(op, "source_image_id", "")
-        if source in poster_of:
-            owner = poster_of[source]
-        elif len(posters) == 1:
-            (owner,) = posters
-        else:
-            dropped += 1
-            continue
-        routed.setdefault(owner, []).append(op)
-    if dropped:
-        logger.info("memory.images.profile_unattributed", dropped=dropped)
-    return routed
+    if images is None or limits is None:
+        return list(cells), []
+    labels: dict[str, str] = {}
+    pictures: list[ProfilePicture] = []
+    for cell in cells:
+        for picture in await pictures_of(cell, images=images, limits=limits):
+            if picture.poster != owner_id or picture.image_id in labels:
+                continue
+            label = f"img-{len(labels) + 1}"
+            labels[picture.image_id] = label
+            part = image_url_part_from_bytes(picture.data, picture.mime)
+            if part.image_url.detail is None and detail:
+                part = part.model_copy(
+                    update={
+                        "image_url": part.image_url.model_copy(
+                            update={"detail": detail}
+                        )
+                    }
+                )
+            pictures.append(ProfilePicture(label=label, id=picture.image_id, part=part))
+    return [_relabelled(cell, labels) for cell in cells], pictures
+
+
+def _relabelled(cell: MemCell, labels: dict[str, str]) -> MemCell:
+    """``cell`` with each picture reference as the update names it."""
+
+    def text(content: str) -> str:
+        for image_id in image_ids_in(content):
+            label = labels.get(image_id)
+            reference = f"{_IMAGE_REF_PREFIX}{image_id}]"
+            content = content.replace(
+                reference, f"{_IMAGE_REF_PREFIX}{label}]" if label else "[IMAGE]"
+            )
+        return content
+
+    items = [
+        item.model_copy(update={"content": text(item.content)})
+        if isinstance(getattr(item, "content", None), str)
+        and _IMAGE_REF_PREFIX in item.content
+        else item
+        for item in cell.items
+    ]
+    return cell.model_copy(update={"items": items})
 
 
 def image_ids_in(text: str) -> list[str]:

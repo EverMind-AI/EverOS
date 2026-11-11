@@ -276,7 +276,7 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "id": "u_pic_ep_<TODAY>_00000001",
      "project_id": "default",
      "sender_ids": [
@@ -285,7 +285,7 @@
      ],
      "session_id": "s_picture",
      "subject": "Talk between nobody",
-     "summary": "0 lines (f0f50370921d)",
+     "summary": "0 lines (09652039336a)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
@@ -297,42 +297,10 @@
   "u_pic:profile": {
    "agent_cases": [],
    "agent_skills": [],
-   "count": 1,
+   "count": 0,
    "episodes": [],
-   "profiles": [
-    {
-     "app_id": "default",
-     "id": "u_pic",
-     "profile_data": {
-      "explicit_info": [
-       {
-        "category": "pets",
-        "description": "Has a tabby cat (img-1)",
-        "evidence": "the photo shows the cat at home",
-        "observed_at": 1761000120000,
-        "source_image_ids": [
-         "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
-        ]
-       },
-       {
-        "category": "pets",
-        "description": "Has a tabby cat (img-2)",
-        "evidence": "the photo shows the cat at home",
-        "observed_at": 1761000120000,
-        "source_image_ids": [
-         "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
-        ]
-       }
-      ],
-      "implicit_traits": [],
-      "profile_timestamp_ms": 1761000120000,
-      "summary": ""
-     },
-     "project_id": "default",
-     "user_id": "u_pic"
-    }
-   ],
-   "total_count": 1
+   "profiles": [],
+   "total_count": 0
   },
   "user_001:episode": {
    "agent_cases": [],
@@ -419,9 +387,8 @@
  "markdown": {
   "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md": "---\nid: episode_log_caroline_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: caroline\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (6dc4730b4193)\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (30824b938ddb)\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (7b3bc03aed78)\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n17 lines (4322b78050db)\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
   "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md": "---\nid: episode_log_melanie_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: melanie\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (6dc4730b4193)\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (30824b938ddb)\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (7b3bc03aed78)\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n17 lines (4322b78050db)\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
-  "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md": "---\nid: episode_log_u_pic_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: u_pic\n**session_id**: s_picture\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**sender_ids**: [u_pic, bot_pic]\n**image_ids**: [b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99]\n**language**: English\n\n### Subject\nTalk between nobody\n\n### Summary\n0 lines (f0f50370921d)\n\n### Content\n[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)\n<!-- /entry:ep_<TODAY>_00000001 -->\n",
+  "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md": "---\nid: episode_log_u_pic_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: u_pic\n**session_id**: s_picture\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**sender_ids**: [u_pic, bot_pic]\n**image_ids**: [b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99]\n**language**: English\n\n### Subject\nTalk between nobody\n\n### Summary\n0 lines (09652039336a)\n\n### Content\n[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)\n<!-- /entry:ep_<TODAY>_00000001 -->\n",
   "default_app/default_project/users/u_pic/images/image-<TODAY>.md": "---\nid: image_log_u_pic_<TODAY>\ntype: image_memory_daily\nfile_type: image_memory_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:im_<TODAY>_00000001 -->\n## im_<TODAY>_00000001\n\n**owner_id**: u_pic\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**image_id**: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\n**original_path**: figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png\n**media_type**: png\n**width**: 48\n**height**: 32\n**name**: cat.png\n**session_id**: s_picture\n\n### Description\nA tabby cat on a sill (img-1)\n<!-- /entry:im_<TODAY>_00000001 -->\n",
-  "default_app/default_project/users/u_pic/user.md": "---\nid: profile_u_pic\ntype: user_profile\nschema_version: 1\nuser_id: u_pic\ntrack: user\nsummary: ''\nexplicit_info:\n- description: Has a tabby cat (img-1)\n  category: pets\n  evidence: the photo shows the cat at home\n  observed_at: 1761000120000\n  source_image_ids:\n  - b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\n- description: Has a tabby cat (img-2)\n  category: pets\n  evidence: the photo shows the cat at home\n  observed_at: 1761000120000\n  source_image_ids:\n  - b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\nimplicit_traits: []\nprofile_timestamp_ms: 1761000120000\nprimary_language: English\n---\n",
   "default_app/default_project/users/user_001/episodes/episode-<TODAY>.md": "---\nid: episode_log_user_001_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: user_001\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-06-26T00:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<5>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (b33c3ced6691)\n\n### Content\nI will travel to Beijing next week. Could you give me some s | Of course! Beijing attractions: Forbidden City, Great Wall,  | I am very interested in the variety of foods you mentioned.  [b33c3ced6691]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-05T07:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<6>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (4427231cd4f7)\n\n### Content\nI will go with five or six of my friends. I really enjoy act | Entertainment suitable for groups of 6-8 people: 1. Hutong I | We will try immersive script murder games in the hutongs and [4427231cd4f7]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-07T06:03:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<7>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (ddd529e75d57)\n\n### Content\nThese past few days, to check in at all the attractions, I w | For your current physical and mental exhaustion and work anx | I feel like I've gained some weight. Are there any self-asse [ddd529e75d57]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-14T04:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<8>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (16dd80b2f5d7)\n\n### Content\nI ate a lot of greasy food for lunch today and now I feel a  | Causes: Excessive fat intake, delayed gastric emptying, bloo | Okay, I will take your advice, drink some warm water tonight [16dd80b2f5d7]\n<!-- /entry:ep_<TODAY>_00000004 -->\n"
  },
  "rows": {
@@ -652,12 +619,12 @@
    },
    {
     "app_id": "default",
-    "content_sha256": "3785f4783dcd7aed1c732d6d76209b525c03395fb65c11c43a8a1cd2012867ba",
+    "content_sha256": "dbcada59f391b9d5e8aff25de2bc66c006eaa11e1bf2b6aa9cff87cde8bab10e",
     "created_at": "<NOW>",
     "deprecated_by": null,
     "entry_id": "ep_<TODAY>_00000001",
-    "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
-    "episode_tokens": "f0f50370921d photo img photo img img b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99 talk between nobody",
+    "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+    "episode_tokens": "09652039336a photo img photo img img b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99 talk between nobody",
     "id": "u_pic_ep_<TODAY>_00000001",
     "image_ids": [
      "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
@@ -675,10 +642,10 @@
     "session_id": "s_picture",
     "subject": "Talk between nobody",
     "subject_vector": "d5a92ac8ec2a5721",
-    "summary": "0 lines (f0f50370921d)",
+    "summary": "0 lines (09652039336a)",
     "timestamp": "2025-10-20T22:42:00Z",
     "updated_at": "<NOW>",
-    "vector": "a7f50c7062da63a6"
+    "vector": "09c0905d945b618b"
    },
    {
     "app_id": "default",
@@ -824,23 +791,7 @@
     "width": 48
    }
   ],
-  "user_profile": [
-   {
-    "app_id": "default",
-    "content_sha256": "f9458dbd43cbf4594d18425d21e5adc8705fbfe7552e1f8243e4227a37bbab16",
-    "created_at": "<NOW>",
-    "explicit_info_json": "[{\"category\": \"pets\", \"description\": \"Has a tabby cat (img-1)\", \"evidence\": \"the photo shows the cat at home\", \"observed_at\": 1761000120000, \"source_image_ids\": [\"b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\"]}, {\"category\": \"pets\", \"description\": \"Has a tabby cat (img-2)\", \"evidence\": \"the photo shows the cat at home\", \"observed_at\": 1761000120000, \"source_image_ids\": [\"b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\"]}]",
-    "id": "u_pic",
-    "implicit_traits_json": "[]",
-    "md_path": "default_app/default_project/users/u_pic/user.md",
-    "owner_id": "u_pic",
-    "owner_type": "user",
-    "profile_timestamp_ms": 1761000120000,
-    "project_id": "default",
-    "summary": "",
-    "updated_at": "<NOW>"
-   }
-  ]
+  "user_profile": []
  },
  "search": {
   "caroline:cat": {
@@ -1591,7 +1542,7 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1610,7 +1561,7 @@
      "source": null,
      "subject": "Talk between nobody",
      "subject_ids": [],
-     "summary": "0 lines (f0f50370921d)",
+     "summary": "0 lines (09652039336a)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
@@ -1651,7 +1602,7 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1670,7 +1621,7 @@
      "source": null,
      "subject": "Talk between nobody",
      "subject_ids": [],
-     "summary": "0 lines (f0f50370921d)",
+     "summary": "0 lines (09652039336a)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
@@ -1703,43 +1654,7 @@
      "width": 48
     }
    ],
-   "profiles": [
-    {
-     "app_id": "default",
-     "group_id": null,
-     "id": "u_pic",
-     "member_id": null,
-     "owner_type": null,
-     "profile_data": {
-      "explicit_info": [
-       {
-        "category": "pets",
-        "description": "Has a tabby cat (img-1)",
-        "evidence": "the photo shows the cat at home",
-        "observed_at": 1761000120000,
-        "source_image_ids": [
-         "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
-        ]
-       },
-       {
-        "category": "pets",
-        "description": "Has a tabby cat (img-2)",
-        "evidence": "the photo shows the cat at home",
-        "observed_at": 1761000120000,
-        "source_image_ids": [
-         "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
-        ]
-       }
-      ],
-      "implicit_traits": [],
-      "profile_timestamp_ms": 1761000120000,
-      "summary": ""
-     },
-     "project_id": "default",
-     "score": null,
-     "user_id": "u_pic"
-    }
-   ],
+   "profiles": [],
    "scope": null,
    "unprocessed_messages": []
   },
@@ -1747,7 +1662,7 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1766,7 +1681,7 @@
      "source": null,
      "subject": "Talk between nobody",
      "subject_ids": [],
-     "summary": "0 lines (f0f50370921d)",
+     "summary": "0 lines (09652039336a)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
@@ -1807,7 +1722,7 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[f0f50370921d] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "[09652039336a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1826,7 +1741,7 @@
      "source": null,
      "subject": "Talk between nobody",
      "subject_ids": [],
-     "summary": "0 lines (f0f50370921d)",
+     "summary": "0 lines (09652039336a)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"

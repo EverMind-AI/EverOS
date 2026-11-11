@@ -381,7 +381,14 @@ async def test_add_flush_get_on_canned_user_track(
     providers = make_providers(llm=llm, embedding=None, rerank=None)
     app = create_app(application=build_application(settings, providers=providers))
     episode = json.loads(user_track_script("episode"))
-    profile = json.loads(user_track_script("profile_init"))
+    profile = {
+        bucket: [
+            op["data"]
+            for op in json.loads(user_track_script("profile_update"))["operations"]
+            if op["type"] == bucket
+        ]
+        for bucket in ("explicit_info", "implicit_traits")
+    }
 
     async with (
         app.router.lifespan_context(app),

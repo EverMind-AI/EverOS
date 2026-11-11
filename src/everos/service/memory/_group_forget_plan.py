@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from everalgo.types import ChatMessage
 
 from everos.core.errors import NotFoundError
-from everos.memory.extract.pipeline import profile_delta
+from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.pictures import image_ids_in
 from everos.memory.groups import without_forgotten, without_pictures
@@ -772,7 +772,7 @@ def member_edit(
         if item_id and item_id in record_items:
             edit.forgotten.append(item_id)
             continue
-        images = [str(i) for i in extra.get(profile_delta.SOURCE_IMAGE_KEYS) or []]
+        images = [str(i) for i in extra.get(profile_items.SOURCE_IMAGE_KEYS) or []]
         if images:
             if pictures and set(images) <= pictures:
                 edit.forgotten.append(item_id)
@@ -790,7 +790,7 @@ def member_edit(
             edit.forgotten.append(item_id)
     for position, old in enumerate(held.history):
         sources = {str(s) for s in old.get("source_memcell_ids") or []}
-        images = {str(i) for i in old.get(profile_delta.SOURCE_IMAGE_KEYS) or []}
+        images = {str(i) for i in old.get(profile_items.SOURCE_IMAGE_KEYS) or []}
         named = bool(old.get("item_id")) and old.get("item_id") in record_items
         if sources & set(readable) or (images and images <= pictures) or named:
             edit.history.append(position)

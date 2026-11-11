@@ -2,9 +2,10 @@
 
 A cell cut from a session bound to a group is the group's memory, not each
 sender's: the pipeline writes **one** episode under ``groups/<group_id>/``
-(D3), one picture memory per picture the segment carries (7.3), and the
-profile items a picture establishes into its poster's member-in-group profile
-only (D17). It never writes under ``users/``.
+(D3) and one picture memory per picture the segment carries (7.3). What a
+picture says about its poster reaches that member's profile through the
+member-profile update, which reads the poster's pictures itself (D17). It
+never writes under ``users/``.
 
 The extraction call is the one-to-one call -- everalgo's
 :class:`EpisodeExtractor` for text, the EverOS picture call for a segment with
@@ -19,7 +20,7 @@ The language is the conversation's, resolved in code before the call exactly
 as on the one-to-one path (:mod:`everos.memory.extract.conversation_language`):
 the segment's human messages, and its session's earlier segments when it has
 too little text of its own. It is named to the model on both routes, so the
-picture descriptions and the poster's picture profile items get it too, and it
+picture descriptions get it too, and it
 pins the episode and its event, which carry it on to the member-in-group
 profiles and the scenes. Only a session without a letter anywhere leaves the
 choice to the model; then the language its episode was written in is pinned.
@@ -56,7 +57,6 @@ from everos.memory.events import GroupEpisodeExtracted
 from everos.memory.extract.conversation_language import resolve_cell_language
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline import image_memory as image_extract
-from everos.memory.extract.pipeline import profile_delta
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.extract.pipeline.group_render import (
     attribution,
@@ -65,13 +65,9 @@ from everos.memory.extract.pipeline.group_render import (
     with_roster_block,
 )
 from everos.memory.extract.pipeline.group_scene import narrate_scene
-from everos.memory.extract.pipeline.member_profile import (
-    write_member_picture_profile,
-)
 from everos.memory.extract.pipeline.pictures import (
     Picture,
     memcell_alive,
-    ops_by_poster,
     pictures_of,
 )
 from everos.memory.groups import named_members, roster_names, without_forgotten
@@ -88,7 +84,6 @@ from everos.memory.ports import (
     Event,
     GroupStore,
     ImageMemoryStore,
-    MemberProfileStore,
     MemcellStore,
     MemoryRef,
     MessageForgetStore,
@@ -103,13 +98,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_Extraction = tuple[
-    AlgoEpisode,
-    dict[str, tuple[str, str]],
-    list[profile_delta.ProfileItemOp],
-]
-"""The episode, each picture's ``(description, ocr)`` by label, and the
-profile operations the pictures produced -- readings of one call."""
+_Extraction = tuple[AlgoEpisode, dict[str, tuple[str, str]]]
+"""The episode and each picture's ``(description, ocr)`` by label -- readings
+of one call."""
 
 
 @dataclass(frozen=True)
@@ -120,7 +111,6 @@ class _Segment:
         episode: The group episode, attribution and span set, not written.
         pictures: The pictures the call was shown.
         described: Each picture's ``(description, ocr)`` by label.
-        ops: The profile operations the pictures produced.
         language: The episode's language (the conversation's).
         roster: The group's roster the call was rendered with.
     """
@@ -128,7 +118,6 @@ class _Segment:
     episode: Episode
     pictures: list[Picture]
     described: dict[str, tuple[str, str]]
-    ops: list[profile_delta.ProfileItemOp]
     language: str | None
     roster: Roster
 
@@ -146,8 +135,6 @@ class GroupMemoryPipeline:
             picture route.
         image_memory_store: Where a picture's memory is written.
         image_limits: ``[images]`` -- the size a picture is scaled to.
-        member_profiles: Where a picture's profile items reach its poster's
-            member-in-group profile; ``None`` keeps that half off.
         message_forget: Which messages are forgotten; a cell is extracted
             without them. ``None`` reads every message.
     """
@@ -163,7 +150,6 @@ class GroupMemoryPipeline:
         image_store: ImageStore | None = None,
         image_memory_store: ImageMemoryStore | None = None,
         image_limits: ImageLimits | None = None,
-        member_profiles: MemberProfileStore | None = None,
         message_forget: MessageForgetStore | None = None,
     ) -> None:
         self._message_forget = message_forget
@@ -176,7 +162,6 @@ class GroupMemoryPipeline:
         self._images = image_store
         self._image_memory_store = image_memory_store
         self._image_limits = image_limits
-        self._member_profiles = member_profiles
 
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
@@ -202,13 +187,6 @@ class GroupMemoryPipeline:
             found.roster,
             pictures=found.pictures,
             described=found.described,
-        )
-        await self._persist_member_profiles(
-            scope,
-            prepared,
-            ops=found.ops,
-            pictures=found.pictures,
-            language=found.language,
         )
         episode = found.episode
         ref = await self._persist(scope, ingested, episode, prepared.memcell_id)
@@ -243,8 +221,8 @@ class GroupMemoryPipeline:
         carries pictures -- over a segment a forget changed: ``cell`` is the
         stored segment without what was forgotten
         (:func:`~everos.memory.groups.without_forgotten`). The pictures'
-        descriptions and profile items the call returns again are dropped:
-        their memories were never made of the forgotten message.
+        descriptions the call returns again are dropped: their memories were
+        never made of the forgotten message.
 
         Returns:
             The new episode version, or ``None`` when ``cell`` holds no text
@@ -311,7 +289,7 @@ class GroupMemoryPipeline:
             self._instructions.load("episode_extract"),
             roster_block(group, roster, cell),
         )
-        algo_ep, described, ops = await self._extract(
+        algo_ep, described = await self._extract(
             scope,
             session,
             memcell_id,
@@ -320,8 +298,8 @@ class GroupMemoryPipeline:
             custom,
             named,
         )
-        # That language pins the episode, its picture profile items and its
-        # event, so the member-in-group profiles and the scenes follow it.
+        # That language pins the episode and its event, so the
+        # member-in-group profiles and the scenes follow it.
         # Only a conversation without a letter in it left the choice to the
         # model; then what it chose is read off the episode.
         language = (
@@ -347,7 +325,6 @@ class GroupMemoryPipeline:
             episode=episode,
             pictures=list(pictures),
             described=described,
-            ops=list(ops),
             language=language,
             roster=roster,
         )
@@ -397,7 +374,7 @@ class GroupMemoryPipeline:
                 episode = await retry_llm_output(
                     attempt, operator="episode", memcell_id=memcell_id
                 )
-                extraction = (episode, {}, [])
+                extraction = (episode, {})
             capture_output(extract_span, extraction[0].episode)
         return extraction
 
@@ -423,7 +400,6 @@ class GroupMemoryPipeline:
             return (
                 image_extract.to_episode(reply, labelled, labels=by_label),
                 {fact.ref: (fact.description, fact.ocr) for fact in reply.images},
-                profile_delta.retarget(reply.profile, by_label),
             )
 
         return await retry_llm_output(
@@ -493,41 +469,6 @@ class GroupMemoryPipeline:
             only_if=memcell_alive(self._memcell_store, prepared.memcell_id),
         )
         return [ref.md_path for ref in refs]
-
-    async def _persist_member_profiles(
-        self,
-        scope: Scope,
-        prepared: PreparedCell,
-        *,
-        ops: Sequence[profile_delta.ProfileItemOp],
-        pictures: Sequence[Picture],
-        language: str | None,
-    ) -> None:
-        """Each poster's picture profile items, into their profile in this group.
-
-        D17: an item goes to the poster of the picture it names and to no one
-        else; an assistant's picture reaches no profile.
-        """
-        if self._member_profiles is None or not ops:
-            return
-        for poster, routed in ops_by_poster(ops, pictures).items():
-            if not poster:
-                continue
-            own = [p for p in pictures if p.poster == poster]
-            await write_member_picture_profile(
-                store=self._member_profiles,
-                scope=scope,
-                member_id=poster,
-                ops=routed,
-                observed_at=prepared.cell.timestamp,
-                image_ids=[p.image_id for p in own],
-                memcell_id=prepared.memcell_id,
-                span=(
-                    min(p.at or prepared.cell.timestamp for p in own),
-                    max(p.at or prepared.cell.timestamp for p in own),
-                ),
-                language=language,
-            )
 
     async def _persist(
         self, scope: Scope, ingested: IngestResult, episode: Episode, memcell_id: str

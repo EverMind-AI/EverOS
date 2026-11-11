@@ -470,7 +470,8 @@ function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
-- `extract_user_profile` — user pipeline
+- `extract_user_profile` — user pipeline: the owner's profile, one new
+  segment per update (everalgo's two profile prompts)
 - `extract_agent_case` / `extract_agent_skill` — agent pipeline
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation on the merged episode's event)

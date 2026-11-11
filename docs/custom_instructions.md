@@ -18,7 +18,7 @@ the schema it has to produce.
 |---|---|---|
 | `boundary_detection.yaml` | `everalgo.boundary.adetect_boundaries` | last block of the system message |
 | `episode_extract.yaml` | `EpisodeExtractor.aextract` | last block of the system message |
-| `profile_extract.yaml` | `ProfileExtractor.aextract` (every INIT / UPDATE / COMPACT / REGROUP call) | additional-requirements section before the data |
+| `profile_extract.yaml` | `ProfileExtractor.aupdate` (every update and consolidation call, one-to-one and member-in-group profiles) | `<additional_requirements>` block closing the system message |
 | `reflect.yaml` | `EpisodeReflector.areflect` | last block of the system message |
 
 ## File format

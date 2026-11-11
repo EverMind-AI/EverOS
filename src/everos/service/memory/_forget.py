@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory.extract.pipeline import profile_delta
+from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import Episode
 from everos.memory.ports import Filter, MemoryRef, Scope, Stored, all_of, eq, is_null
 
@@ -235,7 +235,7 @@ class ForgetManager:
 
         A profile item records the pictures that established it. The item goes
         only when every one of them is forgotten (see
-        :func:`profile_delta.forget_images`); a fact a photo and a sentence
+        :func:`profile_items.forget_images`); a fact a photo and a sentence
         both established keeps the sentence's ground and stays. An item with no
         picture source is never touched, which is why a forget cannot quietly
         erase a text-derived fact.
@@ -248,7 +248,7 @@ class ForgetManager:
         the caller's own response carries the count.
         """
         existing = await self._stores.profile.read(scope)
-        next_profile, removed, count = profile_delta.forget_images(existing, [image_id])
+        next_profile, removed, count = profile_items.forget_images(existing, [image_id])
         if not count or next_profile is None:
             return ()
         await self._stores.profile.write(scope, next_profile)

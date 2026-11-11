@@ -364,6 +364,8 @@ def build_application(
         indexes=indexes,
         instructions=CustomInstructions(_CONFIG_ROOT),
         case_judge=_case_judge(settings, providers.llm),
+        # The profile update reads a segment's pictures when [llm] reads images.
+        picture_limits=_image_limits(settings) if settings.extraction.vision else None,
     )
     ome_lock = OmeLock(root.ome_db)
     engine = _build_engine(root, deps, settings, lock=ome_lock)
@@ -711,7 +713,6 @@ def _build_memory_service(
             image_store=stores.images,
             image_memory_store=stores.image_memory,
             image_limits=_image_limits(settings),
-            profile_store=stores.profile,
         ),
         agent_pipeline=AgentMemoryPipeline(),
         # One group episode per segment of a group session (docs/group-memory.md,
@@ -725,7 +726,6 @@ def _build_memory_service(
             image_store=stores.images,
             image_memory_store=stores.image_memory,
             image_limits=_image_limits(settings),
-            member_profiles=stores.member_profile,
             message_forget=stores.message_forget,
         ),
         bus=bus,

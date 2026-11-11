@@ -3,8 +3,8 @@
 A group chat goes through the bootstrap's memory service (add, flush), the
 ``update_member_profiles`` strategy runs everalgo's real merge on a scripted
 model, and the cascade projects the profile into the index. Betty first says
-she lives in Paris, later that she moved to Berlin; the model's UPDATE
-rewrites the Paris item by its index. What these pin:
+she lives in Paris, later that she moved to Berlin; the model's update
+modifies the Paris item by its ref. What these pin:
 
 - the stored Berlin item names the Paris one and when it changed, and the
   Paris history entry names Berlin back;
@@ -33,7 +33,8 @@ from everos.service import GetRequest, GroupForgetTarget, SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join
 
 T0 = 1_772_323_200_000
-_TARGET = re.compile(r"TARGET USER: ([^*\n]+)\*\*")
+_TARGET = re.compile(r"The target user is (.+?), the speaker")
+_NOTHING_ON_FILE = "<explicit_info>\n(nothing on file)\n</explicit_info>"
 
 
 def _fact(description: str) -> dict[str, str]:
@@ -49,21 +50,15 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
         return json.dumps({"title": "Chat", "summary": "A chat.", "content": "Chat."})
     found = _TARGET.search(prompt)
     who = found.group(1).strip() if found else "?"
-    if name == "_ProfileItems":
+    if name == "_ProfileUpdateReply" and _NOTHING_ON_FILE in prompt:
         fact = "Lives in Paris" if who == "Betty" else "Is friendly"
-        return json.dumps({"explicit_info": [_fact(fact)], "implicit_traits": []})
-    if name == "_MemCellUpdateOutput":
+        add = {"action": "add", "type": "explicit_info", "data": _fact(fact)}
+        return json.dumps({"operations": [add]})
+    if name == "_ProfileUpdateReply":
         ops: list[dict[str, Any]] = [{"action": "none"}]
         if who == "Betty" and "Berlin" in prompt:
-            ops = [
-                {
-                    "action": "update",
-                    "type": "explicit_info",
-                    "index": 0,
-                    "data": _fact("Lives in Berlin"),
-                }
-            ]
-        return json.dumps({"operations": ops, "update_note": "n"})
+            ops = [{"action": "modify", "ref": "e1", "data": _fact("Lives in Berlin")}]
+        return json.dumps({"operations": ops})
     raise AssertionError(f"unexpected model call {name}")
 
 

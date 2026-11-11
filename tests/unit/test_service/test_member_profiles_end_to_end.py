@@ -34,21 +34,17 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
         return json.dumps(
             {"title": "Trip", "summary": "Trip plans.", "content": "Trip plans."}
         )
-    if name == "_ProfileItems":
+    if name == "_ProfileUpdateReply":
         text = "\n".join(str(m.content) for m in messages)
-        found = re.search(r"TARGET USER: ([^*\n]+)\*\*", text)
+        found = re.search(r"The target user is (.+?), the speaker", text)
         who = found.group(1).strip() if found else "?"
+        item = {
+            "evidence": f"{who}: said it",
+            "description": f"{who} plans the trip",
+            "category": "plans",
+        }
         return json.dumps(
-            {
-                "explicit_info": [
-                    {
-                        "evidence": f"{who}: said it",
-                        "description": f"{who} plans the trip",
-                        "category": "plans",
-                    }
-                ],
-                "implicit_traits": [],
-            }
+            {"operations": [{"action": "add", "type": "explicit_info", "data": item}]}
         )
     raise AssertionError(f"unexpected model call {name}")
 
