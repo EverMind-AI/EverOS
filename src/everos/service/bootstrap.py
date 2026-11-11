@@ -61,6 +61,7 @@ from everos.component.rerank import RerankProvider, build_rerank_provider
 from everos.component.tokenizer import Tokenizer, build_tokenizer
 from everos.config import OmeSettings, Settings, load_settings, resolve_root
 from everos.config.search_runtime import SearchConfigSource
+from everos.core.locks import LOCKS
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
 from everos.core.observability.tracing import (
@@ -84,7 +85,7 @@ from everos.infra.ome import (
     OmeLock,
     to_ome_strategy,
 )
-from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence import MemoryRoot, purge_scope
 from everos.infra.persistence.factories import (
     build_derived_index,
     build_indexes,
@@ -97,6 +98,7 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownKnowledgeStore,
+    MarkdownScopePurger,
 )
 from everos.infra.persistence.sqlite import (
     SqliteDatabase,
@@ -124,6 +126,7 @@ from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
+from everos.service.purge import PurgeRunGate, PurgeService
 
 logger = get_logger(__name__)
 
@@ -168,6 +171,7 @@ class Application:
     memory: MemoryService
     knowledge: KnowledgeService
     ops: OpsService
+    purge: PurgeService
     capabilities: Capabilities
     _settings: Settings = dataclasses.field(repr=False)
     _root: MemoryRoot = dataclasses.field(repr=False)
@@ -218,9 +222,13 @@ class Application:
         self._root.ensure()
         tables = await self._admin.create_schema()
         logger.info("sqlite_schema_ready", tables=tables)
+        # Before anything writes: a purge that was running is running again
+        # (its mark is up), and earlier purges' tombstones are known.
+        await self.purge.restore()
         # Before anything writes: a whole-owner deletion a crash cut short
-        # still has today's id counters to put back.
-        await self.memory.finish_interrupted_deletions()
+        # still has today's id counters to put back; one inside a running
+        # purge's scope is left to that purge.
+        await self.memory.finish_interrupted_deletions(skip=self.purge.covers_trash)
 
         await self._admin.start_index()
         if self._admin.backend == "lancedb":
@@ -237,6 +245,9 @@ class Application:
 
         await self.memory.start()
         self._stack.push_async_callback(_shielded("memory", self.memory.aclose))
+
+        self.purge.start()
+        self._stack.push_async_callback(_shielded("purge", self.purge.stop))
         logger.info("application_started")
 
     async def aclose(self) -> None:
@@ -360,6 +371,22 @@ def build_application(
     memory = _build_memory_service(
         settings, providers, deps, tokenizer, OmeEventBus(engine), eraser, marks
     )
+    engine.set_run_gate(PurgeRunGate(marks))
+    purge = PurgeService(
+        settings=settings.purge,
+        root=root.root,
+        scope_of=purge_scope,
+        jobs=sqlite.purge_job,
+        scope_repo=sqlite.scope_purge,
+        markdown=MarkdownScopePurger(root, stores.owner_dir),
+        index=index.repositories,
+        index_store=settings.index.backend,
+        engine=engine,
+        fence=fence,
+        locks=LOCKS,
+        extraction_snapshot=memory.extraction_snapshot,
+        wake_queue=memory.wake_queue,
+    )
     vector_tables = index.repositories.with_vectors()
     return Application(
         memory=memory,
@@ -398,6 +425,7 @@ def build_application(
             capabilities=capabilities,
             queue_health=memory.queue_health,
         ),
+        purge=purge,
         capabilities=capabilities,
         _settings=settings,
         _root=root,

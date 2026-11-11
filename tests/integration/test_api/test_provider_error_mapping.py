@@ -2,7 +2,7 @@
 
 Deviates from a naive flat `{"error_code": ..., "message": ...}` envelope: the
 project already has a canonical error envelope (`ErrorResponse` /
-`_error_response` in `exception_handlers.py`) shared by every domain
+`error_response` in `exception_handlers.py`) shared by every domain
 exception, so `ProviderNotConfiguredError` reuses it rather than inventing a
 parallel shape. `ProviderNotConfiguredError` is a `ConfigurationError`
 subclass; the assertions below also pin that the more-specific handler wins

@@ -368,6 +368,166 @@
         }
       }
     },
+    "/api/v1/memory/purge": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Request Purge",
+        "description": "Step 1 of 2: count what the scope holds and get a nonce.\n\nNothing is deleted. The purge is irreversible once confirmed: ``space``\nclears the whole memory root, ``app`` one app, ``project`` one project.",
+        "operationId": "request_purge_api_v1_memory_purge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeRequestData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/purge/confirm": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Confirm Purge",
+        "description": "Step 2 of 2: start the purge the nonce was issued for.\n\nWith a purge already running (any scope) this returns that job: compare\nits ``scope`` with the one you asked for.",
+        "operationId": "confirm_purge_api_v1_memory_purge_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PURGE_NONCE_INVALID: unknown, expired or used nonce",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The job could not be recorded; the nonce is still valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/purge/{job_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Purge",
+        "description": "A purge job's status and per-store progress.",
+        "operationId": "get_purge_api_v1_memory_purge__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ome/trigger": {
       "post": {
         "tags": [
@@ -1432,6 +1592,166 @@
           },
           "500": {
             "description": "Deletion incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/purge": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Request Purge",
+        "description": "Step 1 of 2: count what the scope holds and get a nonce.\n\nNothing is deleted. The purge is irreversible once confirmed: ``space``\nclears the whole memory root, ``app`` one app, ``project`` one project.",
+        "operationId": "request_purge_api_v2_memory_purge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeRequestData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/purge/confirm": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Confirm Purge",
+        "description": "Step 2 of 2: start the purge the nonce was issued for.\n\nWith a purge already running (any scope) this returns that job: compare\nits ``scope`` with the one you asked for.",
+        "operationId": "confirm_purge_api_v2_memory_purge_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PURGE_NONCE_INVALID: unknown, expired or used nonce",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The job could not be recorded; the nonce is still valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/purge/{job_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Purge",
+        "description": "A purge job's status and per-store progress.",
+        "operationId": "get_purge_api_v2_memory_purge__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
             "content": {
               "application/json": {
                 "schema": {
@@ -4164,6 +4484,393 @@
         ],
         "title": "MessageItemDTO"
       },
+      "PurgeConfirmRequest": {
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 16,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Nonce"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "nonce"
+        ],
+        "title": "PurgeConfirmRequest",
+        "description": "Step 2: confirm. The scope is the one bound to the nonce."
+      },
+      "PurgeJobData": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "space",
+              "app",
+              "project"
+            ],
+            "title": "Scope"
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PurgeStepData"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "scope",
+          "created_at"
+        ],
+        "title": "PurgeJobData",
+        "description": "A purge job as the caller sees it."
+      },
+      "PurgeRequest": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "space",
+              "app",
+              "project"
+            ],
+            "title": "Scope",
+            "description": "`space` purges the whole memory root; `app` one app in it (`app_id`); `project` one project of one app (`app_id` + `project_id`)."
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id",
+            "description": "Required for `app` and `project` scope."
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id",
+            "description": "Required for `project` scope."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scope"
+        ],
+        "title": "PurgeRequest",
+        "description": "Step 1: ask for a purge. Nothing is deleted."
+      },
+      "PurgeRequestData": {
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "title": "Nonce",
+            "description": "Send to /purge/confirm before `expires_at`."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "space",
+              "app",
+              "project"
+            ],
+            "title": "Scope"
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PurgeSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nonce",
+          "expires_at",
+          "scope",
+          "summary"
+        ],
+        "title": "PurgeRequestData",
+        "description": "The nonce to confirm, and what it will purge."
+      },
+      "PurgeStepData": {
+        "properties": {
+          "store": {
+            "type": "string",
+            "title": "Store"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "store",
+          "state"
+        ],
+        "title": "PurgeStepData",
+        "description": "One store of one purge step, e.g. ``markdown`` or ``lancedb``."
+      },
+      "PurgeSummary": {
+        "properties": {
+          "markdown": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Markdown",
+            "description": "Memory entries per kind in the Markdown files (the truth)."
+          },
+          "markdown_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markdown Total",
+            "description": "Sum of `markdown`; null if not counted."
+          },
+          "sqlite": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Sqlite",
+            "description": "Rows per system.db table."
+          },
+          "sqlite_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sqlite Total",
+            "description": "Sum of `sqlite`; null if not counted."
+          },
+          "lancedb_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lancedb Total",
+            "description": "LanceDB index rows (derived); null if not counted."
+          },
+          "milvus_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milvus Total",
+            "description": "Milvus index rows (derived); null if not counted."
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete",
+            "description": "False when any count timed out or failed."
+          },
+          "counted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Counted At"
+          },
+          "comment": {
+            "type": "string",
+            "title": "Comment",
+            "description": "What the counts include and exclude."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Which counts did not finish; null when `complete`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "markdown",
+          "markdown_total",
+          "sqlite",
+          "sqlite_total",
+          "complete",
+          "counted_at",
+          "comment"
+        ],
+        "title": "PurgeSummary",
+        "description": "What the purge would delete right now, counted per store.\n\nA snapshot at request time: data written before the purge runs is deleted\ntoo. A count that did not finish in time is ``null`` and ``complete`` is\n``false``. The index count is under the field of the backend this server\nruns (``lancedb_total`` or ``milvus_total``); the other one is ``null``."
+      },
       "QuiesceResponse": {
         "properties": {
           "quiesced": {
@@ -4988,6 +5695,40 @@
           "data"
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
+      },
+      "SuccessEnvelope_PurgeJobData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PurgeJobData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[PurgeJobData]"
+      },
+      "SuccessEnvelope_PurgeRequestData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PurgeRequestData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[PurgeRequestData]"
       },
       "SuccessEnvelope_TaskItem_": {
         "properties": {

@@ -32,6 +32,7 @@ __all__ = [
 ]
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import PathTraversalError, SessionBusyError
@@ -61,7 +62,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
-    from everos.memory.ports import EventBus, IndexEraser
+    from everos.memory.ports import EventBus, IndexEraser, Scope
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
 
@@ -235,9 +236,14 @@ class MemoryService:
         """Let the async queue claim again at once (a purge ended)."""
         self._queue.wake()
 
-    async def finish_interrupted_deletions(self) -> int:
-        """Finish whole-owner deletions a crash cut short (startup)."""
-        return await self._stores.owner_dir.sweep_trash()
+    async def finish_interrupted_deletions(
+        self, *, skip: Callable[[Scope], bool] | None = None
+    ) -> int:
+        """Finish whole-owner deletions a crash cut short (startup).
+
+        ``skip`` leaves the trash of owners it accepts (a running purge's).
+        """
+        return await self._stores.owner_dir.sweep_trash(skip=skip)
 
     # ── async_mode queue ───────────────────────────────────────────────────
 
