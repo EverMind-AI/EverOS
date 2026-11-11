@@ -219,7 +219,8 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
 ├── sqlite/
 │   └── system.db          state / audit / cascade queue + buffer / LSN
 │                           (system tables: md_change_state, memcell,
-│                            unprocessed_buffer, conversation_status, cluster, memorize_inbox)
+│                            unprocessed_buffer, conversation_status, cluster, memorize_inbox,
+│                            purge_job)
 ├── lancedb/
 │   └── <kind>.lance/      default derived index backend
 ```
@@ -227,7 +228,9 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
 - **SQLite** ([`infra/persistence/sqlite/_tables/`](../src/everos/infra/persistence/sqlite/_tables/))
   holds only system / coordination tables — `md_change_state` (cascade
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
-  `conversation_status`, `cluster`, `knowledge`, `reflection_report`, `memorize_inbox` (the `async_mode` queue) — **not**
+  `conversation_status`, `cluster`, `knowledge`, `reflection_report`, `memorize_inbox` (the `async_mode` queue),
+  `purge_job` (purge jobs; each row's scope and confirm time is the
+  tombstone stale background work is checked against, so it is kept) — **not**
   per-kind business rows. `reflection_report` is the audit trail for
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).

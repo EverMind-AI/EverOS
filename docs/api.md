@@ -1565,9 +1565,9 @@ the purged range -- with `409` `PURGE_IN_PROGRESS`; the message names
 the job: `"purge <job_id> in progress; poll GET /api/v2/memory/purge/<job_id>"`.
 Reads (`/search`, `/get`, `/knowledge/search`, every `GET`, the three
 purge endpoints) keep working. Wait for the job to end, then send the
-write again; do not retry it in a tight loop. Background work (memory
-extraction, Reflection, queued `async_mode` requests) waits and runs
-after the purge; the range's own queued requests are dropped and show
+write again; do not retry it in a tight loop. Background work that would
+start meanwhile (memory extraction, Reflection, queued `async_mode`
+requests) waits and runs after the purge; the range's own queued requests are dropped and show
 `purge_in_progress` in `GET /api/v2/tasks/{task_id}` -- do not resend
 them.
 
@@ -1603,10 +1603,12 @@ The Cloud API spells the same conditions in lower case
 
 #### Known gaps
 
-- Work that was already running when the purge was confirmed and finishes
-  after `settle_wait_seconds` (a slow `/add`, an extraction, an upload) can
-  write a little into the range afterwards; requesting the range again
-  shows it (a non-zero summary). Purge again to clear it.
+- Work that was already running when the purge was confirmed can write a
+  little into the range after the purge ends: a slow `/add` or extraction
+  that outlasts `settle_wait_seconds`, an `/add` that took its session lock
+  only after the confirm, and a knowledge upload still running when the
+  purge ends (uploads are not waited for). Requesting the range again shows
+  it (a non-zero summary); purge again to clear it.
 - The OME run history keeps its rows; the stored event of a failed or
   dead-lettered run of the range is replaced by a `{"purged_by": …}`
   marker. Older LanceDB table versions and SQLite free pages keep deleted

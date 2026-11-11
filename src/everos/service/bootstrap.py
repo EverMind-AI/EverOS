@@ -1,8 +1,9 @@
 """Application assembly: the one place EverOS's objects are built and wired.
 
 :func:`build_application` turns :class:`~everos.config.Settings` into an
-:class:`Application` -- three facades (:class:`MemoryService`,
-:class:`KnowledgeService`, :class:`OpsService`) plus the snapshot of which
+:class:`Application` -- four facades (:class:`MemoryService`,
+:class:`KnowledgeService`, :class:`OpsService`, :class:`PurgeService`) plus
+the snapshot of which
 optional providers were configured. Everything below the facades is built
 here and nowhere else: providers, storage adapters, the OME engine with every
 strategy registered, the event bus, the cascade orchestrator, the domain
@@ -158,10 +159,11 @@ class _Lifecycle:
 
 @dataclasses.dataclass(frozen=True)
 class Application:
-    """What an entry point holds: three facades plus the provider snapshot.
+    """What an entry point holds: four facades plus the provider snapshot.
 
-    ``start`` brings up what a long-running server needs -- system DB,
-    index, cascade, OME, the ``async_mode`` queue -- in that order.
+    ``start`` brings up what a long-running server needs -- system DB (and
+    an unfinished purge's mark, before anything writes), index, cascade,
+    OME, the ``async_mode`` queue, the purge runner -- in that order.
     ``aclose`` stops whatever was started in reverse, closes the storage
     connections whether or not ``start`` ran (a CLI command opens them
     without starting), and shuts tracing down; it is idempotent and safe
