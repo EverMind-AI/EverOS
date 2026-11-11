@@ -58,6 +58,8 @@ from everos.memory.ports import (
     Scope,
     SourceCheck,
     Stored,
+    Withdrawal,
+    WithdrawnEntry,
 )
 
 from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
@@ -193,6 +195,111 @@ class _DailyLogStore[T]:
             count=count,
         )
         return False
+
+    # ── Withdrawal (a group forget) ──────────────────────────────────────
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        Under the owner lock: each entry leaves its file with its own mark,
+        and an entry whose mark named one of them -- the version it had
+        replaced -- loses that mark and is current again (``released``). The
+        returned :class:`Withdrawal` is what :meth:`reinstate` takes to put
+        every byte back.
+        """
+        wanted = set(entry_ids)
+        if not wanted:
+            return Withdrawal()
+        by_path: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in wanted:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                by_path[path].add(entry_id)
+        writer = self._writer_for(scope)
+        key = owner_lock(scope)
+        taken: list[WithdrawnEntry] = []
+        released: list[tuple[str, str, str]] = []
+        async with LOCKS.hold("owner", key):
+            for path, ids in sorted(by_path.items()):
+                md_path = _relative(self._root, path)
+                taken += [
+                    WithdrawnEntry(entry_id=e, md_path=md_path, text=t, mark=m)
+                    for e, t, m in await writer.take_entries(path, ids)
+                ]
+            gone = {entry.entry_id for entry in taken}
+            for path in await self._daily_files(scope):
+                marks = await _deprecations(path)
+                freed = {
+                    k: str(v) for k, v in marks.items() if v in gone and k not in gone
+                }
+                if freed and await writer.drop_deprecations(path, freed):
+                    md_path = _relative(self._root, path)
+                    released += [(md_path, k, v) for k, v in sorted(freed.items())]
+            if taken:
+                LOCKS.bump_delete_count(key)
+        return Withdrawal(entries=tuple(taken), released=tuple(released))
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a :meth:`withdraw`'s entries back under their ids, marks included.
+
+        An entry the file holds again already is left alone, so a repeated
+        undo restores nothing twice; a released mark comes back only while
+        its entry has none of its own.
+        """
+        by_path: dict[str, list[WithdrawnEntry]] = defaultdict(list)
+        for entry in withdrawal.entries:
+            by_path[entry.md_path].append(entry)
+        writer = self._writer_for(scope)
+        refs: list[MemoryRef] = []
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            for md_path, entries in sorted(by_path.items()):
+                put = await writer.put_back(
+                    scope.owner_id,
+                    self._root.root / md_path,
+                    [(e.entry_id, e.text, e.mark) for e in entries],
+                )
+                refs += [
+                    MemoryRef(
+                        id=f"{scope.owner_id}_{entry_id}",
+                        entry_id=entry_id,
+                        md_path=md_path,
+                    )
+                    for entry_id in put
+                ]
+            restore: dict[str, dict[str, str]] = defaultdict(dict)
+            for md_path, entry_id, mark in withdrawal.released:
+                restore[md_path][entry_id] = mark
+            for md_path, marks in restore.items():
+                path = self._root.root / md_path
+                current = await _deprecations(path)
+                wanted = {k: v for k, v in marks.items() if not current.get(k)}
+                if wanted and await anyio.Path(path).is_file():
+                    await writer.patch_frontmatter(path, {"deprecated_entries": wanted})
+        return refs
+
+    async def _entries_where(
+        self, scope: Scope, needles: Sequence[str], keep: Callable[[Entry], bool]
+    ) -> list[tuple[str, Entry, str | None]]:
+        """``(md_path, entry, mark)`` of the entries ``keep`` selects.
+
+        Only the files whose text holds one of ``needles`` are parsed.
+        """
+        found: list[tuple[str, Entry, str | None]] = []
+        for path in await self._files_mentioning(scope, *needles):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                try:
+                    selected = keep(entry)
+                except Exception:  # a hand-edited entry that does not parse
+                    continue
+                if selected:
+                    found.append((md_path, entry, marks.get(entry.id)))
+        return found
 
     # ── Deletion ──────────────────────────────────────────────────────────
 
@@ -373,6 +480,58 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
                 )
             )
         return found
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes written from one of ``memcell_ids``.
+
+        Read from markdown (a forget changes the truth and must not wait for
+        the index); an entry a supersession or forget mark retired is left out.
+        """
+        wanted = set(memcell_ids)
+        if not wanted:
+            return []
+        found = await self._entries_where(
+            scope,
+            [f"**parent_id**: {memcell_id}" for memcell_id in sorted(wanted)],
+            lambda e: (
+                e.as_structured().inline.get("parent_id") in wanted
+                and (e.as_structured().inline.get("parent_type") or "memcell")
+                == "memcell"
+            ),
+        )
+        return [
+            self._stored(scope, md_path, entry)
+            for md_path, entry, mark in found
+            if not mark
+        ]
+
+    async def read_referring(
+        self, scope: Scope, image_id: str
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes that refer to the picture ``image_id``."""
+        found = await self._entries_where(
+            scope,
+            [image_id],
+            lambda e: image_id in e.body,
+        )
+        return [
+            self._stored(scope, md_path, entry)
+            for md_path, entry, mark in found
+            if not mark
+        ]
+
+    def _stored(self, scope: Scope, md_path: str, entry: Entry) -> Stored[Episode]:
+        return Stored(
+            ref=MemoryRef(
+                id=f"{scope.owner_id}_{entry.id}",
+                entry_id=entry.id,
+                md_path=md_path,
+            ),
+            scope=scope,
+            item=_episode_from_entry(entry, owner_id=scope.owner_id),
+        )
 
     async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
         """Remove these entries; each file is rewritten under the owner lock."""
@@ -674,6 +833,72 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                     return found
         return found
 
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """Every picture memory written from one of ``memcell_ids``, marks included."""
+        wanted = set(memcell_ids)
+        if not wanted:
+            return []
+        found = await self._entries_where(
+            scope,
+            [f"**parent_id**: {memcell_id}" for memcell_id in sorted(wanted)],
+            lambda e: e.as_structured().inline.get("parent_id") in wanted,
+        )
+        stored: list[Stored[ImageMemory]] = []
+        for md_path, entry, mark in found:
+            item = _image_memory_from(entry, owner_id=scope.owner_id)
+            item.superseded_by = mark
+            item.status = "superseded" if mark else "current"
+            stored.append(
+                Stored(
+                    ref=MemoryRef(
+                        id=f"{scope.owner_id}_{entry.id}",
+                        entry_id=entry.id,
+                        md_path=md_path,
+                    ),
+                    scope=scope,
+                    item=item,
+                )
+            )
+        return stored
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The picture memories of ``entry_ids`` still in md, marks included."""
+        wanted: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in entry_ids:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                wanted[path].add(entry_id)
+        found: list[Stored[ImageMemory]] = []
+        for path, ids in sorted(wanted.items()):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                if entry.id not in ids:
+                    continue
+                item = _image_memory_from(entry, owner_id=scope.owner_id)
+                item.superseded_by = marks.get(entry.id)
+                item.status = "superseded" if item.superseded_by else "current"
+                found.append(
+                    Stored(
+                        ref=MemoryRef(
+                            id=f"{scope.owner_id}_{entry.id}",
+                            entry_id=entry.id,
+                            md_path=md_path,
+                        ),
+                        scope=scope,
+                        item=item,
+                    )
+                )
+        return found
+
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Drop the owner's picture memories of one session from markdown."""
         return await super().remove_session(scope, session_id)
@@ -780,6 +1005,24 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
                         item=scene,
                     )
         return newest
+
+    async def versions(self, scope: Scope) -> list[Stored[Scene]]:
+        """Every version of every scene of the group, in file order."""
+        found = await self._entries_where(
+            scope, ["**scene_id**: "], lambda e: bool(e.as_structured().inline)
+        )
+        return [
+            Stored(
+                ref=MemoryRef(
+                    id=f"{scope.owner_id}_{entry.id}",
+                    entry_id=entry.id,
+                    md_path=md_path,
+                ),
+                scope=scope,
+                item=_scene_from_entry(entry, owner_id=scope.owner_id),
+            )
+            for md_path, entry, _mark in found
+        ]
 
     async def append(
         self,
@@ -1064,6 +1307,32 @@ class MarkdownMemberProfileStore:
             md_path=_relative(self._root, path),
         )
 
+    async def remove(
+        self, scope: Scope, member_id: str
+    ) -> Stored[MemberProfile] | None:
+        """Delete the member's profile file; what it held and its row, or ``None``.
+
+        A forget of a member takes the whole document (section 9.4); its undo
+        writes the returned profile back.
+        """
+        path = self._path(scope, member_id)
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await anyio.Path(path).is_file():
+                return None
+            held = await self.read(scope, member_id)
+            await anyio.Path(path).unlink(missing_ok=True)
+        if held is None:
+            return None
+        return Stored(
+            ref=MemoryRef(
+                id=member_profile_row_id(scope.owner_id, member_id),
+                entry_id=f"member_profile_{scope.owner_id}_{member_id}",
+                md_path=_relative(self._root, path),
+            ),
+            scope=scope,
+            item=held,
+        )
+
     async def members(self, scope: Scope) -> list[str]:
         folder = anyio.Path(self._folder(scope))
         if not await folder.is_dir():
@@ -1225,6 +1494,11 @@ def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
         parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
         entry_id=entry.id,
         md_path=None,
+        # Group attribution (absent on a one-to-one entry): a forget inside a
+        # group reads the poster off the entry to decide who may forget it.
+        sender_ids=_list_field(inline.get("sender_ids")),
+        subject_ids=_list_field(inline.get("subject_ids")),
+        origin=inline.get("origin") or None,  # type: ignore[arg-type]
     )
 
 

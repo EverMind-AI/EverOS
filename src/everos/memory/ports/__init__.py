@@ -90,6 +90,8 @@ from .stores import SceneStore as SceneStore
 from .stores import SessionBufferStore as SessionBufferStore
 from .stores import SessionPurgeStore as SessionPurgeStore
 from .stores import SourceCheck as SourceCheck
+from .stores import Withdrawal as Withdrawal
+from .stores import WithdrawnEntry as WithdrawnEntry
 from .stores import WrittenDocument as WrittenDocument
 from .strategy import AppliesTo as AppliesTo
 from .strategy import Counter as Counter
@@ -169,6 +171,8 @@ __all__ = [
     "StrategyFn",
     "StrategySpec",
     "Trigger",
+    "Withdrawal",
+    "WithdrawnEntry",
     "WrittenDocument",
     "all_of",
     "any_of",

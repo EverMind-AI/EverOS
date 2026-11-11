@@ -174,6 +174,17 @@ class SqliteMemcellStore:
             for row in rows
         }
 
+    async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
+        rows = await self._repo.in_session(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+        )
+        return {
+            row.memcell_id: MemCell.model_validate_json(row.payload_json)
+            for row in rows
+        }
+
     async def recent_in_session(
         self,
         session: SessionKey,
@@ -660,6 +671,13 @@ class SqliteForgetLogStore:
     async def get(self, forget_id: str) -> ForgetEntry | None:
         row = await self._repo.get(forget_id)
         return _forget_entry(row) if row is not None else None
+
+    async def live_targets(
+        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+    ) -> list[str]:
+        return await self._repo.live_targets(
+            target_kind=target, app_id=app_id, project_id=project_id, owner_id=owner_id
+        )
 
     async def holds_picture(self, image_id: str) -> bool:
         return await self._repo.holds_picture(image_id)

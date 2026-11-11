@@ -127,6 +127,16 @@ class ForgetLogStore(Protocol):
         """One forget by id, undone or not; ``None`` when there is none."""
         ...
 
+    async def live_targets(
+        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+    ) -> list[str]:
+        """The target ids of the owner's forgets of one kind no undo reversed.
+
+        A group's live picture forgets, for instance: every later
+        re-extraction of a segment that showed the picture leaves it out.
+        """
+        ...
+
     async def holds_picture(self, image_id: str) -> bool:
         """Whether a group forget no undo reversed took out a memory of the picture.
 

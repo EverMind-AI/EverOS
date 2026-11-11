@@ -65,6 +65,8 @@ from everos.memory.ports import (
     SessionKey,
     SourceCheck,
     Stored,
+    Withdrawal,
+    WithdrawnEntry,
 )
 
 
@@ -95,6 +97,7 @@ class _DailyLog[T]:
         self._folder = folder
         self.records: list[Stored[T]] = []
         self.deprecated: dict[str, dict[str, str]] = defaultdict(dict)
+        self.withdrawn: dict[str, Stored[T]] = {}
 
     def items_for(self, owner_id: str) -> list[T]:
         """Everything written under ``owner_id``, in write order."""
@@ -157,6 +160,37 @@ class _DailyLog[T]:
         gone = [s for s in self.records if s.scope == scope and drop(s.item)]
         self.records = [s for s in self.records if s not in gone]
         return [s.ref for s in gone]
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take records out, keeping each whole (as JSON) for :meth:`reinstate`."""
+        wanted = set(entry_ids)
+        gone = [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+        self.records = [s for s in self.records if s not in gone]
+        self.withdrawn.update({s.ref.entry_id: s for s in gone})
+        return Withdrawal(
+            entries=tuple(
+                WithdrawnEntry(
+                    entry_id=s.ref.entry_id,
+                    md_path=s.ref.md_path,
+                    text=s.item.model_dump_json(),  # type: ignore[attr-defined]
+                    mark=self.deprecated.get(s.ref.md_path, {}).get(s.ref.entry_id),
+                )
+                for s in gone
+            )
+        )
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        present = {s.ref.entry_id for s in self.records}
+        refs: list[MemoryRef] = []
+        for entry in withdrawal.entries:
+            stored = self.withdrawn.get(entry.entry_id)
+            if stored is None or entry.entry_id in present:
+                continue
+            self.records.append(stored)
+            refs.append(stored.ref)
+        return refs
 
 
 async def _alive(only_if: SourceCheck | NoSourceCheck) -> bool:
@@ -243,6 +277,29 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             if needle in f"/{md_path}":
                 for key in set(keys) & marks.keys():
                     del marks[key]
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        wanted = set(memcell_ids)
+        marks = {k for m in self.deprecated.values() for k in m}
+        return [
+            s
+            for s in self.records
+            if s.scope == scope
+            and s.item.parent_id in wanted
+            and s.ref.entry_id not in marks
+        ]
+
+    async def read_referring(
+        self, scope: Scope, image_id: str
+    ) -> list[Stored[Episode]]:
+        return [
+            s
+            for s in self.records
+            if s.scope == scope
+            and (image_id in s.item.episode or image_id in s.item.image_ids)
+        ]
 
     def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
         """Put an episode under a chosen entry id (as if read from md)."""
@@ -541,6 +598,15 @@ class InMemoryMemcellStore:
     async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
         return {i: self.cells[i] for i in memcell_ids if i in self.cells}
 
+    async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
+        return {
+            memcell_id: cell
+            for memcell_id, cell in sorted(
+                self.cells.items(), key=lambda pair: pair[1].timestamp
+            )
+            if self.sessions.get(memcell_id) == session
+        }
+
     async def recent_in_session(
         self,
         session: SessionKey,
@@ -750,6 +816,19 @@ class InMemoryForgetLogStore:
             if entry.forget_id == forget_id:
                 return entry
         return None
+
+    async def live_targets(
+        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+    ) -> list[str]:
+        return list(
+            dict.fromkeys(
+                entry.target_id
+                for entry in self.entries
+                if entry.target == target
+                and entry.owner_id == owner_id
+                and entry.forget_id not in self.undone
+            )
+        )
 
     async def holds_picture(self, image_id: str) -> bool:
         return any(

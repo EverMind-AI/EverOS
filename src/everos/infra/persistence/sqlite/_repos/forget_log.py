@@ -77,6 +77,24 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
         async with session_scope(self._factory) as s:
             return await s.get(ForgetLog, forget_id)
 
+    async def live_targets(
+        self, *, target_kind: str, app_id: str, project_id: str, owner_id: str
+    ) -> list[str]:
+        """Target ids of the owner's live forgets of one kind, oldest first."""
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(ForgetLog.target_id)
+                .where(
+                    ForgetLog.target_kind == target_kind,  # type: ignore[arg-type]
+                    ForgetLog.app_id == app_id,  # type: ignore[arg-type]
+                    ForgetLog.project_id == project_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                )
+                .order_by(ForgetLog.created_at)  # type: ignore[arg-type]
+            )
+            return list(dict.fromkeys((await s.execute(stmt)).scalars().all()))
+
     async def holds_picture(self, image_id: str) -> bool:
         """Whether a live group forget's undo record took out a memory of the hash.
 

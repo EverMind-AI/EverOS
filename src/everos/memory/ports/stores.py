@@ -33,6 +33,8 @@ __all__ = [
     "SessionBufferStore",
     "SessionPurgeStore",
     "SourceCheck",
+    "Withdrawal",
+    "WithdrawnEntry",
     "WrittenDocument",
 ]
 
@@ -98,6 +100,41 @@ class NoSourceCheck:
 
 
 NO_SOURCE_CHECK: Final = NoSourceCheck()
+
+
+# ── Withdrawal (a forget inside a group) ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class WithdrawnEntry:
+    """One daily-log entry taken out of the files, exactly as it was.
+
+    ``text`` is the entry as its file held it -- opaque to the domain, which
+    only keeps it and hands it back: a reinstatement puts it back under its
+    own id, so an undo restores the previous version byte for byte. ``mark``
+    is the entry's own supersession mark (``None`` while it was current).
+    """
+
+    entry_id: str
+    md_path: str
+    text: str
+    mark: str | None = None
+
+
+@dataclass(frozen=True)
+class Withdrawal:
+    """What one withdrawal took out of one owner's files of one kind.
+
+    Attributes:
+        entries: The entries removed, with their text and marks.
+        released: ``(md_path, entry_id, mark)`` of the entries whose mark named
+            a removed entry: the mark was dropped, so the version a removed
+            entry had replaced is current again. A reinstatement marks them
+            again.
+    """
+
+    entries: tuple[WithdrawnEntry, ...] = ()
+    released: tuple[tuple[str, str, str], ...] = ()
 
 
 # ── User-track daily logs ────────────────────────────────────────────────
@@ -177,6 +214,33 @@ class EpisodeStore(Protocol):
 
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
+        ...
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes written from one of ``memcell_ids``."""
+        ...
+
+    async def read_referring(
+        self, scope: Scope, image_id: str
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes that refer to the picture ``image_id``."""
+        ...
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
+        version out of markdown rather than marking it, so what a forgotten
+        message said is nowhere under the memory root; the forget keeps the
+        :class:`Withdrawal` for its undo. An entry whose mark named a removed
+        one is current again.
+        """
+        ...
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a withdrawal's entries back under their ids, marks included."""
         ...
 
 
@@ -261,6 +325,33 @@ class ImageMemoryStore(Protocol):
 
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Remove the owner's picture memories that came from one session."""
+        ...
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """Every picture memory written from one of ``memcell_ids``, marks included."""
+        ...
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The picture memories of ``entry_ids`` still in md, marks included."""
+        ...
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
+        version out of markdown rather than marking it, so what a forgotten
+        message said is nowhere under the memory root; the forget keeps the
+        :class:`Withdrawal` for its undo. An entry whose mark named a removed
+        one is current again.
+        """
+        ...
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a withdrawal's entries back under their ids, marks included."""
         ...
 
 
@@ -358,6 +449,25 @@ class SceneStore(Protocol):
         """Write a version; mark ``supersedes`` replaced by it, in one step."""
         ...
 
+    async def versions(self, scope: Scope) -> list[Stored[Scene]]:
+        """Every version of every scene of the group."""
+        ...
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
+        version out of markdown rather than marking it, so what a forgotten
+        message said is nowhere under the memory root; the forget keeps the
+        :class:`Withdrawal` for its undo. An entry whose mark named a removed
+        one is current again.
+        """
+        ...
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a withdrawal's entries back under their ids, marks included."""
+        ...
+
 
 @runtime_checkable
 class MemberProfileStore(Protocol):
@@ -374,6 +484,15 @@ class MemberProfileStore(Protocol):
 
     async def members(self, scope: Scope) -> list[str]:
         """The members of the group that have a profile document, sorted."""
+        ...
+
+    async def remove(
+        self, scope: Scope, member_id: str
+    ) -> Stored[MemberProfile] | None:
+        """Delete the member's profile document; what it held, or ``None``.
+
+        The ref is the document's index row, which the caller erases.
+        """
         ...
 
 
@@ -431,6 +550,21 @@ class GroupProfileStore(Protocol):
 
     async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
         """Replace the queued segments."""
+        ...
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
+        version out of markdown rather than marking it, so what a forgotten
+        message said is nowhere under the memory root; the forget keeps the
+        :class:`Withdrawal` for its undo. An entry whose mark named a removed
+        one is current again.
+        """
+        ...
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a withdrawal's entries back under their ids, marks included."""
         ...
 
 
@@ -565,6 +699,14 @@ class MemcellStore(Protocol):
         :meth:`find_by_ids` returns bare cells, which carry no id: when some of
         the ids are gone the caller cannot tell which cell is which. This is
         the read for a caller that holds several ids and needs each answer.
+        """
+        ...
+
+    async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
+        """Every cell of the session, keyed by memcell id, oldest first.
+
+        What a forget inside a group reads to find the segments holding the
+        messages it names (docs/group-memory.md, 9.4).
         """
         ...
 
