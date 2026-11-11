@@ -293,7 +293,7 @@ the same, with a warning at startup. Such a deployment:
   loop and decider (`GET /health` lists `vector_recall` in
   `disabled_features`);
 - writes as usual: markdown, the cascade's index rows (with no vector), and the
-  user profile, which takes its direct path instead of clustering;
+  user profile, which never depended on the clusters;
 - runs no reflection and no skill extraction, and refuses knowledge (`422`);
 - makes no embedding calls at all.
 

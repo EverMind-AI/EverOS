@@ -494,7 +494,7 @@ def _embedding_or_none(settings: Settings) -> EmbeddingProvider | None:
 
     ``[embedding] model = ""`` is the deliberate way to run without one: memory
     search then recalls by keyword (BM25) only, the cascade writes rows with no
-    vector, and the user profile takes its direct path. A section that names a
+    vector, and the user profile is updated as with one. A section that names a
     model but cannot build (no key, no URL) is the same deployment by accident,
     and logs as a warning.
     """

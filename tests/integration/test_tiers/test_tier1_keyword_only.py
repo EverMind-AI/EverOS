@@ -2,8 +2,8 @@
 embedding model.
 
 Pins the behavior promised to a user who has configured only an LLM:
-writes still work (markdown, cascade rows with no vector, the user profile
-by its direct path), memory search recalls by keyword (BM25) alone through
+writes still work (markdown, cascade rows with no vector, the user profile),
+memory search recalls by keyword (BM25) alone through
 the same multi-round loop, what needs embedding/rerank -- knowledge --
 fails fast with a 422 instead of a silent 200 or a 500, and the background
 strategy engine never registers a strategy it cannot run.

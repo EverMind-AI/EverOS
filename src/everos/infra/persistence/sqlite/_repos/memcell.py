@@ -46,10 +46,8 @@ class MemcellRepo(RepoBase[Memcell]):
         """Bulk fetch rows by primary key list — preserves caller order.
 
         Chunked at ``_SQLITE_IN_CHUNK`` to protect against
-        ``SQLITE_MAX_VARIABLE_NUMBER`` blowups on large owner histories
-        (e.g. ``extract_user_profile``'s direct path when ``user.md``
-        doesn't exist yet — ``last_profile_ts=0`` fetches every memcell
-        the owner has ever produced).
+        ``SQLITE_MAX_VARIABLE_NUMBER`` blowups on large id lists (a whole
+        cluster's members, a forgotten conversation's segments).
 
         Used by offline strategies that pull every memcell in a cluster
         (membership lives in :class:`ClusterMember` and is supplied to

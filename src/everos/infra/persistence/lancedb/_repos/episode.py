@@ -75,15 +75,10 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
         scoped by parent_type and app/project. No vector dependency —
         Tier 1-safe. Rows with vector=None are included.
 
-        Used by extract_user_profile direct path (KEYWORD_ONLY mode) to
-        select memcells to feed the profile extractor without going through
-        cluster events.
-
         Excludes rows with ``deprecated_by IS NOT NULL`` (Reflection-
         superseded episodes) — matches the filter idiom used by
         :func:`memory.search.filters.compile_filters` and reflection
-        reads. Without this, direct-path profile extraction would feed
-        stale (superseded) memcell references to the extractor.
+        reads, so a caller is never handed a superseded episode.
 
         Args:
             owner_id: Owner identifier.
