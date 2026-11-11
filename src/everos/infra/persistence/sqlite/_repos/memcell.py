@@ -66,6 +66,25 @@ class MemcellRepo(RepoBase[Memcell]):
                 by_id.update((r.memcell_id, r) for r in rows)
         return [by_id[mid] for mid in memcell_ids if mid in by_id]
 
+    async def in_session(
+        self, *, app_id: str, project_id: str, session_id: str
+    ) -> list[Memcell]:
+        """Every row of the session, oldest first (ties by ``memcell_id``)."""
+        stmt = (
+            select(Memcell)
+            .where(
+                Memcell.app_id == app_id,
+                Memcell.project_id == project_id,
+                Memcell.session_id == session_id,
+            )
+            .order_by(
+                Memcell.timestamp,  # type: ignore[arg-type]
+                Memcell.memcell_id,  # type: ignore[arg-type]
+            )
+        )
+        async with session_scope(self._factory) as s:
+            return list((await s.execute(stmt)).scalars().all())
+
     async def recent_in_session(
         self,
         *,

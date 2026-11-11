@@ -306,3 +306,19 @@ def test_to_item_tool_without_id_falls_through_and_raises() -> None:
 def test_to_item_carries_the_epoch_millisecond_timestamp() -> None:
     item = to_conversation_item(_msg("m_u", "user", ts_seconds=1_700_000_000))
     assert item.timestamp == 1_700_000_000_000
+
+
+def test_a_group_message_keeps_the_clients_id_in_its_cell() -> None:
+    """A group batch's own message id is what the group's records cite.
+
+    Source quotes and message-level forget address a message by the id the
+    client sent (docs/group-memory.md, section 5.2); without one, and on
+    every one-to-one batch, the generated id stays.
+    """
+    sent = _msg("m_generated", "user", ts_seconds=1_700_000_000).model_copy(
+        update={"client_message_id": "m-102"}
+    )
+    plain = _msg("m_generated", "user", ts_seconds=1_700_000_000)
+
+    assert to_conversation_item(sent).id == "m-102"
+    assert to_conversation_item(plain).id == "m_generated"

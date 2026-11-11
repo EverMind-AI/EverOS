@@ -46,6 +46,7 @@ from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
 from ._repos import MdChangeStateRepo as MdChangeStateRepo
 from ._repos import MemcellRepo as MemcellRepo
 from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
+from ._repos import MessageForgetRepo as MessageForgetRepo
 from ._repos import QueueSummary as QueueSummary
 from ._repos import ReflectionReportRepo as ReflectionReportRepo
 from ._repos import TopicUpsertPayload as TopicUpsertPayload
@@ -62,6 +63,7 @@ from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
 from ._tables import MdChangeState as MdChangeState
 from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
+from ._tables import MessageForget as MessageForget
 from ._tables import ReflectionReport as ReflectionReport
 from ._tables import SessionBinding as SessionBinding
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
@@ -72,6 +74,7 @@ from .stores import SqliteClusterStore as SqliteClusterStore
 from .stores import SqliteForgetLogStore as SqliteForgetLogStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
+from .stores import SqliteMessageForgetStore as SqliteMessageForgetStore
 from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
@@ -103,6 +106,8 @@ __all__ = [
     "MemcellRepo",
     "MemorizeInbox",
     "MemorizeInboxRepo",
+    "MessageForget",
+    "MessageForgetRepo",
     "QueueSummary",
     "ReflectionReport",
     "ReflectionReportRepo",
@@ -116,6 +121,7 @@ __all__ = [
     "SqliteKnowledgeCatalog",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
+    "SqliteMessageForgetStore",
     "SqliteReflectionReportStore",
     "SqliteRepos",
     "SqliteSessionBufferStore",

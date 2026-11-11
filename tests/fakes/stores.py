@@ -20,17 +20,20 @@ __all__ = [
     "InMemoryImageStore",
     "InMemoryMemberProfileStore",
     "InMemoryMemcellStore",
+    "InMemoryMessageForgetStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
     "InMemorySceneStore",
     "UnusedPort",
 ]
 
+import json
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     AgentCase,
     AgentSkill,
     AtomicFact,
@@ -40,6 +43,7 @@ from everos.memory.models import (
     Episode,
     Foresight,
     Group,
+    GroupProfileItem,
     ImageMemory,
     MemberProfile,
     MemCell,
@@ -57,10 +61,13 @@ from everos.memory.ports import (
     GroupRecord,
     MemoryRef,
     NoSourceCheck,
+    PendingBatch,
     Scope,
     SessionKey,
     SourceCheck,
     Stored,
+    Withdrawal,
+    WithdrawnEntry,
 )
 
 
@@ -91,6 +98,7 @@ class _DailyLog[T]:
         self._folder = folder
         self.records: list[Stored[T]] = []
         self.deprecated: dict[str, dict[str, str]] = defaultdict(dict)
+        self.withdrawn: dict[str, Stored[T]] = {}
 
     def items_for(self, owner_id: str) -> list[T]:
         """Everything written under ``owner_id``, in write order."""
@@ -153,6 +161,37 @@ class _DailyLog[T]:
         gone = [s for s in self.records if s.scope == scope and drop(s.item)]
         self.records = [s for s in self.records if s not in gone]
         return [s.ref for s in gone]
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take records out, keeping each whole (as JSON) for :meth:`reinstate`."""
+        wanted = set(entry_ids)
+        gone = [
+            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
+        ]
+        self.records = [s for s in self.records if s not in gone]
+        self.withdrawn.update({s.ref.entry_id: s for s in gone})
+        return Withdrawal(
+            entries=tuple(
+                WithdrawnEntry(
+                    entry_id=s.ref.entry_id,
+                    md_path=s.ref.md_path,
+                    text=s.item.model_dump_json(),  # type: ignore[attr-defined]
+                    mark=self.deprecated.get(s.ref.md_path, {}).get(s.ref.entry_id),
+                )
+                for s in gone
+            )
+        )
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        present = {s.ref.entry_id for s in self.records}
+        refs: list[MemoryRef] = []
+        for entry in withdrawal.entries:
+            stored = self.withdrawn.get(entry.entry_id)
+            if stored is None or entry.entry_id in present:
+                continue
+            self.records.append(stored)
+            refs.append(stored.ref)
+        return refs
 
 
 async def _alive(only_if: SourceCheck | NoSourceCheck) -> bool:
@@ -239,6 +278,29 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             if needle in f"/{md_path}":
                 for key in set(keys) & marks.keys():
                     del marks[key]
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        wanted = set(memcell_ids)
+        marks = {k for m in self.deprecated.values() for k in m}
+        return [
+            s
+            for s in self.records
+            if s.scope == scope
+            and s.item.parent_id in wanted
+            and s.ref.entry_id not in marks
+        ]
+
+    async def read_referring(
+        self, scope: Scope, image_id: str
+    ) -> list[Stored[Episode]]:
+        return [
+            s
+            for s in self.records
+            if s.scope == scope
+            and (image_id in s.item.episode or image_id in s.item.image_ids)
+        ]
 
     def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
         """Put an episode under a chosen entry id (as if read from md)."""
@@ -366,6 +428,101 @@ class InMemorySceneStore:
         return ref
 
 
+class InMemoryGroupProfileStore:
+    """Group-profile items per group scope, in write order, with entry marks.
+
+    Mirrors the markdown store's read-back: ``items()`` sets ``item_id`` and
+    the status a mark gives (``FORGOTTEN_MARK`` -> forgotten, another entry id
+    -> superseded), and a supersede never overwrites a forgotten mark.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[Stored[GroupProfileItem]] = []
+        self.marks: dict[str, str] = {}
+        self.queued: dict[Scope, PendingBatch] = {}
+
+    @staticmethod
+    def _check(scope: Scope) -> None:
+        if scope.owner_type != "group":
+            raise ValueError("a group profile belongs to a group scope")
+
+    async def items(self, scope: Scope) -> list[Stored[GroupProfileItem]]:
+        self._check(scope)
+        return [
+            Stored(
+                ref=row.ref,
+                scope=row.scope,
+                item=row.item.read_back(
+                    item_id=row.ref.entry_id, mark=self.marks.get(row.ref.entry_id)
+                ),
+            )
+            for row in self.rows
+            if row.scope == scope
+        ]
+
+    async def append(
+        self,
+        scope: Scope,
+        items: Sequence[GroupProfileItem],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        self._check(scope)
+        if not items:
+            return []
+        if not isinstance(only_if, NoSourceCheck) and not await only_if():
+            return []
+        refs: list[MemoryRef] = []
+        for item in items:
+            entry_id = f"gp_{len(self.rows) + 1:08d}"
+            ref = MemoryRef(
+                id=f"{scope.owner_id}_{entry_id}",
+                entry_id=entry_id,
+                md_path=f"groups/{scope.owner_id}/profile/group_profile.md",
+            )
+            self.rows.append(Stored(ref=ref, scope=scope, item=item))
+            old = item.supersedes
+            if old is not None and self.marks.get(old) != FORGOTTEN_MARK:
+                self.marks[old] = entry_id
+            refs.append(ref)
+        return refs
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        self._check(scope)
+        if not isinstance(only_if, NoSourceCheck) and not await only_if():
+            return False
+        for _md_path, entry_id in entries:
+            self.marks[entry_id] = replaced_by
+        return True
+
+    async def pending(self, scope: Scope) -> list[str]:
+        return list((await self.pending_batch(scope)).memcell_ids)
+
+    async def pending_batch(self, scope: Scope) -> PendingBatch:
+        self._check(scope)
+        return self.queued.get(scope, PendingBatch())
+
+    async def set_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        self._check(scope)
+        self.queued[scope] = PendingBatch(
+            memcell_ids=tuple(memcell_ids), failures=failures, retry_at=retry_at
+        )
+
+
 class InMemoryMemberProfileStore:
     """Member-in-group profiles by ``(group scope, member)``; ``writes`` in order."""
 
@@ -450,6 +607,18 @@ class InMemoryMemcellStore:
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]:
         return [self.cells[i] for i in memcell_ids if i in self.cells]
+
+    async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
+        return {i: self.cells[i] for i in memcell_ids if i in self.cells}
+
+    async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
+        return {
+            memcell_id: cell
+            for memcell_id, cell in sorted(
+                self.cells.items(), key=lambda pair: pair[1].timestamp
+            )
+            if self.sessions.get(memcell_id) == session
+        }
 
     async def recent_in_session(
         self,
@@ -635,9 +804,12 @@ class InMemoryForgetLogStore:
         entry_ids: tuple[str, ...] = (),
         episode_ids: tuple[tuple[str, str], ...] = (),
         removed_profile_items: tuple[tuple[str, dict[str, object]], ...] = (),
+        requested_by: str | None = None,
+        undo: Mapping[str, Any] | None = None,
+        forget_id: str | None = None,
     ) -> ForgetEntry:
         entry = ForgetEntry(
-            forget_id=f"fg_{len(self.entries) + 1:016x}",
+            forget_id=forget_id or f"fg_{len(self.entries) + 1:016x}",
             target=target,
             target_id=target_id,
             owner_id=owner_id,
@@ -645,9 +817,39 @@ class InMemoryForgetLogStore:
             entry_ids=entry_ids,
             episode_ids=episode_ids,
             removed_profile_items=removed_profile_items,
+            owner_type=owner_type,
+            requested_by=requested_by,
+            undo=undo,
         )
         self.entries.append(entry)
         return entry
+
+    async def get(self, forget_id: str) -> ForgetEntry | None:
+        for entry in self.entries:
+            if entry.forget_id == forget_id:
+                return entry
+        return None
+
+    async def live_targets(
+        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+    ) -> list[str]:
+        return list(
+            dict.fromkeys(
+                entry.target_id
+                for entry in self.entries
+                if entry.target == target
+                and entry.owner_id == owner_id
+                and entry.forget_id not in self.undone
+            )
+        )
+
+    async def holds_picture(self, image_id: str) -> bool:
+        return any(
+            entry.owner_type == "group"
+            and entry.forget_id not in self.undone
+            and f'"image_id": "{image_id}"' in json.dumps(entry.undo or {})
+            for entry in self.entries
+        )
 
     async def latest_live(
         self,
@@ -673,6 +875,48 @@ class InMemoryForgetLogStore:
             return False
         self.undone.add(forget_id)
         return True
+
+
+class InMemoryMessageForgetStore:
+    """Forgotten messages, in memory: ``(session, message_id, forget_id)`` marks.
+
+    ``segments`` maps a memcell id to its session, as the memcell rows do.
+    """
+
+    def __init__(self) -> None:
+        self.marks: list[tuple[SessionKey, str, str]] = []
+        self.undone: set[str] = set()
+        self.segments: dict[str, SessionKey] = {}
+
+    async def record(
+        self, session: SessionKey, message_ids: Collection[str], *, forget_id: str
+    ) -> None:
+        for message_id in dict.fromkeys(message_ids):
+            mark = (session, message_id, forget_id)
+            if mark not in self.marks:
+                self.marks.append(mark)
+
+    async def undo(self, forget_id: str) -> int:
+        if forget_id in self.undone:
+            return 0
+        self.undone.add(forget_id)
+        return sum(1 for _, _, f in self.marks if f == forget_id)
+
+    async def forgotten(self, session: SessionKey) -> frozenset[str]:
+        return frozenset(
+            message_id
+            for key, message_id, forget_id in self.marks
+            if key == session and forget_id not in self.undone
+        )
+
+    async def forgotten_in_segments(
+        self, memcell_ids: Collection[str]
+    ) -> dict[str, frozenset[str]]:
+        return {
+            memcell_id: await self.forgotten(self.segments[memcell_id])
+            for memcell_id in memcell_ids
+            if memcell_id in self.segments
+        }
 
 
 class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
@@ -871,6 +1115,9 @@ class InMemoryGroupStore:
     async def get(self, scope: Scope) -> GroupRecord | None:
         key = self._key(scope)
         return self._record(key) if key in self.groups else None
+
+    async def group_ids(self, app_id: str, project_id: str) -> list[str]:
+        return sorted(g for a, p, g in self.groups if (a, p) == (app_id, project_id))
 
     async def save(
         self, scope: Scope, *, group: Group, events: Sequence[RosterEvent]

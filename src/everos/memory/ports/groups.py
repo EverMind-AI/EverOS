@@ -67,6 +67,10 @@ class GroupStore(Protocol):
         """
         ...
 
+    async def group_ids(self, app_id: str, project_id: str) -> list[str]:
+        """Every group of one ``(app_id, project_id)``, sorted by id."""
+        ...
+
     async def binding(self, session: SessionKey) -> str | None:
         """The group ``session`` is bound to, or ``None``."""
         ...

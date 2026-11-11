@@ -13,6 +13,7 @@ from everos.infra.persistence.sqlite import MdChangeStateRepo
 from everos.memory.ports import Filter, MemoryRef, Scope, all_of, eq, one_of
 
 from ._fence import DeleteFence
+from .registry import match_kind
 
 logger = get_logger(__name__)
 
@@ -26,7 +27,10 @@ class FencedIndexEraser:
     that file deletes the rows by diff. Queuing the file again is needed even
     though rewriting it already queued it once: a run of the same file that
     started before the rewrite may still be going, and may have read the
-    index before an even earlier run wrote the rows back.
+    index before an even earlier run wrote the rows back. A file is queued
+    under the cascade kind its path matches, which picks its handler: a table
+    is not a kind (``group_profile_item`` is projected by ``group_profile``),
+    so the table name stands in only for a path no kind matches.
 
     Args:
         index: The derived-index tables.
@@ -102,8 +106,11 @@ class FencedIndexEraser:
 
     async def _requeue(self, kind: str, md_paths: Collection[str]) -> None:
         for md_path in sorted(md_paths):
+            spec = match_kind(md_path)
             try:
-                await self._ledger.force_enqueue(md_path, kind)
+                await self._ledger.force_enqueue(
+                    md_path, spec.name if spec is not None else kind
+                )
             except Exception as exc:  # the scanner still finds the rewrite
                 logger.warning(
                     "memory_delete_requeue_failed",

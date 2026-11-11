@@ -14,6 +14,7 @@ __all__ = [
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
+    "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
     "MarkdownMemberProfileStore",
     "MarkdownProfileStore",
@@ -21,7 +22,7 @@ __all__ = [
 ]
 
 from collections import defaultdict
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -39,11 +40,13 @@ from everos.core.utils.datetime import (
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.infra.persistence.records import member_profile_row_id
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     AgentCase,
     AgentSkill,
     AtomicFact,
     Episode,
     Foresight,
+    GroupProfileItem,
     ImageMemory,
     MemberProfile,
     Profile,
@@ -52,16 +55,23 @@ from everos.memory.models import (
 from everos.memory.ports import (
     MemoryRef,
     NoSourceCheck,
+    PendingBatch,
     Scope,
     SourceCheck,
     Stored,
+    Withdrawal,
+    WithdrawnEntry,
 )
 
 from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
 from ._mds import (
     AgentSkillFrontmatter,
     GroupMemberProfileFrontmatter,
+    GroupProfileDailyFrontmatter,
+    GroupProfilePendingFrontmatter,
     UserProfileFrontmatter,
+    group_profile_item_from_entry,
+    render_group_profile_entry,
 )
 from ._readers import AgentSkillReader, ProfileReader
 from ._writers import (
@@ -73,6 +83,7 @@ from ._writers import (
     ForesightWriter,
     GroupEpisodeWriter,
     GroupImageMemoryWriter,
+    GroupProfileWriter,
     GroupSceneWriter,
     ImageMemoryWriter,
     ProfileWriter,
@@ -185,6 +196,111 @@ class _DailyLogStore[T]:
             count=count,
         )
         return False
+
+    # ── Withdrawal (a group forget) ──────────────────────────────────────
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the owner's files, keeping their exact text.
+
+        Under the owner lock: each entry leaves its file with its own mark,
+        and an entry whose mark named one of them -- the version it had
+        replaced -- loses that mark and is current again (``released``). The
+        returned :class:`Withdrawal` is what :meth:`reinstate` takes to put
+        every byte back.
+        """
+        wanted = set(entry_ids)
+        if not wanted:
+            return Withdrawal()
+        by_path: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in wanted:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                by_path[path].add(entry_id)
+        writer = self._writer_for(scope)
+        key = owner_lock(scope)
+        taken: list[WithdrawnEntry] = []
+        released: list[tuple[str, str, str]] = []
+        async with LOCKS.hold("owner", key):
+            for path, ids in sorted(by_path.items()):
+                md_path = _relative(self._root, path)
+                taken += [
+                    WithdrawnEntry(entry_id=e, md_path=md_path, text=t, mark=m)
+                    for e, t, m in await writer.take_entries(path, ids)
+                ]
+            gone = {entry.entry_id for entry in taken}
+            for path in await self._daily_files(scope):
+                marks = await _deprecations(path)
+                freed = {
+                    k: str(v) for k, v in marks.items() if v in gone and k not in gone
+                }
+                if freed and await writer.drop_deprecations(path, freed):
+                    md_path = _relative(self._root, path)
+                    released += [(md_path, k, v) for k, v in sorted(freed.items())]
+            if taken:
+                LOCKS.bump_delete_count(key)
+        return Withdrawal(entries=tuple(taken), released=tuple(released))
+
+    async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
+        """Put a :meth:`withdraw`'s entries back under their ids, marks included.
+
+        An entry the file holds again already is left alone, so a repeated
+        undo restores nothing twice; a released mark comes back only while
+        its entry has none of its own.
+        """
+        by_path: dict[str, list[WithdrawnEntry]] = defaultdict(list)
+        for entry in withdrawal.entries:
+            by_path[entry.md_path].append(entry)
+        writer = self._writer_for(scope)
+        refs: list[MemoryRef] = []
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            for md_path, entries in sorted(by_path.items()):
+                put = await writer.put_back(
+                    scope.owner_id,
+                    self._root.root / md_path,
+                    [(e.entry_id, e.text, e.mark) for e in entries],
+                )
+                refs += [
+                    MemoryRef(
+                        id=f"{scope.owner_id}_{entry_id}",
+                        entry_id=entry_id,
+                        md_path=md_path,
+                    )
+                    for entry_id in put
+                ]
+            restore: dict[str, dict[str, str]] = defaultdict(dict)
+            for md_path, entry_id, mark in withdrawal.released:
+                restore[md_path][entry_id] = mark
+            for md_path, marks in restore.items():
+                path = self._root.root / md_path
+                current = await _deprecations(path)
+                wanted = {k: v for k, v in marks.items() if not current.get(k)}
+                if wanted and await anyio.Path(path).is_file():
+                    await writer.patch_frontmatter(path, {"deprecated_entries": wanted})
+        return refs
+
+    async def _entries_where(
+        self, scope: Scope, needles: Sequence[str], keep: Callable[[Entry], bool]
+    ) -> list[tuple[str, Entry, str | None]]:
+        """``(md_path, entry, mark)`` of the entries ``keep`` selects.
+
+        Only the files whose text holds one of ``needles`` are parsed.
+        """
+        found: list[tuple[str, Entry, str | None]] = []
+        for path in await self._files_mentioning(scope, *needles):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                try:
+                    selected = keep(entry)
+                except Exception:  # a hand-edited entry that does not parse
+                    continue
+                if selected:
+                    found.append((md_path, entry, marks.get(entry.id)))
+        return found
 
     # ── Deletion ──────────────────────────────────────────────────────────
 
@@ -365,6 +481,58 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
                 )
             )
         return found
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes written from one of ``memcell_ids``.
+
+        Read from markdown (a forget changes the truth and must not wait for
+        the index); an entry a supersession or forget mark retired is left out.
+        """
+        wanted = set(memcell_ids)
+        if not wanted:
+            return []
+        found = await self._entries_where(
+            scope,
+            [f"**parent_id**: {memcell_id}" for memcell_id in sorted(wanted)],
+            lambda e: (
+                e.as_structured().inline.get("parent_id") in wanted
+                and (e.as_structured().inline.get("parent_type") or "memcell")
+                == "memcell"
+            ),
+        )
+        return [
+            self._stored(scope, md_path, entry)
+            for md_path, entry, mark in found
+            if not mark
+        ]
+
+    async def read_referring(
+        self, scope: Scope, image_id: str
+    ) -> list[Stored[Episode]]:
+        """The owner's current episodes that refer to the picture ``image_id``."""
+        found = await self._entries_where(
+            scope,
+            [image_id],
+            lambda e: image_id in e.body,
+        )
+        return [
+            self._stored(scope, md_path, entry)
+            for md_path, entry, mark in found
+            if not mark
+        ]
+
+    def _stored(self, scope: Scope, md_path: str, entry: Entry) -> Stored[Episode]:
+        return Stored(
+            ref=MemoryRef(
+                id=f"{scope.owner_id}_{entry.id}",
+                entry_id=entry.id,
+                md_path=md_path,
+            ),
+            scope=scope,
+            item=_episode_from_entry(entry, owner_id=scope.owner_id),
+        )
 
     async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
         """Remove these entries; each file is rewritten under the owner lock."""
@@ -666,6 +834,72 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                     return found
         return found
 
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """Every picture memory written from one of ``memcell_ids``, marks included."""
+        wanted = set(memcell_ids)
+        if not wanted:
+            return []
+        found = await self._entries_where(
+            scope,
+            [f"**parent_id**: {memcell_id}" for memcell_id in sorted(wanted)],
+            lambda e: e.as_structured().inline.get("parent_id") in wanted,
+        )
+        stored: list[Stored[ImageMemory]] = []
+        for md_path, entry, mark in found:
+            item = _image_memory_from(entry, owner_id=scope.owner_id)
+            item.superseded_by = mark
+            item.status = "superseded" if mark else "current"
+            stored.append(
+                Stored(
+                    ref=MemoryRef(
+                        id=f"{scope.owner_id}_{entry.id}",
+                        entry_id=entry.id,
+                        md_path=md_path,
+                    ),
+                    scope=scope,
+                    item=item,
+                )
+            )
+        return stored
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        """The picture memories of ``entry_ids`` still in md, marks included."""
+        wanted: dict[Path, set[str]] = defaultdict(set)
+        for entry_id in entry_ids:
+            path = self._path_of(scope, entry_id)
+            if path is not None:
+                wanted[path].add(entry_id)
+        found: list[Stored[ImageMemory]] = []
+        for path, ids in sorted(wanted.items()):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                if entry.id not in ids:
+                    continue
+                item = _image_memory_from(entry, owner_id=scope.owner_id)
+                item.superseded_by = marks.get(entry.id)
+                item.status = "superseded" if item.superseded_by else "current"
+                found.append(
+                    Stored(
+                        ref=MemoryRef(
+                            id=f"{scope.owner_id}_{entry.id}",
+                            entry_id=entry.id,
+                            md_path=md_path,
+                        ),
+                        scope=scope,
+                        item=item,
+                    )
+                )
+        return found
+
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Drop the owner's picture memories of one session from markdown."""
         return await super().remove_session(scope, session_id)
@@ -773,6 +1007,24 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
                     )
         return newest
 
+    async def versions(self, scope: Scope) -> list[Stored[Scene]]:
+        """Every version of every scene of the group, in file order."""
+        found = await self._entries_where(
+            scope, ["**scene_id**: "], lambda e: bool(e.as_structured().inline)
+        )
+        return [
+            Stored(
+                ref=MemoryRef(
+                    id=f"{scope.owner_id}_{entry.id}",
+                    entry_id=entry.id,
+                    md_path=md_path,
+                ),
+                scope=scope,
+                item=_scene_from_entry(entry, owner_id=scope.owner_id),
+            )
+            for md_path, entry, _mark in found
+        ]
+
     async def append(
         self,
         scope: Scope,
@@ -799,6 +1051,208 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
                     {"deprecated_entries": {supersedes.ref.entry_id: eid.format()}},
                 )
         return self._ref(scope, eid)
+
+
+class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
+    """A group's profile items and its pending batch (``groups/<g>/profile/``).
+
+    Items are daily-log entries (``group_profile-<date>.md``, ``gp_`` ids, the
+    format :mod:`._mds.group_profile` documents), append-only: a new version is
+    a new entry, and :meth:`append` lists each entry an item ``supersedes`` in
+    that entry's own file's ``deprecated_entries`` against the new entry -- in
+    the same step, under the group's owner lock, after ``only_if`` passed. A
+    forget (:meth:`deprecate` with :data:`FORGOTTEN_MARK`) is final: a later
+    item that names a forgotten entry is written, but never turns the mark
+    into a supersession, which would bring the entry back into history. A
+    named entry that is not in its file (gone, or never this group's) is
+    logged and left alone. ``pending.md`` beside the logs holds the batch the
+    next update reads; it is no daily log, and no cascade kind matches it.
+
+    Every read and write is the group's: any other scope is refused.
+
+    Args:
+        root: Memory root the groups live under.
+    """
+
+    _KIND = "group_profile"
+
+    def __init__(self, root: MemoryRoot) -> None:
+        writer = GroupProfileWriter(root)
+        super().__init__(root, writer, render_group_profile_entry, group_writer=writer)
+        self._markdown = MarkdownWriter(root)
+
+    async def items(self, scope: Scope) -> list[Stored[GroupProfileItem]]:
+        _require_group(scope)
+        found: list[Stored[GroupProfileItem]] = []
+        for path in await self._daily_files(scope):
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                continue
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            for entry in parsed.entries:
+                try:
+                    item = group_profile_item_from_entry(entry, owner_id=scope.owner_id)
+                except ValueError as exc:  # a hand edit; the rest stays readable
+                    logger.warning(
+                        "group_profile_entry_unreadable",
+                        md_path=md_path,
+                        entry_id=entry.id,
+                        error=str(exc)[:200],
+                    )
+                    continue
+                item = item.read_back(item_id=entry.id, mark=marks.get(entry.id))
+                found.append(
+                    Stored(
+                        ref=MemoryRef(
+                            id=f"{scope.owner_id}_{entry.id}",
+                            entry_id=entry.id,
+                            md_path=md_path,
+                        ),
+                        scope=scope,
+                        item=item,
+                    )
+                )
+        return found
+
+    async def append(
+        self,
+        scope: Scope,
+        items: Sequence[GroupProfileItem],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        _require_group(scope)
+        if not items:
+            return []
+        writer = self._writer_for(scope)
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await self._sources_alive(scope, only_if, len(items)):
+                return []
+            eids = await writer.append_entries(
+                scope.owner_id,
+                [render_group_profile_entry(item) for item in items],
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+            )
+            await self._mark_replaced(
+                scope,
+                [
+                    (item.supersedes, eid.format())
+                    for item, eid in zip(items, eids, strict=True)
+                    if item.supersedes
+                ],
+            )
+        return [self._ref(scope, eid) for eid in eids]
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        _require_group(scope)
+        return await self._deprecate(
+            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
+        )
+
+    async def pending(self, scope: Scope) -> list[str]:
+        return list((await self.pending_batch(scope)).memcell_ids)
+
+    async def pending_batch(self, scope: Scope) -> PendingBatch:
+        path = self._pending_path(scope)
+        if not await anyio.Path(path).is_file():
+            return PendingBatch()
+        parsed = await MarkdownReader.read(path)
+        frontmatter = GroupProfilePendingFrontmatter.model_validate(parsed.frontmatter)
+        return PendingBatch(
+            memcell_ids=tuple(frontmatter.pending_memcell_ids),
+            failures=frontmatter.failures,
+            retry_at=frontmatter.retry_at,
+        )
+
+    async def set_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        path = self._pending_path(scope)
+        frontmatter = GroupProfilePendingFrontmatter(
+            id=f"group_profile_pending_{scope.owner_id}",
+            group_id=scope.owner_id,
+            pending_memcell_ids=list(memcell_ids),
+            failures=failures,
+            retry_at=retry_at,
+        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            await self._markdown.write_markdown(
+                path, frontmatter=frontmatter.model_dump(mode="json")
+            )
+
+    async def _mark_replaced(
+        self, scope: Scope, replaced: Sequence[tuple[str, str]]
+    ) -> None:
+        """Mark each ``(old, new)`` in the old entry's file (caller holds the lock)."""
+        by_file: dict[Path, dict[str, str]] = defaultdict(dict)
+        for old, new in replaced:
+            path = self._path_of(scope, old)
+            if path is None:
+                self._skip_mark(scope, old, reason="not an entry id")
+                continue
+            by_file[path][old] = new
+        writer = self._writer_for(scope)
+        for path, marks in by_file.items():
+            try:
+                parsed = await MarkdownReader.read(path)
+            except FileNotFoundError:
+                for old in marks:
+                    self._skip_mark(scope, old, reason="no such file")
+                continue
+            present = {entry.id for entry in parsed.entries}
+            current = _marks(parsed.frontmatter)
+            wanted: dict[str, str] = {}
+            for old, new in marks.items():
+                if old not in present:
+                    self._skip_mark(scope, old, reason="no such entry")
+                elif current.get(old) == FORGOTTEN_MARK:
+                    self._skip_mark(scope, old, reason="forgotten")
+                else:
+                    wanted[old] = new
+            if wanted:
+                await writer.patch_frontmatter(path, {"deprecated_entries": wanted})
+
+    def _skip_mark(self, scope: Scope, entry_id: str, *, reason: str) -> None:
+        logger.warning(
+            "group_profile_supersede_skipped",
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            group_id=scope.owner_id,
+            entry_id=entry_id,
+            reason=reason,
+        )
+
+    async def _daily_files(self, scope: Scope) -> list[Path]:
+        """The daily logs, oldest first -- never ``pending.md`` beside them."""
+        folder = anyio.Path(self._folder(scope))
+        if not await folder.is_dir():
+            return []
+        pattern = f"{GroupProfileDailyFrontmatter.FILE_PREFIX}-*.md"
+        return sorted([Path(str(f)) async for f in folder.glob(pattern)])
+
+    def _pending_path(self, scope: Scope) -> Path:
+        _require_group(scope)
+        return (
+            self._root.groups_dir(scope.app_id, scope.project_id)
+            / scope.owner_id
+            / GroupProfilePendingFrontmatter.DIR_NAME
+            / GroupProfilePendingFrontmatter.FILENAME
+        )
 
 
 class MarkdownMemberProfileStore:
@@ -868,6 +1322,32 @@ class MarkdownMemberProfileStore:
             id=member_profile_row_id(scope.owner_id, profile.member_id),
             entry_id=frontmatter.id,
             md_path=_relative(self._root, path),
+        )
+
+    async def remove(
+        self, scope: Scope, member_id: str
+    ) -> Stored[MemberProfile] | None:
+        """Delete the member's profile file; what it held and its row, or ``None``.
+
+        A forget of a member takes the whole document (section 9.4); its undo
+        writes the returned profile back.
+        """
+        path = self._path(scope, member_id)
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await anyio.Path(path).is_file():
+                return None
+            held = await self.read(scope, member_id)
+            await anyio.Path(path).unlink(missing_ok=True)
+        if held is None:
+            return None
+        return Stored(
+            ref=MemoryRef(
+                id=member_profile_row_id(scope.owner_id, member_id),
+                entry_id=f"member_profile_{scope.owner_id}_{member_id}",
+                md_path=_relative(self._root, path),
+            ),
+            scope=scope,
+            item=held,
         )
 
     async def members(self, scope: Scope) -> list[str]:
@@ -1031,6 +1511,11 @@ def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
         parent_type=inline.get("parent_type") or "memcell",  # type: ignore[arg-type]
         entry_id=entry.id,
         md_path=None,
+        # Group attribution (absent on a one-to-one entry): a forget inside a
+        # group reads the poster off the entry to decide who may forget it.
+        sender_ids=_list_field(inline.get("sender_ids")),
+        subject_ids=_list_field(inline.get("subject_ids")),
+        origin=inline.get("origin") or None,  # type: ignore[arg-type]
     )
 
 
@@ -1303,6 +1788,19 @@ def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
             else None
         ),
     )
+
+
+def _require_group(scope: Scope) -> None:
+    if scope.owner_type != "group":
+        raise ValueError("a group profile belongs to a group scope")
+
+
+def _marks(frontmatter: Mapping[str, object]) -> dict[str, str]:
+    """A file's ``deprecated_entries``; a hand-broken value reads as none."""
+    marks = frontmatter.get("deprecated_entries")
+    if not isinstance(marks, dict):
+        return {}
+    return {str(key): str(value) for key, value in marks.items() if value}
 
 
 async def _deprecations(path: Path) -> dict[str, str]:

@@ -13,6 +13,7 @@ from ..records import (
     AtomicFact,
     Episode,
     Foresight,
+    GroupProfileItem,
     ImageMemory,
     KnowledgeTopic,
     UserProfile,
@@ -32,6 +33,7 @@ BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     ImageMemory,
     UserProfile,
     KnowledgeTopic,
+    GroupProfileItem,
 )
 """The record class of every business table, in :class:`IndexRepositories`
 field order; the engine-neutral list every per-table sweep starts from."""
@@ -54,6 +56,7 @@ class IndexRepositories:
     image_memory: IndexRepository[Any]
     user_profile: IndexRepository[Any]
     knowledge_topic: IndexRepository[Any]
+    group_profile_item: IndexRepository[Any]
 
     def all(self) -> tuple[IndexRepository[Any], ...]:
         """Every repository, in declaration order."""

@@ -26,6 +26,7 @@ from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
 from everos.core.errors import TopicNotFoundError as TopicNotFoundError
 from everos.memory.get import GetRequest as GetRequest
 from everos.memory.get import GetResponse as GetResponse
+from everos.memory.search import GroupProfileEntry as GroupProfileEntry
 from everos.memory.search import SearchRequest as SearchRequest
 from everos.memory.search import SearchResponse as SearchResponse
 
@@ -50,10 +51,16 @@ from .knowledge import TopicDetail as TopicDetail
 from .knowledge import TopicOverview as TopicOverview
 from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import FlushResult as FlushResult
+from .memory import GroupForgetResult as GroupForgetResult
+from .memory import GroupForgetTarget as GroupForgetTarget
+from .memory import GroupUndoResult as GroupUndoResult
 from .memory import GroupUpsertResult as GroupUpsertResult
 from .memory import GroupView as GroupView
 from .memory import MemorizeResult as MemorizeResult
 from .memory import MemoryService as MemoryService
+from .memory import ProjectMember as ProjectMember
+from .memory import ProjectProfile as ProjectProfile
+from .memory import ProjectView as ProjectView
 from .memory import Queued as Queued
 from .memory import QueueHealth as QueueHealth
 from .memory import RosterChangeResult as RosterChangeResult
@@ -107,6 +114,10 @@ __all__ = [
     "FlushResult",
     "GetRequest",
     "GetResponse",
+    "GroupForgetResult",
+    "GroupForgetTarget",
+    "GroupProfileEntry",
+    "GroupUndoResult",
     "GroupUpsertResult",
     "GroupView",
     "HealthReport",
@@ -119,6 +130,9 @@ __all__ = [
     "OmeTriggerResult",
     "OpsService",
     "PatchResult",
+    "ProjectMember",
+    "ProjectProfile",
+    "ProjectView",
     "ProviderStatus",
     "Providers",
     "QueueHealth",

@@ -15,6 +15,7 @@ __all__ = [
     "AgentSkillIndexAdapter",
     "AtomicFactIndexAdapter",
     "EpisodeIndexAdapter",
+    "GroupProfileIndexAdapter",
     "ImageMemoryIndexAdapter",
     "KnowledgeTopicIndexAdapter",
     "ProfileIndexAdapter",
@@ -24,7 +25,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
@@ -34,6 +35,7 @@ from everos.memory.models import (
     AtomicFact,
     Episode,
     EpisodeParentType,
+    GroupProfileItem,
     ImageMemory,
     KnowledgeTopic,
     Profile,
@@ -364,6 +366,64 @@ class ProfileIndexAdapter:
         return _stored_profile(fields, subject=member_id)
 
 
+class GroupProfileIndexAdapter:
+    """The group-profile items in the derived index (``group_profile_item``).
+
+    Filters name the row's columns, which carry the domain's own names
+    (``kind``, ``topic_id``, ``supersedes``, ``about``, ``member_id``,
+    ``source_memcell_ids``, ``subject_ids``, ``observed_at`` ...) plus the
+    owner and window columns every group record has, so a read scope's
+    predicate applies unchanged; time columns compare with datetimes, as the
+    scope predicate's window bounds do. A row's version state is not filtered
+    here: ``is_null("deprecated_by")`` keeps the newest versions only, and
+    without it superseded and forgotten rows come back marked as such.
+
+    Each item is rebuilt from the row's ``payload_json`` with ``item_id`` (its
+    entry id) and the ``status`` / ``superseded_by`` its ``deprecated_by``
+    gives it. A row whose payload no longer validates is logged and skipped:
+    a stale encoding must not fail a read, and the cascade rewrites the row
+    on its next reconcile of the file.
+
+    Args:
+        repo: Group-profile derived-index repository.
+    """
+
+    def __init__(self, repo: IndexRepository[Any]) -> None:
+        self._repo = repo
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[Stored[GroupProfileItem]]:
+        rows = [_fields(row) for row in await self._repo.scan(where)]
+        rows.sort(key=lambda row: (row["observed_at"], row["entry_id"]), reverse=True)
+        found = _stored_group_profile_items(rows)
+        return found if limit is None else found[:limit]
+
+    async def sparse_search(
+        self, terms: Sequence[str], where: Filter, *, limit: int
+    ) -> list[SearchHit[GroupProfileItem]]:
+        rows = await self._repo.sparse_search(
+            terms, where, columns=self._repo.schema.BM25_FIELDS, limit=limit
+        )
+        hits: list[SearchHit[GroupProfileItem]] = []
+        for row in rows:
+            stored = _stored_group_profile_item(row)
+            if stored is not None:
+                hits.append(SearchHit(stored=stored, score=_bm25_score(row)))
+        return hits
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[GroupProfileItem]]:
+        rows = await self._repo.find_by_owner_entries(
+            scope.owner_id,
+            entry_ids,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+        )
+        return _stored_group_profile_items([_fields(row) for row in rows])
+
+
 class KnowledgeTopicIndexAdapter:
     """Knowledge-topic index search.
 
@@ -501,6 +561,29 @@ def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
             origin=fields.get("origin"),
         ),
     )
+
+
+def _stored_group_profile_items(rows: Sequence[Row]) -> list[Stored[GroupProfileItem]]:
+    return [
+        stored
+        for stored in (_stored_group_profile_item(row) for row in rows)
+        if stored is not None
+    ]
+
+
+def _stored_group_profile_item(fields: Row) -> Stored[GroupProfileItem] | None:
+    try:
+        item = GroupProfileItem.model_validate_json(fields["payload_json"])
+    except ValidationError as exc:
+        logger.warning(
+            "group_profile_row_unreadable",
+            row_id=fields.get("id"),
+            md_path=fields.get("md_path"),
+            error=str(exc)[:200],
+        )
+        return None
+    item = item.read_back(item_id=fields["entry_id"], mark=fields.get("deprecated_by"))
+    return Stored(ref=_daily_ref(fields), scope=_scope(fields), item=item)
 
 
 def _stored_profile(fields: Row, *, subject: str) -> Stored[Profile]:

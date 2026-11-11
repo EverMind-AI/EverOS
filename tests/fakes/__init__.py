@@ -42,6 +42,7 @@ from .indexes import InMemoryAgentCaseIndex as InMemoryAgentCaseIndex
 from .indexes import InMemoryAgentSkillIndex as InMemoryAgentSkillIndex
 from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
+from .indexes import InMemoryGroupProfileIndex as InMemoryGroupProfileIndex
 from .indexes import InMemoryImageMemoryIndex as InMemoryImageMemoryIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
 from .llm import AGENT_TRACK_OPERATORS as AGENT_TRACK_OPERATORS
@@ -75,6 +76,7 @@ from .stores import InMemoryClusterStore as InMemoryClusterStore
 from .stores import InMemoryEpisodeStore as InMemoryEpisodeStore
 from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryForgetLogStore as InMemoryForgetLogStore
+from .stores import InMemoryGroupProfileStore as InMemoryGroupProfileStore
 from .stores import InMemoryGroupStore as InMemoryGroupStore
 from .stores import InMemoryImageMemoryStore as InMemoryImageMemoryStore
 from .stores import InMemoryImageStore as InMemoryImageStore
@@ -108,6 +110,8 @@ __all__ = [
     "InMemoryEpisodeStore",
     "InMemoryForesightStore",
     "InMemoryForgetLogStore",
+    "InMemoryGroupProfileIndex",
+    "InMemoryGroupProfileStore",
     "InMemoryGroupStore",
     "InMemoryImageMemoryIndex",
     "InMemoryImageMemoryStore",

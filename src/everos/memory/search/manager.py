@@ -41,12 +41,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
 
-from everos.config import load_settings
+from everos.config import GroupSearchSettings, load_settings
 from everos.config.settings import DeciderSettings
 from everos.core.context import resolve_request_id
 from everos.core.errors import (
@@ -69,11 +69,17 @@ from everos.memory.access import (
     ScopeRequest,
     resolve_identity,
 )
+from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.groups import named_members, roster_names
-from everos.memory.models import CanonicalMessage, ImageMemory
+from everos.memory.models import CanonicalMessage, ImageMemory, MemCell
 from everos.memory.ports import (
     ClusterStore,
+    EpisodeIndex,
     Filter,
+    GroupProfileIndex,
+    MemcellStore,
+    MessageForgetStore,
+    SceneStore,
     Scope,
     SessionBufferStore,
     SessionKey,
@@ -85,12 +91,16 @@ from everos.memory.ports import (
 from .adapter import resolve_pipeline
 from .agentic import search_episodes_agentic
 from .agentic_agent import search_agent_cases_agentic, search_agent_skills_agentic
+from .audience import with_audience
+from .constraints import bind_constraints, build_constraints
 from .dto import (
+    ConstraintItem,
     FilterNode,
     SearchAgentCaseItem,
     SearchAgentSkillItem,
     SearchData,
     SearchEpisodeItem,
+    SearchGroupProfile,
     SearchImageItem,
     SearchMethod,
     SearchProfileItem,
@@ -100,11 +110,14 @@ from .dto import (
     SearchWindow,
     UnprocessedMessageDTO,
 )
+from .expansion import GroupLinks
 from .filters import compile_scoped
+from .group_profile import visible_profile, visible_profile_items
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import (
+    Coverage,
     RoundDecider,
-    search_episodes_and_images_llm_multiround,
+    run_llm_multiround,
 )
 from .recall import (
     KindRecaller,
@@ -204,6 +217,19 @@ def _top_score(data: SearchData) -> float:
 _CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
 
 
+class _Ranked(NamedTuple):
+    """What one episode-track ranking returned.
+
+    ``coverage`` and ``core`` come from the multi-round loop only (its stop
+    and its decider's core, as result ids); other methods leave them unset.
+    """
+
+    episodes: list[SearchEpisodeItem]
+    images: list[SearchImageItem]
+    coverage: Coverage | None = None
+    core: list[str] | None = None
+
+
 class SearchManager:
     """Orchestrates per-kind recall, fusion, and shape into the public DTO."""
 
@@ -228,8 +254,23 @@ class SearchManager:
         image_recaller: ImageMemoryRecaller | None = None,
         image_store: ImageStore | None = None,
         access: AccessPolicy,
+        group_profile_index: GroupProfileIndex | None = None,
+        episode_index: EpisodeIndex | None = None,
+        memcells: MemcellStore | None = None,
+        message_forget: MessageForgetStore | None = None,
+        scenes: SceneStore | None = None,
+        group_search: GroupSearchSettings | None = None,
     ) -> None:
         self._access = access
+        # Group scopes (docs/group-memory.md, sections 8.3-8.6): the group
+        # profile's items, the segments constraints quote, the scenes
+        # expansion follows, and the switches that decide all three.
+        self._group_profile = group_profile_index
+        self._episode_index = episode_index
+        self._memcells = memcells
+        self._message_forget = message_forget
+        self._scenes = scenes
+        self._group_search = group_search or GroupSearchSettings()
         self._no_facts = NoAtomicFacts()
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
@@ -308,34 +349,41 @@ class SearchManager:
             self._validate_components(req)
 
             if scope.is_group:
-                (episodes, images), profiles, unprocessed = await asyncio.gather(
+                ranked, profiles, unprocessed, group_profile = await asyncio.gather(
                     self._search_episodes(
                         req, where, question_image_ids=question_image_ids, scope=scope
                     ),
                     self._group_profiles(req, scope),
                     self._load_unprocessed(req, scope),
+                    self._attach_group_profile(req, scope),
                 )
                 images = await self._resolve_episode_pictures(
-                    req, episodes, images, scope=scope
+                    req, ranked.episodes, ranked.images, scope=scope
                 )
+                constraints = await self._constraints(req, scope, ranked, images)
                 data = SearchData(
-                    episodes=episodes,
-                    images=images,
+                    episodes=with_audience(scope, ranked.episodes),
+                    images=with_audience(scope, images),
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
                     scope=_scope_view(scope),
+                    group_profile=group_profile,
+                    constraints=constraints,
+                    coverage=ranked.coverage,
                 )
             elif req.owner_type == "user":
-                (episodes, images), profiles, unprocessed = await asyncio.gather(
+                ranked, profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(
                         req, where, question_image_ids=question_image_ids
                     ),
                     self._fetch_profile(req),
                     self._load_unprocessed(req, scope),
                 )
-                images = await self._resolve_episode_pictures(req, episodes, images)
+                images = await self._resolve_episode_pictures(
+                    req, ranked.episodes, ranked.images
+                )
                 data = SearchData(
-                    episodes=episodes,
+                    episodes=ranked.episodes,
                     images=images,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
@@ -406,6 +454,7 @@ class SearchManager:
                 group_ids=req.scope_group_ids,
                 audience=req.audience,
                 context_group_id=req.context_group_id,
+                project_scope=req.project_scope,
             ),
         )
 
@@ -492,10 +541,8 @@ class SearchManager:
         self._validate_components(req)
         scope = await self._read_scope(req, None)
         where = compile_scoped(req.filters, scope.predicate)
-        episodes, _images = await self._search_episodes(
-            req, where, decider=decider, scope=scope
-        )
-        return episodes
+        ranked = await self._search_episodes(req, where, decider=decider, scope=scope)
+        return ranked.episodes
 
     async def _search_episodes(
         self,
@@ -505,10 +552,12 @@ class SearchManager:
         decider: RoundDecider | None = None,
         question_image_ids: Sequence[str] = (),
         scope: ReadScope | None = None,
-    ) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
+    ) -> _Ranked:
         """User-track retrieval: the episodes and the pictures ranked with them.
 
-        A group scope runs the same routes over a recall with no atomic facts.
+        A group scope runs the same routes over a recall with no atomic facts;
+        its multi-round loop also follows the core's stored links (section
+        8.3) when ``[search] expansion`` is on.
         """
         facts = self._no_facts if scope is not None and scope.is_group else self._fact
         if req.method == SearchMethod.AGENTIC:
@@ -531,12 +580,13 @@ class SearchManager:
             # pictures. Rather than splice images into a route that never ranked
             # them, it returns episodes alone and leaves ``images`` empty --
             # an empty array is honest, an image pinned to the wrong rank is not.
-            return episodes, []
+            return _Ranked(episodes, [])
 
         if req.method == SearchMethod.LLM_MULTIROUND:
-            return await search_episodes_and_images_llm_multiround(
+            expander = self._expander(scope, where)
+            result = await run_llm_multiround(
                 _question(req, scope),
-                owner_id=req.owner_id,
+                owner_id=scope.owner_id if scope is not None else req.owner_id,
                 where=where,
                 app_id=req.app_id,
                 project_id=req.project_id,
@@ -555,6 +605,11 @@ class SearchManager:
                 visual_embed_query_fn=(
                     self._vision.embed_query if self._vision is not None else None
                 ),
+                expander=expander,
+                link_slots=self._group_search.link_slots if expander else 0,
+            )
+            return _Ranked(
+                result.episodes, result.images, result.coverage, list(result.core)
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
@@ -584,7 +639,7 @@ class SearchManager:
                 recalled.candidates[:top_k], recalled.stored_by_id
             )
             images = await self._image_hits(req, where, top_k)
-            return episodes, images
+            return _Ranked(episodes, images)
 
         # ── HYBRID: heap-expand hierarchy over parallel sparse + dense recall ──
         sparse, dense, query_vector = await self._recall_sparse_dense(
@@ -616,7 +671,7 @@ class SearchManager:
             if req.min_score is not None:
                 shaped = [s for s in shaped if s.score >= req.min_score]
             images = await self._image_hits(req, where, top_k)
-            return shaped, images
+            return _Ranked(shaped, images)
 
     async def _resolve_episode_pictures(
         self,
@@ -899,6 +954,96 @@ class SearchManager:
         )
         return [item for item in fetched if item is not None]
 
+    # ── Group-scope additions (sections 8.3-8.6) ────────────────────
+
+    def _expander(self, scope: ReadScope | None, where: Filter) -> GroupLinks | None:
+        """The link expander of a group multi-round search, when it is on."""
+        settings = self._group_search
+        if (
+            scope is None
+            or not scope.is_group
+            or not settings.expansion
+            or settings.link_slots <= 0
+            or self._group_profile is None
+            or self._episode_index is None
+        ):
+            return None
+        return GroupLinks(
+            scope=scope,
+            where=where,
+            episodes=self._episode_index,
+            profile=self._group_profile,
+            scenes=self._scenes,
+        )
+
+    async def _attach_group_profile(
+        self, req: SearchRequest, scope: ReadScope
+    ) -> SearchGroupProfile | None:
+        """The visible current group-profile items (section 5.3), each kind capped.
+
+        On by default for a group scope (``include_group_profile``): it is
+        what grounds a request about the group itself -- its purpose, its
+        current plan, who does what -- when the ranking found little.
+        """
+        wanted = req.include_group_profile is not False
+        if not wanted or self._group_profile is None:
+            return None
+        stored = await visible_profile_items(self._group_profile, scope)
+        attached, _view = visible_profile(
+            stored, cap=self._group_search.group_profile_cap
+        )
+        return SearchGroupProfile(
+            topics=with_audience(scope, attached.topics),
+            decisions=with_audience(scope, attached.decisions),
+            dissent=with_audience(scope, attached.dissent),
+            roles=with_audience(scope, attached.roles),
+        )
+
+    async def _constraints(
+        self,
+        req: SearchRequest,
+        scope: ReadScope,
+        ranked: _Ranked,
+        images: Sequence[SearchImageItem],
+    ) -> list[ConstraintItem]:
+        """The constraint block (section 8.4), on by default for a group scope.
+
+        The core is the decider's on the multi-round route, and what was
+        returned on the others. ``[search] constraints = "model"`` adds the
+        binding call over the rules layer's constraints.
+        """
+        if req.constraints is False:
+            return []
+        if (
+            self._group_profile is None
+            or self._memcells is None
+            or self._message_forget is None
+        ):
+            return []
+        returned = [*ranked.episodes, *images]
+        core = (
+            [r for r in returned if r.id in set(ranked.core)]
+            if ranked.core is not None
+            else returned
+        )
+        constraints, cells = await build_constraints(
+            scope=scope,
+            core=core,
+            profile=self._group_profile,
+            memcells=self._memcells,
+            forgotten=self._message_forget,
+        )
+        if self._group_search.constraints != "model" or not constraints:
+            return constraints
+        bound, _dropped = await bind_constraints(
+            self._llm,
+            question=req.query,
+            scope=scope,
+            constraints=constraints,
+            cells=_labelled(cells, constraints, scope),
+        )
+        return bound
+
     # ── Recall helpers ──────────────────────────────────────────────
 
     async def _single_route_recall(
@@ -1132,6 +1277,24 @@ def _scope_view(scope: ReadScope) -> SearchScope:
             for w in view.windows
         ],
     )
+
+
+def _labelled(
+    cells: Mapping[str, MemCell],
+    constraints: Sequence[ConstraintItem],
+    scope: ReadScope,
+) -> dict[str, MemCell]:
+    """The segments with their speakers named by their group's roster.
+
+    A segment belongs to the group of the constraints that cite it; one no
+    constraint cites keeps its senders' own names.
+    """
+    group_of = {c.source.memcell_id: c.scope.group_id for c in constraints}
+    out: dict[str, MemCell] = {}
+    for memcell_id, cell in cells.items():
+        view = scope.group(group_of.get(memcell_id, ""))
+        out[memcell_id] = label_cell(cell, view.roster) if view is not None else cell
+    return out
 
 
 def _picture_by_image_id(

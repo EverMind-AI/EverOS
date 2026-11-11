@@ -12,6 +12,10 @@ only what it is given changes, and the change is code, not prompt text (D15):
   instructions: who speaks in this part and who it names, with access roles
   and titles, and the rule that what the assistant says is its own reply,
   never something the group agreed.
+* **Speaker with id** (:func:`speaker_with_id`). The group-profile and
+  constraint-binding prompts (sections 7.5 and 8.4) show a labelled
+  speaker's member id next to the name, ``Chen (u_chen)``: the id is what
+  their replies must name people by.
 
 After the call :func:`attribution` sets the record's ``sender_ids``,
 ``subject_ids`` and ``origin`` from the memcell and the roster -- never from
@@ -24,14 +28,13 @@ from __future__ import annotations
 __all__ = [
     "ROSTER_BLOCK",
     "Attribution",
-    "PromptTemplate",
     "attribution",
     "label_cell",
     "roster_block",
+    "speaker_with_id",
     "with_roster_block",
 ]
 
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -46,24 +49,7 @@ from everos.memory.models import (
     Origin,
     Roster,
 )
-
-
-@dataclass(frozen=True)
-class PromptTemplate:
-    """A registered rendering template: id, version and the text it renders.
-
-    ``fingerprint`` changes whenever a part's text does, so data built from
-    one version can be told apart from data built from another.
-    """
-
-    id: str
-    version: int
-    parts: tuple[str, ...]
-
-    @property
-    def fingerprint(self) -> str:
-        return hashlib.sha256("\n".join(self.parts).encode("utf-8")).hexdigest()[:16]
-
+from everos.memory.prompts import PromptTemplate
 
 ROSTER_BLOCK = PromptTemplate(
     id="chat.group_roster_block",
@@ -114,6 +100,18 @@ def label_cell(cell: MemCell, roster: Roster) -> MemCell:
         for item in cell.items
     ]
     return cell.model_copy(update={"items": items})
+
+
+def speaker_with_id(message: ChatMessage) -> str:
+    """A labelled message's speaker with their member id: ``Chen (u_chen)``.
+
+    The name is the label :func:`label_cell` gave (an assistant's ends in
+    ``(assistant)``); a speaker whose name is their id shows the id alone.
+    """
+    name = message.sender_name or message.sender_id
+    if not message.sender_id or name == message.sender_id:
+        return name
+    return f"{name} ({message.sender_id})"
 
 
 def with_roster_block(custom_instructions: str | None, block: str) -> str:

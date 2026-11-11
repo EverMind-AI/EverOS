@@ -426,6 +426,164 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project",
+        "description": "The asker's groups of the project and their current members.",
+        "operationId": "read_project_api_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/profile": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project Profile",
+        "description": "The visible current group-profile items of the asker's groups.",
+        "operationId": "read_project_profile_api_v1_projects__project_id__profile_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectProfileDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memory/search": {
       "post": {
         "tags": [
@@ -516,7 +674,7 @@
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Delete one owner's memories, one session's, or one owner's of a session.",
+        "description": "Delete one owner's memories, one session's, or one owner's of a session.\n\nWith ``group_id`` it is the group's delete (docs/group-memory.md, section\n15): an owner's or admin's forget of one session or one member's\nmessages -- soft and propagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v1_memory_delete_post",
         "requestBody": {
           "content": {
@@ -534,7 +692,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_DeleteResponseData__GroupDeleteResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group-scoped: the asker is not an owner or admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -623,13 +791,21 @@
           "memory"
         ],
         "summary": "Forget Image",
-        "description": "Forget one picture: its memories, its vector, and what referred to it.\n\nReturns what was touched, so a caller can see that the picture had a\nmemory at all instead of assuming success from an empty 200.",
+        "description": "Forget one picture of a user, or a target inside a group.\n\nA body naming ``user_id`` and ``image_id`` forgets the user's picture: its\nmemories, its vector, and what referred to it. A body naming ``group_id``\nforgets inside the group (docs/group-memory.md, section 5.5): messages, a\nmember, a session, records or a picture, propagated to everything derived\nfrom them; ``dry_run`` reports what it would touch, and the returned\n``forget_id`` undoes it.\n\nReturns what was touched, so a caller can see that the target had a\nmemory at all instead of assuming success from an empty 200.",
         "operationId": "forget_image_api_v1_memory_forget_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ForgetImageRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ForgetImageRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GroupForgetRequest"
+                  }
+                ],
+                "title": "Req"
               }
             }
           },
@@ -641,13 +817,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetImageResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group forget: not a current member, or not allowed this target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
           },
           "404": {
-            "description": "No such picture for this user",
+            "description": "No such picture for this user; or the group holds no such message, session, member, record or picture",
             "content": {
               "application/json": {
                 "schema": {
@@ -658,6 +844,16 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Group forget: a session it touches is busy; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -831,13 +1027,21 @@
           "memory"
         ],
         "summary": "Undo Forget Image",
-        "description": "Undo the newest forget of one picture for one user.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.",
+        "description": "Undo the newest forget of one picture for one user, or a group forget.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.\nA body naming ``group_id`` undoes the group forget ``forget_id``, with the\nforget's own authorisation; 409 when a later forget rewrote what it wrote\n(undo that one first).",
         "operationId": "undo_forget_image_api_v1_memory_forget_undo_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UndoForgetRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UndoForgetRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GroupUndoForgetRequest"
+                  }
+                ],
+                "title": "Req"
               }
             }
           },
@@ -849,7 +1053,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group undo: not allowed the forget it reverses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such group forget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Group undo: a later forget rewrote what this one wrote; undo that one first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1127,6 +1361,22 @@
               "default": "desc",
               "title": "Sort Order"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1303,6 +1553,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1419,6 +1685,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1514,6 +1796,22 @@
               "type": "string",
               "default": "default",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
             }
           }
         ],
@@ -2092,6 +2390,164 @@
         }
       }
     },
+    "/api/v2/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project",
+        "description": "The asker's groups of the project and their current members.",
+        "operationId": "read_project_api_v2_projects__project_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/projects/{project_id}/profile": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project Profile",
+        "description": "The visible current group-profile items of the asker's groups.",
+        "operationId": "read_project_profile_api_v2_projects__project_id__profile_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectProfileDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/memory/search": {
       "post": {
         "tags": [
@@ -2182,13 +2638,21 @@
           "memory"
         ],
         "summary": "Forget Image",
-        "description": "Forget one picture: its memories, its vector, and what referred to it.\n\nReturns what was touched, so a caller can see that the picture had a\nmemory at all instead of assuming success from an empty 200.",
+        "description": "Forget one picture of a user, or a target inside a group.\n\nA body naming ``user_id`` and ``image_id`` forgets the user's picture: its\nmemories, its vector, and what referred to it. A body naming ``group_id``\nforgets inside the group (docs/group-memory.md, section 5.5): messages, a\nmember, a session, records or a picture, propagated to everything derived\nfrom them; ``dry_run`` reports what it would touch, and the returned\n``forget_id`` undoes it.\n\nReturns what was touched, so a caller can see that the target had a\nmemory at all instead of assuming success from an empty 200.",
         "operationId": "forget_image_api_v2_memory_forget_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ForgetImageRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ForgetImageRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GroupForgetRequest"
+                  }
+                ],
+                "title": "Req"
               }
             }
           },
@@ -2200,13 +2664,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_ForgetImageResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group forget: not a current member, or not allowed this target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
           },
           "404": {
-            "description": "No such picture for this user",
+            "description": "No such picture for this user; or the group holds no such message, session, member, record or picture",
             "content": {
               "application/json": {
                 "schema": {
@@ -2217,6 +2691,16 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Group forget: a session it touches is busy; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -2390,13 +2874,21 @@
           "memory"
         ],
         "summary": "Undo Forget Image",
-        "description": "Undo the newest forget of one picture for one user.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.",
+        "description": "Undo the newest forget of one picture for one user, or a group forget.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.\nA body naming ``group_id`` undoes the group forget ``forget_id``, with the\nforget's own authorisation; 409 when a later forget rewrote what it wrote\n(undo that one first).",
         "operationId": "undo_forget_image_api_v2_memory_forget_undo_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UndoForgetRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UndoForgetRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GroupUndoForgetRequest"
+                  }
+                ],
+                "title": "Req"
               }
             }
           },
@@ -2408,7 +2900,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_UndoForgetResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group undo: not allowed the forget it reverses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such group forget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Group undo: a later forget rewrote what this one wrote; undo that one first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2514,7 +3036,7 @@
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Delete one owner's memories, one session's, or one owner's of a session.",
+        "description": "Delete one owner's memories, one session's, or one owner's of a session.\n\nWith ``group_id`` it is the group's delete (docs/group-memory.md, section\n15): an owner's or admin's forget of one session or one member's\nmessages -- soft and propagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v2_memory_delete_post",
         "requestBody": {
           "content": {
@@ -2532,7 +3054,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_DeleteResponseData__GroupDeleteResponseData__"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Group-scoped: the asker is not an owner or admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2793,6 +3325,22 @@
               "default": "desc",
               "title": "Sort Order"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -2969,6 +3517,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -3085,6 +3649,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -3180,6 +3760,22 @@
               "type": "string",
               "default": "default",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
             }
           }
         ],
@@ -3430,6 +4026,28 @@
           "status"
         ],
         "title": "AddResponseData"
+      },
+      "AudienceItem": {
+        "properties": {
+          "present": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Present"
+          },
+          "joined_after": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Joined After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AudienceItem",
+        "description": "Who knew a group record (docs/group-memory.md, section 8.6).\n\nComputed at read time from the roster and the record's sources; shown only\non records the asker can see."
       },
       "Body_create_document_route_api_v1_knowledge_documents_post": {
         "properties": {
@@ -3755,6 +4373,194 @@
         "title": "CategoryListResponse",
         "description": "Response for GET /categories."
       },
+      "ConstraintItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "dissent",
+              "topic",
+              "episode",
+              "picture"
+            ],
+            "title": "Kind"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ConstraintScopeItem"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "supersedes": {
+            "items": {
+              "$ref": "#/components/schemas/SupersededStatement"
+            },
+            "type": "array",
+            "title": "Supersedes"
+          },
+          "decided_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decided By"
+          },
+          "agreed_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Agreed By"
+          },
+          "held_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held By"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConstraintSourceItem"
+          },
+          "applies": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "kind",
+          "record_id",
+          "scope",
+          "status",
+          "source"
+        ],
+        "title": "ConstraintItem",
+        "description": "One thing an answer must respect (docs/group-memory.md, section 8.4).\n\nBuilt after the search loop from the core: a group-profile item linked to\nit (a decision, a dissent, a topic's status) whose quote and speakers were\nverified when it was written, or -- for a core record no item covers -- a\nmetadata constraint quoting the record's best-matching source message.\nEvery quote is a verbatim part of the message it cites."
+      },
+      "ConstraintScopeItem": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "applies_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Applies To",
+            "default": "group"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "ConstraintScopeItem",
+        "description": "Where a constraint applies: the group, or some of its members."
+      },
+      "ConstraintSourceItem": {
+        "properties": {
+          "memcell_id": {
+            "type": "string",
+            "title": "Memcell Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "speaker_id": {
+            "type": "string",
+            "title": "Speaker Id"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memcell_id",
+          "message_id",
+          "speaker_id",
+          "at",
+          "quote"
+        ],
+        "title": "ConstraintSourceItem",
+        "description": "The message a constraint quotes: verbatim, from its segment."
+      },
       "ContentItemDTO": {
         "properties": {
           "type": {
@@ -4014,20 +4820,36 @@
           "group_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped delete; refused with 422 before Step 2."
+            "description": "A group-scoped delete: an owner's or admin's forget of one session (session_id) or one member's messages (user_id)."
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who asks, for a group-scoped delete (an owner or admin)."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "DeleteRequest",
-        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id``, ``agent_id`` and ``session_id``; never both\n``user_id`` and ``agent_id``."
+        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id``, ``agent_id`` and ``session_id``; never both\n``user_id`` and ``agent_id``.\n\nWith ``group_id`` the delete is the group's (docs/group-memory.md,\nsection 15): an owner's or admin's forget -- soft, propagated, undone by\nthe returned ``forget_id`` -- of one of the group's sessions\n(``session_id``) or of one member's messages (``user_id``, the member).\n``asker_id`` names the owner or admin."
       },
       "DeleteResponseData": {
         "properties": {
@@ -4505,7 +5327,7 @@
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped forget; refused with 422 before Step 2."
+            "description": "Not taken here: a body that names a group is a group forget (group_id, asker_id, target)."
           },
           "image_id": {
             "type": "string",
@@ -4609,7 +5431,7 @@
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped forget; refused with 422 before Step 2."
+            "description": "Refused (422): a conversation of a group is forgotten with POST /memory/forget and a session target."
           },
           "session_id": {
             "type": "string",
@@ -4677,6 +5499,26 @@
         ],
         "title": "ForgetSessionResponseData",
         "description": "What forgetting one conversation touched.\n\n``episodes`` are entry ids marked forgotten, ``image_memories`` how many\npicture memories, and ``images`` the picture *files* taken out of\ncirculation because this session held their last live reference."
+      },
+      "ForgottenMessageData": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "message_id"
+        ],
+        "title": "ForgottenMessageData",
+        "description": "One message a group forget marked forgotten."
       },
       "ForgottenPictureData": {
         "properties": {
@@ -4866,6 +5708,13 @@
             },
             "type": "array",
             "title": "Profiles"
+          },
+          "group_profile": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Group Profile"
           },
           "agent_cases": {
             "items": {
@@ -5169,7 +6018,8 @@
           "agent_skill",
           "scene",
           "image_memory",
-          "member_profile"
+          "member_profile",
+          "group_profile"
         ],
         "title": "GetMemoryType",
         "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
@@ -5350,6 +6200,11 @@
             ],
             "title": "Member Id"
           },
+          "include_superseded": {
+            "type": "boolean",
+            "title": "Include Superseded",
+            "default": false
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -5504,6 +6359,634 @@
         ],
         "title": "GroupDTO",
         "description": "A group's meta and roster."
+      },
+      "GroupDeleteResponseData": {
+        "properties": {
+          "filters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filters",
+          "count",
+          "forget_id"
+        ],
+        "title": "GroupDeleteResponseData",
+        "description": "What a group-scoped delete forgot, and the forget's id for its undo.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Records taken out of the group's memory.\n    forget_id: The forget it ran (``POST /memory/forget/undo`` takes it)."
+      },
+      "GroupForgetRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "group_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Group Id"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who asks; required unless the identity header names them."
+          },
+          "target": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTarget"
+              },
+              {
+                "$ref": "#/components/schemas/MemberTarget"
+              },
+              {
+                "$ref": "#/components/schemas/SessionTarget"
+              },
+              {
+                "$ref": "#/components/schemas/RecordTarget"
+              },
+              {
+                "$ref": "#/components/schemas/ImageTarget"
+              }
+            ],
+            "title": "Target",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "image": "#/components/schemas/ImageTarget",
+                "member": "#/components/schemas/MemberTarget",
+                "message": "#/components/schemas/MessageTarget",
+                "record": "#/components/schemas/RecordTarget",
+                "session": "#/components/schemas/SessionTarget"
+              }
+            }
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id",
+          "target"
+        ],
+        "title": "GroupForgetRequest",
+        "description": "A forget inside a group (docs/group-memory.md, section 5.5).\n\nWho may forget what: a message its sender, a member that member, a record\na member whose own messages alone it rests on, a picture its poster; the\ngroup's owners and admins anything; a session only they. A former member\nor a stranger is refused (403). ``dry_run`` changes nothing and answers\nwith exactly what the real run would touch."
+      },
+      "GroupForgetResponseData": {
+        "properties": {
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id",
+            "default": ""
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          },
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "target": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Target"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ForgottenMessageData"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "rewritten": {
+            "type": "integer",
+            "title": "Rewritten",
+            "default": 0
+          },
+          "new_episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New Episodes"
+          },
+          "image_memories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Memories"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
+          "rewritten_scenes": {
+            "type": "integer",
+            "title": "Rewritten Scenes",
+            "default": 0
+          },
+          "new_scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New Scenes"
+          },
+          "member_profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Member Profiles"
+          },
+          "member_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Member Profile Items"
+          },
+          "stale_member_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Member Profile Items"
+          },
+          "group_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Profile Items"
+          },
+          "stale_group_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Group Profile Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "GroupForgetResponseData",
+        "description": "What a forget inside a group touched (or would, on a dry run).\n\nRecords are named as the read side names them (``<group>_<entry>``);\nmember-profile items by their ``item_id``. ``episodes`` are the versions\ntaken out -- each either rewritten (``rewritten`` new versions, ids in\n``new_episodes``) or dropped when nothing of its segment was left.\n``stale_*`` items were taken out and are written again from their\nremaining sources by the profile's next update."
+      },
+      "GroupProfileEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "topic",
+              "decision",
+              "dissent",
+              "role"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement",
+            "default": ""
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "topic_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Status"
+          },
+          "decided_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decided By"
+          },
+          "agreed_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Agreed By"
+          },
+          "assignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assignees"
+          },
+          "applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Applies To"
+          },
+          "held_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held By"
+          },
+          "about": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "About"
+          },
+          "resolved_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resolved By"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileSourceItem"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SearchSource"
+          },
+          "observed_at": {
+            "type": "integer",
+            "title": "Observed At"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "item_id",
+          "group_id",
+          "kind",
+          "status",
+          "source",
+          "observed_at"
+        ],
+        "title": "GroupProfileEntry",
+        "description": "One group-profile item (docs/group-memory.md, section 7.5).\n\n``kind`` decides which fields are filled: a topic its ``topic_id`` /\n``name`` / ``summary`` / ``topic_status``; a decision its ``statement``\nand the people fields; a dissent ``statement`` / ``held_by`` / ``about``;\na role ``member_id`` / ``role`` / ``confidence``. ``status`` is the\nitem's own (``current``, ``open``, ``active``, a topic's status ...) or\n``superseded`` once a later item replaced it."
+      },
+      "GroupUndoForgetRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "group_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Group Id"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
+          },
+          "forget_id": {
+            "type": "string",
+            "pattern": "^fg_[0-9a-f]{16}$",
+            "title": "Forget Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id",
+          "forget_id"
+        ],
+        "title": "GroupUndoForgetRequest",
+        "description": "Undo one forget of a group by its id, with the forget's own authorisation."
+      },
+      "GroupUndoForgetResponseData": {
+        "properties": {
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ForgottenMessageData"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "image_memories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Memories"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
+          "member_profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Member Profiles"
+          },
+          "member_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Member Profile Items"
+          },
+          "group_profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Profile Items"
+          },
+          "withdrawn": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Withdrawn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "forget_id",
+          "applied",
+          "group_id"
+        ],
+        "title": "GroupUndoForgetResponseData",
+        "description": "What an undo of a group forget put back.\n\n``applied`` is ``False`` when the forget was undone already. ``withdrawn``\nare the records the forget had written, now taken out again."
       },
       "GroupUpsertRequest": {
         "properties": {
@@ -5730,6 +7213,30 @@
         "title": "HealthResponse",
         "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities``,\n``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``\nreturn type degrades the OpenAPI response to\n``additionalProperties: true``, which robs clients (and codegen) of\nany structure to lean on."
       },
+      "ImageTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "image",
+            "title": "Kind"
+          },
+          "image_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Image Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "image_id"
+        ],
+        "title": "ImageTarget",
+        "description": "The group's memories of one picture, by content hash."
+      },
       "KnowledgeSearchRequest": {
         "properties": {
           "query": {
@@ -5780,6 +7287,18 @@
             "type": "string",
             "title": "Project Id",
             "default": "default"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
           }
         },
         "type": "object",
@@ -5897,6 +7416,29 @@
         ],
         "title": "MemberIntervalDTO",
         "description": "One membership interval, ``[joined_at, left_at)`` in epoch ms."
+      },
+      "MemberTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "member",
+            "title": "Kind"
+          },
+          "member_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Member Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "member_id"
+        ],
+        "title": "MemberTarget",
+        "description": "Every message one member sent in the group, and their profile in it."
       },
       "MemorizeAddRequest": {
         "properties": {
@@ -6189,6 +7731,196 @@
         ],
         "title": "MessageItemDTO"
       },
+      "MessageTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "message",
+            "title": "Kind"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "message_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Message Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "session_id",
+          "message_ids"
+        ],
+        "title": "MessageTarget",
+        "description": "Messages of one session of the group, by id."
+      },
+      "ProfileSourceItem": {
+        "properties": {
+          "memcell_id": {
+            "type": "string",
+            "title": "Memcell Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "speaker_id": {
+            "type": "string",
+            "title": "Speaker Id"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memcell_id",
+          "message_id",
+          "speaker_id",
+          "at",
+          "quote"
+        ],
+        "title": "ProfileSourceItem",
+        "description": "One verified piece of evidence: a message of a segment, quoted verbatim."
+      },
+      "ProjectDTO": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectGroupDTO"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberDTO"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "project_id"
+        ],
+        "title": "ProjectDTO",
+        "description": "``GET /projects/{project_id}``: the asker's groups and their members."
+      },
+      "ProjectGroupDTO": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "ProjectGroupDTO",
+        "description": "One group of the project the asker is in."
+      },
+      "ProjectMemberDTO": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "title": "Member Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "member_id",
+          "display_name",
+          "kind"
+        ],
+        "title": "ProjectMemberDTO",
+        "description": "A current member of the asker's groups, with the groups they share."
+      },
+      "ProjectProfileDTO": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "project_id"
+        ],
+        "title": "ProjectProfileDTO",
+        "description": "``GET /projects/{project_id}/profile``: the visible current items.\n\nEach item names its group (``group_id``); oldest first. The same decision\ntaken in two groups is two items."
+      },
       "QuestionPicture": {
         "properties": {
           "type": {
@@ -6281,6 +8013,33 @@
         "title": "QuiesceResponse",
         "description": "What the final drain accomplished, and what it left behind.\n\n``pending_before`` is the queue depth on arrival: a caller that expected the\nprojection to be up to date can assert it was 0 and learn otherwise. Anything\nabove 0 in ``pending_after`` means the drain could not finish -- the index is\nNOT a complete projection of the markdown, and searching it will silently\nunder-recall."
       },
+      "RecordTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "record",
+            "title": "Kind"
+          },
+          "record_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Record Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "record_ids"
+        ],
+        "title": "RecordTarget",
+        "description": "Records by id: episodes, picture memories, scenes, profile items."
+      },
       "ReviseImageMemoryRequest": {
         "properties": {
           "app_id": {
@@ -6315,7 +8074,7 @@
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped forget; refused with 422 before Step 2."
+            "description": "Not taken here: a body that names a group is a group forget (group_id, asker_id, target)."
           },
           "image_id": {
             "type": "string",
@@ -6849,6 +8608,39 @@
                 "type": "null"
               }
             ]
+          },
+          "group_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchGroupProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "constraints": {
+            "items": {
+              "$ref": "#/components/schemas/ConstraintItem"
+            },
+            "type": "array",
+            "title": "Constraints"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
           }
         },
         "additionalProperties": false,
@@ -7006,6 +8798,16 @@
             },
             "type": "array",
             "title": "Atomic Facts"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -7022,6 +8824,42 @@
         ],
         "title": "SearchEpisodeItem",
         "description": "Episode hit — always user-scoped in the current emission contract.\n\n``type`` is narrowed to ``\"Conversation\"`` because the only emitted\nepisode shape today is conversation-derived; widen when other\nsources ship. Item kind is encoded by class name (no ``owner_type``\nfield on the wire), so episode results never carry ambiguity."
+      },
+      "SearchGroupProfile": {
+        "properties": {
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "dissent": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Dissent"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Roles"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SearchGroupProfile",
+        "description": "The visible current group-profile items of a group scope, by kind."
       },
       "SearchHitDTO": {
         "properties": {
@@ -7191,6 +9029,26 @@
               }
             ],
             "title": "Origin"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "type": "string",
@@ -7507,6 +9365,33 @@
             "title": "Include Profile",
             "default": false
           },
+          "include_group_profile": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Group Profile"
+          },
+          "constraints": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints"
+          },
+          "project_scope": {
+            "type": "boolean",
+            "title": "Project Scope",
+            "default": false
+          },
           "enable_llm_rerank": {
             "type": "boolean",
             "title": "Enable Llm Rerank",
@@ -7673,6 +9558,29 @@
         "title": "SearchWindow",
         "description": "One of the asker's membership windows in one group, ``[from, to)`` ms."
       },
+      "SessionTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "session",
+            "title": "Kind"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "session_id"
+        ],
+        "title": "SessionTarget",
+        "description": "Every message of one of the group's sessions (owners and admins)."
+      },
       "SuccessEnvelope_AcceptedResponseData_": {
         "properties": {
           "request_id": {
@@ -7740,23 +9648,6 @@
           "data"
         ],
         "title": "SuccessEnvelope[DeleteByIdsResponseData]"
-      },
-      "SuccessEnvelope_DeleteResponseData_": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DeleteResponseData"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "data"
-        ],
-        "title": "SuccessEnvelope[DeleteResponseData]"
       },
       "SuccessEnvelope_DocumentCreateResponse_": {
         "properties": {
@@ -7843,23 +9734,6 @@
         ],
         "title": "SuccessEnvelope[FlushResponseData]"
       },
-      "SuccessEnvelope_ForgetImageResponseData_": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ForgetImageResponseData"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "data"
-        ],
-        "title": "SuccessEnvelope[ForgetImageResponseData]"
-      },
       "SuccessEnvelope_ForgetSessionResponseData_": {
         "properties": {
           "request_id": {
@@ -7927,6 +9801,40 @@
           "data"
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
+      },
+      "SuccessEnvelope_ProjectDTO_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProjectDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ProjectDTO]"
+      },
+      "SuccessEnvelope_ProjectProfileDTO_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProjectProfileDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ProjectProfileDTO]"
       },
       "SuccessEnvelope_ReviseImageMemoryResponseData_": {
         "properties": {
@@ -8013,23 +9921,6 @@
         ],
         "title": "SuccessEnvelope[TopicDetailResponse]"
       },
-      "SuccessEnvelope_UndoForgetResponseData_": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "data": {
-            "$ref": "#/components/schemas/UndoForgetResponseData"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "data"
-        ],
-        "title": "SuccessEnvelope[UndoForgetResponseData]"
-      },
       "SuccessEnvelope_UndoForgetSessionResponseData_": {
         "properties": {
           "request_id": {
@@ -8046,6 +9937,101 @@
           "data"
         ],
         "title": "SuccessEnvelope[UndoForgetSessionResponseData]"
+      },
+      "SuccessEnvelope_Union_DeleteResponseData__GroupDeleteResponseData__": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeleteResponseData"
+              },
+              {
+                "$ref": "#/components/schemas/GroupDeleteResponseData"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[Union[DeleteResponseData, GroupDeleteResponseData]]"
+      },
+      "SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ForgetImageResponseData"
+              },
+              {
+                "$ref": "#/components/schemas/GroupForgetResponseData"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[Union[ForgetImageResponseData, GroupForgetResponseData]]"
+      },
+      "SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UndoForgetResponseData"
+              },
+              {
+                "$ref": "#/components/schemas/GroupUndoForgetResponseData"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[Union[UndoForgetResponseData, GroupUndoForgetResponseData]]"
+      },
+      "SupersededStatement": {
+        "properties": {
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "statement",
+          "at"
+        ],
+        "title": "SupersededStatement",
+        "description": "An earlier version a current constraint replaced."
       },
       "TaskItem": {
         "properties": {
@@ -8406,7 +10392,7 @@
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped forget; refused with 422 before Step 2."
+            "description": "Not taken here: a body that names a group is a group forget (group_id, asker_id, target)."
           },
           "image_id": {
             "type": "string",
@@ -8520,7 +10506,7 @@
               }
             ],
             "title": "Group Id",
-            "description": "A group-scoped forget; refused with 422 before Step 2."
+            "description": "Refused (422): a conversation of a group is forgotten with POST /memory/forget and a session target."
           },
           "session_id": {
             "type": "string",

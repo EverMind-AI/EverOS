@@ -1,7 +1,7 @@
 """The LanceDB derived-index backend over one connection.
 
 :class:`LanceIndexBackend` owns the LanceDB side of the derived index: the
-seven business repositories built over the application's
+business repositories built over the application's
 :class:`~.lancedb_manager.LanceDbConnection`, the one-time schema / FTS
 migrations, schema verification, and the embedding-model attestation.
 """
@@ -51,6 +51,7 @@ from ._repos.agent_skill import _AgentSkillRepo
 from ._repos.atomic_fact import _AtomicFactRepo
 from ._repos.episode import _EpisodeRepo
 from ._repos.foresight import _ForesightRepo
+from ._repos.group_profile_item import _GroupProfileItemRepo
 from ._repos.image_memory import _ImageMemoryRepo
 from ._repos.knowledge_topic import _KnowledgeTopicRepo
 from ._repos.user_profile import _UserProfileRepo
@@ -124,6 +125,12 @@ and 9.1): ``user_profile.subject_id``, the member a ``group`` row is about,
 and ``agent_case.source_group_id``, the group a case was learned in. Added
 nullable; a personal profile row and a case from no group hold NULL.
 
+A new *table* needs no version: :meth:`LanceDbConnection.table` creates a
+missing table from its record on first open, and verification and the FTS
+pass open every business table, so a store at the current marker gains the
+table (empty, its FTS index built) the first time it is opened -- the group
+profile's ``group_profile_item`` arrived that way, with no step here.
+
 :meth:`migrate_table_schemas` dispatches through :data:`_MIGRATIONS`, one
 coroutine per version, so a new version is one entry — not an edit to a
 hard-coded body that silently replays the previous step.
@@ -190,6 +197,7 @@ class LanceIndexBackend:
             ),
             user_profile=_UserProfileRepo(source=connection, dim=dim),
             knowledge_topic=_KnowledgeTopicRepo(source=connection, dim=dim),
+            group_profile_item=_GroupProfileItemRepo(source=connection, dim=dim),
         )
 
     async def connect(self) -> object:

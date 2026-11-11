@@ -61,6 +61,7 @@ def test_each_index_is_bound_to_the_milvus_repository(
     assert _bound(indexes.agent_skill) is repos.agent_skill
     assert _bound(indexes.profile) is repos.user_profile
     assert _bound(indexes.knowledge_topic) is repos.knowledge_topic
+    assert _bound(indexes.group_profile) is repos.group_profile_item
     assert isinstance(indexes.episode, EpisodeIndex)
 
 

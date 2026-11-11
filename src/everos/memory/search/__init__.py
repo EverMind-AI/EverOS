@@ -52,12 +52,17 @@ The Filters DSL primitives (``ALLOWED_FIELDS`` / ``RESERVED_FIELDS`` /
 its flat-DSL variant without forking the field allow-list.
 """
 
+from .audience import with_audience as with_audience
+from .dto import AudienceItem as AudienceItem
 from .dto import FilterNode as FilterNode
+from .dto import GroupProfileEntry as GroupProfileEntry
+from .dto import ProfileSourceItem as ProfileSourceItem
 from .dto import SearchAgentCaseItem as SearchAgentCaseItem
 from .dto import SearchAgentSkillItem as SearchAgentSkillItem
 from .dto import SearchAtomicFactItem as SearchAtomicFactItem
 from .dto import SearchData as SearchData
 from .dto import SearchEpisodeItem as SearchEpisodeItem
+from .dto import SearchGroupProfile as SearchGroupProfile
 from .dto import SearchMethod as SearchMethod
 from .dto import SearchProfileItem as SearchProfileItem
 from .dto import SearchRequest as SearchRequest
@@ -71,18 +76,26 @@ from .filters import FilterError as FilterError
 from .filters import compile_filters as compile_filters
 from .filters import compile_predicate as compile_predicate
 from .filters import compile_scoped as compile_scoped
+from .group_profile import item_versions as item_versions
+from .group_profile import shape_profile_item as shape_profile_item
+from .group_profile import visible_profile as visible_profile
+from .group_profile import visible_profile_items as visible_profile_items
 from .shaper import group_source as group_source
 
 __all__ = [
     "ALLOWED_FIELDS",
     "RESERVED_FIELDS",
+    "AudienceItem",
     "FilterError",
     "FilterNode",
+    "GroupProfileEntry",
+    "ProfileSourceItem",
     "SearchAgentCaseItem",
     "SearchAgentSkillItem",
     "SearchAtomicFactItem",
     "SearchData",
     "SearchEpisodeItem",
+    "SearchGroupProfile",
     "SearchMethod",
     "SearchProfileItem",
     "SearchRequest",
@@ -94,4 +107,9 @@ __all__ = [
     "compile_predicate",
     "compile_scoped",
     "group_source",
+    "item_versions",
+    "shape_profile_item",
+    "visible_profile",
+    "visible_profile_items",
+    "with_audience",
 ]

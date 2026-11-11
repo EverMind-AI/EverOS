@@ -1,12 +1,13 @@
 """A real memory stack with group memory seeded in it, for group tests.
 
 Read-path tests seed group records directly, the way the group write path
-writes them: through the episode and picture-memory stores with a group
-:class:`Scope`, then project the markdown with the cascade handlers into a real
-LanceDB index. Write-path tests go through the bootstrap's memory service and
-run the group strategies on the events it published (:meth:`GroupWorld.run`),
-as the engine would. Everything is real -- markdown, ``system.db``, the index,
-the memory service -- and the model and embedder are deterministic doubles.
+writes them: through the episode, picture-memory and group-profile stores with
+a group :class:`Scope`, then project the markdown with the cascade handlers
+into a real LanceDB index. Write-path tests go through the bootstrap's memory
+service and run the group strategies on the events it published
+(:meth:`GroupWorld.run`), as the engine would. Everything is real -- markdown,
+``system.db``, the index, the memory service -- and the model and embedder are
+deterministic doubles.
 
 Usage::
 
@@ -30,18 +31,30 @@ from pathlib import Path
 from typing import Any
 
 from everalgo.testing import FakeLLMClient
+from everalgo.types import ChatMessage, MemCell
 from PIL import Image
 
 from everos.component.images import ImageLimits
 from everos.component.tokenizer import build_tokenizer
 from everos.config import Settings
+from everos.infra.cascade import DeleteFence, FencedIndexEraser
 from everos.infra.cascade.registry import match_kind
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps, Stores
-from everos.memory.models import Episode, Group, ImageMemory, Profile, RosterEvent
+from everos.memory.models import (
+    Episode,
+    Group,
+    GroupProfileItem,
+    ImageMemory,
+    MemcellRecord,
+    Profile,
+    ProfileSource,
+    RosterEvent,
+)
 from everos.memory.ports import (
     Immediate,
+    MemoryRef,
     NoSourceCheck,
     Scope,
     SessionKey,
@@ -56,7 +69,6 @@ from tests.fakes import (
     make_providers,
 )
 from tests.fakes.storage import Storage, make_storage
-from tests.fakes.stores import UnusedPort
 
 DIM = 8
 APP = "default"
@@ -139,13 +151,18 @@ class GroupWorld:
             instructions=bundled_instructions(),
         )
         bus = _Bus()
+        # The eraser a forget erases index rows through, as the bootstrap
+        # builds it; the cascade is the test's own :meth:`project`.
+        eraser = FencedIndexEraser(
+            storage.repos, DeleteFence(), storage.sqlite.md_change_state
+        )
         memory = _build_memory_service(
             settings,
             make_providers(llm=model, embedding=embedding, rerank=None),
             deps,
             build_tokenizer(),
             bus,
-            UnusedPort("index_eraser"),
+            eraser,
         )
         try:
             yield cls(
@@ -229,8 +246,12 @@ class GroupWorld:
         senders: Sequence[str] = ("u_chen",),
         session_id: str = "s_group",
         image_ids: Sequence[str] = (),
+        memcell_id: str | None = None,
     ) -> str:
-        """A group episode whose segment ran ``[start, end]``; returns its id."""
+        """A group episode whose segment ran ``[start, end]``; returns its id.
+
+        Its segment is ``memcell_id``, by default ``mc_<group>_<start>``.
+        """
         ref = await self.stores.episode.append(
             self.scope(group_id),
             Episode(
@@ -241,7 +262,7 @@ class GroupWorld:
                 timestamp=end,
                 session_id=session_id,
                 sender_ids=list(senders),
-                parent_id=f"mc_{group_id}_{start}",
+                parent_id=memcell_id or f"mc_{group_id}_{start}",
                 source_start=start,
                 subject_ids=list(senders),
                 origin="member",
@@ -305,6 +326,92 @@ class GroupWorld:
             only_if=NoSourceCheck(),
         )
         return stored.image_id
+
+    async def segment(
+        self,
+        memcell_id: str,
+        *lines: tuple[str, str, str, int],
+        session_id: str = "s_group",
+    ) -> None:
+        """Store one segment as boundary detection stores it.
+
+        Each line is ``(message_id, sender_id, text, at)``; the message ids are
+        the cell items' ids, as a group batch's client ids are.
+        """
+        items = [
+            ChatMessage(
+                id=message_id,
+                role="assistant" if sender.startswith("bot") else "user",
+                sender_id=sender,
+                sender_name=sender,
+                content=text,
+                timestamp=at,
+            )
+            for message_id, sender, text, at in lines
+        ]
+        await self.stores.memcell.insert_many(
+            self.session(session_id),
+            [
+                MemcellRecord(
+                    memcell_id=memcell_id,
+                    cell=MemCell(items=items, timestamp=max(at for *_, at in lines)),
+                    raw_type="Conversation",
+                    message_ids=[message_id for message_id, *_ in lines],
+                    sender_ids=list(dict.fromkeys(sender for _, sender, _, _ in lines)),
+                )
+            ],
+        )
+
+    async def profile_item(
+        self,
+        group_id: str,
+        text: str,
+        *,
+        start: int,
+        end: int,
+        kind: str = "decision",
+        speaker: str = "u_chen",
+        memcell_id: str | None = None,
+        observed_at: int | None = None,
+        **fields: Any,
+    ) -> MemoryRef:
+        """One group-profile item whose evidence spans ``[start, end]``; its ref.
+
+        ``text`` is the statement (a topic's name, with ``topic_id``
+        ``tp_<start>``) and the quote of the one evidence message, which
+        ``speaker`` sent at ``start`` in segment ``memcell_id`` (default
+        ``mc_<group>_<start>``). ``observed_at`` defaults to ``end``. Any other
+        :class:`GroupProfileItem` field goes in ``fields`` and wins, e.g.
+        ``supersedes=ref.entry_id`` for a new version.
+        """
+        values: dict[str, Any] = {
+            "owner_id": group_id,
+            "kind": kind,
+            "sources": [
+                ProfileSource(
+                    memcell_id=memcell_id or f"mc_{group_id}_{start}",
+                    message_id=f"m-{start}",
+                    speaker_id=speaker,
+                    at=start,
+                    quote=text,
+                )
+            ],
+            "sender_ids": [speaker],
+            "subject_ids": [speaker],
+            "origin": "member",
+            "source_start": start,
+            "source_end": end,
+            "observed_at": end if observed_at is None else observed_at,
+        }
+        if kind == "topic":
+            values.update(name=text, topic_id=f"tp_{start}")
+        else:
+            values["statement"] = text
+        values.update(fields)
+        (ref,) = await self.stores.group_profile.append(
+            self.scope(group_id), [GroupProfileItem(**values)], only_if=NoSourceCheck()
+        )
+        return ref
 
     async def profile(self, user_id: str, fact: str) -> None:
         from everos.memory.models import ExplicitInfoItem

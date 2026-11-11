@@ -14,6 +14,7 @@ __all__ = [
     "AgentSkillIndex",
     "AtomicFactIndex",
     "EpisodeIndex",
+    "GroupProfileIndex",
     "ImageMemoryIndex",
     "IndexEraser",
     "KnowledgeTopicIndex",
@@ -29,6 +30,7 @@ from everos.memory.models import (
     AtomicFact,
     Episode,
     EpisodeParentType,
+    GroupProfileItem,
     ImageMemory,
     Profile,
 )
@@ -152,6 +154,41 @@ class ImageMemoryIndex(Protocol):
         history, the content is not current.
         """
         ...
+
+
+@runtime_checkable
+class GroupProfileIndex(Protocol):
+    """Read side of the group-profile items (table ``group_profile_item``).
+
+    Rows carry the owner and window columns every group record has
+    (``owner_type`` / ``owner_id`` / ``app_id`` / ``project_id`` /
+    ``deprecated_by`` / ``source_start`` / ``source_end``), so a read scope's
+    predicate applies to them unchanged, plus the link columns a read follows:
+    ``entry_id``, ``kind``, ``topic_id``, ``supersedes``, ``about``,
+    ``member_id``, ``source_memcell_ids`` (list), ``subject_ids`` (list) and
+    ``observed_at``. No vector: items are found by those links and by BM25
+    over their statements.
+
+    Every item comes back with ``item_id``, and with ``status`` /
+    ``superseded_by`` read from the row's ``deprecated_by`` (``forgotten``,
+    ``superseded`` by that entry, or the item's own status).
+    """
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[Stored[GroupProfileItem]]:
+        """Items matching ``where``, newest ``observed_at`` first."""
+        ...
+
+    async def sparse_search(
+        self, terms: Sequence[str], where: Filter, *, limit: int
+    ) -> list[SearchHit[GroupProfileItem]]:
+        """BM25 over the items' statements, names and summaries."""
+        ...
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[GroupProfileItem]]: ...
 
 
 @runtime_checkable

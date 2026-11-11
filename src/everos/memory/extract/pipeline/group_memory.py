@@ -28,6 +28,12 @@ Every cell announces its episode as :class:`GroupEpisodeExtracted`, which the
 group strategies consume (member-in-group profiles, scenes). None of the
 one-to-one events is published: those would run the personal strategies on
 group content.
+
+A message forgotten while it waited in the buffer is not read: the cell is
+extracted without the messages a live forget names (section 9.4). A forget
+of a segment already extracted re-runs the same call through
+:meth:`GroupMemoryPipeline.reextract`, over the segment without what was
+forgotten, and writes nothing itself: the forget decides what replaces what.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from __future__ import annotations
 __all__ = ["GroupMemoryPipeline"]
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
@@ -57,6 +64,7 @@ from everos.memory.extract.pipeline.group_render import (
     roster_block,
     with_roster_block,
 )
+from everos.memory.extract.pipeline.group_scene import narrate_scene
 from everos.memory.extract.pipeline.member_profile import (
     write_member_picture_profile,
 )
@@ -66,7 +74,7 @@ from everos.memory.extract.pipeline.pictures import (
     ops_by_poster,
     pictures_of,
 )
-from everos.memory.groups import named_members, roster_names
+from everos.memory.groups import named_members, roster_names, without_forgotten
 from everos.memory.models import (
     Episode,
     Group,
@@ -83,8 +91,10 @@ from everos.memory.ports import (
     MemberProfileStore,
     MemcellStore,
     MemoryRef,
+    MessageForgetStore,
     Scope,
     SessionKey,
+    Stored,
 )
 from everos.memory.ports.images import ImageStore
 
@@ -102,6 +112,27 @@ _Extraction = tuple[
 profile operations the pictures produced -- readings of one call."""
 
 
+@dataclass(frozen=True)
+class _Segment:
+    """One segment's extraction: the group episode and what the call read.
+
+    Attributes:
+        episode: The group episode, attribution and span set, not written.
+        pictures: The pictures the call was shown.
+        described: Each picture's ``(description, ocr)`` by label.
+        ops: The profile operations the pictures produced.
+        language: The episode's language (the conversation's).
+        roster: The group's roster the call was rendered with.
+    """
+
+    episode: Episode
+    pictures: list[Picture]
+    described: dict[str, tuple[str, str]]
+    ops: list[profile_delta.ProfileItemOp]
+    language: str | None
+    roster: Roster
+
+
 class GroupMemoryPipeline:
     """One group episode per pre-cut memcell of a group session.
 
@@ -117,6 +148,8 @@ class GroupMemoryPipeline:
         image_limits: ``[images]`` -- the size a picture is scaled to.
         member_profiles: Where a picture's profile items reach its poster's
             member-in-group profile; ``None`` keeps that half off.
+        message_forget: Which messages are forgotten; a cell is extracted
+            without them. ``None`` reads every message.
     """
 
     def __init__(
@@ -131,7 +164,9 @@ class GroupMemoryPipeline:
         image_memory_store: ImageMemoryStore | None = None,
         image_limits: ImageLimits | None = None,
         member_profiles: MemberProfileStore | None = None,
+        message_forget: MessageForgetStore | None = None,
     ) -> None:
+        self._message_forget = message_forget
         self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
@@ -155,65 +190,27 @@ class GroupMemoryPipeline:
             owner_id=ingested.group_id,
             owner_type="group",
         )
-        cell = prepared.cell
-        if not any(getattr(i, "kind", None) == "text" for i in cell.items):
-            return CellOutcome(message_count=len(cell.items))
-        record = await self._groups.get(scope)
-        roster = record.roster if record is not None else Roster()
-        group = (
-            record.group
-            if record is not None
-            else Group(group_id=scope.owner_id, created_at=cell.timestamp)
-        )
-        # Named to the model, never left to it: the conversation's language,
-        # resolved from the human messages as on the one-to-one path.
-        named = await resolve_cell_language(
-            cell,
-            memcell_id=prepared.memcell_id,
-            session=SessionKey(
-                ingested.app_id, ingested.project_id, ingested.session_id
-            ),
-            memcells=self._memcell_store,
-        )
-        pictures = await pictures_of(
-            cell, images=self._images, limits=self._image_limits
-        )
-        custom = with_roster_block(
-            self._instructions.load("episode_extract"),
-            roster_block(group, roster, cell),
-        )
-        algo_ep, described, ops = await self._extract(
-            ingested, prepared, label_cell(cell, roster), pictures, custom, named
-        )
-        # That language pins the episode, its picture profile items and its
-        # event, so the member-in-group profiles and the scenes follow it.
-        # Only a conversation without a letter in it left the choice to the
-        # model; then what it chose is read off the episode.
-        language = (
-            str(named) if named is not None else detect_output_language(algo_ep.episode)
-        )
-        found = attribution(cell, roster, texts=(algo_ep.subject, algo_ep.episode))
+        session = SessionKey(ingested.app_id, ingested.project_id, ingested.session_id)
+        cell = await self._readable(prepared.memcell_id, prepared.cell)
+        if not _has_text(cell):
+            return CellOutcome(message_count=len(prepared.cell.items))
+        found = await self._extract_segment(scope, session, prepared.memcell_id, cell)
         md_paths = await self._persist_images(
-            scope, ingested, prepared, roster, pictures=pictures, described=described
+            scope,
+            ingested,
+            prepared,
+            found.roster,
+            pictures=found.pictures,
+            described=found.described,
         )
         await self._persist_member_profiles(
-            scope, prepared, ops=ops, pictures=pictures, language=language
+            scope,
+            prepared,
+            ops=found.ops,
+            pictures=found.pictures,
+            language=found.language,
         )
-        episode = Episode.from_algo(
-            algo_ep,
-            owner_id=scope.owner_id,
-            session_id=ingested.session_id,
-            sender_ids=found.sender_ids,
-            parent_id=prepared.memcell_id,
-            language=language,
-            image_ids=[picture.image_id for picture in pictures],
-        ).model_copy(
-            update={
-                "subject_ids": found.subject_ids,
-                "origin": found.origin,
-                "source_start": found.source_start,
-            }
-        )
+        episode = found.episode
         ref = await self._persist(scope, ingested, episode, prepared.memcell_id)
         events: list[Event] = []
         if ref is not None:
@@ -228,18 +225,138 @@ class GroupMemoryPipeline:
                     session_id=ingested.session_id,
                     app_id=ingested.app_id,
                     project_id=ingested.project_id,
-                    speaker_ids=_human_speakers(cell, roster),
-                    language=language,
+                    speaker_ids=_human_speakers(cell, found.roster),
+                    language=found.language,
                 )
             )
         return CellOutcome(
-            message_count=len(cell.items), events=events, md_paths=md_paths
+            message_count=len(prepared.cell.items), events=events, md_paths=md_paths
+        )
+
+    async def reextract(
+        self, *, scope: Scope, session_id: str, memcell_id: str, cell: MemCell
+    ) -> Episode | None:
+        """The segment's group episode, extracted again from ``cell``; not written.
+
+        The call :meth:`run_cell` makes -- speaker labels, the roster block,
+        the conversation's language, the picture route when ``cell`` still
+        carries pictures -- over a segment a forget changed: ``cell`` is the
+        stored segment without what was forgotten
+        (:func:`~everos.memory.groups.without_forgotten`). The pictures'
+        descriptions and profile items the call returns again are dropped:
+        their memories were never made of the forgotten message.
+
+        Returns:
+            The new episode version, or ``None`` when ``cell`` holds no text
+            message any more (nothing is left to remember).
+        """
+        if not _has_text(cell):
+            return None
+        session = SessionKey(scope.app_id, scope.project_id, session_id)
+        found = await self._extract_segment(scope, session, memcell_id, cell)
+        return found.episode
+
+    async def scene_narrative(
+        self,
+        *,
+        owner_id: str,
+        members: Sequence[Stored[Episode]],
+        language: str | None,
+    ) -> AlgoEpisode:
+        """A scene's narrative written from scratch over ``members``.
+
+        What a forget writes when an episode of a scene changed: the INIT of
+        the scene strategy's reflector, never an UPDATE -- the previous
+        narrative may say what was forgotten.
+        """
+        return await narrate_scene(
+            self._llm,
+            owner_id=owner_id,
+            members=members,
+            previous=None,
+            custom_instructions=self._instructions.load("reflect"),
+            language=language,
+        )
+
+    async def _readable(self, memcell_id: str, cell: MemCell) -> MemCell:
+        """``cell`` without the messages a live forget names."""
+        if self._message_forget is None:
+            return cell
+        forgotten = await self._message_forget.forgotten_in_segments([memcell_id])
+        return without_forgotten(cell, forgotten.get(memcell_id, ()))
+
+    async def _extract_segment(
+        self, scope: Scope, session: SessionKey, memcell_id: str, cell: MemCell
+    ) -> _Segment:
+        """Run the episode call over ``cell`` and set the attribution fields."""
+        record = await self._groups.get(scope)
+        roster = record.roster if record is not None else Roster()
+        group = (
+            record.group
+            if record is not None
+            else Group(group_id=scope.owner_id, created_at=cell.timestamp)
+        )
+        # Named to the model, never left to it: the conversation's language,
+        # resolved from the human messages as on the one-to-one path.
+        named = await resolve_cell_language(
+            cell,
+            memcell_id=memcell_id,
+            session=session,
+            memcells=self._memcell_store,
+        )
+        pictures = await pictures_of(
+            cell, images=self._images, limits=self._image_limits
+        )
+        custom = with_roster_block(
+            self._instructions.load("episode_extract"),
+            roster_block(group, roster, cell),
+        )
+        algo_ep, described, ops = await self._extract(
+            scope,
+            session,
+            memcell_id,
+            label_cell(cell, roster),
+            pictures,
+            custom,
+            named,
+        )
+        # That language pins the episode, its picture profile items and its
+        # event, so the member-in-group profiles and the scenes follow it.
+        # Only a conversation without a letter in it left the choice to the
+        # model; then what it chose is read off the episode.
+        language = (
+            str(named) if named is not None else detect_output_language(algo_ep.episode)
+        )
+        found = attribution(cell, roster, texts=(algo_ep.subject, algo_ep.episode))
+        episode = Episode.from_algo(
+            algo_ep,
+            owner_id=scope.owner_id,
+            session_id=session.session_id,
+            sender_ids=found.sender_ids,
+            parent_id=memcell_id,
+            language=language,
+            image_ids=[picture.image_id for picture in pictures],
+        ).model_copy(
+            update={
+                "subject_ids": found.subject_ids,
+                "origin": found.origin,
+                "source_start": found.source_start,
+            }
+        )
+        return _Segment(
+            episode=episode,
+            pictures=list(pictures),
+            described=described,
+            ops=list(ops),
+            language=language,
+            roster=roster,
         )
 
     async def _extract(
         self,
-        ingested: IngestResult,
-        prepared: PreparedCell,
+        scope: Scope,
+        session: SessionKey,
+        memcell_id: str,
         labelled: MemCell,
         pictures: Sequence[Picture],
         custom_instructions: str,
@@ -253,19 +370,19 @@ class GroupMemoryPipeline:
         with memory_span(
             "everos.extract",
             observation_type="generation",
-            session_id=ingested.session_id,
+            session_id=session.session_id,
             metadata={
-                "app_id": ingested.app_id,
-                "project_id": ingested.project_id,
-                "memcell_id": prepared.memcell_id,
-                "group_id": ingested.group_id,
+                "app_id": scope.app_id,
+                "project_id": scope.project_id,
+                "memcell_id": memcell_id,
+                "group_id": scope.owner_id,
                 "pictures": len(pictures),
                 "output_language": None if language is None else str(language),
             },
         ) as extract_span:
             if pictures:
                 extraction = await self._extract_with_pictures(
-                    prepared, labelled, pictures, custom_instructions, language
+                    memcell_id, labelled, pictures, custom_instructions, language
                 )
             else:
 
@@ -278,7 +395,7 @@ class GroupMemoryPipeline:
                     )
 
                 episode = await retry_llm_output(
-                    attempt, operator="episode", memcell_id=prepared.memcell_id
+                    attempt, operator="episode", memcell_id=memcell_id
                 )
                 extraction = (episode, {}, [])
             capture_output(extract_span, extraction[0].episode)
@@ -286,7 +403,7 @@ class GroupMemoryPipeline:
 
     async def _extract_with_pictures(
         self,
-        prepared: PreparedCell,
+        memcell_id: str,
         labelled: MemCell,
         pictures: Sequence[Picture],
         custom_instructions: str,
@@ -310,7 +427,7 @@ class GroupMemoryPipeline:
             )
 
         return await retry_llm_output(
-            attempt, operator="image_memory", memcell_id=prepared.memcell_id
+            attempt, operator="image_memory", memcell_id=memcell_id
         )
 
     async def _persist_images(
@@ -435,6 +552,11 @@ class GroupMemoryPipeline:
                 return None
             capture_output(persist_span, ref.md_path)
         return ref
+
+
+def _has_text(cell: MemCell) -> bool:
+    """Whether the cell holds a chat message (``kind == "text"``) to remember."""
+    return any(getattr(item, "kind", None) == "text" for item in cell.items)
 
 
 def _human_speakers(cell: MemCell, roster: Roster) -> list[str]:

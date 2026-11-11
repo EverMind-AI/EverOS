@@ -15,7 +15,7 @@ import pytest
 from everalgo.types import AtomicFact, ChatMessage, Foresight, MemCell
 from structlog.testing import capture_logs
 
-from everos.config import OmeSettings
+from everos.config import Settings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps
@@ -190,7 +190,7 @@ async def test_emit_dispatches_both_strategies_to_success(
         await storage.create_schema()
 
         engine = _build_engine(
-            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+            MemoryRoot(root=tmp_path), _installed["deps"], Settings()
         )
         await engine.start()
         try:
@@ -291,7 +291,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         await storage.create_schema()
 
         engine = _build_engine(
-            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+            MemoryRoot(root=tmp_path), _installed["deps"], Settings()
         )
         await engine.start()
         try:
@@ -367,7 +367,7 @@ async def test_skill_chain_e2e(
         await storage.create_schema()
 
         engine = _build_engine(
-            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+            MemoryRoot(root=tmp_path), _installed["deps"], Settings()
         )
         await engine.start()
         try:
@@ -520,7 +520,7 @@ async def test_profile_chain_e2e(
         await storage.create_schema()
 
         engine = _build_engine(
-            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+            MemoryRoot(root=tmp_path), _installed["deps"], Settings()
         )
         await engine.start()
         try:

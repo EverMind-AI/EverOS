@@ -13,6 +13,7 @@ from everos.infra.persistence.markdown import (
     AtomicFactDailyFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
+    GroupProfileDailyFrontmatter,
 )
 
 
@@ -24,6 +25,10 @@ from everos.infra.persistence.markdown import (
         (ForesightDailyFrontmatter, "*/*/users/*/.foresights/foresight-*.md"),
         (AgentCaseDailyFrontmatter, "*/*/agents/*/.cases/agent_case-*.md"),
         (AgentSkillFrontmatter, "*/*/agents/*/skills/skill_*/SKILL.md"),
+        (
+            GroupProfileDailyFrontmatter,
+            "*/*/groups/*/profile/group_profile-*.md",
+        ),
     ],
 )
 def test_path_glob(schema: type, expected: str) -> None:

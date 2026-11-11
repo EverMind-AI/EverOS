@@ -14,6 +14,9 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 * ``group`` + ``image_memory`` → ``data.images`` inside the asker's windows
 * ``group`` + ``member_profile`` (``member_id``) → ``data.profiles``: the
   member's profile in each group of the scope, its items cut to the windows
+* ``group`` + ``group_profile`` → ``data.group_profile``: the items whose
+  sources lie in the asker's windows, current ones only, or every version but
+  the forgotten with ``include_superseded``
 
 Reads only — never writes. The owner part of every ``where`` is the access
 policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
@@ -39,6 +42,7 @@ from everos.memory.ports import (
     AgentCaseIndex,
     AgentSkillIndex,
     EpisodeIndex,
+    GroupProfileIndex,
     ImageMemoryIndex,
     Page,
     ProfileIndex,
@@ -48,7 +52,12 @@ from everos.memory.ports import (
     eq,
     ne,
 )
-from everos.memory.search import group_source
+from everos.memory.search import (
+    group_source,
+    item_versions,
+    shape_profile_item,
+    visible_profile_items,
+)
 
 from .dto import (
     GetAgentCaseItem,
@@ -77,6 +86,7 @@ class GetManager:
         profile_index: User and member-in-group profile reads.
         image_index: Picture-memory reads (group listings); ``None`` refuses
             them.
+        group_profile_index: Group-profile reads; ``None`` refuses them.
     """
 
     def __init__(
@@ -88,9 +98,11 @@ class GetManager:
         profile_index: ProfileIndex,
         access: AccessPolicy,
         image_index: ImageMemoryIndex | None = None,
+        group_profile_index: GroupProfileIndex | None = None,
     ) -> None:
         self._access = access
         self._images = image_index
+        self._group_profile = group_profile_index
         self._ep = episode_index
         self._case = agent_case_index
         self._skill = agent_skill_index
@@ -159,6 +171,23 @@ class GetManager:
                 members = await self._member_profiles(scope, req.member_id)
                 data = GetData(
                     profiles=members, total_count=len(members), count=len(members)
+                )
+            case GetMemoryType.GROUP_PROFILE:
+                if self._group_profile is None:
+                    raise RuntimeError("group-profile listings need their index")
+                found = await (
+                    item_versions(self._group_profile, scope)
+                    if req.include_superseded
+                    else visible_profile_items(self._group_profile, scope)
+                )
+                if not descending:
+                    found.reverse()
+                start = (req.page - 1) * req.page_size
+                shaped = [
+                    shape_profile_item(i) for i in found[start : start + req.page_size]
+                ]
+                data = GetData(
+                    group_profile=shaped, total_count=len(found), count=len(shaped)
                 )
             case GetMemoryType.PROFILE:
                 profiles = await self._fetch_profile(req)

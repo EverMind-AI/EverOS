@@ -162,6 +162,15 @@ class SearchRequest(BaseModel):
     Only the episode hybrid path consumes it — other methods ignore it.
     """
     include_profile: bool = False
+    include_group_profile: bool | None = None
+    """Attach the visible current group-profile items (section 5.3). Unset:
+    on for a group scope; a user or agent scope has none to attach."""
+    constraints: bool | None = None
+    """Return the constraint block (section 8.4). Unset: on for a group scope;
+    a user or agent scope has none."""
+    project_scope: bool = False
+    """Search every group of ``project_id`` the asker currently belongs to, as
+    one pool (section 8.7); needs ``asker_id`` and no other owner field."""
     enable_llm_rerank: bool = Field(
         default=False,
         description=(
@@ -189,11 +198,12 @@ class SearchRequest(BaseModel):
             self.agent_id is not None,
             self.group_id is not None,
             self.group_ids is not None,
+            self.project_scope,
         ]
         if sum(scopes) != 1:
             raise ValueError(
-                "exactly one of user_id / agent_id / group_id / group_ids "
-                "must be provided"
+                "exactly one of user_id / agent_id / group_id / group_ids / "
+                "project_scope must be provided"
             )
         return self
 
@@ -228,7 +238,10 @@ class SearchRequest(BaseModel):
 
     @property
     def owner_type(self) -> Literal["user", "agent", "group"]:
-        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set."""
+        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set.
+
+        A project scope is a pool of groups: ``group``.
+        """
         if self.user_id is not None:
             return "user"
         if self.agent_id is not None:
@@ -247,6 +260,21 @@ class SearchAtomicFactItem(BaseModel):
     id: str
     content: str
     score: float
+
+
+class AudienceItem(BaseModel):
+    """Who knew a group record (docs/group-memory.md, section 8.6).
+
+    Computed at read time from the roster and the record's sources; shown only
+    on records the asker can see.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    present: list[str] = Field(default_factory=list)
+    """Members whose windows cover all of the record's sources."""
+    joined_after: list[str] = Field(default_factory=list)
+    """Current members who joined after its last source."""
 
 
 class SearchSource(BaseModel):
@@ -319,6 +347,8 @@ class SearchEpisodeItem(BaseModel):
     group's episodes, competing with them in the same ranking."""
     score: float
     atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
+    audience: AudienceItem | None = None
+    """Who heard it, on a group episode (section 8.6); unset otherwise."""
 
 
 class SearchImageItem(BaseModel):
@@ -356,6 +386,11 @@ class SearchImageItem(BaseModel):
     """Who posted the picture, on a group picture memory."""
     subject_ids: list[str] = Field(default_factory=list)
     origin: Literal["member", "assistant", "mixed"] | None = None
+    source: SearchSource | None = None
+    """A group picture memory's segment, and the time of the message that
+    carried the picture (``from`` = ``to``); unset on one-to-one memory."""
+    audience: AudienceItem | None = None
+    """Who was there when it was posted (group scopes, section 8.6)."""
     description: str
     """What the picture shows — the half of its memory a reader gets as text."""
 
@@ -474,6 +509,144 @@ class UnprocessedMessageDTO(BaseModel):
     tool_call_id: str | None = None
 
 
+class ProfileSourceItem(BaseModel):
+    """One verified piece of evidence: a message of a segment, quoted verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memcell_id: str
+    message_id: str
+    speaker_id: str
+    at: int
+    """The message's time, epoch ms."""
+    quote: str
+
+
+class GroupProfileEntry(BaseModel):
+    """One group-profile item (docs/group-memory.md, section 7.5).
+
+    ``kind`` decides which fields are filled: a topic its ``topic_id`` /
+    ``name`` / ``summary`` / ``topic_status``; a decision its ``statement``
+    and the people fields; a dissent ``statement`` / ``held_by`` / ``about``;
+    a role ``member_id`` / ``role`` / ``confidence``. ``status`` is the
+    item's own (``current``, ``open``, ``active``, a topic's status ...) or
+    ``superseded`` once a later item replaced it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    """Index row id, ``<group_id>_<item_id>``."""
+    item_id: str
+    group_id: str
+    kind: Literal["topic", "decision", "dissent", "role"]
+    status: str
+    statement: str = ""
+    topic_id: str | None = None
+    name: str = ""
+    summary: str = ""
+    topic_status: str | None = None
+    decided_by: list[str] = Field(default_factory=list)
+    agreed_by: list[str] = Field(default_factory=list)
+    assignees: list[str] = Field(default_factory=list)
+    applies_to: list[str] = Field(default_factory=list)
+    held_by: list[str] = Field(default_factory=list)
+    about: str | None = None
+    resolved_by: list[str] = Field(default_factory=list)
+    member_id: str | None = None
+    role: str | None = None
+    confidence: str | None = None
+    supersedes: str | None = None
+    superseded_by: str | None = None
+    subject_ids: list[str] = Field(default_factory=list)
+    sender_ids: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
+    sources: list[ProfileSourceItem] = Field(default_factory=list)
+    source: SearchSource
+    """The span of the item's sources (``memcell_id`` is ``None``: an item may
+    rest on several segments)."""
+    observed_at: int
+    audience: AudienceItem | None = None
+
+
+class ConstraintSourceItem(BaseModel):
+    """The message a constraint quotes: verbatim, from its segment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memcell_id: str
+    message_id: str
+    speaker_id: str
+    at: int
+    quote: str
+
+
+class ConstraintScopeItem(BaseModel):
+    """Where a constraint applies: the group, or some of its members."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    group_id: str
+    applies_to: Literal["group"] | list[str] = "group"
+
+
+class SupersededStatement(BaseModel):
+    """An earlier version a current constraint replaced."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    statement: str
+    at: int
+    """When the earlier version's last source was said, epoch ms."""
+
+
+class ConstraintItem(BaseModel):
+    """One thing an answer must respect (docs/group-memory.md, section 8.4).
+
+    Built after the search loop from the core: a group-profile item linked to
+    it (a decision, a dissent, a topic's status) whose quote and speakers were
+    verified when it was written, or -- for a core record no item covers -- a
+    metadata constraint quoting the record's best-matching source message.
+    Every quote is a verbatim part of the message it cites.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    """``c1``, ``c2`` ... in the block's order."""
+    statement: str
+    kind: Literal["decision", "dissent", "topic", "episode", "picture"]
+    record_id: str
+    """The item id (``gp_...``) or the episode / picture memory id it rests on."""
+    subject_ids: list[str] = Field(default_factory=list)
+    scope: ConstraintScopeItem
+    status: str
+    """``current`` / ``disputed`` / ``superseded`` for a decision, ``open`` /
+    ``resolved`` for a dissent, a topic's own status, ``current`` for a
+    record."""
+    supersedes: list[SupersededStatement] = Field(default_factory=list)
+    decided_by: list[str] = Field(default_factory=list)
+    agreed_by: list[str] = Field(default_factory=list)
+    held_by: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
+    source: ConstraintSourceItem
+    applies: bool | None = None
+    """Set by the model layer (``[search] constraints = "model"``): whether the
+    constraint bears on the question. ``None`` under the rules layer."""
+    audience: AudienceItem | None = None
+
+
+class SearchGroupProfile(BaseModel):
+    """The visible current group-profile items of a group scope, by kind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topics: list[GroupProfileEntry] = Field(default_factory=list)
+    decisions: list[GroupProfileEntry] = Field(default_factory=list)
+    dissent: list[GroupProfileEntry] = Field(default_factory=list)
+    roles: list[GroupProfileEntry] = Field(default_factory=list)
+
+
 # ── Response envelope ────────────────────────────────────────────────────
 
 
@@ -529,6 +702,16 @@ class SearchData(BaseModel):
     scope: SearchScope | None = None
     """The group scope and the asker's windows; ``None`` for a user or agent
     search, whose scope is the owner the request named."""
+    group_profile: SearchGroupProfile | None = None
+    """The visible current group-profile items of a group scope
+    (``include_group_profile``); ``None`` otherwise."""
+    constraints: list[ConstraintItem] = Field(default_factory=list)
+    """What an answer must respect (``constraints``, group scopes)."""
+    coverage: Literal["complete", "partial", "none"] | None = None
+    """How far a group scope's multi-round search got: ``complete`` (the
+    decider stopped with a core), ``partial`` (the round budget ran out),
+    ``none`` (no core). ``None`` for the methods without a decider and for
+    user and agent scopes, whose responses stay as they were."""
 
 
 class SearchResponse(BaseModel):

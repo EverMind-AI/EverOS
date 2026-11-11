@@ -274,6 +274,101 @@ class BaseDailyWriter:
             await self._writer.write_markdown(path, frontmatter=meta, body=body)
             return [entry.id for entry in gone]
 
+    async def take_entries(
+        self, path: Path, entry_ids: Collection[str]
+    ) -> list[tuple[str, str, str | None]]:
+        """Remove ``entry_ids`` from ``path``; each as ``(id, body, mark)``.
+
+        :meth:`remove_entries` that hands back what it removed, so the caller
+        can keep it elsewhere and :meth:`put_back` it later: ``body`` is the
+        text between the entry's markers exactly as the file held it, and
+        ``mark`` the entry's own ``deprecated_entries`` value (dropped from the
+        frontmatter with it). ``entry_count`` never falls, so no later append
+        reuses a removed id. A missing file or id removes nothing.
+        """
+        wanted = set(entry_ids)
+        async with self._writer.locked(path):
+            try:
+                raw = await MarkdownReader.read_text(path)
+            except FileNotFoundError:
+                return []
+            meta, body = parse_frontmatter(raw)
+            entries = split_entries(body)
+            gone = [entry for entry in entries if entry.id in wanted]
+            if not gone:
+                return []
+            highest = max((_seq(entry.id) for entry in entries), default=0)
+            count = meta.get("entry_count", 0)
+            if not isinstance(count, int) or isinstance(count, bool):
+                count = 0
+            meta["entry_count"] = max(count, highest)
+            marks = meta.get("deprecated_entries")
+            marks = dict(marks) if isinstance(marks, dict) else {}
+            taken = [
+                (entry.id, entry.body, _mark_of(marks.pop(entry.id, None)))
+                for entry in gone
+            ]
+            if "deprecated_entries" in meta:
+                meta["deprecated_entries"] = marks
+            for entry in reversed(gone):  # offsets stay valid back to front
+                end = entry.end + (body[entry.end : entry.end + 1] == "\n")
+                body = body[: entry.start] + body[end:]
+            await self._writer.write_markdown(path, frontmatter=meta, body=body)
+            return taken
+
+    async def put_back(
+        self,
+        scope_id: str,
+        path: Path,
+        entries: Sequence[tuple[str, str, str | None]],
+    ) -> list[str]:
+        """Insert entries :meth:`take_entries` removed, under their own ids.
+
+        Each ``(id, body, mark)`` goes back where its sequence puts it among
+        the file's entries, with its mark; an id the file already holds is
+        left alone (a repeated undo restores nothing twice). A file that is
+        gone is written again with this writer's frontmatter. Returns the ids
+        put back.
+        """
+        if not entries:
+            return []
+        async with self._writer.locked(path):
+            try:
+                raw = await MarkdownReader.read_text(path)
+            except FileNotFoundError:
+                raw = None
+            if raw is None:
+                day = EntryId.parse(entries[0][0]).date
+                meta = dict(
+                    self._frontmatter_updates(scope_id, day, next_count=0) or {}
+                )
+                body = ""
+            else:
+                meta, body = parse_frontmatter(raw)
+            present = {entry.id for entry in split_entries(body)}
+            restored: list[str] = []
+            marks = meta.get("deprecated_entries")
+            marks = dict(marks) if isinstance(marks, dict) else {}
+            for entry_id, entry_body, mark in sorted(entries, key=lambda e: _seq(e[0])):
+                if entry_id in present:
+                    continue
+                body = _insert_block(body, entry_id, entry_body)
+                present.add(entry_id)
+                restored.append(entry_id)
+                if mark:
+                    marks[entry_id] = mark
+            if not restored:
+                return []
+            if marks:
+                meta["deprecated_entries"] = marks
+            highest = max((_seq(entry_id) for entry_id in present), default=0)
+            count = meta.get("entry_count", 0)
+            if not isinstance(count, int) or isinstance(count, bool):
+                count = 0
+            meta["entry_count"] = max(count, highest)
+            await self._writer.write_markdown(path, frontmatter=meta, body=body)
+            return restored
+
     async def drop_deprecations(self, path: Path, keys: Collection[str]) -> bool:
         """Remove ``keys`` from the file's ``deprecated_entries``; whether any was."""
         async with self._writer.locked(path):
@@ -399,6 +494,22 @@ class BaseDailyWriter:
             / self.schema.DIR_NAME
             / f"{self.schema.FILE_PREFIX}-{date.isoformat()}.md"
         )
+
+
+def _mark_of(value: object) -> str | None:
+    return str(value) if value else None
+
+
+def _insert_block(body: str, entry_id: str, entry_body: str) -> str:
+    """``body`` with one entry block inserted before the first later sequence."""
+    block = f"<!-- entry:{entry_id} -->\n{entry_body}\n<!-- /entry:{entry_id} -->\n"
+    seq = _seq(entry_id)
+    for entry in split_entries(body):
+        if _seq(entry.id) > seq:
+            return body[: entry.start] + block + body[entry.start :]
+    if body and not body.endswith("\n"):
+        body += "\n"
+    return body + block
 
 
 def _selected(drop: Callable[[Entry], bool], entry: Entry) -> bool:

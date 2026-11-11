@@ -69,6 +69,19 @@ class GroupRosterRepo(RepoBase[GroupMeta]):
             )
             return meta, list(members), list(bindings)
 
+    async def group_ids(self, app_id: str, project_id: str) -> list[str]:
+        """The ids of every group with a meta row in ``(app_id, project_id)``."""
+        async with session_scope(self._factory) as s:
+            rows = await s.execute(
+                select(GroupMeta.group_id)  # type: ignore[call-overload]
+                .where(
+                    GroupMeta.app_id == app_id,  # type: ignore[arg-type]
+                    GroupMeta.project_id == project_id,  # type: ignore[arg-type]
+                )
+                .order_by(GroupMeta.group_id)  # type: ignore[arg-type]
+            )
+            return [str(row) for row in rows.scalars().all()]
+
     async def replace(
         self,
         meta: GroupMeta,

@@ -174,8 +174,11 @@ def to_conversation_item(message: CanonicalMessage) -> ConversationItem:
             sender_name=message.sender_name,
         )
     if message.role == "user" or message.role == "assistant":
+        # A group batch's own message id, when the client sent one, is the
+        # id the group's records cite (source quotes, message-level forget);
+        # the generated id stays the buffer's and the memcell row's key.
         return ChatMessage(
-            id=message.message_id,
+            id=message.client_message_id or message.message_id,
             role=message.role,
             sender_id=message.sender_id,
             sender_name=message.sender_name,

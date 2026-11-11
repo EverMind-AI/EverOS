@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .ids import (
     PATH_SAFE_CHARSET,
     AppScopeId,
-    GroupScopeRefused,
     PathSafeId,
     ProjectScopeId,
     SessionId,
@@ -25,6 +24,12 @@ class DeleteRequest(BaseModel):
 
     At least one of ``user_id``, ``agent_id`` and ``session_id``; never both
     ``user_id`` and ``agent_id``.
+
+    With ``group_id`` the delete is the group's (docs/group-memory.md,
+    section 15): an owner's or admin's forget -- soft, propagated, undone by
+    the returned ``forget_id`` -- of one of the group's sessions
+    (``session_id``) or of one member's messages (``user_id``, the member).
+    ``asker_id`` names the owner or admin.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -38,9 +43,18 @@ class DeleteRequest(BaseModel):
     user_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     agent_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     session_id: SessionId | None = Field(default=None, min_length=1, max_length=128)
-    group_id: GroupScopeRefused = Field(
+    group_id: PathSafeId | None = Field(
         default=None,
-        description="A group-scoped delete; refused with 422 before Step 2.",
+        min_length=1,
+        max_length=128,
+        description="A group-scoped delete: an owner's or admin's forget of one "
+        "session (session_id) or one member's messages (user_id).",
+    )
+    asker_id: PathSafeId | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="Who asks, for a group-scoped delete (an owner or admin).",
     )
 
     @model_validator(mode="after")
@@ -49,6 +63,15 @@ class DeleteRequest(BaseModel):
             raise ValueError("set at least one of user_id, agent_id, session_id")
         if self.user_id is not None and self.agent_id is not None:
             raise ValueError("user_id and agent_id are mutually exclusive")
+        if self.group_id is not None:
+            if self.agent_id is not None:
+                raise ValueError("a group-scoped delete takes no agent_id")
+            if self.user_id is not None and self.session_id is not None:
+                raise ValueError(
+                    "a group-scoped delete names one session_id or one user_id"
+                )
+        elif self.asker_id is not None:
+            raise ValueError("asker_id is taken only with group_id")
         return self
 
 
@@ -63,6 +86,20 @@ class DeleteResponseData(BaseModel):
 
     filters: list[str]
     count: int
+
+
+class GroupDeleteResponseData(BaseModel):
+    """What a group-scoped delete forgot, and the forget's id for its undo.
+
+    Attributes:
+        filters: The scope fields the request set.
+        count: Records taken out of the group's memory.
+        forget_id: The forget it ran (``POST /memory/forget/undo`` takes it).
+    """
+
+    filters: list[str]
+    count: int
+    forget_id: str
 
 
 class DeleteReason(BaseModel):

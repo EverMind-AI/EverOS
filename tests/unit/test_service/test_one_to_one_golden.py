@@ -100,8 +100,17 @@ ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
     "image_memory_row": {**_GROUP_COLUMNS, "sender_ids": []},
     # Section 6.3: the member a member-in-group profile row is about.
     "user_profile_row": {"subject_id": None},
-    "search": {**_GROUP_ITEM_FIELDS, "sender_ids": [], "scope": None},
-    "get": {**_GROUP_ITEM_FIELDS, "scenes": [], "images": []},
+    "search": {
+        **_GROUP_ITEM_FIELDS,
+        "sender_ids": [],
+        "scope": None,
+        # Step 2 (sections 5.3 and 8.4-8.6): group-only additions.
+        "audience": None,
+        "group_profile": None,
+        "constraints": [],
+        "coverage": None,
+    },
+    "get": {**_GROUP_ITEM_FIELDS, "scenes": [], "images": [], "group_profile": []},
 }
 """Fields a later change added to a one-to-one output, with their empty default.
 

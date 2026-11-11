@@ -15,6 +15,9 @@ group's segments are.
   :class:`GroupEpisodeExtracted` names the human speakers of each segment,
   and :func:`~everos.memory.extract.pipeline.member_profile.wrote_in`
   drops any segment without a message of the member's own (the source check).
+  Each segment is read without its forgotten messages
+  (:func:`~everos.memory.groups.readable_segments`, section 9.4), so a
+  forget that queued a segment again has its rewrite read the rest only.
 - **Throttle.** A segment is queued on the member's profile
   (``pending_memcell_ids``); the profile is updated after
   ``[groups] member_profile_every`` of them, and on :class:`GroupFlushed`
@@ -22,6 +25,12 @@ group's segments are.
   segment once.
 - **Lock.** One per ``(group, member)``: two updates of one member never lose
   each other's items, and the members of one segment update in parallel.
+- **Fan-out.** A flush updates every member with pending segments at once,
+  so the storage reads of one run are bounded: each member's pending
+  segments come back in one query (``cells_by_id``), and at most
+  ``[sqlite] pool_size`` members read storage at a time (their model calls
+  stay parallel). Without the bound one flush asked for a connection per
+  pending segment of every member at once and saturated the pool.
 - **Sources.** Every new or rewritten item records the segments it was read
   from and their span; items the update dropped move to the history.
 - **Language.** A stored ``primary_language`` wins, as for ``user.md``. Until
@@ -38,7 +47,7 @@ import asyncio
 
 from everalgo.user_memory import ProfileExtractor
 
-from everos.config import load_settings
+from everos.config import SqliteSettings, load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import member_profile_lock
 from everos.memory.deps import MemoryDeps
@@ -50,6 +59,7 @@ from everos.memory.extract.pipeline.member_profile import (
     with_provenance,
     wrote_in,
 )
+from everos.memory.groups import readable_segments
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import MemberProfile, MemCell, Profile, Roster
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
@@ -67,18 +77,32 @@ async def update_member_profiles(
         owner_id=event.group_id,
         owner_type="group",
     )
-    every = load_settings().groups.member_profile_every
+    settings = load_settings()
+    every = settings.groups.member_profile_every
+    reads = asyncio.Semaphore(read_fanout(settings.sqlite))
     if isinstance(event, GroupEpisodeExtracted):
         await asyncio.gather(
             *(
-                _queue(deps, scope, member, event, every=every)
+                _queue(deps, scope, member, event, every=every, reads=reads)
                 for member in dict.fromkeys(event.speaker_ids)
             )
         )
     else:
         members = await deps.stores.member_profile.members(scope)
-        await asyncio.gather(*(_update_pending(deps, scope, m) for m in members))
+        await asyncio.gather(
+            *(_update_pending(deps, scope, m, reads=reads) for m in members)
+        )
     return []
+
+
+def read_fanout(sqlite: SqliteSettings) -> int:
+    """How many members of one run may read storage at once.
+
+    The pool's steady size: the overflow above it stays free for every other
+    reader of ``system.db`` (the cascade, the queue, requests), so one large
+    group's flush cannot exhaust the pool on its own.
+    """
+    return max(1, sqlite.pool_size)
 
 
 async def _queue(
@@ -88,6 +112,7 @@ async def _queue(
     event: GroupEpisodeExtracted,
     *,
     every: int,
+    reads: asyncio.Semaphore,
 ) -> None:
     async with member_profile_lock(
         scope.app_id, scope.project_id, scope.owner_id, member_id
@@ -106,11 +131,15 @@ async def _queue(
             }
         )
         if len(profile.pending_memcell_ids) >= every:
-            profile = await _update(deps, scope, profile, language=event.language)
+            profile = await _update(
+                deps, scope, profile, language=event.language, reads=reads
+            )
         await deps.stores.member_profile.write(scope, profile)
 
 
-async def _update_pending(deps: MemoryDeps, scope: Scope, member_id: str) -> None:
+async def _update_pending(
+    deps: MemoryDeps, scope: Scope, member_id: str, *, reads: asyncio.Semaphore
+) -> None:
     async with member_profile_lock(
         scope.app_id, scope.project_id, scope.owner_id, member_id
     ):
@@ -118,7 +147,7 @@ async def _update_pending(deps: MemoryDeps, scope: Scope, member_id: str) -> Non
         if stored is None or not stored.pending_memcell_ids:
             return
         await deps.stores.member_profile.write(
-            scope, await _update(deps, scope, stored, language=None)
+            scope, await _update(deps, scope, stored, language=None, reads=reads)
         )
 
 
@@ -128,24 +157,28 @@ async def _update(
     profile: MemberProfile,
     *,
     language: str | None,
+    reads: asyncio.Semaphore,
 ) -> MemberProfile:
     """Read the pending segments into the profile; the caller holds the lock."""
     member_id = profile.member_id
-    found = await asyncio.gather(
-        *(deps.stores.memcell.find_by_ids([m]) for m in profile.pending_memcell_ids)
-    )
-    # A segment that is gone (its session deleted) or holds no message of the
-    # member's own is not read: no item may rest on others' words alone.
-    segments = sorted(
-        (
-            (memcell_id, cells[0])
-            for memcell_id, cells in zip(
-                profile.pending_memcell_ids, found, strict=True
-            )
-            if cells and wrote_in(cells[0], member_id)
-        ),
-        key=lambda pair: pair[1].timestamp,
-    )
+    pending = profile.pending_memcell_ids
+    async with reads:
+        # Forgotten messages are not read (section 9.4): the payload keeps
+        # them for an undo, the profile never sees them.
+        cells = await readable_segments(
+            deps.stores.message_forget, await deps.stores.memcell.cells_by_id(pending)
+        )
+        # A segment that is gone (its session deleted) or holds no message of
+        # the member's own is not read: no item may rest on others' words alone.
+        segments = sorted(
+            (
+                (memcell_id, cells[memcell_id])
+                for memcell_id in pending
+                if memcell_id in cells and wrote_in(cells[memcell_id], member_id)
+            ),
+            key=lambda pair: pair[1].timestamp,
+        )
+        record = await deps.stores.groups.get(scope) if segments else None
     done = profile.model_copy(update={"pending_memcell_ids": []})
     if not segments:
         logger.info(
@@ -155,7 +188,6 @@ async def _update(
             pending=len(profile.pending_memcell_ids),
         )
         return done
-    record = await deps.stores.groups.get(scope)
     roster = record.roster if record is not None else Roster()
     existing = profile.profile
     old = existing if existing.explicit_info or existing.implicit_traits else None

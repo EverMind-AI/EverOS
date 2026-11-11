@@ -18,6 +18,7 @@ from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
 from .settings import EmbeddingSettings as EmbeddingSettings
+from .settings import GroupSearchSettings as GroupSearchSettings
 from .settings import GroupsSettings as GroupsSettings
 from .settings import IndexSettings as IndexSettings
 from .settings import LanceDBSettings as LanceDBSettings
@@ -40,6 +41,7 @@ __all__ = [
     "AsyncQueueSettings",
     "BoundaryDetectionSettings",
     "EmbeddingSettings",
+    "GroupSearchSettings",
     "GroupsSettings",
     "IndexSettings",
     "LLMSettings",

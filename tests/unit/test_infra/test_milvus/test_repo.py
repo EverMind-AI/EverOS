@@ -586,6 +586,62 @@ def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
         assert next(f for f in actual if f.name == name).dim == 1024
 
 
+# The group profile's table (group memory, Step 2): no vector, so Milvus gets
+# the dummy one; BM25 over ``statement_tokens``; the three window and order
+# times stored as epoch ms; the link lists as capped VARCHAR arrays.
+_GROUP_PROFILE_ITEM_PHYSICAL = (
+    ("__pk", DataType.VARCHAR, "is_primary", 65535),
+    ("created_at_ms", DataType.INT64),
+    ("updated_at_ms", DataType.INT64),
+    ("id", DataType.VARCHAR, "", 512),
+    ("entry_id", DataType.VARCHAR, "", 65535),
+    ("owner_id", DataType.VARCHAR, "", 65535),
+    ("owner_type", DataType.VARCHAR, "", 65535),
+    ("app_id", DataType.VARCHAR, "", 65535),
+    ("project_id", DataType.VARCHAR, "", 65535),
+    ("kind", DataType.VARCHAR, "", 65535),
+    ("topic_id", DataType.VARCHAR, "nullable", 65535),
+    ("statement", DataType.VARCHAR, "", 65535),
+    ("statement_tokens", DataType.VARCHAR, "enable_analyzer", 65535),
+    ("supersedes", DataType.VARCHAR, "nullable", 65535),
+    ("about", DataType.VARCHAR, "nullable", 65535),
+    ("member_id", DataType.VARCHAR, "nullable", 65535),
+    ("role", DataType.VARCHAR, "nullable", 65535),
+    ("source_memcell_ids", DataType.ARRAY, "", 512),
+    ("subject_ids", DataType.ARRAY, "", 512),
+    ("sender_ids", DataType.ARRAY, "", 512),
+    ("decided_by", DataType.ARRAY, "", 512),
+    ("agreed_by", DataType.ARRAY, "", 512),
+    ("held_by", DataType.ARRAY, "", 512),
+    ("origin", DataType.VARCHAR, "nullable", 65535),
+    ("source_start_ms", DataType.INT64),
+    ("source_end_ms", DataType.INT64),
+    ("observed_at_ms", DataType.INT64),
+    ("payload_json", DataType.VARCHAR, "", 65535),
+    ("md_path", DataType.VARCHAR, "", 65535),
+    ("content_sha256", DataType.VARCHAR, "", 65535),
+    ("deprecated_by", DataType.VARCHAR, "nullable", 65535),
+    ("_everos_dummy_vector", DataType.FLOAT_VECTOR),
+    ("statement_tokens__sparse", DataType.SPARSE_FLOAT_VECTOR),
+)
+
+
+def test_group_profile_item_physical_layout_matches_the_declared_snapshot() -> None:
+    actual = _milvus().group_profile_item._layout.physical_fields()  # type: ignore[attr-defined]
+
+    assert [f.name for f in actual] == [row[0] for row in _GROUP_PROFILE_ITEM_PHYSICAL]
+    for field, row in zip(actual, _GROUP_PROFILE_ITEM_PHYSICAL, strict=True):
+        assert field.datatype == row[1], field.name
+        if len(row) == 2:
+            assert not _flag(field), field.name
+            continue
+        assert _flag(field) == row[2], field.name
+        assert field.max_length == row[3], field.name
+    arrays = [f for f in actual if f.datatype is DataType.ARRAY]
+    assert all(f.element_type is DataType.VARCHAR for f in arrays)
+    assert all(f.max_capacity == 256 for f in arrays)
+
+
 def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     """Milvus needs at least one vector column, so scalar-only tables fake one."""
     milvus_repo = _milvus().user_profile

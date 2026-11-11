@@ -120,6 +120,9 @@ class StubMemoryService:
         self.revise_image_memory = AsyncMock()
         self.forget_session = AsyncMock()
         self.undo_forget_session = AsyncMock()
+        self.forget_in_group = AsyncMock()
+        self.undo_group_forget = AsyncMock()
+        self.delete_in_group = AsyncMock()
         # A stub serves every picture, as the route did before group memory.
         self.picture_visible = AsyncMock(return_value=True)
 
@@ -399,6 +402,7 @@ def make_knowledge_service(
     topics: Any = None,
     parser_available: bool = False,
     max_upload_bytes: int | None = None,
+    access: Any = None,
 ) -> KnowledgeService:
     """A real :class:`KnowledgeService`; unset providers read as unconfigured.
 
@@ -427,6 +431,7 @@ def make_knowledge_service(
         search_config=search_config or load_settings().knowledge.search,
         parse_file=parse_file or functools.partial(aparse_file, llm=None),
         parser_available=parser_available,
+        access=access,
         max_upload_bytes=max_upload_bytes or load_settings().knowledge.max_upload_bytes,
     )
 

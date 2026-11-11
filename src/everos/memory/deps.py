@@ -37,6 +37,8 @@ from everos.memory.ports import (
     EpisodeStore,
     ForesightStore,
     ForgetLogStore,
+    GroupProfileIndex,
+    GroupProfileStore,
     GroupStore,
     ImageMemoryIndex,
     ImageMemoryStore,
@@ -45,6 +47,7 @@ from everos.memory.ports import (
     MemberProfileStore,
     MemcellStore,
     MemorizeInboxStore,
+    MessageForgetStore,
     OwnerDirStore,
     ProfileIndex,
     ProfileStore,
@@ -81,6 +84,8 @@ class Stores:
     groups: GroupStore
     member_profile: MemberProfileStore
     scene: SceneStore
+    group_profile: GroupProfileStore
+    message_forget: MessageForgetStore
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,7 @@ class Indexes:
     image_memory: ImageMemoryIndex
     profile: ProfileIndex
     knowledge_topic: KnowledgeTopicIndex
+    group_profile: GroupProfileIndex
 
 
 @dataclass(frozen=True)

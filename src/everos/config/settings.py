@@ -1045,6 +1045,11 @@ class GroupsSettings(BaseModel):
     makes no extra reflector calls).
     ``asker_in_question``: a group scope's multi-round question names the
     asker, ``"<display name>: <question>"`` (section 8.2).
+    ``group_profile``: keep the group profile (section 7.5) -- topics,
+    decisions, dissent and roles, one model call per batch of segments.
+    ``group_profile_batch``: a batch is read after this many new segments;
+    ``group_profile_idle_seconds``: or after the group has had no new segment
+    for this long; and at every flush of the group.
     """
 
     implicit_create: bool = True
@@ -1052,6 +1057,35 @@ class GroupsSettings(BaseModel):
     member_profile_every: int = Field(default=5, ge=1)
     scenes: bool = False
     asker_in_question: bool = True
+    group_profile: bool = True
+    group_profile_batch: int = Field(default=5, ge=1)
+    group_profile_idle_seconds: int = Field(default=600, ge=2)
+
+
+class GroupSearchSettings(BaseModel):
+    """``[search]`` -- what a group search adds around its ranking (sections 8.3-8.5).
+
+    ``expansion``: after each round of a group's multi-round search, follow the
+    stored links of the round's new core (decision chains, shared topics, the
+    members it is about, a scene's episodes) and show the linked records in
+    the next round. ``link_slots``: at most this many linked records join a
+    round. ``constraints``: how the constraint block is built -- ``rules``
+    from verified group-profile items and the core's metadata, or ``model``,
+    which adds one call that states applicability and scope with exact
+    quotes. ``group_profile_cap``: current group-profile items attached per
+    kind (topics, decisions, dissent, roles).
+
+    Env binding:
+        EVEROS_SEARCH__EXPANSION
+        EVEROS_SEARCH__LINK_SLOTS
+        EVEROS_SEARCH__CONSTRAINTS
+        EVEROS_SEARCH__GROUP_PROFILE_CAP
+    """
+
+    expansion: bool = True
+    link_slots: int = Field(default=5, ge=0)
+    constraints: Literal["rules", "model"] = "rules"
+    group_profile_cap: int = Field(default=20, ge=1)
 
 
 class AccessSettings(BaseModel):
@@ -1194,6 +1228,7 @@ class Settings(BaseSettings):
     extraction: ExtractionSettings = ExtractionSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
     groups: GroupsSettings = GroupsSettings()
+    search: GroupSearchSettings = GroupSearchSettings()
     access: AccessSettings = AccessSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

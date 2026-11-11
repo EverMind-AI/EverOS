@@ -24,6 +24,7 @@ from .index.adapters import (
     AgentSkillIndexAdapter,
     AtomicFactIndexAdapter,
     EpisodeIndexAdapter,
+    GroupProfileIndexAdapter,
     ImageMemoryIndexAdapter,
     KnowledgeTopicIndexAdapter,
     ProfileIndexAdapter,
@@ -35,6 +36,7 @@ from .markdown import (
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownForesightStore,
+    MarkdownGroupProfileStore,
     MarkdownImageMemoryStore,
     MarkdownMemberProfileStore,
     MarkdownOwnerDirStore,
@@ -47,6 +49,7 @@ from .sqlite import (
     SqliteForgetLogStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
+    SqliteMessageForgetStore,
     SqliteReflectionReportStore,
     SqliteRepos,
     SqliteSessionBufferStore,
@@ -78,6 +81,8 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         groups=GroupRosterStore(root, sqlite.group_roster),
         member_profile=MarkdownMemberProfileStore(root),
         scene=MarkdownSceneStore(root),
+        group_profile=MarkdownGroupProfileStore(root),
+        message_forget=SqliteMessageForgetStore(sqlite.message_forget),
     )
 
 
@@ -122,4 +127,5 @@ def build_indexes(index: DerivedIndex) -> Indexes:
         image_memory=ImageMemoryIndexAdapter(repos.image_memory),
         profile=ProfileIndexAdapter(repos.user_profile),
         knowledge_topic=KnowledgeTopicIndexAdapter(repos.knowledge_topic),
+        group_profile=GroupProfileIndexAdapter(repos.group_profile_item),
     )

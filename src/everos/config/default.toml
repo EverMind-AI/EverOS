@@ -386,6 +386,26 @@ scenes = false
 # A group search's multi-round question names the asker:
 # "<display name>: <question>" (section 8.2).
 asker_in_question = true
+# The group profile (section 7.5): topics, decisions, dissent and roles,
+# append-only, updated by one model call per batch of segments -- after
+# group_profile_batch new segments, after group_profile_idle_seconds without
+# one, and at every flush of the group. false keeps no group profile.
+group_profile = true
+group_profile_batch = 5
+group_profile_idle_seconds = 600
+
+[search]
+# What a group search adds around its ranking (docs/group-memory.md, 8.3-8.5).
+# After each multi-round round, follow the stored links of the new core
+# (decision chains, shared topics, subjects, a scene's episodes) and show at
+# most link_slots linked records in the next round.
+expansion = true
+link_slots = 5
+# The constraint block: "rules" (verified group-profile items and the core's
+# metadata) or "model" (adds one call stating applicability and scope).
+constraints = "rules"
+# Current group-profile items attached per kind to a group search.
+group_profile_cap = 20
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

@@ -897,6 +897,35 @@ incomplete:
   neither memory nor general knowledge supports the request. Benchmarks keep their
   official answer prompts unchanged.
 
+The answer prompt for applications (EverOS does not call it; an application
+puts the search response where it says `{memory}`):
+
+```
+You answer for the group's assistant. {asker} asks: {question}
+
+Memory from the group (JSON: "episodes" and "images" are the records found,
+the decider's core first; "group_profile" is the group's current topics,
+decisions, open disagreements and roles; "constraints" are what the answer
+must respect, each with the message it rests on; "coverage" says how complete
+the search was):
+{memory}
+
+Rules:
+1. Respect every constraint. Never present a decision whose status is
+   "superseded" as current; when a decision is "disputed", say who disagrees.
+2. A record whose origin is "assistant" is something the assistant said or
+   suggested, not something the group decided.
+3. Complete an open request -- a reminder, a summary, a plan -- from what is
+   known. When "coverage" is "partial" or "none", or memory covers only part
+   of the request, do that part and say plainly what is missing.
+4. Use general knowledge where memory is silent, and say which parts come
+   from it.
+5. Decline only when neither memory nor general knowledge supports the
+   request.
+6. People in a record's "audience.joined_after" joined after it was said:
+   write for them as people who have not heard it.
+```
+
 ### 8.6 Who knew what (Step 2)
 
 From the roster and record times, every group record gets:
@@ -1439,6 +1468,154 @@ The second half of Step 1 differs from the text above in these places:
   [Section 10](#10-one-to-one-conversations-stay-unchanged) was regenerated
   for that fix; it differs only where its fake model echoes a digest of the
   prompt.
+
+### Implementation notes (Step 2, tasks 11-17)
+
+Step 2 differs from the text above in these places:
+
+- **Flush fan-out.** A flush updated every member with pending segments at
+  once, each reading its pending segments one id at a time, which saturated
+  the SQLite pool. Each member's segments are now read in one query
+  (`MemcellStore.cells_by_id`), and at most `[sqlite] pool_size` members of
+  one run read storage at a time; their model calls stay parallel.
+- **Group-profile entries.** Evidence is stored one compact JSON object per
+  line under `### Evidence`, so it round-trips exactly; entries also carry
+  `sender_ids` and `observed_at`. The daily file is dated by the write. The
+  pending batch is `profile/pending.md` (frontmatter only, matched by no
+  cascade kind). A decision's member scope is `applies_to` (empty for the
+  whole group). Resolving a dissent and retiring a role append a new version
+  with `resolved` / `retired` set.
+- **`group_profile_item` columns.** No `status`, `superseded_by` or `sources`
+  column: a superseded or forgotten item is marked in its file's
+  `deprecated_entries` (the mechanism the other versioned kinds use) and the
+  index row's `deprecated_by` holds the mark; the status is read from it. The
+  item travels as `payload_json`, its segments as `source_memcell_ids`.
+- **Update triggers.** A new switch, `[groups] group_profile` (default
+  `true`). The idle trigger is the scheduler's: it fires again on every scan
+  while a group stays idle, and a tick with nothing queued returns at once.
+- **An update whose call yields nothing usable** (a reply that never
+  validates, a failed call) is not raised: raised, it was retried at once by
+  the scheduler and called again by every idle scan, about six calls a minute
+  for one idle group in the 2026-11-11 check. It is counted in
+  `everos_group_profile_update_failures_total` (by `reason` and `outcome`),
+  and the batch stays queued with a back-off kept in `profile/pending.md`
+  (`failures`, `retry_at`): no trigger of the group reads it before
+  `group_profile_idle_seconds` has passed, then twice that, while new
+  segments still queue. The third failure in a row drops the batch: its
+  operations are lost, its segments stay searchable. A forget that queues
+  segments rewrites the batch and clears the record.
+- **Reply parsing.** The update reply is lenient about form: a key left out
+  or `null` reads as empty, and one id where a list is expected as a list of
+  it (`""` as no one); in the check, 33 of 42 replies had left out the keys
+  of unused fields or written `decided_by` as a string, and each failed the
+  whole batch. The schema sent is unchanged (every field required, no
+  default), and the verifier judges the values as before: an operation
+  without evidence is dropped as `no_evidence`.
+- **Verifier.** Beyond the listed checks it drops an operation that names a
+  person who did not write its evidence (`decided_by`, `agreed_by`,
+  `held_by`, a role's member), names someone outside the roster
+  (`assignees`, `applies_to`), refers to an id that was not rendered
+  (`topic_id`, `about`), or repeats a target. A topic id is minted by code.
+  The verbatim check reads curly quotation marks as straight ones on both
+  sides (all four quote drops of the check were that alone), and a stored
+  quote is the message's own words. The same check
+  (`everos.memory.groups.verbatim_part`) serves the constraint binding and
+  the read-time check of stored quotes.
+- **Prompts, version 2.** Both prompts show each speaker's member id on
+  the segment lines, `[<message_id>] <time> <name> (<member_id>): <text>`
+  (the binding call's lines carry no time). `chat.group_profile_update`
+  requires a cited message of everyone it names in `decided_by`,
+  `agreed_by` and `held_by` (24 of 37 ungrounded drops in the check named
+  an agreeing member without citing them). `search.constraint_bind` defines
+  `segment`, lets an `applies: false` binding cite nothing, and asks for a
+  non-empty member list.
+- **Message ids.** A group batch's `messages[].message_id` is the message's
+  id in its segment; without one the generated id stays.
+- **Forget (task 12).** Superseded and forgotten versions are taken out of
+  markdown and the index, not marked, and kept byte for byte in the forget
+  log (`forget_log.undo_json`) so that undo restores them under their own
+  ids; they are therefore absent from history reads. Profile items that may
+  quote a forgotten message are removed at once and rewritten from their
+  remaining segments by the next update (absent until then, not marked
+  stale). Targets: `message`, `member`, `session`, `record` (episode,
+  picture memory, scene, group-profile or member-profile item ids), `image`;
+  there is no separate segment target. A group without owner or admin lets
+  any current member forget; managers may forget records outside their own
+  windows. Undo is last in, first out (409 while a later forget holds what
+  this one wrote). A group-scoped delete is an owner's or admin's forget of a
+  session or of a member's messages. Not scrubbed: the memcell payload (by
+  design), the scheduler's event log, and older LanceDB table versions until
+  the cascade prunes them.
+- **Expansion.** Only group scopes expand. A core scene leads to its
+  episodes; an episode's scene is not looked up (scene membership is not
+  indexed). A linked record scores 0 and reaches the final injection only if
+  the decider makes it core. Nothing is expanded after the last round.
+- **Constraints.** The core is the decider's on the multi-round route and the
+  returned records on the others. A decision whose newer version the asker
+  cannot see is returned as it is, `superseded`, without naming its
+  successor. A metadata constraint quotes at most 300 characters of its
+  message (a prefix). The model layer only refines: a failing binding is
+  dropped (`everos_constraint_bindings_dropped_total`) and the constraint
+  keeps its rules form; a bound one gains `applies`. A binding with
+  `applies: false` may cite nothing and state no scope, and then keeps the
+  constraint's source and scope; what it does fill in is checked in full.
+  One member id where a list is expected reads as a list of it. A binding
+  call that yields nothing usable leaves the rules layer's block as the
+  answer, counted in `everos_constraint_bind_failures_total`; it no longer
+  fails the search with a 503. Quotes are checked again at read time
+  against the segment read without forgotten messages.
+- **Partial memory.** `coverage` is reported for group scopes on the
+  multi-round method only; a loop ended by the no-new-core patience counts as
+  `partial`. The group profile is attached by default, each kind capped at
+  `[search] group_profile_cap` (default 20). The decline share on
+  GroupAssistBench L2 is reported with task 18.
+- **Who knew what.** `present` reads membership stays, not visibility
+  windows, and includes assistants; `joined_after` leaves out members who
+  were present.
+- **Projects.** `GET /projects/{id}` lists the asker's groups and their
+  members only: a roster is read by a group's current members. A knowledge
+  read of a project with groups answers 422 without an asker and 403 for a
+  non-member. Fetching a document or topic by id is not scoped to its
+  project (as before).
+- **One-to-one.** Search and get responses of user and agent scopes carry the
+  new fields with their empty defaults (`audience`, `group_profile`,
+  `constraints`, `coverage`); the golden test lists them as added fields and
+  its fixture is unchanged.
+- **Real-model check (2026-11-11).** DeepSeek V4.1 Flash, JSON mode,
+  thinking off; gab04 (all 68 messages), gab27 (first 300), `team_chat_en`
+  (first 300), then 22 keyword searches with `[search] constraints =
+  "model"`. Before these fixes (version 1 prompts): 33 of 42 group-profile
+  replies failed the schema and their batches were called again and again;
+  replayed offline, 71 of 339 proposed operations were dropped (37
+  `ungrounded_member`, 13 `no_evidence`, 12 `unknown_message`, 4
+  `quote_not_verbatim`, 3 `invalid_field`, 1 `unknown_target`, 1
+  `duplicate`), and 58 of 151 bindings; $0.37. After (version 2): 0 of 9
+  replies failed; 7 of 75 operations were dropped (4 `unknown_message`, 1
+  each `ungrounded_member`, `unknown_reference`, `quote_not_verbatim`); 34
+  of 331 bindings were dropped at run time, 32 of them `applies: false` with
+  an empty scope, which the binding check has accepted since (1 of 331 when
+  the same replies are checked again); $0.28. Boundary detection cut the
+  three groups into 34 segments in the first run and 41 in the second, so
+  the counts compare runs, not segments.
+- **Decisions (2026-11-11).** Five questions the implementation raised,
+  decided by the product owner; none changed the code.
+  1. Group-profile items that may quote a forgotten message are removed at
+     once and rewritten from their remaining segments by the next update,
+     absent until then: showing them, even marked stale, would show the
+     forgotten words.
+  2. A forget does not scrub the scheduler's event log or prune older
+     LanceDB table versions at once, so that undo keeps working (2.0 does no
+     hard deletes). Until version cleanup, forgotten text can still exist in
+     the scheduler's event log, in older LanceDB table versions (until the
+     cascade prunes them), and in `forget_log.undo_json` (what undo
+     restores from); the stored memcell payload keeps it too, by design,
+     and every reader drops the forgotten messages from it.
+  3. In a group with no owner or admin, any current member may forget;
+     managers may forget records outside their own windows.
+  4. Undo stays last in, first out: undoing a forget while a later forget
+     holds what it wrote answers 409.
+  5. The verifier stays strict: a message cited under the wrong segment,
+     even one of the same session, is dropped (`unknown_message`).
 
 ---
 

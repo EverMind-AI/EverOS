@@ -28,6 +28,7 @@ from everos.infra.persistence.markdown import (
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
     GroupMemberProfileFrontmatter,
+    GroupProfileDailyFrontmatter,
     GroupSceneDailyFrontmatter,
     ImageMemoryDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
@@ -40,6 +41,7 @@ from everos.infra.persistence.records import (
     AtomicFact,
     Episode,
     Foresight,
+    GroupProfileItem,
     ImageMemory,
     KnowledgeTopic,
     UserProfile,
@@ -52,6 +54,7 @@ from ._projections import (
     EpisodeHandler,
     ForesightHandler,
     GroupMemberProfileHandler,
+    GroupProfileHandler,
     GroupRosterHandler,
     Handler,
     HandlerDeps,
@@ -176,6 +179,14 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=GroupMemberProfileFrontmatter,
         index_schema=UserProfile,
         handler_factory=GroupMemberProfileHandler,
+    ),
+    # A group's profile items (Step 2): their own table, no vector; the
+    # pending batch beside the logs (``profile/pending.md``) matches no glob.
+    KindSpec(
+        name="group_profile",
+        frontmatter_schema=GroupProfileDailyFrontmatter,
+        index_schema=GroupProfileItem,
+        handler_factory=GroupProfileHandler,
     ),
     KindSpec(
         name="group_roster",

@@ -15,6 +15,7 @@ from everos.infra.persistence.records import (
     AtomicFact,
     Episode,
     Foresight,
+    GroupProfileItem,
     IndexRecord,
     KnowledgeTopic,
     UserProfile,
@@ -29,6 +30,7 @@ BUSINESS_TABLES = (
     AgentSkill,
     UserProfile,
     KnowledgeTopic,
+    GroupProfileItem,
 )
 
 

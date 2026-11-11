@@ -13,7 +13,8 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
 * :meth:`AccessPolicy.buffered_messages` decides which in-flight messages of a
   session a read may see.
 * :func:`authorize_roster_change` and :func:`authorize_manage` decide roster
-  changes and meta updates.
+  changes and meta updates; :func:`authorize_forget` decides a forget, its
+  undo and a group-scoped delete (section 5.5).
 
 Rules the implementation must keep (section 9.1):
 
@@ -24,7 +25,10 @@ Rules the implementation must keep (section 9.1):
   and ``source_end < to`` (no upper bound for the open window);
 * ``history_visible_from = creation`` gives a current member the whole history;
 * ``audience = group`` keeps only what every current member can see;
-* an owner or admin role grants roster management, never extra reading;
+* an owner or admin role grants roster management and forgetting, never extra
+  reading; a member may forget only what rests on their own messages;
+* a forgotten message is absent from every read of a session's buffer, as it
+  is from every record a forget rewrote;
 * an agent's cases learned in a group (``source_group_id``) are read only in
   that group's context, by a current member of it -- the agent itself unless
   another asker is named (:attr:`ReadScope.case_filter`).
@@ -39,6 +43,7 @@ __all__ = [
     "ReadScope",
     "ScopeRequest",
     "Window",
+    "authorize_forget",
     "authorize_manage",
     "authorize_roster_change",
     "intersect_windows",
@@ -47,13 +52,14 @@ __all__ = [
     "visible_profile",
 ]
 
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Collection, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from everos.core.errors import ForbiddenError, InvalidInputError
 from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     MANAGER_ROLES,
     CanonicalMessage,
     Group,
@@ -65,6 +71,7 @@ from everos.memory.models import (
 from everos.memory.ports import (
     Filter,
     GroupStore,
+    MessageForgetStore,
     OwnerType,
     Scope,
     SessionKey,
@@ -75,6 +82,7 @@ from everos.memory.ports import (
     gte,
     is_null,
     lt,
+    ne,
 )
 
 from .identity import Identity
@@ -155,6 +163,9 @@ class ScopeRequest:
     audience: Audience = "asker"
     context_group_id: str | None = None
     """An agent scope read in a group's context: the group's cases join."""
+    project_scope: bool = False
+    """Every group of ``project_id`` the asker currently belongs to, as one
+    pool (section 8.7); ``group_ids`` is then resolved by the policy."""
 
 
 @dataclass(frozen=True)
@@ -170,6 +181,10 @@ class ReadScope:
         groups: Per group, its roster and the windows in force.
         predicate: The owner, space, status and window conditions -- what
             replaces the owner part of every recall's ``where``.
+        versions_predicate: The same, with every version a group record
+            had except the forgotten ones: what a read of an item's history
+            (``include_superseded``) uses. Equal to ``predicate`` outside
+            groups.
         case_filter: For an agent scope, the extra condition on its cases:
             cases learned outside groups, plus the context group's.
     """
@@ -183,6 +198,12 @@ class ReadScope:
     audience: Audience = "asker"
     groups: tuple[GroupView, ...] = field(default_factory=tuple)
     case_filter: Filter | None = None
+    versions_predicate: Filter | None = None
+
+    @property
+    def history_predicate(self) -> Filter:
+        """``versions_predicate`` when set, else ``predicate``."""
+        return self.versions_predicate or self.predicate
 
     def cases_where(self, where: Filter) -> Filter:
         """``where`` narrowed to the agent cases this read may see."""
@@ -384,16 +405,51 @@ def authorize_roster_change(
         raise ForbiddenError("only an owner or admin may change the roster")
 
 
+def authorize_forget(
+    roster: Roster, asker_id: str | None, *, sources: Collection[str]
+) -> None:
+    """Raise unless ``asker_id`` may forget what rests on ``sources`` (section 5.5).
+
+    ``sources`` are the members whose messages the target is made of: the
+    senders of the messages, the member of a member target, the speakers a
+    record rests on, the posters of a picture. Owners and admins may forget
+    anything in the group -- and, as for roster changes, any current member
+    of a group that has no owner or admin at all. Anyone else may forget a
+    target only when it rests on their own messages alone; a target with no
+    sources (a whole session) is the managers'.
+
+    Raises:
+        ForbiddenError: The asker is not a current member, or the target
+            rests on someone else's messages.
+    """
+    current = roster.current(asker_id) if asker_id else None
+    if current is None:
+        raise ForbiddenError("the asker is not a current member of the group")
+    if current.role in MANAGER_ROLES or not roster.has_managers():
+        return
+    if sources and set(sources) == {asker_id}:
+        return
+    raise ForbiddenError(
+        "only an owner or admin may forget what rests on another member's messages"
+    )
+
+
 class AccessPolicy:
     """Read scopes and buffer visibility over the groups of one memory root.
 
     Args:
         groups: Where rosters are read; the mirror is current the moment a
             roster write returns, so a removed member is refused at once.
+        forgotten: Which messages of a session are forgotten; a buffer read
+            leaves them out. ``None`` (a build without group forget) leaves
+            the buffer as it is.
     """
 
-    def __init__(self, groups: GroupStore) -> None:
+    def __init__(
+        self, groups: GroupStore, *, forgotten: MessageForgetStore | None = None
+    ) -> None:
         self._groups = groups
+        self._forgotten = forgotten
 
     async def read_scope(self, identity: Identity, request: ScopeRequest) -> ReadScope:
         """The compiled scope of one read.
@@ -404,6 +460,10 @@ class AccessPolicy:
                 exist answers the same, so a probe learns nothing).
             InvalidInputError: A group scope without an asker.
         """
+        if request.project_scope:
+            return await self._group_scope(
+                identity, await self._project_groups(identity, request)
+            )
         if request.group_ids:
             return await self._group_scope(identity, request)
         case_filter: Filter | None = None
@@ -431,6 +491,68 @@ class AccessPolicy:
             ),
             case_filter=case_filter,
         )
+
+    async def project_groups(
+        self, app_id: str, project_id: str, asker: str
+    ) -> list[str]:
+        """The groups of a project ``asker`` currently belongs to, sorted."""
+        found: list[str] = []
+        for group_id in await self._groups.group_ids(app_id, project_id):
+            record = await self._groups.get(
+                Scope(
+                    app_id=app_id,
+                    project_id=project_id,
+                    owner_id=group_id,
+                    owner_type="group",
+                )
+            )
+            if record is not None and record.roster.is_current_member(asker):
+                found.append(group_id)
+        return sorted(found)
+
+    async def authorize_project_read(
+        self, identity: Identity, app_id: str, project_id: str
+    ) -> None:
+        """Raise unless ``identity`` may read the project's knowledge base (9.1).
+
+        A project without groups keeps today's behaviour: anyone who names it
+        reads it. A project with groups is read by its members only -- the
+        current members of any of its groups.
+
+        Raises:
+            InvalidInputError: The project has groups and no asker was named.
+            ForbiddenError: The asker is in none of the project's groups.
+        """
+        if not await self._groups.group_ids(app_id, project_id):
+            return
+        if identity.asker_id is None:
+            raise InvalidInputError(
+                "asker_id is required to read the knowledge of a project with groups"
+            )
+        if not await self.project_groups(app_id, project_id, identity.asker_id):
+            raise ForbiddenError(
+                "the asker is not a member of any group of the project"
+            )
+
+    async def _project_groups(
+        self, identity: Identity, request: ScopeRequest
+    ) -> ScopeRequest:
+        """The request with its groups: the asker's current groups of the project.
+
+        Raises:
+            InvalidInputError: No asker.
+            ForbiddenError: The asker is in none of the project's groups.
+        """
+        if identity.asker_id is None:
+            raise InvalidInputError("asker_id is required for a project scope")
+        groups = await self.project_groups(
+            request.app_id, request.project_id, identity.asker_id
+        )
+        if not groups:
+            raise ForbiddenError(
+                "the asker is not a member of any group of the project"
+            )
+        return replace(request, group_ids=tuple(groups), project_scope=False)
 
     async def _case_filter(self, request: ScopeRequest, *, asker: str) -> Filter:
         """Which of an agent's cases a read sees (section 9.1, row 12).
@@ -491,12 +613,20 @@ class AccessPolicy:
                 GroupView(group=record.group, roster=record.roster, windows=windows)
             )
         per_group = [p for p in (view.predicate() for view in views) if p is not None]
+        space = (
+            eq("owner_type", "group"),
+            eq("app_id", request.app_id),
+            eq("project_id", request.project_id),
+        )
         predicate = (
+            all_of(*space, is_null("deprecated_by"), any_of(*per_group))
+            if per_group
+            else _NOTHING
+        )
+        versions = (
             all_of(
-                eq("owner_type", "group"),
-                eq("app_id", request.app_id),
-                eq("project_id", request.project_id),
-                is_null("deprecated_by"),
+                *space,
+                any_of(is_null("deprecated_by"), ne("deprecated_by", FORGOTTEN_MARK)),
                 any_of(*per_group),
             )
             if per_group
@@ -511,10 +641,15 @@ class AccessPolicy:
             predicate=predicate,
             audience=request.audience,
             groups=tuple(views),
+            versions_predicate=versions,
         )
 
     async def picture_visible(
-        self, identity: Identity, references: Sequence[Stored[ImageMemory]]
+        self,
+        identity: Identity,
+        references: Sequence[Stored[ImageMemory]],
+        *,
+        forgotten_in_group: bool = False,
     ) -> bool:
         """Whether a picture's bytes may be served, given its live memories (row 7).
 
@@ -522,11 +657,14 @@ class AccessPolicy:
         across every space. A hash only personal memories refer to behaves as
         before groups existed (served by hash). A hash a group picture memory
         refers to needs an asker who can see one of them -- or who has a
-        personal memory of the same picture, which is theirs to see.
+        personal memory of the same picture, which is theirs to see. A hash
+        nothing refers to any more is served by hash too, unless a group
+        forgot it (``forgotten_in_group``): then it is served to nobody, the
+        same as a forgotten record is read by nobody.
         """
         groups = [r for r in references if r.scope.owner_type == "group"]
         if not groups:
-            return True
+            return bool(references) or not forgotten_in_group
         asker = identity.asker_id
         if asker is None:
             return False
@@ -579,10 +717,16 @@ class AccessPolicy:
             view = scope.group(bound) if bound is not None else None
             if view is None:
                 return []
+            forgotten = (
+                await self._forgotten.forgotten(session)
+                if self._forgotten is not None
+                else frozenset()
+            )
             return [
                 m
                 for m in messages
-                if any(
+                if (m.client_message_id or m.message_id) not in forgotten
+                and any(
                     w.contains_point(to_timestamp_ms(m.timestamp)) for w in view.windows
                 )
             ]
