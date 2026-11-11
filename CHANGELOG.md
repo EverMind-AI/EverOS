@@ -112,6 +112,13 @@ machinery that keeps a deleted memory from coming back.
   `0.3`) when that is higher, since at 0.0 the identical request tends to
   reproduce the identical bad reply. `"none"` leaves either field out, for an
   endpoint that rejects it. `[decider]` and `[multimodal]` are unchanged.
+- **Boundary requests put the window's count after the messages.** Every add
+  re-sends the session's uncut buffer, and everalgo renders the count in
+  front of it (`<messages count="N">`), so consecutive calls of a session
+  shared a provider cache prefix only through the system prompt. The count
+  now follows the records (`</messages>` then `<count>N</count>`), so each
+  call repeats the previous call's records as a prefix; the records, their
+  numbering and the system message are byte-identical.
 - **The multi-round decider is greedy and reads the full episode body.**
   `[decider] temperature` (default `0.0`) is sent on every call. Left out, a
   vLLM endpoint applied the model's `generation_config` (Qwen3.8-27B:

@@ -44,6 +44,7 @@ from .messages import (
     to_conversation_item,
     unique_senders,
 )
+from .prompt_order import CountAfterMessages
 from .quarantine import SessionQuarantine
 
 logger = get_logger(__name__)
@@ -224,8 +225,13 @@ class BoundaryDetection:
     async def _segment(
         self, merged: list[CanonicalMessage], *, mode: Mode, is_final: bool
     ) -> DetectionResult:
-        """One bounded-retry boundary call; each attempt has its own deadline."""
-        llm = self._llm
+        """One bounded-retry boundary call; each attempt has its own deadline.
+
+        The request goes out with the window's count after the records
+        (:mod:`.prompt_order`), so a session's consecutive calls share a
+        provider cache prefix through every record they repeat.
+        """
+        llm = CountAfterMessages(self._llm)
         items = [to_conversation_item(m) for m in merged]
         custom_instructions = self._instructions.load("boundary_detection")
 

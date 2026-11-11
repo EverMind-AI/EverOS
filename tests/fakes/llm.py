@@ -45,7 +45,9 @@ UNUSABLE_REPLY = "this is not JSON"
 """A reply no operator can parse: it raises ``LLMOutputError``."""
 
 _SCRIPTS = Path(__file__).parent / "llm_scripts"
-_WINDOW = re.compile(r'<messages count="(\d+)">')
+_WINDOW = re.compile(r'<messages count="(\d+)">|</messages>\n<count>(\d+)</count>')
+"""The window size: everalgo's rendering, or EverOS's with the count after the
+records (``memory.extract.boundary.prompt_order``)."""
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
@@ -98,7 +100,7 @@ def boundary_window(messages: Sequence[Any]) -> int:
     found = _WINDOW.search(messages[-1].content)
     if found is None:
         raise AssertionError("not a batch boundary request")
-    return int(found.group(1))
+    return int(found.group(1) or found.group(2))
 
 
 def memorize_llm(
