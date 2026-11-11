@@ -124,14 +124,14 @@ Select ─→ Merge ─→ Re-extract ─→ Deprecate
    end with the current state. A previously consolidated cluster is updated
    incrementally — only the new fragments are folded into the existing
    narrative.
-3. **Re-extract** — the merged narrative is written to Markdown and triggers
-   re-extraction of atomic facts, keeping derived data consistent with it.
-4. **Deprecate** — once those facts exist, the `finish_reflection` strategy
-   gives the replaced original Episodes and their atomic facts
-   `deprecated_by` pointing at the new narrative, updates cluster membership,
-   and writes an audit record. If fact extraction never succeeds, nothing is
-   deprecated: the originals stay searchable rather than being replaced by a
-   narrative without facts.
+3. **Write** — the merged narrative is written to the Episode daily-log
+   Markdown and announced as an `EpisodeExtracted` event.
+4. **Deprecate** — on that event the `finish_reflection` strategy gives the
+   replaced original Episodes `deprecated_by` pointing at the new narrative,
+   updates cluster membership, and writes an audit record. It waits for
+   nothing else: as soon as the merged narrative is written, it replaces
+   the fragments. If this step fails, nothing is deprecated and the
+   originals stay searchable.
 
 The result:
 
@@ -158,7 +158,7 @@ cascade daemon.
 |---|---|---|
 | Markdown | Episode bodies, merged narratives, archive markers | Single source of truth; human-readable and editable |
 | SQLite | Clusters and members, consolidation audit records | Structured state and queries |
-| Derived index | Vectors + BM25 index for Episodes / atomic facts | Search (rebuildable from Markdown) |
+| Derived index | Vectors + BM25 index for Episodes | Search (rebuildable from Markdown) |
 
 The **merged narrative** is written to the Episode daily-log Markdown; its
 frontmatter marks that it came from a cluster:
@@ -283,7 +283,6 @@ consolidation history:
 | `mode` | `init` (first merge) or `update` (incremental update) |
 | `source_count` | Number of fragments merged |
 | `merged_entry_id` | The merged-narrative Episode produced |
-| `deprecated_fact_count` | Number of atomic facts archived alongside |
 | `created_at` | Consolidation time |
 
 ```bash

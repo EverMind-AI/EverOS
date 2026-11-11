@@ -170,8 +170,8 @@ api_key = "<DASHSCOPE_API_KEY>"
 base_url = "https://dashscope.aliyuncs.com"
 ```
 
-Embedding 会启用 vector 和 user-hybrid retrieval；DashScope rerank 会进一步
-启用 agentic search、默认 agent-hybrid search 和 Knowledge Wiki。共享 DashScope
+Embedding 会启用多轮检索（multi-round retrieval，`llm_multiround`，唯一的搜索
+方式）；DashScope rerank 会进一步启用 Knowledge Wiki。共享 DashScope
 host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
 
 如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
@@ -235,13 +235,13 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
-    "method": "hybrid",
+    "method": "llm_multiround",
     "top_k": 5
   }'
 ```
 
-响应里应该能看到 Yosemite 相关记忆。完整百炼配置可以直接使用 hybrid search；
-也可以省略 `method` 字段，因为 API 默认就是 hybrid。
+响应里应该能看到 Yosemite 相关记忆。`llm_multiround` 是默认值，也是唯一的搜索
+方式，可以省略 `method` 字段；其他取值会返回 HTTP 422。
 
 > [!TIP]
 > **第一条记忆已经写入。**
@@ -253,16 +253,16 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 
 | 配置 | 可用能力 |
 | --- | --- |
-| 百炼 `[llm]` + `[embedding]` + `[rerank]` | Keyword、vector、hybrid、agentic search；reflection、skill extraction、Knowledge Wiki |
+| 百炼 `[llm]` + `[embedding]` + `[rerank]` | 多轮检索（`llm_multiround`）；reflection、skill extraction、Knowledge Wiki |
 | 再添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
 
 `/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会
 返回明确的 HTTP 422。
 
 > [!NOTE]
-> `everos demo --live` 和步骤 2 的独立 Demo 不一样：它会连接正在运行的 server，
-> 并执行真实的 add / flush / search 流程。它使用 hybrid search，上面的完整百炼
-> 配置可以直接运行。
+> `everos demo --live` 和步骤 2 的独立 Demo 不一样：它用你自己的 Key
+> （`EVEROS_CLOUD_API_KEY`）在 EverOS Cloud 平台上执行真实的 add / flush /
+> search 流程，不连接本地 server。
 
 ### 可选：摄取多模态文件
 

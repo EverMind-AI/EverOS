@@ -1346,7 +1346,10 @@ The first half of Step 1 differs from the text above in these places:
   every other v2 route.
 - **Picture bytes.** An asker who holds a personal memory of the same picture
   (the same hash) may also fetch it.
-- **Not supported for group scopes yet:** `agentic` search answers 422.
+- **One search method.** Multi-round retrieval (`llm_multiround`) is the only
+  search method in 2.0, for one-to-one and group scopes alike; any other
+  method answers 422. Agent memory is listed by `/memory/get` (with
+  `context_group_id`), not searched: a search with `agent_id` answers 422.
 - **Client message ids** are kept only on group batches. They are not yet
   persisted in memcells.
 - **Agent-scope buffer reads** follow the users' rule: the agent must be a

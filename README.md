@@ -106,8 +106,9 @@ built into Raven. Choose an integration to open its setup guide.
 
 ## Quick Start
 
-> One OpenRouter API key is enough to start EverOS, write durable memories,
-> and retrieve them with keyword search.
+> One OpenRouter API key is enough to start EverOS and write durable memories.
+> Searching them back runs multi-round retrieval, which also needs an
+> embedding provider.
 
 ### Prerequisites
 
@@ -156,8 +157,11 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
-This is the smallest Tier 1 setup: memory add, flush, Markdown persistence,
-cascade indexing, and keyword search.
+This is the smallest Tier 1 setup: memory add, flush, Markdown persistence and
+cascade indexing. To search (step 5), also fill the `[embedding]` section with
+an OpenAI-compatible embedding endpoint — see
+[config.example.toml](config.example.toml) and
+[docs/configuration.md](docs/configuration.md).
 
 Use `everos init --root <path>` if you want a different memory root. Pass the
 same `--root <path>` to subsequent commands.
@@ -221,14 +225,14 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
-    "method": "keyword",
+    "method": "llm_multiround",
     "top_k": 5
   }'
 ```
 
-You should see the Yosemite memory in the response. Keep
-`"method": "keyword"` in this one-key setup because the API defaults to hybrid
-search, which requires an embedding provider.
+You should see the Yosemite memory in the response. `llm_multiround`
+(multi-round retrieval) is the default and the only search method; without an
+`[embedding]` provider the request answers HTTP 422.
 
 > [!TIP]
 > **First memory unlocked.**
@@ -243,14 +247,14 @@ For annotated responses and the Markdown files EverOS creates, see
 ### What works with one key?
 
 The OpenRouter one-key setup is EverOS Tier 1. It supports server startup,
-memory add and flush, durable Markdown storage, cascade indexing, and keyword
-search. Add optional providers only when you need the features below:
+memory add and flush, durable Markdown storage and cascade indexing. Add
+optional providers when you need the features below:
 
 | Configuration | Adds |
 | --- | --- |
-| `[llm]` only | Core memory flow and keyword search |
-| Add `[embedding]` | Vector/user hybrid search, reflection, and skill extraction |
-| Add `[rerank]` too | Agentic search, default agent hybrid search, and Knowledge Wiki |
+| `[llm]` only | Core memory flow (add, flush, Markdown, indexing) |
+| Add `[embedding]` | Multi-round search, reflection, and skill extraction |
+| Add `[rerank]` too | Knowledge Wiki |
 | Add `[multimodal]` and parser extra | Image, PDF, audio, and office-file ingestion |
 
 Missing optional capabilities are reported by `/health` and return a clear
@@ -258,8 +262,8 @@ HTTP 422 if you request a feature that needs them.
 
 > [!NOTE]
 > `everos demo --live` is different from the standalone demo in step 2: it
-> connects to a running server and uses the real add/flush/search flow. It uses
-> hybrid search, so add an embedding provider before you run it.
+> runs the real add/flush/search flow against the EverOS Cloud platform with
+> your own key (`EVEROS_CLOUD_API_KEY`), not against your local server.
 
 ### Optional: Ingest Multimodal Files
 

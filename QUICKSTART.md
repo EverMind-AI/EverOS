@@ -1,10 +1,11 @@
 # Quickstart
 
-> Five minutes from one OpenRouter API key to durable Markdown memory and
-> keyword recall.
+> Five minutes from one OpenRouter API key to durable Markdown memory, plus an
+> embedding endpoint to search it back.
 
-EverOS runs as a local service. The minimum production path needs only an LLM:
-configure one OpenRouter key, start the server, then call the HTTP API.
+EverOS runs as a local service. Writing memory needs only an LLM: configure one
+OpenRouter key, start the server, then call the HTTP API. Searching memory runs
+multi-round retrieval, which also needs an embedding provider.
 
 ## What the one-key setup includes
 
@@ -12,11 +13,10 @@ With only `[llm]` configured, EverOS can:
 
 - start the server;
 - extract conversations into durable Markdown;
-- keep the local index in sync; and
-- retrieve memories with keyword search.
+- keep the local index in sync.
 
-Embedding, rerank, knowledge, and multimodal providers are optional upgrades.
-They are not required for this walkthrough.
+Search (step 8) additionally needs `[embedding]`. Rerank, knowledge, and
+multimodal providers are optional upgrades, not required for this walkthrough.
 
 ## Prerequisites
 
@@ -95,9 +95,11 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
-Leave `[embedding]`, `[rerank]`, and `[multimodal]` unchanged for this
-walkthrough. Their empty keys do not prevent the server from starting; this
-setup uses keyword search.
+Leave `[rerank]` and `[multimodal]` unchanged for this walkthrough. Their empty
+keys do not prevent the server from starting. To run the search in step 8, also
+fill `[embedding]` with an OpenAI-compatible embedding endpoint (see
+[config.example.toml](config.example.toml)); without it the server starts and
+writes memory, and search answers HTTP 422.
 
 ## 5. Start the server
 
@@ -123,9 +125,7 @@ the important fields look like this:
     "rerank": false
   },
   "disabled_features": [
-    "vector_search",
-    "hybrid_search",
-    "agentic_search",
+    "memory_search",
     "reflection",
     "skill_extraction",
     "knowledge"
@@ -183,7 +183,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
 A successful flush returns `data.status` as `"extracted"`. The extraction is
 written to Markdown, then the cascade worker projects it into the local index.
 
-## 8. Search with the one-key method
+## 8. Search with multi-round retrieval
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
@@ -193,7 +193,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where does Alice like to climb?",
-    "method": "keyword",
+    "method": "llm_multiround",
     "top_k": 5
   }'
 ```
@@ -202,12 +202,13 @@ The response should contain an episode whose summary mentions Yosemite or El
 Cap. If the first search is empty, wait a moment for cascade indexing and retry.
 
 > [!IMPORTANT]
-> Keep `"method": "keyword"` when only the LLM is configured. The API default
-> is hybrid, which requires embedding and returns HTTP 422 in the one-key tier.
+> `llm_multiround` is the default and the only search method. It needs
+> `[embedding]`: in the one-key tier the search returns HTTP 422
+> `PROVIDER_NOT_CONFIGURED`.
 
-Keyword retrieval returns matching episodes from the local BM25 index. Atomic
-facts are created by an embedding-dependent strategy, so they are not expected
-in the OpenRouter Tier 1 response.
+Each round recalls the question (and later the decider's sub-queries) from the
+local BM25 index and the vector index, and the decider model picks the
+episodes that answer it.
 
 ## 9. Read the Markdown source of truth
 
@@ -220,8 +221,7 @@ Your extracted memory is a normal Markdown file under the memory root:
 │       ├── users/alice/
 │       │   ├── user.md
 │       │   ├── episodes/
-│       │   ├── .atomic_facts/
-│       │   └── .foresights/
+│       │   └── images/
 │       ├── agents/<agent_id>/
 │       │   ├── agent.md
 │       │   ├── .cases/
@@ -244,14 +244,14 @@ models for the optional providers.
 
 | Configuration | Available capabilities |
 | --- | --- |
-| `[llm]` only | Add, flush, Markdown persistence, cascade sync, keyword search |
-| Add `[embedding]` | Vector/user hybrid search, reflection, skill extraction |
-| Add `[rerank]` too | Agentic search, default agent hybrid search, Knowledge Wiki |
+| `[llm]` only | Add, flush, Markdown persistence, cascade sync |
+| Add `[embedding]` | Multi-round search, reflection, skill extraction |
+| Add `[rerank]` too | Knowledge Wiki |
 | Add `[multimodal]` and install `everos[multimodal]` | Image, PDF, audio, and office-file ingestion |
 
 EverOS reports unavailable features through `/health`. Requests that require a
 missing provider fail fast with a descriptive HTTP 422 instead of silently
-degrading to a different search method.
+degrading.
 
 You can replace OpenRouter with another OpenAI-compatible LLM endpoint by
 changing the `[llm]` model, base URL, and key.
@@ -266,9 +266,8 @@ Press `Ctrl+C` in the server terminal.
 - Partition memory with `app_id` and `project_id`.
 - Explore the full API contract in [docs/openapi.json](docs/openapi.json).
 - Configure advanced retrieval in the generated `everos.toml`.
-- Run `everos demo --live` after starting a server with embedding configured;
-  unlike the standalone demo in step 2, live mode calls the real API and uses
-  hybrid search.
+- Run `everos demo --live` with your EverOS Cloud key; unlike the standalone
+  demo in step 2, live mode calls the real EverOS Cloud API.
 - Read [docs/architecture.md](docs/architecture.md) and
   [docs/storage_layout.md](docs/storage_layout.md).
 - Set up multimodal ingestion with [docs/multimodal.md](docs/multimodal.md).

@@ -18,8 +18,7 @@ machinery that keeps a deleted memory from coming back.
   answers `503 SESSION_BUSY` and nothing is deleted. everos-mcp's
   `forget_session` now works against a self-hosted server.
 - **`POST /api/v2/memory/delete_by_ids`**: delete episodes by memory id, with
-  what Reflection merged into them, their atomic facts and their cluster
-  membership.
+  what Reflection merged into them and their cluster membership.
 - Configuration: `[memorize] delete_wait_seconds` (default `10`),
   `[cascade] delete_fence_warn_entries` (default `100000`).
 - Metrics: `everos_lock_wait_seconds` / `everos_lock_hold_seconds` (by lock
@@ -101,6 +100,20 @@ machinery that keeps a deleted memory from coming back.
     `agent_case.source_group_id`. Existing rows read as before.
 
 ### Changed
+
+- **Memory search needs an embedding provider.** Multi-round retrieval embeds
+  every sub-query, so an LLM-only deployment (Tier 1) no longer searches: a
+  search answers `422 PROVIDER_NOT_CONFIGURED` (feature `llm_multiround`).
+  `GET /health` reports `memory_search` among `disabled_features` without
+  `[embedding]`; `vector_search`, `hybrid_search` and `agentic_search` are no
+  longer reported, and a missing rerank provider now disables `knowledge`
+  only.
+- **A Reflection merge finishes on the merged episode itself.**
+  `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
+  and deprecates the replaced members at once; it used to wait for the
+  merged episode's atomic facts to be extracted first.
+- `reflection_report.deprecated_fact_count` is kept in `system.db` for stores
+  that have it and is always written `0`.
 
 - **The multi-round decider is greedy and reads the full episode body.**
   `[decider] temperature` (default `0.0`) is sent on every call. Left out, a
@@ -275,6 +288,30 @@ machinery that keeps a deleted memory from coming back.
 
 ### Removed
 
+- **Atomic facts and foresight (EverOS 2.0).** Chat memory keeps episodes,
+  picture memories and profiles. The `extract_atomic_facts` and
+  `extract_foresight` strategies, the `AtomicFactsExtracted` and
+  `UserPipelineStarted` events, the `users/<id>/.atomic_facts/` and
+  `.foresights/` daily logs, the `atomic_fact` and `foresight` index tables
+  (LanceDB and Milvus) and their cascade handlers are gone; everalgo still
+  ships the two extractors, EverOS no longer calls them. A store written
+  before keeps its leftover files and tables untouched and ignored (deletes
+  no longer reach them); an `ome.toml` naming the two strategies only logs a
+  warning; a cascade change still queued for them is marked failed; a
+  background run still pending for them (or for the removed events) is
+  dropped with a warning instead of failing in the scheduler.
+- **Every search method but multi-round retrieval.** `keyword`, `vector`,
+  `hybrid` and `agentic` are removed (the vector and hybrid routes ranked
+  atomic facts); `llm_multiround` is the default and the only method. A
+  request naming another method answers `422 INVALID_INPUT` saying only
+  `llm_multiround` is supported. Gone with them: the request fields `radius`,
+  `min_score` and `enable_llm_rerank` (now unknown fields, `422`), the
+  response's `episodes[].atomic_facts`, `agent_cases` and `agent_skills`, and
+  `[observability] recall_hit_threshold` (no calibrated score is left).
+- **Agent memory search.** Multi-round retrieval covers user and group memory;
+  a search with `agent_id` (or `context_group_id`) answers `422` and points at
+  `POST /api/v2/memory/get`, which still lists an agent's cases and skills,
+  in a group's context too. Cases and skills are still extracted and indexed.
 - `[decider] full_text` and `EVEROS_LLMMR_DECIDER_FULL_TEXT`. Its default
   showed the decider only the stored `summary`, a 200-character prefix of the
   body on most stores, which cost 9.3 points of LoCoMo core-only accuracy; a
@@ -291,7 +328,6 @@ machinery that keeps a deleted memory from coming back.
   be fixed in both together.
 - **Group scopes, until Step 2 of the group-memory design:**
   - delete and forget answer 422;
-  - `agentic` search answers 422;
   - there is no history route.
 - **A group's query-encoder state is not built.** The design encodes group
   queries with the group's own state. No query encoder on this line takes a
