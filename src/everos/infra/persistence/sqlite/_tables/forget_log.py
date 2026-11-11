@@ -20,6 +20,12 @@ in order tells the whole story of what was hidden and shown again.
 The row is scoped like every other memory (``app_id`` / ``project_id`` /
 ``owner_id``) and keyed by what the forget addressed — an ``image`` hash or a
 ``session`` id — so an undo finds exactly the forget it is undoing.
+
+``message_forget`` is the per-message half of a forget inside a group
+(docs/group-memory.md, sections 6.2 and 9.4): one row per message a forget
+names, which every reader of a segment consults to skip it. The memcell
+payload keeps the message, so an undo -- which stamps the rows -- needs no
+copy of it.
 """
 
 from __future__ import annotations
@@ -87,3 +93,39 @@ class ForgetLog(BaseTable, table=True):
     undone_at: UtcDatetime | None = Field(default=None, sa_type=UtcDateTimeColumn)
     """When an undo reversed this forget. Set once; a second undo of the same
     forget is a no-op rather than a second restoration."""
+
+    requested_by: str | None = None
+    """Who asked for a group forget (the asker); ``NULL`` for a personal one.
+    Added after the first release (``schema._ADDED_COLUMNS``)."""
+
+    undo_json: str | None = None
+    """What a group forget's undo restores, as JSON: the entries it took out
+    of markdown (their exact text), the entries it wrote, the profile items it
+    removed, the segments it queued. ``NULL`` outside groups. A group forget
+    takes the previous versions out of the files -- what a forgotten message
+    said must be nowhere under the memory root -- so this column is the one
+    place they are kept. Added after the first release."""
+
+
+class MessageForget(BaseTable, table=True):
+    """One message of a session marked forgotten by one forget.
+
+    PK ``(app_id, project_id, session_id, message_id, forget_id)``: the same
+    message forgotten twice (a message forget, then its sender's member
+    forget) has two rows, and it is forgotten while either is live. An undo
+    stamps ``undone_at``; rows are never deleted (docs/group-memory.md,
+    section 6.2).
+
+    ``message_id`` is the id a segment's message carries: the client's
+    ``message_id`` on a group batch that sent one, the generated id otherwise.
+    """
+
+    __tablename__ = "message_forget"  # type: ignore[assignment]
+    __table_args__ = (Index("ix_message_forget_forget", "forget_id"),)
+
+    app_id: str = Field(primary_key=True)
+    project_id: str = Field(primary_key=True)
+    session_id: str = Field(primary_key=True)
+    message_id: str = Field(primary_key=True)
+    forget_id: str = Field(primary_key=True)
+    undone_at: UtcDatetime | None = Field(default=None, sa_type=UtcDateTimeColumn)

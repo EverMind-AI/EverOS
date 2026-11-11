@@ -13,6 +13,7 @@ __all__ = [
     "SqliteForgetLogStore",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
+    "SqliteMessageForgetStore",
     "SqliteReflectionReportStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
@@ -52,6 +53,7 @@ from ._repos import (
     ForgetLogRepo,
     MemcellRepo,
     MemorizeInboxRepo,
+    MessageForgetRepo,
     ReflectionReportRepo,
     SessionCutRepo,
     SessionPurgeRepo,
@@ -632,6 +634,9 @@ class SqliteForgetLogStore:
         entry_ids: tuple[str, ...] = (),
         episode_ids: tuple[tuple[str, str], ...] = (),
         removed_profile_items: tuple[tuple[str, dict[str, object]], ...] = (),
+        requested_by: str | None = None,
+        undo: Mapping[str, Any] | None = None,
+        forget_id: str | None = None,
     ) -> ForgetEntry:
         row = await self._repo.append(
             target_kind=target,
@@ -646,8 +651,18 @@ class SqliteForgetLogStore:
             removed_profile_items=[
                 [bucket, dict(item)] for bucket, item in removed_profile_items
             ],
+            requested_by=requested_by,
+            undo_json=None if undo is None else json.dumps(undo, ensure_ascii=False),
+            forget_id=forget_id,
         )
         return _forget_entry(row)
+
+    async def get(self, forget_id: str) -> ForgetEntry | None:
+        row = await self._repo.get(forget_id)
+        return _forget_entry(row) if row is not None else None
+
+    async def holds_picture(self, image_id: str) -> bool:
+        return await self._repo.holds_picture(image_id)
 
     async def latest_live(
         self,
@@ -671,6 +686,54 @@ class SqliteForgetLogStore:
         return await self._repo.mark_undone(forget_id)
 
 
+class SqliteMessageForgetStore:
+    """Forgotten messages over ``message_forget`` (and the memcell rows' sessions).
+
+    Args:
+        repo: Repository of the ``message_forget`` table.
+    """
+
+    def __init__(self, repo: MessageForgetRepo) -> None:
+        self._repo = repo
+
+    async def record(
+        self, session: SessionKey, message_ids: Collection[str], *, forget_id: str
+    ) -> None:
+        await self._repo.record(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+            message_ids=message_ids,
+            forget_id=forget_id,
+        )
+
+    async def undo(self, forget_id: str) -> int:
+        return await self._repo.undo(forget_id)
+
+    async def forgotten(self, session: SessionKey) -> frozenset[str]:
+        found = await self._repo.live_in_sessions(
+            session.app_id, session.project_id, [session.session_id]
+        )
+        return frozenset(found.get(session.session_id, ()))
+
+    async def forgotten_in_segments(
+        self, memcell_ids: Collection[str]
+    ) -> dict[str, frozenset[str]]:
+        sessions = await self._repo.sessions_of(memcell_ids)
+        by_space: dict[tuple[str, str], set[str]] = {}
+        for app_id, project_id, session_id in sessions.values():
+            by_space.setdefault((app_id, project_id), set()).add(session_id)
+        live: dict[tuple[str, str, str], set[str]] = {}
+        for (app_id, project_id), session_ids in by_space.items():
+            found = await self._repo.live_in_sessions(app_id, project_id, session_ids)
+            for session_id, ids in found.items():
+                live[(app_id, project_id, session_id)] = ids
+        return {
+            memcell_id: frozenset(live.get(key, ()))
+            for memcell_id, key in sessions.items()
+        }
+
+
 def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
     """One stored row as the domain reads it."""
     return ForgetEntry(
@@ -688,4 +751,7 @@ def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
             for bucket, item in json.loads(row.removed_profile_items_json or "[]")
         ),
         undone=row.undone_at is not None,
+        owner_type=row.owner_type,
+        requested_by=row.requested_by,
+        undo=json.loads(row.undo_json) if row.undo_json else None,
     )

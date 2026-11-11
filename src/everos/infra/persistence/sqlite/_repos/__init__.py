@@ -7,6 +7,8 @@ Each is built over the session factory of the application's
 
 from .cluster import ClusterRepo as ClusterRepo
 from .forget_log import ForgetLogRepo as ForgetLogRepo
+from .forget_log import MessageForgetRepo as MessageForgetRepo
+from .forget_log import mint_forget_id as mint_forget_id
 from .group import GroupRosterRepo as GroupRosterRepo
 from .image_original import ImageOriginalRepo as ImageOriginalRepo
 from .knowledge import DocumentListPage as DocumentListPage
@@ -37,10 +39,12 @@ __all__ = [
     "MdChangeStateRepo",
     "MemcellRepo",
     "MemorizeInboxRepo",
+    "MessageForgetRepo",
     "QueueSummary",
     "ReflectionReportRepo",
     "SessionCutRepo",
     "SessionPurgeRepo",
     "TopicUpsertPayload",
     "UnprocessedBufferRepo",
+    "mint_forget_id",
 ]

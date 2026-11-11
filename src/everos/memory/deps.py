@@ -47,6 +47,7 @@ from everos.memory.ports import (
     MemberProfileStore,
     MemcellStore,
     MemorizeInboxStore,
+    MessageForgetStore,
     OwnerDirStore,
     ProfileIndex,
     ProfileStore,
@@ -84,6 +85,7 @@ class Stores:
     member_profile: MemberProfileStore
     scene: SceneStore
     group_profile: GroupProfileStore
+    message_forget: MessageForgetStore
 
 
 @dataclass(frozen=True)

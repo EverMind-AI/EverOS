@@ -49,6 +49,7 @@ from .sqlite import (
     SqliteForgetLogStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
+    SqliteMessageForgetStore,
     SqliteReflectionReportStore,
     SqliteRepos,
     SqliteSessionBufferStore,
@@ -81,6 +82,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         member_profile=MarkdownMemberProfileStore(root),
         scene=MarkdownSceneStore(root),
         group_profile=MarkdownGroupProfileStore(root),
+        message_forget=SqliteMessageForgetStore(sqlite.message_forget),
     )
 
 

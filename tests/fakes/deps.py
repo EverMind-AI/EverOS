@@ -46,6 +46,7 @@ from .stores import (
     InMemoryImageStore,
     InMemoryMemberProfileStore,
     InMemoryMemcellStore,
+    InMemoryMessageForgetStore,
     InMemoryProfileStore,
     InMemoryReflectionReportStore,
     InMemorySceneStore,
@@ -93,6 +94,7 @@ def make_stores(**overrides: Any) -> Stores:
         "member_profile": InMemoryMemberProfileStore(),
         "scene": InMemorySceneStore(),
         "group_profile": InMemoryGroupProfileStore(),
+        "message_forget": InMemoryMessageForgetStore(),
     }
     return Stores(**{**fields, **overrides})
 

@@ -20,12 +20,14 @@ __all__ = [
     "InMemoryImageStore",
     "InMemoryMemberProfileStore",
     "InMemoryMemcellStore",
+    "InMemoryMessageForgetStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
     "InMemorySceneStore",
     "UnusedPort",
 ]
 
+import json
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
@@ -723,9 +725,12 @@ class InMemoryForgetLogStore:
         entry_ids: tuple[str, ...] = (),
         episode_ids: tuple[tuple[str, str], ...] = (),
         removed_profile_items: tuple[tuple[str, dict[str, object]], ...] = (),
+        requested_by: str | None = None,
+        undo: Mapping[str, Any] | None = None,
+        forget_id: str | None = None,
     ) -> ForgetEntry:
         entry = ForgetEntry(
-            forget_id=f"fg_{len(self.entries) + 1:016x}",
+            forget_id=forget_id or f"fg_{len(self.entries) + 1:016x}",
             target=target,
             target_id=target_id,
             owner_id=owner_id,
@@ -733,9 +738,26 @@ class InMemoryForgetLogStore:
             entry_ids=entry_ids,
             episode_ids=episode_ids,
             removed_profile_items=removed_profile_items,
+            owner_type=owner_type,
+            requested_by=requested_by,
+            undo=undo,
         )
         self.entries.append(entry)
         return entry
+
+    async def get(self, forget_id: str) -> ForgetEntry | None:
+        for entry in self.entries:
+            if entry.forget_id == forget_id:
+                return entry
+        return None
+
+    async def holds_picture(self, image_id: str) -> bool:
+        return any(
+            entry.owner_type == "group"
+            and entry.forget_id not in self.undone
+            and f'"image_id": "{image_id}"' in json.dumps(entry.undo or {})
+            for entry in self.entries
+        )
 
     async def latest_live(
         self,
@@ -761,6 +783,48 @@ class InMemoryForgetLogStore:
             return False
         self.undone.add(forget_id)
         return True
+
+
+class InMemoryMessageForgetStore:
+    """Forgotten messages, in memory: ``(session, message_id, forget_id)`` marks.
+
+    ``segments`` maps a memcell id to its session, as the memcell rows do.
+    """
+
+    def __init__(self) -> None:
+        self.marks: list[tuple[SessionKey, str, str]] = []
+        self.undone: set[str] = set()
+        self.segments: dict[str, SessionKey] = {}
+
+    async def record(
+        self, session: SessionKey, message_ids: Collection[str], *, forget_id: str
+    ) -> None:
+        for message_id in dict.fromkeys(message_ids):
+            mark = (session, message_id, forget_id)
+            if mark not in self.marks:
+                self.marks.append(mark)
+
+    async def undo(self, forget_id: str) -> int:
+        if forget_id in self.undone:
+            return 0
+        self.undone.add(forget_id)
+        return sum(1 for _, _, f in self.marks if f == forget_id)
+
+    async def forgotten(self, session: SessionKey) -> frozenset[str]:
+        return frozenset(
+            message_id
+            for key, message_id, forget_id in self.marks
+            if key == session and forget_id not in self.undone
+        )
+
+    async def forgotten_in_segments(
+        self, memcell_ids: Collection[str]
+    ) -> dict[str, frozenset[str]]:
+        return {
+            memcell_id: await self.forgotten(self.segments[memcell_id])
+            for memcell_id in memcell_ids
+            if memcell_id in self.segments
+        }
 
 
 class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):

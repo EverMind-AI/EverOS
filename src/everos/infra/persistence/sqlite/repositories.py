@@ -16,6 +16,7 @@ from ._repos import (
     MdChangeStateRepo,
     MemcellRepo,
     MemorizeInboxRepo,
+    MessageForgetRepo,
     ReflectionReportRepo,
     SessionCutRepo,
     SessionPurgeRepo,
@@ -37,6 +38,7 @@ class SqliteRepos:
     md_change_state: MdChangeStateRepo
     memcell: MemcellRepo
     memorize_inbox: MemorizeInboxRepo
+    message_forget: MessageForgetRepo
     reflection_report: ReflectionReportRepo
     session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
@@ -56,6 +58,7 @@ class SqliteRepos:
             md_change_state=MdChangeStateRepo(factory),
             memcell=MemcellRepo(factory),
             memorize_inbox=MemorizeInboxRepo(factory),
+            message_forget=MessageForgetRepo(factory),
             reflection_report=ReflectionReportRepo(factory),
             session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),
