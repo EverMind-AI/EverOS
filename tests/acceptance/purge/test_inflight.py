@@ -94,24 +94,31 @@ def test_t21_1_trash_is_never_indexed(make_world: Any) -> None:
     assert _lance_rows_with_app(root, ".tmp") == 0
 
 
-def test_t22_1_sync_add_in_flight_is_refused(make_world: Any, purge_proxy: Any) -> None:
+def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) -> None:
+    """A synchronous add of S that entered before T and writes SQLite after it:
+    its boundary call is held while it holds the session lock, so step 7
+    waits for that lock and step 8 deletes what it wrote. Whether the add
+    then answers 409 (its markdown write refused) or 200 (its source was
+    already gone) depends on timing; either way S ends empty."""
     world = make_world("T22.1", EVEROS_PURGE__SETTLE_WAIT_SECONDS="60")
     srv, root = world.srv, world.srv.root
-    token = scope_token("a1", "p1")
-    word = f"{token}late"
+    word = f"{scope_token('a1', 'p1')}late"
     hold = purge_proxy.add(
-        Rule(target="llm", pattern=f'(?=.*"_EpisodeReply")(?=.*{word})', mode="hold")
+        Rule(target="llm", pattern=f'(?=.*"_BatchReply")(?=.*{word})', mode="hold")
     )
     responses: dict[str, httpx.Response] = {}
 
-    def add_and_flush() -> None:
-        body = {"session_id": "late", **WHERE}
+    def add() -> None:
         responses["add"] = srv.post(
-            "/memory/add", {**body, "messages": chat("u1", word, assistant=AGENT)}
+            "/memory/add",
+            {
+                "session_id": "late",
+                **WHERE,
+                "messages": chat("u1", word, assistant=AGENT),
+            },
         )
-        responses["flush"] = srv.post("/memory/flush", body)
 
-    client = threading.Thread(target=add_and_flush)
+    client = threading.Thread(target=add)
     client.start()
     assert purge_proxy.wait_held("llm", timeout=60)
     job_id, _ = purge(srv, **S)
@@ -124,8 +131,7 @@ def test_t22_1_sync_add_in_flight_is_refused(make_world: Any, purge_proxy: Any) 
         "responses", {k: (r.status_code, r.text[:400]) for k, r in responses.items()}
     )
     world.ev.json("job", job)
-    refused = [r for r in responses.values() if r.status_code == 409]
-    assert refused and refused[0].json()["error"]["code"] == "PURGE_IN_PROGRESS"
+    assert job["status"] == "succeeded", job
     counts = scope_counts(root, "a1", "p1")
     for key in (
         "sqlite.memcell",
@@ -138,7 +144,8 @@ def test_t22_1_sync_add_in_flight_is_refused(make_world: Any, purge_proxy: Any) 
     world.ev.json(
         "sqlite_deleted", {"first_round": first_sqlite, "final": final_sqlite}
     )
-    assert final_sqlite >= first_sqlite
+    assert final_sqlite > first_sqlite  # step 8 deleted what the add wrote
+    assert responses["add"].status_code in (200, 409), responses["add"].text
 
 
 def test_t23_1_projection_in_flight_is_cleared(
