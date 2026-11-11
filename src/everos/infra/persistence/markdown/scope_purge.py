@@ -33,7 +33,7 @@ from everos.memory.ports import Scope
 
 from ._base import MarkdownReader
 from ._mds import AgentSkillFrontmatter, UserProfileFrontmatter
-from .owner_dir import MarkdownOwnerDirStore
+from .owner_dir import MOVED_DIR, MarkdownOwnerDirStore
 
 logger = get_logger(__name__)
 
@@ -142,7 +142,7 @@ class MarkdownScopePurger:
         """Put today's counters back from this job's trash and the scope's
         ``/delete`` trash folders; owners restored."""
         owners: list[tuple[Scope, Path]] = [
-            (owner, trash / "owner") for trash, owner in self._delete_trash_of(scope)
+            (owner, trash / MOVED_DIR) for trash, owner in self._delete_trash_of(scope)
         ]
         trash = self._trash(job_id)
         for app in _children(trash):

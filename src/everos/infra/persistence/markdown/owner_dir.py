@@ -47,7 +47,8 @@ logger = get_logger(__name__)
 
 _TRASH_PREFIX = "delete-"
 _MANIFEST = "scope.json"
-_MOVED = "owner"
+MOVED_DIR = "owner"
+"""Name of the owner directory inside a ``/delete`` trash folder."""
 
 
 class MarkdownOwnerDirStore:
@@ -84,7 +85,7 @@ class MarkdownOwnerDirStore:
                 if held == scope and t not in self._emptying
             ]
             for earlier in moved:
-                await self._keep_today_counters(scope, earlier / _MOVED)
+                await self._keep_today_counters(scope, earlier / MOVED_DIR)
             if await anyio.Path(owner_dir).is_dir():
                 await self._move(scope, owner_dir, trash)
                 moved.append(trash)
@@ -108,15 +109,15 @@ class MarkdownOwnerDirStore:
             ),
             encoding="utf-8",
         )
-        await anyio.Path(owner_dir).rename(trash / _MOVED)
+        await anyio.Path(owner_dir).rename(trash / MOVED_DIR)
         await afailpoint("delete_owner.after_rename")
-        await self._keep_today_counters(scope, trash / _MOVED)
+        await self._keep_today_counters(scope, trash / MOVED_DIR)
         await afailpoint("delete_owner.after_restore")
 
     async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
         """Inventory the trash folders, then remove them."""
         try:
-            parts = [await self._inventory(scope, t / _MOVED) for t in moved]
+            parts = [await self._inventory(scope, t / MOVED_DIR) for t in moved]
             for trash in moved:
                 await anyio.to_thread.run_sync(shutil.rmtree, trash)
         finally:
@@ -139,7 +140,7 @@ class MarkdownOwnerDirStore:
                 scope: Scope | None = Scope(**fields)
             except (OSError, ValueError, TypeError):
                 scope = None  # died before the manifest was written: nothing moved
-            found.append((trash, scope if (trash / _MOVED).is_dir() else None))
+            found.append((trash, scope if (trash / MOVED_DIR).is_dir() else None))
         return found
 
     async def sweep_trash(self, *, skip: Callable[[Scope], bool] | None = None) -> int:
@@ -149,7 +150,7 @@ class MarkdownOwnerDirStore:
                 continue  # a running purge owns this one (it restores, then removes)
             if scope is not None:
                 async with LOCKS.hold("owner", owner_lock(scope)):
-                    await self._keep_today_counters(scope, trash / _MOVED)
+                    await self._keep_today_counters(scope, trash / MOVED_DIR)
             try:
                 await anyio.to_thread.run_sync(shutil.rmtree, trash)
             except OSError as exc:
