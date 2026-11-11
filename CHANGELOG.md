@@ -139,6 +139,20 @@ machinery that keeps a deleted memory from coming back.
     `GET /api/v2/projects/{project_id}/profile` read them. A project's
     knowledge base is read by its members only once the project has groups
     (the knowledge reads take `asker_id`).
+- **A member's fact that changes keeps its earlier value**
+  ([docs/group-memory.md](docs/group-memory.md), section 7.4). When the
+  profile operator's UPDATE rewrites a member-in-group profile fact
+  (`explicit_info`) by its index, the new item names the item it replaced
+  (`supersedes`) and when (`since`, the end of the update's span), and the
+  old item's history entry names it back (`superseded_by`). Search
+  (`include_profile`) and get (`memory_type: member_profile`) show such an
+  item with `since` and `previous` (at most two replaced values, newest
+  first, each with `description` and `until`), cut to the asker's windows. A
+  replaced value a forget took out is never shown, and a forget by record id
+  now reaches a replaced value. COMPACT, REGROUP and dedupe rewrites, and
+  rewritten implicit traits, are not linked. No extra model call and no
+  prompt change: the link is the `item_id` everalgo keeps on the item an
+  UPDATE op patches. The one-to-one user profile is unchanged.
 - **Two recoveries for a failed multi-round decider round**, both on by
   default. Each acts only on a round that would otherwise fall back, so a
   round that fits the window and parses is sent and recorded as before. Set

@@ -33,6 +33,11 @@ group's segments are.
   pending segment of every member at once and saturated the pool.
 - **Sources.** Every new or rewritten item records the segments it was read
   from and their span; items the update dropped move to the history.
+- **Versions.** A fact the UPDATE rewrote by its own index becomes a new
+  value of it: the new item names the old one (``supersedes``) and the end of
+  this update's span (``since``), and the old one's history entry names the
+  new one (``superseded_by``). The history keeps the values a current item
+  still shows as replaced when older entries drop off.
 - **Language.** A stored ``primary_language`` wins, as for ``user.md``. Until
   one is stored, an update that a segment's event runs is told that event's
   language -- the conversation's, resolved in code by the group pipeline --
@@ -55,7 +60,7 @@ from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import (
-    HISTORY_LIMIT,
+    bounded_history,
     with_provenance,
     wrote_in,
 )
@@ -215,11 +220,12 @@ async def _update(
         segments=len(segments),
         mode="UPDATE" if old is not None else "INIT",
         replaced=len(replaced),
+        superseded=sum(1 for entry in replaced if "superseded_by" in entry),
     )
     return done.model_copy(
         update={
             "profile": stamped,
-            "history": [*replaced, *profile.history][:HISTORY_LIMIT],
+            "history": bounded_history(replaced, profile.history, stamped),
         }
     )
 

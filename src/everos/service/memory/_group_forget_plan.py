@@ -188,7 +188,8 @@ class MemberEdit:
 
     Attributes:
         member_id: The member.
-        forgotten: Item ids forgotten (all their sources are).
+        forgotten: Item ids forgotten (all their sources are), and the
+            replaced values a record forget names.
         stale: Item ids that go and are written again from ``queue``.
         history: Positions in the document's history (replaced items) of the
             entries that go: they may say what was forgotten as well.
@@ -593,14 +594,18 @@ class ForgetPlanner:
     async def _item_owners(
         self, scope: Scope, item_ids: Collection[str]
     ) -> dict[str, str]:
-        """``item_id -> member_id`` of the member-profile items named."""
+        """``item_id -> member_id`` of the member-profile items named.
+
+        A replaced value counts: a read shows it under the item that replaced
+        it (section 7.4), so it is forgotten by its id like a current item.
+        """
         owners: dict[str, str] = {}
         for member_id in await self._stores.member_profile.members(scope):
             held = await self._stores.member_profile.read(scope, member_id)
             if held is None:
                 continue
-            for item in _items(held):
-                item_id = (item.model_extra or {}).get("item_id")
+            for extra in (*(i.model_extra or {} for i in _items(held)), *held.history):
+                item_id = extra.get("item_id")
                 if item_id in item_ids:
                     owners[str(item_id)] = member_id
         return owners
@@ -786,12 +791,11 @@ def member_edit(
     for position, old in enumerate(held.history):
         sources = {str(s) for s in old.get("source_memcell_ids") or []}
         images = {str(i) for i in old.get(profile_delta.SOURCE_IMAGE_KEYS) or []}
-        if (
-            sources & set(readable)
-            or (images and images <= pictures)
-            or (old.get("item_id") and old.get("item_id") in record_items)
-        ):
+        named = bool(old.get("item_id")) and old.get("item_id") in record_items
+        if sources & set(readable) or (images and images <= pictures) or named:
             edit.history.append(position)
+        if named:  # a replaced value a read listed, forgotten by its id
+            edit.forgotten.append(str(old["item_id"]))
     edit.queue = [m for m in dict.fromkeys(queue) if m not in held.pending_memcell_ids]
     return edit
 

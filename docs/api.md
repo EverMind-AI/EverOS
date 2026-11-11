@@ -1516,8 +1516,13 @@ asker's member-in-group profile and those of up to three members the query
 names by roster name or alias, in each group:
 `{owner_type: "group", group_id, member_id, profile_data}`. Items whose
 sources lie outside the asker's windows are left out, and so is the summary
-then. A personal profile is never attached. The multi-round search starts
-from `"<display name>: <question>"`.
+then. An item that replaced earlier values of the same fact carries `since`
+(epoch ms), `supersedes` and `previous`: the values it replaced, newest
+first, at most two, each `{item_id, description, until, source_start,
+source_end}`. A replaced value outside the asker's windows, or forgotten, is
+not listed, and an item left with none carries none of the three
+([group-memory.md](group-memory.md), section 7.4). A personal profile is never
+attached. The multi-round search starts from `"<display name>: <question>"`.
 
 **Agent memory in a group.** An agent case learned from a group session
 carries `source_group_id`. `/memory/search` and `/memory/get` with `agent_id`

@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -455,6 +455,22 @@ are the group segments it was read from and ``source_start`` /
 ``source_end`` (epoch ms) their span, which a read compares with the asker's
 membership windows (docs/group-memory.md, section 9.1)."""
 
+MEMBER_VERSION_KEYS: tuple[str, ...] = ("supersedes", "since")
+"""The keys a member-profile fact carries when it is a new value of another.
+
+``supersedes`` is the ``item_id`` of the ``explicit_info`` item an update
+rewrote into this one and ``since`` the epoch ms of that update; the replaced
+item's ``history`` entry names this one in ``superseded_by``
+(docs/group-memory.md, 7.4)."""
+
+MEMBER_PREVIOUS_KEY = "previous"
+"""The key under which a read of a member profile lists the values an item
+replaced, newest first: ``item_id``, ``description``, ``until`` (epoch ms)
+and the old item's ``source_start`` / ``source_end`` each."""
+
+MEMBER_PREVIOUS_LIMIT = 2
+"""Replaced values a read shows per member-profile item."""
+
 
 class MemberProfile(BaseModel):
     """One member's profile inside one group (docs/group-memory.md, 7.4, D6).
@@ -462,7 +478,8 @@ class MemberProfile(BaseModel):
     ``profile`` is the profile operator's document about ``member_id``, read
     only from this group's segments in which the member spoke; it never holds
     the member's personal profile (``users/<m>/user.md``) or another group's.
-    Its items carry :data:`MEMBER_ITEM_KEYS` as extra keys.
+    Its items carry :data:`MEMBER_ITEM_KEYS` as extra keys, and
+    :data:`MEMBER_VERSION_KEYS` when they replaced an item.
 
     Attributes:
         group_id: The group.
@@ -470,8 +487,9 @@ class MemberProfile(BaseModel):
         profile: The document; ``profile.owner_id`` is ``member_id``.
         pending_memcell_ids: Segments the member spoke in that no update has
             read yet (the ``[groups] member_profile_every`` throttle).
-        history: Items a later update replaced or dropped, each with the
-            ``replaced_at`` epoch ms of that update.
+        history: Items a later update replaced or dropped, newest first, each
+            with the ``replaced_at`` epoch ms of that update and, when a new
+            value replaced it, that item's id in ``superseded_by``.
     """
 
     group_id: str
@@ -479,6 +497,77 @@ class MemberProfile(BaseModel):
     profile: Profile
     pending_memcell_ids: list[str] = Field(default_factory=list)
     history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def replaced_chains(
+    items: Sequence[Mapping[str, Any]],
+    history: Sequence[object],
+    *,
+    limit: int = MEMBER_PREVIOUS_LIMIT,
+) -> list[list[Mapping[str, Any]]]:
+    """For each member-profile item, the history entries of the values it replaced.
+
+    Newest first, at most ``limit``: the entry its ``supersedes`` names, then
+    the one that entry names, and so on. A link is followed only to an entry
+    that names the newer item back (``superseded_by``) and records when it was
+    replaced; the chain stops at the first link that does not hold, so an
+    entry a forget removed ends it.
+    """
+    replaced: dict[str, Mapping[str, Any]] = {}
+    for entry in history:  # newest first: the first entry of an id is its last
+        if isinstance(entry, Mapping) and isinstance(entry.get("item_id"), str):
+            replaced.setdefault(entry["item_id"], entry)
+    chains: list[list[Mapping[str, Any]]] = []
+    for item in items:
+        chain: list[Mapping[str, Any]] = []
+        newer, link = item.get("item_id"), item.get("supersedes")
+        while len(chain) < limit and isinstance(link, str) and link in replaced:
+            entry = replaced[link]
+            if entry.get("superseded_by") != newer or not isinstance(
+                entry.get("replaced_at"), int
+            ):
+                break
+            if any(e is entry for e in chain):
+                break
+            chain.append(entry)
+            newer, link = link, entry.get("supersedes")
+        chains.append(chain)
+    return chains
+
+
+def with_previous_values(
+    items: Sequence[object],
+    history: Sequence[object],
+    *,
+    limit: int = MEMBER_PREVIOUS_LIMIT,
+) -> list[object]:
+    """Member-profile items as a read shows them, each with the values it replaced.
+
+    An item that replaced others gains :data:`MEMBER_PREVIOUS_KEY`, read from
+    ``history`` through :func:`replaced_chains`; every other item, and
+    anything that is not an item, is returned as it is. What a forget took out
+    of ``history`` is no longer there to show.
+    """
+    mappings = [item if isinstance(item, Mapping) else {} for item in items]
+    shown: list[object] = []
+    for item, chain in zip(
+        items, replaced_chains(mappings, history, limit=limit), strict=True
+    ):
+        if not chain or not isinstance(item, Mapping):
+            shown.append(item)
+            continue
+        previous = [
+            {
+                "item_id": entry["item_id"],
+                "description": entry.get("description"),
+                "until": entry["replaced_at"],
+                "source_start": entry.get("source_start"),
+                "source_end": entry.get("source_end"),
+            }
+            for entry in chain
+        ]
+        shown.append({**item, MEMBER_PREVIOUS_KEY: previous})
+    return shown
 
 
 FORGOTTEN_MARK = "forgotten"
@@ -1087,6 +1176,9 @@ __all__ = [
     "FORGOTTEN_MARK",
     "MANAGER_ROLES",
     "MEMBER_ITEM_KEYS",
+    "MEMBER_PREVIOUS_KEY",
+    "MEMBER_PREVIOUS_LIMIT",
+    "MEMBER_VERSION_KEYS",
     "AccessRole",
     "AgentCase",
     "AgentSkill",
@@ -1128,4 +1220,6 @@ __all__ = [
     "TopicStatus",
     "fold_roster",
     "mint_cluster_id",
+    "replaced_chains",
+    "with_previous_values",
 ]
