@@ -47,7 +47,7 @@ from everos.memory.models import (
     Profile,
     Scene,
 )
-from everos.memory.ports import NoSourceCheck, Scope, SessionKey
+from everos.memory.ports import NoSourceCheck, Scope, SessionKey, all_of, eq
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import GetRequest, SearchRequest
 from tests.fakes import make_application
@@ -55,7 +55,6 @@ from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
 NOT_YET: dict[int, str] = {
     6: "history route: not built yet (2.0 history); reads go through visible()",
-    8: "group forget / undo / revise / delete: refused with 422 until Step 2",
     9: "knowledge reads by project members: Step 2 (task 17)",
     13: "MCP: a separate package (everos-mcp) forwarding the HTTP API",
 }
@@ -332,18 +331,165 @@ async def test_picture_bytes_follow_the_windows(
         assert (error["code"], error["message"]) == (absent["code"], absent["message"])
 
 
-async def test_group_forget_and_delete_are_refused(fixture: _Fixture) -> None:
-    """Row 8, until Step 2: no partial forget can run."""
+def _forget_body(asker: str | None, target: dict[str, Any], **extra: Any) -> Any:
+    body = {"project_id": PROJECT, "group_id": "trip", "target": target, **extra}
+    if asker is not None:
+        body["asker_id"] = asker
+    return body
+
+
+async def test_group_forget_undo_revise_delete_are_authorised(
+    fixture: _Fixture,
+) -> None:
+    """Row 8: authorise, then act on the group's own memory only."""
+    client = fixture.client
+    episode = await _record_id(fixture.world, ALPHA)
+    record = {"kind": "record", "record_ids": [episode]}
+    # A stranger and a former member are refused before anything is read; a
+    # member may not forget what rests on another member's messages.
+    for asker in ("u_zoe", "u_betty", "u_dan", None):
+        refused = await client.post(
+            "/api/v2/memory/forget", json=_forget_body(asker, record, dry_run=True)
+        )
+        assert refused.status_code == (422 if asker is None else 403), refused.text
+    # A group delete is the owner's or an admin's; a plain delete of a group
+    # session, a group revision and a group conversation forget stay refused.
+    denied = await client.post(
+        "/api/v2/memory/delete",
+        json={
+            "project_id": PROJECT,
+            "group_id": "trip",
+            "session_id": "s_group",
+            "asker_id": "u_dan",
+        },
+    )
+    assert denied.status_code == 403, denied.text
     for path, body in (
         ("/api/v2/memory/delete", {"project_id": PROJECT, "session_id": "s_group"}),
-        ("/api/v2/memory/delete", {"group_id": "trip", "session_id": "s_group"}),
         (
             "/api/v2/memory/forget/session",
             {"user_id": "u_chen", "group_id": "trip", "session_id": "s_group"},
         ),
+        (
+            "/api/v2/memory/images/revise",
+            {
+                "user_id": "u_chen",
+                "group_id": "trip",
+                "image_id": fixture.picture,
+                "description": "x",
+            },
+        ),
     ):
-        refused = await fixture.client.post(path, json=body)
+        refused = await client.post(path, json=body)
         assert refused.status_code == 422, (path, refused.text)
+    # The owner forgets; the undo needs the same authorisation.
+    done = await client.post(
+        "/api/v2/memory/forget", json=_forget_body("u_chen", record)
+    )
+    assert done.status_code == 200, done.text
+    forget_id = done.json()["data"]["forget_id"]
+    undo = {"project_id": PROJECT, "group_id": "trip", "forget_id": forget_id}
+    for asker, status in (("u_dan", 403), ("u_zoe", 403), ("u_chen", 200)):
+        answer = await client.post(
+            "/api/v2/memory/forget/undo", json={**undo, "asker_id": asker}
+        )
+        assert answer.status_code == status, (asker, answer.text)
+    missing = await client.post(
+        "/api/v2/memory/forget/undo",
+        json={**undo, "asker_id": "u_chen", "forget_id": "fg_" + "0" * 16},
+    )
+    assert missing.status_code == 404
+
+
+async def _record_id(world: GroupWorld, text: str) -> str:
+    """The row id of the group episode that says ``text``."""
+    response = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id="u_chen",
+            memory_type="episode",
+            page_size=100,
+        )
+    )
+    return next(e.id for e in response.data.episodes if e.episode == text)
+
+
+async def _everything_read_by(fixture: _Fixture, asker: str) -> str:
+    """Every read path's answer to ``asker``, in one blob."""
+    world = fixture.world
+    blobs = []
+    for method in ("keyword", "vector", "hybrid", "llm_multiround"):
+        response = await world.memory.search(
+            _search(method, group_id="trip", asker_id=asker).model_copy(
+                update={"filters": None}
+            )
+        )
+        blobs.append(_everything_text(response))
+    blobs.append("\n".join(fixture.decider.prompts))
+    for memory_type, extra in (
+        ("episode", {}),
+        ("image_memory", {}),
+        ("scene", {}),
+        ("group_profile", {"include_superseded": True}),
+        ("member_profile", {"member_id": "u_chen"}),
+    ):
+        listed = await world.memory.get(
+            GetRequest(
+                app_id=APP,
+                project_id=PROJECT,
+                group_id="trip",
+                asker_id=asker,
+                memory_type=memory_type,
+                page_size=100,
+                **extra,
+            )
+        )
+        blobs.append(json.dumps(listed.model_dump(mode="json")))
+    return "\n".join(blobs)
+
+
+@pytest.mark.parametrize("kind", ["episode", "picture", "group_profile"])
+async def test_a_forgotten_record_is_absent_for_every_asker(
+    fixture: _Fixture, kind: str
+) -> None:
+    """Row 8: a forgotten record leaves search, get, group-profile reads and
+    picture bytes, for every asker."""
+    world = fixture.world
+    await _seed_profile_items(world)
+    if kind == "episode":
+        text, record = CHARLIE, await _record_id(world, CHARLIE)
+    elif kind == "picture":
+        hits = await world.deps.indexes.image_memory.find(
+            all_of(eq("image_id", fixture.picture)), limit=10
+        )
+        text, record = PICTURE, hits[0].stored.ref.id
+    else:
+        items = await world.stores.group_profile.items(world.scope("trip"))
+        found = next(i for i in items if i.item.statement == "charlie decision marker")
+        text, record = "charlie decision marker", found.ref.id
+    seen_before = await _everything_read_by(fixture, "u_chen")
+    assert text in seen_before
+
+    done = await fixture.client.post(
+        "/api/v2/memory/forget",
+        json=_forget_body("u_chen", {"kind": "record", "record_ids": [record]}),
+    )
+    assert done.status_code == 200, done.text
+    await world.project()
+
+    for asker in ("u_chen", "u_evan", "u_dan"):
+        fixture.decider.prompts.clear()
+        assert text not in await _everything_read_by(fixture, asker), (asker, kind)
+    if kind != "picture":
+        return
+    for asker in ("u_chen", "u_dan", "u_evan", "u_zoe", None):
+        params = {"asker_id": asker} if asker else {}
+        picture = await fixture.client.get(
+            f"/api/v2/memory/images/{fixture.picture}", params=params
+        )
+        assert picture.status_code == 404, asker
 
 
 def _member_profile(member: str, *items: tuple[str, int, int]) -> MemberProfile:
@@ -642,6 +788,6 @@ async def test_group_profile_items_follow_the_windows(
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:
-    covered = {1, 2, 3, 4, 5, 7, 10, 11, 12}
+    covered = {1, 2, 3, 4, 5, 7, 8, 10, 11, 12}
     assert covered | set(NOT_YET) == set(range(1, 14))
     assert not covered & set(NOT_YET)

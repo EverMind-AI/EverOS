@@ -1,5 +1,9 @@
 """The picture routes: forget, its undo, a revision, and the two read-only reads.
 
+``/forget`` and ``/forget/undo`` also take a group's body (``group_id``): a
+forget inside the group of messages, a member, a session, records or a
+picture (docs/group-memory.md, section 5.5), and its undo by ``forget_id``.
+
 Forgetting is its own endpoint rather than a mode of ``/memory/delete``: a
 delete removes memories, while a forget marks a picture and everything written
 about it, and leaves every version on disk. Collapsing the two would make it
@@ -27,19 +31,25 @@ from everos.entrypoints.api.dependencies import (
 )
 from everos.entrypoints.api.schemas import (
     ErrorResponse,
-    ForgetImageRequest,
     ForgetImageResponseData,
+    ForgetRequest,
     ForgetSessionRequest,
     ForgetSessionResponseData,
+    ForgottenMessageData,
     ForgottenPictureData,
+    GroupForgetRequest,
+    GroupForgetResponseData,
+    GroupUndoForgetRequest,
+    GroupUndoForgetResponseData,
     ReviseImageMemoryRequest,
     ReviseImageMemoryResponseData,
     SuccessEnvelope,
-    UndoForgetRequest,
     UndoForgetResponseData,
     UndoForgetSessionRequest,
     UndoForgetSessionResponseData,
+    UndoRequest,
 )
+from everos.service import GroupForgetResult, GroupForgetTarget, GroupUndoResult
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -54,21 +64,60 @@ _MEDIA_TYPES: dict[str, str] = {
 @router.post(
     "/forget",
     responses={
-        404: {"model": ErrorResponse, "description": "No such picture for this user"},
+        403: {
+            "model": ErrorResponse,
+            "description": "Group forget: not a current member, or not allowed "
+            "this target",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "No such picture for this user; or the group holds no "
+            "such message, session, member, record or picture",
+        },
         500: {
             "model": ErrorResponse,
             "description": "Forget incomplete; send the same request again",
         },
+        503: {
+            "model": ErrorResponse,
+            "description": "Group forget: a session it touches is busy; nothing "
+            "was forgotten, retry later",
+        },
     },
 )
 async def forget_image(
-    req: ForgetImageRequest, app: ApplicationDep, request_id: RequestIdDep
-) -> SuccessEnvelope[ForgetImageResponseData]:
-    """Forget one picture: its memories, its vector, and what referred to it.
+    req: ForgetRequest,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
+) -> SuccessEnvelope[ForgetImageResponseData | GroupForgetResponseData]:
+    """Forget one picture of a user, or a target inside a group.
 
-    Returns what was touched, so a caller can see that the picture had a
+    A body naming ``user_id`` and ``image_id`` forgets the user's picture: its
+    memories, its vector, and what referred to it. A body naming ``group_id``
+    forgets inside the group (docs/group-memory.md, section 5.5): messages, a
+    member, a session, records or a picture, propagated to everything derived
+    from them; ``dry_run`` reports what it would touch, and the returned
+    ``forget_id`` undoes it.
+
+    Returns what was touched, so a caller can see that the target had a
     memory at all instead of assuming success from an empty 200.
     """
+    if isinstance(req, GroupForgetRequest):
+        forgotten = await app.memory.forget_in_group(
+            app_id=req.app_id,
+            project_id=req.project_id,
+            group_id=req.group_id,
+            asker_id=req.asker_id,
+            target=_target(req),
+            reason=req.reason,
+            dry_run=req.dry_run,
+            asserted_asker=asker_header,
+        )
+        return SuccessEnvelope(
+            request_id=request_id,
+            data=_group_forget_data(req.group_id, forgotten),
+        )
     result = await app.memory.forget_image(
         app_id=req.app_id,
         project_id=req.project_id,
@@ -195,6 +244,16 @@ async def revise_image_memory(
 @router.post(
     "/forget/undo",
     responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "Group undo: not allowed the forget it reverses",
+        },
+        404: {"model": ErrorResponse, "description": "No such group forget"},
+        409: {
+            "model": ErrorResponse,
+            "description": "Group undo: a later forget rewrote what this one "
+            "wrote; undo that one first",
+        },
         500: {
             "model": ErrorResponse,
             "description": "Undo incomplete; send the same request again",
@@ -202,13 +261,31 @@ async def revise_image_memory(
     },
 )
 async def undo_forget_image(
-    req: UndoForgetRequest, app: ApplicationDep, request_id: RequestIdDep
-) -> SuccessEnvelope[UndoForgetResponseData]:
-    """Undo the newest forget of one picture for one user.
+    req: UndoRequest,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
+) -> SuccessEnvelope[UndoForgetResponseData | GroupUndoForgetResponseData]:
+    """Undo the newest forget of one picture for one user, or a group forget.
 
     ``applied: false`` means there was nothing to undo (never forgotten, or
     already undone); the reported occurrences are still the current state.
+    A body naming ``group_id`` undoes the group forget ``forget_id``, with the
+    forget's own authorisation; 409 when a later forget rewrote what it wrote
+    (undo that one first).
     """
+    if isinstance(req, GroupUndoForgetRequest):
+        undone = await app.memory.undo_group_forget(
+            app_id=req.app_id,
+            project_id=req.project_id,
+            group_id=req.group_id,
+            asker_id=req.asker_id,
+            forget_id=req.forget_id,
+            asserted_asker=asker_header,
+        )
+        return SuccessEnvelope(
+            request_id=request_id, data=_group_undo_data(req.group_id, undone)
+        )
     result = await app.memory.undo_forget_image(
         app_id=req.app_id,
         project_id=req.project_id,
@@ -279,3 +356,70 @@ async def get_image(
         raise HTTPException(status_code=404, detail="no such picture") from exc
     media_type = _MEDIA_TYPES.get(info.media_type if info else "jpeg", "image/jpeg")
     return Response(content=data, media_type=media_type)
+
+
+def _target(req: GroupForgetRequest) -> GroupForgetTarget:
+    """The request's target as the service takes it."""
+    data = req.target.model_dump()
+    return GroupForgetTarget(
+        kind=data["kind"],
+        session_id=data.get("session_id"),
+        message_ids=tuple(data.get("message_ids") or ()),
+        member_id=data.get("member_id"),
+        record_ids=tuple(data.get("record_ids") or ()),
+        image_id=data.get("image_id"),
+    )
+
+
+def _group_forget_data(
+    group_id: str, result: GroupForgetResult
+) -> GroupForgetResponseData:
+    return GroupForgetResponseData(
+        forget_id=result.forget_id,
+        dry_run=result.dry_run,
+        group_id=group_id,
+        target={
+            key: value
+            for key, value in vars(result.target).items()
+            if value not in (None, ())
+        },
+        messages=[
+            ForgottenMessageData(session_id=session_id, message_id=message_id)
+            for session_id, message_id in result.messages
+        ],
+        episodes=list(result.episodes),
+        rewritten=result.rewritten,
+        new_episodes=list(result.new_episodes),
+        image_memories=list(result.image_memories),
+        images=list(result.images),
+        scenes=list(result.scenes),
+        rewritten_scenes=result.rewritten_scenes,
+        new_scenes=list(result.new_scenes),
+        member_profiles=list(result.member_profiles),
+        member_profile_items=list(result.member_profile_items),
+        stale_member_profile_items=list(result.stale_member_profile_items),
+        group_profile_items=list(result.group_profile_items),
+        stale_group_profile_items=list(result.stale_group_profile_items),
+    )
+
+
+def _group_undo_data(
+    group_id: str, result: GroupUndoResult
+) -> GroupUndoForgetResponseData:
+    return GroupUndoForgetResponseData(
+        forget_id=result.forget_id,
+        applied=result.applied,
+        group_id=group_id,
+        messages=[
+            ForgottenMessageData(session_id=session_id, message_id=message_id)
+            for session_id, message_id in result.messages
+        ],
+        episodes=list(result.episodes),
+        image_memories=list(result.image_memories),
+        images=list(result.images),
+        scenes=list(result.scenes),
+        member_profiles=list(result.member_profiles),
+        member_profile_items=list(result.member_profile_items),
+        group_profile_items=list(result.group_profile_items),
+        withdrawn=list(result.withdrawn),
+    )

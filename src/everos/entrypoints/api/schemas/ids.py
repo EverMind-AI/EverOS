@@ -93,19 +93,22 @@ ProjectScopeId = Annotated[
 
 
 def refuse_group_scope(value: str | None) -> str | None:
-    """A group-scoped forget, undo, revision or delete is refused (422).
+    """A ``group_id`` on a route that takes no group scope is refused (422).
 
-    Inside a group these travel along sources (docs/group-memory.md, section
-    9.4) and arrive with Step 2; until then the request is refused whole, so
-    no partial forget can run (section 5.5).
+    Inside a group a forget travels along sources (docs/group-memory.md,
+    section 9.4): it goes through ``POST /memory/forget`` with ``group_id``,
+    ``asker_id`` and a target (section 5.5), and so does a conversation of
+    the group. A picture memory of a group is not revised in place; it is
+    forgotten. The request is refused whole, so nothing partial runs.
     """
     if value is not None:
         raise ValueError(
-            "group-scoped forget and delete are not available yet "
+            "this route takes no group scope; forget inside a group with "
+            "POST /memory/forget (group_id, asker_id, target) "
             "(docs/group-memory.md, section 5.5)"
         )
     return value
 
 
 GroupScopeRefused = Annotated[str | None, AfterValidator(refuse_group_scope)]
-"""The ``group_id`` field of the forget / delete requests: always refused."""
+"""The ``group_id`` field of a route with no group scope: always refused."""

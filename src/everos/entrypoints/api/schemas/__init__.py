@@ -11,6 +11,7 @@ from .delete import DeleteByIdsRequest as DeleteByIdsRequest
 from .delete import DeleteByIdsResponseData as DeleteByIdsResponseData
 from .delete import DeleteRequest as DeleteRequest
 from .delete import DeleteResponseData as DeleteResponseData
+from .delete import GroupDeleteResponseData as GroupDeleteResponseData
 from .envelope import ErrorDetail as ErrorDetail
 from .envelope import ErrorResponse as ErrorResponse
 from .envelope import SuccessEnvelope as SuccessEnvelope
@@ -25,6 +26,13 @@ from .forget import UndoForgetRequest as UndoForgetRequest
 from .forget import UndoForgetResponseData as UndoForgetResponseData
 from .forget import UndoForgetSessionRequest as UndoForgetSessionRequest
 from .forget import UndoForgetSessionResponseData as UndoForgetSessionResponseData
+from .group_forget import ForgetRequest as ForgetRequest
+from .group_forget import ForgottenMessageData as ForgottenMessageData
+from .group_forget import GroupForgetRequest as GroupForgetRequest
+from .group_forget import GroupForgetResponseData as GroupForgetResponseData
+from .group_forget import GroupUndoForgetRequest as GroupUndoForgetRequest
+from .group_forget import GroupUndoForgetResponseData as GroupUndoForgetResponseData
+from .group_forget import UndoRequest as UndoRequest
 from .groups import GroupDTO as GroupDTO
 from .groups import GroupUpsertRequest as GroupUpsertRequest
 from .groups import GroupUpsertResponseData as GroupUpsertResponseData
@@ -92,10 +100,17 @@ __all__ = [
     "FlushResponseData",
     "ForgetImageRequest",
     "ForgetImageResponseData",
+    "ForgetRequest",
     "ForgetSessionRequest",
     "ForgetSessionResponseData",
+    "ForgottenMessageData",
     "ForgottenPictureData",
     "GroupDTO",
+    "GroupDeleteResponseData",
+    "GroupForgetRequest",
+    "GroupForgetResponseData",
+    "GroupUndoForgetRequest",
+    "GroupUndoForgetResponseData",
     "GroupUpsertRequest",
     "GroupUpsertResponseData",
     "HealthCapabilities",
@@ -128,4 +143,5 @@ __all__ = [
     "UndoForgetResponseData",
     "UndoForgetSessionRequest",
     "UndoForgetSessionResponseData",
+    "UndoRequest",
 ]

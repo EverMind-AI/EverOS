@@ -40,7 +40,8 @@ class ForgetImageRequest(BaseModel):
     user_id: PathSafeId = Field(min_length=1, max_length=128)
     group_id: GroupScopeRefused = Field(
         default=None,
-        description="A group-scoped forget; refused with 422 before Step 2.",
+        description="Not taken here: a body that names a group is a group forget "
+        "(group_id, asker_id, target).",
     )
     image_id: str = Field(min_length=64, max_length=64, pattern=_IMAGE_ID)
     reason: str | None = Field(default=None, max_length=500)
@@ -80,7 +81,8 @@ class ForgetSessionRequest(BaseModel):
     user_id: PathSafeId = Field(min_length=1, max_length=128)
     group_id: GroupScopeRefused = Field(
         default=None,
-        description="A group-scoped forget; refused with 422 before Step 2.",
+        description="Refused (422): a conversation of a group is forgotten with "
+        "POST /memory/forget and a session target.",
     )
     session_id: str = Field(min_length=1, max_length=128)
     reason: str | None = Field(default=None, max_length=500)
