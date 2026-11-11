@@ -265,12 +265,20 @@ machinery that keeps a deleted memory from coming back.
   history: at most 8.3K tokens on LoCoMo (17.3K before) and 9.9K on MemEye
   (32.7K). Reading the poster's pictures adds 10% to the update prompt on
   MemEye, $0.042 per 1,000 pictures off-peak. Needs everalgo-user-memory
-  0.9.0rc6.dev6 (a local build until it is published; the pin still names
-  0.9.0rc4).
+  0.9.0rc6.dev6, vendored for the test phase (below).
   `extract_user_profile` now triggers on the pipeline's `EpisodeExtracted`
   with or without an embedding provider and skips a segment an item already
   rests on; the clusters no longer drive it (`trigger_profile_clustering`
   still runs, for Reflection).
+- **everalgo-user-memory is a vendored local build for the test phase.**
+  `pyproject.toml` pins `everalgo-user-memory==0.9.0rc6.dev6` and
+  `[tool.uv.sources]` points it at
+  `vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl`, built
+  from the everalgo branch `feat/profile-two-prompts` at `46b322c` (sha256
+  `9e315019...`; provenance in `vendor/wheels/README.md`), so `uv sync`
+  installs it with no manual step. The other everalgo pins are unchanged.
+  It is replaced by the PyPI release once everalgo publishes; until then
+  `pip install` of this tree cannot resolve it.
 - **The profile reads traits again.** Reading one segment at a time, the
   two-prompt update first wrote almost no trait (9 on LoCoMo conversations
   0-1 where rc5 held 100, 12 on MemEye where it held 44): the rewrite had

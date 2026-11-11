@@ -23,6 +23,8 @@ parts/
 sdist/
 var/
 wheels/
+# ...except the test-phase builds EverOS depends on (vendor/wheels/README.md).
+!vendor/wheels/
 pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/

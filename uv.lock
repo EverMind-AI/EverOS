@@ -566,17 +566,24 @@ wheels = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.9.0rc4"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.0rc6.dev6"
+source = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-boundary" },
     { name = "everalgo-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/64/d70219c424f32e34344aa0e4ad05ed9dc5c55509503b236c259c484db0cf/everalgo_user_memory-0.9.0rc4.tar.gz", hash = "sha256:a89b8fd788dd1186f4632da69469f9c0df47d1069f837ae9b87cf0b67627ef22", size = 227936, upload-time = "2026-10-13T14:35:46.596Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/61/57919df4920e7a91a18458ee993086f903fd4349c7bd1327381879fc76fb/everalgo_user_memory-0.9.0rc4-py3-none-any.whl", hash = "sha256:b5b4d80e4a5fe2ea9812ab9bf143ab46e156a31b148796461218384a1b27b0c0", size = 98424, upload-time = "2026-10-13T14:35:45.589Z" },
+    { filename = "everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl", hash = "sha256:9e3150194751e3ecc8f695dd3e2de66bb21074d85ffa8bb336c6c0f751518d34" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asgiref", specifier = ">=3.0" },
+    { name = "everalgo-boundary", specifier = ">=0.4.0rc1,<2.0.0" },
+    { name = "everalgo-core", specifier = ">=0.6.0rc3,<2.0.0" },
+    { name = "pydantic", specifier = ">=2.7" },
 ]
 
 [[package]]
@@ -661,7 +668,7 @@ requires-dist = [
     { name = "everalgo-knowledge", specifier = "==0.3.0rc2" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = "==0.3.0rc2" },
     { name = "everalgo-rank", specifier = "==0.5.0rc3" },
-    { name = "everalgo-user-memory", specifier = "==0.9.0rc4" },
+    { name = "everalgo-user-memory", path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "jieba", specifier = ">=0.42.1,<1.0" },

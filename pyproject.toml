@@ -99,7 +99,10 @@ dependencies = [
     # one another, so a fresh `pip install everos` would otherwise mix lines
     # the suite has never run together. Pin every one with `==` and raise them
     # together, with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-user-memory==0.9.0rc4",
+    # Test phase: everalgo-user-memory is a local build of the 2.0 profile
+    # (everalgo feat/profile-two-prompts), vendored in vendor/wheels/ and named
+    # in [tool.uv.sources]; it goes back to a PyPI pin once everalgo publishes.
+    "everalgo-user-memory==0.9.0rc6.dev6",
     "everalgo-agent-memory==0.6.0rc3",
     "everalgo-rank==0.5.0rc3",
     "everalgo-knowledge==0.3.0rc2",
@@ -127,6 +130,11 @@ Changelog = "https://github.com/EverMind-AI/EverOS/blob/main/CHANGELOG.md"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# Test phase only (vendor/wheels/README.md): the vendored local build, until
+# everalgo publishes it; uv installs it from this path, pip cannot.
+everalgo-user-memory = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/everos"]
