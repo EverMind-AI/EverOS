@@ -34,6 +34,7 @@ import anyio
 import yaml
 
 from everos.core.observability.logging import get_logger
+from everos.core.purge_marks import ensure_writable
 from everos.infra.persistence.markdown._base.path_safety import sanitize_dirname
 from everos.memory.models import KnowledgeMemory
 
@@ -73,6 +74,7 @@ class KnowledgeWriter:
         """
         root_node, topic_nodes = _split_root_and_topics(memories)
         doc_dir = _resolve_doc_dir(knowledge_dir, root_node)
+        ensure_writable(doc_dir)  # before the old version is removed
 
         # Overwrite: remove existing directory, then recreate.
         await _remove_dir(doc_dir)
