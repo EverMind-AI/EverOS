@@ -211,7 +211,8 @@ machinery that keeps a deleted memory from coming back.
   (`[llm] search_timeout_seconds`, `[decider] full_text` /
   `invalid_reply_retries` / `code_pin`, `[knowledge.search]
   session_lock_timeout_seconds`, `[observability] recall_hit_threshold`,
-  `[search] facts_per_episode` / `vector_strategy`, `[memory] root`; see
+  `[search] facts_per_episode` / `vector_strategy`, `[memory] root`,
+  `[multimodal] max_tokens`, which every benchmark launcher exports; see
   [docs/configuration.md](docs/configuration.md#unknown-keys-are-rejected)).
   Variables that name no section (`EVEROS_ROOT`, `EVEROS_DISABLE_OME`, ...)
   are not checked. No model call.

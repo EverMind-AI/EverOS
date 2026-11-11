@@ -1299,6 +1299,10 @@ IGNORED_KEYS: Mapping[str, str] = {
     "memory.root": (
         "removed in EverOS 1.x: the root is --root, EVEROS_ROOT or ~/.everos"
     ),
+    "multimodal.max_tokens": (
+        "never read: each [multimodal] call sets its own max_tokens; benchmark "
+        "launchers still export EVEROS_MULTIMODAL__MAX_TOKENS"
+    ),
     "observability.recall_hit_threshold": "removed with the search hit verdict",
     "search.facts_per_episode": "removed with atomic facts",
     "search.vector_strategy": "removed in EverOS 1.x with the vector search method",
