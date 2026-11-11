@@ -17,8 +17,9 @@ dissent, roles -- kept by one model call per batch of the group's segments
   one: a forget that left an item stale queues the item's other segments,
   and this update rewrites it from them.
 - **Checks.** Every operation the model returns is verified, and a failing
-  one is dropped and counted by reason (:func:`verify`); items are built from
-  the verified evidence alone.
+  one is dropped and counted by reason (:func:`verify`); a topic or item it
+  names that resolves to nothing drops only the link, also counted; items are
+  built from the verified evidence alone.
 - **A call that yields nothing usable** (an invalid reply, a failed call) is
   not raised -- raising made the scheduler retry at once, and the idle tick,
   which fires on every scan while a group stays idle, call again and again.
@@ -223,6 +224,7 @@ async def _update(deps: MemoryDeps, scope: Scope, pending: list[str]) -> str | N
         proposed=checked.proposed,
         written=len(refs),
         dropped=drop_summary(checked.dropped),
+        links_dropped=drop_summary(checked.links_dropped),
     )
     return None
 

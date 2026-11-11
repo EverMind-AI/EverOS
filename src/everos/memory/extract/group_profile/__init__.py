@@ -25,6 +25,7 @@ from .prompt import build_messages as build_messages
 from .reply import GroupProfileReply as GroupProfileReply
 from .reply import Operation as Operation
 from .verify import DROP_REASONS as DROP_REASONS
+from .verify import LINK_DROP_REASONS as LINK_DROP_REASONS
 from .verify import Verified as Verified
 from .verify import drop_summary as drop_summary
 from .verify import verify as verify
@@ -32,6 +33,7 @@ from .verify import verify as verify
 __all__ = [
     "DROP_REASONS",
     "GROUP_PROFILE_UPDATE",
+    "LINK_DROP_REASONS",
     "MAX_TOPICS",
     "GroupProfileReply",
     "GroupProfileView",

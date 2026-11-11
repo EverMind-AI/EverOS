@@ -18,13 +18,25 @@ any check is dropped -- never repaired -- and counted by reason
   speaker is the message's sender, never the model's say-so;
 * ``unknown_member``: ``assignees`` / ``applies_to`` names someone not in the
   roster, or a role or dissent is given to an assistant;
-* ``unknown_target`` / ``unknown_reference``: the id it updates or
-  supersedes, or the topic / item it refers to, is not one of the rendered
-  current items;
+* ``unknown_target``: the id it updates, supersedes, resolves or retires is
+  not one of the rendered current items (a new topic's label is not one: a
+  topic the reply creates is written as it stands, never updated in the same
+  reply);
 * ``invalid_field``: a value outside its set (a topic status, a role, a
   confidence) or a required text left empty;
 * ``duplicate``: a second operation on the same target in one reply, or a
   role the member already holds.
+
+A new topic's id is minted here, never by the model. A ``topic.new``'s
+``topic_id`` is its label: the reply's other operations name the new topic
+by it, in ``topic_id`` or ``about``, before or after the ``topic.new``.
+
+A link is not a reason to drop an operation. A ``topic_id`` or ``about``
+that names neither a rendered current item nor a topic the reply creates is
+dropped, the operation kept as if the field were empty, and the link counted
+by reason (``everos_group_profile_links_dropped_total``):
+``unknown_reference``, or ``ambiguous_reference`` for a label two new topics
+share.
 
 Speakers and times are copied from the cited messages, and a quote is stored
 as the message's own words; the attribution fields and the span of an item
@@ -33,7 +45,14 @@ come from its verified evidence alone.
 
 from __future__ import annotations
 
-__all__ = ["DROP_REASONS", "Verified", "drop_summary", "mint_topic_id", "verify"]
+__all__ = [
+    "DROP_REASONS",
+    "LINK_DROP_REASONS",
+    "Verified",
+    "drop_summary",
+    "mint_topic_id",
+    "verify",
+]
 
 import uuid
 from collections import Counter
@@ -68,10 +87,10 @@ DROP_REASONS: tuple[str, ...] = (
     "ungrounded_member",
     "unknown_member",
     "unknown_target",
-    "unknown_reference",
     "invalid_field",
     "duplicate",
 )
+LINK_DROP_REASONS: tuple[str, ...] = ("unknown_reference", "ambiguous_reference")
 
 _ops_total = MetricCounter(
     name="group_profile_ops_total",
@@ -82,6 +101,15 @@ _ops_total = MetricCounter(
 _ops_dropped = MetricCounter(
     name="group_profile_ops_dropped_total",
     description="Group-profile update operations dropped by the verifier, by reason.",
+    labelnames=("reason",),
+    namespace="everos",
+)
+_links_dropped = MetricCounter(
+    name="group_profile_links_dropped_total",
+    description=(
+        "Topic or item links the group-profile verifier dropped, by reason; "
+        "the operation naming them was kept without the link."
+    ),
     labelnames=("reason",),
     namespace="everos",
 )
@@ -104,10 +132,12 @@ class Verified:
     Attributes:
         items: The new items, in reply order, ready to append.
         dropped: Dropped operations by reason.
+        links_dropped: Links dropped from kept operations, by reason.
     """
 
     items: list[GroupProfileItem] = field(default_factory=list)
     dropped: Counter[str] = field(default_factory=Counter)
+    links_dropped: Counter[str] = field(default_factory=Counter)
 
     @property
     def proposed(self) -> int:
@@ -157,16 +187,31 @@ def verify(
             profile.decisions if shown_decisions is None else shown_decisions
         ),
     )
-    result = Verified()
-    for operation in operations:
+    # The topic operations first, so that an operation may name a topic its
+    # reply creates whether it comes before or after the topic.new; the items
+    # keep the reply's order.
+    order = sorted(
+        range(len(operations)), key=lambda i: not operations[i].op.startswith("topic.")
+    )
+    outcomes: dict[int, GroupProfileItem | str] = {}
+    for i in order:
         try:
-            result.items.append(checker.check(operation))
+            outcomes[i] = checker.check(operations[i])
         except _DroppedError as drop:
-            result.dropped[drop.reason] += 1
+            outcomes[i] = drop.reason
+    result = Verified(links_dropped=checker.links_dropped)
+    for i in range(len(operations)):
+        outcome = outcomes[i]
+        if isinstance(outcome, str):
+            result.dropped[outcome] += 1
+        else:
+            result.items.append(outcome)
     _ops_total.labels(outcome="kept").inc(len(result.items))
     _ops_total.labels(outcome="dropped").inc(sum(result.dropped.values()))
     for reason, count in result.dropped.items():
         _ops_dropped.labels(reason=reason).inc(count)
+    for reason, count in result.links_dropped.items():
+        _links_dropped.labels(reason=reason).inc(count)
     return result
 
 
@@ -199,6 +244,9 @@ class _Checker:
         self._roles = {r.item_id: r for r in profile.roles if r.item_id}
         self._held = {(r.member_id, r.role) for r in profile.roles}
         self._targets: set[str] = set()
+        # A new topic's label -> its minted id; None for a label two share.
+        self._labels: dict[str, str | None] = {}
+        self.links_dropped: Counter[str] = Counter()
 
     # ── one operation ─────────────────────────────────────────────────
 
@@ -233,7 +281,7 @@ class _Checker:
         if op.op == "topic.new":
             if not op.name.strip():
                 raise _DroppedError("invalid_field")
-            topic_id, old = mint_topic_id(), None
+            topic_id, old = self._mint(op.topic_id), None
         else:
             old = self._topics.get(op.target)
             if old is None:
@@ -270,9 +318,11 @@ class _Checker:
             if old is None:
                 raise _DroppedError("unknown_target")
             self._claim(op.target)
-        topic_id = op.topic_id or (old.topic_id if old else None)
-        if topic_id and topic_id not in self._topics:
-            raise _DroppedError("unknown_reference")
+        # An empty topic_id, or one dropped as a link, keeps a superseded
+        # decision's topic.
+        topic_id = self._link(op.topic_id, self._topics) or (
+            old.topic_id if old else None
+        )
         people = [*op.decided_by, *op.agreed_by, *op.assignees, *op.applies_to]
         return GroupProfileItem(
             **base,  # type: ignore[arg-type]
@@ -300,18 +350,12 @@ class _Checker:
             self._grounded(op.held_by, speakers)
             if any(self._kind_now(m) != "human" for m in op.held_by):
                 raise _DroppedError("unknown_member")
-            if (
-                op.about
-                and op.about not in self._decisions
-                and (op.about not in self._topics)
-            ):
-                raise _DroppedError("unknown_reference")
             return GroupProfileItem(
                 **base,  # type: ignore[arg-type]
                 kind="dissent",
                 statement=op.statement.strip(),
                 held_by=list(dict.fromkeys(op.held_by)),
-                about=op.about or None,
+                about=self._link(op.about, self._decisions, self._topics),
                 subject_ids=list(dict.fromkeys(op.held_by)),
             )
         old = self._dissent.get(op.target)
@@ -411,6 +455,36 @@ class _Checker:
             raise _DroppedError("duplicate")
         self._targets.add(target)
 
+    def _mint(self, label: str) -> str:
+        """A new topic's id, which ``label`` names to the rest of the reply.
+
+        Called once the topic.new has passed every check. A label that is a
+        rendered id stays that id's; a label two new topics share names neither.
+        """
+        topic_id = mint_topic_id()
+        if label and label not in self._topics and label not in self._decisions:
+            self._labels[label] = None if label in self._labels else topic_id
+        return topic_id
+
+    def _link(self, ref: str, *rendered: Mapping[str, GroupProfileItem]) -> str | None:
+        """The id ``ref`` names: a rendered one, or the topic its label names.
+
+        Called last, once the operation has passed every check, so that only a
+        kept operation counts a dropped link. ``None`` when ``ref`` is empty or
+        names nothing; the latter is counted by reason.
+        """
+        if not ref:
+            return None
+        if any(ref in ids for ids in rendered):
+            return ref
+        topic_id = self._labels.get(ref)
+        if topic_id is None:
+            reason = (
+                "ambiguous_reference" if ref in self._labels else "unknown_reference"
+            )
+            self.links_dropped[reason] += 1
+        return topic_id
+
     def _kind(self, message: ChatMessage) -> MemberKind:
         """The sender's roster kind at the message; its role without a roster entry."""
         interval = self._roster.interval_at(message.sender_id, message.timestamp)
@@ -440,5 +514,6 @@ def _origin(kinds: set[MemberKind]) -> Origin | None:
 
 
 def drop_summary(dropped: Mapping[str, int]) -> dict[str, int]:
-    """The drop counts in :data:`DROP_REASONS` order, zeros left out."""
-    return {r: dropped[r] for r in DROP_REASONS if dropped.get(r)}
+    """Either counter of :class:`Verified` in reason order, zeros left out."""
+    reasons = (*DROP_REASONS, *LINK_DROP_REASONS)
+    return {r: dropped[r] for r in reasons if dropped.get(r)}

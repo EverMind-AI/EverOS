@@ -101,6 +101,9 @@ class Operation(StrictOutputModel):
     """``topic.update``: the topic id. ``decision.supersede`` /
     ``dissent.resolve`` / ``role.retire``: the id of the item replaced."""
     topic_id: str = ""
+    """``topic.new``: the new topic's label, by which the reply's other
+    operations name it. ``decision.*``: a listed topic id or a new topic's
+    label."""
     name: str = ""
     summary: str = ""
     status: str = ""

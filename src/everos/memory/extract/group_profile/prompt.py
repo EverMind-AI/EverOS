@@ -15,7 +15,11 @@ One call per batch of segments. It is shown:
   name alone).
 
 It answers with operations (:mod:`.reply`), each citing evidence as
-``(segment, message, quote)``. Code checks every one (:mod:`.verify`).
+``(segment, message, quote)``. Code checks every one (:mod:`.verify`). A
+``topic.new`` gives its topic a label of the model's own (``new_1``, ...) in
+``topic_id``, by which the reply's other operations name the new topic in
+``topic_id`` or ``about``; code mints the topic's id (version 3; version 2 had
+no way to name a topic created in the same reply).
 
 The prompt is zero-shot and names the conversation's language, resolved in
 code from the segments' human messages; only a batch without a letter in it
@@ -62,7 +66,7 @@ MAX_ROLES = 30
 
 GROUP_PROFILE_UPDATE = PromptTemplate(
     id="chat.group_profile_update",
-    version=2,
+    version=3,
     parts=(
         # 0: the system prompt; {members} and {language_rule} are filled in.
         """You keep the shared profile of a group chat: the topics the group \
@@ -81,19 +85,22 @@ when a member says or confirms it.
 
 <operations>
 - topic.new: a substantive thread the profile does not have yet. Fill name, \
-summary and status.
+summary and status, and topic_id = a label for the new topic (new_1, new_2, \
+...) that the other operations of this reply use as topic_id or about to name \
+it.
 - topic.update: a listed topic whose summary or status changed. target = its \
 topic id (tp_...). Fill name, summary and status as they are now.
 - decision.new: something the members decided or agreed to do. Fill \
 statement, decided_by (who made the decision), agreed_by (who agreed), \
 assignees (who will carry it out), applies_to (the members it applies to; \
-empty when it applies to the whole group) and topic_id (a listed topic id, or \
-empty).
+empty when it applies to the whole group) and topic_id (a listed topic id, a \
+new topic's label, or empty).
 - decision.supersede: a new decision that replaces a listed decision. target \
 = the id of the decision it replaces. Fill the same fields as decision.new.
 - dissent.open: a member disagrees with a decision or a topic's direction and \
 has not been brought round. Fill statement (what they object to and why), \
-held_by and about (a listed decision id or topic id, or empty).
+held_by and about (a listed decision id or topic id, a new topic's label, or \
+empty).
 - dissent.resolve: a listed open dissent is settled. target = its id; \
 statement = how it was settled.
 - role.add: a member clearly plays one of the roles below. Fill member_id, \
@@ -132,9 +139,10 @@ work, a question the group works through. Scheduling chatter, greetings, \
 thanks, bot notices and one-word confirmations are not topics. Status: \
 exploring (being discussed), disagreement (members disagree), consensus \
 (members agree), implemented (done).
-5. Ids. Use only ids that appear in <profile>. Never invent an id. Leave \
-target, topic_id and about empty when they do not apply, and every field an \
-operation does not use empty ("" or []).
+5. Ids. Use only ids that appear in <profile>, and the labels of the topics \
+this reply creates. Never invent an id. Leave target, topic_id and about \
+empty when they do not apply, and every field an operation does not use empty \
+("" or []).
 6. Only what changed. Do not repeat what the profile already says. If \
 nothing changed, reply {{"operations": []}}.
 7. {language_rule}

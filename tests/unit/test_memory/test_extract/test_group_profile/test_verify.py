@@ -8,7 +8,12 @@ What these pin:
   repaired, and counted by reason -- in the result and in the metric;
 - speakers, times, the span and the origin come from the cited messages;
 - an id an operation updates or supersedes must be a rendered current item;
-- topic.update keeps the topic id and names the version it replaces.
+- topic.update keeps the topic id and names the version it replaces;
+- a topic.new's topic_id is a label the reply's other operations name the new
+  topic by, before or after it; code mints the id;
+- a link that names nothing (a made-up id, the label of a dropped topic, a
+  label two new topics share) is dropped and counted, the item kept; targets
+  and the semantic checks stay strict, and a dropped operation counts no link.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from everos.memory.extract.group_profile import (
     GroupProfileView,
     Operation,
     Segment,
+    drop_summary,
     verify,
 )
 from everos.memory.models import (
@@ -137,6 +143,13 @@ def _dropped(reason: str) -> float:
     return value or 0.0
 
 
+def _links_dropped(reason: str) -> float:
+    value = get_metrics_registry().get_sample_value(
+        "everos_group_profile_links_dropped_total", {"reason": reason}
+    )
+    return value or 0.0
+
+
 _DEPART = ("mc_1", "m-102", "Let's leave on April 30 instead.")
 _AGREE = ("mc_1", "m-103", "Fine by me. I'll book the hotel")
 
@@ -214,7 +227,6 @@ def test_the_rest_of_the_checks() -> None:
         _op("decision.supersede", _DEPART, statement="x", target="gp_unknown"),
         _op("topic.new", _DEPART, name="Travel", status="ongoing"),
         _op("role.add", _DEPART, member_id="u_chen", role="boss", confidence="strong"),
-        _op("dissent.open", _DEPART, statement="x", held_by=["u_chen"], about="gp_x"),
     )
 
     assert result.items == []
@@ -224,7 +236,6 @@ def test_the_rest_of_the_checks() -> None:
         "unknown_member": 1,
         "unknown_target": 1,
         "invalid_field": 2,
-        "unknown_reference": 1,
     }
 
 
@@ -362,3 +373,155 @@ def test_curly_and_straight_quotation_marks_match_either_way() -> None:
     assert first.sources[0].quote == "The “delivery timeline” was vague; we’ll fix"
     assert second.sources[0].quote == 'He said "maybe" and it\'s fine.'
     assert result.dropped == {"quote_not_verbatim": 1}
+
+
+# ── topics created in the same reply, and links ───────────────────────────
+
+_TRAVEL = {"name": "Travel", "summary": "Dates and flights", "status": "consensus"}
+_HOTEL = {"name": "Hotel", "summary": "Where we stay", "status": "exploring"}
+_DECIDED = {"statement": "Depart on April 30.", "decided_by": ["u_chen"]}
+_OBJECTS = {"statement": "Betty would rather wait.", "held_by": ["u_betty"]}
+_ASSISTANT = ("mc_1", "m-104", "two April 30 flights")
+
+
+def test_a_decision_names_a_topic_its_reply_creates_after_it() -> None:
+    result = _check(
+        _op("decision.new", _DEPART, topic_id="new_1", **_DECIDED),
+        _op("topic.new", _DEPART, topic_id="new_1", **_TRAVEL),
+    )
+
+    decision, topic = result.items  # the reply's order
+    assert (decision.kind, topic.kind) == ("decision", "topic")
+    assert topic.topic_id and topic.topic_id.startswith("tp_")
+    assert decision.topic_id == topic.topic_id
+    assert not result.dropped and not result.links_dropped
+
+
+def test_operations_name_topics_their_reply_created_before_them() -> None:
+    profile = GroupProfileView(topics=[_TOPIC], decisions=[_DECISION])
+
+    result = _check(
+        _op("topic.new", _DEPART, topic_id="new_1", **_TRAVEL),
+        _op("topic.new", _AGREE, topic_id="new_2", **_HOTEL),
+        _op("decision.new", _DEPART, topic_id="new_1", **_DECIDED),
+        _op("dissent.open", _AGREE, about="new_2", **_OBJECTS),
+        # A superseding decision moves to a new topic by its label.
+        _op("decision.supersede", _DEPART, target="gp_2", topic_id="new_2", **_DECIDED),
+        profile=profile,
+    )
+
+    travel, hotel, decision, dissent, moved = result.items
+    assert len({travel.topic_id, hotel.topic_id, "tp_trip"}) == 3
+    assert decision.topic_id == travel.topic_id
+    assert dissent.about == hotel.topic_id
+    assert (moved.supersedes, moved.topic_id) == ("gp_2", hotel.topic_id)
+    assert not result.dropped and not result.links_dropped
+
+
+def test_a_link_that_names_nothing_is_dropped_and_the_item_kept() -> None:
+    before = _links_dropped("unknown_reference")
+
+    result = _check(
+        # The 11-11 smoke: the topic.new gives no label, and the decision and
+        # the dissent name a topic id the model made up.
+        _op("topic.new", _DEPART, **_TRAVEL),
+        _op("decision.new", _DEPART, topic_id="tp_spring_offsite", **_DECIDED),
+        _op("dissent.open", _AGREE, about="tp_spring_offsite", **_OBJECTS),
+        # A decision id that was never rendered.
+        _op("dissent.open", _AGREE, about="gp_x", **_OBJECTS),
+    )
+
+    topic, decision, dissent, other = result.items
+    assert topic.kind == "topic" and decision.statement == "Depart on April 30."
+    assert decision.topic_id is None
+    assert dissent.about is None and other.about is None
+    assert not result.dropped
+    assert drop_summary(result.links_dropped) == {"unknown_reference": 3}
+    assert _links_dropped("unknown_reference") - before == 3.0
+
+
+def test_the_label_of_a_dropped_or_doubled_topic_names_nothing() -> None:
+    result = _check(
+        # Dropped (a paraphrased quote): its label names nothing.
+        _op(
+            "topic.new", ("mc_1", "m-102", "Let us leave"), topic_id="new_1", **_TRAVEL
+        ),
+        _op("decision.new", _DEPART, topic_id="new_1", **_DECIDED),
+        # Two new topics under one label: it names neither.
+        _op("topic.new", _DEPART, topic_id="new_2", **_TRAVEL),
+        _op("topic.new", _AGREE, topic_id="new_2", **_HOTEL),
+        _op("dissent.open", _AGREE, about="new_2", **_OBJECTS),
+    )
+
+    decision, travel, hotel, dissent = result.items
+    assert decision.topic_id is None and dissent.about is None
+    assert travel.topic_id != hotel.topic_id
+    assert dict(result.dropped) == {"quote_not_verbatim": 1}
+    assert drop_summary(result.links_dropped) == {
+        "unknown_reference": 1,
+        "ambiguous_reference": 1,
+    }
+
+
+def test_a_listed_id_wins_over_a_label_that_repeats_it() -> None:
+    profile = GroupProfileView(topics=[_TOPIC], decisions=[_DECISION])
+
+    result = _check(
+        _op("topic.new", _DEPART, topic_id="tp_trip", **_HOTEL),
+        _op("decision.new", _DEPART, topic_id="tp_trip", **_DECIDED),
+        profile=profile,
+    )
+
+    topic, decision = result.items
+    assert topic.topic_id != "tp_trip" and decision.topic_id == "tp_trip"
+
+
+def test_a_supersede_whose_link_names_nothing_keeps_its_topic() -> None:
+    result = _check(
+        _op("decision.supersede", _DEPART, target="gp_2", topic_id="tp_x", **_DECIDED),
+        profile=GroupProfileView(topics=[_TOPIC], decisions=[_DECISION]),
+    )
+
+    (decision,) = result.items
+    assert (decision.supersedes, decision.topic_id) == ("gp_2", "tp_trip")
+    assert dict(result.links_dropped) == {"unknown_reference": 1}
+
+
+def test_targets_and_the_semantic_checks_stay_strict() -> None:
+    profile = GroupProfileView(topics=[_TOPIC], decisions=[_DECISION])
+
+    result = _check(
+        _op("topic.new", _DEPART, topic_id="new_1", **_TRAVEL),
+        # A topic the reply creates is written as it stands, never updated in
+        # the same reply; a label is no target, nor is a made-up id.
+        _op("topic.update", _AGREE, target="new_1", **_HOTEL),
+        _op("decision.supersede", _DEPART, target="new_1", **_DECIDED),
+        _op("decision.supersede", _DEPART, target="gp_9", **_DECIDED),
+        _op("dissent.resolve", _AGREE, target="gp_9", statement="Settled."),
+        _op("role.retire", _DEPART, target="gp_9"),
+        # A link never saves an operation that fails a check, and a dropped
+        # operation counts no link: the assistant's words alone, a speaker
+        # the evidence does not back, a dissent given to the assistant.
+        _op("decision.new", _ASSISTANT, topic_id="new_1", statement="Fly 08:10."),
+        _op(
+            "decision.new",
+            _DEPART,
+            topic_id="tp_x",
+            statement="x",
+            decided_by=["u_betty"],
+        ),
+        _op(
+            "dissent.open", _ASSISTANT, about="tp_x", statement="x", held_by=["bot_ava"]
+        ),
+        profile=profile,
+    )
+
+    (topic,) = result.items
+    assert topic.kind == "topic"
+    assert dict(result.dropped) == {
+        "unknown_target": 5,
+        "assistant_only_decision": 1,
+        "ungrounded_member": 1,
+        "unknown_member": 1,
+    }
+    assert not result.links_dropped

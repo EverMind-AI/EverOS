@@ -104,14 +104,16 @@ machinery that keeps a deleted memory from coming back.
   - **The group profile.** Topics, decisions, dissent and observed roles as
     append-only items in `groups/<group_id>/profile/` and the new
     `group_profile_item` table (no vector). One model call per batch of
-    segments (prompt `chat.group_profile_update` v2, in EverOS), after
+    segments (prompt `chat.group_profile_update` v3, in EverOS), after
     `[groups] group_profile_batch` segments (default `5`), after
     `[groups] group_profile_idle_seconds` without one (default `600`) and at
     every flush; `[groups] group_profile` switches it off. Code checks every
     operation the model returns -- the cited segment and message exist, the
     quote is verbatim, a decision rests on a member's message, the people it
     names wrote the evidence, the ids it replaces are current -- and drops a
-    failing one, counted in `everos_group_profile_ops_dropped_total`. A call
+    failing one, counted in `everos_group_profile_ops_dropped_total`; a
+    topic or item link that names nothing drops only the link, counted in
+    `everos_group_profile_links_dropped_total`. A call
     that yields nothing usable is counted in
     `everos_group_profile_update_failures_total` and retried after a
     back-off; the third failure in a row drops the batch.
@@ -248,6 +250,24 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A new group keeps its first decisions, linked to their topics.** The
+  group-profile reply could not name a topic it created itself: `topic_id`
+  and `about` took listed ids only, and topic ids are minted by code. On a
+  new group's first batch the model either made an id up, and the verifier
+  dropped every decision and dissent naming it (`unknown_reference`; 3 of 7
+  operations in the 2026-11-11 integration check, so no decision was
+  stored), or left the field empty, and the decisions lost their topic. A
+  `topic.new` now gives its topic a label in `topic_id` (`new_1`, ...),
+  which the reply's other operations use before or after it, and the
+  verifier maps the label to the id it mints (prompt
+  `chat.group_profile_update` v3). A `topic_id` or `about` that still names
+  nothing drops only the link: the decision or dissent is kept, and the link
+  is counted in `everos_group_profile_links_dropped_total` (by `reason`) and
+  in the `group_profile_updated` log line. Targets and the evidence, member
+  and assistant checks stay as strict as before; a topic is not updated in
+  the reply that creates it. Four fresh groups on DeepSeek V4.1 Flash: 9 of
+  9 decisions linked to their topic (0 of 8 before); still one call per
+  batch, 61 more prompt tokens per call.
 - **A group flush no longer saturates the SQLite pool.** Each member's
   pending segments are read in one query, and at most `[sqlite] pool_size`
   members read at a time; the profiles written are unchanged.
