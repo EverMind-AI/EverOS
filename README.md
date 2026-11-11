@@ -114,6 +114,10 @@ built into Raven. Choose an integration to open its setup guide.
 - Python 3.12+
 - One [OpenRouter API key](https://openrouter.ai/keys)
 
+To use Atlas Cloud for chat instead, set `EVEROS_LLM__PROVIDER=atlascloud`
+and `EVEROS_LLM__API_KEY`; EverOS will select the Atlas Cloud
+OpenAI-compatible endpoint and default model.
+
 ### 1. Install
 
 ```bash
