@@ -386,7 +386,7 @@ class LLMRoundDecider:
         raw: str | None = None
         usage: dict[str, object] | None = None
         last_error = ""
-        # [decider].fit_to_window / .salvage_truncated_core (both off by default): what
+        # [decider].fit_to_window / .salvage_truncated_core (both on by default): what
         # they did this round. Untouched while both are off.
         n_shown = n_candidates  # candidates the sent prompt shows (a fit may drop some)
         fit_record: dict[str, object] | None = None

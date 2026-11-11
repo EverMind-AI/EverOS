@@ -99,8 +99,11 @@ machinery that keeps a deleted memory from coming back.
     `member_profile` (with `member_id`) on group scopes.
   - **Table schema version 5** adds `user_profile.subject_id` and
     `agent_case.source_group_id`. Existing rows read as before.
-- **Two opt-in recoveries for a failed multi-round decider round**, both off
-  by default (off, requests and traces are byte-identical to before):
+- **Two recoveries for a failed multi-round decider round**, both on by
+  default. Each acts only on a round that would otherwise fall back, so a
+  round that fits the window and parses is sent and recorded as before. Set
+  either to `false` to reproduce a run from before 2026-11-11; off, requests
+  and traces are byte-identical to before.
   - `[decider] fit_to_window`: when the decider endpoint rejects a round
     prompt as longer than its window, the prompt is re-rendered to fit
     `window - max_tokens` tokens, counted by the endpoint itself (vLLM's

@@ -360,8 +360,8 @@ class DeciderSettings(BaseModel):
     Not 0: an empty core silently disables core-first injection -- the very mechanism
     under test -- and is indistinguishable in the output from a decider that chose
     nothing on purpose."""
-    fit_to_window: bool = False
-    """Re-render a round prompt the decider endpoint rejects as too long. Default off.
+    fit_to_window: bool = True
+    """Re-render a round prompt the decider endpoint rejects as too long. Default on.
 
     Off, a prompt over the decider's context window is rejected (HTTP 400) on every
     attempt and the round falls back (``decider_failed``). Measured 2026-11-10 on BEAM
@@ -373,15 +373,18 @@ class DeciderSettings(BaseModel):
     first, longest first under one shared cap, then candidate texts, then the last
     candidates are dropped. Deterministic; the round trace records what was trimmed
     (``decider_fit``). A prompt that fits is never touched, and an endpoint that cannot
-    count leaves the round as it was."""
-    salvage_truncated_core: bool = False
-    """Keep the core indices of a decider reply that was cut short. Default off.
+    count leaves the round as it was, so a round that never overflows sends and records
+    exactly what it did with the switch off. Set it ``false`` only to reproduce a run
+    from before 2026-11-11."""
+    salvage_truncated_core: bool = True
+    """Keep the core indices of a decider reply that was cut short. Default on.
 
     Off, a reply such as ``{"core": [0, 3],`` (the model stopped after the core list)
     fails to parse on every attempt and the round falls back. On, and only after every
     attempt failed to parse, the complete indices of the first such reply become the
     round's core and the loop stops there, since no ``next_queries`` were emitted. The
-    round trace records it (``decider_salvaged``)."""
+    round trace records it (``decider_salvaged``). A round with a reply that parses is
+    untouched. Set it ``false`` only to reproduce a run from before 2026-11-11."""
     image_candidates_per_round: int = Field(default=0, ge=0)
     """Pictures the decider may look at per round, highest-ranked first.
 

@@ -9,9 +9,10 @@ RL-tuned 27B decider (2026-11-10):
 * the reply stops right after the core list (``{"core": [0],``): it fails to parse on
   every attempt and the round falls back.
 
-Both switches are off by default and, off, nothing changes. On, each acts only on a
-round that would otherwise have failed: the fit only after an attempt was rejected for
-its length, the salvage only after every attempt failed to parse.
+Both switches are on by default (since 2026-11-11). Each acts only on a round that
+would otherwise have failed: the fit only after an attempt was rejected for its length,
+the salvage only after every attempt failed to parse. Switched off, a run is the one
+from before they existed, request for request.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from everalgo.types import Candidate
 from everos.component.llm import OpenAIProvider
 from everos.component.llm.openai_provider import RawReply
 from everos.config.search_runtime import SearchConfigSource
+from everos.config.settings import DeciderSettings
 from everos.memory.ports import SearchHit
 from everos.memory.search import llm_multiround as lmr
 from everos.memory.search.llm_multiround import (
@@ -127,10 +129,21 @@ def _no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 def _on(
     monkeypatch: pytest.MonkeyPatch, *, fit: bool = False, salvage: bool = False
 ) -> None:
+    """Switch these on explicitly (both are on by default; the others stay as set)."""
     if fit:
         monkeypatch.setenv("EVEROS_DECIDER__FIT_TO_WINDOW", "true")
     if salvage:
         monkeypatch.setenv("EVEROS_DECIDER__SALVAGE_TRUNCATED_CORE", "true")
+
+
+def _off(
+    monkeypatch: pytest.MonkeyPatch, *, fit: bool = False, salvage: bool = False
+) -> None:
+    """Switch these off: the behaviour from before 2026-11-11."""
+    if fit:
+        monkeypatch.setenv("EVEROS_DECIDER__FIT_TO_WINDOW", "false")
+    if salvage:
+        monkeypatch.setenv("EVEROS_DECIDER__SALVAGE_TRUNCATED_CORE", "false")
 
 
 def _decider(llm: Any) -> LLMRoundDecider:
@@ -188,6 +201,22 @@ def test_the_fake_endpoint_is_what_the_decider_detects() -> None:
     assert isinstance(ep, RawChatClient) and isinstance(ep, PromptTokenCounter)
 
 
+def test_both_switches_are_on_by_default() -> None:
+    """On since 2026-11-11, in the model and in the shipped ``default.toml``."""
+    assert DeciderSettings().fit_to_window is True
+    assert DeciderSettings().salvage_truncated_core is True
+    tune = _LIVE.tuning()
+    assert (tune.fit_to_window, tune.salvage_truncated_core) == (True, True)
+
+
+async def test_by_default_a_truncated_reply_keeps_its_core() -> None:
+    """No switch set: a reply cut after its core list no longer empties the round."""
+    ep = _Endpoint(['{"core": [0, 2],'])
+    d = await _decider(ep)("q", "(none)", "ev", 5, 0)
+    assert (d.core, d.stop, d.failed) == ([0, 2], True, False)
+    assert d.salvaged == {"attempt": 0, "n_indices": 2}
+
+
 # ── salvage: the parser ─────────────────────────────────────────────────────
 
 
@@ -231,7 +260,10 @@ def test_a_reply_cut_at_any_point_never_yields_a_partial_index() -> None:
 # ── salvage: the decider ────────────────────────────────────────────────────
 
 
-async def test_salvage_off_a_truncated_reply_still_falls_back() -> None:
+async def test_salvage_off_a_truncated_reply_still_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _off(monkeypatch, salvage=True)
     ep = _Endpoint(['{"core": [0, 2],'])
     d = await _decider(ep)("q", "(none)", "ev", 5, 0)
     assert d.failed and d.core == [0, 1, 2] and d.salvaged is None
@@ -288,6 +320,7 @@ async def test_salvage_cannot_rescue_a_reply_without_a_core(
 async def test_valid_replies_are_unchanged_with_both_switches_on(
     monkeypatch: pytest.MonkeyPatch, reply: str
 ) -> None:
+    _off(monkeypatch, fit=True, salvage=True)
     off_ep = _Endpoint([reply])
     off = await _decider(off_ep)("q", "(none)", "ev", 5, 0)
     _on(monkeypatch, fit=True, salvage=True)
@@ -429,7 +462,10 @@ async def test_dropped_candidates_cannot_be_chosen(
     assert f"  {shown}: " not in ep.prompts[-1]
 
 
-async def test_fit_off_an_overflow_still_falls_back() -> None:
+async def test_fit_off_an_overflow_still_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _off(monkeypatch, fit=True)
     _, core, ev, n, window = _boundary_case(1)
     ep = _Endpoint([_reply([0])], window=window)
     d = await _decider(ep)("q", core, ev, n, 0)
@@ -520,6 +556,8 @@ async def test_both_switches_on_change_nothing_on_a_clean_search(
     for on in (False, True):
         if on:
             _on(monkeypatch, fit=True, salvage=True)
+        else:
+            _off(monkeypatch, fit=True, salvage=True)
         trace = tmp_path / f"trace_{on}.jsonl"
         monkeypatch.setenv("EVEROS_LLMMR_TRACE_DUMP", str(trace))
         ep = _Endpoint(replies)

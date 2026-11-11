@@ -129,8 +129,8 @@ retries = 3                    # decider retries before falling back
 retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 fallback_core = 3              # core size when every decider attempt fails
-fit_to_window = false          # true = re-render a prompt rejected as too long
-salvage_truncated_core = false # true = keep the core of a reply cut after it
+fit_to_window = true           # re-render a prompt rejected as too long
+salvage_truncated_core = true  # keep the core of a reply cut after it
 image_candidates_per_round = 0 # pictures the decider may look at per round; 0 = none
 image_detail = "low"           # `detail` hint on each picture part
 image_thumbnail_edge = 448     # long side of the decider's copy, in pixels
