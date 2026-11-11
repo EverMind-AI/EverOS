@@ -1,23 +1,20 @@
-"""Reflection — Select -> Merge -> Re-extract -> Deprecate, in two steps.
+"""Reflection — Select -> Merge -> Deprecate, in two steps.
 
 Consolidates fragmented cluster members (memcell-derived episodes) into a
-single high-quality merged episode per cluster. The originals — episodes
-and their atomic facts — may only be deprecated once the merged episode's
-own facts exist, so the cycle is split at that point:
+single high-quality merged episode per cluster:
 
 - :class:`ReflectionOrchestrator` selects clusters, merges each one, writes
   the merged episode to md and returns an ``EpisodeExtracted`` carrying a
   :class:`~everos.memory.events.ReflectionContext` — the snapshot the second
   step acts on.
-- ``extract_atomic_facts`` extracts the merged episode's facts and passes
-  the context on in ``AtomicFactsExtracted``.
-- :class:`ReflectionFinisher` deprecates the replaced members and their
-  facts in md (the cascade carries the marks into the index), moves the
-  cluster onto the merged episode and records a ``ReflectionReport``.
+- :class:`ReflectionFinisher`, run by ``finish_reflection`` on that event,
+  deprecates the replaced members in md (the cascade carries the marks into
+  the index), moves the cluster onto the merged episode and records a
+  ``ReflectionReport``.
 
-If fact extraction never succeeds the second step never runs: the merged
-episode stays without facts and the originals stay live, which a later
-cycle detects as an orphan.
+The second step starts as soon as the merged episode is written; it waits
+for nothing else. If it fails, the merged episode stays and the originals
+stay live, which a later cycle detects as an orphan.
 
 See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 """
@@ -121,7 +118,7 @@ class ReflectionOrchestrator:
 
         Returns:
             One ``EpisodeExtracted`` per merged cluster, carrying the
-            context :class:`ReflectionFinisher` needs once its facts exist.
+            context :class:`ReflectionFinisher` acts on.
         """
         candidates = await self._select_candidates(scope=scope, kind=kind)
         logger.info(
@@ -481,7 +478,7 @@ class ReflectionOrchestrator:
 
 
 class ReflectionFinisher:
-    """Retire what one merge replaced, once the merged episode has its facts.
+    """Retire what one merge replaced, once the merged episode is written.
 
     Args:
         cluster_store: Clusters and their membership.

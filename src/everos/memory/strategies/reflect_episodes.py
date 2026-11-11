@@ -4,9 +4,8 @@ Triggered by a cron schedule (default: ``0 2 * * 1``). Enumerates all
 distinct owner scopes from the cluster store and runs the
 :class:`ReflectionOrchestrator` for each, returning one
 ``EpisodeExtracted(source="reflection")`` per merged cluster. The merge is
-finished by :mod:`.finish_reflection` once the merged episode's atomic
-facts exist. Configuration lives in ``[reflection]`` of
-``config/default.toml``.
+finished by :mod:`.finish_reflection` on that event. Configuration lives in
+``[reflection]`` of ``config/default.toml``.
 
 The strategy is a thin entry point; all business logic lives in
 :mod:`everos.memory.reflection.orchestrator`.

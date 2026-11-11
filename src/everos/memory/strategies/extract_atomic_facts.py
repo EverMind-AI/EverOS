@@ -7,8 +7,7 @@ facts from the episode narrative. Each event carries a single
 append.
 
 Always returns one :class:`AtomicFactsExtracted`, even for an episode that
-yields no facts: Reflection finishes a merge on that event, and it carries
-the event's Reflection context through unchanged.
+yields no facts.
 """
 
 from __future__ import annotations

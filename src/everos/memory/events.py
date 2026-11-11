@@ -112,9 +112,8 @@ class EpisodeExtracted(Event):
     project_id: str = "default"
     source: str = "pipeline"
     reflection: ReflectionContext | None = None
-    """Set on Reflection's merged episode (``source="reflection"``); carried
-    through to :class:`AtomicFactsExtracted` so the step that finishes the
-    merge knows what to deprecate."""
+    """Set on Reflection's merged episode (``source="reflection"``): what the
+    step that finishes the merge (``finish_reflection``) deprecates."""
     language: str | None = None
     """The episode's ``OutputLanguage`` value (see ``Episode.language``); the
     extractions this event drives write in it. ``None`` lets each extractor
@@ -162,12 +161,7 @@ class GroupFlushed(Event):
 
 
 class AtomicFactsExtracted(Event):
-    """Fired by ``extract_atomic_facts`` once an episode's facts are written.
-
-    Fired even when the episode yielded no facts: Reflection finishes a
-    merge on this event, and a merged episode without facts must still
-    retire the members it replaced.
-    """
+    """Fired by ``extract_atomic_facts`` once an episode's facts are written."""
 
     episode_entry_id: str
     owner_id: str
