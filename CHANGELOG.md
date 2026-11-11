@@ -23,16 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default 240), `extra`, `response_format_mode` and
   `invalid_reply_retries`. A reasoning model with thinking on is
   recommended; see `docs/configuration.md`.
+- **`[profile] max_episodes_per_call`** (default 10): how many episodes one
+  profile extraction call folds; see the profile entry under Changed.
 
 ### Changed
 
-- **The user profile is built from episodes, one at a time.** Every pipeline
-  `EpisodeExtracted` now folds that one episode's narrative into its owner's
+- **The user profile is built from episodes.** Every pipeline
+  `EpisodeExtracted` now folds its episode's narrative into its owner's
   `user.md` through everalgo's `ProfileExtractor.aextract_from_episodes`,
   instead of re-reading raw memcells selected through the owner's clusters
   (with an embedding provider) or through the episode index (without one).
-  The profile no longer depends on clustering, and an episode is no longer
-  sent to the profile again on a later run. The event now carries
+  The same call folds that owner's newer episodes still waiting in the
+  episode index, up to `[profile] max_episodes_per_call`, and their own runs
+  then end without a call, so a burst for one owner (a bulk import) drains in
+  a fraction of the calls instead of queueing one slow call per episode past
+  the OME run timeout. The profile no longer depends on clustering, and an
+  episode is no longer sent to the profile again on a later run (a crash can
+  still repeat one). The event now carries
   `owner_name` — the label the owner's chat lines had (`sender_name`, else
   `sender_id`) — and the profile finds the owner in the narrative by it; an
   episode whose narrative does not name them is skipped with a
@@ -42,9 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **`EpisodeIndex.count` / `EpisodeIndex.list_after`** and the repositories'
-  `count_by_owner` / `list_by_owner_after_ts` (LanceDB and Milvus), with the
-  `EpisodeIndexRepository` protocol: only the old profile selection used them.
+- **`EpisodeIndex.count`** and the repositories' `count_by_owner` (LanceDB
+  and Milvus): only the old profile throttle used it.
 
 ## [1.6.0] - 2026-11-11
 

@@ -141,9 +141,11 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 ### `[profile]`
 
-The LLM user-profile extraction runs on, when it should differ from `[llm]`. With `model` empty the profile is extracted with `[llm]`, every field of it. Once `model` is set, `api_key` and `base_url` fall back to `[llm]` when blank and every other field comes from this section.
+User-profile extraction: the LLM it runs on, when it should differ from `[llm]`, and how many episodes one call folds. With `model` empty the profile is extracted with `[llm]`, every field of it. Once `model` is set, `api_key` and `base_url` fall back to `[llm]` when blank and the other LLM fields come from this section. `max_episodes_per_call` applies either way.
 
-Recommended: a reasoning model with thinking on. The everalgo profile evaluation ran `claude-haiku-5-5` with thinking, at about 28s median and 41s p90 per call; size `timeout_seconds` and the OME run timeout for that, and switch thinking on through `extra` as your gateway names it.
+Recommended: a reasoning model with thinking on. The everalgo profile evaluation ran `claude-haiku-5-5` with thinking, at about 28s median and 41s p90 per call; switch thinking on through `extra` as your gateway names it.
+
+Episodes are folded one owner at a time. A run folds the episode that triggered it together with that owner's newer episodes still waiting (up to `max_episodes_per_call` in all), and the runs of those episodes then end without a call. A burst of episodes for one owner, such as a bulk import, therefore drains in about `1 / max_episodes_per_call` of the calls, and runs queued behind a slow model stay within `[ome] run_timeout_seconds`.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
@@ -154,6 +156,7 @@ Recommended: a reasoning model with thinking on. The everalgo profile evaluation
 | `extra` | object | `{}` | No | Provider-specific request fields, nested under `extra_body` (see `[llm]`); where a gateway's thinking switch goes. |
 | `invalid_reply_retries` | int | `1` | No | Extra attempts after a reply that fails validation, used once `model` is set. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested, used once `model` is set. |
+| `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. Applies with or without `model`. |
 
 ### `[multimodal]`
 

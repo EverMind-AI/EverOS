@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = [
     "bundled_instructions",
+    "default_profile_batcher",
     "make_deps",
     "make_indexes",
     "make_stores",
@@ -17,10 +18,12 @@ from typing import Any
 from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
+from everos.config.settings import ProfileSettings
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
 from everos.memory.models import Episode, MemCell
 from everos.memory.ports import Scope
+from everos.memory.profile_batcher import ProfileBatcher
 
 from .embedding import FakeEmbeddingProvider
 from .indexes import (
@@ -51,6 +54,11 @@ _CONFIG_ROOT = Path(__file__).resolve().parents[2] / "src" / "everos" / "config"
 def bundled_instructions() -> CustomInstructions:
     """The custom instructions the package ships (every operator disabled)."""
     return CustomInstructions(_CONFIG_ROOT)
+
+
+def default_profile_batcher() -> ProfileBatcher:
+    """A fresh batcher with the configured default per-call cap."""
+    return ProfileBatcher(ProfileSettings().max_episodes_per_call)
 
 
 def unscripted_llm() -> FakeLLMClient:
@@ -100,6 +108,7 @@ def make_deps(
     *,
     llm: Any = _DEFAULT,
     profile_llm: Any = _DEFAULT,
+    profile_batcher: ProfileBatcher | None = None,
     embedding: Any = _DEFAULT,
     stores: Stores | None = None,
     indexes: Indexes | None = None,
@@ -109,7 +118,8 @@ def make_deps(
     """Dependencies backed by in-memory doubles.
 
     ``llm`` defaults to an LLM that refuses every call, ``profile_llm`` to
-    ``llm`` (as ``[profile]`` falls back to ``[llm]``) and ``embedding`` to a
+    ``llm`` (as ``[profile]`` falls back to ``[llm]``), ``profile_batcher`` to
+    one with the default per-call cap, and ``embedding`` to a
     :class:`FakeEmbeddingProvider`; pass ``None`` for ``llm`` or ``embedding``
     to model an unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
     gate) unless given.
@@ -118,6 +128,7 @@ def make_deps(
     return MemoryDeps(
         llm=llm,
         profile_llm=llm if profile_llm is _DEFAULT else profile_llm,
+        profile_batcher=profile_batcher or default_profile_batcher(),
         embedding=FakeEmbeddingProvider() if embedding is _DEFAULT else embedding,
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),

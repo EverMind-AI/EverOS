@@ -349,19 +349,19 @@ class DeciderSettings(BaseModel):
 
 
 class ProfileSettings(BaseModel):
-    """LLM for user-profile extraction (the ``extract_user_profile`` strategy).
+    """User-profile extraction (the ``extract_user_profile`` strategy).
 
-    A flat section mirroring ``[llm]``, kept separate because the profile is a
-    different job: it folds each new episode into a standing portrait, one call
-    per episode, where an inferred or unfounded item gives a wrong picture of the
-    person for as long as it stays -- so it gains most from a slower reasoning
-    model -- while boundary, episode and fact extraction run on every cell and are
-    throughput-bound.
+    The LLM fields mirror ``[llm]`` and are kept separate because the profile is
+    a different job: it folds new episodes into a standing portrait, where an
+    inferred or unfounded item gives a wrong picture of the person for as long as
+    it stays -- so it gains most from a slower reasoning model -- while boundary,
+    episode and fact extraction run on every cell and are throughput-bound.
 
-    Empty ``model`` leaves the whole section unused: the profile is extracted with
+    Empty ``model`` leaves the LLM fields unused: the profile is extracted with
     ``[llm]``, every field of it, exactly as before this section existed. Once
     ``model`` is set, ``api_key`` and ``base_url`` still fall back to ``[llm]``
-    when blank, and every other field comes from here.
+    when blank, and the other LLM fields come from here.
+    ``max_episodes_per_call`` applies either way.
 
     Env binding (via parent ``Settings``):
         EVEROS_PROFILE__MODEL
@@ -371,6 +371,7 @@ class ProfileSettings(BaseModel):
         EVEROS_PROFILE__EXTRA
         EVEROS_PROFILE__RESPONSE_FORMAT_MODE
         EVEROS_PROFILE__INVALID_REPLY_RETRIES
+        EVEROS_PROFILE__MAX_EPISODES_PER_CALL
     """
 
     model: str = ""
@@ -391,6 +392,12 @@ class ProfileSettings(BaseModel):
     invalid_reply_retries: int = Field(default=1, ge=0)
     """Extra attempts after an unusable reply, used once ``model`` is set. See
     :attr:`LLMSettings.invalid_reply_retries`."""
+    max_episodes_per_call: int = Field(default=10, gt=0)
+    """Most episodes one extraction call folds, the triggering one included.
+    Episodes are folded one owner at a time; a run also folds that owner's newer
+    episodes still waiting, and their own runs then find nothing left to do, so a
+    backlog drains in about ``1 / max_episodes_per_call`` of the calls. Larger
+    means fewer, longer calls and a longer prompt; 1 folds each episode alone."""
 
 
 class MultimodalSettings(BaseModel):

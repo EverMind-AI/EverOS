@@ -47,6 +47,7 @@ from everos.memory.ports import (
     SessionBufferStore,
     SessionPurgeStore,
 )
+from everos.memory.profile_batcher import ProfileBatcher
 
 if TYPE_CHECKING:
     from everos.memory.custom_instructions import CustomInstructions
@@ -92,6 +93,8 @@ class MemoryDeps:
         llm: Extraction LLM.
         profile_llm: The LLM user-profile extraction runs on (``[profile]``,
             ``[llm]`` itself when that section names no model).
+        profile_batcher: The per-call episode cap of user-profile extraction
+            and its marks of episodes folded ahead; one for the process.
         embedding: Embedding provider; ``None`` when not configured.
         stores: Write-side stores.
         indexes: Read-side indexes.
@@ -102,6 +105,7 @@ class MemoryDeps:
 
     llm: LLMClient
     profile_llm: LLMClient
+    profile_batcher: ProfileBatcher
     embedding: EmbeddingProvider | None
     stores: Stores
     indexes: Indexes

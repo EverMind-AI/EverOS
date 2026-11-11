@@ -1,9 +1,10 @@
 """Tests for :func:`extract_user_profile`.
 
 The strategy reads the event's episode back from md and its memcell from the
-memcell store, and runs ``ProfileExtractor.aextract_from_episodes`` (patched)
-on that one episode. In-memory doubles from :mod:`tests.fakes` stand in for
-every port, so the assertions are on what was passed and what was stored.
+memcell store, adds the owner's waiting episodes the index holds, and runs
+``ProfileExtractor.aextract_from_episodes`` (patched) once on them all.
+In-memory doubles from :mod:`tests.fakes` stand in for every port, so the
+assertions are on what was passed, stored and marked.
 """
 
 from __future__ import annotations
@@ -23,8 +24,9 @@ from everalgo.utils import InvalidInputError as AlgoInvalidInputError
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
-from everos.memory.models import Episode, Profile
-from everos.memory.ports import Scope
+from everos.memory.models import Episode, EpisodeParentType, Profile
+from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.profile_batcher import ProfileBatcher
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
 from tests.fakes import make_deps
 
@@ -186,6 +188,188 @@ async def test_update_rehydrates_the_stored_profile() -> None:
     assert (old.summary, old.timestamp) == ("prior summary", _TS - 1)
     assert [i.description for i in old.explicit_info] == ["prior fact"]
     assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
+
+
+# ── waiting episodes: folded along, then skipped by their own runs ──────
+
+
+def _seed_indexed(
+    deps: MemoryDeps,
+    scope: Scope,
+    entry_id: str,
+    *,
+    timestamp: int,
+    in_md: bool = True,
+    parent_type: EpisodeParentType = "memcell",
+) -> None:
+    """An owner's episode the index holds; its md copy and memcell unless not."""
+    memcell_id = f"mc_{entry_id}"
+    narrative = f"Alice wrote {entry_id}."
+    if in_md:
+        _seed(
+            deps,
+            scope,
+            entry_id=entry_id,
+            memcell_id=memcell_id,
+            narrative=narrative,
+            timestamp=timestamp,
+        )
+    ref = MemoryRef(
+        id=f"{scope.owner_id}_{entry_id}",
+        entry_id=entry_id,
+        md_path=f"users/{scope.owner_id}/episodes/2026-01-01.md",
+    )
+    episode = Episode(
+        owner_id=scope.owner_id,
+        episode=narrative,
+        summary="",
+        timestamp=timestamp,
+        parent_id=memcell_id,
+        parent_type=parent_type,
+    )
+    deps.indexes.episode.seed(Stored(ref=ref, scope=scope, item=episode))
+
+
+def _own_event(entry_id: str) -> EpisodeExtracted:
+    return _event(episode_entry_id=entry_id, memcell_id=f"mc_{entry_id}")
+
+
+def _passed(extract: AsyncMock) -> list[str]:
+    """The narratives of the last call, oldest first."""
+    (episodes,), _ = extract.call_args
+    return [e.episode for e in sorted(episodes, key=lambda e: e.timestamp)]
+
+
+async def test_waiting_episodes_ride_along_and_their_runs_make_no_call() -> None:
+    deps = make_deps()
+    _seed_indexed(deps, _scope(), "ep_own", timestamp=_TS)
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    _seed_indexed(deps, _scope(), "ep_w2", timestamp=_TS + 2)
+    with _extractor(return_value=_algo_profile(timestamp=_TS + 2)) as extract:
+        await extract_user_profile(_own_event("ep_own"), deps)
+        await extract_user_profile(_own_event("ep_w1"), deps)
+        await extract_user_profile(_own_event("ep_w2"), deps)
+
+    assert extract.call_count == 1
+    assert _passed(extract) == [
+        "Alice wrote ep_own.",
+        "Alice wrote ep_w1.",
+        "Alice wrote ep_w2.",
+    ]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_the_oldest_waiting_episodes_fill_the_cap() -> None:
+    deps = make_deps(profile_batcher=ProfileBatcher(3))
+    _seed(deps, _scope(), entry_id="ep_own", memcell_id="mc_ep_own")
+    for entry_id, offset in [("ep_d", 4), ("ep_a", 1), ("ep_c", 3), ("ep_b", 2)]:
+        _seed_indexed(deps, _scope(), entry_id, timestamp=_TS + offset)
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_own_event("ep_own"), deps)
+
+    assert _passed(extract) == [
+        "Alice plans a trip to Kyoto.",
+        "Alice wrote ep_a.",
+        "Alice wrote ep_b.",
+    ]
+
+
+async def test_a_cap_of_one_folds_the_events_episode_alone() -> None:
+    deps = make_deps(profile_batcher=ProfileBatcher(1))
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_an_episode_older_than_the_profile_is_left_to_its_own_run() -> None:
+    deps = make_deps()
+    _seed(deps, _scope(), timestamp=_TS + 10)
+    deps.stores.profile.profiles[_scope()] = Profile(
+        owner_id="u_alice", summary="prior", timestamp=_TS + 5
+    )
+    _seed_indexed(deps, _scope(), "ep_late", timestamp=_TS + 1)
+    _seed_indexed(deps, _scope(), "ep_new", timestamp=_TS + 20)
+    with _extractor(return_value=_algo_profile(timestamp=_TS + 20)) as extract:
+        await extract_user_profile(_event(), deps)
+        assert _passed(extract) == [
+            "Alice plans a trip to Kyoto.",
+            "Alice wrote ep_new.",
+        ]
+        await extract_user_profile(_own_event("ep_late"), deps)
+
+    assert extract.call_count == 2
+    assert _passed(extract) == ["Alice wrote ep_late."]
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        pytest.param({"in_md": False}, id="gone-from-md"),
+        pytest.param({"parent_type": "cluster"}, id="reflection-merged"),
+    ],
+)
+async def test_an_unfoldable_index_row_is_left_out(missing: dict[str, object]) -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_x", timestamp=_TS + 1, **missing)  # type: ignore[arg-type]
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_x")
+
+
+async def test_a_waiting_episode_whose_memcell_is_gone_is_left_out() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_x", timestamp=_TS + 1)
+    del deps.stores.memcell.cells["mc_ep_x"]
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+
+
+async def test_an_episode_folded_ahead_is_not_folded_again() -> None:
+    """Its own run has not come yet; another run must not send it twice."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    deps.profile_batcher.mark(_scope(), ["ep_w1"])
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+
+
+async def test_a_failed_call_marks_nothing() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    with (
+        _extractor(side_effect=RuntimeError("gateway down")),
+        pytest.raises(RuntimeError),
+    ):
+        await extract_user_profile(_event(), deps)
+
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_a_refused_batch_still_marks_its_waiting_episodes() -> None:
+    """A retry would read the same narratives, so their runs need not call."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    refusal = AlgoInvalidInputError("no episode narrative mentions 'Alice'")
+    with _extractor(side_effect=refusal):
+        await extract_user_profile(_event(), deps)
+
+    assert deps.stores.profile.writes == []
+    assert deps.profile_batcher.is_marked(_scope(), "ep_w1")
 
 
 # ── owner_name: the label the event carries ──────────────────────────────

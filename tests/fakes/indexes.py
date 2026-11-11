@@ -85,6 +85,24 @@ class InMemoryEpisodeIndex(_Unsearchable):
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         raise NotImplementedError
 
+    async def list_after(
+        self,
+        scope: Scope,
+        after_ts: int,
+        *,
+        parent_type: str,
+        limit: int | None = None,
+    ) -> list[Stored[Episode]]:
+        found = [
+            r
+            for r in self.rows
+            if _same_space(r.scope, scope)
+            and r.item.parent_type == parent_type
+            and r.item.timestamp > after_ts
+        ]
+        found = found if limit is None else found[:limit]
+        return sorted(found, key=lambda r: r.item.timestamp)
+
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
         return [r for r in self.rows if matches(where, self._fields(r))][:limit]
 

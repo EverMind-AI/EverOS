@@ -37,6 +37,7 @@ from tests.fakes import (
     agent_track_script,
     agent_trajectory,
     bundled_instructions,
+    default_profile_batcher,
     make_indexes,
     unscripted_llm,
 )
@@ -93,6 +94,7 @@ def _install_deps(
     deps = MemoryDeps(
         llm=llm,
         profile_llm=llm,
+        profile_batcher=default_profile_batcher(),
         embedding=embedding,
         stores=dataclasses.replace(real, **(stores or {})),
         indexes=(

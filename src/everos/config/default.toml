@@ -146,6 +146,11 @@ base_url = ""
 # extra = {}
 # response_format_mode = "json_schema"
 # invalid_reply_retries = 1
+# Most episodes one extraction call folds, the triggering one included; applies
+# with or without model. A run also folds the owner's newer episodes still
+# waiting, so a backlog drains in about 1/N of the calls. 1 = one per call.
+# Override via EVEROS_PROFILE__MAX_EPISODES_PER_CALL.
+max_episodes_per_call = 10
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept

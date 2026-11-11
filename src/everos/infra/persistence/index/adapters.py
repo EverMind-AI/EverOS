@@ -32,6 +32,7 @@ from everos.memory.models import (
     AgentSkill,
     AtomicFact,
     Episode,
+    EpisodeParentType,
     KnowledgeTopic,
     Profile,
 )
@@ -50,11 +51,13 @@ from everos.memory.ports import (
 
 from .protocols import (
     AgentSkillIndexRepository,
+    EpisodeIndexRepository,
     IndexRepository,
 )
 
 logger = get_logger(__name__)
 
+_VECTOR_COLUMNS = frozenset({"vector", "subject_vector"})
 
 type Row = Mapping[str, Any]
 
@@ -119,7 +122,7 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
         repo: Episode derived-index repository.
     """
 
-    def __init__(self, repo: IndexRepository[Any]) -> None:
+    def __init__(self, repo: EpisodeIndexRepository[Any]) -> None:
         super().__init__(repo, _stored_episode)
         self._episodes = repo
 
@@ -145,6 +148,25 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
 
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         return await self._paginate(where, page)
+
+    async def list_after(
+        self,
+        scope: Scope,
+        after_ts: int,
+        *,
+        parent_type: EpisodeParentType,
+        limit: int | None = None,
+    ) -> list[Stored[Episode]]:
+        rows = await self._episodes.list_by_owner_after_ts(
+            owner_id=scope.owner_id,
+            after_ts=after_ts,
+            parent_type=parent_type,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            columns=_read_columns(self._episodes.schema),
+            limit=limit,
+        )
+        return [_stored_episode(_fields(r)) for r in rows]
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
         rows = await self._episodes.find_where(where, limit=limit, skip_vectors=True)
@@ -304,6 +326,16 @@ def _cosine_similarity(row: Row) -> float:
     if distance is None:
         return 0.0
     return min(max(1.0 - float(distance), 0.0), 1.0)
+
+
+def _read_columns(schema: type[BaseModel]) -> list[str]:
+    """Every column a domain read needs: no vectors, no BM25 token columns."""
+    tokens = set(getattr(schema, "BM25_FIELDS", ()))
+    return [
+        name
+        for name in schema.model_fields
+        if name not in _VECTOR_COLUMNS and name not in tokens
+    ]
 
 
 def _scope(fields: Row) -> Scope:

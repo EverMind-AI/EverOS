@@ -71,7 +71,12 @@ from everos.service import (
 )
 from everos.service.bootstrap import build_replay_engine
 
-from .deps import bundled_instructions, make_stores, unscripted_llm
+from .deps import (
+    bundled_instructions,
+    default_profile_batcher,
+    make_stores,
+    unscripted_llm,
+)
 from .sources import unused_raw_file_builder
 from .storage import make_storage
 from .stores import UnusedPort
@@ -463,6 +468,7 @@ def make_backfill_deps(
     deps = MemoryDeps(
         llm=llm,
         profile_llm=llm,
+        profile_batcher=default_profile_batcher(),
         embedding=embedding,
         stores=build_stores(storage.root, storage.sqlite),
         indexes=build_indexes(storage.index),
