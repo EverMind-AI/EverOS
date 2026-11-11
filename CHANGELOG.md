@@ -7,16 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.6.0] - 2026-11-10
+## [1.6.0] - 2026-11-11
 
-**Memory deletion.** Two endpoints aligned with the Cloud API, and the
-machinery that keeps a deleted memory from coming back.
+EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including
+owner-scoped deletion by ID, and improves recovery when writes, background
+tasks, and file updates overlap. It also unifies application assembly across
+the server and CLI through `MemoryService`, `KnowledgeService`, and
+`OpsService`.
 
-**One place builds the application.** Providers, storage adapters, the OME
-engine, the cascade and the domain objects are now assembled once, by
-`everos.service.build_application(settings)`, and the HTTP server and the CLI
-both use the resulting `Application` through three facades:
-`MemoryService`, `KnowledgeService` and `OpsService`.
+This release adds safeguards for large search workloads and keeps unused
+vectors out of returned query results. See the upgrade notes below for
+configuration and Python API changes.
 
 ### Added
 
