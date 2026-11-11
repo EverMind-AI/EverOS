@@ -114,6 +114,55 @@ async def test_active_job_returned_for_other_scope(storage: Storage) -> None:
         await p.service.confirm(other.nonce)
 
 
+async def test_confirm_while_the_active_row_is_unwritten_waits_for_it(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    p = await _ready(storage)
+    first_req = await p.service.request("project", "a1", "p1")
+    other_req = await p.service.request("app", "a2", None)
+    arm(monkeypatch, tmp_path, "purge.confirm_insert=pause")
+    first = asyncio.create_task(p.service.confirm(first_req.nonce))
+    await asyncio.sleep(0.1)
+    other = asyncio.create_task(p.service.confirm(other_req.nonce))
+    await asyncio.sleep(0.1)
+    assert not other.done()  # the mark is up but the job row is not written
+    release(tmp_path, "purge.confirm_insert")
+    job = await asyncio.wait_for(first, 2)
+    assert (await asyncio.wait_for(other, 2)).job_id == job.job_id
+    assert len(await storage.sqlite.purge_job.all_rows()) == 1
+
+
+async def test_confirm_starts_its_own_job_when_the_pending_one_gives_up(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = await _ready(storage)
+    first_req = await p.service.request("project", "a1", "p1")
+    other_req = await p.service.request("app", "a2", None)
+    go = asyncio.Event()
+    real_insert = p.service.jobs.insert
+    calls = 0
+
+    async def insert(**fields: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await go.wait()
+            raise OSError("disk full")
+        return await real_insert(**fields)
+
+    monkeypatch.setattr(p.service.jobs, "insert", insert)
+    first = asyncio.create_task(p.service.confirm(first_req.nonce))
+    await asyncio.sleep(0.05)
+    other = asyncio.create_task(p.service.confirm(other_req.nonce))
+    await asyncio.sleep(0.05)
+    go.set()
+    with pytest.raises(StorageError):
+        await asyncio.wait_for(first, 2)
+    job = await asyncio.wait_for(other, 2)
+    assert (job.scope, job.app_id) == ("app", "a2")
+    assert p.marks.active_job_id == job.job_id
+
+
 async def test_snapshot_excludes_runs_started_after_t(storage: Storage) -> None:
     p = await _ready(storage)
     now = get_utc_now()

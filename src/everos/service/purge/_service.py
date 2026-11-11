@@ -86,6 +86,8 @@ class PurgeService:
     wake_queue: Callable[[], None]
     _nonces: dict[str, _Nonce] = field(default_factory=dict, init=False)
     _reserved: set[str] = field(default_factory=set, init=False)
+    _recording: asyncio.Event | None = field(default=None, init=False)
+    """Set while a confirm writes its job row (the mark is up, the row not yet)."""
     _inflight: InFlight | None = field(default=None, init=False)
     _runner: PurgeRunner | None = field(default=None, init=False)
 
@@ -170,20 +172,29 @@ class PurgeService:
             StorageError: The job row could not be written; nothing started
                 and the nonce stays valid.
         """
-        # Synchronous up to the first await: two confirms of one nonce, or of
-        # two nonces, cannot both get past here.
-        entry = self._nonces.get(nonce)
-        if (
-            entry is None
-            or entry.expires_at <= get_utc_now()
-            or nonce in self._reserved
-        ):
-            raise PurgeNonceInvalidError("unknown, expired or used purge nonce")
         marks = self.marks
-        active = marks.active_job_id
-        if active is not None:
-            del self._nonces[nonce]
-            return await self.get(active)
+        while True:
+            entry = self._nonces.get(nonce)
+            if (
+                entry is None
+                or entry.expires_at <= get_utc_now()
+                or nonce in self._reserved
+            ):
+                raise PurgeNonceInvalidError("unknown, expired or used purge nonce")
+            active = marks.active_job_id
+            if active is None:
+                break
+            if self._recording is not None:
+                # That job's confirm is still writing its row: wait, then
+                # decide again (it may also give up and lift the mark).
+                await self._recording.wait()
+                continue
+            view = await self.get(active)
+            # Used only once the running job can be returned.
+            self._nonces.pop(nonce, None)
+            return view
+        # Synchronous from the last check on: two confirms of one nonce, or
+        # of two nonces, cannot both get past here.
         self._reserved.add(nonce)
         scope = entry.scope
         job_id = f"pj_{uuid.uuid4().hex}"
@@ -198,30 +209,35 @@ class PurgeService:
             if scope.covers(*key.split("\x1f")[:2])
         )
         tasks = self.extraction_snapshot()
+        recording = self._recording = asyncio.Event()
         try:
-            await afailpoint("purge.confirm_insert")
-            row = await self.jobs.insert(
-                job_id=job_id,
-                scope=scope.kind,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                created_at=at,
-                steps_json=steps_to_json(
-                    [PurgeStep(s, "pending") for s in step_stores(self.index_store)]
-                ),
-            )
-        except Exception as exc:
-            # ponytail: a stale event this tombstone dropped in these few ms
-            # stays dropped; it was in S, which the caller is clearing anyway.
-            self._undo(scope, tombstone, nonce)
-            logger.warning("purge_job_insert_failed", error=repr(exc)[:200])
-            raise StorageError("could not record the purge job; retry") from exc
-        if row is None:  # another process holds the active row
-            self._undo(scope, tombstone, nonce)
-            other = await self.jobs.active()
-            if other is None:
-                raise StorageError("could not record the purge job; retry")
-            return self._view(other)
+            try:
+                await afailpoint("purge.confirm_insert")
+                row = await self.jobs.insert(
+                    job_id=job_id,
+                    scope=scope.kind,
+                    app_id=scope.app_id,
+                    project_id=scope.project_id,
+                    created_at=at,
+                    steps_json=steps_to_json(
+                        [PurgeStep(s, "pending") for s in step_stores(self.index_store)]
+                    ),
+                )
+            except Exception as exc:
+                # ponytail: a stale event this tombstone dropped in these few ms
+                # stays dropped; it was in S, which the caller is clearing anyway.
+                self._undo(scope, tombstone, nonce)
+                logger.warning("purge_job_insert_failed", error=repr(exc)[:200])
+                raise StorageError("could not record the purge job; retry") from exc
+            if row is None:  # another process holds the active row
+                self._undo(scope, tombstone, nonce)
+                other = await self.jobs.active()
+                if other is None:
+                    raise StorageError("could not record the purge job; retry")
+                return self._view(other)
+        finally:
+            self._recording = None
+            recording.set()
         del self._nonces[nonce]
         self._reserved.discard(nonce)
         runs = await self.engine.running_runs()
