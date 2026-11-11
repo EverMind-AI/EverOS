@@ -55,10 +55,18 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
 
 from everalgo.user_memory._language import OutputLanguage
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
+from everos.memory.extract.reply_form import drop_empty_unknown_keys
 from everos.memory.models import ExplicitInfoItem, ImplicitTraitItem, Profile
 from everos.memory.ports import ProfileStore, Scope
 
@@ -124,27 +132,41 @@ since 2019" — not a sentence repeating the name and prices the text gave.
   time, and names no one."""
 
 
-class _ExplicitData(BaseModel):
-    """An ``explicit_info`` item, in everalgo's own shape (grounding first)."""
+class _LenientForm(BaseModel):
+    """Base of the reply's operation models: an unknown key left empty reads as absent.
+
+    The picture call is answered in JSON mode, where a model sometimes adds a
+    key the format never names and leaves it empty (``"action_note": ""``,
+    measured 2026-11-11); failing the reply for it cost a second call with
+    every picture attached. A key that carries anything still fails
+    (:func:`everos.memory.extract.reply_form.drop_empty_unknown_keys`).
+    """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
+        return drop_empty_unknown_keys(cls, value)
+
+
+class _ExplicitData(_LenientForm):
+    """An ``explicit_info`` item, in everalgo's own shape (grounding first)."""
 
     evidence: str
     description: str
     category: str
 
 
-class _TraitData(BaseModel):
+class _TraitData(_LenientForm):
     """An ``implicit_traits`` item, in everalgo's own shape."""
-
-    model_config = ConfigDict(extra="forbid")
 
     basis: str
     description: str
     trait: str
 
 
-class _AddOp(BaseModel):
+class _AddOp(_LenientForm):
     """One ``add``, addressed by a bucket name rather than an index.
 
     ``action`` / ``type`` / ``data`` are everalgo's UPDATE reply fields byte for
@@ -160,11 +182,14 @@ class _AddOp(BaseModel):
     data: _ExplicitData | _TraitData
     source_image_id: str = ""
 
+    @field_validator("source_image_id", mode="before")
+    @classmethod
+    def _null_is_untagged(cls, value: object) -> object:
+        return "" if value is None else value
 
-class _NoOp(BaseModel):
+
+class _NoOp(_LenientForm):
     """The documented no-op: nothing in these photos is about their sender."""
-
-    model_config = ConfigDict(extra="forbid")
 
     action: Literal["none"]
 

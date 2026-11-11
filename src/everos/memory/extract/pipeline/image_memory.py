@@ -33,6 +33,16 @@ Two rules keep the results coherent with the rest of the store:
 Numbers on the reply side are the same as the episode prompt's (``content`` /
 ``summary`` / ``title``), so the caller can hand the episode half to
 :class:`everos.memory.Episode` unchanged.
+
+The reply is read leniently in form and strictly in meaning
+(:mod:`everos.memory.extract.reply_form`): an unknown key left empty reads as
+absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images`` /
+``profile`` (one entry given bare reads as a list of it), and a reply with an
+array element left open or split in two objects is mended before it is
+validated. Each of those cost a second call carrying every picture again
+(2026-11-11, 4.2% of MemEye's picture calls). The JSON schema a call sends is
+unchanged; the reply models' docstrings are part of it, so they stay as they
+are.
 """
 
 from __future__ import annotations
@@ -54,13 +64,14 @@ from everalgo.user_memory._language import (
 )
 from everalgo.user_memory.prompts.en.episode import assemble_system_prompt
 from everalgo.utils import paragraphs, render_chat_line, tagged
-from pydantic import Field
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from everos.core.observability.logging import get_logger
 from everos.memory.extract.pipeline.profile_delta import (
     PICTURE_PROFILE_RULES,
     ProfileItemOp,
 )
+from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 
 logger = get_logger(__name__)
 
@@ -84,6 +95,16 @@ class ImageFact(StrictOutputModel):
     Empty for a picture with no text in it — a photograph of a scene, which
     is the common case rather than a defect."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
+        return drop_empty_unknown_keys(cls, value)
+
+    @field_validator("ocr", mode="before")
+    @classmethod
+    def _null_is_empty(cls, value: object) -> object:
+        return "" if value is None else value
+
 
 class ImageEpisodeReply(StrictOutputModel):
     """The one reply that carries the episode, every picture's memory, and the profile.
@@ -99,6 +120,45 @@ class ImageEpisodeReply(StrictOutputModel):
     title: str
     images: list[ImageFact] = Field(default_factory=list)
     profile: list[ProfileItemOp] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
+        return drop_empty_unknown_keys(cls, value)
+
+    @field_validator("images", "profile", mode="before")
+    @classmethod
+    def _one_or_none_reads_as_a_list(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        return value
+
+    @classmethod
+    def model_validate_json(
+        cls, json_data: str | bytes | bytearray, **kwargs: Any
+    ) -> ImageEpisodeReply:
+        """Validate a reply, mending its JSON form first when that is all that fails.
+
+        The provider checks a reply and the operator parses it through this
+        method, so both read the same mended text. Only a reply that is not
+        valid JSON is mended (:func:`repair_json_form`); one that parses but
+        breaks the model is not touched, and a slip the repair does not know
+        keeps its original error.
+        """
+        try:
+            return super().model_validate_json(json_data, **kwargs)
+        except ValidationError as err:
+            if any(error["type"] != "json_invalid" for error in err.errors()):
+                raise
+            text = (
+                json_data if isinstance(json_data, str) else bytes(json_data).decode()
+            )
+            mended = repair_json_form(text)
+            if mended is None:
+                raise
+            return super().model_validate_json(mended, **kwargs)
 
 
 _IMAGE_RULES = """\

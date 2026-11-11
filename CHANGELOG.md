@@ -248,6 +248,25 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A picture call is no longer paid twice for a slip of form in its reply.**
+  On the picture route, 7 of MemEye's 168 extraction replies (4.2%, DeepSeek
+  V4.1 Flash in JSON mode at the then-default temperature 1.0; 3 of CUE-Mem's
+  125 at temperature 0) failed the reply schema, and each failure resent the
+  call with every picture attached, although none said anything a valid reply
+  would not have: an unknown key left empty (`"profile": []` inside a
+  picture's entry, `"ocr_note": ""`, `"action_note": ""`), a profile operation
+  whose closing brace was left off before the next one or the array's `]`,
+  and a reply split into two objects. The reply is now read leniently in
+  form: an unknown key whose value is empty reads as absent, `null` reads as
+  empty (`ocr`, `source_image_id`) or as no entries (`images`, `profile`),
+  one entry given bare reads as a list of it, and a reply that is not valid
+  JSON only because an array element was left open or the reply was split
+  into objects with distinct keys is mended before it is validated
+  (`everos.memory.extract.reply_form`). Meaning stays strict: an unknown key
+  that carries anything, a missing description or episode, a wrong type and
+  any other syntax error still fail and are retried as before. The prompt
+  and the JSON schema the call sends are unchanged; on the measured replies
+  the schema failures drop from 7 to 0 (MemEye) and 3 to 1 (CUE-Mem).
 - **A group flush no longer saturates the SQLite pool.** Each member's
   pending segments are read in one query, and at most `[sqlite] pool_size`
   members read at a time; the profiles written are unchanged.
