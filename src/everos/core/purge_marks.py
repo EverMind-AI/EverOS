@@ -26,8 +26,7 @@ __all__ = [
 ]
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
-from contextlib import asynccontextmanager
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -163,12 +162,6 @@ class PurgeMarks:
             waiter = asyncio.get_running_loop().create_future()
             self._waiters.append(waiter)
             await waiter
-
-    @asynccontextmanager
-    async def lifted(self) -> AsyncIterator[None]:
-        """Enter once no mark is up."""
-        await self.wait_lifted()
-        yield
 
 
 class PurgeMarkRegistry:
