@@ -62,6 +62,10 @@ class DeleteFence:
         self._seq = 0
         self._runs: set[int] = set()
         self._entries: dict[RowKey, int] = {}
+        self._scopes: set[tuple[str, str | None]] = set()
+        """Whole scopes a purge keeps out, ``(app_id, project_id | None)``;
+        ``("*", None)`` is the whole root. Held until the purge lifts them,
+        whatever runs are in flight."""
         self._publish()
 
     def register_run(self) -> int:
@@ -93,8 +97,24 @@ class DeleteFence:
                 threshold=self._warn_entries,
             )
 
+    def block_scope(self, app_id: str, project_id: str | None) -> None:
+        """Keep every row of a scope out of the index (``app_id="*"``: all)."""
+        self._scopes.add((app_id, project_id))
+
+    def unblock_scope(self, app_id: str, project_id: str | None) -> None:
+        self._scopes.discard((app_id, project_id))
+
+    def in_flight(self) -> frozenset[int]:
+        """Tokens of the runs registered right now."""
+        return frozenset(self._runs)
+
     def blocks(self, row: Any) -> bool:
         """Whether ``row`` (an index record) was fenced by a deletion."""
+        for app_id, project_id in self._scopes:
+            if app_id == "*" or (
+                app_id == row.app_id and project_id in (None, row.project_id)
+            ):
+                return True
         return (row.app_id, row.project_id, row.id) in self._entries
 
     def filter_for(self, rows: Sequence[Any]) -> Filter:

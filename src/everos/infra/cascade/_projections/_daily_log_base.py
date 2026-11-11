@@ -103,16 +103,10 @@ class BaseDailyLogHandler(Handler):
         return compute_content_sha256(parts)
 
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
-        # Registered before the file is read, ended however the run ends:
-        # a deletion that fences rows while this run is going keeps them out
-        # of this run's upsert (``_apply_lance_changes``).
-        fence = self._deps.fence
-        token = fence.register_run() if fence is not None else None
-        try:
-            return await self._project(md_path)
-        finally:
-            if fence is not None and token is not None:
-                fence.end_run(token)
+        # The worker registers this run with the delete fence before calling
+        # it, so a deletion that fences rows meanwhile keeps them out of this
+        # run's upsert (``_apply_lance_changes``).
+        return await self._project(md_path)
 
     async def _project(self, md_path: str) -> HandlerOutcome:
         absolute = self._deps.memory_root.root / md_path
