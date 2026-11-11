@@ -73,6 +73,20 @@ def member_profile_lock(
     )
 
 
+def group_profile_lock(
+    app_id: str, project_id: str, group_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one group's profile batch holds.
+
+    One per group (docs/group-memory.md, section 7.5): a segment queued while
+    an update runs waits for it, so no segment is read twice or dropped from
+    the batch, and the update reads the items the previous one wrote.
+    """
+    return get_partition_lock(
+        "update_group_profile", f"{app_id}:{project_id}:{group_id}"
+    )
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
     LOCKS.reset()

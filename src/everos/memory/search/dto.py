@@ -474,6 +474,76 @@ class UnprocessedMessageDTO(BaseModel):
     tool_call_id: str | None = None
 
 
+class ProfileSourceItem(BaseModel):
+    """One verified piece of evidence: a message of a segment, quoted verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memcell_id: str
+    message_id: str
+    speaker_id: str
+    at: int
+    """The message's time, epoch ms."""
+    quote: str
+
+
+class GroupProfileEntry(BaseModel):
+    """One group-profile item (docs/group-memory.md, section 7.5).
+
+    ``kind`` decides which fields are filled: a topic its ``topic_id`` /
+    ``name`` / ``summary`` / ``topic_status``; a decision its ``statement``
+    and the people fields; a dissent ``statement`` / ``held_by`` / ``about``;
+    a role ``member_id`` / ``role`` / ``confidence``. ``status`` is the
+    item's own (``current``, ``open``, ``active``, a topic's status ...) or
+    ``superseded`` once a later item replaced it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    """Index row id, ``<group_id>_<item_id>``."""
+    item_id: str
+    group_id: str
+    kind: Literal["topic", "decision", "dissent", "role"]
+    status: str
+    statement: str = ""
+    topic_id: str | None = None
+    name: str = ""
+    summary: str = ""
+    topic_status: str | None = None
+    decided_by: list[str] = Field(default_factory=list)
+    agreed_by: list[str] = Field(default_factory=list)
+    assignees: list[str] = Field(default_factory=list)
+    applies_to: list[str] = Field(default_factory=list)
+    held_by: list[str] = Field(default_factory=list)
+    about: str | None = None
+    resolved_by: list[str] = Field(default_factory=list)
+    member_id: str | None = None
+    role: str | None = None
+    confidence: str | None = None
+    supersedes: str | None = None
+    superseded_by: str | None = None
+    subject_ids: list[str] = Field(default_factory=list)
+    sender_ids: list[str] = Field(default_factory=list)
+    origin: Literal["member", "assistant", "mixed"] | None = None
+    sources: list[ProfileSourceItem] = Field(default_factory=list)
+    source: SearchSource
+    """The span of the item's sources (``memcell_id`` is ``None``: an item may
+    rest on several segments)."""
+    observed_at: int
+
+
+class SearchGroupProfile(BaseModel):
+    """The visible current group-profile items of a group scope, by kind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topics: list[GroupProfileEntry] = Field(default_factory=list)
+    decisions: list[GroupProfileEntry] = Field(default_factory=list)
+    dissent: list[GroupProfileEntry] = Field(default_factory=list)
+    roles: list[GroupProfileEntry] = Field(default_factory=list)
+
+
 # ── Response envelope ────────────────────────────────────────────────────
 
 

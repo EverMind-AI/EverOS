@@ -4867,6 +4867,13 @@
             "type": "array",
             "title": "Profiles"
           },
+          "group_profile": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Group Profile"
+          },
           "agent_cases": {
             "items": {
               "$ref": "#/components/schemas/GetAgentCaseItem"
@@ -5169,7 +5176,8 @@
           "agent_skill",
           "scene",
           "image_memory",
-          "member_profile"
+          "member_profile",
+          "group_profile"
         ],
         "title": "GetMemoryType",
         "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
@@ -5350,6 +5358,11 @@
             ],
             "title": "Member Id"
           },
+          "include_superseded": {
+            "type": "boolean",
+            "title": "Include Superseded",
+            "default": false
+          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -5504,6 +5517,238 @@
         ],
         "title": "GroupDTO",
         "description": "A group's meta and roster."
+      },
+      "GroupProfileEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "topic",
+              "decision",
+              "dissent",
+              "role"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement",
+            "default": ""
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "topic_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Status"
+          },
+          "decided_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decided By"
+          },
+          "agreed_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Agreed By"
+          },
+          "assignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assignees"
+          },
+          "applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Applies To"
+          },
+          "held_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held By"
+          },
+          "about": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "About"
+          },
+          "resolved_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resolved By"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileSourceItem"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SearchSource"
+          },
+          "observed_at": {
+            "type": "integer",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "item_id",
+          "group_id",
+          "kind",
+          "status",
+          "source",
+          "observed_at"
+        ],
+        "title": "GroupProfileEntry",
+        "description": "One group-profile item (docs/group-memory.md, section 7.5).\n\n``kind`` decides which fields are filled: a topic its ``topic_id`` /\n``name`` / ``summary`` / ``topic_status``; a decision its ``statement``\nand the people fields; a dissent ``statement`` / ``held_by`` / ``about``;\na role ``member_id`` / ``role`` / ``confidence``. ``status`` is the\nitem's own (``current``, ``open``, ``active``, a topic's status ...) or\n``superseded`` once a later item replaced it."
       },
       "GroupUpsertRequest": {
         "properties": {
@@ -6188,6 +6433,41 @@
           "content"
         ],
         "title": "MessageItemDTO"
+      },
+      "ProfileSourceItem": {
+        "properties": {
+          "memcell_id": {
+            "type": "string",
+            "title": "Memcell Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "speaker_id": {
+            "type": "string",
+            "title": "Speaker Id"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memcell_id",
+          "message_id",
+          "speaker_id",
+          "at",
+          "quote"
+        ],
+        "title": "ProfileSourceItem",
+        "description": "One verified piece of evidence: a message of a segment, quoted verbatim."
       },
       "QuestionPicture": {
         "properties": {

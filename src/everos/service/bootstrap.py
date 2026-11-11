@@ -119,7 +119,7 @@ from everos.memory.extract.pipeline import (
 )
 from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
-from everos.memory.ports import EventBus, IndexEraser, StrategySpec
+from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
@@ -132,7 +132,11 @@ from everos.memory.search.recall import (
     ProfileRecaller,
     RecallerDeps,
 )
-from everos.memory.strategies import STRATEGY_SPECS
+from everos.memory.strategies import (
+    STRATEGY_SPECS,
+    UPDATE_GROUP_PROFILE_IDLE_SPEC,
+    UPDATE_GROUP_PROFILE_SPEC,
+)
 from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
@@ -362,7 +366,7 @@ def build_application(
         case_judge=_case_judge(settings, providers.llm),
     )
     ome_lock = OmeLock(root.ome_db)
-    engine = _build_engine(root, deps, settings.ome, lock=ome_lock)
+    engine = _build_engine(root, deps, settings, lock=ome_lock)
     capabilities = _capabilities(settings, providers)
     admin = CascadeAdmin(
         database=database,
@@ -513,14 +517,20 @@ def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
 
 
 def _build_engine(
-    root: MemoryRoot, deps: MemoryDeps, ome: OmeSettings, *, lock: OmeLock | None = None
+    root: MemoryRoot,
+    deps: MemoryDeps,
+    settings: Settings,
+    *,
+    lock: OmeLock | None = None,
 ) -> OfflineEngine:
     """The OME engine with every strategy registered over ``deps``.
 
     Strategies that need an embedding provider return no events when
     ``deps.embedding`` is ``None``; providers are resolved once, so a tier
-    change needs a restart.
+    change needs a restart. Strategies whose trigger the settings decide are
+    registered as configured (:func:`configured_spec`).
     """
+    ome = settings.ome
     engine = OfflineEngine(
         config=OMEConfig(
             jobstore_path=root.ome_db,
@@ -531,8 +541,33 @@ def _build_engine(
         lock=lock,
     )
     for spec in STRATEGY_SPECS:
-        engine.register(to_ome_strategy(spec, deps))
+        engine.register(to_ome_strategy(configured_spec(spec, settings), deps))
     return engine
+
+
+def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
+    """``spec`` with the trigger values ``settings`` own.
+
+    The group profile's idle trigger fires ``[groups] group_profile_idle_seconds``
+    after a group's last segment (scanned at most every minute), and both group
+    profile strategies are off with ``[groups] group_profile = false``.
+    ``ome.toml`` overrides still apply on top, by strategy name.
+    """
+    groups = settings.groups
+    if spec.name == UPDATE_GROUP_PROFILE_IDLE_SPEC.name:
+        idle = groups.group_profile_idle_seconds
+        trigger = Idle(
+            on=list(UPDATE_GROUP_PROFILE_IDLE_SPEC.trigger.on),  # type: ignore[union-attr]
+            event_field="group_key",
+            idle_seconds=idle,
+            scan_interval_seconds=max(1, min(60, idle // 2)),
+        )
+        return dataclasses.replace(
+            spec, trigger=trigger, enabled=spec.enabled and groups.group_profile
+        )
+    if spec.name == UPDATE_GROUP_PROFILE_SPEC.name:
+        return dataclasses.replace(spec, enabled=spec.enabled and groups.group_profile)
+    return spec
 
 
 def build_replay_engine(
@@ -661,6 +696,7 @@ def _build_memory_service(
             profile_index=indexes.profile,
             access=access,
             image_index=indexes.image_memory,
+            group_profile_index=indexes.group_profile,
         ),
         indexes=indexes,
         image_limits=_image_limits(settings),

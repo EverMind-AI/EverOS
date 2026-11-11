@@ -1045,6 +1045,11 @@ class GroupsSettings(BaseModel):
     makes no extra reflector calls).
     ``asker_in_question``: a group scope's multi-round question names the
     asker, ``"<display name>: <question>"`` (section 8.2).
+    ``group_profile``: keep the group profile (section 7.5) -- topics,
+    decisions, dissent and roles, one model call per batch of segments.
+    ``group_profile_batch``: a batch is read after this many new segments;
+    ``group_profile_idle_seconds``: or after the group has had no new segment
+    for this long; and at every flush of the group.
     """
 
     implicit_create: bool = True
@@ -1052,6 +1057,9 @@ class GroupsSettings(BaseModel):
     member_profile_every: int = Field(default=5, ge=1)
     scenes: bool = False
     asker_in_question: bool = True
+    group_profile: bool = True
+    group_profile_batch: int = Field(default=5, ge=1)
+    group_profile_idle_seconds: int = Field(default=600, ge=2)
 
 
 class AccessSettings(BaseModel):

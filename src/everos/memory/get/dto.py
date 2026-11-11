@@ -31,7 +31,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from everos.memory.search import FilterNode, SearchSource
+from everos.memory.search import FilterNode, GroupProfileEntry, SearchSource
 
 
 class GetMemoryType(StrEnum):
@@ -56,6 +56,9 @@ class GetMemoryType(StrEnum):
     """A group's picture memories (group scopes only)."""
     MEMBER_PROFILE = "member_profile"
     """One member's profile in the group(s), with ``member_id`` (group scopes)."""
+    GROUP_PROFILE = "group_profile"
+    """The group-profile items the asker can see (group scopes); with
+    ``include_superseded`` every version, not only the current ones."""
 
 
 # ── Request ──────────────────────────────────────────────────────────────
@@ -91,6 +94,9 @@ class GetRequest(BaseModel):
     (the cases learned in it join those learned outside groups)."""
     member_id: str | None = Field(default=None, min_length=1)
     """With ``memory_type = member_profile`` only: whose profile to list."""
+    include_superseded: bool = False
+    """With ``memory_type = group_profile`` only: list the versions later items
+    replaced too, each marked ``superseded``. Forgotten items never return."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the query
@@ -150,6 +156,7 @@ class GetRequest(BaseModel):
             GetMemoryType.SCENE,
             GetMemoryType.IMAGE_MEMORY,
             GetMemoryType.MEMBER_PROFILE,
+            GetMemoryType.GROUP_PROFILE,
         }
         if self.owner_type == "group" and self.memory_type not in group_kinds:
             raise ValueError(
@@ -164,6 +171,11 @@ class GetRequest(BaseModel):
         wants_member = self.memory_type == GetMemoryType.MEMBER_PROFILE
         if wants_member != (self.member_id is not None):
             raise ValueError("member_id goes with memory_type member_profile, only")
+        profile = self.memory_type == GetMemoryType.GROUP_PROFILE
+        if self.include_superseded and not profile:
+            raise ValueError("include_superseded goes with memory_type group_profile")
+        if profile and self.filters is not None:
+            raise ValueError("filters are not supported for memory_type group_profile")
         return self
 
     @property
@@ -321,6 +333,8 @@ class GetData(BaseModel):
     images: list[GetImageItem] = Field(default_factory=list)
     """A group's picture memories (``memory_type = image_memory``)."""
     profiles: list[GetProfileItem] = Field(default_factory=list)
+    group_profile: list[GroupProfileEntry] = Field(default_factory=list)
+    """A group's profile items (``memory_type = group_profile``), newest first."""
     agent_cases: list[GetAgentCaseItem] = Field(default_factory=list)
     agent_skills: list[GetAgentSkillItem] = Field(default_factory=list)
     total_count: int = 0

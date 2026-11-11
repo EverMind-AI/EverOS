@@ -510,10 +510,14 @@ async def test_group_strategies_read_only_the_groups_own_segments(
 ) -> None:
     """Row 11: group strategies read only the group's segments, member
     profiles never read ``users/<m>/``, personal strategies never see a group
-    segment."""
+    segment, and the group profile's update reads only the group's own."""
+    profile_prompts: list[str] = []
 
     def model(messages: Any, *, response_format: type, **_kw: Any) -> str:
         name = response_format.__name__
+        if name == "GroupProfileReply":
+            profile_prompts.append("\n".join(str(m.content) for m in messages))
+            return json.dumps({"operations": []})
         if name == "_BatchReply":
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
@@ -573,6 +577,68 @@ async def test_group_strategies_read_only_the_groups_own_segments(
                     set((item.model_extra or {})["source_memcell_ids"]) <= group_cells
                 )
         assert user_md.read_bytes() == before
+        (prompt,) = profile_prompts  # the flush ran the group profile's batch
+        assert "personal marker" not in prompt
+        assert "group marker: book the venue" in prompt
+        assert [m for m in group_cells if f"=== SEGMENT {m} ===" in prompt] == list(
+            group_cells
+        )
+
+
+PROFILE_ITEMS = {
+    "alpha decision marker": (1000, 2000),
+    "bravo decision marker": (3000, 4000),
+    "straddle decision marker": (2000, 3000),
+    "charlie decision marker": (8000, 9000),
+}
+"""Group-profile items at the episodes' spans (offsets from T0)."""
+
+
+async def _seed_profile_items(world: GroupWorld) -> None:
+    for text, (start, end) in PROFILE_ITEMS.items():
+        await world.profile_item("trip", text, start=T0 + start, end=T0 + end)
+    # A decision whose newer version lies where a late joiner can see it: the
+    # old one is superseded, so no current read returns it to anyone.
+    old = await world.profile_item(
+        "trip", "replaced decision marker", start=T0 + 1100, end=T0 + 1200
+    )
+    await world.profile_item(
+        "trip",
+        "replacing decision marker",
+        start=T0 + 8100,
+        end=T0 + 8200,
+        supersedes=old.entry_id,
+    )
+    await world.project()
+
+
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+@pytest.mark.parametrize("history", [False, True])
+async def test_group_profile_items_follow_the_windows(
+    fixture: _Fixture, asker: str, history: bool
+) -> None:
+    """Section 13.5: a group-profile item whose source is invisible is absent."""
+    world = fixture.world
+    await _seed_profile_items(world)
+
+    listed = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id=asker,
+            memory_type="group_profile",
+            include_superseded=history,
+        )
+    )
+    blob = json.dumps(listed.model_dump(mode="json"))
+    for text, (start, end) in PROFILE_ITEMS.items():
+        assert (text in blob) == _visible(asker, T0 + start, T0 + end), (asker, text)
+    replaced_seen = history and _visible(asker, T0 + 1100, T0 + 1200)
+    assert ("replaced decision marker" in blob) == replaced_seen
+    assert ("replacing decision marker" in blob) == _visible(
+        asker, T0 + 8100, T0 + 8200
+    )
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:

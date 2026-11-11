@@ -24,14 +24,12 @@ from __future__ import annotations
 __all__ = [
     "ROSTER_BLOCK",
     "Attribution",
-    "PromptTemplate",
     "attribution",
     "label_cell",
     "roster_block",
     "with_roster_block",
 ]
 
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -46,24 +44,7 @@ from everos.memory.models import (
     Origin,
     Roster,
 )
-
-
-@dataclass(frozen=True)
-class PromptTemplate:
-    """A registered rendering template: id, version and the text it renders.
-
-    ``fingerprint`` changes whenever a part's text does, so data built from
-    one version can be told apart from data built from another.
-    """
-
-    id: str
-    version: int
-    parts: tuple[str, ...]
-
-    @property
-    def fingerprint(self) -> str:
-        return hashlib.sha256("\n".join(self.parts).encode("utf-8")).hexdigest()[:16]
-
+from everos.memory.prompts import PromptTemplate
 
 ROSTER_BLOCK = PromptTemplate(
     id="chat.group_roster_block",

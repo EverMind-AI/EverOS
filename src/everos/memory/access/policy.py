@@ -54,6 +54,7 @@ from typing import Literal
 from everos.core.errors import ForbiddenError, InvalidInputError
 from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     MANAGER_ROLES,
     CanonicalMessage,
     Group,
@@ -75,6 +76,7 @@ from everos.memory.ports import (
     gte,
     is_null,
     lt,
+    ne,
 )
 
 from .identity import Identity
@@ -170,6 +172,10 @@ class ReadScope:
         groups: Per group, its roster and the windows in force.
         predicate: The owner, space, status and window conditions -- what
             replaces the owner part of every recall's ``where``.
+        versions_predicate: The same, with every version a group record
+            had except the forgotten ones: what a read of an item's history
+            (``include_superseded``) uses. Equal to ``predicate`` outside
+            groups.
         case_filter: For an agent scope, the extra condition on its cases:
             cases learned outside groups, plus the context group's.
     """
@@ -183,6 +189,12 @@ class ReadScope:
     audience: Audience = "asker"
     groups: tuple[GroupView, ...] = field(default_factory=tuple)
     case_filter: Filter | None = None
+    versions_predicate: Filter | None = None
+
+    @property
+    def history_predicate(self) -> Filter:
+        """``versions_predicate`` when set, else ``predicate``."""
+        return self.versions_predicate or self.predicate
 
     def cases_where(self, where: Filter) -> Filter:
         """``where`` narrowed to the agent cases this read may see."""
@@ -491,12 +503,20 @@ class AccessPolicy:
                 GroupView(group=record.group, roster=record.roster, windows=windows)
             )
         per_group = [p for p in (view.predicate() for view in views) if p is not None]
+        space = (
+            eq("owner_type", "group"),
+            eq("app_id", request.app_id),
+            eq("project_id", request.project_id),
+        )
         predicate = (
+            all_of(*space, is_null("deprecated_by"), any_of(*per_group))
+            if per_group
+            else _NOTHING
+        )
+        versions = (
             all_of(
-                eq("owner_type", "group"),
-                eq("app_id", request.app_id),
-                eq("project_id", request.project_id),
-                is_null("deprecated_by"),
+                *space,
+                any_of(is_null("deprecated_by"), ne("deprecated_by", FORGOTTEN_MARK)),
                 any_of(*per_group),
             )
             if per_group
@@ -511,6 +531,7 @@ class AccessPolicy:
             predicate=predicate,
             audience=request.audience,
             groups=tuple(views),
+            versions_predicate=versions,
         )
 
     async def picture_visible(

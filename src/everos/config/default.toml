@@ -386,6 +386,13 @@ scenes = false
 # A group search's multi-round question names the asker:
 # "<display name>: <question>" (section 8.2).
 asker_in_question = true
+# The group profile (section 7.5): topics, decisions, dissent and roles,
+# append-only, updated by one model call per batch of segments -- after
+# group_profile_batch new segments, after group_profile_idle_seconds without
+# one, and at every flush of the group. false keeps no group profile.
+group_profile = true
+group_profile_batch = 5
+group_profile_idle_seconds = 600
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

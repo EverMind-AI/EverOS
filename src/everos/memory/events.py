@@ -11,9 +11,20 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from everalgo.types import MemCell
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from everos.memory.ports import Event
+
+
+def group_key(app_id: str, project_id: str, group_id: str) -> str:
+    """One string naming a group across spaces: ``<app>/<project>/<group>``."""
+    return f"{app_id}/{project_id}/{group_id}"
+
+
+def parse_group_key(key: str) -> tuple[str, str, str] | None:
+    """``(app_id, project_id, group_id)`` back from :func:`group_key`."""
+    parts = key.split("/")
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
 
 
 class UserPipelineStarted(Event):
@@ -144,6 +155,17 @@ class GroupEpisodeExtracted(Event):
     project_id: str = "default"
     speaker_ids: list[str] = Field(default_factory=list)
     language: str | None = None
+    group_key: str = ""
+    """``<app_id>/<project_id>/<group_id>``, filled from the three: the bucket
+    an idle trigger keys on, so the tick it fires names the whole group (ids
+    are path-safe, so the separator cannot occur inside one)."""
+
+    @model_validator(mode="after")
+    def _fill_group_key(self) -> GroupEpisodeExtracted:
+        if not self.group_key:
+            key = group_key(self.app_id, self.project_id, self.group_id)
+            object.__setattr__(self, "group_key", key)
+        return self
 
 
 class GroupFlushed(Event):
