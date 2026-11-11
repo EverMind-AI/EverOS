@@ -238,7 +238,7 @@ class PurgeService:
         finally:
             self._recording = None
             recording.set()
-        del self._nonces[nonce]
+        self._nonces.pop(nonce, None)
         self._reserved.discard(nonce)
         runs = await self.engine.running_runs()
         self._inflight = InFlight(
