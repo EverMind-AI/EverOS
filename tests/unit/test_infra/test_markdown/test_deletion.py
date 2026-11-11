@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,34 @@ async def test_read_many_returns_the_episodes_in_md(root: MemoryRoot) -> None:
     assert found.ref == a
     assert (found.item.episode, found.item.session_id) == ("talk s1", "s1")
     assert found.item.timestamp == _TS
+
+
+async def test_episode_parse_leaves_the_event_loop_available(
+    root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = MarkdownEpisodeStore(root)
+    (ref,) = await _write(store, _scope(), "s1")
+    started, release = threading.Event(), threading.Event()
+    parse = MarkdownReader.parse
+
+    def paused_parse(text: str):
+        started.set()
+        if not release.wait(timeout=2):
+            raise RuntimeError("episode parsing blocked the event loop")
+        return parse(text)
+
+    monkeypatch.setattr(MarkdownReader, "parse", paused_parse)
+    task = asyncio.create_task(store.read_many(_scope(), [ref.entry_id]))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        # Another coroutine can act while the parser is still occupied.
+        release.set()
+        (found,) = await task
+        assert found.ref == ref and found.item.episode == "talk s1"
+    finally:
+        release.set()
+        if not task.done():
+            await task
 
 
 async def test_remove_by_parents_only_those_facts(root: MemoryRoot) -> None:
