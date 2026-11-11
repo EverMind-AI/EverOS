@@ -302,12 +302,20 @@ transient errors, retrying will not help — admin action is required:
 
 **Transient LLM errors** — the multimodal LLM call failed. These
 degrade gracefully — the request still returns `200`, the affected
-item is marked `parse_status="failed"` and contributes no text, and the
-rest of the batch extracts normally:
+item is marked `parse_status="failed"` and contributes no text, the
+response counts it in `failed`, and the rest of the batch extracts
+normally:
 
 | Condition | HTTP | Result |
 |---|---|---|
-| Multimodal LLM call fails (timeout / rate-limit / model rejects) | `200` | That item is skipped; the rest of the batch still extracts |
+| Multimodal LLM call fails (timeout / rate-limit / model rejects) | `200` | That item is skipped and counted in `failed`; the rest of the batch still extracts |
+
+**Refused pictures** — with `[extraction] vision = true`, a picture over an
+`[images]` limit, or one that is not a picture, is refused at ingest: the
+request returns `200`, the response counts it in `rejected`, and it is not
+sent to the parser or any other model. With `vision = false` pictures are
+parser input like any other file (`[IMAGE: name]` followed by the parsed
+text), so they are neither stored nor refused.
 
 All error responses use the standard error envelope — see
 [api.md → Errors](api.md#errors).

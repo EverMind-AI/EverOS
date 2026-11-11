@@ -603,6 +603,16 @@ rule and how to poll progress.
 |---|---|---|
 | `message_count` | `integer` | Number of messages accepted in this call |
 | `status` | `"accumulated" \| "extracted"` | What the server did with the batch |
+| `rejected` | `integer` | Pictures refused at ingest: over an `[images]` limit (bytes, per message, per request), not a picture, or unreadable |
+| `failed` | `integer` | Non-text items the parser could not read into text (its model call failed) |
+
+**`rejected` / `failed`** — A dropped item never fails the request: the rest
+of its message is kept, and the item adds nothing to the memory. A refused
+picture is not sent to any model. Both are `0` on a clean batch. A file
+format the parser does not handle at all still answers `415`, as before (see
+[multimodal.md](multimodal.md#errors-and-limits)). A
+queued batch (`202`) is ingested later; its counts are logged
+(`memorize.ingest_dropped`).
 
 **`message_count`** — Always equal to `len(messages)` on a `200` —
 there is no partial accept. The field is present mainly for log
@@ -653,7 +663,9 @@ Response (real capture):
     "request_id": "ae78d3f689c941eea135893e702fd171",
     "data": {
         "message_count": 3,
-        "status": "accumulated"
+        "status": "accumulated",
+        "rejected": 0,
+        "failed": 0
     }
 }
 ```

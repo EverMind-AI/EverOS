@@ -434,20 +434,14 @@ class Memorizer:
             buffered = await self._boundary.buffer(ingested, mode=mode)
             if cut_first:
                 return ingested, cut_first
-            return MemorizeResult(
-                message_count=len(payload.get("messages", [])),
-                status=_merge_status(buffered.status, "skipped"),
-            )
+            return _result(payload, ingested, _merge_status(buffered.status, "skipped"))
 
         boundary = await self._boundary.detect(ingested, mode=mode, is_final=is_final)
         boundaries = [*cut_first, boundary] if boundary.cells else cut_first
 
         if not boundaries:
             # Nothing went past the boundary stage — no pipelines to dispatch.
-            return MemorizeResult(
-                message_count=len(payload.get("messages", [])),
-                status=_merge_status(boundary.status, "skipped"),
-            )
+            return _result(payload, ingested, _merge_status(boundary.status, "skipped"))
         return ingested, boundaries
 
     async def _group_of(
@@ -644,10 +638,7 @@ class Memorizer:
             if mode == "agent"
             else "skipped"
         )
-        return MemorizeResult(
-            message_count=len(payload.get("messages", [])),
-            status=_merge_status(user.status, agent_status),
-        )
+        return _result(payload, ingested, _merge_status(user.status, agent_status))
 
     async def _extract_group(
         self,
@@ -667,7 +658,6 @@ class Memorizer:
         batch reads as accumulated -- never as the one-to-one copies.
         """
         cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
-        count = len(payload.get("messages", []))
         if self._group_pipeline is None:
             logger.info(
                 "memorize.group_extraction_pending",
@@ -675,7 +665,7 @@ class Memorizer:
                 group_id=ingested.group_id,
                 memcell_ids=[c.memcell_id for c in cells],
             )
-            return MemorizeResult(message_count=count, status="accumulated")
+            return _result(payload, ingested, "accumulated")
         pipelines: dict[str, Pipeline] = {"group_memory": self._group_pipeline}
         if mode == "agent":
             pipelines["agent_memory"] = self._agent_pipeline
@@ -698,9 +688,21 @@ class Memorizer:
         if first_error is not None:
             raise first_error
         outcome = PipelineOutcome.from_cells("group_memory", done)
-        return MemorizeResult(
-            message_count=count, status=_merge_status(outcome.status, "skipped")
-        )
+        return _result(payload, ingested, _merge_status(outcome.status, "skipped"))
+
+
+def _result(
+    payload: dict[str, Any],
+    ingested: IngestResult,
+    status: Literal["accumulated", "extracted"],
+) -> MemorizeResult:
+    """The batch's result: its messages, its status and what ingest dropped."""
+    return MemorizeResult(
+        message_count=len(payload.get("messages", [])),
+        status=status,
+        rejected=ingested.rejected_count,
+        failed=ingested.failed_count,
+    )
 
 
 def _own_cuts(

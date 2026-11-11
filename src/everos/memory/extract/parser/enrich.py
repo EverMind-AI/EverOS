@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from everos.component.llm import LLMCallError
-from everos.core.errors import UnsupportedModalityError
+from everos.core.errors import LLMServiceError, UnsupportedModalityError
 from everos.core.observability.logging import get_logger
+
+from .availability import needs_parser
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -33,8 +34,13 @@ async def enrich_content_items(
 
     Synchronous to the request; items parse concurrently under a bounded
     semaphore. Deterministic failures (unsupported modality, missing system
-    dependency) propagate and abort the batch; transient LLM failures degrade
-    per item (``parse_status="failed"``) without dropping the rest.
+    dependency) propagate and abort the batch; a failed parser model call
+    degrades per item (``parse_status="failed"``) without dropping the rest --
+    counted by ingest as a failed item. ``aparse_file`` reports that call as
+    :class:`~everos.core.errors.LLMServiceError` (the provider's
+    ``LLMCallError`` is its subclass), so that is what is caught: catching only
+    the subclass let every failed parse fail the whole request. A picture
+    ingest refused is skipped (:func:`needs_parser`).
 
     Args:
         items: ContentItem dicts (mutated in place).
@@ -45,11 +51,7 @@ async def enrich_content_items(
     """
     from everos.component.parser import aparse_file  # Deferred: optional dep
 
-    targets = [
-        item
-        for item in items
-        if item.get("type") != "text" and "parsed_content" not in item
-    ]
+    targets = [item for item in items if needs_parser(item)]
     if not targets:
         return
 
@@ -63,12 +65,13 @@ async def enrich_content_items(
                 raise UnsupportedModalityError(str(exc)) from exc
             try:
                 parsed = await aparse_file(raw, llm=llm)
-            except LLMCallError:
+            except LLMServiceError as exc:
                 item["parse_status"] = "failed"
                 item["parse_error"] = "LLMError"
                 logger.warning(
                     "multimodal_parse_failed",
-                    extra={"content_type": item.get("type")},
+                    content_type=item.get("type"),
+                    error=f"{type(exc).__name__}: {exc}"[:200],
                 )
                 return
             item["parsed_content"] = parsed.text

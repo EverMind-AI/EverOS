@@ -83,9 +83,11 @@ class CanonicalMessage(BaseModel):
 class IngestResult(BaseModel):
     """Output of ``ingest.process()`` — handed to pipelines.
 
-    ``unparsed_non_text_count`` reports the number of non-text
-    ``ContentItem`` entries kept on the records (a parser hook will
-    consume them once it lands; today only ``type="text"`` is parsed).
+    ``rejected_count`` counts the pictures ingest refused (over a limit, not a
+    picture, unreadable), ``failed_count`` the non-text items the parser could
+    not turn into text; ``unparsed_non_text_count`` is their sum. Each such
+    item is counted once, stays on its message's content items, and adds
+    nothing to its ``text``.
     """
 
     session_id: str
@@ -96,6 +98,8 @@ class IngestResult(BaseModel):
     buffer rows, and md paths all land in the right space."""
     messages: list[CanonicalMessage]
     unparsed_non_text_count: int = 0
+    rejected_count: int = 0
+    failed_count: int = 0
     group_id: str | None = None
     """The group the session is bound to (D18); ``None`` on the one-to-one path.
     A pipeline reads it to know whose memory a cell is."""

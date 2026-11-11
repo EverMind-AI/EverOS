@@ -31,12 +31,22 @@ def has_unparsed_multimodal(items: list[dict[str, Any]]) -> bool:
     The parser route is still there for a text-only extraction model: with
     ``[extraction] vision = false`` the ingest layer does not store pictures at
     all, so they arrive here unstored and are parsed exactly as before.
+
+    A picture ingest *refused* (``status = "rejected"``: over a limit, not a
+    picture, no store) is not parser input either: it was refused on purpose,
+    and parsing it anyway cost a multimodal call whose text was dropped -- or,
+    with no ``[multimodal]`` configured, failed the whole request.
     """
-    return any(
+    return any(needs_parser(item) for item in items)
+
+
+def needs_parser(item: dict[str, Any]) -> bool:
+    """Whether one content item is still waiting for the parser."""
+    return (
         item.get("type") != "text"
         and "parsed_content" not in item
         and "image_id" not in item
-        for item in items
+        and item.get("status") != "rejected"
     )
 
 

@@ -19,12 +19,12 @@ whole design:
   ``parsed_content`` (populated by the parser hook,
   ``memory/extract/parser``) rendered as a provenance tag
   ``[TYPE: name]\\n{parsed_content}``; items still lacking ``parsed_content``
-  are counted so callers can surface them via
-  ``IngestResult.unparsed_non_text_count``.
+  are counted (``IngestResult.failed_count``) and returned by ``/add``.
 
 A picture that no format accepts, or that breaches a configured limit, is
-counted and dropped rather than failing the request: the text around it is
-still worth remembering, and one corrupt upload must not cost a conversation.
+counted (``IngestResult.rejected_count``) and dropped rather than failing the
+request: the text around it is still worth remembering, and one corrupt upload
+must not cost a conversation. It is not handed to the parser either.
 """
 
 from __future__ import annotations
@@ -307,15 +307,16 @@ def _render_item(item: dict[str, Any]) -> str | None:
     a description: the description is a *memory* of the picture, written
     later, and putting one here would let a stale caption stand in for the
     picture in every downstream extraction. Other non-text items yield
-    ``[TYPE: name]\\n{parsed_content}`` once parsed.
+    ``[TYPE: name]\\n{parsed_content}`` once parsed -- and so does a picture
+    the parser read (``[extraction] vision = false``: the extraction model
+    cannot see it, so the parsed text is all of it that reaches extraction).
     """
     kind = item.get("type")
     if kind == "text":
         text = item.get("text")
         return str(text) if text else None
-    if kind == IMAGE_TYPE:
-        image_id = item.get("image_id")
-        return f"[IMAGE: {image_id}]" if image_id else None
+    if kind == IMAGE_TYPE and item.get("image_id"):
+        return f"[IMAGE: {item['image_id']}]"
     parsed = item.get("parsed_content")
     if not parsed:
         return None

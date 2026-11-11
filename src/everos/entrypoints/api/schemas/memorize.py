@@ -163,6 +163,21 @@ class MemorizeAddRequest(BaseModel):
 class AddResponseData(BaseModel):
     message_count: int
     status: Literal["accumulated", "extracted"]
+    rejected: int = Field(
+        default=0,
+        description=(
+            "Pictures refused at ingest: over a [images] limit (bytes, per "
+            "message, per request), not a picture, or unreadable. The rest of "
+            "their message is kept."
+        ),
+    )
+    failed: int = Field(
+        default=0,
+        description=(
+            "Non-text items that could not be read into text (a parser call "
+            "that failed). The rest of their message is kept."
+        ),
+    )
 
 
 class AcceptedResponseData(BaseModel):

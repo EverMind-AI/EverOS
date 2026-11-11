@@ -94,6 +94,9 @@ async def add_memory(
 
     With ``group_id`` the session becomes (or already is) a group session:
     its messages become group memory, never per-sender personal memory.
+    ``rejected`` / ``failed`` count the non-text items dropped at ingest; a
+    queued batch (202) is ingested later and logs them
+    (``memorize.ingest_dropped``).
     """
     result = await app.memory.add(
         _payload(req, asker_header),
@@ -108,6 +111,8 @@ async def add_memory(
         data=AddResponseData(
             message_count=result.message_count,
             status=result.status,
+            rejected=result.rejected,
+            failed=result.failed,
         ),
     )
 

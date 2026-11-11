@@ -83,7 +83,13 @@ async def test_sync_add_without_backlog_runs_inline_and_keeps_old_body(
     assert resp.status_code == 200
     data = resp.json()
     assert set(data) == {"request_id", "data"}
-    assert data["data"] == {"message_count": 1, "status": "extracted"}
+    # The inline body, plus what ingest dropped (nothing, for this batch).
+    assert data["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "rejected": 0,
+        "failed": 0,
+    }
     assert queue.enqueued == []
     ((payload, is_final, defer),) = fake_memorize.calls
     assert (is_final, defer) == (False, False)
@@ -151,7 +157,12 @@ async def test_async_mode_without_worker_runs_synchronously(
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"message_count": 1, "status": "extracted"}
+    assert resp.json()["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "rejected": 0,
+        "failed": 0,
+    }
     assert len(fake_memorize.calls) == 1
 
 
@@ -300,7 +311,12 @@ async def test_async_mode_is_ignored_when_queue_is_not_accepting(
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"message_count": 1, "status": "extracted"}
+    assert resp.json()["data"] == {
+        "message_count": 1,
+        "status": "extracted",
+        "rejected": 0,
+        "failed": 0,
+    }
     assert queue.enqueued == []
 
 

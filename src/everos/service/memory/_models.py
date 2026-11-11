@@ -10,10 +10,18 @@ from pydantic import BaseModel
 
 
 class MemorizeResult(BaseModel):
-    """What memorize returns to the caller (route serialises it)."""
+    """What memorize returns to the caller (route serialises it).
+
+    ``rejected`` and ``failed`` count the batch's non-text items that were
+    dropped at ingest -- pictures refused, and items the parser could not
+    read (:class:`~everos.memory.IngestResult`); the messages themselves are
+    kept.
+    """
 
     message_count: int
     status: Literal["accumulated", "extracted"]
+    rejected: int = 0
+    failed: int = 0
 
 
 class FlushResult(BaseModel):

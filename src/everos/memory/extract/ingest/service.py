@@ -29,8 +29,12 @@ alternative of parsing it into prose at ingest — the same information, read by
 the model that has to remember it rather than by a captioner that does not know
 what will be asked.
 
-``unparsed_non_text_count`` reports what was dropped: a non-text item whose
-format or size no route accepted. One bad upload never fails the request.
+What was dropped is counted, each item once: ``rejected_count`` for a picture
+refused at ingest (over a limit, not a picture, unreadable -- never handed to
+a model), ``failed_count`` for a non-text item that could not be turned into
+text (a parser call that failed). ``/add`` returns both. One bad upload never
+fails the request. With ``[extraction] vision = false`` pictures are parser
+input, not pictures to store: they are neither stored nor refused.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 
 from everos.component.images import ImageLimits
 from everos.config import load_settings
+from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
 from everos.memory.extract.parser import (
@@ -61,6 +66,8 @@ if TYPE_CHECKING:
 
     from everos.component.parser import RawFileBuilder
     from everos.memory.ports.images import ImageStore
+
+logger = get_logger(__name__)
 
 
 async def process(
@@ -85,6 +92,10 @@ async def process(
         vision: Whether the extraction model reads images
             (``[extraction] vision``). False routes pictures through the
             parser into text instead of storing them.
+
+    Returns:
+        The canonical messages, with ``rejected_count`` (pictures refused)
+        and ``failed_count`` (non-text items the parser could not read).
     """
     session_id: str = payload["session_id"]
     app_id: str = payload.get("app_id") or "default"
@@ -92,7 +103,6 @@ async def process(
     group_id: str | None = payload.get("group_id") or None
     raw_messages: list[dict[str, Any]] = payload["messages"]
     limits = image_limits or _image_limits()
-    store = image_store if vision else None
 
     # One budget for the whole request, not one per message: the bound exists
     # because every picture costs the extraction model visual tokens, and that
@@ -103,22 +113,19 @@ async def process(
     )
 
     canonical: list[CanonicalMessage] = []
-    non_text_total = 0
-    rejected_images = 0
+    failed = 0
+    rejected = 0
     for idx, m in enumerate(raw_messages):
         content_items = coerce_items(m["content"])
-        if any(item.get("type") == IMAGE_TYPE for item in content_items):
+        # With vision off a picture is parser input, like a pdf: not stored,
+        # not refused.
+        if vision and any(item.get("type") == IMAGE_TYPE for item in content_items):
             await store_images(
                 content_items,
-                store=store,
+                store=image_store,
                 limits=limits,
                 raw_file_builder=raw_file_builder,
                 budget=request_budget,
-            )
-            rejected_images += sum(
-                1
-                for item in content_items
-                if item.get("type") == IMAGE_TYPE and item.get("status") != "stored"
             )
         if has_unparsed_multimodal(content_items):
             require_multimodal()
@@ -129,7 +136,9 @@ async def process(
                 max_concurrency=load_settings().multimodal.max_concurrency,
             )
         text, non_text = derive_text(content_items)
-        non_text_total += non_text
+        refused = sum(1 for item in content_items if item.get("status") == "rejected")
+        rejected += refused
+        failed += non_text - refused
 
         ts_ms: int = int(m["timestamp"])
         message_id = gen_message_id(session_id, ts_ms, idx)
@@ -153,12 +162,21 @@ async def process(
             )
         )
 
+    if rejected or failed:
+        logger.warning(
+            "memorize.ingest_dropped",
+            session_id=session_id,
+            rejected=rejected,
+            failed=failed,
+        )
     return IngestResult(
         session_id=session_id,
         app_id=app_id,
         project_id=project_id,
         messages=canonical,
-        unparsed_non_text_count=non_text_total + rejected_images,
+        unparsed_non_text_count=rejected + failed,
+        rejected_count=rejected,
+        failed_count=failed,
         group_id=group_id,
     )
 

@@ -191,6 +191,11 @@ machinery that keeps a deleted memory from coming back.
   decider's own `temperature` / `extra`, sent only through a client with a
   raw call (the production provider); its cost is about ten input tokens
   and one output token per server start.
+- **`/add` returns what ingest dropped.** `data.rejected` counts pictures
+  refused at ingest (over an `[images]` limit, not a picture, unreadable) and
+  `data.failed` the non-text items the parser could not read; the rest of
+  their messages is kept. Both are `0` on a clean batch. A queued batch
+  (`202`) logs them as `memorize.ingest_dropped`.
 
 
 ### Changed
@@ -283,6 +288,22 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A refused picture no longer reaches the parser.** With `[extraction]
+  vision = true`, a picture over an `[images]` limit (or not a picture) was
+  still handed to the `[multimodal]` parser: a paid call whose text was then
+  dropped, or -- with no `[multimodal]` configured -- an
+  `LLMNotConfiguredError` that failed the whole `/add`. It is now counted in
+  `rejected` and never sent to a model.
+- **`[extraction] vision = false` delivers pictures again.** Every picture was
+  marked refused, parsed anyway, and its parsed text dropped, so no picture
+  reached extraction. Pictures are parser input on that route, rendered as
+  `[IMAGE: name]` plus the parsed text.
+- **A failed parser call fails one item, not the request.** `aparse_file`
+  reports a failed model call as `LLMServiceError`; ingest caught only its
+  subclass, so the documented per-item degradation never happened. The item
+  is now marked failed and counted in `failed`.
+- A refused picture was counted twice in the ingest result's
+  `unparsed_non_text_count`.
 - **A new group keeps its first decisions, linked to their topics.** The
   group-profile reply could not name a topic it created itself: `topic_id`
   and `about` took listed ids only, and topic ids are minted by code. On a
