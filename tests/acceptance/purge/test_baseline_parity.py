@@ -187,6 +187,32 @@ def _workload(srv: PurgeServer, proxy: Any, fake: Any) -> list[tuple[str, str]]:
         srv.post("/memory/get", {"user_id": "u1", "memory_type": "episode", **WHERE}),
     )
     rec("tasks list", srv.call("GET", "/tasks"))
+    # The same uses on /api/v1, and the unversioned endpoints.
+    rec(
+        "v1 get",
+        srv.call(
+            "POST",
+            "/memory/get",
+            {"user_id": "u1", "memory_type": "episode", **WHERE},
+            version="v1",
+        ),
+    )
+    rec(
+        "v1 add",
+        srv.call(
+            "POST",
+            "/memory/add",
+            {
+                "session_id": "v1-s",
+                "messages": _msgs("u3", "zqparity", T0 + 3_000_000),
+                **WHERE,
+            },
+            version="v1",
+        ),
+    )
+    for path in ("/health", "/metrics"):  # /docs is served only with ENV=DEV
+        resp = srv.call("GET", path, version="")
+        out.append((f"GET {path}", _norm({"status": resp.status_code})))
     # Knowledge writes and reads.
     created = rec(
         "knowledge create",
@@ -204,6 +230,9 @@ def _workload(srv: PurgeServer, proxy: Any, fake: Any) -> list[tuple[str, str]]:
         ),
     )
     doc_id = created.json()["data"]["doc_id"]
+    # The document's catalog row is written by the cascade after the 201;
+    # a replace sent before it lands answers 404 on either server.
+    wait_idle(srv.base, srv.root, timeout=300)
     rec(
         "knowledge put",
         srv.call(
@@ -337,6 +366,16 @@ def test_t17_1_existing_uses_match_the_baseline(
             (b[0], b[1], a[1]) for b, a in zip(before, after, strict=True) if b != a
         ]
         ev.json("diff", diff)
+        # Equal is only evidence where the baseline itself worked: a use that
+        # fails on both sides would compare equal and verify nothing.
+        failing = [
+            step
+            for step, value in before
+            if isinstance(data := json.loads(value), dict)
+            and isinstance(status := data.get("status"), int)
+            and status >= 400
+        ]
+        assert failing == [], failing
         assert [s for s, _ in before] == [s for s, _ in after]
         assert diff == [], diff
     finally:
