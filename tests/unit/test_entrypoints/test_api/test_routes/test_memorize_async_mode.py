@@ -86,7 +86,7 @@ async def test_sync_add_without_backlog_runs_inline_and_keeps_old_body(
     assert data["data"] == {"message_count": 1, "status": "extracted"}
     assert queue.enqueued == []
     ((payload, is_final, defer),) = fake_memorize.calls
-    assert (is_final, defer) == (False, False)
+    assert (is_final, defer) == (False, True)
     assert "async_mode" not in payload and "defer_extraction" not in payload
 
 
@@ -102,7 +102,7 @@ async def test_async_add_is_queued_and_answers_202(
     assert fake_memorize.calls == []
     ((payload, request_id, is_final, defer),) = queue.enqueued
     assert request_id == data["request_id"]
-    assert (is_final, defer) == (False, False)
+    assert (is_final, defer) == (False, True)
     assert payload["session_id"] == "s1" and len(payload["messages"]) == 1
     assert "async_mode" not in payload and "defer_extraction" not in payload
 

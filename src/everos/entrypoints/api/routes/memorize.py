@@ -94,11 +94,14 @@ async def flush_memory(
     Runs inline unless the session still has queued batches, in which case
     the flush joins the queue behind them and answers 202.
     """
-    result = await app.memory.flush(
+    flush_fn = app.memory.flush
+    extra: dict[str, Any] = {"background": True} if hasattr(app.memory, "_extractions") else {}
+    result = await flush_fn(
         session_id=req.session_id,
         request_id=request_id,
         app_id=req.app_id,
         project_id=req.project_id,
+        **extra,
     )
     if isinstance(result, Queued):
         return _accepted(response, request_id, result)

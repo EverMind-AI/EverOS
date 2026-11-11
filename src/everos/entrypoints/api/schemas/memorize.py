@@ -93,7 +93,7 @@ class MemorizeAddRequest(BaseModel):
     )
     messages: list[MessageItemDTO] = Field(..., min_length=1, max_length=500)
     defer_extraction: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Persist messages in the durable unprocessed buffer without running "
             "boundary detection or extraction. A later /flush commits the batch."
