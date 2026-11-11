@@ -200,6 +200,17 @@ def _image(
         sender_ids=list(image.sender_ids),
         subject_ids=list(image.subject_ids),
         origin=image.origin,
+        source=(
+            SearchSource.model_validate(
+                {
+                    "memcell_id": image.parent_id or None,
+                    "from": image.timestamp,
+                    "to": image.timestamp,
+                }
+            )
+            if group
+            else None
+        ),
         description=image.description,
         ocr=image.ocr,
         name=image.name,
