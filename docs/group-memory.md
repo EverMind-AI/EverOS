@@ -730,10 +730,14 @@ flush. One call per batch. Its input:
 - the new segments, each opened by `=== SEGMENT <memcell_id> ===`, one line per
   message: `[<message_id>] <time> <speaker>: <text>`.
 
-Its output is a list of operations: `topic.new`, `topic.update` (with the old
-`topic_id`), `decision.new`, `decision.supersede` (with the replaced item id),
+Its output is a list of operations: `topic.new` (with a label of its own in
+`topic_id`: `new_1`, `new_2`, ...), `topic.update` (with the old `topic_id`),
+`decision.new`, `decision.supersede` (with the replaced item id),
 `dissent.open`, `dissent.resolve`, `role.add`, `role.retire`. Each operation
-cites evidence as `(memcell_id, message_id, quote)`.
+cites evidence as `(memcell_id, message_id, quote)`. A decision's `topic_id`
+and a dissent's `about` name a rendered item, or a topic the same reply
+creates by its label, before or after the `topic.new`. Code mints every topic
+id and maps the label to it.
 
 **Verification.** Code checks every operation and drops (never repairs) one
 that fails:
@@ -742,9 +746,18 @@ that fails:
 - the quote is a verbatim substring of that message's text, after whitespace normalisation;
 - the speaker is taken from the message, never from the model;
 - a `decision.*` operation has at least one evidence message from a human member;
-- an id it updates or supersedes is one of the rendered current items.
+- an id it updates, supersedes, resolves or retires is one of the rendered
+  current items. A topic the reply creates is written as it stands at the end
+  of the batch, so its label is no target: a `topic.update` of it in the same
+  reply is dropped.
 
-Dropped operations are counted in metrics by reason.
+A link never drops its operation: a `topic_id` or `about` that names neither a
+rendered current item nor a topic the reply creates is dropped, and the
+operation is kept as if the field were empty (a superseding decision keeps the
+replaced decision's topic). Dropped operations are counted in metrics by
+reason (`everos_group_profile_ops_dropped_total`), dropped links likewise
+(`everos_group_profile_links_dropped_total`: `unknown_reference`, or
+`ambiguous_reference` for a label two new topics share).
 
 **Reading the profile.** The current profile is the fold of the items: the
 newest version of each topic, decisions not superseded, open dissent, active
@@ -1326,6 +1339,7 @@ Ordered; each task lists its acceptance tests.
 
 11. **Group profile.** Update strategy, prompt, verifier, writer, index table, fold.
     - Crafted replies with an unknown segment id, a paraphrased quote, a wrong speaker, or assistant-only decision evidence are each dropped and counted.
+    - A decision or dissent that names a topic created in the same reply, by its label and before or after the `topic.new`, links to the minted topic id; a link that names nothing is dropped and counted, the item kept; targets stay strict.
     - Superseding a decision appends the new item; the old one indexes as superseded and both read through history.
     - Dissent moves from open to resolved; no topic is ever deleted; the batch and idle triggers fire.
 12. **Forget and delete in groups.**
@@ -1517,8 +1531,9 @@ Step 2 differs from the text above in these places:
 - **Verifier.** Beyond the listed checks it drops an operation that names a
   person who did not write its evidence (`decided_by`, `agreed_by`,
   `held_by`, a role's member), names someone outside the roster
-  (`assignees`, `applies_to`), refers to an id that was not rendered
-  (`topic_id`, `about`), or repeats a target. A topic id is minted by code.
+  (`assignees`, `applies_to`), or repeats a target. A `topic_id` or `about`
+  that names nothing drops only the link (see "Topics created in the same
+  reply" below). A topic id is minted by code.
   The verbatim check reads curly quotation marks as straight ones on both
   sides (all four quote drops of the check were that alone), and a stored
   quote is the message's own words. The same check
@@ -1532,6 +1547,29 @@ Step 2 differs from the text above in these places:
   an agreeing member without citing them). `search.constraint_bind` defines
   `segment`, lets an `applies: false` binding cite nothing, and asks for a
   non-empty member list.
+- **Topics created in the same reply (`chat.group_profile_update` version
+  3).** Version 2 let `topic_id` and `about` name listed ids only, so a reply
+  had no way to name a topic it created. On a new group's first batch the
+  model either made an id up, and the verifier dropped every decision and
+  dissent naming it as `unknown_reference` (the 2026-11-11 integration
+  check: 3 of 7 operations, no decision stored), or left the field empty, and
+  the decisions were stored without their topic (four fresh groups: 0 of 8
+  decisions and 0 of 2 dissent linked). In version 3 a `topic.new` puts a
+  label of its own in `topic_id` (`new_1`, ...) for the reply's other
+  operations to name the topic by. The verifier checks the topic operations
+  first, so a reference may come before or after the `topic.new`, and maps
+  the label to the id it mints; a label that repeats a rendered id stays
+  that id's. A link that names nothing drops only the link
+  (`everos_group_profile_links_dropped_total`); replayed, the integration
+  check's reply keeps its 2 decisions and its dissent, unlinked. Targets stay
+  strict, labels included: a topic created in a reply is not updated in it,
+  since the update would have no stored version to supersede and the profile
+  would carry two current versions of the topic. Only topics take labels: a
+  dissent about a decision made in the same reply is kept without its link.
+  The same four groups again (DeepSeek V4.1 Flash, thinking off): every reply
+  used labels, no operation or link was dropped, and 9 of 9 decisions and 2
+  of 2 dissent were linked to their topic. The call's prompt grew by 61
+  tokens (about 4%); there is still one call per batch.
 - **Message ids.** A group batch's `messages[].message_id` is the message's
   id in its segment; without one the generated id stays.
 - **Forget (task 12).** Superseded and forgotten versions are taken out of

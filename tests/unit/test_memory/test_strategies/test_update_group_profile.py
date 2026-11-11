@@ -19,6 +19,9 @@ What these pin:
 - superseding a decision appends a new item and marks the old one
   superseded; a dissent moves from open to resolved; a topic update keeps
   every earlier version stored -- nothing is ever deleted;
+- a decision stored from the reply that creates its topic links to it, and
+  the next call shows it under that topic; a link that names nothing is
+  dropped and counted, the item stored;
 - a dropped operation writes nothing.
 """
 
@@ -167,8 +170,8 @@ async def _items(deps: Any) -> list[Any]:
 
 def test_the_prompt_is_registered_and_pinned() -> None:
     assert GROUP_PROFILE_UPDATE.id == "chat.group_profile_update"
-    assert GROUP_PROFILE_UPDATE.version == 2
-    assert GROUP_PROFILE_UPDATE.fingerprint == "b4d4d70a1248c9c2"
+    assert GROUP_PROFILE_UPDATE.version == 3
+    assert GROUP_PROFILE_UPDATE.fingerprint == "4e4f531149128e69"
 
 
 async def test_a_batch_runs_at_the_batch_size_once_per_segment(groups: Any) -> None:
@@ -334,6 +337,64 @@ async def test_versions_supersede_and_nothing_is_deleted(groups: Any) -> None:
     ]
     assert items[1].superseded_by == items[4].item_id
     assert items[3].topic_id == topic.topic_id
+
+
+async def test_a_decision_links_to_the_topic_its_reply_creates(groups: Any) -> None:
+    groups(group_profile_batch=1)
+    links = (
+        "everos_group_profile_links_dropped_total",
+        {"reason": "unknown_reference"},
+    )
+    before = get_metrics_registry().get_sample_value(*links) or 0.0
+    fly = [("mc_1", "m-1", "Let's fly out on May 1")]
+    model = _Model(
+        [
+            # The decision names the topic before the topic.new that creates it.
+            op(
+                "decision.new",
+                fly,
+                topic_id="new_1",
+                statement="Fly out on May 1.",
+                decided_by=["u_chen"],
+            ),
+            op(
+                "topic.new",
+                fly,
+                topic_id="new_1",
+                name="Travel",
+                summary="How the group gets there",
+                status="consensus",
+            ),
+            # A topic id the model made up: the dissent is kept, unlinked.
+            op(
+                "dissent.open",
+                [("mc_1", "m-2", "too early for me")],
+                statement="Betty finds May 1 too early.",
+                held_by=["u_betty"],
+                about="tp_travel",
+            ),
+        ]
+    )
+    deps = _deps(model)
+    _segment(
+        deps,
+        "mc_1",
+        1_000,
+        ("m-1", "u_chen", "Let's fly out on May 1."),
+        ("m-2", "u_betty", "Though it is too early for me."),
+    )
+
+    await update_group_profile(_extracted("mc_1"), deps)
+
+    decision, topic, dissent = await _items(deps)
+    assert topic.topic_id and topic.topic_id.startswith("tp_")
+    assert decision.topic_id == topic.topic_id and dissent.about is None
+    assert (get_metrics_registry().get_sample_value(*links) or 0.0) - before == 1.0
+
+    _segment(deps, "mc_2", 5_000, ("m-3", "u_chen", "Booking the flights now."))
+    await update_group_profile(_extracted("mc_2"), deps)
+
+    assert f"(topic {topic.topic_id}) Fly out on May 1." in model.prompts[1]
 
 
 async def test_a_dropped_operation_writes_nothing(groups: Any) -> None:
