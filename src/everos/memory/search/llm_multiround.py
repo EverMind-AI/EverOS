@@ -48,7 +48,14 @@ import json
 import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NamedTuple,
+    Protocol,
+    runtime_checkable,
+)
 
 from everalgo.llm import (
     LLMMessage,
@@ -66,6 +73,7 @@ from everos.memory.ports.images import ImageStore
 
 from .dto import SearchEpisodeItem, SearchImageItem
 from .recall import RecallResult
+from .recall.base import to_candidate
 from .recall.image_memory import IMAGE_KIND
 from .shaper import shape_episodes, shape_images
 
@@ -181,6 +189,48 @@ class RoundDecider(Protocol):
         *,
         pictures: Sequence[Picture] = (),
     ) -> RoundDecision: ...
+
+
+Coverage = Literal["complete", "partial", "none"]
+"""How far a multi-round search got (docs/group-memory.md, section 8.5):
+``complete`` -- the decider stopped with a core; ``partial`` -- the round
+budget (or the no-new-core patience) ended the loop first; ``none`` -- no
+core at all."""
+
+
+class MultiroundResult(NamedTuple):
+    """What one multi-round search returns besides its ranking.
+
+    Attributes:
+        episodes / images: The final injection, split by kind.
+        coverage: See :data:`Coverage`.
+        core: The decider's core, as candidate ids in the order they were
+            first selected.
+        records: The stored record behind every candidate the loop saw, by
+            candidate id (what the constraint block reads the core from).
+    """
+
+    episodes: list[SearchEpisodeItem]
+    images: list[SearchImageItem]
+    coverage: Coverage
+    core: list[str]
+    records: dict[str, Stored[Episode] | Stored[ImageMemory]]
+
+
+@runtime_checkable
+class LinkExpander(Protocol):
+    """Follows stored links from a round's new core (section 8.3).
+
+    Called once per round that the loop continues past, with the records the
+    decider just selected; returns the linked records, in priority order, each
+    with the id of the anchor it was reached from. It reads through the read
+    scope's predicate, so it can only return what the asker may see, and it
+    never looks at the question's wording -- only ids and links.
+    """
+
+    async def __call__(
+        self, anchors: Sequence[Stored[Episode] | Stored[ImageMemory]]
+    ) -> list[tuple[str, Stored[Episode]]]: ...
 
 
 _DECIDER_PROMPT = """You steer a multi-round memory search. Reply with ONLY a \
@@ -649,6 +699,60 @@ async def search_episodes_and_images_llm_multiround(
         were ranked together, so the slots one consumed are not available to
         the other.
     """
+    result = await run_llm_multiround(
+        query,
+        owner_id=owner_id,
+        where=where,
+        app_id=app_id,
+        project_id=project_id,
+        episode_recaller=episode_recaller,
+        atomic_fact_recaller=atomic_fact_recaller,
+        embed_query_fn=embed_query_fn,
+        llm=llm,
+        top_k=top_k,
+        reranker=reranker,
+        decider=decider,
+        tuning_source=tuning_source,
+        trace_path_source=trace_path_source,
+        image_recaller=image_recaller,
+        image_store=image_store,
+        question_image_ids=question_image_ids,
+        visual_embed_query_fn=visual_embed_query_fn,
+    )
+    return result.episodes, result.images
+
+
+async def run_llm_multiround(
+    query: str,
+    *,
+    owner_id: str,
+    where: Filter,
+    app_id: str = "default",
+    project_id: str = "default",
+    episode_recaller: EpisodeRecaller,
+    atomic_fact_recaller: AtomicFactRecaller,
+    embed_query_fn: Callable[[str], Awaitable[list[float]]],
+    llm: LLMClient,
+    top_k: int,
+    reranker: RerankProvider | None = None,
+    decider: RoundDecider | None = None,
+    tuning_source: Callable[[], DeciderSettings],
+    trace_path_source: Callable[[], str | None],
+    image_recaller: ImageMemoryRecaller | None = None,
+    image_store: ImageStore | None = None,
+    question_image_ids: Sequence[str] = (),
+    visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
+    expander: LinkExpander | None = None,
+    link_slots: int = 0,
+) -> MultiroundResult:
+    """The multi-round loop, with what a group search needs besides the ranking.
+
+    The same loop as :func:`search_episodes_and_images_llm_multiround`; it
+    also returns the coverage, the core and the records behind it. With an
+    ``expander`` and ``link_slots`` above 0, each round's new core is followed
+    along its stored links and at most ``link_slots`` linked records join the
+    next round (section 8.3); without one the loop is exactly the plain one.
+    """
     return await _search_episodes_subq(
         query,
         owner_id=owner_id,
@@ -668,6 +772,8 @@ async def search_episodes_and_images_llm_multiround(
         image_store=image_store,
         question_image_ids=question_image_ids,
         visual_embed_query_fn=visual_embed_query_fn,
+        expander=expander,
+        link_slots=link_slots,
     )
 
 
@@ -998,7 +1104,9 @@ async def _search_episodes_subq(
     image_store: ImageStore | None = None,
     question_image_ids: Sequence[str] = (),
     visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
-) -> tuple[list[SearchEpisodeItem], list[SearchImageItem]]:
+    expander: LinkExpander | None = None,
+    link_slots: int = 0,
+) -> MultiroundResult:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
     Each round: embed every current sub-query, recall (BM25 + vector) and fuse
@@ -1018,6 +1126,13 @@ async def _search_episodes_subq(
     scheme has no cross-encoder stage (the CE was net-negative). ``decider``, when
     supplied, replaces :class:`LLMRoundDecider` for every round: that is the seam an RL
     policy occupies so the loop it trains against is this loop rather than a copy.
+
+    Relational expansion (section 8.3): when the loop continues past a round,
+    ``expander`` follows the stored links of that round's new core, and at most
+    ``link_slots`` of the linked records join the next round -- inside a block
+    labelled with the sub-query that surfaced their anchor, rendered like any
+    candidate, so the decider's input format does not change. A linked record
+    already in the round, or already core, is not shown twice.
     """
     # Honour an injected decider. The parameter and the RoundDecider protocol were
     # written for this ("a Phase-2 policy implements this same signature so the loop
@@ -1043,6 +1158,8 @@ async def _search_episodes_subq(
     subqueries_seen: list[str] = []
     no_new_core_streak = 0
     cur_queries = [query]  # round 0 seeds with the user question
+    linked: list[tuple[str, Stored[Episode]]] = []  # (anchor label, record)
+    stop_reason = "budget"
 
     tune = tuning_source()
     for round_idx in range(tune.max_rounds):
@@ -1159,7 +1276,16 @@ async def _search_episodes_subq(
             )
         if round_idx == 0 and not any(b for _, b in blocks):
             # Empty seed: nothing to rank or decide over.
-            return [], []
+            return MultiroundResult([], [], "none", [], {})
+        n_linked = _join_linked(
+            blocks,
+            linked,
+            core_ids=core_ids,
+            subq_hits=subq_hits,
+            cand_by_id=cand_by_id,
+            episodes_by_id=episodes_by_id,
+        )
+        linked = []
 
         # Render the blocked decider view + CORE-SO-FAR (global index across blocks).
         rendered, global_cands, index_meta = _render_blocks(blocks)
@@ -1252,19 +1378,43 @@ async def _search_episodes_subq(
             n_subqueries=len(decision.queries),
             next_queries=" | ".join(decision.queries)[:120],
             query=query[:80],
+            linked=n_linked,
         )
 
         # Stop conditions, in the design's priority order.
         if not decision.queries:  # (1) decider is done (no gaps left)
+            stop_reason = "decider"
             break
         # (2) coverage saturated — never before at least one follow-up round.
         if round_idx >= 1 and no_new_core_streak >= tune.no_new_core_patience:
+            stop_reason = "patience"
             break
         cur_queries = decision.queries  # else continue; (3) the loop caps rounds
+        if expander is not None and link_slots > 0 and round_idx + 1 < tune.max_rounds:
+            seen_records = {**images_by_id, **episodes_by_id}
+            anchors = [
+                seen_records[str(added["id"])]
+                for added in core_added
+                if str(added["id"]) in seen_records
+            ]
+            if anchors:
+                linked = [
+                    (core_source.get(anchor_id, "original question"), record)
+                    for anchor_id, record in await expander(anchors)
+                ][:link_slots]
 
+    coverage: Coverage = (
+        "none"
+        if not core_ids
+        else ("complete" if stop_reason == "decider" else "partial")
+    )
+    records: dict[str, Stored[Episode] | Stored[ImageMemory]] = {
+        **images_by_id,
+        **episodes_by_id,
+    }
     if not cand_by_id and not core_by_id:
-        return [], []
-    return _finalize_injection(
+        return MultiroundResult([], [], coverage, list(core_order), records)
+    episodes, images = _finalize_injection(
         owner_id=owner_id,
         question=query,
         top_k=top_k,
@@ -1280,6 +1430,43 @@ async def _search_episodes_subq(
         trace_path_source=trace_path_source,
         image_thumbnail_edge=tune.image_thumbnail_edge,
     )
+    return MultiroundResult(episodes, images, coverage, list(core_order), records)
+
+
+def _join_linked(
+    blocks: list[tuple[str, list[Candidate]]],
+    linked: Sequence[tuple[str, Stored[Episode]]],
+    *,
+    core_ids: set[str],
+    subq_hits: dict[str, dict[str, float]],
+    cand_by_id: dict[str, Candidate],
+    episodes_by_id: dict[str, Stored[Episode]],
+) -> int:
+    """Put last round's linked records into this round's blocks; how many joined.
+
+    Each joins the block labelled with the sub-query that surfaced its anchor
+    (a new block with that label when the round has none), after the block's
+    own candidates. A record already in the round, or already core, is not
+    shown again. A linked record has no RRF score of its own: it scores 0, so
+    it reaches the final injection only when the decider makes it core.
+    """
+    seen = {c.id for _, block in blocks for c in block} | core_ids
+    joined = 0
+    for label, record in linked:
+        if record.ref.id in seen:
+            continue
+        seen.add(record.ref.id)
+        cand = to_candidate(record, score=0.0, source="other")  # type: ignore[arg-type]
+        block = next((b for lbl, b in blocks if lbl == label), None)
+        if block is None:
+            block = []
+            blocks.append((label, block))
+        block.append(cand)
+        subq_hits.setdefault(cand.id, {})[label] = 0.0
+        cand_by_id.setdefault(cand.id, cand)
+        episodes_by_id.setdefault(cand.id, record)
+        joined += 1
+    return joined
 
 
 def _finalize_injection(
