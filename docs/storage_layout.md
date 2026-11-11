@@ -85,6 +85,31 @@ data reset. Removing a local root also does not remove data from a remote
 Milvus backend. For owner, session, or episode deletion while retaining
 the root, use the [memory deletion APIs](api.md#post-apiv2memorydelete).
 
+**Online clearing instead of removing the root.** With the server
+running, [`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)
+clears the whole root (`space`), one app or one project without stopping
+anything: the range's markdown, SQLite rows, index rows and queued
+requests go; configuration files, `.taxonomy.md` and files you put in a
+project directory yourself stay. It differs from removing the root in
+what it keeps:
+
+- **Entry ids keep counting.** Today's daily-log files are put back empty
+  with their id counter, so a memory written later the same day never
+  reuses a purged id. A fresh root starts every counter at 1.
+- **OME run history stays, emptied.** `ome.db` keeps its rows; the stored
+  event of a failed or dead-lettered run of the range is replaced by a
+  `{"purged_by": …}` marker.
+- **Bytes can linger.** Older LanceDB table versions keep deleted rows
+  until the next prune, and SQLite keeps them in free pages until vacuum.
+- **Milvus is cleared by prefix.** With the Milvus backend, the root's
+  collections (`[milvus] collection_prefix`) are cleared, by range for an
+  app or a project. Two roots that share a prefix share those collections,
+  so a purge in one deletes the other's rows too; give every root its own
+  prefix.
+
+For a deterministic reset between test runs, use a fresh temporary root
+per run rather than purging a shared one.
+
 > The single-file writer also supports `agent.md` / `soul.md` / `tools.md`
 > / `behaviors.md`, but no shipped strategy produces those today — only
 > `user.md` is written. `memcell` is a SQLite-only kind (the boundary

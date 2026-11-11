@@ -35,6 +35,7 @@ business semantics the raw spec does not carry.
   - [POST /api/v2/memory/get](#post-apiv2memoryget)
   - [POST /api/v2/memory/delete](#post-apiv2memorydelete)
   - [POST /api/v2/memory/delete_by_ids](#post-apiv2memorydelete_by_ids)
+  - [POST /api/v2/memory/purge](#post-apiv2memorypurge)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
@@ -244,6 +245,8 @@ parsing the human-readable `message` field.
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
+| `PURGE_IN_PROGRESS` | `409` | Yes, after the purge ends | A write while a purge of the memory root runs; the message names the job to poll (`GET /api/v2/memory/purge/{job_id}`) |
+| `PURGE_NONCE_INVALID` | `404` | No | `/purge/confirm` with an unknown, expired or used nonce; request a new one |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
@@ -1466,6 +1469,155 @@ The log line `memory_delete_by_ids` records the reason code and which ids
 were found and which skipped; it never records `note` or any memory text.
 Errors are those of [/delete](#post-apiv2memorydelete) (`422`; `500`
 "deletion incomplete; retry the same request").
+
+### POST /api/v2/memory/purge
+
+Clears a whole range of memory while the server keeps serving: the
+`space` (the **entire memory root**: every app and project), one `app`,
+or one `project` of one app. A purge is **irreversible**: the markdown
+files, the SQLite rows and the index rows of the range are deleted, not
+hidden. Path, request body and response shape follow the Cloud endpoint.
+
+It takes two calls and a poll:
+
+1. `POST /api/v2/memory/purge` counts what the range holds and returns a
+   one-time `nonce`. Nothing is deleted.
+2. `POST /api/v2/memory/purge/confirm` with that nonce starts the job
+   (`202`) and returns its `job_id`.
+3. `GET /api/v2/memory/purge/{job_id}` until `status` is `succeeded` or
+   `failed`.
+
+```bash
+curl -s -X POST http://127.0.0.1:$PORT/api/v2/memory/purge \
+  -H 'content-type: application/json' \
+  -d '{"scope": "project", "app_id": "a1", "project_id": "p1"}'
+# -> data.nonce, data.summary (what will be deleted)
+
+curl -s -X POST http://127.0.0.1:$PORT/api/v2/memory/purge/confirm \
+  -H 'content-type: application/json' \
+  -d '{"nonce": "<NONCE>"}'
+# -> 202, data.job_id
+
+curl -s http://127.0.0.1:$PORT/api/v2/memory/purge/<JOB_ID>
+# -> data.status: queued | running | succeeded | failed
+```
+
+#### Request body (`/purge`)
+
+| Field | Type | Required | Constraints |
+|---|---|---|---|
+| `scope` | `"space" \| "app" \| "project"` | yes | — |
+| `app_id` | `string` *(ScopeId)* | for `app` and `project` | not allowed for `space` |
+| `project_id` | `string` *(ScopeId)* | for `project` | not allowed for `space` and `app` |
+
+Each scope takes exactly its own ids; anything else (an unknown field
+included) is `422`. To purge the default range, send `"default"` as the
+id: `{"scope": "project", "app_id": "default", "project_id": "default"}`
+clears `default_app/default_project/` and the rows stored with
+`"default"`.
+
+#### Response (`/purge`)
+
+```json
+{
+  "request_id": "<32-char hex>",
+  "data": {
+    "nonce": "…", "expires_at": "…", "scope": "project",
+    "app_id": "a1", "project_id": "p1",
+    "summary": {
+      "markdown": {"episode": 12, "atomic_fact": 30, "…": 0},
+      "markdown_total": 42,
+      "sqlite": {"memcell": 6, "cluster": 2, "…": 0},
+      "sqlite_total": 8,
+      "lancedb_total": 42, "milvus_total": null,
+      "complete": true, "counted_at": "…", "comment": "…", "error": null
+    }
+  }
+}
+```
+
+The summary counts memory entries per kind in the markdown files (not
+today's empty counter files, not `.taxonomy.md`), rows per `system.db`
+table, and index rows under the backend this server runs (`lancedb_total`
+or `milvus_total`; the other is `null`). A count that takes longer than
+`[purge] count_timeout_seconds` is `null` and `complete` is `false`; the
+request still succeeds. After a purge `succeeded`, requesting the same
+range again answers a summary of all `0`.
+
+#### Confirm (`/purge/confirm`)
+
+Body `{"nonce": "<16-64 url-safe characters>"}`. The range comes from
+the nonce, never from this body. A nonce can be used **only once** and
+expires after `[purge] nonce_ttl_seconds` (5 minutes by default).
+
+- **Only one purge runs at a time per root.** While one runs, confirming
+  any nonce returns `202` with the **running** job: compare its `scope`,
+  `app_id` and `project_id` with what you asked for, and request again
+  after it ends.
+- **If the `202` is lost** (a timeout, a dropped connection), the job may
+  be running: request a new nonce and confirm it. You get the running
+  job's `job_id`; the spent nonce answers `404`.
+
+#### While a purge runs
+
+Every write to the root is refused -- in every app and project, not only
+the purged range -- with `409` `PURGE_IN_PROGRESS`; the message names
+the job: `"purge <job_id> in progress; poll GET /api/v2/memory/purge/<job_id>"`.
+Reads (`/search`, `/get`, `/knowledge/search`, every `GET`, the three
+purge endpoints) keep working. Wait for the job to end, then send the
+write again; do not retry it in a tight loop. Background work (memory
+extraction, Reflection, queued `async_mode` requests) waits and runs
+after the purge; the range's own queued requests are dropped and show
+`purge_in_progress` in `GET /api/v2/tasks/{task_id}` -- do not resend
+them.
+
+A purge normally holds writes for as long as it takes to delete, plus up
+to `[purge] settle_wait_seconds` (60 s) for work already in flight. A
+purge stuck on a failing store ends `failed` after
+`[purge] run_budget_seconds` (2 h of running time) and writes resume.
+
+#### Job (`GET /purge/{job_id}`)
+
+`job_id`, `status` (`queued` / `running` / `succeeded` / `failed`),
+`scope`, `app_id`, `project_id`, `created_at`, `started_at`,
+`heartbeat_at`, `finished_at` and `steps`: one item per store
+(`inbox`, `markdown`, `lancedb` or `milvus`, `sqlite`, `ome`,
+`md_change_state`) with `state` (`pending` / `done` / `failed`) and the
+rows it `deleted`. A job that `failed` deleted part of the range and
+nothing is rolled back: purge the same range again. A server stopped
+mid-purge resumes the job when it starts again.
+
+#### Errors specific to these endpoints
+
+| Status | `error.code` | When |
+|---|---|---|
+| `422` | `INVALID_INPUT` | A scope with the wrong ids, an unknown field, a nonce that is not 16-64 url-safe characters |
+| `404` | `PURGE_NONCE_INVALID` | The nonce is unknown, expired or already used; request a new one |
+| `503` | `EXTERNAL_SERVICE_UNAVAILABLE` | The job could not be recorded; nothing started and the nonce is still valid |
+| `404` | `NOT_FOUND` | `GET` of an unknown `job_id` |
+| `409` | `PURGE_IN_PROGRESS` | Any write while a purge runs (see above) |
+
+The Cloud API spells the same conditions in lower case
+(`purge_in_progress`, `purge_nonce_invalid`); a client that matches on
+`error.code` and talks to both should accept either spelling.
+
+#### Known gaps
+
+- Work that was already running when the purge was confirmed and finishes
+  after `settle_wait_seconds` (a slow `/add`, an extraction, an upload) can
+  write a little into the range afterwards; requesting the range again
+  shows it (a non-zero summary). Purge again to clear it.
+- The OME run history keeps its rows; the stored event of a failed or
+  dead-lettered run of the range is replaced by a `{"purged_by": …}`
+  marker. Older LanceDB table versions and SQLite free pages keep deleted
+  bytes until they are pruned or vacuumed.
+- **There is no authentication** on these endpoints. Anyone who can reach
+  the port can clear the whole root: when the API is exposed beyond
+  `127.0.0.1`, block `/api/*/memory/purge*` at your reverse proxy unless
+  the caller is trusted.
+- To reset memory between tests, point each run at a fresh temporary
+  memory root (`--root`) instead of purging a shared one: that is the
+  deterministic reset.
 
 ### POST /api/v2/ome/trigger
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`POST /api/v2/memory/purge`**, **`/purge/confirm`** and
+  **`GET /api/v2/memory/purge/{job_id}`**: clear the whole memory root, one
+  app or one project while the server keeps serving, aligned with the Cloud
+  API. Writes answer `409 PURGE_IN_PROGRESS` until the purge ends; new
+  `[purge]` settings bound how long. See `docs/api.md`.
+
 ### Fixed
 
 - Profile extraction includes the triggering conversation before its episode

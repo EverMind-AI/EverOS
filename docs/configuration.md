@@ -126,7 +126,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `token` | string | `""` | Authentication token, when required. |
 | `db_name` | string | `""` | Optional Milvus database name. |
 | `consistency_level` | string | `"Session"` | Milvus consistency level used by collections. |
-| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. |
+| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. Give every memory root its own prefix: roots that share one share the collections, and a purge in one deletes the other's rows at any scope. |
 
 ### `[llm]`
 
@@ -313,6 +313,19 @@ strategies and is hot-reloaded; these require a restart.
 |---|---|---|---|
 | `max_concurrent_runs` | int | `20` | Cap on concurrent strategy runs. Each slot mostly waits on a remote extraction call, so a bulk ingest can afford far more. |
 | `run_timeout_seconds` | float | `1800.0` | Wall-clock ceiling on one strategy attempt — a deadlock backstop, not a latency target; too low kills slow-but-healthy extractions. `0` disables it. |
+
+### `[purge]`
+
+Online clearing ([`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)).
+While a purge runs, every write to the memory root answers `409
+PURGE_IN_PROGRESS`; these bound how long that lasts.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `settle_wait_seconds` | float | `60.0` | Wait limit for work already in flight when the purge was confirmed (a memorize, an extraction, an index projection) before the purge deletes again. |
+| `run_budget_seconds` | float | `7200.0` | Total running time of one purge across retries; past it the job ends `failed` and writes resume. Time the server is stopped or the machine sleeps is not counted. |
+| `nonce_ttl_seconds` | float | `300.0` | How long the nonce from `POST /memory/purge` can be confirmed. |
+| `count_timeout_seconds` | float | `30.0` | Per-store limit on counting the summary; a slower store reads `null` and the summary says `complete: false`. |
 
 ### `[knowledge]`
 

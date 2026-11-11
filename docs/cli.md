@@ -152,6 +152,12 @@ The CLI is the **shell-friendly** surface for ops + scripting; the
 HTTP API is the **process-friendly** surface for clients (web UIs,
 agents, automation).
 
+A purge ([`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)) is
+an API-only operation and holds the server's writes, not the CLI's: with
+a purge interrupted and the server stopped, CLI commands run as usual.
+When the server starts again the purge resumes from the start, so
+anything written into the purged range in the meantime is deleted too.
+
 ## See also
 
 - [architecture.md](architecture.md) — DDD layering between
