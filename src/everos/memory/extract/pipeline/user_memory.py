@@ -20,6 +20,7 @@ from everalgo.types import MemCell as AlgoMemCell
 from everalgo.user_memory import EpisodeExtractor
 
 from everos.core.observability.tracing import capture_output, memory_span
+from everos.core.utils.datetime import from_timestamp, today_with_timezone
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
@@ -163,6 +164,11 @@ class UserMemoryPipeline:
         async def memcell_alive() -> bool:
             return bool(await self._memcell_store.find_by_ids([memcell_id]))
 
+        ep_date = (
+            from_timestamp(ep.timestamp).date()
+            if isinstance(ep.timestamp, (int, float)) and ep.timestamp > 0
+            else today_with_timezone()
+        )
         with memory_span(
             "everos.persist.markdown",
             observation_type="span",
@@ -182,6 +188,7 @@ class UserMemoryPipeline:
                 ),
                 ep,
                 only_if=memcell_alive,
+                date=ep_date,
             )
             if ref is None:
                 return None

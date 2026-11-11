@@ -140,6 +140,7 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
         episode: Episode,
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: Any = None,
     ) -> MemoryRef | None:
         refs = await self._append_many(scope, [episode], only_if)
         return refs[0] if refs else None
@@ -150,6 +151,7 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
         episodes: Sequence[Episode],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: Any = None,
     ) -> list[MemoryRef]:
         return await self._append_many(scope, episodes, only_if)
 
@@ -232,6 +234,7 @@ class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
         facts: Sequence[AtomicFact],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: Any = None,
     ) -> list[MemoryRef]:
         return await self._append_many(scope, facts, only_if)
 

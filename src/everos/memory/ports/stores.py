@@ -109,6 +109,7 @@ class EpisodeStore(Protocol):
         episode: Episode,
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: dt.date | None = None,
     ) -> MemoryRef | None: ...
 
     async def append_many(
@@ -117,6 +118,7 @@ class EpisodeStore(Protocol):
         episodes: Sequence[Episode],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: dt.date | None = None,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
@@ -182,6 +184,7 @@ class AtomicFactStore(Protocol):
         facts: Sequence[AtomicFact],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: dt.date | None = None,
     ) -> list[MemoryRef]: ...
 
     async def deprecate(

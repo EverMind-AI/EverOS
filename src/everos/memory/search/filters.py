@@ -57,12 +57,14 @@ def compile_filters(
     project_id: str = "default",
 ) -> Filter:
     """Validate request filters and return one normalized predicate tree."""
-    base: list[Filter] = [
-        eq("owner_id", owner_id),
-        eq("owner_type", owner_type),
-        eq("app_id", app_id),
-        eq("project_id", project_id),
-    ]
+    base: list[Filter] = []
+    if owner_id not in ("*", "shared", "all"):
+        base.append(eq("owner_id", owner_id))
+    base.append(eq("owner_type", owner_type))
+    if app_id not in ("*", "shared", "all"):
+        base.append(eq("app_id", app_id))
+    if project_id not in ("*", "shared", "all"):
+        base.append(eq("project_id", project_id))
     if owner_type == "user":
         base.append(is_null("deprecated_by"))
     if node is not None:

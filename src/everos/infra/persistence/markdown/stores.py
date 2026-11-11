@@ -17,6 +17,7 @@ __all__ = [
     "MarkdownProfileStore",
 ]
 
+import datetime as _dt
 from collections import defaultdict
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
@@ -32,6 +33,7 @@ from everos.core.utils.datetime import (
     from_timestamp,
     to_iso_format,
     to_timestamp_ms,
+    today_with_timezone,
 )
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import (
@@ -106,6 +108,8 @@ class _DailyLogStore[T]:
         scope: Scope,
         items: Sequence[T],
         only_if: SourceCheck | NoSourceCheck,
+        *,
+        date: _dt.date | None = None,
     ) -> list[MemoryRef]:
         if not items:
             return []
@@ -115,6 +119,7 @@ class _DailyLogStore[T]:
             eids = await self._writer.append_entries(
                 scope.owner_id,
                 [self._to_entry(item) for item in items],
+                date=date,
                 app_id=scope.app_id,
                 project_id=scope.project_id,
             )
@@ -259,8 +264,9 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         episode: Episode,
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: _dt.date | None = None,
     ) -> MemoryRef | None:
-        refs = await self._append_many(scope, [episode], only_if)
+        refs = await self._append_many(scope, [episode], only_if, date=date)
         return refs[0] if refs else None
 
     async def append_many(
@@ -269,8 +275,9 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         episodes: Sequence[Episode],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: _dt.date | None = None,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, episodes, only_if)
+        return await self._append_many(scope, episodes, only_if, date=date)
 
     async def deprecate(
         self,
@@ -378,8 +385,22 @@ class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
         facts: Sequence[AtomicFact],
         *,
         only_if: SourceCheck | NoSourceCheck,
+        date: _dt.date | None = None,
     ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts, only_if)
+        if date is None and facts:
+            first = facts[0]
+            ts_date = (
+                from_timestamp(first.timestamp).date()
+                if isinstance(first.timestamp, (int, float)) and first.timestamp > 0
+                else None
+            )
+            try:
+                ep_id_date = EntryId.parse(first.parent_id).date
+            except Exception:
+                ep_id_date = None
+            if ts_date is not None and ep_id_date is not None and ep_id_date == ts_date:
+                date = ts_date
+        return await self._append_many(scope, facts, only_if, date=date)
 
     async def deprecate(
         self,

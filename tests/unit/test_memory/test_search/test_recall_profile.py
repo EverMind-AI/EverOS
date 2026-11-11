@@ -169,3 +169,15 @@ async def test_fetch_isolates_by_project(storage: Storage) -> None:
         )
         == []
     )
+
+
+async def test_fetch_shared_app_id_matches_across_apps(storage: Storage) -> None:
+    """Wildcard app_id ('shared', '*', 'all') finds user profile across app scopes."""
+    await storage.repos.user_profile.upsert(
+        [_profile_row(owner_id="u_shared", summary="shared profile", project_id="default")]
+    )
+    recaller = ProfileRecaller(ProfileIndexAdapter(storage.repos.user_profile))
+    for wildcard in ("shared", "*", "all"):
+        items = await recaller.fetch("u_shared", app_id=wildcard, project_id="default")
+        assert len(items) == 1
+        assert items[0].profile_data["summary"] == "shared profile"

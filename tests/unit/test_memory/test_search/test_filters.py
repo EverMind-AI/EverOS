@@ -98,6 +98,24 @@ def test_app_project_scope_pinned() -> None:
     assert eq("project_id", "oss") in _clauses(where)
 
 
+@pytest.mark.parametrize("wildcard", ["*", "shared", "all"])
+def test_wildcard_scopes_omit_equality_predicates(wildcard: str) -> None:
+    where = compile_filters(
+        None,
+        owner_id=wildcard,
+        owner_type="user",
+        app_id=wildcard,
+        project_id=wildcard,
+    )
+    clauses = _clauses(where)
+    assert eq("owner_type", "user") in clauses
+    assert is_null("deprecated_by") in clauses
+    assert not any(
+        isinstance(c, Comparison) and c.field in ("owner_id", "app_id", "project_id")
+        for c in clauses
+    )
+
+
 def test_owner_id_is_carried_verbatim() -> None:
     """The compiler must not pre-escape — quoting is the adapter's job.
 
