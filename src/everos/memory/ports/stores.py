@@ -26,6 +26,7 @@ __all__ = [
     "OwnerDirStore",
     "ProfileStore",
     "ReflectionReportStore",
+    "SenderNameStore",
     "SessionBufferStore",
     "SessionPurgeStore",
     "SourceCheck",
@@ -565,6 +566,32 @@ class SessionPurgeStore(Protocol):
         Returns the deleted memcells (their senders name the owners whose
         memories came from the session).
         """
+        ...
+
+
+@runtime_checkable
+class SenderNameStore(Protocol):
+    """The latest display name each sender went by, per ``(app, project)``.
+
+    Lets a message that arrives without ``sender_name`` carry the name its
+    sender used before, so the memcells, the episode narratives written from
+    them and the profile name one person the same way.
+    """
+
+    async def get_many(
+        self, app_id: str, project_id: str, sender_ids: Collection[str]
+    ) -> Mapping[str, str]:
+        """The known name of each of ``sender_ids``; unknown ones are absent."""
+        ...
+
+    async def upsert_many(
+        self, app_id: str, project_id: str, names: Mapping[str, str]
+    ) -> None:
+        """Record each sender's name, replacing an older one."""
+        ...
+
+    async def delete(self, app_id: str, project_id: str, sender_id: str) -> None:
+        """Forget the sender's name (the sender's memories are being deleted)."""
         ...
 
 

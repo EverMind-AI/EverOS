@@ -14,6 +14,7 @@ from ._repos import (
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SenderNameRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
@@ -32,6 +33,7 @@ class SqliteRepos:
     memcell: MemcellRepo
     memorize_inbox: MemorizeInboxRepo
     reflection_report: ReflectionReportRepo
+    sender_name: SenderNameRepo
     session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
     unprocessed_buffer: UnprocessedBufferRepo
@@ -48,6 +50,7 @@ class SqliteRepos:
             memcell=MemcellRepo(factory),
             memorize_inbox=MemorizeInboxRepo(factory),
             reflection_report=ReflectionReportRepo(factory),
+            sender_name=SenderNameRepo(factory),
             session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),
             unprocessed_buffer=UnprocessedBufferRepo(factory),

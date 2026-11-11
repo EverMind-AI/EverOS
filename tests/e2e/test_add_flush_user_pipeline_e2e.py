@@ -502,3 +502,60 @@ async def test_add_flush_search_get_on_canned_user_track(
     assert replies.count("_EpisodeReply") == 1
     assert "_AtomicFactsReply" in replies
     assert "_ProfileItems" in replies
+
+
+async def test_a_name_sent_once_labels_the_senders_later_lines(
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first add names Alice, the second does not. After the flush the
+    episode operator sees every one of her lines under ``Alice`` -- the label
+    the canned narrative names her by -- so her profile is built from it."""
+    llm = user_track_llm(boundary="boundary_empty")
+    profile = json.loads(user_track_script("profile_init"))
+    messages = [
+        {
+            "sender_id": sender,
+            "sender_name": name if i < 2 else None,
+            "role": role,
+            "timestamp": _ALICE_TS + i * 60_000,
+            "content": text,
+        }
+        for i, (sender, name, role, text) in enumerate(_CONVERSATION)
+    ]
+
+    async with _canned_user_track_client(monkeypatch, llm) as client:
+        for batch in (messages[:2], messages[2:]):
+            add = await client.post(
+                "/api/v1/memory/add",
+                json={"session_id": "s_kyoto", "messages": batch},
+            )
+            assert add.status_code == 200, add.text
+        flush = await client.post(
+            "/api/v1/memory/flush", json={"session_id": "s_kyoto"}
+        )
+        assert flush.json()["data"]["status"] == "extracted"
+
+        async def _profiles() -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/get",
+                json={"user_id": "u_alice", "memory_type": "profile"},
+            )
+            return resp.json()["data"]["profiles"]
+
+        await _poll_until(lambda: _has(_profiles))
+        (got_profile,) = await _profiles()
+
+    (episode_call,) = [
+        c for c in llm.calls if c.response_format.__name__ == "_EpisodeReply"
+    ]
+    rendered = episode_call.messages[-1].content
+    unnamed_line = _CONVERSATION[2][3]
+    assert f"Alice: {unnamed_line}" in rendered
+    assert "u_alice:" not in rendered
+    assert [i["description"] for i in got_profile["profile_data"]["explicit_info"]] == [
+        i["description"] for i in profile["explicit_info"]
+    ]
+
+
+async def _has(fetch: Callable[[], Awaitable[list[dict]]]) -> bool:
+    return bool(await fetch())

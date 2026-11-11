@@ -119,6 +119,7 @@ class MemoryService:
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            sender_names=stores.sender_name,
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(

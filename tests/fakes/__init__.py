@@ -76,6 +76,7 @@ from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
+from .stores import InMemorySenderNameStore as InMemorySenderNameStore
 from .stores import UnusedPort as UnusedPort
 from .trajectories import TRAJECTORY_START_MS as TRAJECTORY_START_MS
 from .trajectories import agent_trajectory as agent_trajectory
@@ -104,6 +105,7 @@ __all__ = [
     "InMemoryProfileIndex",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
+    "InMemorySenderNameStore",
     "InMemorySkillFiles",
     "InMemoryVectorTable",
     "RecordingCascade",

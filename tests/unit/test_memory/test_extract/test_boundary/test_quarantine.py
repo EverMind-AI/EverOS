@@ -46,6 +46,7 @@ from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from tests.fakes import (
     UNUSABLE_REPLY,
+    InMemorySenderNameStore,
     boundary_reply,
     bundled_instructions,
     unused_raw_file_builder,
@@ -100,6 +101,7 @@ class _Stage:
             _payload(session, start),
             multimodal_llm=None,
             raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         return await self.boundary.buffer(ingested, mode="chat")
 
@@ -110,6 +112,7 @@ class _Stage:
             _payload(session, start),
             multimodal_llm=None,
             raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         return await self.boundary.detect(ingested, mode="chat", is_final=final)
 
@@ -125,7 +128,10 @@ class _Stage:
             }
         )
         ingested = await ingest.process(
-            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+            payload,
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         return await self.boundary.detect(ingested, mode="agent", is_final=False)
 

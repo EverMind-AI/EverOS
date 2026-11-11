@@ -43,6 +43,7 @@ from everos.memory.ports import (
     ProfileIndex,
     ProfileStore,
     ReflectionReportStore,
+    SenderNameStore,
     SessionBufferStore,
     SessionPurgeStore,
 )
@@ -68,6 +69,7 @@ class Stores:
     reflection_report: ReflectionReportStore
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
+    sender_name: SenderNameStore
 
 
 @dataclass(frozen=True)

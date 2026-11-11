@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A sender keeps the name it was last given.** Ingestion records the latest
+  non-blank `sender_name` of every `(app_id, project_id, sender_id)` in a new
+  `sender_name` table of `system.db`, and gives it to that sender's later
+  messages that arrive without one (blank names count as absent; names are
+  stripped). One person is then labelled the same way in every memcell,
+  episode narrative and profile. Deleting a whole user or agent forgets its
+  name; deleting a session does not.
+
 ### Changed
 
 - **The user profile is built from episodes, one at a time.** Every pipeline

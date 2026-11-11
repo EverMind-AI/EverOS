@@ -290,7 +290,10 @@ extraction but it is not used as an indexing key).
 **`sender_name`** — Optional human-readable display name. Lets the LLM
 use a real name during extraction without changing the indexing key.
 For example, set `sender_id: "u_42"` (stable internal id) and
-`sender_name: "Alice"` (what the LLM sees).
+`sender_name: "Alice"` (what the LLM sees). A sender keeps the last
+non-blank name it was given in the same `app_id` / `project_id`: a later
+message from that `sender_id` without one is stored under that name.
+Deleting the whole user or agent forgets it.
 
 **`role`** — Speaker role; one of:
 - `"user"` — content originates from a human (or human-acting client).
@@ -1073,7 +1076,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 | `project_id` | `string` | Scope where the buffered message lives |
 | `session_id` | `string` | Matches the requested `filters.session_id` |
 | `sender_id` | `string` | Original sender id from `/add` |
-| `sender_name` | `string \| null` | Original sender name; `null` if not provided |
+| `sender_name` | `string \| null` | Sender name as stored: the one sent, else the sender's last known name; `null` if it was never given |
 | `role` | `"user" \| "assistant" \| "tool"` | Original role |
 | `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#messageitem)) |
 | `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
