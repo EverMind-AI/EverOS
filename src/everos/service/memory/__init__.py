@@ -227,6 +227,10 @@ class MemoryService:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
 
+    def extraction_snapshot(self) -> frozenset[asyncio.Task[Any]]:
+        """The extractions running right now (a purge waits for them)."""
+        return self._extractions.snapshot()
+
     def wake_queue(self) -> None:
         """Let the async queue claim again at once (a purge ended)."""
         self._queue.wake()

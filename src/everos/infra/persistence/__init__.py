@@ -22,6 +22,7 @@ from .memory_root import app_dir_name as app_dir_name
 from .memory_root import app_id_from_dir as app_id_from_dir
 from .memory_root import project_dir_name as project_dir_name
 from .memory_root import project_id_from_dir as project_id_from_dir
+from .memory_root import purge_scope as purge_scope
 
 __all__ = [
     "LockError",
@@ -31,4 +32,5 @@ __all__ = [
     "memory_root_lock",
     "project_dir_name",
     "project_id_from_dir",
+    "purge_scope",
 ]

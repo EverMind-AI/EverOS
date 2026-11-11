@@ -18,8 +18,29 @@ class PurgeJobRepo(RepoBase[PurgeJob]):
 
     model = PurgeJob
 
-    async def insert(self, row: PurgeJob) -> PurgeJob | None:
-        """Insert ``row``; ``None`` when another job is already active."""
+    async def insert(
+        self,
+        *,
+        job_id: str,
+        scope: str,
+        app_id: str | None,
+        project_id: str | None,
+        created_at: datetime,
+        steps_json: str,
+    ) -> PurgeJob | None:
+        """Insert a queued, active job; ``None`` when another one is active.
+
+        ``created_at`` is the confirm time ``T`` (the tombstone).
+        """
+        row = PurgeJob(
+            job_id=job_id,
+            scope=scope,
+            app_id=app_id,
+            project_id=project_id,
+            created_at=created_at,
+            updated_at=created_at,
+            steps_json=steps_json,
+        )
         async with session_scope(self._factory) as s:
             s.add(row)
             try:

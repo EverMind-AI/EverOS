@@ -76,6 +76,10 @@ class ExtractionSupervisor:
     def in_flight(self) -> int:
         return len(self._tasks)
 
+    def snapshot(self) -> frozenset[asyncio.Task[Any]]:
+        """The extractions running right now."""
+        return frozenset(self._tasks)
+
     async def drain(self, wait_seconds: float) -> int:
         """Wait up to ``wait_seconds`` for running extractions; return what is left."""
         pending = {t for t in self._tasks if not t.done()}
