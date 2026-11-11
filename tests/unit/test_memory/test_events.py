@@ -12,9 +12,19 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    ProfileClusterUpdated,
     SkillClusterUpdated,
     UserPipelineStarted,
 )
+
+
+def test_queued_profile_event_without_episode_identity_still_loads() -> None:
+    event = ProfileClusterUpdated.model_validate_json(
+        '{"memcell_id":"mc_old","cluster_id":"cl_old","owner_id":"alice"}'
+    )
+    assert event.episode_entry_id is None
+    assert event.memcell_id == "mc_old"
+
 
 _FROZEN_PAYLOADS = (
     Path(__file__).resolve().parents[2]

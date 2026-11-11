@@ -114,6 +114,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
     (announced,) = events
     assert isinstance(announced, ProfileClusterUpdated)
     assert announced.memcell_id == "mc_aaaaaaaaaaa1"
+    assert announced.episode_entry_id == "ep_20260517_0001"
     assert announced.cluster_id == "cl_newuser00001"
     assert announced.owner_id == "u_alice"
     assert announced.language == "Chinese"

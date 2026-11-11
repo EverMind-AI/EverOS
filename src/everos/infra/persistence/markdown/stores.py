@@ -353,11 +353,9 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         found: list[tuple[Path, Entry]] = []
         for path, ids in wanted.items():
             try:
-                text = await MarkdownReader.read_text(path)
+                parsed = await MarkdownReader.read(path)
             except FileNotFoundError:
                 continue
-            # A busy day's log can be large even when only a few ids are wanted.
-            parsed = await anyio.to_thread.run_sync(MarkdownReader.parse, text)
             found += [(path, entry) for entry in parsed.entries if entry.id in ids]
         return found
 

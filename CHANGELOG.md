@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Profile extraction reads persisted cluster episodes without waiting for the
-  asynchronous search index, so a first conversation can produce its profile
-  before indexing finishes. Deleted episodes are excluded when a queued
-  cluster-triggered profile task selects its source conversations.
+- Profile extraction includes the triggering conversation before its episode
+  is indexed, while retaining indexed history. Queued cluster events check
+  that their triggering episode is still a member. Session deletion now
+  removes stale cluster members, including when retrying a partial deletion.
 
 ## [1.6.0] - 2026-11-11
 
