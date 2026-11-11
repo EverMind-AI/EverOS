@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -63,12 +63,26 @@ def _retryable(exc: BaseException) -> bool:
     return isinstance(exc, InfrastructureError | OSError)
 
 
+@contextlib.contextmanager
+def _index_errors() -> Iterator[None]:
+    """A backend's own error type (pymilvus raises its own) becomes a
+    retryable :class:`VectorStoreError`: an index that cannot be reached
+    reruns the attempt."""
+    try:
+        yield
+    except AppError:
+        raise
+    except Exception as exc:
+        raise VectorStoreError(f"index: {exc!r}"[:300]) from exc
+
+
 async def count_index(index: Any, scope: PurgeScope) -> int:
     """Rows of ``scope`` across every index table."""
     where = scope_filter(scope)
     total = 0
-    for repo in index.all():
-        total += await (repo.count() if where is None else repo.count_where(where))
+    with _index_errors():
+        for repo in index.all():
+            total += await (repo.count() if where is None else repo.count_where(where))
     return total
 
 
@@ -364,7 +378,7 @@ class PurgeRunner:
         where = scope_filter(run.scope)
         deleted = 0
         for repo in self._index.all():
-            try:
+            with _index_errors():
                 count = await (
                     repo.count() if where is None else repo.count_where(where)
                 )
@@ -373,12 +387,6 @@ class PurgeRunner:
                     await repo.delete_all()
                 else:
                     await repo.delete(where)
-            except AppError:
-                raise
-            except Exception as exc:
-                # A backend's own error type (pymilvus raises its own): an
-                # index that cannot be reached reruns the attempt.
-                raise VectorStoreError(f"index: {exc!r}"[:300]) from exc
             deleted += count
         return deleted
 

@@ -132,8 +132,9 @@ async def test_retryable_error_reruns_from_step1(
     assert (row.attempts, row.retries) == (2, 1)
 
 
+@pytest.mark.parametrize("method", ["count_where", "delete"])
 async def test_index_backend_error_reruns_the_attempt(
-    storage: Storage, monkeypatch: pytest.MonkeyPatch
+    storage: Storage, monkeypatch: pytest.MonkeyPatch, method: str
 ) -> None:
     p, job_id = await _confirmed(storage)
 
@@ -141,15 +142,15 @@ async def test_index_backend_error_reruns_the_attempt(
         pass
 
     repo = next(iter(storage.repos.all()))
-    real_delete, calls = repo.delete, []
+    real, calls = getattr(repo, method), []
 
-    async def delete(*args: Any, **kwargs: Any) -> Any:
+    async def flaky(*args: Any, **kwargs: Any) -> Any:
         calls.append(1)
         if len(calls) == 1:
             raise BackendDownError("server unavailable")
-        return await real_delete(*args, **kwargs)
+        return await real(*args, **kwargs)
 
-    monkeypatch.setattr(repo, "delete", delete)
+    monkeypatch.setattr(repo, method, flaky)
     assert await p.run_to_end(job_id) == "succeeded"
     row = await _row(p, job_id)
     assert (row.attempts, row.retries) == (2, 1)
