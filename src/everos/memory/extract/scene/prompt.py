@@ -17,6 +17,9 @@ plus at most ``[scenes] max_new_episodes`` episodes of at most
 The text is registered as :data:`SCENE_UPDATE` (id, version, fingerprint
 pinned by tests); a change to it bumps the version. It lives in EverOS, like
 the group-profile prompt, until an everalgo operator takes over the same id.
+Version 2 states the cap as a total however long the input is and shows the
+current narrative's word count: under version 1 DeepSeek V4.1 Flash kept
+updates at 420-730 words against a 300-word cap.
 """
 
 from __future__ import annotations
@@ -45,7 +48,7 @@ from everos.memory.prompts import LENIENT_REPLY, PromptTemplate
 
 SCENE_UPDATE = PromptTemplate(
     id="chat.scene_update",
-    version=1,
+    version=2,
     parts=(
         # 0: the system prompt; {max_words} and {language_rule} are filled in.
         """You keep a scene: one running account of one matter in a person's \
@@ -64,9 +67,11 @@ quantities, decisions, plans and outcomes.
 - When a newer episode changes something, give the newer state and when it \
 changed; never keep both as if both were true.
 - End with one sentence on where things stand as of the latest episode.
-- At most {max_words} words. When the account would run longer, shorten its \
-oldest parts first: merge repeated events and leave out small talk and \
-details that no longer matter, but keep the dates that place the events.
+- At most {max_words} words in all, however long the current narrative and \
+the new episodes are. Make room for the new episodes by condensing the older \
+parts: merge repeated events and leave out small talk and details that no \
+longer matter, but keep the dates that place the events. The newest events \
+and where things stand matter most.
 - Write only what the narrative or the episodes say. Do not mention the \
 episodes, the narrative or this task.
 </narrative_rules>
@@ -84,10 +89,11 @@ A short name for the matter, under 10 words.
 {language_rule}
 </output_language>
 
-Reply with one JSON object, nothing else:
+Reply with one JSON object, nothing else; the narrative at most {max_words} \
+words:
 {{"narrative": "...", "summary": "...", "title": "..."}}""",
-        # 1: the user message.
-        """<current_narrative>
+        # 1: the user message; {words} is the current narrative's word count.
+        """<current_narrative words="{words}">
 {narrative}
 </current_narrative>
 
@@ -150,20 +156,27 @@ def clip_text(text: str, max_chars: int) -> str:
 
 
 def clip_narrative(text: str, max_chars: int) -> tuple[str, bool]:
-    """``(narrative, clipped)``: ``text`` kept to ``max_chars``, at a sentence end.
+    """``(narrative, clipped)``: ``text`` kept to its last ``max_chars``.
 
     A reply that ignored the length rule is cut back rather than stored, so
     the next call's prompt carries a bounded narrative whatever the model
-    did. The cut falls on the last sentence end in the second half of the
-    allowance, else on a word.
+    did. The cut drops the oldest part -- the narrative runs in time order,
+    and the rules shorten the oldest parts first -- so the newest events and
+    the closing state stay. It falls on a sentence start in the first half
+    of the kept text, else on a word.
     """
     if len(text) <= max_chars:
         return text, False
-    head = text[:max_chars]
-    end = max(head.rfind(mark) for mark in _SENTENCE_ENDS)
-    if end > max_chars // 2:
-        return head[: end + 1], True
-    return clip_text(text, max_chars), True
+    tail = text[-max_chars:]
+    starts = [
+        i + 1
+        for i, char in enumerate(tail[: max_chars // 2])
+        if char in _SENTENCE_ENDS and (i + 1 == len(tail) or tail[i + 1].isspace())
+    ]
+    if starts:
+        return tail[starts[0] :].strip(), True
+    space = tail.find(" ")
+    return (tail[space:] if 0 <= space < max_chars // 2 else tail).strip(), True
 
 
 def build_messages(
@@ -195,6 +208,7 @@ def build_messages(
         LLMMessage(
             role="user",
             content=user.format(
+                words=len(narrative.split()),
                 narrative=narrative,
                 episodes="\n".join(
                     line.format(n=n, text=text) for n, text in enumerate(episodes, 1)

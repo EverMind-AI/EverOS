@@ -42,6 +42,8 @@ from everos.memory.strategies import UPDATE_USER_SCENES_SPEC, update_user_scenes
 from tests.fakes import make_deps
 
 _SCOPE = Scope(app_id="default", project_id="p", owner_id="amy", owner_type="user")
+_EMPTY = '<current_narrative words="0">\n\n</current_narrative>'
+"""A new scene's prompt: an empty current narrative."""
 
 
 class _Same:
@@ -151,7 +153,7 @@ async def test_a_scene_forms_at_the_second_episode_and_versions_supersede() -> N
     assert v1.item.version == 1 and v1.item.member_ids == [first, second]
     assert v1.item.narrative == "Narrative 1." and v1.item.subject == "Scene 1"
     assert v1.ref.entry_id.startswith("sc_")
-    assert "<current_narrative>\n\n</current_narrative>" in model.calls[0]["user"]
+    assert _EMPTY in model.calls[0]["user"]
     assert "1. Episode 1" in model.calls[0]["user"]
     assert "2. Episode 2" in model.calls[0]["user"]
 
@@ -172,16 +174,19 @@ async def test_a_scene_forms_at_the_second_episode_and_versions_supersede() -> N
 async def test_the_call_is_capped_and_a_long_reply_is_clipped(scenes: Any) -> None:
     scenes(narrative_max_words=60)
     sentence = "Amy booked a flat in Alfama on 3 May 2023. "
-    model = _SceneModel(narrative=sentence * 200)  # far past the cap
+    closing = "Now the trip is set for June."
+    model = _SceneModel(narrative=sentence * 200 + closing)  # far past the cap
     deps = make_deps(llm=FakeLLMClient(handler=model), embedding=_Same())
     await _add(deps, 1)
     await _add(deps, 2)
     (v1,) = deps.stores.scene.written
     cap = narrative_char_cap(60)
     assert len(v1.item.narrative) <= cap
-    assert v1.item.narrative.endswith(".")  # cut at a sentence end
+    # The oldest part goes, at a sentence start; the closing state stays.
+    assert v1.item.narrative.startswith("Amy booked")
+    assert v1.item.narrative.endswith(closing)
     call = model.calls[0]
-    assert "At most 60 words." in call["system"]
+    assert "At most 60 words in all" in call["system"]
     assert call["max_tokens"] == reply_token_cap(60)
     assert call["retry_cut"] is True
 
@@ -241,7 +246,7 @@ async def test_a_forgotten_member_is_dropped_and_its_narrative_not_carried() -> 
     v2 = deps.stores.scene.written[-1]
     assert v2.item.member_ids == [second, third]
     # Written from the live members alone: no carried narrative, no secret.
-    assert "<current_narrative>\n\n</current_narrative>" in model.calls[1]["user"]
+    assert _EMPTY in model.calls[1]["user"]
     assert "secret" not in model.calls[1]["user"]
     assert "Episode 2" in model.calls[1]["user"]
     assert deps.stores.scene.superseded == {v1.ref.entry_id: v2.ref.entry_id}
@@ -283,5 +288,5 @@ async def test_only_pipeline_episodes_with_an_embedder_apply() -> None:
 
 def test_the_prompt_is_registered_and_pinned() -> None:
     assert SCENE_UPDATE.id == "chat.scene_update"
-    assert SCENE_UPDATE.version == 1
-    assert SCENE_UPDATE.fingerprint == "4a3f308e845d072b"
+    assert SCENE_UPDATE.version == 2
+    assert SCENE_UPDATE.fingerprint == "6ce8a6f4593bf434"
