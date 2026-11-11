@@ -1062,6 +1062,32 @@ class GroupsSettings(BaseModel):
     group_profile_idle_seconds: int = Field(default=600, ge=2)
 
 
+class GroupSearchSettings(BaseModel):
+    """``[search]`` -- what a group search adds around its ranking (sections 8.3-8.5).
+
+    ``expansion``: after each round of a group's multi-round search, follow the
+    stored links of the round's new core (decision chains, shared topics, the
+    members it is about, a scene's episodes) and show the linked records in
+    the next round. ``link_slots``: at most this many linked records join a
+    round. ``constraints``: how the constraint block is built -- ``rules``
+    from verified group-profile items and the core's metadata, or ``model``,
+    which adds one call that states applicability and scope with exact
+    quotes. ``group_profile_cap``: current group-profile items attached per
+    kind (topics, decisions, dissent, roles).
+
+    Env binding:
+        EVEROS_SEARCH__EXPANSION
+        EVEROS_SEARCH__LINK_SLOTS
+        EVEROS_SEARCH__CONSTRAINTS
+        EVEROS_SEARCH__GROUP_PROFILE_CAP
+    """
+
+    expansion: bool = True
+    link_slots: int = Field(default=5, ge=0)
+    constraints: Literal["rules", "model"] = "rules"
+    group_profile_cap: int = Field(default=20, ge=1)
+
+
 class AccessSettings(BaseModel):
     """Who is asking (``[access]``, docs/group-memory.md section 9.2).
 
@@ -1202,6 +1228,7 @@ class Settings(BaseSettings):
     extraction: ExtractionSettings = ExtractionSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
     groups: GroupsSettings = GroupsSettings()
+    search: GroupSearchSettings = GroupSearchSettings()
     access: AccessSettings = AccessSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

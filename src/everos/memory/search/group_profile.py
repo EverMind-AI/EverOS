@@ -57,10 +57,26 @@ async def visible_profile_items(
 async def item_versions(
     index: GroupProfileIndex, scope: ReadScope
 ) -> list[Stored[GroupProfileItem]]:
-    """Every version of every visible item, superseded ones too, newest first."""
+    """Every version of every visible item, superseded ones too, newest first.
+
+    A version whose successor lies outside the asker's windows still reads
+    ``superseded``, but not by which entry: an id the asker cannot see is not
+    handed out.
+    """
     if not scope.is_group:
         return []
-    return await index.find(scope.history_predicate, limit=_PROFILE_SCAN_CAP)
+    found = await index.find(scope.history_predicate, limit=_PROFILE_SCAN_CAP)
+    shown = {s.item.item_id for s in found}
+    return [
+        s
+        if s.item.superseded_by is None or s.item.superseded_by in shown
+        else Stored(
+            ref=s.ref,
+            scope=s.scope,
+            item=s.item.model_copy(update={"superseded_by": None}),
+        )
+        for s in found
+    ]
 
 
 def visible_profile(

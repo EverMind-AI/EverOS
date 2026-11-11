@@ -426,6 +426,164 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project",
+        "description": "The asker's groups of the project and their current members.",
+        "operationId": "read_project_api_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/profile": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project Profile",
+        "description": "The visible current group-profile items of the asker's groups.",
+        "operationId": "read_project_profile_api_v1_projects__project_id__profile_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectProfileDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memory/search": {
       "post": {
         "tags": [
@@ -1203,6 +1361,22 @@
               "default": "desc",
               "title": "Sort Order"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1379,6 +1553,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1495,6 +1685,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -1590,6 +1796,22 @@
               "type": "string",
               "default": "default",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
             }
           }
         ],
@@ -2147,6 +2369,164 @@
           },
           "409": {
             "description": "A roster event conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project",
+        "description": "The asker's groups of the project and their current members.",
+        "operationId": "read_project_api_v2_projects__project_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/projects/{project_id}/profile": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Read Project Profile",
+        "description": "The visible current group-profile items of the asker's groups.",
+        "operationId": "read_project_profile_api_v2_projects__project_id__profile_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_ProjectProfileDTO_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "In none of the project's groups",
             "content": {
               "application/json": {
                 "schema": {
@@ -2945,6 +3325,22 @@
               "default": "desc",
               "title": "Sort Order"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -3121,6 +3517,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -3237,6 +3649,22 @@
               "default": "default",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
+            }
           }
         ],
         "responses": {
@@ -3332,6 +3760,22 @@
               "type": "string",
               "default": "default",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asker Id"
             }
           }
         ],
@@ -3582,6 +4026,28 @@
           "status"
         ],
         "title": "AddResponseData"
+      },
+      "AudienceItem": {
+        "properties": {
+          "present": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Present"
+          },
+          "joined_after": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Joined After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AudienceItem",
+        "description": "Who knew a group record (docs/group-memory.md, section 8.6).\n\nComputed at read time from the roster and the record's sources; shown only\non records the asker can see."
       },
       "Body_create_document_route_api_v1_knowledge_documents_post": {
         "properties": {
@@ -3906,6 +4372,194 @@
         ],
         "title": "CategoryListResponse",
         "description": "Response for GET /categories."
+      },
+      "ConstraintItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "dissent",
+              "topic",
+              "episode",
+              "picture"
+            ],
+            "title": "Kind"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Ids"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ConstraintScopeItem"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "supersedes": {
+            "items": {
+              "$ref": "#/components/schemas/SupersededStatement"
+            },
+            "type": "array",
+            "title": "Supersedes"
+          },
+          "decided_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decided By"
+          },
+          "agreed_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Agreed By"
+          },
+          "held_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held By"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "member",
+                  "assistant",
+                  "mixed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConstraintSourceItem"
+          },
+          "applies": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "kind",
+          "record_id",
+          "scope",
+          "status",
+          "source"
+        ],
+        "title": "ConstraintItem",
+        "description": "One thing an answer must respect (docs/group-memory.md, section 8.4).\n\nBuilt after the search loop from the core: a group-profile item linked to\nit (a decision, a dissent, a topic's status) whose quote and speakers were\nverified when it was written, or -- for a core record no item covers -- a\nmetadata constraint quoting the record's best-matching source message.\nEvery quote is a verbatim part of the message it cites."
+      },
+      "ConstraintScopeItem": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "applies_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "group"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Applies To",
+            "default": "group"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "ConstraintScopeItem",
+        "description": "Where a constraint applies: the group, or some of its members."
+      },
+      "ConstraintSourceItem": {
+        "properties": {
+          "memcell_id": {
+            "type": "string",
+            "title": "Memcell Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "speaker_id": {
+            "type": "string",
+            "title": "Speaker Id"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memcell_id",
+          "message_id",
+          "speaker_id",
+          "at",
+          "quote"
+        ],
+        "title": "ConstraintSourceItem",
+        "description": "The message a constraint quotes: verbatim, from its segment."
       },
       "ContentItemDTO": {
         "properties": {
@@ -6168,6 +6822,16 @@
           "observed_at": {
             "type": "integer",
             "title": "Observed At"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -6623,6 +7287,18 @@
             "type": "string",
             "title": "Project Id",
             "default": "default"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
           }
         },
         "type": "object",
@@ -7124,6 +7800,126 @@
         ],
         "title": "ProfileSourceItem",
         "description": "One verified piece of evidence: a message of a segment, quoted verbatim."
+      },
+      "ProjectDTO": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectGroupDTO"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberDTO"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "project_id"
+        ],
+        "title": "ProjectDTO",
+        "description": "``GET /projects/{project_id}``: the asker's groups and their members."
+      },
+      "ProjectGroupDTO": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "title": "ProjectGroupDTO",
+        "description": "One group of the project the asker is in."
+      },
+      "ProjectMemberDTO": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "title": "Member Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "member_id",
+          "display_name",
+          "kind"
+        ],
+        "title": "ProjectMemberDTO",
+        "description": "A current member of the asker's groups, with the groups they share."
+      },
+      "ProjectProfileDTO": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "project_id"
+        ],
+        "title": "ProjectProfileDTO",
+        "description": "``GET /projects/{project_id}/profile``: the visible current items.\n\nEach item names its group (``group_id``); oldest first. The same decision\ntaken in two groups is two items."
       },
       "QuestionPicture": {
         "properties": {
@@ -7812,6 +8608,39 @@
                 "type": "null"
               }
             ]
+          },
+          "group_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchGroupProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "constraints": {
+            "items": {
+              "$ref": "#/components/schemas/ConstraintItem"
+            },
+            "type": "array",
+            "title": "Constraints"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
           }
         },
         "additionalProperties": false,
@@ -7969,6 +8798,16 @@
             },
             "type": "array",
             "title": "Atomic Facts"
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -7985,6 +8824,42 @@
         ],
         "title": "SearchEpisodeItem",
         "description": "Episode hit — always user-scoped in the current emission contract.\n\n``type`` is narrowed to ``\"Conversation\"`` because the only emitted\nepisode shape today is conversation-derived; widen when other\nsources ship. Item kind is encoded by class name (no ``owner_type``\nfield on the wire), so episode results never carry ambiguity."
+      },
+      "SearchGroupProfile": {
+        "properties": {
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "dissent": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Dissent"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GroupProfileEntry"
+            },
+            "type": "array",
+            "title": "Roles"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SearchGroupProfile",
+        "description": "The visible current group-profile items of a group scope, by kind."
       },
       "SearchHitDTO": {
         "properties": {
@@ -8154,6 +9029,26 @@
               }
             ],
             "title": "Origin"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudienceItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "type": "string",
@@ -8468,6 +9363,33 @@
           "include_profile": {
             "type": "boolean",
             "title": "Include Profile",
+            "default": false
+          },
+          "include_group_profile": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Group Profile"
+          },
+          "constraints": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints"
+          },
+          "project_scope": {
+            "type": "boolean",
+            "title": "Project Scope",
             "default": false
           },
           "enable_llm_rerank": {
@@ -8880,6 +9802,40 @@
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
       },
+      "SuccessEnvelope_ProjectDTO_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProjectDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ProjectDTO]"
+      },
+      "SuccessEnvelope_ProjectProfileDTO_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProjectProfileDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[ProjectProfileDTO]"
+      },
       "SuccessEnvelope_ReviseImageMemoryResponseData_": {
         "properties": {
           "request_id": {
@@ -9056,6 +10012,26 @@
           "data"
         ],
         "title": "SuccessEnvelope[Union[UndoForgetResponseData, GroupUndoForgetResponseData]]"
+      },
+      "SupersededStatement": {
+        "properties": {
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "statement",
+          "at"
+        ],
+        "title": "SupersededStatement",
+        "description": "An earlier version a current constraint replaced."
       },
       "TaskItem": {
         "properties": {

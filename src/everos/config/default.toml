@@ -394,6 +394,19 @@ group_profile = true
 group_profile_batch = 5
 group_profile_idle_seconds = 600
 
+[search]
+# What a group search adds around its ranking (docs/group-memory.md, 8.3-8.5).
+# After each multi-round round, follow the stored links of the new core
+# (decision chains, shared topics, subjects, a scene's episodes) and show at
+# most link_slots linked records in the next round.
+expansion = true
+link_slots = 5
+# The constraint block: "rules" (verified group-profile items and the core's
+# metadata) or "model" (adds one call stating applicability and scope).
+constraints = "rules"
+# Current group-profile items attached per kind to a group search.
+group_profile_cap = 20
+
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no
 # authentication: the asker of a request is the caller's assertion. A

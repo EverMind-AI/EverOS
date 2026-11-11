@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from everalgo.testing import FakeLLMClient
+from everalgo.types import ChatMessage, MemCell
 from PIL import Image
 
 from everos.component.images import ImageLimits
@@ -46,6 +47,7 @@ from everos.memory.models import (
     Group,
     GroupProfileItem,
     ImageMemory,
+    MemcellRecord,
     Profile,
     ProfileSource,
     RosterEvent,
@@ -244,8 +246,12 @@ class GroupWorld:
         senders: Sequence[str] = ("u_chen",),
         session_id: str = "s_group",
         image_ids: Sequence[str] = (),
+        memcell_id: str | None = None,
     ) -> str:
-        """A group episode whose segment ran ``[start, end]``; returns its id."""
+        """A group episode whose segment ran ``[start, end]``; returns its id.
+
+        Its segment is ``memcell_id``, by default ``mc_<group>_<start>``.
+        """
         ref = await self.stores.episode.append(
             self.scope(group_id),
             Episode(
@@ -256,7 +262,7 @@ class GroupWorld:
                 timestamp=end,
                 session_id=session_id,
                 sender_ids=list(senders),
-                parent_id=f"mc_{group_id}_{start}",
+                parent_id=memcell_id or f"mc_{group_id}_{start}",
                 source_start=start,
                 subject_ids=list(senders),
                 origin="member",
@@ -320,6 +326,41 @@ class GroupWorld:
             only_if=NoSourceCheck(),
         )
         return stored.image_id
+
+    async def segment(
+        self,
+        memcell_id: str,
+        *lines: tuple[str, str, str, int],
+        session_id: str = "s_group",
+    ) -> None:
+        """Store one segment as boundary detection stores it.
+
+        Each line is ``(message_id, sender_id, text, at)``; the message ids are
+        the cell items' ids, as a group batch's client ids are.
+        """
+        items = [
+            ChatMessage(
+                id=message_id,
+                role="assistant" if sender.startswith("bot") else "user",
+                sender_id=sender,
+                sender_name=sender,
+                content=text,
+                timestamp=at,
+            )
+            for message_id, sender, text, at in lines
+        ]
+        await self.stores.memcell.insert_many(
+            self.session(session_id),
+            [
+                MemcellRecord(
+                    memcell_id=memcell_id,
+                    cell=MemCell(items=items, timestamp=max(at for *_, at in lines)),
+                    raw_type="Conversation",
+                    message_ids=[message_id for message_id, *_ in lines],
+                    sender_ids=list(dict.fromkeys(sender for _, sender, _, _ in lines)),
+                )
+            ],
+        )
 
     async def profile_item(
         self,

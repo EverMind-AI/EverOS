@@ -388,15 +388,31 @@ def build_application(
         fence=fence,
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
+    # The one access policy every read path asks (docs/group-memory.md, D9),
+    # shared by the memory reads and the project's knowledge base.
+    access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser
+        settings,
+        providers,
+        deps,
+        tokenizer,
+        OmeEventBus(engine),
+        eraser,
+        access=access,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
         memory=memory,
         images=stores.images,
         knowledge=_build_knowledge_service(
-            settings, root, providers, indexes, sqlite, tokenizer, capabilities
+            settings,
+            root,
+            providers,
+            indexes,
+            sqlite,
+            tokenizer,
+            capabilities,
+            access=access,
         ),
         ops=OpsService(
             settings=settings,
@@ -627,11 +643,13 @@ def _build_memory_service(
     tokenizer: Tokenizer,
     bus: EventBus,
     index_eraser: IndexEraser,
+    *,
+    access: AccessPolicy | None = None,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     # The one access policy every read path asks (docs/group-memory.md, D9).
-    access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
+    access = access or AccessPolicy(stores.groups, forgotten=stores.message_forget)
     return MemoryService(
         index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
@@ -689,6 +707,12 @@ def _build_memory_service(
             image_recaller=ImageMemoryRecaller(recaller_deps, indexes.image_memory),
             image_store=stores.images,
             access=access,
+            group_profile_index=indexes.group_profile,
+            episode_index=indexes.episode,
+            memcells=stores.memcell,
+            message_forget=stores.message_forget,
+            scenes=stores.scene,
+            group_search=settings.search,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,
@@ -718,6 +742,8 @@ def _build_knowledge_service(
     sqlite: SqliteRepos,
     tokenizer: Tokenizer,
     capabilities: Capabilities,
+    *,
+    access: AccessPolicy | None = None,
 ) -> KnowledgeService:
     return KnowledgeService(
         store=MarkdownKnowledgeStore(root),
@@ -734,6 +760,7 @@ def _build_knowledge_service(
         parse_file=functools.partial(aparse_file, llm=providers.multimodal_llm),
         parser_available=capabilities.parser,
         max_upload_bytes=settings.knowledge.max_upload_bytes,
+        access=access,
     )
 
 

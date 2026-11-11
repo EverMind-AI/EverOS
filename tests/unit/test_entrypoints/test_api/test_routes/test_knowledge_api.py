@@ -321,6 +321,8 @@ async def test_list_documents_pagination_params(client: AsyncClient) -> None:
         page_size=5,
         sort_by="title",
         sort_order="asc",
+        asker_id=None,
+        asserted_asker=None,
     )
 
 

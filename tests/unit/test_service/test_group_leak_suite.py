@@ -40,11 +40,13 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import ForbiddenError
 from everos.entrypoints.api.app import create_app
+from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.models import (
     AgentCase,
     ExplicitInfoItem,
     MemberProfile,
     Profile,
+    ProfileSource,
     Scene,
 )
 from everos.memory.ports import NoSourceCheck, Scope, SessionKey, all_of, eq
@@ -54,8 +56,9 @@ from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
 NOT_YET: dict[int, str] = {
-    6: "history route: not built yet (2.0 history); reads go through visible()",
-    9: "knowledge reads by project members: Step 2 (task 17)",
+    6: "history route: not built yet (2.0 history); the group profile's versions"
+    " (get include_superseded) are covered by"
+    " test_group_profile_items_follow_the_windows",
     13: "MCP: a separate package (everos-mcp) forwarding the HTTP API",
 }
 """Rows of section 9.3 this suite cannot exercise yet, and why."""
@@ -787,7 +790,124 @@ async def test_group_profile_items_follow_the_windows(
     )
 
 
+CONSTRAINED = {
+    "kappa": (1_000, 2_000),
+    "lambda": (3_000, 4_000),
+    "sigma": (8_000, 9_000),
+}
+"""Segments with an episode and a decision each; the marker word is quoted."""
+
+
+async def _seed_constrained(world: GroupWorld) -> None:
+    for word, (start, end) in CONSTRAINED.items():
+        memcell = f"mc_{word}"
+        await world.segment(
+            memcell,
+            (
+                f"m-{word}",
+                "u_chen",
+                f"{word}quote marker plan Lisbon offsite",
+                T0 + start,
+            ),
+        )
+        await world.episode(
+            "trip",
+            f"{word}episode marker plan Lisbon offsite",
+            start=T0 + start,
+            end=T0 + end,
+            memcell_id=memcell,
+        )
+        await world.profile_item(
+            "trip",
+            f"{word}quote",
+            start=T0 + start,
+            end=T0 + start,
+            memcell_id=memcell,
+            statement=f"{word}decision marker",
+            sources=[
+                ProfileSource(
+                    memcell_id=memcell,
+                    message_id=f"m-{word}",
+                    speaker_id="u_chen",
+                    at=T0 + start,
+                    quote=f"{word}quote",
+                )
+            ],
+        )
+    await world.project()
+
+
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+@pytest.mark.parametrize("method", ["keyword", "llm_multiround"])
+async def test_constraints_and_attachments_follow_the_windows(
+    fixture: _Fixture, asker: str, method: str
+) -> None:
+    """Section 13.5: a constraint or attached profile item from an invisible source."""
+    world = fixture.world
+    await _seed_constrained(world)
+
+    response = await world.memory.search(
+        SearchRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id=asker,
+            query="marker plan Lisbon offsite",
+            method=method,
+            top_k=20,
+        )
+    )
+
+    blob = _everything_text(response)
+    assert response.data.constraints, "the fixture must produce constraints"
+    for word, (start, end) in CONSTRAINED.items():
+        seen = _visible(asker, T0 + start, T0 + end)
+        for marker in (f"{word}episode", f"{word}decision", f"{word}quote"):
+            assert (marker in blob) == seen, (asker, method, marker)
+
+
+async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -> None:
+    """Row 10 and section 8.7: project scope, project profile, knowledge base."""
+    world = fixture.world
+    await world.roster("secret", [join("u_chen", T0), join("u_zoe", T0)])
+    await world.episode("secret", "secret marker plan Lisbon offsite", start=T0, end=T0)
+    await world.profile_item("secret", "secret decision", start=T0, end=T0)
+    await _seed_constrained(world)
+
+    searched = await world.memory.search(
+        SearchRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            project_scope=True,
+            asker_id="u_evan",
+            query="marker plan Lisbon offsite",
+            method="keyword",
+            top_k=20,
+        )
+    )
+    profile = await world.memory.project_profile(
+        app_id=APP, project_id=PROJECT, asker_id="u_evan", asserted_asker=None
+    )
+    blob = _everything_text(searched) + json.dumps(
+        [i.model_dump(mode="json") for i in profile.items]
+    )
+    assert "secret" not in blob
+    for word, (start, end) in CONSTRAINED.items():
+        seen = _visible("u_evan", T0 + start, T0 + end)
+        assert (f"{word}decision" in blob) == seen, word
+    access = AccessPolicy(world.stores.groups)
+    for outsider in ("u_betty", "u_zoe_never", "u_amy"):
+        with pytest.raises(ForbiddenError):
+            await access.authorize_project_read(
+                resolve_identity(header=None, body_asker=outsider), APP, PROJECT
+            )
+    with pytest.raises(ForbiddenError):
+        await world.memory.project_profile(
+            app_id=APP, project_id=PROJECT, asker_id="u_betty", asserted_asker=None
+        )
+
+
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:
-    covered = {1, 2, 3, 4, 5, 7, 8, 10, 11, 12}
+    covered = {1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12}
     assert covered | set(NOT_YET) == set(range(1, 14))
     assert not covered & set(NOT_YET)
