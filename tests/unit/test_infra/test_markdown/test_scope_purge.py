@@ -94,6 +94,15 @@ async def test_move_out_layout(root: MemoryRoot) -> None:
     assert (root.root / "a1" / "p1" / "knowledge" / ".taxonomy.md").is_file()
 
 
+async def test_unreadable_day_file_is_moved_too(root: MemoryRoot) -> None:
+    await _episodes(root, "a1", "p1", 1)
+    broken = _today_file(root).with_name("episode-2020-01-01.md")
+    broken.write_text("---\nentry_count: [1\n---\n", encoding="utf-8")
+    moved = await _purger(root).move_out(S, "j1")
+    assert moved == 1  # the broken file counts no entries
+    assert not (root.root / "a1" / "p1" / "users").exists()
+
+
 async def test_trash_not_matched_by_scanner_glob(root: MemoryRoot) -> None:
     await _episodes(root, "a1", "p1", 1)
     _knowledge(root)

@@ -114,7 +114,7 @@ class MarkdownScopePurger:
                 elif path.name == AgentSkillFrontmatter.SKILL_MAIN_FILENAME:
                     counts["agent_skill"] += 1
                 elif (kind := path.stem.rsplit("-", 3)[0]) in _DAILY_KINDS:
-                    counts[kind] += len((await MarkdownReader.read(path)).entries)
+                    counts[kind] += await _entries(path)
         return dict(counts)
 
     # ── step 2 ───────────────────────────────────────────────────────────
@@ -206,3 +206,12 @@ def _prune_empty(path: Path, *, recurse: bool = True) -> None:
                 _prune_empty(child)
     if not any(path.iterdir()):
         path.rmdir()
+
+
+async def _entries(path: Path) -> int:
+    """Entries in one day file; an unreadable file counts 0 (it is moved anyway)."""
+    try:
+        return len((await MarkdownReader.read(path)).entries)
+    except Exception as exc:  # a broken file must not keep the purge from clearing it
+        logger.warning("purge_md_unreadable", path=path.name, error=repr(exc)[:200])
+        return 0
