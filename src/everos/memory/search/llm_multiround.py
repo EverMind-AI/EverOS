@@ -171,6 +171,53 @@ class RoundDecision(NamedTuple):
     salvaged: dict[str, object] | None = None
     """Set only when ``[decider].salvage_truncated_core`` took this round's core from a
     reply that was cut short; ``raw`` is then that reply."""
+    error: str | None = None
+    """The last attempt's error, set when the round was not decided (``failed``, or
+    ``salvaged``): what the search response reports as the reason."""
+    attempts: int | None = None
+    """Requests sent for an undecided round; ``None`` on a decided one."""
+
+
+class DeciderFailure(NamedTuple):
+    """A round the decider did not decide, as the search response reports it.
+
+    Attributes:
+        round_idx: The round, 0-based.
+        outcome: ``fallback``: every attempt failed, and the round's core is the
+            top ``[decider] fallback_core`` fused candidates. ``salvaged``: every
+            attempt failed to parse, and the core was read from a reply that was
+            cut short. Either way the loop stopped at this round.
+        reason: The last attempt's error (``NotFoundError: Error code: 404 ...``),
+            with anything shaped like a credential masked.
+        attempts: Requests sent for the round.
+    """
+
+    round_idx: int
+    outcome: Literal["fallback", "salvaged"]
+    reason: str
+    attempts: int
+
+
+_REASON_CHARS = 300
+"""Longest reason a search response carries; the server log keeps 200 as before."""
+
+_CREDENTIAL = re.compile(
+    r"(sk-[A-Za-z0-9_\-*]{6,}|Bearer\s+\S+|(?i:api[_-]?key)[\"'=:\s]+\S+)"
+)
+"""Shapes of a credential an endpoint may echo in its error text."""
+
+
+def _failure_of(round_idx: int, decision: RoundDecision) -> DeciderFailure | None:
+    """The response's record of an undecided round; ``None`` for a decided one."""
+    if not decision.failed and decision.salvaged is None:
+        return None
+    reason = _CREDENTIAL.sub("***", decision.error or "")[:_REASON_CHARS]
+    return DeciderFailure(
+        round_idx=round_idx,
+        outcome="fallback" if decision.failed else "salvaged",
+        reason=reason or "the decider reported the round as failed",
+        attempts=decision.attempts or 1,
+    )
 
 
 class RoundDecider(Protocol):
@@ -213,6 +260,9 @@ class MultiroundResult(NamedTuple):
             first selected.
         records: The stored record behind every candidate the loop saw, by
             candidate id (what the constraint block reads the core from).
+        rounds: Rounds the decider was asked to decide.
+        failures: The rounds it did not decide (:class:`DeciderFailure`), in
+            order; empty when every round was decided.
     """
 
     episodes: list[SearchEpisodeItem]
@@ -220,6 +270,8 @@ class MultiroundResult(NamedTuple):
     coverage: Coverage
     core: list[str]
     records: dict[str, Stored[Episode] | Stored[ImageMemory]]
+    rounds: int = 0
+    failures: tuple[DeciderFailure, ...] = ()
 
 
 @runtime_checkable
@@ -540,6 +592,8 @@ class LLMRoundDecider:
                 raw=raw,
                 failed=True,
                 fit=fit_record,
+                error=last_error,
+                attempts=attempt + 1,
             )
         # n_shown == n_candidates unless a fit dropped candidates: an index the sent
         # prompt never showed is not a choice the decider made.
@@ -560,6 +614,8 @@ class LLMRoundDecider:
             raw=raw,
             fit=fit_record,
             salvaged=salvaged_record,
+            error=last_error if salvaged_record is not None else None,
+            attempts=attempt + 1 if salvaged_record is not None else None,
         )
 
     def _token_counter(
@@ -1476,6 +1532,9 @@ def _build_round_trace(
         record["decider_fit"] = decision.fit
     if decision.salvaged is not None:
         record["decider_salvaged"] = decision.salvaged
+    if decision.error is not None:
+        # Why the round was not decided -- the reason the search response reports.
+        record["decider_error"] = decision.error[:_REASON_CHARS]
     return record
 
 
@@ -1552,6 +1611,8 @@ async def _search_episodes_subq(
     cur_queries = [query]  # round 0 seeds with the user question
     linked: list[tuple[str, Stored[Episode]]] = []  # (anchor label, record)
     stop_reason = "budget"
+    rounds = 0  # rounds the decider was asked to decide
+    failures: list[DeciderFailure] = []  # the rounds it did not decide
 
     tune = tuning_source()
     for round_idx in range(tune.max_rounds):
@@ -1704,6 +1765,9 @@ async def _search_episodes_subq(
             if tune.fit_to_window and isinstance(decide, LLMRoundDecider)
             else None,
         )
+        rounds += 1
+        if (failure := _failure_of(round_idx, decision)) is not None:
+            failures.append(failure)
 
         # Accumulate new core (global index -> id, dedup against already-cored).
         n_before = len(core_ids)
@@ -1799,6 +1863,10 @@ async def _search_episodes_subq(
                     for anchor_id, record in await expander(anchors)
                 ][:link_slots]
 
+    # A loop that ended on an undecided round did not stop because the decider judged
+    # its core sufficient: the fixed fallback (or a salvaged core) is not "complete".
+    if stop_reason == "decider" and failures and failures[-1].round_idx == rounds - 1:
+        stop_reason = "failure"
     coverage: Coverage = (
         "none"
         if not core_ids
@@ -1809,7 +1877,9 @@ async def _search_episodes_subq(
         **episodes_by_id,
     }
     if not cand_by_id and not core_by_id:
-        return MultiroundResult([], [], coverage, list(core_order), records)
+        return MultiroundResult(
+            [], [], coverage, list(core_order), records, rounds, tuple(failures)
+        )
     episodes, images = _finalize_injection(
         owner_id=owner_id,
         question=query,
@@ -1826,7 +1896,15 @@ async def _search_episodes_subq(
         trace_path_source=trace_path_source,
         image_thumbnail_edge=tune.image_thumbnail_edge,
     )
-    return MultiroundResult(episodes, images, coverage, list(core_order), records)
+    return MultiroundResult(
+        episodes,
+        images,
+        coverage,
+        list(core_order),
+        records,
+        rounds,
+        tuple(failures),
+    )
 
 
 def _join_linked(

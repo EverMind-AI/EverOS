@@ -621,6 +621,31 @@ class SearchScope(BaseModel):
     windows: list[SearchWindow] = Field(default_factory=list)
 
 
+class SearchDegradation(BaseModel):
+    """A part of this search that did not run as configured.
+
+    Today one kind: a multi-round round the decider did not decide. Its
+    candidates were still ranked, but which of them are core was not the
+    decider's choice, and the loop stopped there.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: Literal["decider"] = "decider"
+    round: int
+    """The multi-round round, 0-based."""
+    outcome: Literal["fallback", "salvaged"]
+    """``fallback``: every attempt failed; the round's core is the top
+    ``[decider] fallback_core`` candidates by fused score. ``salvaged``: every
+    attempt failed to parse; the core was read from a reply that was cut
+    short (``[decider] salvage_truncated_core``)."""
+    reason: str
+    """The last attempt's error, e.g. ``NotFoundError: Error code: 404 ...``;
+    anything shaped like a credential is masked."""
+    attempts: int
+    """Requests sent to the decider for the round."""
+
+
 class SearchData(BaseModel):
     """Body of ``response.data``.
 
@@ -653,9 +678,12 @@ class SearchData(BaseModel):
     """What an answer must respect (``constraints``, group scopes)."""
     coverage: Literal["complete", "partial", "none"] | None = None
     """How far a group scope's multi-round search got: ``complete`` (the
-    decider stopped with a core), ``partial`` (the round budget ran out),
-    ``none`` (no core). ``None`` for a user scope, whose response stays as it
-    was."""
+    decider stopped with a core), ``partial`` (the round budget ran out, or
+    the loop ended on a round the decider did not decide), ``none`` (no
+    core). ``None`` for a user scope, whose response stays as it was."""
+    degraded: list[SearchDegradation] = Field(default_factory=list)
+    """What did not run as configured -- a decider round that failed and
+    fell back, with the reason. Empty when the search ran as configured."""
 
 
 class SearchResponse(BaseModel):

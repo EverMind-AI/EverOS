@@ -8458,12 +8458,59 @@
               }
             ],
             "title": "Coverage"
+          },
+          "degraded": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDegradation"
+            },
+            "type": "array",
+            "title": "Degraded"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SearchData",
         "description": "Body of ``response.data``.\n\nAll arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
+      },
+      "SearchDegradation": {
+        "properties": {
+          "component": {
+            "type": "string",
+            "const": "decider",
+            "title": "Component",
+            "default": "decider"
+          },
+          "round": {
+            "type": "integer",
+            "title": "Round"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "fallback",
+              "salvaged"
+            ],
+            "title": "Outcome"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "round",
+          "outcome",
+          "reason",
+          "attempts"
+        ],
+        "title": "SearchDegradation",
+        "description": "A part of this search that did not run as configured.\n\nToday one kind: a multi-round round the decider did not decide. Its\ncandidates were still ranked, but which of them are core was not the\ndecider's choice, and the loop stopped there."
       },
       "SearchEpisodeItem": {
         "properties": {

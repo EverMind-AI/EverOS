@@ -928,7 +928,8 @@ incomplete:
 
 - the response always carries the core items assembled so far (core first, as today);
 - `coverage` says `complete` (the decider stopped with a core), `partial` (the
-  round budget ran out) or `none` (no core);
+  round budget ran out, or the loop ended on a round the decider did not
+  decide -- listed in `degraded`) or `none` (no core);
 - for group scopes the current group-profile items are attached
   (`include_group_profile`), which grounds requests about the group itself
   (purpose, current plan, who does what);

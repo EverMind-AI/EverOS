@@ -110,6 +110,8 @@ ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
         "group_profile": None,
         "constraints": [],
         "coverage": None,
+        # The decider rounds that fell back; empty when every round was decided.
+        "degraded": [],
     },
     "get": {**_GROUP_ITEM_FIELDS, "scenes": [], "images": [], "group_profile": []},
 }

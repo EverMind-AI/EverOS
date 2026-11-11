@@ -80,6 +80,7 @@ from .dto import (
     ConstraintItem,
     FilterNode,
     SearchData,
+    SearchDegradation,
     SearchEpisodeItem,
     SearchGroupProfile,
     SearchImageItem,
@@ -96,6 +97,7 @@ from .filters import compile_scoped
 from .group_profile import visible_profile, visible_profile_items
 from .llm_multiround import (
     Coverage,
+    DeciderFailure,
     RoundDecider,
     run_llm_multiround,
 )
@@ -133,13 +135,28 @@ class _Ranked(NamedTuple):
     """What the multi-round loop returned: its ranking, its stop and its core.
 
     ``core`` is the decider's core as result ids; the constraint block of a
-    group search is built from it.
+    group search is built from it. ``failures`` are the rounds the decider
+    did not decide, which the response reports as ``degraded``.
     """
 
     episodes: list[SearchEpisodeItem]
     images: list[SearchImageItem]
     coverage: Coverage
     core: list[str]
+    failures: tuple[DeciderFailure, ...] = ()
+
+
+def _degraded(failures: Sequence[DeciderFailure]) -> list[SearchDegradation]:
+    """The response's ``degraded`` entries for the rounds the decider missed."""
+    return [
+        SearchDegradation(
+            round=f.round_idx,
+            outcome=f.outcome,
+            reason=f.reason,
+            attempts=f.attempts,
+        )
+        for f in failures
+    ]
 
 
 class SearchManager:
@@ -269,6 +286,7 @@ class SearchManager:
                     group_profile=group_profile,
                     constraints=constraints,
                     coverage=ranked.coverage,
+                    degraded=_degraded(ranked.failures),
                 )
             else:
                 ranked, profiles, unprocessed = await asyncio.gather(
@@ -286,6 +304,7 @@ class SearchManager:
                     images=images,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
+                    degraded=_degraded(ranked.failures),
                 )
 
             # Returned hits (ids only) — content, so only when capture_content
@@ -422,7 +441,11 @@ class SearchManager:
             link_slots=self._group_search.link_slots if expander else 0,
         )
         return _Ranked(
-            result.episodes, result.images, result.coverage, list(result.core)
+            result.episodes,
+            result.images,
+            result.coverage,
+            list(result.core),
+            result.failures,
         )
 
     async def _resolve_episode_pictures(

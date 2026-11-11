@@ -172,6 +172,14 @@ machinery that keeps a deleted memory from coming back.
     a reply had already emitted its core list (`{"core": [0, 3],` and
     nothing after it), those indices become the round's core and the loop
     stops there. The round trace records it (`decider_salvaged`).
+- **A search says when the decider did not decide a round, and why.** The
+  response's `data.degraded` lists each such round (`component: "decider"`,
+  `round`, `outcome` `fallback` or `salvaged`, `reason` = the last attempt's
+  error with credential-shaped text masked, `attempts`); it is `[]` when every
+  round was decided. Before, a fallback answered `200` like any other search
+  and its reason was only in the server log. The round trace gains
+  `decider_error`, and a group scope's `coverage` reads `partial` instead of
+  `complete` when the loop ended on such a round. No extra model call.
 
 
 ### Changed

@@ -947,6 +947,27 @@ owner scope; arrays that do not apply stay `[]`.
 | `profiles` | `array<SearchProfileItem>` | Populated **only** when `include_profile=true` |
 | `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Buffer rows have no owner attribution — boundary detection runs before owner inference |
 | `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows |
+| `degraded` | `array<SearchDegradation>` | What did not run as configured; `[]` when the search did. See below |
+
+#### SearchDegradation
+
+One entry per multi-round round the decider did not decide. The search
+still answers `200`: the round's candidates were ranked, but which of them
+are core was not the decider's choice, and the loop stopped at that round.
+Count or exclude such answers; the reason is also in the server log
+(`llm_multiround_decider_fallback`) and, when tracing, in the round trace
+(`decider_error`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `component` | `"decider"` | The part that did not run |
+| `round` | `integer` | The round, 0-based |
+| `outcome` | `"fallback" \| "salvaged"` | `fallback`: every attempt failed and the round's core is the top `[decider] fallback_core` candidates by fused score. `salvaged`: every attempt failed to parse and the core was read from a reply cut short (`[decider] salvage_truncated_core`) |
+| `reason` | `string` | The last attempt's error, e.g. `NotFoundError: Error code: 404 ...` (credential-shaped text masked) |
+| `attempts` | `integer` | Requests sent for the round |
+
+A group scope's `coverage` reads `partial`, not `complete`, when the loop
+ended on such a round.
 
 #### SearchEpisodeItem
 
@@ -1052,7 +1073,8 @@ Response (abridged):
         ],
         "images": [],
         "profiles": [],
-        "unprocessed_messages": []
+        "unprocessed_messages": [],
+        "degraded": []
     }
 }
 ```

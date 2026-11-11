@@ -10,8 +10,8 @@ Two defects, one root cause: a run's behaviour was not readable off its configur
   and benchmark trace were promoted to hard validation signals.
 
 The parameters therefore live in ``[decider]`` and are resolved per search; a fallback
-logs at error and carries ``decider_failed`` in the round trace without changing the
-public search response.
+logs at error, carries ``decider_failed`` in the round trace, and is reported in the
+search response's ``degraded`` (test_search_degraded.py).
 """
 
 from __future__ import annotations
