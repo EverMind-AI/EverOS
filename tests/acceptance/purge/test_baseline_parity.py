@@ -154,6 +154,28 @@ def _workload(srv: PurgeServer, proxy: Any, fake: Any) -> list[tuple[str, str]]:
             )
         )
     wait_idle(srv.base, srv.root, timeout=300)
+    # A second turn per user. Profile extraction reads the owner's episodes
+    # from the index; on the first turn a fake upstream can reach it before
+    # the index has them (it then skips the profile), on either server. By
+    # now the index holds them, so every profile is extracted on both sides.
+    for i, user in enumerate(("u1", "u2", "u3", "u4")):
+        session = f"{user}-s2"
+        rec(
+            f"second turn {user}",
+            srv.post(
+                "/memory/add",
+                {
+                    "session_id": session,
+                    "messages": _msgs(user, "zqparity", T0 + 1_200_000 + i * 60_000),
+                    **WHERE,
+                },
+            ),
+        )
+        rec(
+            f"second flush {user}",
+            srv.post("/memory/flush", {"session_id": session, **WHERE}),
+        )
+    wait_idle(srv.base, srv.root, timeout=300)
     # Reads.
     rec(
         "search",
