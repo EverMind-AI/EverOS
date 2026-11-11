@@ -1,8 +1,7 @@
 """T17.1: with no purge running, existing uses behave as on origin/main (A17).
 
 One workload, one per row of spec §5.2's existing-uses table, runs against
-a server of the baseline checkout (``$PURGE_BASELINE_EVEROS``, default
-``/Users/admin/EverOS-purge-base/.venv/bin/everos``) and of this branch,
+a server of the baseline checkout and of this branch,
 both over the same fake upstream; the normalised responses and stores of
 the two runs must be equal.
 """
@@ -30,11 +29,10 @@ from .observe import INDEX_TABLES, index_ids, scope_counts, wait_converged, wait
 
 pytestmark = pytest.mark.acceptance
 
-BASELINE = Path(
-    os.environ.get(
-        "PURGE_BASELINE_EVEROS", "/Users/admin/EverOS-purge-base/.venv/bin/everos"
-    )
-)
+# The ``everos`` of an origin/main checkout, e.g. a worktree:
+#   git worktree add ../everos-base origin/main && (cd ../everos-base && uv sync)
+#   PURGE_BASELINE_EVEROS=../everos-base/.venv/bin/everos make acceptance-purge
+BASELINE = os.environ.get("PURGE_BASELINE_EVEROS")
 WHERE = {"app_id": "a1", "project_id": "p1"}
 T0 = 1_762_041_600_000
 _VOLATILE = {"request_id", "took_ms", "latency_ms", "elapsed_ms", "duration_ms"}
@@ -322,9 +320,11 @@ def _workload(srv: PurgeServer, proxy: Any, fake: Any) -> list[tuple[str, str]]:
 def test_t17_1_existing_uses_match_the_baseline(
     make_purge_server: Any, purge_proxy: Any, fake: Any, tmp_path: Path
 ) -> None:
-    if not BASELINE.exists():
-        pytest.fail(f"baseline everos missing: {BASELINE} (see the module docstring)")
-    base = make_purge_server("base", everos=BASELINE)
+    if BASELINE is None:
+        pytest.skip("set PURGE_BASELINE_EVEROS (see the comment at BASELINE)")
+    if not Path(BASELINE).exists():
+        pytest.fail(f"PURGE_BASELINE_EVEROS does not exist: {BASELINE}")
+    base = make_purge_server("base", everos=Path(BASELINE))
     ours = make_purge_server("ours")
     ev = Evidence("T17.1", evidence_base(tmp_path), [base, ours])
     try:
