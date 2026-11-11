@@ -19,7 +19,7 @@ __all__ = ["MarkdownOwnerDirStore"]
 import json
 import shutil
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 import anyio
@@ -142,9 +142,11 @@ class MarkdownOwnerDirStore:
             found.append((trash, scope if (trash / _MOVED).is_dir() else None))
         return found
 
-    async def sweep_trash(self) -> int:
+    async def sweep_trash(self, *, skip: Callable[[Scope], bool] | None = None) -> int:
         finished = 0
         for trash, scope in self._trash_folders():
+            if scope is not None and skip is not None and skip(scope):
+                continue  # a running purge owns this one (it restores, then removes)
             if scope is not None:
                 async with LOCKS.hold("owner", owner_lock(scope)):
                     await self._keep_today_counters(scope, trash / _MOVED)
@@ -162,6 +164,19 @@ class MarkdownOwnerDirStore:
             logger.info("memory_delete_trash_swept", trash=trash.name)
             finished += 1
         return finished
+
+    def trash_folders(self) -> list[tuple[Path, Scope | None]]:
+        """Every ``.tmp/delete-*`` folder with the owner it holds."""
+        return self._trash_folders()
+
+    async def restore_today_counters(self, scope: Scope, moved_owner_dir: Path) -> None:
+        """Put the owner's today's files back, empty, from a moved copy.
+
+        For a purge, which has its scope marked: nothing else may write there
+        meanwhile, so no owner lock is taken -- a ``/delete`` stopped after its
+        rename holds that lock, and waiting for it would stall the purge.
+        """
+        await self._keep_today_counters(scope, moved_owner_dir)
 
     async def owners_with_session(
         self, app_id: str, project_id: str, session_id: str

@@ -61,6 +61,11 @@ POINTS: dict[tuple[str, str, str], str] = {
     ("owner_dir.py", "MarkdownOwnerDirStore._move", ".rename"): DELETE,
     ("owner_dir.py", "MarkdownOwnerDirStore._move", ".write_text"): DELETE,
     ("owner_dir.py", "MarkdownOwnerDirStore.sweep_trash", "shutil.rmtree"): DELETE,
+    ("scope_purge.py", "MarkdownScopePurger._rename", ".mkdir"): PURGE,
+    ("scope_purge.py", "MarkdownScopePurger._rename", ".rename"): PURGE,
+    ("scope_purge.py", "MarkdownScopePurger.empty", "shutil.rmtree"): PURGE,
+    ("scope_purge.py", "MarkdownScopePurger.sweep_inactive", "shutil.rmtree"): PURGE,
+    ("scope_purge.py", "_prune_empty", ".rmdir"): PURGE,
 }
 
 
