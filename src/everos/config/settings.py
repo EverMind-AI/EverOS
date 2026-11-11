@@ -530,13 +530,14 @@ class EmbeddingSettings(BaseModel):
     requests to the endpoint are ``max_concurrent + query_max_concurrent``;
     lower this if the endpoint is rate-limited.
 
-    Each hybrid or vector search holds one slot for one embedding call,
-    so the sustainable search rate is about this value divided by the
-    endpoint's per-call latency: at 4 and a remote endpoint answering in
-    ~0.45 s, hybrid search capped near 9 requests/s and a steady 10/s
-    queued without bound (p50 64 s); at 16 the same load held p50 0.42 s,
-    p95 1.45 s. Size it as searches per second x per-call latency, with
-    headroom."""
+    Each embedding call holds one slot -- a multi-round search makes one
+    for the question and one per sub-query of each later round -- so the
+    sustainable call rate is about this value divided by the endpoint's
+    per-call latency: at 4 and a remote endpoint answering in ~0.45 s, a
+    search route making one call per request capped near 9 requests/s and a
+    steady 10/s queued without bound (p50 64 s); at 16 the same load held
+    p50 0.42 s, p95 1.45 s. Size it as embedding calls per second x per-call
+    latency, with headroom."""
 
 
 class VisionEmbeddingSettings(BaseModel):
@@ -853,14 +854,15 @@ class LanceDBSettings(BaseModel):
     get an ANN index. Below this a brute-force scan is cheaper than the
     index; above it the scan grows linearly with the table — 27k rows of
     1024-dim vectors was 112 MB and ~0.6 s per query on a laptop SSD, and
-    a hybrid search runs two or three of them. Applied by the cascade worker
-    only: its first rebuild sweep after server start builds a missing index
-    and the heavy maintenance beat keeps it healthy. The CLI never builds
+    every round of a multi-round search runs several of them. Applied by the
+    cascade worker only: its first rebuild sweep after server start builds a
+    missing index and the heavy maintenance beat keeps it healthy. The CLI never builds
     one (it would race the running server's commits)."""
     max_concurrent_queries: int = Field(default=32, ge=1)
     """Search queries (keyword, vector, filtered scan) one process runs on
-    LanceDB at once; the rest wait for a slot. One agentic search fans out to
-    about 28 of them. Uncapped, a burst opened every data file of a table once
+    LanceDB at once; the rest wait for a slot. One multi-round round fans out
+    to up to five of them per sub-query (episode BM25 and vector, picture BM25,
+    vector and visual). Uncapped, a burst opened every data file of a table once
     per query (981 descriptors at peak against a 1024 soft limit, 2026-11) and
     turned all their results into Python objects on the event loop together."""
 
@@ -1102,7 +1104,6 @@ class ObservabilitySettings(BaseModel):
         EVEROS_OBSERVABILITY__LANGFUSE_PUBLIC_KEY / __LANGFUSE_SECRET_KEY
         EVEROS_OBSERVABILITY__LANGFUSE_HOST
         EVEROS_OBSERVABILITY__EMIT_RECALL_SCORES
-        EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD
     """
 
     enabled: bool = False
@@ -1121,10 +1122,6 @@ class ObservabilitySettings(BaseModel):
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str | None = None
     emit_recall_scores: bool = True
-    # ``hit`` threshold: only meaningful for calibrated-score methods
-    # (HYBRID LR / rerank / agentic). Not bounded to [0, 1] because raw
-    # BM25 scores are unbounded; tune per method on the eval side.
-    recall_hit_threshold: float = 0.6
 
 
 _READ_ONLY_SWITCHES: dict[str, tuple[str, str]] = {

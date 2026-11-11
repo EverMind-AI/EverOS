@@ -1,4 +1,4 @@
-"""Laws of the merge, rank and parse helpers on the memorize and search paths.
+"""Laws of the merge and parse helpers on the memorize and search paths.
 
 1. ``merge_dedupe_sort`` (boundary stage): the result is sorted by
    ``(timestamp, message_id)``, holds each id once, its id set is the union
@@ -6,15 +6,12 @@
    and merging again changes nothing. ``buffered`` comes from a table keyed
    by ``message_id``, so it never holds an id twice; the law is stated on
    that domain.
-2. ``merge_by_id_max`` (search recall): each id once, with the highest score seen
-   for it in either list; a tie keeps the primary candidate. A duplicate id
-   inside ``primary`` kept the *last* occurrence before this law.
-3. ``_coerce_core_indices``: the result is a sub-sequence of ``range(n)``
+2. ``_coerce_core_indices``: the result is a sub-sequence of ``range(n)``
    in first-occurrence order with no repeats, and coercing the result again
    is the identity. The decider's reply model makes every index an ``int``;
    the strings and bools the parser once tolerated are rejected upstream.
-4. ``_merge_status``: commutative, ``extracted`` absorbs.
-5. ``reconcile``: every path appears at most once; ``added`` is exactly
+3. ``_merge_status``: commutative, ``extracted`` absorbs.
+4. ``reconcile``: every path appears at most once; ``added`` is exactly
    scan minus state, ``deleted`` exactly state minus scan minus rows whose
    last cycle was a completed delete; the decision set does not depend on
    scan order; and once the worker has marked every decision done, the
@@ -26,7 +23,6 @@ from __future__ import annotations
 import datetime as dt
 import random
 
-from everalgo.types import Candidate
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -35,7 +31,6 @@ from everos.infra.cascade.reconciler import PriorState, reconcile
 from everos.memory.extract.boundary.messages import merge_dedupe_sort
 from everos.memory.models import CanonicalMessage
 from everos.memory.search.llm_multiround import _coerce_core_indices
-from everos.memory.search.recall import RecallResult, merge_by_id_max
 from everos.service.memory._memorize import _merge_status
 
 _UTC = dt.UTC
@@ -91,34 +86,6 @@ def test_merge_dedupe_sort_laws(
             assert m is by_id[m.message_id], "the buffered message wins"
     assert merge_dedupe_sort(merged, []) == merged
     assert merge_dedupe_sort(merged, new) == merged
-
-
-_cands = st.lists(
-    st.builds(
-        lambda i, s: Candidate(id=i, score=s, source="vector", metadata={}),
-        st.text("xyz", min_size=1, max_size=2),
-        st.floats(0, 1, allow_nan=False),
-    ),
-    max_size=6,
-)
-
-
-@given(primary=_cands, extra=_cands)
-def test_merge_by_id_max_keeps_the_highest_score(
-    primary: list[Candidate], extra: list[Candidate]
-) -> None:
-    merged = merge_by_id_max(
-        RecallResult(candidates=primary, stored_by_id={}),
-        RecallResult(candidates=extra, stored_by_id={}),
-    ).candidates
-    ids = [c.id for c in merged]
-    assert len(ids) == len(set(ids))
-    assert set(ids) == {c.id for c in primary} | {c.id for c in extra}
-    for c in merged:
-        best = max(x.score for x in (*primary, *extra) if x.id == c.id)
-        assert c.score == best
-        if any(x.id == c.id and x.score == best for x in primary):
-            assert any(x is c for x in primary), "a tie keeps the primary candidate"
 
 
 @given(raw=st.lists(st.integers(-3, 12), max_size=10), n=st.integers(0, 8))

@@ -4,13 +4,13 @@ Real markdown, ``system.db`` and LanceDB (``tests/helpers/groups.py``). What
 these pin (docs/group-memory.md, sections 5.3-5.4, 8.1 and 14 task 7):
 
 - two askers with different membership windows get different results for one
-  query, on every single-pool route (keyword, vector, hybrid) and on get;
+  query, on the multi-round route and on get;
 - a non-member is 403, and so is a personal read of someone else's scope;
 - ``group_ids`` searches several groups as one ranked pool, each with its own
   windows;
 - a personal scope never returns a group record, and a group scope never a
-  personal one; a group scope attaches no personal profile and no atomic
-  facts; ``agentic`` has no group route (422);
+  personal one; a group scope attaches no personal profile; a method other
+  than ``llm_multiround`` is refused;
 - a picture an episode refers to is attached only when the asker may see it;
 - the response carries the scope block with the asker's windows.
 """
@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from everos.core.errors import ForbiddenError, InvalidInputError
 from everos.service import GetRequest, SearchRequest
@@ -62,17 +63,16 @@ def _texts(response: Any) -> set[str]:
     return {e.episode for e in response.data.episodes}
 
 
-@pytest.mark.parametrize("method", ["keyword", "vector", "hybrid"])
 async def test_askers_with_different_windows_see_different_results(
-    tmp_path: Path, method: str
+    tmp_path: Path,
 ) -> None:
     world, cm = await _world(tmp_path)
     try:
         chen = await world.memory.search(
-            _search(group_id="trip", asker_id="u_chen", method=method, top_k=10)
+            _search(group_id="trip", asker_id="u_chen", top_k=10)
         )
         evan = await world.memory.search(
-            _search(group_id="trip", asker_id="u_evan", method=method, top_k=10)
+            _search(group_id="trip", asker_id="u_evan", top_k=10)
         )
     finally:
         await cm.__aexit__(None, None, None)
@@ -81,7 +81,6 @@ async def test_askers_with_different_windows_see_different_results(
     assert _texts(evan) <= {_LATE}
     for episode in [*chen.data.episodes, *evan.data.episodes]:
         assert episode.group_id == "trip" and episode.user_id is None
-        assert episode.atomic_facts == []
     assert chen.data.scope is not None
     assert [(w.group_id, w.from_, w.to) for w in evan.data.scope.windows] == [
         ("trip", 5_000, None)
@@ -99,10 +98,8 @@ async def test_non_members_and_other_owners_are_refused(tmp_path: Path) -> None:
             await world.memory.search(_search(user_id="u_chen", asker_id="u_evan"))
         with pytest.raises(InvalidInputError):
             await world.memory.search(_search(group_id="trip"))
-        with pytest.raises(InvalidInputError):
-            await world.memory.search(
-                _search(group_id="trip", asker_id="u_chen", method="agentic")
-            )
+        with pytest.raises(ValidationError, match="llm_multiround"):
+            _search(group_id="trip", asker_id="u_chen", method="agentic")
     finally:
         await cm.__aexit__(None, None, None)
 
@@ -111,13 +108,12 @@ async def test_personal_and_group_memory_never_mix(tmp_path: Path) -> None:
     world, cm = await _world(tmp_path)
     try:
         personal = await world.memory.search(
-            _search(user_id="u_chen", method="keyword", include_profile=True)
+            _search(user_id="u_chen", include_profile=True)
         )
         group = await world.memory.search(
             _search(
                 group_id="trip",
                 asker_id="u_chen",
-                method="keyword",
                 include_profile=True,
             )
         )
@@ -134,11 +130,9 @@ async def test_several_groups_form_one_pool(tmp_path: Path) -> None:
     world, cm = await _world(tmp_path)
     try:
         pooled = await world.memory.search(
-            _search(group_ids=["trip", "ops"], asker_id="u_chen", method="keyword")
+            _search(group_ids=["trip", "ops"], asker_id="u_chen")
         )
-        evan = await world.memory.search(
-            _search(group_ids=["trip"], asker_id="u_evan", method="keyword")
-        )
+        evan = await world.memory.search(_search(group_ids=["trip"], asker_id="u_evan"))
     finally:
         await cm.__aexit__(None, None, None)
 
@@ -201,10 +195,10 @@ async def test_a_referenced_picture_is_attached_only_when_visible(
         )
         await world.project()
         chen = await world.memory.search(
-            _search(group_id="trip", asker_id="u_chen", method="keyword", top_k=10)
+            _search(group_id="trip", asker_id="u_chen", top_k=10)
         )
         evan = await world.memory.search(
-            _search(group_id="trip", asker_id="u_evan", method="keyword", top_k=10)
+            _search(group_id="trip", asker_id="u_evan", top_k=10)
         )
     finally:
         await cm.__aexit__(None, None, None)

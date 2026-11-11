@@ -432,7 +432,7 @@
           "memory"
         ],
         "summary": "Post Search",
-        "description": "Hybrid retrieval across the configured memory backends.\n\nA group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
+        "description": "Multi-round retrieval over a user's or a group's memory.\n\n``method`` other than ``llm_multiround`` and an ``agent_id`` are refused\n(422). A group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
         "operationId": "post_search_api_v1_memory_search_post",
         "requestBody": {
           "content": {
@@ -2098,7 +2098,7 @@
           "memory"
         ],
         "summary": "Post Search",
-        "description": "Hybrid retrieval across the configured memory backends.\n\nA group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
+        "description": "Multi-round retrieval over a user's or a group's memory.\n\n``method`` other than ``llm_multiround`` and an ``agent_id`` are refused\n(422). A group scope (``group_id`` / ``group_ids``) needs an ``asker_id`` who is\na current member; it returns only what lies inside the asker's membership\nwindows (403 for a non-member).",
         "operationId": "post_search_api_v2_memory_search_post",
         "requestBody": {
           "content": {
@@ -6627,175 +6627,6 @@
         "title": "RunSummary",
         "description": "One strategy run within a trigger response."
       },
-      "SearchAgentCaseItem": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "entry_id": {
-            "type": "string",
-            "title": "Entry Id"
-          },
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "app_id": {
-            "type": "string",
-            "title": "App Id",
-            "default": "default"
-          },
-          "project_id": {
-            "type": "string",
-            "title": "Project Id",
-            "default": "default"
-          },
-          "session_id": {
-            "type": "string",
-            "title": "Session Id"
-          },
-          "task_intent": {
-            "type": "string",
-            "title": "Task Intent"
-          },
-          "approach": {
-            "type": "string",
-            "title": "Approach"
-          },
-          "quality_score": {
-            "type": "number",
-            "title": "Quality Score"
-          },
-          "key_insight": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key Insight"
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Timestamp"
-          },
-          "score": {
-            "type": "number",
-            "title": "Score"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "entry_id",
-          "agent_id",
-          "session_id",
-          "task_intent",
-          "approach",
-          "quality_score",
-          "timestamp",
-          "score"
-        ],
-        "title": "SearchAgentCaseItem",
-        "description": "Agent case hit — always agent-scoped."
-      },
-      "SearchAgentSkillItem": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "app_id": {
-            "type": "string",
-            "title": "App Id",
-            "default": "default"
-          },
-          "project_id": {
-            "type": "string",
-            "title": "Project Id",
-            "default": "default"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "content": {
-            "type": "string",
-            "title": "Content"
-          },
-          "confidence": {
-            "type": "number",
-            "title": "Confidence"
-          },
-          "maturity_score": {
-            "type": "number",
-            "title": "Maturity Score"
-          },
-          "source_case_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Source Case Ids"
-          },
-          "score": {
-            "type": "number",
-            "title": "Score"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "agent_id",
-          "name",
-          "description",
-          "content",
-          "confidence",
-          "maturity_score",
-          "score"
-        ],
-        "title": "SearchAgentSkillItem",
-        "description": "Agent skill hit — always agent-scoped."
-      },
-      "SearchAtomicFactItem": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "content": {
-            "type": "string",
-            "title": "Content"
-          },
-          "score": {
-            "type": "number",
-            "title": "Score"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "content",
-          "score"
-        ],
-        "title": "SearchAtomicFactItem",
-        "description": "A single atomic fact nested inside its parent episode."
-      },
       "SearchData": {
         "properties": {
           "episodes": {
@@ -6818,20 +6649,6 @@
             },
             "type": "array",
             "title": "Profiles"
-          },
-          "agent_cases": {
-            "items": {
-              "$ref": "#/components/schemas/SearchAgentCaseItem"
-            },
-            "type": "array",
-            "title": "Agent Cases"
-          },
-          "agent_skills": {
-            "items": {
-              "$ref": "#/components/schemas/SearchAgentSkillItem"
-            },
-            "type": "array",
-            "title": "Agent Skills"
           },
           "unprocessed_messages": {
             "items": {
@@ -6999,13 +6816,6 @@
           "score": {
             "type": "number",
             "title": "Score"
-          },
-          "atomic_facts": {
-            "items": {
-              "$ref": "#/components/schemas/SearchAtomicFactItem"
-            },
-            "type": "array",
-            "title": "Atomic Facts"
           }
         },
         "additionalProperties": false,
@@ -7268,14 +7078,10 @@
       "SearchMethod": {
         "type": "string",
         "enum": [
-          "keyword",
-          "vector",
-          "hybrid",
-          "agentic",
           "llm_multiround"
         ],
         "title": "SearchMethod",
-        "description": "Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."
+        "description": "The search method. Multi-round retrieval is the only one.\n\nThe keyword, vector, hybrid and agentic methods were removed with the\natomic facts the vector and hybrid routes ranked: a request naming one is\nrefused (see :data:`MULTIROUND_ONLY`)."
       },
       "SearchProfileItem": {
         "properties": {
@@ -7379,18 +7185,6 @@
             ],
             "title": "User Id"
           },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
           "group_id": {
             "anyOf": [
               {
@@ -7440,18 +7234,6 @@
             "title": "Audience",
             "default": "asker"
           },
-          "context_group_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Context Group Id"
-          },
           "app_id": {
             "type": "string",
             "title": "App Id",
@@ -7469,48 +7251,16 @@
           },
           "method": {
             "$ref": "#/components/schemas/SearchMethod",
-            "default": "hybrid"
+            "default": "llm_multiround"
           },
           "top_k": {
             "type": "integer",
             "title": "Top K",
             "default": -1
           },
-          "radius": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Radius"
-          },
-          "min_score": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Score"
-          },
           "include_profile": {
             "type": "boolean",
             "title": "Include Profile",
-            "default": false
-          },
-          "enable_llm_rerank": {
-            "type": "boolean",
-            "title": "Enable Llm Rerank",
-            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
           "images": {
@@ -7520,7 +7270,7 @@
             "type": "array",
             "maxItems": 4,
             "title": "Images",
-            "description": "Pictures that are part of the question. They are shown to a multi-round decider on every round; they create no memory and no reference. Routes that cannot use them ignore them."
+            "description": "Pictures that are part of the question. They are shown to a multi-round decider on every round; they create no memory and no reference."
           },
           "filters": {
             "anyOf": [
@@ -7539,7 +7289,7 @@
           "query"
         ],
         "title": "SearchRequest",
-        "description": "Request body for ``POST /api/v2/memory/search``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager + compile_filters keep\nusing ``owner_id`` / ``owner_type`` (the storage tables' columns);\nthose are exposed as derived properties so the rename only affects\nthe wire contract, not the internal recall plumbing."
+        "description": "Request body for ``POST /api/v2/memory/search``.\n\nCallers name the memory owner with ``user_id`` or a group scope\n(``group_id`` / ``group_ids``) -- exactly one. Internally the manager +\ncompile_filters keep using ``owner_id`` / ``owner_type`` (the storage\ntables' columns); those are exposed as derived properties so the rename\nonly affects the wire contract, not the internal recall plumbing.\n\nAn ``agent_id`` is refused with :data:`NO_AGENT_SEARCH`: agent cases and\nskills are extracted and listed by ``/memory/get``, but multi-round\nretrieval does not rank them."
       },
       "SearchResponse": {
         "properties": {

@@ -8,7 +8,8 @@ What these pin:
 - the case's markdown entry and index row carry its group;
 - an agent read without a group context sees only cases learned outside
   groups; a read in one group's context sees those and that group's, never
-  another group's -- on search and on get;
+  another group's -- on get (agent memory is not searchable: multi-round
+  retrieval covers user and group memory only);
 - a group context needs a current member of the group as the asker (the
   agent itself by default): anyone else is refused (403);
 - a group context is only for an agent scope (422 otherwise).
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from everos.core.errors import ForbiddenError
 from everos.memory.models import AgentCase
@@ -65,14 +67,12 @@ async def _world(tmp_path: Path) -> Any:
     return world, cm
 
 
-def _search(**fields: Any) -> SearchRequest:
-    return SearchRequest(
+def _get(**fields: Any) -> GetRequest:
+    return GetRequest(
         app_id=APP,
         project_id=PROJECT,
         agent_id="bot_ava",
-        query="Lisbon flights billing pager",
-        method="keyword",
-        top_k=10,
+        memory_type="agent_case",
         **fields,
     )
 
@@ -87,52 +87,34 @@ async def test_group_sourced_cases_stay_in_their_groups_context(tmp_path: Path) 
         files = list((tmp_path / "default_app" / PROJECT / "agents").rglob("*.md"))
         assert any("**source_group_id**: trip" in f.read_text() for f in files)
 
-        plain = await world.memory.search(_search())
+        plain = await world.memory.get(_get())
         assert _intents(plain) == {_CASES[None]}
-        in_trip = await world.memory.search(_search(context_group_id="trip"))
+        in_trip = await world.memory.get(_get(context_group_id="trip"))
         assert _intents(in_trip) == {_CASES[None], _CASES["trip"]}
 
-        listed = await world.memory.get(
-            GetRequest(
-                app_id=APP,
-                project_id=PROJECT,
-                agent_id="bot_ava",
-                memory_type="agent_case",
-                context_group_id="trip",
-            )
-        )
-        assert {c.task_intent for c in listed.data.agent_cases} == {
-            _CASES[None],
-            _CASES["trip"],
-        }
-        plain_get = await world.memory.get(
-            GetRequest(
-                app_id=APP,
-                project_id=PROJECT,
-                agent_id="bot_ava",
-                memory_type="agent_case",
-            )
-        )
-        assert {c.task_intent for c in plain_get.data.agent_cases} == {_CASES[None]}
-
         # A human member may read the agent's cases in the group's context.
-        chen = await world.memory.search(
-            _search(context_group_id="trip", asker_id="u_chen")
-        )
+        chen = await world.memory.get(_get(context_group_id="trip", asker_id="u_chen"))
         assert _intents(chen) == {_CASES[None], _CASES["trip"]}
         # The agent is not in "ops", and Dan is not in "trip".
         with pytest.raises(ForbiddenError):
-            await world.memory.search(_search(context_group_id="ops"))
+            await world.memory.get(_get(context_group_id="ops"))
         with pytest.raises(ForbiddenError):
-            await world.memory.search(
-                _search(context_group_id="trip", asker_id="u_dan")
-            )
+            await world.memory.get(_get(context_group_id="trip", asker_id="u_dan"))
     finally:
         await cm.__aexit__(None, None, None)
 
 
+def test_agent_memory_is_not_searchable() -> None:
+    """Multi-round retrieval covers user and group memory: an agent scope,
+    with or without a group context, is refused before any read."""
+    for fields in (
+        {"agent_id": "bot_ava"},
+        {"agent_id": "bot_ava", "context_group_id": "trip"},
+    ):
+        with pytest.raises(ValidationError, match="agent memory is not searchable"):
+            SearchRequest(query="q", **fields)
+
+
 def test_a_group_context_is_only_for_an_agent_scope() -> None:
-    with pytest.raises(ValueError):
-        SearchRequest(user_id="u_chen", query="q", context_group_id="trip")
     with pytest.raises(ValueError):
         GetRequest(user_id="u_chen", memory_type="episode", context_group_id="trip")

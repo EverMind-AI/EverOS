@@ -21,10 +21,11 @@ class TestComputeDisabledFeatures:
         disabled = compute_disabled_features(caps)
         assert disabled == []
 
-    def test_embedding_unavailable_disables_vector_search_features(
+    def test_embedding_unavailable_disables_memory_search(
         self,
     ) -> None:
-        """When embedding unavailable, vector/hybrid/reflection/skill disabled."""
+        """When embedding is unavailable, memory search (multi-round embeds
+        every sub-query), reflection and skill extraction are disabled."""
         caps = {
             "embed": False,
             "rerank": True,
@@ -32,17 +33,12 @@ class TestComputeDisabledFeatures:
             "parser": True,
         }
         disabled = compute_disabled_features(caps)
-        expected = {
-            "vector_search",
-            "hybrid_search",
-            "reflection",
-            "skill_extraction",
-            "knowledge",
-        }
+        expected = {"memory_search", "reflection", "skill_extraction", "knowledge"}
         assert set(disabled) == expected
 
-    def test_rerank_unavailable_disables_agentic_search(self) -> None:
-        """When rerank is unavailable, agentic_search is disabled."""
+    def test_rerank_unavailable_leaves_memory_search_on(self) -> None:
+        """Multi-round retrieval has no cross-encoder stage: without rerank
+        only knowledge is disabled."""
         caps = {
             "embed": True,
             "rerank": False,
@@ -50,7 +46,7 @@ class TestComputeDisabledFeatures:
             "parser": True,
         }
         disabled = compute_disabled_features(caps)
-        assert "agentic_search" in disabled
+        assert disabled == ["knowledge"]
 
     def test_both_embed_and_rerank_missing_disables_knowledge(self) -> None:
         """When both embed and rerank are missing, knowledge is disabled."""
@@ -94,11 +90,9 @@ class TestComputeDisabledFeatures:
             "parser": False,
         }
         disabled = compute_disabled_features(caps)
-        # Tier 1 disables: vector/hybrid/agentic/reflection/skill/knowledge/multimodal
+        # Tier 1 disables: memory search/reflection/skill/knowledge/multimodal
         expected = {
-            "vector_search",
-            "hybrid_search",
-            "agentic_search",
+            "memory_search",
             "reflection",
             "skill_extraction",
             "knowledge",
@@ -126,13 +120,7 @@ class TestComputeDisabledFeatures:
                     "multimodal_llm": True,
                     "parser": True,
                 },
-                [
-                    "vector_search",
-                    "hybrid_search",
-                    "reflection",
-                    "skill_extraction",
-                    "knowledge",
-                ],
+                ["memory_search", "reflection", "skill_extraction", "knowledge"],
                 id="no_embed",
             ),
             param(
@@ -142,7 +130,7 @@ class TestComputeDisabledFeatures:
                     "multimodal_llm": True,
                     "parser": True,
                 },
-                ["agentic_search", "knowledge"],
+                ["knowledge"],
                 id="no_rerank",
             ),
         ],
@@ -212,11 +200,9 @@ async def test_health_endpoint_includes_capabilities() -> None:
             False,
             False,
             {
-                "vector_search",
-                "hybrid_search",
+                "memory_search",
                 "reflection",
                 "skill_extraction",
-                "agentic_search",
                 "knowledge",
                 "multimodal_upload",
             },
@@ -227,7 +213,7 @@ async def test_health_endpoint_includes_capabilities() -> None:
             False,
             False,
             False,
-            {"agentic_search", "knowledge", "multimodal_upload"},
+            {"knowledge", "multimodal_upload"},
             id="tier2_embed_only",
         ),
         param(

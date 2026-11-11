@@ -54,7 +54,6 @@ class ImageMemoryRecaller:
     """
 
     kind: ClassVar[str] = "image_memory"
-    everalgo_memory_type: ClassVar[str] = "image"
 
     def __init__(self, deps: RecallerDeps, index: ImageMemoryIndex) -> None:
         self._deps = deps

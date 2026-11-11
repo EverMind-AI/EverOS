@@ -51,7 +51,6 @@ async def _buffered(world: Any, session: str, **scope: Any) -> list[str]:
             app_id=APP,
             project_id=PROJECT,
             query="anything",
-            method="keyword",
             filters={"session_id": session},
             **scope,
         )

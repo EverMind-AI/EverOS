@@ -5,9 +5,6 @@ and ``content_tokens`` — secondary detail match). LanceDB's
 ``nearest_to_text`` searches one column at a time, so we run the BM25 query
 twice in parallel and merge by row id keeping the max score across columns.
 Vector recall is single-shot over the ``summary`` embedding.
-
-Mirrors :class:`AgentCaseRecaller` structurally — both kinds share the
-multi-BM25-column pattern.
 """
 
 from __future__ import annotations

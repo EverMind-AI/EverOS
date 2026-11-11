@@ -1,30 +1,26 @@
-"""memory.search — read path: hybrid retrieval over the derived indexes.
+"""memory.search — read path: multi-round retrieval over the derived indexes.
 
 This subpackage owns ``POST /api/v2/memory/search``: it compiles the
 Filters DSL into a backend-neutral :class:`~everos.memory.ports.Filter`,
-recalls per kind through the ``*Index`` ports, ranks, and shapes the
-public DTOs. It never writes; the cascade maintains the indexes.
+recalls episodes and pictures through the ``*Index`` ports, lets the
+multi-round decider select the core, and shapes the public DTOs. Multi-round
+retrieval (``llm_multiround``) is the only search method. It never writes;
+the cascade maintains the indexes.
 
-Where everalgo's candidate types (``Candidate`` / ``RankInput`` /
-``ScoredItem``) may appear -- three groups, nowhere else:
+Where everalgo's ``Candidate`` type may appear -- three places, nowhere else:
 
 * ``recall/`` -- the inbound mapper: index ``SearchHit`` -> ``Candidate``,
   with the stored domain records returned beside the candidates
   (``RecallResult.stored_by_id``), never inside ``Candidate.metadata``.
-* ``shaper.py`` -- the outbound mapper: ranked ``Candidate`` /
-  ``ScoredItem`` + stored records -> response DTOs.
-* Six rank algorithms still hosted here, pending upstreaming to
-  everalgo-rank (they speak ``Candidate`` natively and move as a whole):
-  ``hierarchy.py`` (heap-expand episode/fact competition),
-  ``llm_multiround.py`` (iterative per-sub-query blocks with an LLM core
-  selector), ``skill_hybrid.py`` (RRF + skill cross-encoder lane),
-  ``callbacks.py`` (kind-shaped cross-encoder ``RerankFn`` factories),
-  ``agentic.py`` and ``agentic_agent.py`` (compositions of the everalgo
-  maxsim / hybrid / cluster / agentic facades). Once everalgo ships them,
-  each file is replaced by a call to the upstream entry.
+* ``shaper.py`` -- the outbound mapper: ranked ``Candidate`` + stored
+  records -> response DTOs.
+* ``llm_multiround.py`` -- the retrieval loop (iterative per-sub-query blocks
+  with an LLM core selector), hosted here pending upstreaming to everalgo.
+  ``callbacks.py`` keeps the cross-encoder ``RerankFn`` factory knowledge
+  search uses.
 
-``manager.py`` orchestrates: it picks the route per kind, passes recall
-results to the algorithms and the shaper, and neither constructs nor
+``manager.py`` orchestrates: it resolves the read scope, runs the loop,
+attaches profiles and referenced pictures, and neither constructs nor
 imports an everalgo candidate type.
 
 External usage::
@@ -34,9 +30,6 @@ External usage::
         RESERVED_FIELDS,
         FilterError,
         FilterNode,
-        SearchAgentCaseItem,
-        SearchAgentSkillItem,
-        SearchAtomicFactItem,
         SearchData,
         SearchEpisodeItem,
         SearchMethod,
@@ -53,9 +46,6 @@ its flat-DSL variant without forking the field allow-list.
 """
 
 from .dto import FilterNode as FilterNode
-from .dto import SearchAgentCaseItem as SearchAgentCaseItem
-from .dto import SearchAgentSkillItem as SearchAgentSkillItem
-from .dto import SearchAtomicFactItem as SearchAtomicFactItem
 from .dto import SearchData as SearchData
 from .dto import SearchEpisodeItem as SearchEpisodeItem
 from .dto import SearchMethod as SearchMethod
@@ -78,9 +68,6 @@ __all__ = [
     "RESERVED_FIELDS",
     "FilterError",
     "FilterNode",
-    "SearchAgentCaseItem",
-    "SearchAgentSkillItem",
-    "SearchAtomicFactItem",
     "SearchData",
     "SearchEpisodeItem",
     "SearchMethod",

@@ -153,7 +153,8 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
 
     assert isinstance(memorizer._bus, OmeEventBus)
     assert memorizer._bus._engine is application._engine
-    assert memory._search_manager._llm is llm
+    # [decider] falls back to [llm]: the search manager's one model is it.
+    assert memory._search_manager._decider_llm is llm
     assert memorizer._boundary._llm is llm
     assert memorizer._boundary._session_buffer is memory._search_manager._session_buffer
     assert memorizer._extractions is memory._extractions

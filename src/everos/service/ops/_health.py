@@ -5,14 +5,13 @@ of truth:
 
 - ``ProviderNotConfiguredError.feature`` (raised per request by search and
   the knowledge endpoints): a granular tag for the one search mode or
-  endpoint that failed -- ``"vector"`` | ``"user_hybrid"`` |
-  ``"agent_hybrid"`` | ``"agentic_search"`` | ``"knowledge"`` |
+  endpoint that failed -- ``"llm_multiround"`` | ``"knowledge"`` |
   ``"skill_extraction_backfill"``. It appears in the HTTP 422 ``message``.
 - :func:`compute_disabled_features`: a capability-level tag for a whole
-  feature category the current tier disables -- ``"vector_search"`` |
-  ``"hybrid_search"`` | ``"agentic_search"`` | ``"reflection"`` |
-  ``"skill_extraction"`` | ``"knowledge"`` | ``"multimodal_upload"``. It
-  appears in ``GET /health``'s ``disabled_features``.
+  feature category the current tier disables -- ``"memory_search"`` |
+  ``"reflection"`` | ``"skill_extraction"`` | ``"knowledge"`` |
+  ``"multimodal_upload"``. It appears in ``GET /health``'s
+  ``disabled_features``.
 
 Both are stable client contracts; unifying them needs a coordinated client
 migration.
@@ -119,17 +118,13 @@ def compute_disabled_features(caps: Mapping[str, bool]) -> list[str]:
             and ``"parser"``.
 
     Returns:
-        A subset of ``"vector_search"``, ``"hybrid_search"``,
-        ``"agentic_search"``, ``"reflection"``, ``"skill_extraction"``,
-        ``"knowledge"`` and ``"multimodal_upload"``.
+        A subset of ``"memory_search"`` (multi-round retrieval embeds every
+        sub-query), ``"reflection"``, ``"skill_extraction"``, ``"knowledge"``
+        and ``"multimodal_upload"``.
     """
     disabled: list[str] = []
     if not caps["embed"]:
-        disabled.extend(
-            ["vector_search", "hybrid_search", "reflection", "skill_extraction"]
-        )
-    if not caps["rerank"]:
-        disabled.append("agentic_search")
+        disabled.extend(["memory_search", "reflection", "skill_extraction"])
     if not (caps["embed"] and caps["rerank"]):
         disabled.append("knowledge")
     if not (caps["multimodal_llm"] and caps["parser"]):

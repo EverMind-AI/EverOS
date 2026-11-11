@@ -6,8 +6,8 @@ different subset of a tie group at the cut on every call. The parity check
 against the exp tree (2026-11-10, deviation R3) found the episode and picture
 recallers here doing exactly that, while the exp tree's ``fts_rows`` -- and its
 2.0 picture port -- return the same list every time. The exp tree applies the
-same rule to atomic facts, so these tests pin it (:func:`stable_sparse_top`) on
-all three recallers: fetch past the limit until the tie group at the cut is
+same rule to every BM25 recall, so these tests pin it (:func:`stable_sparse_top`)
+on both recallers: fetch past the limit until the tie group at the cut is
 complete, order by (score to 5 decimals, id), cut.
 """
 
@@ -28,13 +28,12 @@ from everos.infra.persistence.lancedb import Episode as EpisodeRow
 from everos.infra.persistence.lancedb import ParentType
 from everos.memory.models import ImageMemory
 from everos.memory.ports import Filter, MemoryRef, SearchHit, Stored
-from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps, stable_sparse_top
 from everos.memory.search.recall.episode import EpisodeRecaller
 from everos.memory.search.recall.image_memory import IMAGE_KIND, ImageMemoryRecaller
 from tests.fakes.storage import Storage
 
-from ._records import scope, stored_episode, stored_fact
+from ._records import scope, stored_episode
 
 _WHERE = eq("owner_id", "alice")
 
@@ -118,14 +117,6 @@ def _pictures(index: _NoisyIndex) -> ImageMemoryRecaller:
     return ImageMemoryRecaller(RecallerDeps(tokenizer=_Tokenizer()), index)  # type: ignore[arg-type]
 
 
-def _facts(index: _NoisyIndex) -> AtomicFactRecaller:
-    return AtomicFactRecaller(RecallerDeps(tokenizer=_Tokenizer()), index)  # type: ignore[arg-type]
-
-
-def _fact(key: str) -> Stored[Any]:
-    return stored_fact(key, parent_id="ep_1")
-
-
 async def test_episodes_recall_the_same_list_whatever_the_engine_returns() -> None:
     runs = []
     for seed in range(8):
@@ -151,19 +142,6 @@ async def test_pictures_recall_the_same_list_whatever_the_engine_returns() -> No
 
     assert all(run == runs[0] for run in runs)
     assert runs[0][10:] == [f"alice_tie{i:02d}" for i in range(40)]
-
-
-async def test_atomic_facts_recall_the_same_list_whatever_the_engine_returns() -> None:
-    """As the exp tree's fact recall (``fts_rows``) does; short facts tie often."""
-    runs = []
-    for seed in range(8):
-        index = _NoisyIndex(_scores(), seed, stored=_fact)
-        result = await _facts(index).sparse_recall("marathon", _WHERE, limit=50)
-        runs.append([c.id for c in result.candidates])
-
-    assert all(run == runs[0] for run in runs)
-    assert runs[0][10:] == [f"alice_tie{i:02d}" for i in range(40)]
-    assert index.limits == [100]
 
 
 async def test_the_fetch_widens_until_the_tie_group_is_complete() -> None:

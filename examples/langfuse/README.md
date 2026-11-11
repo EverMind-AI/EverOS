@@ -39,15 +39,15 @@ span ids are minted fresh so repeated runs do not collide, timestamps are
 shifted so the trace lands at the current time, and root spans carry a `replay`
 tag so a recording is never mistaken for live traffic.
 
-Two things in the trace list are not self-explanatory. The short keyword
-searches beyond the five questions are `demo.py` waiting for each conversation
-to become searchable. And the OME spans outlast the `flush` span they hang
-under, because reflection continues after the request returns and re-attaches
-to the originating trace through its `traceparent`.
-
-Recall scores are per-method scales: read HYBRID against HYBRID, not against
-AGENTIC. Agent cases and skills are not in this recording; the span and score
-contract is the same when they appear.
+Two things in the trace list are not self-explanatory. The OME spans outlast
+the `flush` span they hang under, because reflection continues after the
+request returns and re-attaches to the originating trace through its
+`traceparent`. And `recorded_trace.json` was captured on EverOS 1.x: its short
+keyword searches were the demo waiting for each conversation to become
+searchable, and its HYBRID / AGENTIC searches were methods EverOS 2.0 no longer
+has. The current `demo.py` waits through `/memory/get` and searches with
+multi-round retrieval (`llm_multiround`), whose top score is reported as
+`recall_top_score_raw`.
 
 ## Trace your own server
 

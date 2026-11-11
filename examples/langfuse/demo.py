@@ -273,9 +273,8 @@ SESSIONS: list[dict] = [
 ]
 
 # ── the queries ──────────────────────────────────────────────────────────
-# KEYWORD is deliberately absent: its top score is raw BM25, on a different
-# scale from the calibrated methods, so showing the three side by side invites
-# a comparison that means nothing. It still runs as the readiness probe.
+# Multi-round retrieval is the only search method; readiness is probed through
+# /memory/get, which lists from the same index without calling the decider.
 QUERIES: list[dict] = [
     {
         "label": "history",
@@ -316,7 +315,7 @@ QUERIES: list[dict] = [
     },
 ]
 
-METHODS = ("hybrid", "agentic")
+METHODS = ("llm_multiround",)
 
 
 def _post(path: str, body: dict) -> dict:
@@ -374,21 +373,25 @@ def _ingest(session: dict, now_ms: int) -> None:
     )
 
 
-def _session_is_searchable(session: dict) -> bool:
-    """Keyword-probe one session with its own opening line.
-
-    Querying the session's own words guarantees the lexical overlap BM25
-    needs, so an empty result means "not indexed yet" rather than "no match".
-    """
-    opening = next(m["content"] for m in session["messages"] if m["role"] == "user")
-    body = {
+def _episodes(**filters: str) -> list[dict]:
+    """The user's indexed episodes, listed (no ranking, no model call)."""
+    body: dict = {
         "user_id": USER,
-        "query": opening,
-        "method": "keyword",
-        "top_k": 1,
-        "filters": {"session_id": session["id"]},
+        "memory_type": "episode",
+        "page_size": 100,
     }
-    return bool(_post("/api/v2/memory/search", body)["data"].get("episodes"))
+    if filters:
+        body["filters"] = filters
+    return _post("/api/v2/memory/get", body)["data"].get("episodes") or []
+
+
+def _session_is_searchable(session: dict) -> bool:
+    """Whether one session's episode is in the index search reads.
+
+    Listed through /memory/get rather than probed with a search: a search
+    runs the multi-round decider, a listing reads the same index for free.
+    """
+    return bool(_episodes(session_id=session["id"]))
 
 
 def _wait_for_index() -> list[str]:
@@ -436,8 +439,7 @@ def _wait_for_consolidation() -> bool:
     scores lower than the memory deserves. So wait for both edges: the first
     trip session going unsearchable, then the merged memory answering for it.
     """
-    superseded, survivor = SESSIONS[0], SESSIONS[2]
-    opening = next(m["content"] for m in survivor["messages"] if m["role"] == "user")
+    superseded = SESSIONS[0]
     deadline = time.monotonic() + CONSOLIDATION_TIMEOUT_SECONDS
 
     while time.monotonic() < deadline:
@@ -447,14 +449,10 @@ def _wait_for_consolidation() -> bool:
     else:
         return False
 
-    # The originals are gone; wait for the merged episode to answer in their
-    # place. No session filter: the merge is its own entry, not either source.
+    # The originals are gone; wait for the merged episode to take their place.
+    # A merge is its own entry and belongs to no session.
     while time.monotonic() < deadline:
-        found = _post(
-            "/api/v2/memory/search",
-            {"user_id": USER, "query": opening, "method": "keyword", "top_k": 1},
-        )["data"].get("episodes")
-        if found:
+        if any(ep.get("session_id") is None for ep in _episodes()):
             return True
         time.sleep(INDEX_POLL_SECONDS)
     return False
@@ -469,13 +467,13 @@ def _describe(data: dict) -> str:
     says they do not answer it.
     """
     parts = [
-        f"{len(items)} {kind.replace('_', ' ')}"
-        for kind in ("episodes", "profiles", "agent_cases", "agent_skills")
+        f"{len(items)} {kind}"
+        for kind in ("episodes", "images", "profiles")
         if (items := data.get(kind) or [])
     ]
     scored = [
         item.get("score")
-        for kind in ("episodes", "agent_cases", "agent_skills")
+        for kind in ("episodes", "images")
         for item in data.get(kind) or []
         if item.get("score") is not None
     ]
@@ -515,13 +513,12 @@ def main() -> None:
             try:
                 data = _search(spec, method)["data"]
             except urllib.error.HTTPError as exc:
-                # Embedding and rerank are soft dependencies: with neither
-                # configured a server serves KEYWORD only, and HYBRID /
-                # AGENTIC answer 422 CAPABILITY_UNAVAILABLE. Report it and
-                # carry on so the other queries still have something to show.
-                print(f"  {method:<8} HTTP {exc.code}: {exc.reason}")
+                # Multi-round retrieval needs an embedding provider: without
+                # one the server answers 422 PROVIDER_NOT_CONFIGURED. Report
+                # it and carry on so the other queries still show something.
+                print(f"  {method:<14} HTTP {exc.code}: {exc.reason}")
                 continue
-            print(f"  {method:<8} {_describe(data)}")
+            print(f"  {method:<14} {_describe(data)}")
         print()
 
     print(

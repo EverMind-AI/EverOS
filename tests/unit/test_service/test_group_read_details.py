@@ -56,8 +56,8 @@ def _item(text: str, start: int, end: int) -> ExplicitInfoItem:
     )
 
 
-async def _world(tmp_path: Path, llm: Any = None) -> Any:
-    cm = GroupWorld.open(tmp_path, llm=llm)
+async def _world(tmp_path: Path, decider: Any = None) -> Any:
+    cm = GroupWorld.open(tmp_path, decider=decider)
     world = await cm.__aenter__()
     await world.roster(
         "trip",
@@ -113,9 +113,7 @@ def _search(asker: str, query: str, **fields: Any) -> SearchRequest:
 async def test_a_group_episode_carries_its_owner_type_and_span(tmp_path: Path) -> None:
     world, cm = await _world(tmp_path)
     try:
-        found = await world.memory.search(
-            _search("u_chen", "Lisbon venue", method="keyword", top_k=5)
-        )
+        found = await world.memory.search(_search("u_chen", "Lisbon venue", top_k=5))
         (episode,) = found.data.episodes
         assert episode.owner_type == "group"
         assert episode.group_id == "trip"
@@ -132,7 +130,6 @@ async def test_a_group_episode_carries_its_owner_type_and_span(tmp_path: Path) -
                 project_id=PROJECT,
                 user_id="u_chen",
                 query="Lisbon tiles",
-                method="keyword",
             )
         )
         (mine,) = personal.data.episodes
@@ -150,7 +147,6 @@ async def test_include_profile_attaches_the_askers_and_named_members(
             _search(
                 "u_chen",
                 "What does Bets still have to book?",
-                method="keyword",
                 include_profile=True,
             )
         )
@@ -168,7 +164,7 @@ async def test_include_profile_attaches_the_askers_and_named_members(
         # Evan joined at 5000: Betty's early item is outside his window, and
         # a profile with an invisible item shows no summary.
         evan = await world.memory.search(
-            _search("u_evan", "Betty seats", method="keyword", include_profile=True)
+            _search("u_evan", "Betty seats", include_profile=True)
         )
         (betty,) = [p for p in evan.data.profiles if p.member_id == "u_betty"]
         items = [i["description"] for i in betty.profile_data["explicit_info"]]
@@ -181,11 +177,9 @@ async def test_include_profile_attaches_the_askers_and_named_members(
 
 async def test_the_deciders_question_names_the_asker(tmp_path: Path) -> None:
     decider = _Decider()
-    world, cm = await _world(tmp_path, llm=FakeLLMClient(handler=decider))
+    world, cm = await _world(tmp_path, decider=FakeLLMClient(handler=decider))
     try:
-        await world.memory.search(
-            _search("u_betty", "Who booked the venue?", method="llm_multiround")
-        )
+        await world.memory.search(_search("u_betty", "Who booked the venue?"))
         assert any("Betty: Who booked the venue?" in p for p in decider.prompts)
     finally:
         await cm.__aexit__(None, None, None)
@@ -259,7 +253,7 @@ async def test_the_wire_shape_the_harnesses_read(tmp_path: Path) -> None:
                     "group_id": "trip",
                     "asker_id": "u_chen",
                     "query": "Where does Bets stay in Lisbon?",
-                    "method": "keyword",
+                    "method": "llm_multiround",
                     "include_profile": True,
                 },
             )
@@ -319,7 +313,6 @@ async def test_named_members_are_counted_once_across_a_pool(tmp_path: Path) -> N
                 group_ids=["trip", "ops"],
                 asker_id="u_chen",
                 query="What do Betty, Dan and Evan still owe?",
-                method="keyword",
                 include_profile=True,
             )
         )

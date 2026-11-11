@@ -194,16 +194,13 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "atomic_fact rows are also re-embedded by the vectors phase"
         )
 
-        # Proof the backfilled rows are semantically searchable: VECTOR
-        # recalls via atomic_fact MaxSim, or the episode vector when no fact
-        # is embedded (see seed_atomic_fact_for_episode in conftest.py), so
-        # this only succeeds if the backfill actually embedded the
-        # pre-upgrade rows rather than just the schema. Fact vectors are
-        # asserted directly above.
+        # The upgraded deployment searches: multi-round retrieval needs the
+        # embedder Tier 1 lacked, and recalls the backfilled episodes by
+        # BM25 and by the vectors asserted directly above.
         search_resp = await client.post(
             "/api/v1/memory/search",
-            json={"user_id": "u_alice", "query": "hiking", "method": "vector"},
+            json={"user_id": "u_alice", "query": "hiking", "method": "llm_multiround"},
         )
         assert search_resp.status_code == 200, search_resp.text
         episodes = search_resp.json()["data"]["episodes"]
-        assert episodes, "VECTOR search must find the backfilled pre-upgrade episodes"
+        assert episodes, "search must find the backfilled pre-upgrade episodes"

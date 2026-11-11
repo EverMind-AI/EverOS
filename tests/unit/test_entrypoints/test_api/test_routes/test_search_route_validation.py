@@ -43,17 +43,13 @@ async def client(
 def _body(**overrides) -> dict:
     """Minimal valid SearchRequest body; tests override one field to break it.
 
-    ``method="keyword"`` is pinned because the SearchRequest DTO defaults
-    to HYBRID, which ``SearchManager._validate_components`` rejects when
-    no ``[embedding]`` provider is configured (the case in CI). Keyword
-    needs no embedder, so DTO / compile_filters validation paths fire
-    cleanly without external services — which is exactly what this file
-    is supposed to exercise.
+    No embedder is configured (the case in CI), so a valid body would be
+    refused by the manager's component guard -- after the DTO and the
+    filters, which are what this file exercises.
     """
     base = {
         "user_id": "u1",
         "query": "hello",
-        "method": "keyword",
     }
     base.update(overrides)
     return base
@@ -74,16 +70,40 @@ async def test_empty_user_id_returns_422(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
-async def test_both_user_and_agent_id_returns_422(client: AsyncClient) -> None:
-    """Both ``user_id`` and ``agent_id`` set → xor validator rejects."""
-    resp = await client.post("/api/v1/memory/search", json=_body(agent_id="agent_x"))
-    assert resp.status_code == 422
+async def test_an_agent_scope_returns_422_saying_why(client: AsyncClient) -> None:
+    """Multi-round retrieval does not cover agent memory: an ``agent_id`` is
+    refused with a message that says so and where cases and skills are read."""
+    for body in (_body(agent_id="agent_x"), {"agent_id": "agent_x", "query": "q"}):
+        resp = await client.post("/api/v1/memory/search", json=body)
+        assert resp.status_code == 422
+        message = resp.json()["error"]["message"]
+        assert "agent memory is not searchable" in message
+        assert "/api/v2/memory/get" in message
 
 
-async def test_invalid_method_returns_422(client: AsyncClient) -> None:
-    """``method`` outside the SearchMethod enum → 422."""
-    resp = await client.post("/api/v1/memory/search", json=_body(method="bm42"))
+@pytest.mark.parametrize("method", ["keyword", "vector", "hybrid", "agentic", "bm42"])
+async def test_a_removed_method_returns_422_naming_multiround(
+    client: AsyncClient, method: str
+) -> None:
+    """Every method but ``llm_multiround`` is refused with a 4xx that says
+    multi-round retrieval is the only one."""
+    resp = await client.post("/api/v2/memory/search", json=_body(method=method))
     assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert error["code"] == "INVALID_INPUT"
+    assert "multi-round retrieval only" in error["message"]
+    assert "'llm_multiround'" in error["message"]
+    assert repr(method) in error["message"]
+
+
+async def test_without_an_embedder_a_valid_search_is_refused_by_the_guard(
+    client: AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/api/v2/memory/search", json=_body(method="llm_multiround")
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
 
 
 async def test_top_k_zero_returns_422(client: AsyncClient) -> None:
@@ -98,9 +118,15 @@ async def test_top_k_above_cap_returns_422(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
-async def test_radius_above_one_returns_422(client: AsyncClient) -> None:
-    """``radius`` is constrained to [0.0, 1.0]."""
-    resp = await client.post("/api/v1/memory/search", json=_body(radius=1.5))
+@pytest.mark.parametrize(
+    "option", [{"radius": 0.5}, {"min_score": 0.4}, {"enable_llm_rerank": True}]
+)
+async def test_the_removed_methods_options_return_422(
+    client: AsyncClient, option: dict
+) -> None:
+    """``radius`` / ``min_score`` / ``enable_llm_rerank`` tuned the removed
+    methods; the request no longer has them."""
+    resp = await client.post("/api/v1/memory/search", json=_body(**option))
     assert resp.status_code == 422
 
 
