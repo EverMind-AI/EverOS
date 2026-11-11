@@ -132,9 +132,9 @@ fallback_core = 3              # core size when every decider attempt fails
 # field of it, as before this section existed. Override via env:
 # EVEROS_PROFILE__MODEL / __API_KEY / __BASE_URL / __TIMEOUT_SECONDS / __EXTRA.
 #
-# Recommended: a reasoning model with thinking on. The everalgo profile
-# evaluation ran claude-haiku-5-5 with thinking: about 28s median and 41s p90
-# per call, against about 3s for a flash-lite model.
+# Recommended: a reasoning model with thinking on, at its default effort. The
+# everalgo profile evaluation ran claude-haiku-5-5 that way: about 28s median
+# and 41s p90 per call, against about 3s for a flash-lite model.
 # api_key / base_url fall back to [llm] when blank; the fields below apply only
 # once model is set.
 model = ""

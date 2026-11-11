@@ -143,7 +143,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 User-profile extraction: the LLM it runs on, when it should differ from `[llm]`, and how many episodes one call folds. With `model` empty the profile is extracted with `[llm]`, every field of it. Once `model` is set, `api_key` and `base_url` fall back to `[llm]` when blank and the other LLM fields come from this section. `max_episodes_per_call` applies either way.
 
-Recommended: a reasoning model with thinking on. The everalgo profile evaluation ran `claude-haiku-5-5` with thinking, at about 28s median and 41s p90 per call; switch thinking on through `extra` as your gateway names it.
+Recommended: a reasoning model with thinking on, at its default effort. The everalgo profile evaluation ran `claude-haiku-5-5` that way, at about 28s median and 41s p90 per call; switch thinking on through `extra` as your gateway names it, and leave the effort at the gateway's default.
 
 Episodes are folded one owner at a time. A run folds the episode that triggered it together with that owner's newer episodes still waiting (up to `max_episodes_per_call` in all), and the runs of those episodes then end without a call. A burst of episodes for one owner, such as a bulk import, therefore drains in about `1 / max_episodes_per_call` of the calls, and runs queued behind a slow model stay within `[ome] run_timeout_seconds`.
 

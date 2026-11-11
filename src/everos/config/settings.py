@@ -385,7 +385,8 @@ class ProfileSettings(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
     """Provider-specific request fields, used once ``model`` is set. See
     :attr:`LLMSettings.extra`: this is where a gateway's switch for the model's
-    thinking goes, nested under ``extra_body``."""
+    thinking goes, nested under ``extra_body``. The profile evaluation switched
+    thinking on and left its effort at the default."""
     response_format_mode: ResponseFormatMode = "json_schema"
     """How the reply format is requested, used once ``model`` is set. See
     :attr:`LLMSettings.response_format_mode`."""

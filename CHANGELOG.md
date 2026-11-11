@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   until it is set. Once `model` is set, `api_key` and `base_url` fall back to
   `[llm]` when blank, and the section brings its own `timeout_seconds`
   (default 240), `extra`, `response_format_mode` and
-  `invalid_reply_retries`. A reasoning model with thinking on is
-  recommended; see `docs/configuration.md`.
+  `invalid_reply_retries`. A reasoning model with thinking on, at its
+  default effort, is recommended; see `docs/configuration.md`.
 - **`[profile] max_episodes_per_call`** (default 10): how many episodes one
   profile extraction call folds; see the profile entry under Changed.
 
