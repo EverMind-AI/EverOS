@@ -19,6 +19,7 @@ from __future__ import annotations
 __all__ = ["Indexes", "MemoryDeps", "Stores"]
 
 from dataclasses import dataclass
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING
 
 from everalgo.agent_memory import CaseJudge
@@ -94,6 +95,8 @@ class MemoryDeps:
         instructions: Custom instructions appended to the operators' rules.
         case_judge: Answers the agent-case gate question; ``None`` runs
             agent-case extraction without the gate.
+        tz: The zone message times are shown to the model in (``[memory]
+            timezone``).
     """
 
     llm: LLMClient
@@ -102,3 +105,4 @@ class MemoryDeps:
     indexes: Indexes
     instructions: CustomInstructions
     case_judge: CaseJudge | None = None
+    tz: tzinfo = UTC

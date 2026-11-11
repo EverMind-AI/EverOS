@@ -29,6 +29,7 @@ from .settings import OmeSettings as OmeSettings
 from .settings import RerankSettings as RerankSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
+from .settings import TokenizerSettings as TokenizerSettings
 from .settings import load_settings as load_settings
 from .settings import resolve_root as resolve_root
 
@@ -48,6 +49,7 @@ __all__ = [
     "RerankSettings",
     "Settings",
     "SqliteSettings",
+    "TokenizerSettings",
     "load_settings",
     "missing_config_error",
     "resolve_root",

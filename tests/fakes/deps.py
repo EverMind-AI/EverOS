@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, tzinfo
+
 __all__ = [
     "bundled_instructions",
     "make_deps",
@@ -102,6 +104,7 @@ def make_deps(
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
     case_judge: CaseJudge | None = None,
+    tz: tzinfo = UTC,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
@@ -117,6 +120,7 @@ def make_deps(
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
         case_judge=case_judge,
+        tz=tz,
     )
 
 

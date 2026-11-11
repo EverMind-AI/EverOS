@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 from collections.abc import Sequence
+from datetime import UTC, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -159,6 +160,7 @@ def _build_manager(
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
+    tz: Any = UTC,
 ) -> SearchManager:
     """A manager over the real recallers, each reading a scripted index.
 
@@ -211,6 +213,7 @@ def _build_manager(
         decider_client=llm_client or unscripted_llm(),
         tuning_source=static_tuning(),
         trace_path_source=static_trace_path(),
+        tz=tz,
     )
 
 
@@ -660,6 +663,30 @@ async def test_agentic_episode_delegates_to_search_episodes_agentic(
     )
     resp = await mgr.search(_user_req(method=SearchMethod.AGENTIC))
     assert resp.data.episodes == fake_result
+
+
+async def test_agentic_search_gets_the_managers_zone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The zone the manager was built with reaches the agentic search."""
+    seen: list[Any] = []
+
+    async def _fake_agentic(*args: Any, **kwargs: Any) -> list[Any]:
+        seen.append(kwargs["tz"])
+        return []
+
+    monkeypatch.setattr(
+        "everos.memory.search.manager.search_episodes_agentic", _fake_agentic
+    )
+    zone = timezone(timedelta(hours=8))
+    mgr = _build_manager(
+        embedding=_StubEmbedding(),
+        reranker=_StubReranker(),
+        llm_client=_StubLLM(),
+        tz=zone,
+    )
+    await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    assert seen == [zone]
 
 
 # ── AGENT owner hard partition ─────────────────────────────────────────

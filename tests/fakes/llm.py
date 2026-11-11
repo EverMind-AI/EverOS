@@ -45,11 +45,12 @@ UNUSABLE_REPLY = "this is not JSON"
 """A reply no operator can parse: it raises ``LLMOutputError``."""
 
 _SCRIPTS = Path(__file__).parent / "llm_scripts"
-_WINDOW = re.compile(r'<messages count="(\d+)">')
+_WINDOW = re.compile(r"<message_count>\n(\d+)\n</message_count>")
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
-    "boundary": "_BatchReply",
+    "boundary": "Reply",  # everalgo-boundary names its batch reply model `Reply`
     "episode": "_EpisodeReply",
+    "episode_summary": "_SummaryReply",
     "atomic_facts": "_AtomicFactsReply",
     "profile_init": "_ProfileItems",
     "profile_update": "_MemCellUpdateOutput",
@@ -58,7 +59,7 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
 """Operator name -> the reply model it requests; the default script shares the name."""
 
 AGENT_TRACK_OPERATORS: Mapping[str, str] = {
-    "boundary": "_BatchReply",
+    "boundary": "Reply",  # everalgo-boundary names its batch reply model `Reply`
     "case_filter": "_CaseFilterReply",
     "case_compress": "_CaseCompressReply",
     "case_gate": "_SuccessProbability",
@@ -80,17 +81,10 @@ KNOWLEDGE_OPERATORS: Mapping[str, str] = {
 document, so the split / uncovered passes are not reached on it."""
 
 
-def boundary_reply(
-    boundaries: Sequence[int] = (), *, tail_complete: bool = False
-) -> str:
-    """A batch boundary reply cutting after each 1-based message index given."""
-    return json.dumps(
-        {
-            "reasoning": "scripted",
-            "boundaries": list(boundaries),
-            "tail_complete": tail_complete,
-        }
-    )
+def boundary_reply(boundaries: Sequence[int] = ()) -> str:
+    """A batch boundary reply; each label is the zero-based first message of a
+    new episode (so ``[2]`` cuts after the first two messages)."""
+    return json.dumps({"reasoning": "scripted", "boundaries": list(boundaries)})
 
 
 def boundary_window(messages: Sequence[Any]) -> int:
@@ -107,7 +101,6 @@ def memorize_llm(
     episode_title: str = "Test Subject",
     episode_content: str = "Test body",
     calls: list[str] | None = None,
-    tail_complete: bool = False,
     **scripts: str,
 ) -> FakeLLMClient:
     """A model for the memorize path, answering by the reply model requested.
@@ -120,10 +113,9 @@ def memorize_llm(
             (``[]`` once empty), or a function of the window size returning
             the cuts.
         episode_title: Every episode reply's ``title``.
-        episode_content: Every episode reply's ``content`` (and ``summary``).
+        episode_content: Every episode reply's ``content``.
         calls: When given, the requested reply model's name is appended per
             call.
-        tail_complete: Every boundary reply's verdict on the uncut tail.
         **scripts: ``operator=script`` overrides for the other user-track
             operators, as for :func:`user_track_llm`.
 
@@ -135,9 +127,7 @@ def memorize_llm(
     strategy logs and gives up).
     """
     queue = None if callable(boundaries) else [list(b) for b in boundaries]
-    episode = json.dumps(
-        {"content": episode_content, "summary": episode_content, "title": episode_title}
-    )
+    episode = json.dumps({"title": episode_title, "content": episode_content})
     canned = {
         **_canned("agent_track", AGENT_TRACK_OPERATORS, {}),
         **_canned("knowledge", KNOWLEDGE_OPERATORS, {}),
@@ -148,13 +138,13 @@ def memorize_llm(
         name = response_format.__name__
         if calls is not None:
             calls.append(name)
-        if name == "_BatchReply":
+        if name == "Reply":  # the boundary batch reply
             if queue is None:
                 assert callable(boundaries)
                 cuts = boundaries(boundary_window(messages))
             else:
                 cuts = queue.pop(0) if queue else []
-            return boundary_reply(cuts, tail_complete=tail_complete)
+            return boundary_reply(cuts)
         if name == "_EpisodeReply":
             return episode
         return canned.get(name, UNUSABLE_REPLY)

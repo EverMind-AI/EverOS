@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[boundary_detection] strategy`**: `batch` (the default) cuts the whole
+  buffer in one model call per add; `step` asks once per message whether it
+  starts a new episode, as the EverAlgo LoCoMo reference run does (chat
+  messages only, so use it with `[memorize] mode = "chat"`).
+- **`[tokenizer] name`**: choose the keyword (BM25) tokenizer. `jieba` stays
+  the default; `nltk` reproduces the EverAlgo LoCoMo harness pipeline token for
+  token (English only; install with `pip install "everos[nltk]"` plus
+  `python -m nltk.downloader punkt_tab stopwords`). The LoCoMo benchmark config
+  selects `nltk`, and the benchmark's ingest identity now records the tokenizer,
+  so a store indexed with another one is not resumed. Changing `name` on an
+  existing store requires `everos cascade rebuild`.
+
+### Changed
+
+- **everalgo moves to the 2026-11-11 release candidates**:
+  `everalgo-core 0.7.0rc1`, `everalgo-boundary 0.5.0rc1`,
+  `everalgo-user-memory 0.9.0rc5`, `everalgo-agent-memory 0.6.0rc4` and
+  `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
+  `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
+- **Episode summaries are written by the model.** Each cell's summary comes
+  from a second call made at the same time as the episode call
+  (`EpisodeSummarizer.asummarize_memcell`, reading the same conversation),
+  instead of the episode's first 200 characters. The summary is display-only:
+  when its call fails, the episode keeps the first 200 characters and is
+  written as before. A cell now costs two extraction calls instead of one.
+- **`[memory] timezone` now also sets the zone the model sees message times
+  in.** Boundary detection, episode and summary extraction, atomic facts,
+  foresight, the profile and agentic search show every time in that zone with
+  its offset (`2024-03-11 00:00 UTC+08:00 (Monday)`), so relative dates resolve
+  against the user's own calendar. With the default `UTC` the requests are
+  unchanged.
+- Boundary detection runs on everalgo's `BoundaryDetector`, whose two paths
+  return `Cuts`. `hard_token_limit` / `hard_msg_limit` keep their defaults and
+  apply to `batch` only; `step` uses everalgo's own step limits. A tail the
+  model judged complete is no longer closed early: the uncut tail waits for
+  the next batch or the flush.
+
+### Fixed
+
+- The language an episode is detected in, which its atomic facts and a new
+  user's profile are then written in, is Chinese, Japanese or English. Every
+  other script and every Latin text read as English: an English episode that
+  used words such as "die", "Los Angeles" or "café" twice was read as German
+  or Spanish, and its atomic facts were written in that language.
+
 ## [1.6.0] - 2026-11-11
 
 EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including

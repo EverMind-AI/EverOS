@@ -167,7 +167,45 @@ def test_top_k_alone_never_invalidates_the_store(tmp_path: Path) -> None:
 def test_the_everalgo_version_is_not_part_of_the_identity(tmp_path: Path) -> None:
     """Measured to leave extraction quality unmoved; must not discard an ingest."""
     keys = set(ingest_identity(_config(tmp_path), "locomo", _serving()))
-    assert keys == {"data_digest", "adapter", "extraction_backbone"}
+    assert keys == {
+        "data_digest",
+        "adapter",
+        "extraction_backbone",
+        "keyword_tokenizer",
+    }
+
+
+# ── the keyword tokenizer wrote the store's index ──────────────────────────────
+_TOKENIZER = "EVEROS_TOKENIZER__NAME"
+
+
+def test_a_different_keyword_tokenizer_refuses_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Token columns written by one tokenizer are unreadable to another's queries."""
+    monkeypatch.delenv(_TOKENIZER, raising=False)
+    out = tmp_path / "run"
+    _seed_spec(out, _config(tmp_path), _serving())
+    nltk = _config(tmp_path, retrieval_env={_TOKENIZER: "nltk"})
+    with pytest.raises(run_mod.ResumeIdentityError) as err:
+        _check(out, nltk, _serving())
+    assert "keyword_tokenizer: default -> nltk" in str(err.value)
+
+
+def test_the_keyword_tokenizer_is_read_like_the_servers_read_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The config's retrieval_env wins over the process environment, as for servers."""
+    monkeypatch.delenv(_TOKENIZER, raising=False)
+    unset = ingest_identity(_config(tmp_path), "locomo", _serving())
+    monkeypatch.setenv(_TOKENIZER, "jieba")
+    from_env = ingest_identity(_config(tmp_path), "locomo", _serving())
+    pinned = _config(tmp_path, retrieval_env={_TOKENIZER: "nltk"})
+    from_config = ingest_identity(pinned, "locomo", _serving())
+
+    assert unset["keyword_tokenizer"] == "default"
+    assert from_env["keyword_tokenizer"] == "jieba"
+    assert from_config["keyword_tokenizer"] == "nltk"
 
 
 # ── the guard must run before the spec is overwritten ──────────────────────────

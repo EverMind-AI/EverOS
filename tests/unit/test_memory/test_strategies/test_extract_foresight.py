@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -278,3 +279,25 @@ async def test_foresight_dropped_when_memcell_gone() -> None:
         await extract_foresight(_event(), deps)
 
     assert deps.stores.foresight.records == []  # type: ignore[attr-defined]
+
+
+async def test_foresights_see_times_in_the_configured_zone() -> None:
+    zone = timezone(timedelta(hours=8))
+    message = ChatMessage(
+        id="m1",
+        role="user",
+        content="planning a trip",
+        timestamp=1_700_000_000_000,
+        sender_id="u_alice",
+    )
+    event = UserPipelineStarted(
+        memcell_id="mc_a",
+        session_id="s1",
+        memcell=MemCell(items=[message], timestamp=1_700_000_000_000),
+    )
+    deps = seed_sources(make_deps(tz=zone), memcell_id="mc_a")
+    with patch(_EXTRACTOR) as mock_cls:
+        mock_cls.return_value.aextract = AsyncMock(return_value=[])
+        await extract_foresight(event, deps)
+
+    assert mock_cls.return_value.aextract.call_args.kwargs["tz"] is zone

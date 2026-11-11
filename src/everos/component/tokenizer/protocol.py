@@ -5,8 +5,9 @@ the source surface form lives
 in ``<field>`` while the space-joined token stream lives in
 ``<field>_tokens``, and the FTS index reads only the latter using a
 whitespace tokenizer. Keeping the tokenizer decision in the app layer
-means it can swap (jieba → unigram → hf) without re-indexing or
-touching LanceDB schemas.
+means it can swap without touching LanceDB schemas; the stored
+``<field>_tokens`` columns must still be rebuilt, because the indexed side
+and the query side have to tokenize alike.
 
 The protocol is sync — every concrete tokenizer in scope today (jieba,
 char-bigram, regex word-split) is CPU-bound with no IO, so an async

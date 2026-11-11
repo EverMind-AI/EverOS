@@ -274,6 +274,7 @@ async def extract_user_profile(
             old_profile=old_profile,
             custom_instructions=deps.instructions.load("profile_extract"),
             output_language=language,
+            tz=deps.tz,
         )
 
         # Write the fresh profile back to the owner's profile document.

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from everalgo.boundary import adetect_boundaries
+from everalgo.boundary import BoundaryDetector, Cuts
 from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
@@ -55,22 +55,17 @@ _CELL = MemCell(items=list(_MESSAGES), timestamp=_TS + 2)
 
 
 @pytest.mark.parametrize(
-    ("script", "is_final", "cell_sizes", "tail"),
+    ("script", "is_final", "cuts"),
     [
-        ("boundary", True, [3], 0),
-        ("boundary", False, [], 3),
-        ("boundary_empty", False, [], 3),
-        ("boundary_split", False, [2], 1),
+        ("boundary", True, Cuts(ends=[3], tail_start=3)),
+        ("boundary", False, Cuts(ends=[], tail_start=0)),
+        ("boundary_empty", False, Cuts(ends=[], tail_start=0)),
+        ("boundary_split", False, Cuts(ends=[2], tail_start=2)),
     ],
 )
-async def test_boundary_scripts(
-    script: str, is_final: bool, cell_sizes: list[int], tail: int
-) -> None:
-    result = await adetect_boundaries(
-        _MESSAGES, llm=user_track_llm(boundary=script), is_final=is_final
-    )
-    assert [len(c.items) for c in result.cells] == cell_sizes
-    assert len(result.tail) == tail
+async def test_boundary_scripts(script: str, is_final: bool, cuts: Cuts) -> None:
+    detector = BoundaryDetector(llm=user_track_llm(boundary=script))
+    assert await detector.adetect_batch(_MESSAGES, is_final=is_final) == cuts
 
 
 async def test_episode_script() -> None:
@@ -78,11 +73,7 @@ async def test_episode_script() -> None:
         _CELL, sender_id=None
     )
     want = json.loads(user_track_script("episode"))
-    assert (episode.episode, episode.summary, episode.subject) == (
-        want["content"],
-        want["summary"],
-        want["title"],
-    )
+    assert (episode.episode, episode.subject) == (want["content"], want["title"])
 
 
 async def test_blank_episode_script_is_unusable() -> None:

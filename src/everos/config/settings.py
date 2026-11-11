@@ -476,10 +476,29 @@ class RerankSettings(BaseModel):
 
 
 class BoundaryDetectionSettings(BaseModel):
-    """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
+    """How a session's buffered messages are cut into memcells.
+
+    The hard limits apply to ``batch`` only; ``step`` keeps everalgo's own step
+    defaults. Every other cutting parameter is everalgo's ``BoundaryDetector``
+    default.
+
+    Env binding:
+        EVEROS_BOUNDARY_DETECTION__STRATEGY
+        EVEROS_BOUNDARY_DETECTION__HARD_TOKEN_LIMIT
+        EVEROS_BOUNDARY_DETECTION__HARD_MSG_LIMIT
+    """
 
     hard_token_limit: int = Field(default=65536, ge=1)
+    """``batch``: leading segments are cut without the model until the chat
+    messages left hold fewer tokens than this."""
     hard_msg_limit: int = Field(default=500, ge=1)
+    """``batch``: likewise, until fewer chat messages than this are left."""
+    strategy: Literal["batch", "step"] = "batch"
+    """``batch`` asks the model once per call for every cut in the buffer
+    (``BoundaryDetector.adetect_batch``). ``step`` asks once per message
+    whether it starts a new episode (``BoundaryDetector.adetect_step``), as the
+    EverAlgo LoCoMo reference run does. ``step`` handles chat messages only; a
+    tool row fails the call, so it suits ``[memorize] mode = "chat"``."""
 
 
 class AsyncQueueSettings(BaseModel):
@@ -829,6 +848,17 @@ class IndexSettings(BaseModel):
     backend: Literal["lancedb", "milvus"] = "lancedb"
 
 
+class TokenizerSettings(BaseModel):
+    """Keyword (BM25) tokenizer shared by indexing and search.
+
+    Both sides must tokenize alike, so changing ``name`` requires rebuilding the
+    index. ``jieba`` handles mixed Chinese / English text; ``nltk`` reproduces
+    the EverAlgo LoCoMo harness and is English only.
+    """
+
+    name: Literal["jieba", "nltk"] = "jieba"
+
+
 class MilvusSettings(BaseModel):
     """Remote Milvus Server or Zilliz Cloud connection settings."""
 
@@ -937,6 +967,7 @@ class Settings(BaseSettings):
     sqlite: SqliteSettings = SqliteSettings()
     lancedb: LanceDBSettings = LanceDBSettings()
     index: IndexSettings = IndexSettings()
+    tokenizer: TokenizerSettings = TokenizerSettings()
     milvus: MilvusSettings = MilvusSettings()
     llm: LLMSettings = LLMSettings()
     decider: DeciderSettings = DeciderSettings()

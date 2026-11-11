@@ -408,6 +408,7 @@ async def test_add_flush_search_get_on_canned_user_track(
     providers = make_providers(llm=llm, embedding=None, rerank=None)
     app = create_app(application=build_application(settings, providers=providers))
     episode = json.loads(user_track_script("episode"))
+    summary = json.loads(user_track_script("episode_summary"))["summary"]
     profile = json.loads(user_track_script("profile_init"))
 
     async with (
@@ -467,7 +468,7 @@ async def test_add_flush_search_get_on_canned_user_track(
         await _poll_until(_indexed)
         (got_episode,) = await _get("episode")
         assert got_episode["episode"] == episode["content"]
-        assert got_episode["summary"] == episode["summary"]
+        assert got_episode["summary"] == summary
         assert got_episode["subject"] == episode["title"]
         assert got_episode["session_id"] == "s_kyoto"
 
@@ -484,7 +485,7 @@ async def test_add_flush_search_get_on_canned_user_track(
         assert hit["episode"] == episode["content"]
 
     replies = [call.response_format.__name__ for call in llm.calls]
-    assert replies.count("_BatchReply") == 2  # the add and the flush
+    assert replies.count("Reply") == 2  # the add and the flush
     assert replies.count("_EpisodeReply") == 1
     assert "_AtomicFactsReply" in replies
     assert "_ProfileItems" in replies

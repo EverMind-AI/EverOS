@@ -21,6 +21,7 @@ Hyperparameters are aligned to the memsys_opensource ``AgenticConfig`` defaults
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any, Literal
 
 from everalgo.rank.agentic import aagentic_retrieve
@@ -102,6 +103,7 @@ async def search_agent_cases_agentic(
     llm: LLMClient,
     top_k: int,
     radius: float | None = None,
+    tz: tzinfo = UTC,
 ) -> list[SearchAgentCaseItem]:
     """Agent-case AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -128,6 +130,7 @@ async def search_agent_cases_agentic(
         llm=llm,
         top_k=top_k,
         radius=radius,
+        tz=tz,
         kind="case",
     )
     return shape_agent_cases(candidates, stored)
@@ -143,6 +146,7 @@ async def search_agent_skills_agentic(
     llm: LLMClient,
     top_k: int,
     radius: float | None = None,
+    tz: tzinfo = UTC,
 ) -> list[SearchAgentSkillItem]:
     """Agent-skill AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -169,6 +173,7 @@ async def search_agent_skills_agentic(
         llm=llm,
         top_k=top_k,
         radius=radius,
+        tz=tz,
         kind="skill",
     )
     return shape_agent_skills(candidates, stored)
@@ -184,6 +189,7 @@ async def _run_agentic_retrieve(
     llm: LLMClient,
     top_k: int,
     radius: float | None,
+    tz: tzinfo,
     kind: Literal["case", "skill"],
 ) -> tuple[list[Candidate], Mapping[str, Stored[Any]]]:
     """Shared flat agentic retrieve pipeline for agent memory kinds.
@@ -254,5 +260,6 @@ async def _run_agentic_retrieve(
         refinement_strategy=_REFINEMENT_STRATEGY,
         multi_query_count=_MULTI_QUERY_COUNT,
         rrf_k=_HYBRID_RRF_K,
+        tz=tz,
     )
     return candidates, stored

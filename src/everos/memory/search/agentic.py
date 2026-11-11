@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from everalgo.rank.agentic import aagentic_retrieve
@@ -95,6 +96,7 @@ async def search_episodes_agentic(
     llm: LLMClient,
     top_k: int,
     radius: float | None = None,
+    tz: tzinfo = UTC,
 ) -> list[SearchEpisodeItem]:
     """Episode AGENTIC search via cluster-scoped MaxSim with bounded rerank work.
 
@@ -247,6 +249,7 @@ async def search_episodes_agentic(
         refinement_strategy=_REFINEMENT_STRATEGY,
         multi_query_count=_MULTI_QUERY_COUNT,
         rrf_k=_HYBRID_RRF_K,
+        tz=tz,
     )
 
     round_tag = "round1" if decision.is_sufficient else "round2"

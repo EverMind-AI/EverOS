@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from everalgo.boundary import BoundaryDetector
 from everalgo.llm import LLMOutputError
 from everalgo.testing import FakeLLMClient
 from sqlmodel import SQLModel
@@ -69,12 +70,12 @@ class _Stage:
         self.replies: list[str | Exception] = []
         self.llm = FakeLLMClient(handler=self._reply)
         self.boundary = BoundaryDetection(
-            llm=self.llm,
+            detector=BoundaryDetector(llm=self.llm),
             instructions=bundled_instructions(),
             session_buffer=SqliteSessionBufferStore(
                 self.buffer, SessionCutRepo(session_factory=self.factory)
             ),
-            limits=BoundaryDetectionSettings(
+            settings=BoundaryDetectionSettings(
                 hard_token_limit=10_000, hard_msg_limit=100
             ),
         )

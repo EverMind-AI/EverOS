@@ -981,7 +981,7 @@ query within this episode (already nested, no separate call needed).
 | `session_id` | `string` | The `session_id` whose messages produced this episode |
 | `timestamp` | `string` | ISO-8601 with timezone offset; default `UTC` renders as `Z`, non-UTC defaults render as `±HH:MM` — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
-| `summary` | `string` | Short summary (~200 chars), suitable for list-view rendering |
+| `summary` | `string` | Short display summary (1-3 sentences) the model writes from the same conversation as the episode; the episode's first 200 characters when that call failed. Suitable for list-view rendering |
 | `subject` | `string` | One-line subject / title |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |

@@ -39,6 +39,7 @@ async def extract_atomic_facts(
         event.episode_text,
         timestamp=event.episode_timestamp_ms,
         output_language=event.language,
+        tz=deps.tz,
     )
 
     # 2. Build domain AtomicFacts (single owner from event).

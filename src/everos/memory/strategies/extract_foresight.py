@@ -81,7 +81,7 @@ async def extract_foresight(
     # 2. Run the LLM extractor once per sender (prompt is per-sender).
     foresights: list[Foresight] = []
     for sid in sender_ids:
-        algo_foresights = await extractor.aextract(memcell, sender_id=sid)
+        algo_foresights = await extractor.aextract(memcell, sender_id=sid, tz=deps.tz)
         foresights.extend(
             Foresight.from_algo(
                 algo_fs,

@@ -48,6 +48,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from everalgo.boundary import BoundaryDetector
 from everalgo.llm import LLMOutputError
 from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, given, settings
@@ -196,10 +197,10 @@ async def _jittered(
     memorize_mod = make_memory_service(
         settings=cfg,
         boundary=BoundaryDetection(
-            llm=FakeLLMClient(handler=run.reply),
+            detector=BoundaryDetector(llm=FakeLLMClient(handler=run.reply)),
             instructions=bundled_instructions(),
             session_buffer=stores.session_buffer,
-            limits=cfg.boundary_detection,
+            settings=cfg.boundary_detection,
             attempt_timeout=lock_timeout,
         ),
         stores=stores,

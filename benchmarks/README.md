@@ -11,7 +11,14 @@ Per-benchmark rules live in `benchmarks/adapters/<name>.py`.
 
 ```bash
 uv sync
+uv run python -m nltk.downloader -d .venv/nltk_data punkt_tab stopwords
 ```
+
+LoCoMo indexes and searches with the NLTK tokenizer of the EverAlgo harness
+(`EVEROS_TOKENIZER__NAME = "nltk"` in `configs/locomo.toml`), which needs the
+NLTK data above; `make install-deps` fetches it too. A store indexed with another
+tokenizer cannot be searched with this one, so reuse only stores built under the
+same setting.
 
 ## 2. Get the data
 

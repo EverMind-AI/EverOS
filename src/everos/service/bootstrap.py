@@ -42,7 +42,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from pathlib import Path
 from types import TracebackType
+from zoneinfo import ZoneInfo
 
+from everalgo.boundary import BoundaryDetector
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider, build_embedding_provider
@@ -318,7 +320,7 @@ def build_application(
     """
     configure_process(settings)
     providers = providers or build_providers(settings)
-    tokenizer = build_tokenizer()
+    tokenizer = build_tokenizer(settings.tokenizer)
     root = MemoryRoot(resolve_root())
     database = SqliteDatabase(root, settings.sqlite)
     sqlite = SqliteRepos.over(database)
@@ -332,6 +334,7 @@ def build_application(
         indexes=indexes,
         instructions=CustomInstructions(_CONFIG_ROOT),
         case_judge=_case_judge(settings, providers.llm),
+        tz=ZoneInfo(settings.memory.timezone),
     )
     ome_lock = OmeLock(root.ome_db)
     engine = _build_engine(root, deps, settings.ome, lock=ome_lock)
@@ -533,11 +536,12 @@ def _build_memory_service(
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
-            llm=providers.llm,
+            detector=BoundaryDetector(llm=providers.llm),
             instructions=deps.instructions,
             session_buffer=stores.session_buffer,
-            limits=settings.boundary_detection,
+            settings=settings.boundary_detection,
             attempt_timeout=settings.memorize.session_lock_timeout_seconds,
+            tz=deps.tz,
         ),
         multimodal_llm=providers.multimodal_llm,
         stores=stores,
@@ -546,6 +550,7 @@ def _build_memory_service(
             memcell_store=stores.memcell,
             instructions=deps.instructions,
             llm_client=providers.llm,
+            tz=deps.tz,
         ),
         agent_pipeline=AgentMemoryPipeline(),
         bus=bus,
@@ -563,6 +568,7 @@ def _build_memory_service(
             decider_client=providers.decider,
             tuning_source=SearchConfigSource().tuning,
             trace_path_source=SearchConfigSource().trace_path,
+            tz=deps.tz,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,

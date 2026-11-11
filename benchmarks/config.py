@@ -31,6 +31,8 @@ def unresolved(value: str) -> bool:
 
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+_TOKENIZER_ENV = "EVEROS_TOKENIZER__NAME"
+"""The server variable naming the keyword tokenizer; see :func:`ingest_identity`."""
 
 
 def _expand_env(value: Any) -> Any:
@@ -541,9 +543,12 @@ def ingest_identity(
 ) -> dict[str, str]:
     """What must match for an already-ingested store to be reusable.
 
-    Only three things can make stored memories wrong for the current run: different
+    Three things can make stored memories wrong for the current run: different
     source data, a different adapter reading it, or a different model writing the
-    memories. Everything else is a read-time concern.
+    memories. A fourth makes the store's keyword index wrong: the tokenizer that
+    wrote its token columns must be the one the query side uses (``"default"`` when
+    the run leaves ``EVEROS_TOKENIZER__NAME`` unset). Everything else is a read-time
+    concern.
 
     Two things measured to be irrelevant are deliberately EXCLUDED, and excluding them
     is the point of having two identities at all:
@@ -558,10 +563,14 @@ def ingest_identity(
     backbone = next(
         (s.model for s in serving if s.role in ("extraction", "backbone")), ""
     )
+    tokenizer = config.retrieval_env.get(_TOKENIZER_ENV) or os.environ.get(
+        _TOKENIZER_ENV, ""
+    )
     return {
         "data_digest": _file_digest(config.data_path),
         "adapter": f"{benchmark}/{config.adapter}",
         "extraction_backbone": backbone,
+        "keyword_tokenizer": tokenizer or "default",
     }
 
 

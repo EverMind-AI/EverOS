@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -399,3 +400,24 @@ async def test_partition_lock_keeps_same_owner_in_different_spaces_independent(
             )
     assert len(deps.stores.profile.writes) == 2
     assert all([await deps.stores.profile.read(scope) is not None for scope in scopes])
+
+
+async def test_the_profile_sees_times_in_the_configured_zone() -> None:
+    zone = timezone(timedelta(hours=8))
+    deps = make_deps(tz=zone)
+    _seed(
+        deps,
+        _scope(),
+        cluster_id="cl_user00000001",
+        entry_id="ep_20260101_0001",
+        memcell_id="mc_aaaaaaaaaaa1",
+        last_ts=1_700_000_001_000,
+    )
+    new_profile = AlgoProfile.model_validate(
+        {"owner_id": "u_alice", "summary": "s", "timestamp": 1_700_000_001_000}
+    )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        await extract_user_profile(_event(), deps)
+
+    assert extractor_cls.return_value.aextract.call_args.kwargs["tz"] is zone

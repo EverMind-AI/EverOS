@@ -11,7 +11,10 @@
 
 ```bash
 uv sync
+uv run python -m nltk.downloader -d .venv/nltk_data punkt_tab stopwords
 ```
+
+LoCoMo 的建索引和检索都用 EverAlgo 评测框架的 NLTK 分词器（`configs/locomo.toml` 里的 `EVEROS_TOKENIZER__NAME = "nltk"`），需要上面这份 NLTK 数据；`make install-deps` 也会下载。用别的分词器建的库不能用这个分词器检索，只能复用同一设置下建的库。
 
 ## 2. 准备数据
 

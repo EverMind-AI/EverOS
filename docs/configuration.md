@@ -76,7 +76,7 @@ everos init --root /data/everos
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps. Validated against `zoneinfo.ZoneInfo`. |
+| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps, and the zone message times are shown to the model in during extraction (boundary detection, episode, summary, atomic facts, foresight, profile) and agentic search. Validated against `zoneinfo.ZoneInfo`. |
 
 ### `[api]`
 
@@ -113,6 +113,28 @@ truth regardless of backend.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `backend` | string | `"lancedb"` | Index implementation: `lancedb` or `milvus`. |
+
+### `[tokenizer]`
+
+The keyword (BM25) tokenizer. Indexing and search share one instance, because
+the stored token columns only match queries tokenized the same way: changing
+`name` requires rebuilding the index (`everos cascade rebuild`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | `"jieba"` | `jieba`: mixed Chinese / English text. `nltk`: the keyword pipeline of the EverAlgo LoCoMo harness (lowercase, NLTK `word_tokenize`, alphabetic tokens of two or more characters, NLTK English stopwords, Porter stemming); English only, and digits never become tokens. |
+
+`nltk` needs the optional package and its data, and downloads nothing at
+runtime; a missing piece stops startup with the command that installs it:
+
+```bash
+pip install "everos[nltk]"
+python -m nltk.downloader punkt_tab stopwords
+```
+
+The LanceDB keyword index lowercases, Snowball-stems and ASCII-folds tokens on
+both the indexed and the query side, so on that backend `nltk` tokens are
+stemmed a second time; matching stays symmetric.
 
 ### `[milvus]`
 
@@ -244,8 +266,12 @@ unaffected: nothing is probed, compared, or recorded.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `hard_token_limit` | int | `65536` | Max tokens before forced boundary. |
-| `hard_msg_limit` | int | `500` | Max messages before forced boundary. |
+| `strategy` | string | `"batch"` | `batch`: one model call per add cuts the whole buffer. `step`: one model call per message decides whether it starts a new episode; chat messages only, so use it with `[memorize] mode = "chat"`. |
+| `hard_token_limit` | int | `65536` | `batch` only: max tokens before a forced boundary. |
+| `hard_msg_limit` | int | `500` | `batch` only: max messages before a forced boundary. |
+
+`step` keeps everalgo's own step limits; every other cutting parameter is
+everalgo's `BoundaryDetector` default.
 
 ### `[memorize]`
 

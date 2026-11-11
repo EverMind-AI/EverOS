@@ -11,7 +11,8 @@
 # `null` (omitted in TOML) means "use the Pydantic default declared in code".
 
 [memory]
-# Effective timezone for date buckets and timestamps. Drives
+# Effective timezone for date buckets and timestamps, and the zone message
+# times are shown to the model in (extraction and agentic search). Drives
 # core.utils.datetime; this is the SOLE source — OS `TZ` is not
 # read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
 timezone = "UTC"
@@ -58,6 +59,13 @@ cache_size_kb = 2048
 [index]
 # Rebuildable vector/BM25 index. Markdown remains the source of truth.
 backend = "lancedb"
+
+[tokenizer]
+# Keyword (BM25) tokenizer shared by indexing and search; changing it requires
+# rebuilding the index (`everos cascade rebuild`). "jieba" handles mixed Chinese /
+# English text. "nltk" reproduces the EverAlgo LoCoMo harness, is English only and
+# needs `pip install "everos[nltk]"` plus `python -m nltk.downloader punkt_tab stopwords`.
+name = "jieba"
 
 [milvus]
 # Remote Milvus Server or Zilliz Cloud only; Milvus Lite paths are unsupported.
@@ -181,8 +189,13 @@ batch_size      = 10
 max_concurrent  = 5
 
 [boundary_detection]
-# Passed through to ``everalgo.boundary.adetect_boundaries``: leading cells
-# are cut without the model until the rest fits under both limits.
+# "batch": one model call per add cuts the whole buffer.
+# "step":  one model call per message decides whether it starts a new episode
+#          (the EverAlgo LoCoMo reference). Chat messages only; use it with
+#          [memorize] mode = "chat".
+strategy = "batch"
+# batch only: leading cells are cut without the model until the rest fits under
+# both limits. step keeps everalgo's own step limits.
 hard_token_limit = 65536
 hard_msg_limit = 500
 

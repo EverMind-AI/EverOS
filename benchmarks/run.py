@@ -3173,13 +3173,14 @@ def _ingest_identity_for_marker(
     conversation nested function, which has no access to the `serving` list assembled at
     startup, and reaching for it there is what has repeatedly produced UnboundLocalError
     after ADD had already finished. Data and adapter are the two that make a marker
-    describe a different store; the backbone is still checked at the directory level by
-    `_check_resume_identity`.
+    describe a different store; the backbone and the keyword tokenizer are still checked
+    at the directory level by `_check_resume_identity`. Markers compare as whole dicts,
+    so a key added here would mark every existing marker stale and re-ingest it.
     """
     return {
         k: v
         for k, v in ingest_identity(config, benchmark).items()
-        if k != "extraction_backbone"
+        if k in ("data_digest", "adapter")
     }
 
 
