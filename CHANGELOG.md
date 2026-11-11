@@ -99,6 +99,20 @@ machinery that keeps a deleted memory from coming back.
     `member_profile` (with `member_id`) on group scopes.
   - **Table schema version 5** adds `user_profile.subject_id` and
     `agent_case.source_group_id`. Existing rows read as before.
+- **Two opt-in recoveries for a failed multi-round decider round**, both off
+  by default (off, requests and traces are byte-identical to before):
+  - `[decider] fit_to_window`: when the decider endpoint rejects a round
+    prompt as longer than its window, the prompt is re-rendered to fit
+    `window - max_tokens` tokens, counted by the endpoint itself (vLLM's
+    `/tokenize`, through the new `OpenAIProvider.acount_prompt_tokens`).
+    CORE SO FAR texts are cut first (one shared cap, longest first), then
+    candidate texts, then the last candidates are dropped. The round trace
+    records what was cut (`decider_fit`). On BEAM 500K / 1M / 10M this
+    rejection cost the RL decider up to 4.7% of its questions.
+  - `[decider] salvage_truncated_core`: when every attempt fails to parse and
+    a reply had already emitted its core list (`{"core": [0, 3],` and
+    nothing after it), those indices become the round's core and the loop
+    stops there. The round trace records it (`decider_salvaged`).
 
 ### Changed
 

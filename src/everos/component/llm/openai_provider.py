@@ -36,6 +36,7 @@ __all__ = ["OpenAIProvider", "RawReply", "ResponseFormatMode"]
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple
 
+import httpx
 import openai
 from everalgo.llm import to_openai_response_format
 from pydantic import BaseModel, ValidationError
@@ -46,7 +47,6 @@ from .errors import LLMCallError
 from .observer import LLMCallObserver, NullObserver, TokenUsage
 
 if TYPE_CHECKING:
-    import httpx
     from everalgo.llm import LLMMessage
     from openai.types.chat import ChatCompletion
 
@@ -158,6 +158,8 @@ class OpenAIProvider:
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._timeout = timeout
+        self._http_client = http_client
         self._extra: dict[str, Any] = dict(extra or {})
         self._response_format_mode: ResponseFormatMode = response_format_mode
         self._invalid_reply_retries = invalid_reply_retries
@@ -269,6 +271,54 @@ class OpenAIProvider:
                 else None
             ),
         )
+
+    async def acount_prompt_tokens(
+        self, messages: list[LLMMessage], **extra: Any
+    ) -> tuple[int, int] | None:
+        """Count ``messages`` as the endpoint would render them, and its window.
+
+        Asks vLLM's ``/tokenize`` (at the server root, beside ``/v1``) with the model,
+        the messages and the ``chat_template_kwargs`` this provider's requests carry
+        under ``extra_body``, so the count is the one the endpoint checks a chat
+        request against. Outside the everalgo contract, like :meth:`achat_raw`: the
+        multi-round decider uses it only to fit a prompt the endpoint rejected as
+        too long (``[decider].fit_to_window``).
+
+        Returns:
+            ``(prompt_tokens, max_model_len)``, or ``None`` when the endpoint has no
+            such route or the call fails -- counting is best effort, never fatal.
+        """
+        merged = {**self._extra, **extra}
+        body: dict[str, Any] = {
+            "model": merged.get("model", self._model),
+            "messages": [message.model_dump() for message in messages],
+            "add_generation_prompt": True,
+        }
+        extra_body = merged.get("extra_body")
+        if isinstance(extra_body, Mapping) and extra_body.get("chat_template_kwargs"):
+            body["chat_template_kwargs"] = extra_body["chat_template_kwargs"]
+        root = str(self._client.base_url).rstrip("/").removesuffix("/v1")
+        headers = {"Authorization": f"Bearer {self._client.api_key}"}
+        try:
+            if self._http_client is not None:
+                resp = await self._http_client.post(
+                    f"{root}/tokenize", json=body, headers=headers
+                )
+            else:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    resp = await client.post(
+                        f"{root}/tokenize", json=body, headers=headers
+                    )
+            resp.raise_for_status()
+            got = resp.json()
+            return int(got["count"]), int(got["max_model_len"])
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "llm_tokenize_unavailable",
+                error=f"{type(exc).__name__}: {exc}"[:200],
+                model=self._model,
+            )
+            return None
 
     def _build_request(
         self,
