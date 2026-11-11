@@ -881,7 +881,7 @@
           "memory"
         ],
         "summary": "Forget Session",
-        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it.",
+        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it. A\nprofile item goes once every segment it rests on is forgotten.",
         "operationId": "forget_session_api_v1_memory_forget_session_post",
         "requestBody": {
           "content": {
@@ -2728,7 +2728,7 @@
           "memory"
         ],
         "summary": "Forget Session",
-        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it.",
+        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it. A\nprofile item goes once every segment it rests on is forgotten.",
         "operationId": "forget_session_api_v2_memory_forget_session_post",
         "requestBody": {
           "content": {
@@ -5596,6 +5596,11 @@
             },
             "type": "array",
             "title": "Images"
+          },
+          "profiles": {
+            "type": "integer",
+            "title": "Profiles",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -5604,7 +5609,7 @@
           "session_id"
         ],
         "title": "ForgetSessionResponseData",
-        "description": "What forgetting one conversation touched.\n\n``episodes`` are entry ids marked forgotten, ``image_memories`` how many\npicture memories, and ``images`` the picture *files* taken out of\ncirculation because this session held their last live reference."
+        "description": "What forgetting one conversation touched.\n\n``episodes`` are entry ids marked forgotten, ``image_memories`` how many\npicture memories, ``images`` the picture *files* taken out of\ncirculation because this session held their last live reference, and\n``profiles`` how many profile items left ``user.md`` because every segment\nthey rest on is now forgotten."
       },
       "ForgottenMessageData": {
         "properties": {
@@ -10488,6 +10493,11 @@
             },
             "type": "array",
             "title": "Images"
+          },
+          "profiles": {
+            "type": "integer",
+            "title": "Profiles",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -10497,7 +10507,7 @@
           "applied"
         ],
         "title": "UndoForgetSessionResponseData",
-        "description": "What undoing a conversation's forget put back."
+        "description": "What undoing a conversation's forget put back (``profiles``: items)."
       },
       "UnprocessedMessageDTO": {
         "properties": {

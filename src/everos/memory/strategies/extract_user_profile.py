@@ -13,7 +13,10 @@ reading them again only re-adds it.
   carries its id, so nothing waits for the index), and the pictures the owner
   posted in it (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
   none when ``[extraction] vision`` is off). A segment the profile already
-  rests on (a replayed event) is not read again.
+  rests on (a replayed event) is not read again, and neither is a segment of
+  a conversation the owner forgot nor a picture they forgot: a forget leaves
+  the bytes in place for its undo, so the forget log, read under the profile
+  lock a forget holds while it records, is what tells.
 - **Operator.** everalgo's ``ProfileExtractor.aupdate``: one update call with
   the two-prompt design's add / modify / deprecate / none, then a
   consolidation call only for a part of the profile that is over its cap and
@@ -24,7 +27,9 @@ reading them again only re-adds it.
   picture reaches the items resting on it alone. As on a member profile, a
   fact given a new value is a new item linked to the old one (``supersedes``,
   ``since``), and every item the update took out moves to ``user.md``'s
-  history with what replaced it: nothing is lost in place.
+  history with what replaced it: nothing is lost in place. Forgetting a
+  conversation takes out the items every segment of which is forgotten; the
+  forget does that, under the same lock, not this strategy.
 - **Language.** A stored ``primary_language`` wins and is never changed
   automatically; until one is stored, the segment's language (resolved in
   code by the pipeline) is used and then frozen.
@@ -35,7 +40,7 @@ from __future__ import annotations
 from everalgo.user_memory import ProfileExtractor
 
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory._partition_locks import user_profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline.pictures import profile_pictures
@@ -65,6 +70,20 @@ def _profile_language(existing: Profile | None, event: EpisodeExtracted) -> str 
     return event.language
 
 
+async def _forgotten_session(deps: MemoryDeps, event: EpisodeExtracted) -> bool:
+    """Whether the owner forgot the segment's conversation and no undo reversed it."""
+    if not event.session_id:
+        return False
+    entry = await deps.stores.forget_log.latest_live(
+        target="session",
+        target_id=event.session_id,
+        app_id=event.app_id,
+        project_id=event.project_id,
+        owner_id=event.owner_id,
+    )
+    return entry is not None
+
+
 def _already_read(existing: Profile | None, memcell_id: str) -> bool:
     """Whether an item of ``existing`` already rests on the segment."""
     if existing is None:
@@ -85,11 +104,17 @@ async def extract_user_profile(
         owner_id=event.owner_id,
         owner_type="user",
     )
-    # Serialise on owner_id: user.md is a single per-user file and the
-    # body is a read → LLM update → overwrite sequence. Different users
-    # run fully in parallel.
-    partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
-    async with get_partition_lock("extract_user_profile", partition):
+    # Serialise on the owner: user.md is a single per-user file and the
+    # body is a read → LLM update → overwrite sequence; a forget and its undo
+    # hold the same lock. Different users run fully in parallel.
+    async with user_profile_lock(event.app_id, event.project_id, event.owner_id):
+        if await _forgotten_session(deps, event):
+            logger.info(
+                "profile_segment_forgotten",
+                owner_id=event.owner_id,
+                memcell_id=event.memcell_id,
+            )
+            return []
         existing = await deps.stores.profile.read(scope)
         if _already_read(existing, event.memcell_id):
             logger.info(
@@ -106,6 +131,12 @@ async def extract_user_profile(
             event.owner_id,
             images=deps.stores.images,
             limits=deps.picture_limits,
+            forgotten=await deps.stores.forget_log.live_targets(
+                target="image",
+                app_id=event.app_id,
+                project_id=event.project_id,
+                owner_id=event.owner_id,
+            ),
         )
         language = _profile_language(existing, event)
         update = await ProfileExtractor(llm=deps.llm).aupdate(

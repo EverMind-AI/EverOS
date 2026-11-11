@@ -160,7 +160,8 @@ async def forget_session(
 
     Unlike ``/memory/delete`` this removes nothing: the episode versions and
     picture memories are marked, and ``/forget/session/undo`` reverses it. A
-    picture file survives while any other live memory still references it.
+    picture file survives while any other live memory still references it. A
+    profile item goes once every segment it rests on is forgotten.
     """
     result = await app.memory.forget_session(
         app_id=req.app_id,
@@ -177,6 +178,7 @@ async def forget_session(
             episodes=list(result.episodes),
             image_memories=result.image_memories,
             images=list(result.images),
+            profiles=result.profiles,
         ),
     )
 
@@ -201,6 +203,7 @@ async def undo_forget_session(
             episodes=list(result.episodes),
             image_memories=result.image_memories,
             images=list(result.images),
+            profiles=result.profiles,
         ),
     )
 

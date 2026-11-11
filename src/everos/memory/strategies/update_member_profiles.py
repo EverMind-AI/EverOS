@@ -208,6 +208,12 @@ async def _update(
             member_id,
             images=deps.stores.images,
             limits=deps.picture_limits,
+            forgotten=await deps.stores.forget_log.live_targets(
+                target="image",
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=scope.owner_id,
+            ),
         )
     update = await ProfileExtractor(llm=deps.llm).aupdate(
         cells,

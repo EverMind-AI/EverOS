@@ -16,9 +16,10 @@ failure part-way leaves the store consistent with the log entry that still says
    :meth:`Deleter.delete_by_ids` makes when it drops the merge marks of entries
    it deleted — because a "restored" second copy of the same occurrence would
    be a new memory of a picture that never arrived again.
-3. **The profile items.** Items the forget removed because the picture alone
-   established them are merged back; an item re-established meanwhile by a
-   later conversation is not duplicated, because the merge is by description.
+3. **The profile items.** Items (and replaced values) the forget removed
+   because the picture alone established them, or because every segment they
+   rest on was forgotten, are merged back; an item re-established meanwhile by
+   a later conversation is not duplicated, because the merge is by description.
 4. **The picture file.** Its ``forgotten_at`` is cleared. The bytes were never
    unlinked, which is what makes this a status change rather than a restore.
 
@@ -33,6 +34,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
+from everos.memory import user_profile_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import ForgetEntry, MemoryRef, Scope, Stored
@@ -41,6 +43,7 @@ from everos.service.memory._forget import (
     ForgottenPicture,
     _always,
 )
+from everos.service.memory._forget_session import segments_of
 
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
@@ -88,6 +91,7 @@ class SessionUndoResult:
         episodes: Entry ids of the episode versions marked current again.
         image_memories: Picture memories marked current again.
         images: Picture files brought back into circulation.
+        profiles: Profile items put back into ``user.md``.
     """
 
     session_id: str
@@ -96,6 +100,7 @@ class SessionUndoResult:
     episodes: tuple[str, ...]
     image_memories: int
     images: tuple[str, ...] = ()
+    profiles: int = 0
 
 
 class UndoManager:
@@ -147,7 +152,8 @@ class UndoManager:
 
         restored_episodes = await self._restore_episodes(scope, entry)
         restored_images = await self._restore_images(scope, entry, occurrences)
-        restored_profile = await self._restore_profile(scope, entry)
+        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+            restored_profile = await self._restore_profile(scope, entry)
         await self._images.restore(image_id)
 
         await self._eraser.requeue(
@@ -224,7 +230,10 @@ class UndoManager:
         )
         if restored_episodes:
             await self._eraser.requeue("episode", restored_episodes)
-        await self._stores.forget_log.mark_undone(entry.forget_id)
+        # Under the profile lock until the log says "remembered", as the forget.
+        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+            profiles = await self._restore_session_profile(scope, session_id, entry)
+            await self._stores.forget_log.mark_undone(entry.forget_id)
 
         logger.info(
             "memory.session.undo_completed",
@@ -235,6 +244,7 @@ class UndoManager:
             forget_id=entry.forget_id,
             image_memories=len(restored_images),
             episodes=len(restored_episodes),
+            profiles=profiles,
         )
         return SessionUndoResult(
             session_id=session_id,
@@ -243,6 +253,7 @@ class UndoManager:
             episodes=tuple(sorted(restored_episodes)),
             image_memories=len(restored_images),
             images=images,
+            profiles=profiles,
         )
 
     async def _restore_session_episodes(
@@ -380,6 +391,58 @@ class UndoManager:
             )
             written.append((ref, original.item))
         return written
+
+    async def _restore_session_profile(
+        self, scope: Scope, session_id: str, entry: ForgetEntry
+    ) -> int:
+        """Put back what the forget took from ``user.md`` and what it made others take.
+
+        The forget's own items come back: each rests on a segment of this
+        conversation, remembered again. So do the items another forget of the
+        owner's, still live, took out while this one stood, that rest on one
+        of this conversation's segments: not every segment they rest on is
+        forgotten any more. The merge is by description, so an item the
+        profile holds again is not doubled. The caller holds the profile lock.
+
+        Returns the number of items; a replaced value is history, not an item.
+        """
+        removed = list(entry.removed_profile_items)
+        mine = await segments_of(self._stores, scope, [session_id])
+        others = await self._stores.forget_log.live_targets(
+            target="session",
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+        )
+        for other in others:
+            if other == session_id:
+                continue
+            later = await self._stores.forget_log.latest_live(
+                target="session",
+                target_id=other,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=scope.owner_id,
+            )
+            if later is not None:
+                removed += [
+                    (bucket, item)
+                    for bucket, item in later.removed_profile_items
+                    if profile_items.rests_on(item, mine)
+                ]
+        if not removed:
+            return 0
+        existing = await self._stores.profile.read(scope)
+        profile, restored, replaced = profile_items.restore_items(
+            existing,
+            removed,
+            owner_id=scope.owner_id,
+            timestamp=_newest_observed_at(tuple(removed)),
+        )
+        if not (restored or replaced):
+            return 0
+        await self._stores.profile.write(scope, profile)
+        return restored
 
     async def _restore_profile(self, scope: Scope, entry: ForgetEntry) -> int:
         """Merge the items and replaced values the forget removed back into ``user.md``.

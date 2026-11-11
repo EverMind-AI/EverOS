@@ -9,14 +9,22 @@ What these pin:
   stays.
 - Undo clears exactly the marks the forget wrote, and brings the files back.
 - Another participant's memories of the same conversation are untouched.
+- A profile item (or a replaced value) goes once every segment it rests on is
+  forgotten, and comes back, once, when one of them is remembered again.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 
-from everos.memory.models import Episode, ImageMemory
-from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.models import (
+    Episode,
+    ExplicitInfoItem,
+    ImageMemory,
+    MemCell,
+    Profile,
+)
+from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
 from everos.service.memory._forget import FORGET_REASON
 from everos.service.memory._forget_session import SessionForgetManager
 from everos.service.memory._undo import UndoManager
@@ -219,3 +227,93 @@ async def test_undoing_a_conversation_never_forgotten_is_a_no_op() -> None:
 
     assert result.applied is False
     assert result.forget_id == ""
+
+
+def _segments(stores, session: str, *memcell_ids: str) -> None:
+    key = SessionKey(app_id="app", project_id="proj", session_id=session)
+    for memcell_id in memcell_ids:
+        stores.memcell.seed(memcell_id, MemCell(items=[], timestamp=_TS), key)
+
+
+def _fact(description: str, *sources: str) -> ExplicitInfoItem:
+    extra = {"source_memcell_ids": list(sources)} if sources else {}
+    return ExplicitInfoItem(description=description, **extra)
+
+
+def _with_profile(stores, *items: ExplicitInfoItem, history=()) -> None:
+    stores.profile.profiles[_scope()] = Profile(
+        owner_id="u1",
+        summary="",
+        timestamp=_TS,
+        explicit_info=list(items),
+        history=list(history),
+    )
+
+
+def _facts(stores) -> list[str]:
+    return [i.description for i in stores.profile.profiles[_scope()].explicit_info]
+
+
+async def test_a_forgotten_conversation_takes_the_items_resting_on_it_alone() -> None:
+    forget, _, stores, _ = _manager(_episode("ep_1"))
+    _segments(stores, "s1", "mc_1")
+    _segments(stores, "s2", "mc_2")
+    _with_profile(
+        stores,
+        _fact("Lives in Paris", "mc_1"),
+        _fact("Works in Python", "mc_1", "mc_2"),
+        _fact("Likes tea"),
+    )
+
+    result = await forget.forget_session(scope=_scope(), session_id="s1")
+
+    assert result.profiles == 1
+    assert _facts(stores) == ["Works in Python", "Likes tea"]
+    ((bucket, item),) = stores.forget_log.entries[-1].removed_profile_items
+    assert (bucket, item["description"]) == ("explicit_info", "Lives in Paris")
+
+
+async def test_an_item_goes_with_the_last_conversation_it_rests_on() -> None:
+    forget, _, stores, _ = _manager(_episode("ep_1"))
+    _segments(stores, "s1", "mc_1")
+    _segments(stores, "s2", "mc_2")
+    _with_profile(stores, _fact("Works in Python", "mc_1", "mc_2"))
+
+    first = await forget.forget_session(scope=_scope(), session_id="s1")
+    second = await forget.forget_session(scope=_scope(), session_id="s2")
+
+    assert (first.profiles, second.profiles) == (0, 1)
+    assert _facts(stores) == []
+
+
+async def test_undo_brings_back_the_items_and_what_a_later_forget_took() -> None:
+    forget, undo, stores, _ = _manager(_episode("ep_1"))
+    _segments(stores, "s1", "mc_1")
+    _segments(stores, "s2", "mc_2")
+    _with_profile(
+        stores,
+        _fact("Lives in Paris", "mc_1"),
+        _fact("Works in Python", "mc_1", "mc_2"),
+        history=[
+            {
+                "description": "Lived in Lyon",
+                "replaced_at": _TS,
+                "source_memcell_ids": ["mc_1"],
+            }
+        ],
+    )
+    await forget.forget_session(scope=_scope(), session_id="s1")
+    await forget.forget_session(scope=_scope(), session_id="s2")
+    assert _facts(stores) == []
+
+    result = await undo.undo_session(scope=_scope(), session_id="s1")
+
+    # "Works in Python" went with s2's forget, but rests on s1 too.
+    assert result.profiles == 2
+    assert sorted(_facts(stores)) == ["Lives in Paris", "Works in Python"]
+    history = stores.profile.profiles[_scope()].history
+    assert [entry["description"] for entry in history] == ["Lived in Lyon"]
+
+    again = await undo.undo_session(scope=_scope(), session_id="s2")
+    assert again.applied and again.profiles == 0  # nothing doubled
+    assert sorted(_facts(stores)) == ["Lives in Paris", "Works in Python"]

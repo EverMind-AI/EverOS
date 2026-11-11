@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
+from everos.memory import user_profile_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import Episode
 from everos.memory.ports import Filter, MemoryRef, Scope, Stored, all_of, eq, is_null
@@ -156,23 +157,27 @@ class ForgetManager:
 
         referring = await self._referring_episodes(scope, image_id)
         written = await self._rewrite_episodes(scope, referring, image_id)
-        profile_removed = await self._forget_profile(scope, image_id)
+        # The profile lock is held until the log says "forgotten": an update
+        # waiting on it then leaves the picture out, and none in flight writes
+        # back what this takes out.
+        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+            profile_removed = await self._forget_profile(scope, image_id)
+            entry = await self._stores.forget_log.record(
+                target="image",
+                target_id=image_id,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
+                reason=reason,
+                entry_ids=tuple(hit.stored.ref.entry_id for hit in occurrences),
+                episode_ids=tuple(
+                    (stored.ref.entry_id, ref.entry_id)
+                    for stored, ref in zip(referring, written, strict=False)
+                ),
+                removed_profile_items=profile_removed,
+            )
         profiles = sum(1 for bucket, _ in profile_removed if bucket != "history")
-        entry = await self._stores.forget_log.record(
-            target="image",
-            target_id=image_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            owner_type=scope.owner_type,
-            reason=reason,
-            entry_ids=tuple(hit.stored.ref.entry_id for hit in occurrences),
-            episode_ids=tuple(
-                (stored.ref.entry_id, ref.entry_id)
-                for stored, ref in zip(referring, written, strict=False)
-            ),
-            removed_profile_items=profile_removed,
-        )
 
         logger.info(
             "memory.images.forgotten",

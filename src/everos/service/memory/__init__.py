@@ -759,7 +759,8 @@ class MemoryService:
         """Forget everything one conversation established for one user.
 
         Marks rather than deletes, so :meth:`undo_forget_session` reverses it.
-        A picture file survives while any other live memory references it.
+        A picture file survives while any other live memory references it, and
+        a profile item while a segment it rests on is remembered.
         """
         return await self._session_forgetter.forget_session(
             scope=Scope(

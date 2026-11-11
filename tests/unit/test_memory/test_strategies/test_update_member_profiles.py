@@ -21,22 +21,26 @@ model. What these pin:
   consolidation keeps the link of an item it leaves as it is and links none of
   the items it merges (their history entries name what they merged into); the
   version keys never reach the model;
-- the member's pictures in the segments are read with them, nobody else's.
+- the member's pictures in the segments are read with them, nobody else's,
+  and never one the group forgot.
 """
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib
 import json
 import re
 from typing import Any
 
 import pytest
+from everalgo.llm import ImageUrlPart
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 from everalgo.user_memory import ProfileExtractor
 
+from everos.component.images import ImageLimits
 from everos.config import Settings
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.mappers import profile as profile_mapper
@@ -460,3 +464,50 @@ async def test_the_version_keys_never_reach_the_model() -> None:
     plain, versioned = prompts
     assert versioned == plain
     assert "supersedes" not in versioned and "pi_paris" not in versioned
+
+
+async def test_a_picture_the_group_forgot_is_left_out_of_the_update(
+    every: Any,
+) -> None:
+    every(1)
+    cat, dog = "c" * 64, "d" * 64
+    sent: list[Any] = []
+
+    async def model(messages: Any, *, response_format: type, **_: Any) -> str:
+        sent.append(messages)
+        return json.dumps({"operations": [{"action": "none"}]})
+
+    limits = ImageLimits(
+        max_bytes=1 << 20,
+        max_per_message=4,
+        max_request_bytes=1 << 22,
+        max_per_request=8,
+        formats=("jpeg",),
+    )
+    deps = dataclasses.replace(_deps(model), picture_limits=limits)
+    deps.stores.images.images[cat] = (b"cat", "jpeg")
+    deps.stores.images.images[dog] = (b"dog", "jpeg")
+    _segment(
+        deps,
+        "mc_1",
+        100,
+        ("u_chen", f"Our cat [IMAGE: {cat}]"),
+        ("u_chen", f"Our dog [IMAGE: {dog}]"),
+    )
+    await deps.stores.forget_log.record(
+        target="image",
+        target_id=cat,
+        app_id="default",
+        project_id="p",
+        owner_id="trip",
+        owner_type="group",
+    )
+
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+
+    (messages,) = sent
+    content = messages[1].content
+    text = "\n".join(p.text for p in content if not isinstance(p, ImageUrlPart))
+    assert cat not in text and "Our cat" in text
+    assert "Our dog [IMAGE: img-1]" in text
+    assert sum(isinstance(p, ImageUrlPart) for p in content) == 1

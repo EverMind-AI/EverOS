@@ -27,7 +27,9 @@ that into what EverOS keeps on the items:
   :data:`HISTORY_LIMIT` entries.
 
 A forgotten picture reaches the items, and the replaced values, read off it
-alone (:func:`forget_images`), and an undo puts them back (:func:`restore_items`).
+alone (:func:`forget_images`); a forgotten conversation reaches those every
+segment of which is forgotten (:func:`forget_segments`); an undo puts them back
+(:func:`restore_items`).
 """
 
 from __future__ import annotations
@@ -37,16 +39,18 @@ __all__ = [
     "SOURCE_IMAGE_KEYS",
     "bounded_history",
     "forget_images",
+    "forget_segments",
     "item_source_images",
     "mint_item_id",
     "normalised",
     "restore_items",
+    "rests_on",
     "stamp_update",
 ]
 
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -370,6 +374,13 @@ def forget_images(
         sources = item_source_images(entry)
         return not sources or bool(set(sources) - gone)
 
+    return _without(existing, survives)
+
+
+def _without(
+    existing: Profile, survives: Callable[[BaseModel | Mapping[str, Any]], bool]
+) -> tuple[Profile, list[tuple[str, dict[str, Any]]], int]:
+    """``existing`` without the items and replaced values ``survives`` refuses."""
     removed: list[tuple[str, dict[str, Any]]] = []
     kept: dict[str, list[Any]] = {}
     for bucket in ("explicit_info", "implicit_traits"):
@@ -388,6 +399,43 @@ def forget_images(
         return existing, [], 0
     history = [entry for entry in existing.history if survives(entry)]
     return existing.model_copy(update={**kept, "history": history}), removed, count
+
+
+def forget_segments(
+    existing: Profile | None,
+    segments: Collection[str],
+    *,
+    already: Collection[str] = (),
+) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
+    """Drop every item and replaced value that no remembered segment supports.
+
+    ``segments`` are the forgotten conversation's, ``already`` those of the
+    owner's earlier forgets no undo reversed. An entry goes when every segment
+    it rests on is among them and at least one is among ``segments``: what an
+    earlier forget left standing is that forget's to take. An entry with no
+    recorded segments (stored before entries had them) is never touched, nor
+    is one a remembered segment still supports.
+
+    Returns:
+        ``(profile, removed, count)`` as :func:`forget_images` returns them.
+    """
+    if existing is None:
+        return None, [], 0
+    these, gone = set(segments), {*segments, *already}
+
+    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
+        extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
+        raw = extra.get("source_memcell_ids")
+        sources = {str(s) for s in raw} if isinstance(raw, list) else set()
+        return not sources or not sources <= gone or not sources & these
+
+    return _without(existing, survives)
+
+
+def rests_on(entry: Mapping[str, Any], segments: Collection[str]) -> bool:
+    """Whether a removed item or replaced value names one of ``segments``."""
+    raw = entry.get("source_memcell_ids")
+    return isinstance(raw, list) and bool({str(s) for s in raw} & set(segments))
 
 
 def restore_items(

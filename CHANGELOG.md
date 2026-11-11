@@ -281,6 +281,18 @@ machinery that keeps a deleted memory from coming back.
   only to gain evidence and sources. A read shows an item's replaced values
   under `previous`. Forgetting a picture also takes the replaced values read
   off it alone, and the undo puts them back.
+- **Forgetting reaches the profile.** `POST /api/v2/memory/forget/session`
+  now reaches `user.md` through the items' sources: an item, or a replaced
+  value in its history, goes once every segment it rests on is forgotten
+  (this conversation's, or one the owner forgot before), and the undo puts it
+  back, with what a later forget took because of it; both responses carry
+  `profiles` (items). The profile update never reads a segment of a forgotten
+  conversation, nor a picture the owner (for a member profile, the group)
+  forgot: a forget leaves the bytes on disk for its undo, so the update asks
+  the forget log. The update, a forget and its undo hold one lock per user,
+  so no update writes back what a forget took out. A one-to-one forget by
+  message does not exist; a group forget by message already reached the
+  member profiles.
 - **A Reflection merge finishes on the merged episode itself.**
   `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
   and deprecates the replaced members at once; it used to wait for the

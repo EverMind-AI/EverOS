@@ -27,13 +27,14 @@ __all__ = [
     "profile_pictures",
 ]
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from everalgo.llm import image_url_part_from_bytes
 from everalgo.user_memory.profile import ProfilePicture
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
+from everos.memory.groups.forgotten import without_pictures
 from everos.memory.models import MemCell
 from everos.memory.ports import MemcellStore, SourceCheck
 from everos.memory.ports.images import ImageStore
@@ -131,6 +132,7 @@ async def profile_pictures(
     *,
     images: ImageStore | None,
     limits: ImageLimits | None,
+    forgotten: Collection[str] = (),
     detail: str = "high",
 ) -> tuple[list[MemCell], list[ProfilePicture]]:
     """The cells as a profile update reads them, and the pictures ``owner_id`` posted.
@@ -139,14 +141,20 @@ async def profile_pictures(
     (``img-1``, ``img-2`` in conversation order) and its ``[IMAGE: <hash>]``
     reference in the text becomes ``[IMAGE: <label>]``, the name the update
     and its reply use; the hash is the id the lineage reports back. A picture
-    someone else posted, or one that cannot be read (forgotten, or a store
-    rebuilt without its cache), is not attached, and its reference becomes a
-    bare ``[IMAGE]``: the update sees that a picture was sent, never what it
-    shows. ``detail`` is the image parts' hint, as the picture route sends.
+    someone else posted, or one that cannot be read (a store rebuilt without
+    its cache), is not attached, and its reference becomes a bare ``[IMAGE]``:
+    the update sees that a picture was sent, never what it shows. A picture in
+    ``forgotten`` (a forget no undo reversed names it) is taken out of the
+    text, as every group read takes it out
+    (:func:`~everos.memory.groups.without_pictures`): its bytes stay on disk
+    for the undo, so whether they can be read says nothing. ``detail`` is the
+    image parts' hint, as the picture route sends.
 
     Without a picture store or limits (the extraction model reads no images),
-    the cells come back unchanged and no picture is attached.
+    no picture is attached.
     """
+    if forgotten:
+        cells = [without_pictures(cell, forgotten) for cell in cells]
     if images is None or limits is None:
         return list(cells), []
     labels: dict[str, str] = {}

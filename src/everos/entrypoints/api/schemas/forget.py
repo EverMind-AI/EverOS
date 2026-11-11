@@ -92,8 +92,10 @@ class ForgetSessionResponseData(BaseModel):
     """What forgetting one conversation touched.
 
     ``episodes`` are entry ids marked forgotten, ``image_memories`` how many
-    picture memories, and ``images`` the picture *files* taken out of
-    circulation because this session held their last live reference.
+    picture memories, ``images`` the picture *files* taken out of
+    circulation because this session held their last live reference, and
+    ``profiles`` how many profile items left ``user.md`` because every segment
+    they rest on is now forgotten.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -103,6 +105,7 @@ class ForgetSessionResponseData(BaseModel):
     episodes: list[str] = Field(default_factory=list)
     image_memories: int = 0
     images: list[str] = Field(default_factory=list)
+    profiles: int = 0
 
 
 class UndoForgetSessionRequest(ForgetSessionRequest):
@@ -110,7 +113,7 @@ class UndoForgetSessionRequest(ForgetSessionRequest):
 
 
 class UndoForgetSessionResponseData(BaseModel):
-    """What undoing a conversation's forget put back."""
+    """What undoing a conversation's forget put back (``profiles``: items)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -120,6 +123,7 @@ class UndoForgetSessionResponseData(BaseModel):
     episodes: list[str] = Field(default_factory=list)
     image_memories: int = 0
     images: list[str] = Field(default_factory=list)
+    profiles: int = 0
 
 
 class ReviseImageMemoryRequest(ForgetImageRequest):

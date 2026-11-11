@@ -15,7 +15,9 @@ What these pin (``everos.memory.extract.pipeline.profile_items``):
   read off pictures only when every part of it was;
 - the history bound keeps the values a current item still shows as replaced;
 - a forgotten picture takes the items and the replaced values resting on it
-  alone, and an undo puts them back once, history in its place.
+  alone, and an undo puts them back once, history in its place;
+- a forgotten conversation takes those every segment of which is forgotten,
+  one at least its own, and never an item with no recorded segments.
 """
 
 from __future__ import annotations
@@ -31,7 +33,9 @@ from everos.memory.extract.pipeline.profile_items import (
     SOURCE_IMAGE_KEYS,
     bounded_history,
     forget_images,
+    forget_segments,
     restore_items,
+    rests_on,
     stamp_update,
 )
 from everos.memory.mappers import profile as profile_mapper
@@ -485,3 +489,45 @@ def test_an_undo_puts_a_replaced_value_back_in_its_place_once() -> None:
     again, _, replaced = restore_items(back, removed, owner_id="u1", timestamp=1)
     assert replaced == 0
     assert len(again.history) == 3
+
+
+def _sourced(description: str, *sources: str) -> ExplicitInfoItem:
+    return _item(description, source_memcell_ids=list(sources))
+
+
+def test_a_forgotten_conversation_takes_what_no_remembered_segment_supports() -> None:
+    profile = _profile(
+        _sourced("Lives in Paris", "mc_1"),
+        _sourced("Works in Python", "mc_1", "mc_9"),  # mc_9 is remembered
+        _sourced("Has a cat", "mc_1", "mc_5"),  # mc_5 an earlier forget's
+        _sourced("Plays chess", "mc_5"),  # the earlier forget's to take
+        _item("Likes tea"),  # stored before items had segments
+    )
+    profile.history = [
+        _replaced("Lived in Lyon", 30, source_memcell_ids=["mc_1"]),
+        _replaced("Lived in Rome", 20, source_memcell_ids=["mc_9"]),
+    ]
+
+    after, removed, count = forget_segments(profile, ["mc_1", "mc_2"], already=["mc_5"])
+
+    assert after is not None
+    assert [i.description for i in after.explicit_info] == [
+        "Works in Python",
+        "Plays chess",
+        "Likes tea",
+    ]
+    assert count == 2
+    assert [(bucket, entry["description"]) for bucket, entry in removed] == [
+        ("explicit_info", "Lives in Paris"),
+        ("explicit_info", "Has a cat"),
+        ("history", "Lived in Lyon"),
+    ]
+    assert [entry["description"] for entry in after.history] == ["Lived in Rome"]
+    assert forget_segments(None, ["mc_1"]) == (None, [], 0)
+    assert forget_segments(after, ["mc_7"]) == (after, [], 0)
+
+
+def test_rests_on_names_a_removed_entry_by_its_segments() -> None:
+    assert rests_on({"source_memcell_ids": ["mc_1", "mc_2"]}, ["mc_2"])
+    assert not rests_on({"source_memcell_ids": ["mc_1"]}, ["mc_2"])
+    assert not rests_on({"description": "no segments"}, ["mc_2"])

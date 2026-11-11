@@ -58,6 +58,20 @@ def user_cluster_lock(
     )
 
 
+def user_profile_lock(
+    app_id: str, project_id: str, owner_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one user's ``user.md`` holds.
+
+    The profile update (a read, a model call, a write), and a forget and its
+    undo taking items out and putting them back: none of them writes back a
+    profile another changed meanwhile.
+    """
+    return get_partition_lock(
+        "extract_user_profile", f"{app_id}:{project_id}:{owner_id}"
+    )
+
+
 def member_profile_lock(
     app_id: str, project_id: str, group_id: str, member_id: str
 ) -> AbstractAsyncContextManager[None]:

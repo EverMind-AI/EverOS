@@ -244,6 +244,55 @@ async def test_the_owners_pictures_are_attached_and_another_senders_are_not() ->
     assert (stored.explicit_info[0].model_extra or {})["source_image_ids"] == [_CAT]
 
 
+async def test_a_segment_of_a_forgotten_conversation_is_not_read() -> None:
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    forgotten = await deps.stores.forget_log.record(
+        target="session",
+        target_id="sess_1",
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+    )
+    event = _event().model_copy(update={"session_id": "sess_1"})
+
+    await extract_user_profile(event, deps)
+    assert model.sent == []
+
+    await deps.stores.forget_log.mark_undone(forgotten.forget_id)
+    await extract_user_profile(event, deps)
+    assert len(model.sent) == 1  # remembered again
+
+
+async def test_a_forgotten_picture_is_taken_out_of_the_update() -> None:
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model, picture_limits=_LIMITS)
+    deps.stores.images.images[_CAT] = (b"cat", "jpeg")
+    deps.stores.images.images[_DOG] = (b"dog", "jpeg")
+    deps.stores.memcell.seed(
+        "mc_1",
+        _memcell(
+            ("u_alice", f"My cat [IMAGE: {_CAT}]"),
+            ("u_alice", f"My dog [IMAGE: {_DOG}]"),
+        ),
+    )
+    await deps.stores.forget_log.record(
+        target="image",
+        target_id=_CAT,
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+    )
+
+    await extract_user_profile(_event(), deps)
+
+    user = model.user_text()
+    assert _CAT not in user and "My cat" in user
+    assert "My dog [IMAGE: img-1]" in user
+    assert model.images() == 1
+
+
 async def test_without_vision_no_picture_is_attached() -> None:
     model = _Model(json.dumps({"operations": [{"action": "none"}]}))
     deps = _deps(model)
