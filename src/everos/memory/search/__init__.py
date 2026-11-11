@@ -52,6 +52,8 @@ The Filters DSL primitives (``ALLOWED_FIELDS`` / ``RESERVED_FIELDS`` /
 its flat-DSL variant without forking the field allow-list.
 """
 
+from .audience import with_audience as with_audience
+from .dto import AudienceItem as AudienceItem
 from .dto import FilterNode as FilterNode
 from .dto import GroupProfileEntry as GroupProfileEntry
 from .dto import ProfileSourceItem as ProfileSourceItem
@@ -83,6 +85,7 @@ from .shaper import group_source as group_source
 __all__ = [
     "ALLOWED_FIELDS",
     "RESERVED_FIELDS",
+    "AudienceItem",
     "FilterError",
     "FilterNode",
     "GroupProfileEntry",
@@ -108,4 +111,5 @@ __all__ = [
     "shape_profile_item",
     "visible_profile",
     "visible_profile_items",
+    "with_audience",
 ]

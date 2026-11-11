@@ -277,6 +277,9 @@ class KnowledgeSearchRequest(BaseModel):
     include_content: bool = False
     app_id: AppScopeId = "default"
     project_id: ProjectScopeId = "default"
+    asker_id: str | None = Field(default=None, min_length=1)
+    """Who asks. Needed once the project has groups: its knowledge base is
+    then read by its members only (docs/group-memory.md, section 9.1)."""
 
 
 class DocumentPatchRequest(BaseModel):

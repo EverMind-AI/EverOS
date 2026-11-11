@@ -1103,6 +1103,9 @@ class InMemoryGroupStore:
         key = self._key(scope)
         return self._record(key) if key in self.groups else None
 
+    async def group_ids(self, app_id: str, project_id: str) -> list[str]:
+        return sorted(g for a, p, g in self.groups if (a, p) == (app_id, project_id))
+
     async def save(
         self, scope: Scope, *, group: Group, events: Sequence[RosterEvent]
     ) -> GroupRecord:

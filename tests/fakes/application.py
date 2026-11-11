@@ -402,6 +402,7 @@ def make_knowledge_service(
     topics: Any = None,
     parser_available: bool = False,
     max_upload_bytes: int | None = None,
+    access: Any = None,
 ) -> KnowledgeService:
     """A real :class:`KnowledgeService`; unset providers read as unconfigured.
 
@@ -430,6 +431,7 @@ def make_knowledge_service(
         search_config=search_config or load_settings().knowledge.search,
         parse_file=parse_file or functools.partial(aparse_file, llm=None),
         parser_available=parser_available,
+        access=access,
         max_upload_bytes=max_upload_bytes or load_settings().knowledge.max_upload_bytes,
     )
 

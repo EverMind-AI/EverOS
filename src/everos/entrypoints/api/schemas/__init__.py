@@ -74,6 +74,10 @@ from .memorize import ToolFunctionDTO as ToolFunctionDTO
 from .ome import RunSummary as RunSummary
 from .ome import TriggerRequest as TriggerRequest
 from .ome import TriggerResponse as TriggerResponse
+from .projects import ProjectDTO as ProjectDTO
+from .projects import ProjectGroupDTO as ProjectGroupDTO
+from .projects import ProjectMemberDTO as ProjectMemberDTO
+from .projects import ProjectProfileDTO as ProjectProfileDTO
 
 __all__ = [
     "AcceptedResponseData",
@@ -123,6 +127,10 @@ __all__ = [
     "MemorizeQueueHealthBlock",
     "MessageItemDTO",
     "PathSafeId",
+    "ProjectDTO",
+    "ProjectGroupDTO",
+    "ProjectMemberDTO",
+    "ProjectProfileDTO",
     "ProjectScopeId",
     "QuiesceResponse",
     "ReviseImageMemoryRequest",

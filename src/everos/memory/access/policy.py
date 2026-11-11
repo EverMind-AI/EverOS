@@ -53,7 +53,7 @@ __all__ = [
 ]
 
 from collections.abc import Awaitable, Callable, Collection, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from everos.core.errors import ForbiddenError, InvalidInputError
@@ -163,6 +163,9 @@ class ScopeRequest:
     audience: Audience = "asker"
     context_group_id: str | None = None
     """An agent scope read in a group's context: the group's cases join."""
+    project_scope: bool = False
+    """Every group of ``project_id`` the asker currently belongs to, as one
+    pool (section 8.7); ``group_ids`` is then resolved by the policy."""
 
 
 @dataclass(frozen=True)
@@ -457,6 +460,10 @@ class AccessPolicy:
                 exist answers the same, so a probe learns nothing).
             InvalidInputError: A group scope without an asker.
         """
+        if request.project_scope:
+            return await self._group_scope(
+                identity, await self._project_groups(identity, request)
+            )
         if request.group_ids:
             return await self._group_scope(identity, request)
         case_filter: Filter | None = None
@@ -484,6 +491,68 @@ class AccessPolicy:
             ),
             case_filter=case_filter,
         )
+
+    async def project_groups(
+        self, app_id: str, project_id: str, asker: str
+    ) -> list[str]:
+        """The groups of a project ``asker`` currently belongs to, sorted."""
+        found: list[str] = []
+        for group_id in await self._groups.group_ids(app_id, project_id):
+            record = await self._groups.get(
+                Scope(
+                    app_id=app_id,
+                    project_id=project_id,
+                    owner_id=group_id,
+                    owner_type="group",
+                )
+            )
+            if record is not None and record.roster.is_current_member(asker):
+                found.append(group_id)
+        return sorted(found)
+
+    async def authorize_project_read(
+        self, identity: Identity, app_id: str, project_id: str
+    ) -> None:
+        """Raise unless ``identity`` may read the project's knowledge base (9.1).
+
+        A project without groups keeps today's behaviour: anyone who names it
+        reads it. A project with groups is read by its members only -- the
+        current members of any of its groups.
+
+        Raises:
+            InvalidInputError: The project has groups and no asker was named.
+            ForbiddenError: The asker is in none of the project's groups.
+        """
+        if not await self._groups.group_ids(app_id, project_id):
+            return
+        if identity.asker_id is None:
+            raise InvalidInputError(
+                "asker_id is required to read the knowledge of a project with groups"
+            )
+        if not await self.project_groups(app_id, project_id, identity.asker_id):
+            raise ForbiddenError(
+                "the asker is not a member of any group of the project"
+            )
+
+    async def _project_groups(
+        self, identity: Identity, request: ScopeRequest
+    ) -> ScopeRequest:
+        """The request with its groups: the asker's current groups of the project.
+
+        Raises:
+            InvalidInputError: No asker.
+            ForbiddenError: The asker is in none of the project's groups.
+        """
+        if identity.asker_id is None:
+            raise InvalidInputError("asker_id is required for a project scope")
+        groups = await self.project_groups(
+            request.app_id, request.project_id, identity.asker_id
+        )
+        if not groups:
+            raise ForbiddenError(
+                "the asker is not a member of any group of the project"
+            )
+        return replace(request, group_ids=tuple(groups), project_scope=False)
 
     async def _case_filter(self, request: ScopeRequest, *, asker: str) -> Filter:
         """Which of an agent's cases a read sees (section 9.1, row 12).

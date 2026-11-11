@@ -24,7 +24,11 @@ from fastapi import APIRouter, Depends, Path, Query, Response, UploadFile
 from fastapi.params import Form
 
 from everos.core.utils.datetime import to_display_tz
-from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.dependencies import (
+    ApplicationDep,
+    AskerHeaderDep,
+    RequestIdDep,
+)
 from everos.entrypoints.api.schemas import (
     AppScopeId,
     CategoryDTO,
@@ -174,6 +178,7 @@ async def delete_document_route(
 async def list_documents_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
     category_id: _QueryOptStr = None,
@@ -181,6 +186,7 @@ async def list_documents_route(
     page_size: _QueryPageSize = 20,
     sort_by: _QuerySortBy = "created_at",
     sort_order: _QuerySortOrder = "desc",
+    asker_id: _QueryOptStr = None,
 ) -> SuccessEnvelope[DocumentListResponse]:
     """Paginated document listing."""
     result = await app.knowledge.list_documents(
@@ -191,6 +197,8 @@ async def list_documents_route(
         page_size=page_size,
         sort_by=sort_by,
         sort_order=sort_order,
+        asker_id=asker_id,
+        asserted_asker=asker_header,
     )
     return SuccessEnvelope(
         request_id=request_id, data=DocumentListResponse.from_result(result)
@@ -201,12 +209,20 @@ async def list_documents_route(
 async def get_document_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
     doc_id: _PathDocId,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
+    asker_id: _QueryOptStr = None,
 ) -> SuccessEnvelope[DocumentDetailResponse]:
     """Fetch a single document with its topic list."""
-    detail = await app.knowledge.get_document(doc_id, app_id, project_id)
+    detail = await app.knowledge.get_document(
+        doc_id,
+        app_id,
+        project_id,
+        asker_id=asker_id,
+        asserted_asker=asker_header,
+    )
     return SuccessEnvelope(
         request_id=request_id, data=DocumentDetailResponse.from_result(detail)
     )
@@ -216,12 +232,20 @@ async def get_document_route(
 async def get_topic_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
     topic_id: _PathTopicId,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
+    asker_id: _QueryOptStr = None,
 ) -> SuccessEnvelope[TopicDetailResponse]:
     """Fetch a single topic with full content."""
-    detail = await app.knowledge.get_topic(topic_id, app_id, project_id)
+    detail = await app.knowledge.get_topic(
+        topic_id,
+        app_id,
+        project_id,
+        asker_id=asker_id,
+        asserted_asker=asker_header,
+    )
     return SuccessEnvelope(
         request_id=request_id, data=TopicDetailResponse.from_result(detail)
     )
@@ -234,6 +258,7 @@ async def get_topic_route(
 async def search_knowledge_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
     req: KnowledgeSearchRequest,
 ) -> SuccessEnvelope[KnowledgeSearchResponse]:
     """Knowledge retrieval (keyword / vector / hybrid)."""
@@ -245,6 +270,8 @@ async def search_knowledge_route(
         include_content=req.include_content,
         app_id=req.app_id,
         project_id=req.project_id,
+        asker_id=req.asker_id,
+        asserted_asker=asker_header,
     )
     return SuccessEnvelope(
         request_id=request_id, data=KnowledgeSearchResponse.from_result(result)
@@ -255,11 +282,15 @@ async def search_knowledge_route(
 async def list_categories_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
     app_id: _QueryAppId = "default",
     project_id: _QueryProjectId = "default",
+    asker_id: _QueryOptStr = None,
 ) -> SuccessEnvelope[CategoryListResponse]:
     """List taxonomy categories from ``.taxonomy.md``."""
-    overviews = await app.knowledge.list_categories(app_id, project_id)
+    overviews = await app.knowledge.list_categories(
+        app_id, project_id, asker_id=asker_id, asserted_asker=asker_header
+    )
     categories = [
         CategoryDTO(
             category_id=c.category_id,

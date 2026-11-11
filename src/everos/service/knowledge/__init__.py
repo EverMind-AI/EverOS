@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 from everalgo.types import ParsedContent, RawFile
 
+from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.ports import KnowledgeCatalog, KnowledgeStore
 
 from ._documents import DocumentManager
@@ -75,6 +76,9 @@ class KnowledgeService:
         parse_file: Parses an uploaded non-text file with the multimodal LLM.
         parser_available: Whether the parser is installed (else UTF-8 only).
         max_upload_bytes: The largest upload accepted.
+        access: Decides who may read a project's knowledge once the project
+            has groups (docs/group-memory.md, section 9.1); ``None`` reads as
+            a project without groups.
     """
 
     def __init__(
@@ -90,7 +94,9 @@ class KnowledgeService:
         parse_file: Callable[[RawFile], Awaitable[ParsedContent]],
         parser_available: bool = False,
         max_upload_bytes: int = 52_428_800,
+        access: AccessPolicy | None = None,
     ) -> None:
+        self._access = access
         self._documents = DocumentManager(
             store=store,
             catalog=catalog,
@@ -264,13 +270,21 @@ class KnowledgeService:
         )
 
     async def get_document(
-        self, doc_id: str, app_id: str, project_id: str
+        self,
+        doc_id: str,
+        app_id: str,
+        project_id: str,
+        *,
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> DocumentDetail:
         """Fetch a document with its topic list.
 
         Raises:
             DocumentNotFoundError: When no record exists for ``doc_id``.
+            ForbiddenError / InvalidInputError: See :meth:`_authorize_read`.
         """
+        await self._authorize_read(app_id, project_id, asker_id, asserted_asker)
         return await self._queries.get_document(doc_id)
 
     async def list_documents(
@@ -283,8 +297,11 @@ class KnowledgeService:
         page_size: int = 20,
         sort_by: str = "created_at",
         sort_order: str = "desc",
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> DocumentListResult:
         """Paginated document list with per-document topic counts."""
+        await self._authorize_read(app_id, project_id, asker_id, asserted_asker)
         return await self._queries.list_documents(
             app_id,
             project_id,
@@ -296,19 +313,33 @@ class KnowledgeService:
         )
 
     async def get_topic(
-        self, topic_id: str, app_id: str, project_id: str
+        self,
+        topic_id: str,
+        app_id: str,
+        project_id: str,
+        *,
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> TopicDetail:
         """Fetch a single topic with full content.
 
         Raises:
             TopicNotFoundError: When no record exists for ``topic_id``.
+            ForbiddenError / InvalidInputError: See :meth:`_authorize_read`.
         """
+        await self._authorize_read(app_id, project_id, asker_id, asserted_asker)
         return await self._queries.get_topic(topic_id)
 
     async def list_categories(
-        self, app_id: str, project_id: str
+        self,
+        app_id: str,
+        project_id: str,
+        *,
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> list[CategoryOverview]:
         """Taxonomy categories (created on first use) with document counts."""
+        await self._authorize_read(app_id, project_id, asker_id, asserted_asker)
         return await self._queries.list_categories(app_id, project_id)
 
     async def search_knowledge(
@@ -321,12 +352,16 @@ class KnowledgeService:
         include_content: bool = False,
         app_id: str = "default",
         project_id: str = "default",
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> SearchKnowledgeResult:
         """Search knowledge topics by keyword, vector, or hybrid retrieval.
 
         Raises:
             ProviderNotConfiguredError: Embedding or rerank is not configured.
+            ForbiddenError / InvalidInputError: See :meth:`_authorize_read`.
         """
+        await self._authorize_read(app_id, project_id, asker_id, asserted_asker)
         return await self._searcher.search(
             query=query,
             method=method,
@@ -335,4 +370,25 @@ class KnowledgeService:
             include_content=include_content,
             app_id=app_id,
             project_id=project_id,
+        )
+
+    async def _authorize_read(
+        self,
+        app_id: str,
+        project_id: str,
+        asker_id: str | None,
+        asserted_asker: str | None,
+    ) -> None:
+        """A project with groups is read by its members only (section 9.1).
+
+        Raises:
+            InvalidInputError: The project has groups and no asker was named.
+            ForbiddenError: The asker is in none of the project's groups.
+        """
+        if self._access is None:
+            return
+        await self._access.authorize_project_read(
+            resolve_identity(header=asserted_asker, body_asker=asker_id),
+            app_id,
+            project_id,
         )

@@ -43,6 +43,7 @@ from .routes import (
     memorize,
     metrics,
     ome,
+    projects,
     search,
     tasks,
 )
@@ -138,6 +139,7 @@ def create_app(
     # v1 first — legacy alias, behavior identical.
     app.include_router(memorize.router, prefix="/api/v1")
     app.include_router(groups.router, prefix="/api/v1")
+    app.include_router(projects.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(get.router, prefix="/api/v1")
     app.include_router(delete.router, prefix="/api/v1")
@@ -151,6 +153,7 @@ def create_app(
     # v2 — cloud-aligned name, same routers.
     app.include_router(memorize.router, prefix="/api/v2")
     app.include_router(groups.router, prefix="/api/v2")
+    app.include_router(projects.router, prefix="/api/v2")
     app.include_router(search.router, prefix="/api/v2")
     app.include_router(get.router, prefix="/api/v2")
     app.include_router(images.router, prefix="/api/v2")

@@ -31,6 +31,9 @@ __all__ = [
     "GroupView",
     "MemorizeResult",
     "MemoryService",
+    "ProjectMember",
+    "ProjectProfile",
+    "ProjectView",
     "QueueHealth",
     "Queued",
     "RevisionResult",
@@ -91,6 +94,10 @@ from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
 from ._models import Queued as Queued
+from ._projects import ProjectMember as ProjectMember
+from ._projects import ProjectProfile as ProjectProfile
+from ._projects import ProjectUseCases
+from ._projects import ProjectView as ProjectView
 from ._queue import MemorizeQueueWorker
 from ._queue_models import TASK_STATUSES as TASK_STATUSES
 from ._queue_models import QueueHealth as QueueHealth
@@ -241,6 +248,9 @@ class MemoryService:
             if rosters is not None
             else None
         )
+        self._projects = ProjectUseCases(
+            self._access, indexes.group_profile if indexes is not None else None
+        )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
             queue_cfg,
@@ -361,6 +371,24 @@ class MemoryService:
     async def read_group(self, **request: Any) -> GroupView:
         """A group's meta and roster, for a current member (``GET /groups/{id}``)."""
         return await self._group_cases().read(**request)
+
+    async def read_project(self, **request: Any) -> ProjectView:
+        """The asker's groups of a project and their members (``GET /projects/{id}``).
+
+        Raises:
+            ForbiddenError: The asker is in none of the project's groups.
+            InvalidInputError: No asker.
+        """
+        return await self._projects.read(**request)
+
+    async def project_profile(self, **request: Any) -> ProjectProfile:
+        """The group profiles the asker may see across a project (section 8.7).
+
+        Raises:
+            ForbiddenError: The asker is in none of the project's groups.
+            InvalidInputError: No asker.
+        """
+        return await self._projects.profile(**request)
 
     # ── group forget use cases ─────────────────────────────────────────────
 
