@@ -250,25 +250,38 @@ machinery that keeps a deleted memory from coming back.
   `add` / `modify` / `deprecate` / `none`, each naming the segments and
   pictures it rests on, and a changed value is a `modify` of the item holding
   the old one. A consolidation call (drop, merge, split, re-file) runs only for
-  the whole profile past 60 items or one name past 8, and runs again on the
-  same part only once it has grown by 15 / 4 items, so the regroup loop is
-  gone. It used to re-send every segment of every cluster newer than the
+  the whole profile past 60 items, the traits past 10 or one name past 8, and
+  runs again on the same part only once it has grown by 15 / 3 / 4 items, so
+  the regroup loop is gone. It used to re-send every segment of every cluster newer than the
   profile on every update (67 lines for a 17-line segment, measured
   2026-11-11), re-adding what was on file and sending 63 of 82 updates on to
   REGROUP; the profile was 85% of the text write cost. Member-in-group
   profiles keep `[groups] member_profile_every` and use the same prompts.
   Measured on 2026-11-11 (DeepSeek V4.1 Flash, thinking off, temperature 0;
   cold estimate per 1,000 messages, off-peak / peak): LoCoMo conversations
-  0-1 $0.200 / $0.400 before, $0.101 / $0.201 now, the profile 84.5% of it
-  before and 69.4% now; MemEye's eight conversations $0.186 / $0.372 before,
-  $0.155 / $0.309 now. The update prompt is bounded by the profile, not the
-  history: 2.9K to 7.2K tokens on LoCoMo (17.3K before). Reading the poster's
-  pictures adds 10% to the update prompt on MemEye, $0.042 per 1,000
-  pictures off-peak.
+  0-1 $0.200 / $0.400 before, $0.115 / $0.229 now, the profile 84.5% of it
+  before and 73% now; MemEye's eight conversations $0.186 / $0.372 before,
+  $0.146 / $0.293 now. The update prompt is bounded by the profile, not the
+  history: at most 8.3K tokens on LoCoMo (17.3K before) and 9.9K on MemEye
+  (32.7K). Reading the poster's pictures adds 10% to the update prompt on
+  MemEye, $0.042 per 1,000 pictures off-peak. Needs everalgo-user-memory
+  0.9.0rc6.dev6 (a local build until it is published; the pin still names
+  0.9.0rc4).
   `extract_user_profile` now triggers on the pipeline's `EpisodeExtracted`
   with or without an embedding provider and skips a segment an item already
   rests on; the clusters no longer drive it (`trigger_profile_clustering`
   still runs, for Reflection).
+- **The profile reads traits again.** Reading one segment at a time, the
+  two-prompt update first wrote almost no trait (9 on LoCoMo conversations
+  0-1 where rc5 held 100, 12 on MemEye where it held 44): the rewrite had
+  dropped rc5's rule to look for them. The update now asks for them,
+  conduct towards others included, and the traits are consolidated together
+  past 10, because a disposition on file comes back as a new trait, often
+  under a new name, whenever a segment shows it again. Against rc5's final
+  profiles (same judge): LoCoMo 93 of its 100 traits covered (49 before) with
+  31 duplicates (rc5 83), MemEye 42 of 44 (20 before) with 12 (rc5 29). This
+  costs $0.014 per 1,000 LoCoMo messages off-peak and nothing measurable on
+  MemEye; no trait pass or re-read of older segments was needed.
 - **One profile writer.** The picture call no longer writes profile items:
   its `profile` reply field and prompt block are gone (the picture prompt is
   shorter), and `profile_delta` with them. The profile update reads the

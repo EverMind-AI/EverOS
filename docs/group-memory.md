@@ -693,8 +693,8 @@ say about one member: preferences, constraints, commitments, expertise.
   profile and only the member's new segments and replies `add` / `modify` /
   `deprecate` / `none`, each operation naming the segments and pictures it
   rests on; a consolidation call follows only for a part of the profile over
-  its cap (60 items, 8 under one name) that has grown since it was last
-  consolidated (15 items, 4 under the name). It is called with
+  its cap (60 items, 10 traits, 8 under one name) that has grown since it was
+  last consolidated (15 items, 3 traits, 4 under the name). It is called with
   `sender_id = member_id`; its prompt scopes extraction to the target speaker
   and tells the model not to treat assistant suggestions as the person's
   traits.
