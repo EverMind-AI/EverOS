@@ -238,9 +238,12 @@ class AgentSkillReader:
                 while ``list_by_cluster`` catches it per file so one bad
                 file cannot starve the rest of the cluster.
         """
-        if not await anyio.Path(path).is_file():
+        try:
+            parsed = await MarkdownReader.read(path)
+        except FileNotFoundError:
+            # Absent, or gone between the caller's listing and this read: a
+            # deletion of the agent moves its skill files away concurrently.
             return None
-        parsed = await MarkdownReader.read(path)
         frontmatter = schema.model_validate(parsed.frontmatter)
         body = parsed.body.rstrip("\n")
         return frontmatter, body

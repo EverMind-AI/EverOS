@@ -58,7 +58,12 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
-from everos.memory.access import AccessPolicy, authorize_manage, resolve_identity
+from everos.memory.access import (
+    AccessPolicy,
+    Identity,
+    authorize_manage,
+    resolve_identity,
+)
 from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     keep_question_pictures,
@@ -452,21 +457,14 @@ class MemoryService:
         identity = resolve_identity(header=asserted_asker, body_asker=asker_id)
         if identity.asker_id is None:
             raise InvalidInputError("asker_id is required for a group-scoped delete")
-        scope = _group_scope(app_id, project_id, group_id)
-        record = await self._stores.groups.get(scope)
-        if record is None:
-            raise ForbiddenError(
-                f"the asker is not a current member of group {group_id!r}"
-            )
-        authorize_manage(record.roster, identity.asker_id)
         target = (
             GroupForgetTarget(kind="session", session_id=session_id)
             if session_id is not None
             else GroupForgetTarget(kind="member", member_id=member_id)
         )
         forgotten = await self._run_to_completion(
-            self._group_forgetter.forget(
-                scope=scope, identity=identity, target=target, reason="delete"
+            self._delete_in_group(
+                _group_scope(app_id, project_id, group_id), identity, target
             ),
             label="memory_group_delete",
         )
@@ -491,6 +489,20 @@ class MemoryService:
             forget_id=forgotten.forget_id,
         )
         return DeleteResult(filters=filters, count=count), forgotten
+
+    async def _delete_in_group(
+        self, scope: Scope, identity: Identity, target: GroupForgetTarget
+    ) -> GroupForgetResult:
+        """The owner/admin check, then the forget; one supervised step."""
+        record = await self._stores.groups.get(scope)
+        if record is None:
+            raise ForbiddenError(
+                f"the asker is not a current member of group {scope.owner_id!r}"
+            )
+        authorize_manage(record.roster, identity.asker_id)
+        return await self._group_forgetter.forget(
+            scope=scope, identity=identity, target=target, reason="delete"
+        )
 
     async def _run_to_completion[T](
         self, step: Coroutine[Any, Any, T], *, label: str
@@ -535,17 +547,8 @@ class MemoryService:
                 ``asker_id``); deleting the session's buffer and memcells
                 alone would leave the group's memory of it half removed.
         """
-        if session_id is not None:
-            bound = await self._stores.groups.binding(
-                SessionKey(app_id, project_id, session_id)
-            )
-            if bound is not None:
-                raise InvalidInputError(
-                    "the session belongs to a group; name group_id and asker_id "
-                    "to delete it inside the group"
-                )
         task = self._extractions.supervise(
-            self._deleter.delete(
+            self._delete_outside_groups(
                 app_id=app_id,
                 project_id=project_id,
                 user_id=user_id,
@@ -555,7 +558,7 @@ class MemoryService:
             session_id=session_id,
             memcell_ids=[],
             label="memory_delete",
-            expected=(SessionBusyError, PathTraversalError),
+            expected=(SessionBusyError, PathTraversalError, InvalidInputError),
         )
         try:
             return await asyncio.shield(task)
@@ -564,6 +567,39 @@ class MemoryService:
                 "memory_delete_continues_after_cancel", session_id=session_id
             )
             raise
+
+    async def _delete_outside_groups(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        user_id: str | None,
+        agent_id: str | None,
+        session_id: str | None,
+    ) -> DeleteResult:
+        """Refuse a session of a group, then delete; one supervised step.
+
+        The session's binding is read inside the shielded task, not before
+        it: a client that goes away while that read is in flight would
+        otherwise cancel a database call half way, and the session's
+        connection could be closed under the rollback that follows.
+        """
+        if session_id is not None:
+            bound = await self._stores.groups.binding(
+                SessionKey(app_id, project_id, session_id)
+            )
+            if bound is not None:
+                raise InvalidInputError(
+                    "the session belongs to a group; name group_id and asker_id "
+                    "to delete it inside the group"
+                )
+        return await self._deleter.delete(
+            app_id=app_id,
+            project_id=project_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
 
     async def delete_by_ids(
         self,

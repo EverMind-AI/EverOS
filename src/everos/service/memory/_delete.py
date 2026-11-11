@@ -301,9 +301,18 @@ class Deleter:
 
         Members and their texts are read without the clustering lock; under
         it the member list is read again and, if it moved, the round starts
-        over (at most three times, then the md is read under the lock).
+        over (at most three times, then the md is read under the lock). The
+        clusters are looked up after one pass through the clustering lock, so
+        a run that was placing a gone episode has finished placing it.
         """
         clusters = self._stores.cluster
+        # A barrier first: a clustering run that found one of these episodes
+        # still in md before step 1 removed it holds this lock until it has
+        # written the episode into a cluster. Waiting for it here makes the
+        # lookup below see that write; a run that takes the lock after this
+        # finds the episode gone and skips it.
+        async with user_cluster_lock(scope.app_id, scope.project_id, scope.owner_id):
+            pass
         cluster_ids: set[str] = set()
         for entry_id in sorted(gone):
             found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
