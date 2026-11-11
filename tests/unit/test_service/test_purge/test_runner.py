@@ -9,10 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import delete
 
 from everos.core import failpoints
 from everos.core.purge_marks import MARKS
 from everos.core.utils.datetime import get_utc_now
+from everos.infra.persistence.sqlite import session_scope
+from everos.infra.persistence.sqlite._tables import Memcell
 from everos.service.purge import _runner
 from tests.fakes.storage import Storage
 
@@ -329,6 +332,28 @@ async def test_settle_wait_still_waits_when_a_sibling_run_is_gated(
     started = loop.time()
     assert await p.run_to_end(job.job_id) == "succeeded"
     assert 0.5 <= loop.time() - started < 3
+
+
+async def test_rows_the_cascade_drops_after_step2_count_as_deleted(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p, job_id = await _confirmed(storage)
+    move = _runner.PurgeRunner._step_markdown
+
+    async def move_then_cascade(self: Any, run: Any) -> int:
+        moved = await move(self, run)
+        # The cascade sees the moved files and drops their index rows (and
+        # the knowledge row of a document) before step 3 gets there.
+        await storage.repos.episode.delete(_runner.scope_filter(run.scope))
+        async with session_scope(storage.database.session_factory) as s:
+            await s.execute(delete(Memcell).where(Memcell.memcell_id == "mc_a1_p1_0"))
+            await s.commit()
+        return moved
+
+    monkeypatch.setattr(_runner.PurgeRunner, "_step_markdown", move_then_cascade)
+    assert await p.run_to_end(job_id) == "succeeded"
+    deleted = {s.store: s.deleted for s in (await p.service.get(job_id)).steps}
+    assert (deleted["lancedb"], deleted["sqlite"]) == (2, 2)
 
 
 async def test_steps_deleted_accumulate_across_attempts(

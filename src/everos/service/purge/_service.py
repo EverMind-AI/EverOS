@@ -20,7 +20,7 @@ from everos.core.observability.logging import get_logger
 from everos.core.purge_marks import MARKS, PurgeMarks, PurgeScope, Tombstone
 from everos.core.utils.datetime import get_utc_now
 
-from ._runner import PurgeRunner, payload_in_scope, scope_filter
+from ._runner import PurgeRunner, count_index, payload_in_scope
 from ._views import (
     PurgeJobView,
     PurgeRequestResult,
@@ -120,7 +120,7 @@ class PurgeService:
     async def summarize(self, scope: PurgeScope) -> PurgeSummary:
         markdown = await self._count("markdown", lambda: self.markdown.count(scope))
         sqlite = await self._count("sqlite", lambda: self.scope_repo.count(scope))
-        index = await self._count("index", lambda: self._count_index(scope))
+        index = await self._count("index", lambda: count_index(self.index, scope))
         errors = [e for e in (markdown[1], sqlite[1], index[1]) if e]
         comment = (
             "Counts are what the scope holds now; a purge deletes what it holds"
@@ -154,13 +154,6 @@ class PurgeService:
         except Exception as exc:  # a summary never fails the request
             logger.warning("purge_count_failed", store=store, error=repr(exc)[:200])
             return None, f"{store}: count failed"
-
-    async def _count_index(self, scope: PurgeScope) -> int:
-        where = scope_filter(scope)
-        total = 0
-        for repo in self.index.all():
-            total += await (repo.count() if where is None else repo.count_where(where))
-        return total
 
     # ── confirm ──────────────────────────────────────────────────────────
 

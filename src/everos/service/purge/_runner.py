@@ -9,7 +9,7 @@ attempt that stops anywhere (an error, a restart) is simply run again.
 
 from __future__ import annotations
 
-__all__ = ["PurgeRunner", "payload_in_scope", "scope_filter"]
+__all__ = ["PurgeRunner", "count_index", "payload_in_scope", "scope_filter"]
 
 import asyncio
 import contextlib
@@ -61,6 +61,15 @@ def _retryable(exc: BaseException) -> bool:
     if isinstance(exc, sqlalchemy.exc.OperationalError):
         return "database is locked" in str(exc)
     return isinstance(exc, InfrastructureError | OSError)
+
+
+async def count_index(index: Any, scope: PurgeScope) -> int:
+    """Rows of ``scope`` across every index table."""
+    where = scope_filter(scope)
+    total = 0
+    for repo in index.all():
+        total += await (repo.count() if where is None else repo.count_where(where))
+    return total
 
 
 def scope_filter(scope: PurgeScope) -> Filter | None:
@@ -264,7 +273,16 @@ class PurgeRunner:
         await self._clear(run)
 
     async def _clear(self, run: _Run) -> None:
-        """Steps 1-6, each persisted as it ends."""
+        """Steps 1-6, each persisted as it ends.
+
+        The index and SQLite rows are counted before step 2: moving the
+        markdown lets the cascade delete some of them before steps 3-4 get
+        there, and those were purged all the same.
+        """
+        before = {
+            self._index_store: await count_index(self._index, run.scope),
+            "sqlite": sum((await self._scope_repo.count(run.scope)).values()),
+        }
         for n, store, step in (
             (1, "inbox", self._step_inbox),
             (2, "markdown", self._step_markdown),
@@ -274,15 +292,20 @@ class PurgeRunner:
             (6, "md_change_state", self._step_change_state),
         ):
             await afailpoint(f"purge.before_step{n}")
-            await self._run_step(run, store, step)
+            await self._run_step(run, store, step, at_least=before.get(store, 0))
 
     async def _run_step(
-        self, run: _Run, store: str, step: Callable[[_Run], Awaitable[int]]
+        self,
+        run: _Run,
+        store: str,
+        step: Callable[[_Run], Awaitable[int]],
+        *,
+        at_least: int = 0,
     ) -> None:
         started = time.monotonic()
         done = run.steps[store]
         try:
-            deleted = await self._busy_retry(run, step)
+            deleted = max(await self._busy_retry(run, step), at_least)
         except BaseException as exc:
             run.steps[store] = PurgeStep(store, "failed", done.deleted, repr(exc)[:500])
             with contextlib.suppress(Exception):
