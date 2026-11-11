@@ -37,7 +37,6 @@ from .predicate import ne as ne
 from .predicate import one_of as one_of
 from .predicate import primary_key as primary_key
 from .protocols import AgentSkillIndexRepository as AgentSkillIndexRepository
-from .protocols import EpisodeIndexRepository as EpisodeIndexRepository
 from .protocols import IndexBackend as IndexBackend
 from .protocols import IndexRepository as IndexRepository
 from .repositories import BUSINESS_SCHEMAS as BUSINESS_SCHEMAS
@@ -64,7 +63,6 @@ __all__ = [
     "Contains",
     "DerivedIndex",
     "EmbeddingProvenance",
-    "EpisodeIndexRepository",
     "Filter",
     "In",
     "IndexBackend",

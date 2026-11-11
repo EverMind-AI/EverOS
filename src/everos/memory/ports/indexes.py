@@ -27,7 +27,6 @@ from everos.memory.models import (
     AgentSkill,
     AtomicFact,
     Episode,
-    EpisodeParentType,
     Profile,
 )
 from everos.memory.ports.query import (
@@ -71,19 +70,6 @@ class EpisodeIndex(Protocol):
     async def paginate(
         self, where: Filter, page: Page
     ) -> PageResult[Stored[Episode]]: ...
-
-    async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int: ...
-
-    async def list_after(
-        self,
-        scope: Scope,
-        after_ts: int,
-        *,
-        parent_type: EpisodeParentType,
-        limit: int | None = None,
-    ) -> list[Stored[Episode]]:
-        """Episodes newer than ``after_ts`` (epoch milliseconds)."""
-        ...
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]: ...
 

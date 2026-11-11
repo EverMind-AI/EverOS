@@ -177,32 +177,6 @@ class IndexRepository(Protocol[T]):
 
 
 @runtime_checkable
-class EpisodeIndexRepository(IndexRepository[T], Protocol[T]):
-    """Episode-only reads every backend must also provide."""
-
-    async def count_by_owner(
-        self,
-        owner_id: str,
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        parent_type: str | None = None,
-    ) -> int: ...
-
-    async def list_by_owner_after_ts(
-        self,
-        *,
-        owner_id: str,
-        after_ts: int,
-        parent_type: str,
-        app_id: str = "default",
-        project_id: str = "default",
-        columns: Sequence[str] | None = None,
-        limit: int | None = None,
-    ) -> list[Any]: ...
-
-
-@runtime_checkable
 class AgentSkillIndexRepository(IndexRepository[T], Protocol[T]):
     """AgentSkill-only cluster reads every backend must also provide."""
 
@@ -265,7 +239,6 @@ class IndexBackend(Protocol):
 
 __all__ = [
     "AgentSkillIndexRepository",
-    "EpisodeIndexRepository",
     "IndexBackend",
     "IndexRepository",
 ]

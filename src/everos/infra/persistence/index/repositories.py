@@ -18,7 +18,6 @@ from ..records import (
 )
 from .protocols import (
     AgentSkillIndexRepository,
-    EpisodeIndexRepository,
     IndexRepository,
 )
 
@@ -44,7 +43,7 @@ class IndexRepositories:
     take their repository from here.
     """
 
-    episode: EpisodeIndexRepository[Any]
+    episode: IndexRepository[Any]
     atomic_fact: IndexRepository[Any]
     foresight: IndexRepository[Any]
     agent_case: IndexRepository[Any]

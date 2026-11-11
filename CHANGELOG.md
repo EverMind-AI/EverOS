@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trigger_profile_clustering` still clusters episodes for agentic search and
   Reflection, and no longer emits an event.
 
+### Removed
+
+- **`EpisodeIndex.count` / `EpisodeIndex.list_after`** and the repositories'
+  `count_by_owner` / `list_by_owner_after_ts` (LanceDB and Milvus), with the
+  `EpisodeIndexRepository` protocol: only the old profile selection used them.
+
 ## [1.6.0] - 2026-11-11
 
 EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including
