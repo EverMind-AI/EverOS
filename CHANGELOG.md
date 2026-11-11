@@ -100,6 +100,43 @@ machinery that keeps a deleted memory from coming back.
   - **Table schema version 5** adds `user_profile.subject_id` and
     `agent_case.source_group_id`. Existing rows read as before.
 
+- **Group memory, Step 2** ([docs/group-memory.md](docs/group-memory.md),
+  tasks 11-17):
+  - **The group profile.** Topics, decisions, dissent and observed roles as
+    append-only items in `groups/<group_id>/profile/` and the new
+    `group_profile_item` table (no vector). One model call per batch of
+    segments (prompt `chat.group_profile_update` v1, in EverOS), after
+    `[groups] group_profile_batch` segments (default `5`), after
+    `[groups] group_profile_idle_seconds` without one (default `600`) and at
+    every flush; `[groups] group_profile` switches it off. Code checks every
+    operation the model returns -- the cited segment and message exist, the
+    quote is verbatim, a decision rests on a member's message, the people it
+    names wrote the evidence, the ids it replaces are current -- and drops a
+    failing one, counted in `everos_group_profile_ops_dropped_total`.
+    `/memory/get` lists the items (`memory_type: group_profile`, with
+    `include_superseded`).
+  - **Forget and delete inside a group.** `/memory/forget` and its undo take
+    group targets (a message, a member's messages, a session, records, a
+    picture) with `group_id` and `asker_id`, and `dry_run`; the forget travels
+    to everything derived from it and the segment is re-extracted without the
+    message. A group-scoped `/memory/delete` is an owner's or admin's forget.
+    A group batch's own `message_id` is now kept as the message's id in its
+    segment.
+  - **Group search** adds relational expansion to the multi-round loop
+    (`[search] expansion`, `[search] link_slots`, default `5`), a constraint
+    block (`constraints`, `[search] constraints = "rules"` or `"model"`, prompt
+    `search.constraint_bind` v1), the visible current group profile
+    (`include_group_profile`, `[search] group_profile_cap`), `coverage`, and
+    an `audience` on every group record. Requests and responses of user and
+    agent scopes are unchanged; the new response fields hold their empty
+    defaults there.
+  - **Projects.** `project_scope: true` searches every group of the project
+    the asker belongs to; `GET /api/v2/projects/{project_id}` and
+    `GET /api/v2/projects/{project_id}/profile` read them. A project's
+    knowledge base is read by its members only once the project has groups
+    (the knowledge reads take `asker_id`).
+
+
 ### Changed
 
 - **The multi-round decider is greedy and reads the full episode body.**
@@ -159,6 +196,14 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A group flush no longer saturates the SQLite pool.** Each member's
+  pending segments are read in one query, and at most `[sqlite] pool_size`
+  members read at a time; the profiles written are unchanged.
+- **Three races between `/memory/delete` and concurrent writers** that made
+  the delete jitter test fail or hang about one run in five: a cancelled
+  request cut a session's group lookup mid-read; a by-id delete read an
+  episode's cluster outside the cluster lock; a skill file moved by a
+  whole-agent delete was read as an error.
 - **Extractions are written in the conversation's language.** No extraction
   prompt named a language, so the model was left to work it out, and the 2.0
   backbone answered English picture cells in Chinese -- episode, picture
