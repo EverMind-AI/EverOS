@@ -348,6 +348,51 @@ class DeciderSettings(BaseModel):
     nothing on purpose."""
 
 
+class ProfileSettings(BaseModel):
+    """LLM for user-profile extraction (the ``extract_user_profile`` strategy).
+
+    A flat section mirroring ``[llm]``, kept separate because the profile is a
+    different job: it folds each new episode into a standing portrait, one call
+    per episode, where an inferred or unfounded item gives a wrong picture of the
+    person for as long as it stays -- so it gains most from a slower reasoning
+    model -- while boundary, episode and fact extraction run on every cell and are
+    throughput-bound.
+
+    Empty ``model`` leaves the whole section unused: the profile is extracted with
+    ``[llm]``, every field of it, exactly as before this section existed. Once
+    ``model`` is set, ``api_key`` and ``base_url`` still fall back to ``[llm]``
+    when blank, and every other field comes from here.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_PROFILE__MODEL
+        EVEROS_PROFILE__API_KEY
+        EVEROS_PROFILE__BASE_URL
+        EVEROS_PROFILE__TIMEOUT_SECONDS
+        EVEROS_PROFILE__EXTRA
+        EVEROS_PROFILE__RESPONSE_FORMAT_MODE
+        EVEROS_PROFILE__INVALID_REPLY_RETRIES
+    """
+
+    model: str = ""
+    api_key: SecretStr | None = None
+    base_url: str | None = None
+    timeout_seconds: float = Field(default=240.0, gt=0)
+    """Per-request deadline, used once ``model`` is set. A reasoning model on the
+    profile prompt took a median of about 28s and a p90 of about 41s per call in
+    the profile evaluation, which ran with a 240s deadline; ``[llm]``'s 60s would
+    cut its slow tail off."""
+    extra: dict[str, Any] = Field(default_factory=dict)
+    """Provider-specific request fields, used once ``model`` is set. See
+    :attr:`LLMSettings.extra`: this is where a gateway's switch for the model's
+    thinking goes, nested under ``extra_body``."""
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested, used once ``model`` is set. See
+    :attr:`LLMSettings.response_format_mode`."""
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after an unusable reply, used once ``model`` is set. See
+    :attr:`LLMSettings.invalid_reply_retries`."""
+
+
 class MultimodalSettings(BaseModel):
     """Multimodal parsing LLM config (everalgo-parser).
 
@@ -940,6 +985,7 @@ class Settings(BaseSettings):
     milvus: MilvusSettings = MilvusSettings()
     llm: LLMSettings = LLMSettings()
     decider: DeciderSettings = DeciderSettings()
+    profile: ProfileSettings = ProfileSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()

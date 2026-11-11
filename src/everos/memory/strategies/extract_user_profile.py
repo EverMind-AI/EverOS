@@ -108,7 +108,7 @@ async def _extract(
 ) -> AlgoProfile | None:
     """INIT or UPDATE the owner's profile from the episode; ``None`` if refused."""
     try:
-        return await ProfileExtractor(llm=deps.llm).aextract_from_episodes(
+        return await ProfileExtractor(llm=deps.profile_llm).aextract_from_episodes(
             [episode_mapper.to_algo(episode)],
             owner_id=event.owner_id,
             owner_name=event.owner_name or event.owner_id,

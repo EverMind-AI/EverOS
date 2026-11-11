@@ -89,8 +89,10 @@ def _install_deps(
     switches to in-memory indexes (with the given replacements).
     """
     real = build_stores(storage.root, storage.sqlite)
+    llm = llm if llm is not None else unscripted_llm()
     deps = MemoryDeps(
-        llm=llm if llm is not None else unscripted_llm(),
+        llm=llm,
+        profile_llm=llm,
         embedding=embedding,
         stores=dataclasses.replace(real, **(stores or {})),
         indexes=(

@@ -99,6 +99,7 @@ def make_indexes(**overrides: Any) -> Indexes:
 def make_deps(
     *,
     llm: Any = _DEFAULT,
+    profile_llm: Any = _DEFAULT,
     embedding: Any = _DEFAULT,
     stores: Stores | None = None,
     indexes: Indexes | None = None,
@@ -107,13 +108,16 @@ def make_deps(
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
-    ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
-    :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
-    unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
+    ``llm`` defaults to an LLM that refuses every call, ``profile_llm`` to
+    ``llm`` (as ``[profile]`` falls back to ``[llm]``) and ``embedding`` to a
+    :class:`FakeEmbeddingProvider`; pass ``None`` for ``llm`` or ``embedding``
+    to model an unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
     gate) unless given.
     """
+    llm = unscripted_llm() if llm is _DEFAULT else llm
     return MemoryDeps(
-        llm=unscripted_llm() if llm is _DEFAULT else llm,
+        llm=llm,
+        profile_llm=llm if profile_llm is _DEFAULT else profile_llm,
         embedding=FakeEmbeddingProvider() if embedding is _DEFAULT else embedding,
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),

@@ -427,13 +427,15 @@ def make_providers(**overrides: Any) -> Providers:
     """Providers for ``build_application`` without touching settings.
 
     ``llm`` defaults to one that fails the test if called, and ``decider``
-    to ``llm`` (as ``[decider]`` falls back to ``[llm]``); every optional
+    and ``profile_llm`` to ``llm`` (as ``[decider]`` and ``[profile]`` fall
+    back to ``[llm]``); every optional
     provider is unconfigured. Keyword arguments replace single providers.
     """
     llm = overrides.pop("llm", None) or unscripted_llm()
     fields: dict[str, Any] = {
         "llm": llm,
         "decider": llm,
+        "profile_llm": llm,
         "multimodal_llm": None,
         "embedding": None,
         "rerank": None,
@@ -457,8 +459,10 @@ def make_backfill_deps(
     ``cascade``, ...).
     """
     storage = make_storage(root if root is not None else MemoryRoot.resolve())
+    llm = llm or unscripted_llm()
     deps = MemoryDeps(
-        llm=llm or unscripted_llm(),
+        llm=llm,
+        profile_llm=llm,
         embedding=embedding,
         stores=build_stores(storage.root, storage.sqlite),
         indexes=build_indexes(storage.index),

@@ -55,6 +55,7 @@ from everos.component.llm import (
     resolve_decider_config,
     resolve_llm_config,
     resolve_multimodal_config,
+    resolve_profile_config,
 )
 from everos.component.parser import aparse_file, build_raw_file, parser_available
 from everos.component.rerank import RerankProvider, build_rerank_provider
@@ -134,14 +135,16 @@ _CONFIG_ROOT = Path(__file__).resolve().parent.parent / "config"
 class Providers:
     """The swappable providers an application is built over; ``None`` = absent.
 
-    The extraction ``llm`` (and the ``decider``, which falls back to it) is
-    always present: :func:`build_providers` refuses settings without one.
+    The extraction ``llm`` (and the ``decider`` and ``profile_llm``, which
+    fall back to it) is always present: :func:`build_providers` refuses
+    settings without one.
     Built from settings by :func:`build_providers`; a test that needs a fake
     constructs its own.
     """
 
     llm: LLMClient
     decider: LLMClient
+    profile_llm: LLMClient
     multimodal_llm: LLMClient | None
     embedding: EmbeddingProvider | None
     rerank: RerankProvider | None
@@ -294,6 +297,7 @@ def build_providers(settings: Settings) -> Providers:
     return Providers(
         llm=_build_llm(settings, resolve_llm_config),
         decider=_build_llm(settings, resolve_decider_config),
+        profile_llm=_build_llm(settings, resolve_profile_config),
         multimodal_llm=_llm_or_none(
             settings, "multimodal_llm", resolve_multimodal_config
         ),
@@ -327,6 +331,7 @@ def build_application(
     indexes = build_indexes(index)
     deps = MemoryDeps(
         llm=providers.llm,
+        profile_llm=providers.profile_llm,
         embedding=providers.embedding,
         stores=stores,
         indexes=indexes,

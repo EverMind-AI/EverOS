@@ -13,7 +13,8 @@ This package exports only what EverOS itself defines:
   the hook that sees each completion's usage and finish reason.
 - :class:`LLMClientConfig` / :func:`build_llm_provider` -- the factory.
 - :func:`resolve_llm_config` / :func:`resolve_decider_config` /
-  :func:`resolve_multimodal_config` / :func:`observer_for` -- what the
+  :func:`resolve_profile_config` / :func:`resolve_multimodal_config` /
+  :func:`observer_for` -- what the
   application bootstrap feeds the factory, one per LLM role; a role whose
   credentials are missing raises :class:`LLMNotConfiguredError`.
 
@@ -41,6 +42,7 @@ from .factory import observer_for as observer_for
 from .factory import resolve_decider_config as resolve_decider_config
 from .factory import resolve_llm_config as resolve_llm_config
 from .factory import resolve_multimodal_config as resolve_multimodal_config
+from .factory import resolve_profile_config as resolve_profile_config
 from .observer import LLMCallObserver as LLMCallObserver
 from .observer import NullObserver as NullObserver
 from .observer import TokenUsage as TokenUsage
@@ -61,4 +63,5 @@ __all__ = [
     "resolve_decider_config",
     "resolve_llm_config",
     "resolve_multimodal_config",
+    "resolve_profile_config",
 ]

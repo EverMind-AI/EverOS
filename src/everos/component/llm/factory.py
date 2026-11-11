@@ -1,7 +1,8 @@
 """Build :class:`OpenAIProvider` instances from settings, one per LLM role.
 
-Three roles share one construction path: extraction (``[llm]``), the
-multi-round retrieval decider (``[decider]``, falling back to ``[llm]``) and
+Four roles share one construction path: extraction (``[llm]``), the
+multi-round retrieval decider (``[decider]``, falling back to ``[llm]``),
+user-profile extraction (``[profile]``, falling back to ``[llm]``) and
 multimodal parsing (``[multimodal]``). ``resolve_*_config`` turns a section
 into an :class:`LLMClientConfig` -- raising :class:`LLMNotConfiguredError`
 when the key or base URL is missing -- and :func:`build_llm_provider` turns
@@ -24,6 +25,7 @@ __all__ = [
     "resolve_decider_config",
     "resolve_llm_config",
     "resolve_multimodal_config",
+    "resolve_profile_config",
 ]
 
 from dataclasses import dataclass, field
@@ -170,6 +172,43 @@ def resolve_llm_config(settings: Settings) -> LLMClientConfig:
         model=cfg.model,
         api_key=api_key,
         base_url=cfg.base_url,
+        timeout=cfg.timeout_seconds,
+        extra=dict(cfg.extra),
+        response_format_mode=cfg.response_format_mode,
+        invalid_reply_retries=cfg.invalid_reply_retries,
+    )
+
+
+def resolve_profile_config(settings: Settings) -> LLMClientConfig:
+    """Resolve the profile extractor's client settings.
+
+    With ``[profile].model`` empty this is ``[llm]``'s configuration, field for
+    field, so a deployment that never names a profile model extracts its profile
+    as it always did. With it set, ``api_key`` and ``base_url`` fall back to
+    ``[llm]`` when blank -- pointing the profile at another model on the same
+    gateway needs only ``model`` -- and the deadline, ``extra``, reply format and
+    retries come from ``[profile]``: they belong to the model they were set for.
+
+    Raises:
+        LLMNotConfiguredError: When neither section yields a usable key and base URL.
+    """
+    cfg = settings.profile
+    if not cfg.model:
+        return resolve_llm_config(settings)
+    llm_cfg = settings.llm
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
+    api_key = api_key or (
+        llm_cfg.api_key.get_secret_value() if llm_cfg.api_key is not None else None
+    )
+    base_url = cfg.base_url or llm_cfg.base_url
+    if not api_key or not base_url:
+        raise LLMNotConfiguredError(
+            missing_config_error("profile api_key and base_url", "profile")
+        )
+    return LLMClientConfig(
+        model=cfg.model,
+        api_key=api_key,
+        base_url=base_url,
         timeout=cfg.timeout_seconds,
         extra=dict(cfg.extra),
         response_format_mode=cfg.response_format_mode,

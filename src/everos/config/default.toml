@@ -126,6 +126,27 @@ core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 full_text = false              # true = decider reads full episode text, not summary
 fallback_core = 3              # core size when every decider attempt fails
 
+[profile]
+# LLM for user-profile extraction (the extract_user_profile strategy), when it
+# differs from [llm]. Left empty the profile is extracted with [llm], every
+# field of it, as before this section existed. Override via env:
+# EVEROS_PROFILE__MODEL / __API_KEY / __BASE_URL / __TIMEOUT_SECONDS / __EXTRA.
+#
+# Recommended: a reasoning model with thinking on. The everalgo profile
+# evaluation ran claude-haiku-5-5 with thinking: about 28s median and 41s p90
+# per call, against about 3s for a flash-lite model.
+# api_key / base_url fall back to [llm] when blank; the fields below apply only
+# once model is set.
+model = ""
+api_key = ""
+base_url = ""
+# timeout_seconds = 240.0
+# How thinking is switched on depends on the gateway; nest its field under
+# extra_body, as for [llm].
+# extra = {}
+# response_format_mode = "json_schema"
+# invalid_reply_retries = 1
+
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
 # image / pdf / audio image_url parts. Override via env:

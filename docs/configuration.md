@@ -139,6 +139,22 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
 
+### `[profile]`
+
+The LLM user-profile extraction runs on, when it should differ from `[llm]`. With `model` empty the profile is extracted with `[llm]`, every field of it. Once `model` is set, `api_key` and `base_url` fall back to `[llm]` when blank and every other field comes from this section.
+
+Recommended: a reasoning model with thinking on. The everalgo profile evaluation ran `claude-haiku-5-5` with thinking, at about 28s median and 41s p90 per call; size `timeout_seconds` and the OME run timeout for that, and switch thinking on through `extra` as your gateway names it.
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `model` | string | `""` | No | Profile model identifier. Empty = use `[llm]`. |
+| `api_key` | string | — | No | API key; blank = `[llm]`'s. |
+| `base_url` | string | — | No | Endpoint URL; blank = `[llm]`'s. |
+| `timeout_seconds` | float | `240.0` | No | Deadline of one request, used once `model` is set. |
+| `extra` | object | `{}` | No | Provider-specific request fields, nested under `extra_body` (see `[llm]`); where a gateway's thinking switch goes. |
+| `invalid_reply_retries` | int | `1` | No | Extra attempts after a reply that fails validation, used once `model` is set. |
+| `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested, used once `model` is set. |
+
 ### `[multimodal]`
 
 | Field | Type | Default | Required | Description |

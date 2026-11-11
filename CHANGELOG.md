@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stripped). One person is then labelled the same way in every memcell,
   episode narrative and profile. Deleting a whole user or agent forgets its
   name; deleting a session does not.
+- **A `[profile]` LLM section for user-profile extraction.** With `model`
+  empty (the default) the profile keeps using `[llm]`, so nothing changes
+  until it is set. Once `model` is set, `api_key` and `base_url` fall back to
+  `[llm]` when blank, and the section brings its own `timeout_seconds`
+  (default 240), `extra`, `response_format_mode` and
+  `invalid_reply_retries`. A reasoning model with thinking on is
+  recommended; see `docs/configuration.md`.
 
 ### Changed
 

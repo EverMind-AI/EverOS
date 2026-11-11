@@ -155,6 +155,20 @@ async def test_init_extracts_from_the_episode_read_back_from_md() -> None:
     assert [i.description for i in stored.implicit_traits] == ["adventurous"]
 
 
+async def test_the_extractor_runs_on_the_profile_llm() -> None:
+    profile_llm = object()
+    deps = make_deps(profile_llm=profile_llm)
+    _seed(deps, _scope())
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = AsyncMock(
+            return_value=_algo_profile()
+        )
+        await extract_user_profile(_event(), deps)
+
+    assert deps.llm is not profile_llm
+    extractor_cls.assert_called_once_with(llm=profile_llm)
+
+
 async def test_update_rehydrates_the_stored_profile() -> None:
     deps = make_deps()
     _seed(deps, _scope())

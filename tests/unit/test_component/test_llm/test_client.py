@@ -23,6 +23,7 @@ from everos.component.llm import (
     resolve_decider_config,
     resolve_llm_config,
     resolve_multimodal_config,
+    resolve_profile_config,
 )
 from everos.component.llm._tracing_observer import TracingObserver
 from everos.config import Settings
@@ -30,6 +31,7 @@ from everos.config.settings import (
     LLMSettings,
     MultimodalSettings,
     ObservabilitySettings,
+    ProfileSettings,
 )
 
 
@@ -120,3 +122,49 @@ def test_decider_mode_follows_the_section_that_supplies_the_model() -> None:
 
     settings.decider.model = "other-model"
     assert resolve_decider_config(settings).response_format_mode == "json_schema"
+
+
+def test_an_unnamed_profile_model_is_llm_field_for_field() -> None:
+    settings = _settings(timeout_seconds=75.0, extra={"extra_body": {"x": 1}})
+    settings.profile = ProfileSettings(timeout_seconds=300.0, extra={"ignored": True})
+
+    assert resolve_profile_config(settings) == resolve_llm_config(settings)
+
+
+def test_a_named_profile_model_inherits_only_the_endpoint() -> None:
+    settings = _settings(
+        response_format_mode="prompt_only", extra={"extra_body": {"x": 1}}
+    )
+    settings.profile = ProfileSettings(
+        model="claude-haiku-5-5", extra={"extra_body": {"thinking": True}}
+    )
+
+    config = resolve_profile_config(settings)
+
+    assert (config.model, config.api_key, config.base_url) == (
+        "claude-haiku-5-5",
+        "sk-test",
+        "https://example.test",
+    )
+    assert config.timeout == 240.0
+    assert config.extra == {"extra_body": {"thinking": True}}
+    assert config.response_format_mode == "json_schema"
+
+
+def test_a_named_profile_model_takes_its_own_endpoint() -> None:
+    settings = _settings()
+    settings.profile = ProfileSettings(
+        model="m", api_key=SecretStr("sk-profile"), base_url="https://profile.test"
+    )
+
+    config = resolve_profile_config(settings)
+
+    assert (config.api_key, config.base_url) == ("sk-profile", "https://profile.test")
+
+
+def test_a_named_profile_model_without_any_endpoint_names_its_section() -> None:
+    settings = _settings(api_key=None)
+    settings.profile = ProfileSettings(model="m")
+
+    with pytest.raises(LLMNotConfiguredError, match=r"\[profile\]"):
+        resolve_profile_config(settings)

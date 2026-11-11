@@ -90,6 +90,8 @@ class MemoryDeps:
 
     Args:
         llm: Extraction LLM.
+        profile_llm: The LLM user-profile extraction runs on (``[profile]``,
+            ``[llm]`` itself when that section names no model).
         embedding: Embedding provider; ``None`` when not configured.
         stores: Write-side stores.
         indexes: Read-side indexes.
@@ -99,6 +101,7 @@ class MemoryDeps:
     """
 
     llm: LLMClient
+    profile_llm: LLMClient
     embedding: EmbeddingProvider | None
     stores: Stores
     indexes: Indexes

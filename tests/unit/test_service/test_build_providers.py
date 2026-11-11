@@ -20,6 +20,7 @@ from everos.config.settings import (
     EmbeddingSettings,
     LLMSettings,
     MultimodalSettings,
+    ProfileSettings,
     RerankSettings,
 )
 from everos.service import bootstrap as bootstrap_mod
@@ -91,6 +92,26 @@ def test_the_llm_and_decider_are_built_from_llm_alone() -> None:
     assert providers.llm is not None
     assert providers.decider is not None
     assert providers.decider is not providers.llm
+
+
+def test_the_profile_llm_is_built_from_profile_when_it_names_a_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[str] = []
+    real = bootstrap_mod.build_llm_provider
+
+    def _recording(config: Any, **kwargs: Any) -> Any:
+        built.append(config.model)
+        return real(config, **kwargs)
+
+    monkeypatch.setattr(bootstrap_mod, "build_llm_provider", _recording)
+    settings = _unconfigured()
+    settings.profile = ProfileSettings(model="profile-model")
+
+    providers = build_providers(settings)
+
+    assert providers.profile_llm is not providers.llm
+    assert "profile-model" in built
 
 
 def test_configured_optional_providers_are_built() -> None:
