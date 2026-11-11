@@ -321,6 +321,10 @@ class PurgeRunner:
 
     async def _step_markdown(self, run: _Run) -> int:
         await self._markdown.restore_counters(run.scope, run.job_id)
+        # An earlier attempt that stopped after its move left this job's trash
+        # behind; its counters are back in place now, so it can go before the
+        # scope is moved there again (a rename onto it would fail).
+        await self._markdown.empty(run.scope, run.job_id)
         moved = await self._markdown.move_out(run.scope, run.job_id)
         if run.fence_tokens is None:  # projections that may have read S's files
             run.fence_tokens = self._fence.in_flight()

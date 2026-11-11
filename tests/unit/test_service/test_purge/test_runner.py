@@ -296,3 +296,17 @@ async def test_steps_deleted_accumulate_across_attempts(
     view = await p.service.get(job_id)
     deleted = {s.store: s.deleted for s in view.steps}
     assert (deleted["markdown"], deleted["lancedb"], deleted["sqlite"]) == (2, 2, 2)
+
+
+async def test_rerun_after_a_kill_mid_step2_succeeds(storage: Storage) -> None:
+    """An attempt killed after moving S's files out (step 2b) left them in the
+    job's trash; the rerun restores today's counters into place first, and
+    must then still be able to move the scope out."""
+    p, job_id = await _confirmed(storage)
+    scope = p.service.scope_of("project", "a1", "p1")
+    await p.service.markdown.move_out(scope, job_id)  # the killed attempt
+    assert await p.run_to_end(job_id) == "succeeded"
+    trash = storage.root.tmp_dir / f"purge-{job_id}"
+    assert not trash.exists()
+    s_left = (await p.service.request("project", "a1", "p1")).summary
+    assert s_left.markdown_total == 0
