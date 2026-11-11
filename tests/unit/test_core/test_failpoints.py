@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -78,7 +79,8 @@ def test_bare_name_still_kills_with_137() -> None:
             "-c",
             "from everos.core.failpoints import failpoint; failpoint('x')",
         ],
-        env={"EVEROS_TEST_FAILPOINTS": "x", "PATH": ""},
+        # The whole environment: Windows cannot start asyncio without SYSTEMROOT.
+        env={**os.environ, "EVEROS_TEST_FAILPOINTS": "x"},
         check=False,
     ).returncode
     assert code == 137
