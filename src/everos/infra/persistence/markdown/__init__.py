@@ -64,11 +64,17 @@ from ._mds import (
 from ._mds import (
     GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter,
 )
+from ._mds import GroupProfileDailyFrontmatter as GroupProfileDailyFrontmatter
+from ._mds import (
+    GroupProfilePendingFrontmatter as GroupProfilePendingFrontmatter,
+)
 from ._mds import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
 from ._mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
 from ._mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from ._mds import UserProfileFrontmatter as UserProfileFrontmatter
+from ._mds import group_profile_item_from_entry as group_profile_item_from_entry
+from ._mds import render_group_profile_entry as render_group_profile_entry
 from ._readers import AgentCaseReader as AgentCaseReader
 from ._readers import AgentSkillReader as AgentSkillReader
 from ._readers import AtomicFactReader as AtomicFactReader
@@ -86,6 +92,7 @@ from ._writers import EpisodeWriter as EpisodeWriter
 from ._writers import ForesightWriter as ForesightWriter
 from ._writers import GroupEpisodeWriter as GroupEpisodeWriter
 from ._writers import GroupImageMemoryWriter as GroupImageMemoryWriter
+from ._writers import GroupProfileWriter as GroupProfileWriter
 from ._writers import GroupSceneWriter as GroupSceneWriter
 from ._writers import GroupWriter as GroupWriter
 from ._writers import ImageMemoryWriter as ImageMemoryWriter
@@ -98,6 +105,7 @@ from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
 from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
 from .stores import MarkdownForesightStore as MarkdownForesightStore
+from .stores import MarkdownGroupProfileStore as MarkdownGroupProfileStore
 from .stores import MarkdownImageMemoryStore as MarkdownImageMemoryStore
 from .stores import MarkdownMemberProfileStore as MarkdownMemberProfileStore
 from .stores import MarkdownProfileStore as MarkdownProfileStore
@@ -132,6 +140,9 @@ __all__ = [
     "GroupImageMemoryDailyFrontmatter",
     "GroupImageMemoryWriter",
     "GroupMemberProfileFrontmatter",
+    "GroupProfileDailyFrontmatter",
+    "GroupProfilePendingFrontmatter",
+    "GroupProfileWriter",
     "GroupSceneDailyFrontmatter",
     "GroupSceneWriter",
     "GroupScopedFrontmatter",
@@ -149,6 +160,7 @@ __all__ = [
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
+    "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
     "MarkdownKnowledgeStore",
     "MarkdownMemberProfileStore",
@@ -168,9 +180,11 @@ __all__ = [
     "dump_frontmatter",
     "ensure_taxonomy",
     "find_entry",
+    "group_profile_item_from_entry",
     "parse_frontmatter",
     "parse_structured_entry",
     "parse_taxonomy",
+    "render_group_profile_entry",
     "render_structured_entry",
     "sanitize_dirname",
     "split_entries",

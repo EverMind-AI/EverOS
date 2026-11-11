@@ -53,8 +53,11 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │       │   └── image-<YYYY-MM-DD>.md
 │       │       ├── scenes/                           daily-log append (gsc_ ids)
 │       │       │   └── scene-<YYYY-MM-DD>.md         one entry per scene version
-│       │       └── members/                          single-file rewrite
-│       │           └── <member_id>.md                member-in-group profile
+│       │       ├── members/                          single-file rewrite
+│       │       │   └── <member_id>.md                member-in-group profile
+│       │       └── profile/                          group profile
+│       │           ├── group_profile-<YYYY-MM-DD>.md daily-log append (gp_ ids), one entry per item version
+│       │           └── pending.md                    the pending batch (frontmatter only, not indexed)
 │       └── knowledge/                                user-visible (shared / global)
 │
 ├── figures/                             picture originals, content-addressed
@@ -97,7 +100,7 @@ Each business memory kind picks one of three on-disk patterns:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / atomic_fact / foresight / agent_case / image_memory / group scene versions |
+| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / atomic_fact / foresight / agent_case / image_memory / group scene versions / group-profile items |
 | **Skill-named dir** | `skills/skill_<name>/SKILL.md` (+ `references/` `scripts/`) | overwrite the file | agent skills (procedural memory) |
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced); `groups/<g>/members/<member_id>.md` | overwrite the file | user profile; member-in-group profile |
 

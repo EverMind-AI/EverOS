@@ -431,7 +431,8 @@ index backend:
   image_memory, user_profile, agent_case, agent_skill, knowledge_document,
   knowledge_topic, and the group kinds -- group_episode, group_scene and
   group_image_memory into the episode and picture tables, group_member_profile
-  into ``user_profile``, group_roster (``group.md``) into the SQLite roster
+  into ``user_profile``, group_profile into its own ``group_profile_item``
+  table (no vector), group_roster (``group.md``) into the SQLite roster
   mirror
 
 ### `memory/custom_instructions/`
@@ -520,7 +521,10 @@ sound dependency structure.
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # one entry per segment
     │   ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
     │   ├── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
-    │   └── members/<member_id>.md                      # member-in-group profile
+    │   ├── members/<member_id>.md                      # member-in-group profile
+    │   └── profile/                                    # group profile
+    │       ├── group_profile-<YYYY-MM-DD>.md           # one entry per item version
+    │       └── pending.md                              # pending batch (not indexed)
     └── knowledge/                                      # global shared knowledge
 ```
 

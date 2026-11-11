@@ -26,6 +26,7 @@ from .repos import (
     _AtomicFactRepo,
     _EpisodeRepo,
     _ForesightRepo,
+    _GroupProfileItemRepo,
     _ImageMemoryRepo,
     _KnowledgeTopicRepo,
     _UserProfileRepo,
@@ -71,6 +72,7 @@ class MilvusIndexBackend:
             image_memory=_ImageMemoryRepo(connection, dim=dim, column_dims=column_dims),
             user_profile=_UserProfileRepo(connection, dim=dim),
             knowledge_topic=_KnowledgeTopicRepo(connection, dim=dim),
+            group_profile_item=_GroupProfileItemRepo(connection, dim=dim),
         )
 
     @property

@@ -32,6 +32,7 @@ from .episode_writer import EpisodeWriter as EpisodeWriter
 from .foresight_writer import ForesightWriter as ForesightWriter
 from .group_writer import GroupEpisodeWriter as GroupEpisodeWriter
 from .group_writer import GroupImageMemoryWriter as GroupImageMemoryWriter
+from .group_writer import GroupProfileWriter as GroupProfileWriter
 from .group_writer import GroupSceneWriter as GroupSceneWriter
 from .group_writer import GroupWriter as GroupWriter
 from .image_memory_writer import ImageMemoryWriter as ImageMemoryWriter
@@ -47,6 +48,7 @@ __all__ = [
     "ForesightWriter",
     "GroupEpisodeWriter",
     "GroupImageMemoryWriter",
+    "GroupProfileWriter",
     "GroupSceneWriter",
     "GroupWriter",
     "ImageMemoryWriter",

@@ -31,6 +31,7 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     AgentCase,
     AgentSkill,
     AtomicFact,
@@ -40,6 +41,7 @@ from everos.memory.models import (
     Episode,
     Foresight,
     Group,
+    GroupProfileItem,
     ImageMemory,
     MemberProfile,
     MemCell,
@@ -364,6 +366,89 @@ class InMemorySceneStore:
         if supersedes is not None:
             self.superseded[supersedes.ref.entry_id] = entry_id
         return ref
+
+
+class InMemoryGroupProfileStore:
+    """Group-profile items per group scope, in write order, with entry marks.
+
+    Mirrors the markdown store's read-back: ``items()`` sets ``item_id`` and
+    the status a mark gives (``FORGOTTEN_MARK`` -> forgotten, another entry id
+    -> superseded), and a supersede never overwrites a forgotten mark.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[Stored[GroupProfileItem]] = []
+        self.marks: dict[str, str] = {}
+        self.queued: dict[Scope, list[str]] = {}
+
+    @staticmethod
+    def _check(scope: Scope) -> None:
+        if scope.owner_type != "group":
+            raise ValueError("a group profile belongs to a group scope")
+
+    async def items(self, scope: Scope) -> list[Stored[GroupProfileItem]]:
+        self._check(scope)
+        return [
+            Stored(
+                ref=row.ref,
+                scope=row.scope,
+                item=row.item.read_back(
+                    item_id=row.ref.entry_id, mark=self.marks.get(row.ref.entry_id)
+                ),
+            )
+            for row in self.rows
+            if row.scope == scope
+        ]
+
+    async def append(
+        self,
+        scope: Scope,
+        items: Sequence[GroupProfileItem],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        self._check(scope)
+        if not items:
+            return []
+        if not isinstance(only_if, NoSourceCheck) and not await only_if():
+            return []
+        refs: list[MemoryRef] = []
+        for item in items:
+            entry_id = f"gp_{len(self.rows) + 1:08d}"
+            ref = MemoryRef(
+                id=f"{scope.owner_id}_{entry_id}",
+                entry_id=entry_id,
+                md_path=f"groups/{scope.owner_id}/profile/group_profile.md",
+            )
+            self.rows.append(Stored(ref=ref, scope=scope, item=item))
+            old = item.supersedes
+            if old is not None and self.marks.get(old) != FORGOTTEN_MARK:
+                self.marks[old] = entry_id
+            refs.append(ref)
+        return refs
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        self._check(scope)
+        if not isinstance(only_if, NoSourceCheck) and not await only_if():
+            return False
+        for _md_path, entry_id in entries:
+            self.marks[entry_id] = replaced_by
+        return True
+
+    async def pending(self, scope: Scope) -> list[str]:
+        self._check(scope)
+        return list(self.queued.get(scope, []))
+
+    async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
+        self._check(scope)
+        self.queued[scope] = list(memcell_ids)
 
 
 class InMemoryMemberProfileStore:

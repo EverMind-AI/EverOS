@@ -1,9 +1,9 @@
 """Tests for the cascade kind registry.
 
-Verify the 5 registered kinds' globs match the right paths and reject
-noise (random ``.md``, swp files, profile-style paths). ``match_kind``
-must walk the registry in declared order and pick the first matching
-spec.
+Verify the registered kinds' globs match the right paths and reject
+noise (random ``.md``, swp files, profile-style paths, the group profile's
+``pending.md``). ``match_kind`` must walk the registry in declared order and
+pick the first matching spec.
 """
 
 from __future__ import annotations
@@ -37,6 +37,10 @@ from everos.infra.cascade import KIND_REGISTRY, match_kind
             "default_app/default_project/agents/a1/skills/skill_contract_risk_scan/SKILL.md",
             "agent_skill",
         ),
+        (
+            "default_app/p/groups/trip/profile/group_profile-2026-03-02.md",
+            "group_profile",
+        ),
     ],
 )
 def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -> None:
@@ -58,13 +62,16 @@ def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -
         # rejected so a prefix-less path can never silently match (the scanner
         # would otherwise find nothing while the watcher matched, a split brain).
         "users/u1/episodes/episode-2026-05-14.md",
+        # The group profile's pending batch is state beside the logs, never
+        # indexed.
+        "default_app/p/groups/trip/profile/pending.md",
     ],
 )
 def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_fourteen_kinds() -> None:
+def test_registry_has_exactly_fifteen_kinds() -> None:
     """The registry pins the cascade surface — no silent registration."""
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
@@ -79,6 +86,7 @@ def test_registry_has_exactly_fourteen_kinds() -> None:
         "group_image_memory",
         "group_scene",
         "group_member_profile",
+        "group_profile",
         "group_roster",
         "knowledge_document",
         "knowledge_topic",

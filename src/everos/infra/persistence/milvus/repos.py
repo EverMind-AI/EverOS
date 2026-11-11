@@ -12,6 +12,7 @@ from everos.infra.persistence.records import (
     AtomicFact,
     Episode,
     Foresight,
+    GroupProfileItem,
     ImageMemory,
     KnowledgeTopic,
     UserProfile,
@@ -88,6 +89,10 @@ class _AgentCaseRepo(MilvusRepoBase[AgentCase]):
 
 class _ImageMemoryRepo(MilvusRepoBase[ImageMemory]):
     schema = ImageMemory
+
+
+class _GroupProfileItemRepo(MilvusRepoBase[GroupProfileItem]):
+    schema = GroupProfileItem
 
 
 class _AgentSkillRepo(MilvusRepoBase[AgentSkill]):

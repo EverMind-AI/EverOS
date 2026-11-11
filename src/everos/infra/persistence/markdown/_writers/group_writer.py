@@ -35,6 +35,7 @@ from .._mds import (
     GroupEpisodeDailyFrontmatter,
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
+    GroupProfileDailyFrontmatter,
     GroupSceneDailyFrontmatter,
 )
 from .base import BaseDailyWriter
@@ -186,6 +187,38 @@ class GroupSceneWriter(BaseDailyWriter):
             "id": f"group_scene_log_{scope_id}_{date.isoformat()}",
             "type": "group_scene_daily",
             "file_type": "group_scene_daily",
+            "schema_version": 1,
+            "group_id": scope_id,
+            "track": "group",
+            "date": date.isoformat(),
+            "entry_count": next_count,
+            "last_appended_at": to_iso_format(get_now_with_timezone()),
+        }
+
+    async def _current_count(self, path: Path) -> int:
+        return await self._count_from_frontmatter(path)
+
+
+class GroupProfileWriter(BaseDailyWriter):
+    """Daily-log writer for group-profile items (``gp_<YYYYMMDD>_<seq>``).
+
+    Writes only the daily logs; the pending batch beside them
+    (``profile/pending.md``) is the store's own single file.
+    """
+
+    schema = GroupProfileDailyFrontmatter
+
+    def _frontmatter_updates(
+        self,
+        scope_id: str,
+        date: _dt.date,
+        *,
+        next_count: int,
+    ) -> Mapping[str, Any] | None:
+        return {
+            "id": f"group_profile_log_{scope_id}_{date.isoformat()}",
+            "type": "group_profile_daily",
+            "file_type": "group_profile_daily",
             "schema_version": 1,
             "group_id": scope_id,
             "track": "group",

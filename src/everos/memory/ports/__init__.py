@@ -29,6 +29,7 @@ from .indexes import AgentCaseIndex as AgentCaseIndex
 from .indexes import AgentSkillIndex as AgentSkillIndex
 from .indexes import AtomicFactIndex as AtomicFactIndex
 from .indexes import EpisodeIndex as EpisodeIndex
+from .indexes import GroupProfileIndex as GroupProfileIndex
 from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
 from .indexes import KnowledgeTopicIndex as KnowledgeTopicIndex
@@ -72,6 +73,7 @@ from .stores import AtomicFactStore as AtomicFactStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
 from .stores import ForesightStore as ForesightStore
+from .stores import GroupProfileStore as GroupProfileStore
 from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
@@ -125,6 +127,8 @@ __all__ = [
     "ForgetEntry",
     "ForgetLogStore",
     "ForgetTarget",
+    "GroupProfileIndex",
+    "GroupProfileStore",
     "GroupRecord",
     "GroupStore",
     "Idle",

@@ -592,6 +592,168 @@ class MemberProfile(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
 
 
+FORGOTTEN_MARK = "forgotten"
+"""The ``deprecated_by`` value a forget writes, as opposed to the entry id of a
+successor: a superseding item and a forget are different states, and a reader
+must be able to tell "replaced by this entry" from "forgotten"."""
+
+GroupProfileKind = Literal["topic", "decision", "dissent", "role"]
+"""The four kinds of group-profile item (docs/group-memory.md, section 7.5)."""
+TopicStatus = Literal["exploring", "disagreement", "consensus", "implemented"]
+ObservedRole = Literal[
+    "decision_maker",
+    "opinion_leader",
+    "topic_initiator",
+    "execution_promoter",
+    "core_contributor",
+    "coordinator",
+    "info_summarizer",
+]
+"""Roles a member is observed to play in the group's conversations -- never the
+access role the caller declares (section 4.3)."""
+GroupProfileStatus = Literal[
+    "exploring",
+    "disagreement",
+    "consensus",
+    "implemented",
+    "current",
+    "open",
+    "resolved",
+    "active",
+    "retired",
+    "superseded",
+    "forgotten",
+]
+"""What a read says about an item: a topic's own status, ``current`` for a
+decision, ``open`` / ``resolved`` for dissent, ``active`` / ``retired`` for a
+role -- or ``superseded`` once a later item names it, ``forgotten`` once a
+forget marked it."""
+
+
+class ProfileSource(BaseModel):
+    """One verified piece of evidence behind a group-profile item.
+
+    Every field is taken from the segment, never from the model: the model
+    names a segment, a message and a quote; code checks the quote is a
+    verbatim part of that message and copies the speaker and the time from it.
+
+    Attributes:
+        memcell_id: The segment.
+        message_id: The message's id inside the segment (the client's id when
+            it sent one).
+        speaker_id: The message's sender.
+        at: The message's time, epoch ms.
+        quote: The verbatim part of the message, whitespace normalised.
+    """
+
+    memcell_id: str
+    message_id: str
+    speaker_id: str
+    at: int
+    quote: str
+
+
+class GroupProfileItem(BaseModel):
+    """One append-only item of a group's profile (docs/group-memory.md, 7.5, D7).
+
+    A change never edits an item: it appends a new one whose ``supersedes``
+    names the entry it replaces. A topic keeps its ``topic_id`` across
+    versions; a dissent is resolved and a role retired by a new version with
+    ``resolved`` / ``retired`` set. Which fields a kind uses:
+
+    * ``topic``: ``topic_id``, ``name``, ``summary``, ``topic_status``;
+    * ``decision``: ``statement``, ``topic_id`` (optional), ``decided_by``,
+      ``agreed_by``, ``assignees``, ``applies_to`` (empty for the whole
+      group);
+    * ``dissent``: ``statement``, ``held_by``, ``about`` (a decision's entry
+      id or a topic id), ``resolved``, ``resolved_by``;
+    * ``role``: ``member_id``, ``role``, ``confidence``, ``retired``.
+
+    Every item carries its ``sources`` (verified evidence), the attribution
+    fields of section 4.5 (``sender_ids`` are the evidence's speakers,
+    ``origin`` their roster kind) and the span of its sources, which a read
+    compares with the asker's windows like any group record's.
+
+    ``item_id`` (the entry id, ``gp_<YYYYMMDD>_<seq>``), ``status`` and
+    ``superseded_by`` are read-side: set when an item is read back, never
+    written.
+    """
+
+    owner_id: str
+    """The group."""
+    kind: GroupProfileKind
+    statement: str = ""
+    topic_id: str | None = None
+    name: str = ""
+    summary: str = ""
+    topic_status: TopicStatus | None = None
+    decided_by: list[str] = Field(default_factory=list)
+    agreed_by: list[str] = Field(default_factory=list)
+    assignees: list[str] = Field(default_factory=list)
+    applies_to: list[str] = Field(default_factory=list)
+    """Members a decision applies to; empty means the whole group."""
+    held_by: list[str] = Field(default_factory=list)
+    about: str | None = None
+    resolved: bool = False
+    resolved_by: list[str] = Field(default_factory=list)
+    member_id: str | None = None
+    role: ObservedRole | None = None
+    confidence: Literal["strong", "weak"] | None = None
+    retired: bool = False
+    supersedes: str | None = None
+    """Entry id of the item this one replaces."""
+    sources: list[ProfileSource] = Field(default_factory=list)
+    subject_ids: list[str] = Field(default_factory=list)
+    sender_ids: list[str] = Field(default_factory=list)
+    origin: Origin | None = None
+    source_start: int
+    source_end: int
+    observed_at: int
+    """When the update that wrote the item ran: its batch's last segment."""
+
+    # Read side.
+    item_id: str | None = None
+    status: GroupProfileStatus | None = None
+    superseded_by: str | None = None
+
+    @property
+    def source_memcell_ids(self) -> list[str]:
+        """The segments the item rests on, in evidence order, each once."""
+        return list(dict.fromkeys(source.memcell_id for source in self.sources))
+
+    def read_back(self, *, item_id: str, mark: str | None) -> GroupProfileItem:
+        """The item as a read returns it: its entry id and the status its mark gives.
+
+        ``mark`` is the entry's ``deprecated_by`` (in markdown, its line in
+        ``deprecated_entries``): :data:`FORGOTTEN_MARK` reads ``forgotten``,
+        another value ``superseded`` by the entry it names, none the item's
+        own status. The markdown store and the index read it the same way.
+        """
+        if mark == FORGOTTEN_MARK:
+            status, superseded_by = "forgotten", None
+        elif mark:
+            status, superseded_by = "superseded", mark
+        else:
+            status, superseded_by = self.own_status(), None
+        return self.model_copy(
+            update={
+                "item_id": item_id,
+                "status": status,
+                "superseded_by": superseded_by,
+            }
+        )
+
+    def own_status(self) -> GroupProfileStatus:
+        """The status the item states itself, before any later item replaced it."""
+        if self.kind == "topic":
+            return self.topic_status or "exploring"
+        if self.kind == "decision":
+            return "current"
+        if self.kind == "dissent":
+            return "resolved" if self.resolved else "open"
+        return "retired" if self.retired else "active"
+
+
 _DROPPED_PREVIEW_CHARS = 80
 
 
@@ -1035,6 +1197,7 @@ class Roster(BaseModel):
 
 
 __all__ = [
+    "FORGOTTEN_MARK",
     "MANAGER_ROLES",
     "MEMBER_ITEM_KEYS",
     "AccessRole",
@@ -1055,6 +1218,9 @@ __all__ = [
     "ExplicitInfoItem",
     "Foresight",
     "Group",
+    "GroupProfileItem",
+    "GroupProfileKind",
+    "GroupProfileStatus",
     "HistoryVisibleFrom",
     "ImageMemory",
     "ImplicitTraitItem",
@@ -1065,8 +1231,10 @@ __all__ = [
     "MembershipInterval",
     "MemcellRecord",
     "MemorizeTask",
+    "ObservedRole",
     "Origin",
     "Profile",
+    "ProfileSource",
     "ReflectionReport",
     "Roster",
     "RosterEvent",
@@ -1074,6 +1242,7 @@ __all__ = [
     "RosterSource",
     "Scene",
     "ToolCall",
+    "TopicStatus",
     "fold_roster",
     "mint_cluster_id",
 ]

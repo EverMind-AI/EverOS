@@ -1,12 +1,13 @@
 """A real memory stack with group memory seeded in it, for group tests.
 
 Read-path tests seed group records directly, the way the group write path
-writes them: through the episode and picture-memory stores with a group
-:class:`Scope`, then project the markdown with the cascade handlers into a real
-LanceDB index. Write-path tests go through the bootstrap's memory service and
-run the group strategies on the events it published (:meth:`GroupWorld.run`),
-as the engine would. Everything is real -- markdown, ``system.db``, the index,
-the memory service -- and the model and embedder are deterministic doubles.
+writes them: through the episode, picture-memory and group-profile stores with
+a group :class:`Scope`, then project the markdown with the cascade handlers
+into a real LanceDB index. Write-path tests go through the bootstrap's memory
+service and run the group strategies on the events it published
+(:meth:`GroupWorld.run`), as the engine would. Everything is real -- markdown,
+``system.db``, the index, the memory service -- and the model and embedder are
+deterministic doubles.
 
 Usage::
 
@@ -39,9 +40,18 @@ from everos.infra.cascade.registry import match_kind
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps, Stores
-from everos.memory.models import Episode, Group, ImageMemory, Profile, RosterEvent
+from everos.memory.models import (
+    Episode,
+    Group,
+    GroupProfileItem,
+    ImageMemory,
+    Profile,
+    ProfileSource,
+    RosterEvent,
+)
 from everos.memory.ports import (
     Immediate,
+    MemoryRef,
     NoSourceCheck,
     Scope,
     SessionKey,
@@ -305,6 +315,57 @@ class GroupWorld:
             only_if=NoSourceCheck(),
         )
         return stored.image_id
+
+    async def profile_item(
+        self,
+        group_id: str,
+        text: str,
+        *,
+        start: int,
+        end: int,
+        kind: str = "decision",
+        speaker: str = "u_chen",
+        memcell_id: str | None = None,
+        observed_at: int | None = None,
+        **fields: Any,
+    ) -> MemoryRef:
+        """One group-profile item whose evidence spans ``[start, end]``; its ref.
+
+        ``text`` is the statement (a topic's name, with ``topic_id``
+        ``tp_<start>``) and the quote of the one evidence message, which
+        ``speaker`` sent at ``start`` in segment ``memcell_id`` (default
+        ``mc_<group>_<start>``). ``observed_at`` defaults to ``end``. Any other
+        :class:`GroupProfileItem` field goes in ``fields`` and wins, e.g.
+        ``supersedes=ref.entry_id`` for a new version.
+        """
+        values: dict[str, Any] = {
+            "owner_id": group_id,
+            "kind": kind,
+            "sources": [
+                ProfileSource(
+                    memcell_id=memcell_id or f"mc_{group_id}_{start}",
+                    message_id=f"m-{start}",
+                    speaker_id=speaker,
+                    at=start,
+                    quote=text,
+                )
+            ],
+            "sender_ids": [speaker],
+            "subject_ids": [speaker],
+            "origin": "member",
+            "source_start": start,
+            "source_end": end,
+            "observed_at": end if observed_at is None else observed_at,
+        }
+        if kind == "topic":
+            values.update(name=text, topic_id=f"tp_{start}")
+        else:
+            values["statement"] = text
+        values.update(fields)
+        (ref,) = await self.stores.group_profile.append(
+            self.scope(group_id), [GroupProfileItem(**values)], only_if=NoSourceCheck()
+        )
+        return ref
 
     async def profile(self, user_id: str, fact: str) -> None:
         from everos.memory.models import ExplicitInfoItem

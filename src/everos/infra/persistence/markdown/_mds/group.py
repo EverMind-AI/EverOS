@@ -7,6 +7,7 @@ Paths (docs/group-memory.md, section 6.1)::
     groups/<group_id>/images/image-<date>.md        one entry per picture
     groups/<group_id>/scenes/scene-<date>.md        one entry per scene version
     groups/<group_id>/members/<member_id>.md        member-in-group profile
+    groups/<group_id>/profile/                      group profile (group_profile.py)
 
 ``group.md`` is a single file: its frontmatter is the group's meta, its body
 the roster as append-only entries (``gr_<YYYYMMDD>_<seq>``, the date being the

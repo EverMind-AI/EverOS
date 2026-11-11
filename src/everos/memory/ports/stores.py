@@ -17,6 +17,7 @@ __all__ = [
     "ClusterStore",
     "EpisodeStore",
     "ForesightStore",
+    "GroupProfileStore",
     "ImageMemoryStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
@@ -50,6 +51,7 @@ from everos.memory.models import (
     ClusterMemberType,
     Episode,
     Foresight,
+    GroupProfileItem,
     ImageMemory,
     KnowledgeCategory,
     KnowledgeDocument,
@@ -372,6 +374,63 @@ class MemberProfileStore(Protocol):
 
     async def members(self, scope: Scope) -> list[str]:
         """The members of the group that have a profile document, sorted."""
+        ...
+
+
+@runtime_checkable
+class GroupProfileStore(Protocol):
+    """A group's profile items and its pending batch (docs/group-memory.md, 7.5).
+
+    Items live in ``groups/<g>/profile/group_profile-<YYYY-MM-DD>.md``, one
+    entry per item, append-only (D7): a new version is a new entry, and the
+    entry it supersedes is marked against it in the same locked write. The
+    pending batch -- the segments the next update reads -- is state beside
+    them. ``scope`` is the group's (``owner_type = group``); any other scope
+    is refused.
+    """
+
+    async def items(self, scope: Scope) -> list[Stored[GroupProfileItem]]:
+        """Every item of the group, from markdown, in the order written.
+
+        Each comes back with ``item_id`` (its entry id), ``superseded_by``
+        (the entry that replaced it, ``None`` while it is the newest version)
+        and ``status``: ``forgotten`` when a forget marked it, ``superseded``
+        when a later item replaced it, else :meth:`GroupProfileItem.own_status`.
+        """
+        ...
+
+    async def append(
+        self,
+        scope: Scope,
+        items: Sequence[GroupProfileItem],
+        *,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> list[MemoryRef]:
+        """Append ``items`` in one locked write; their refs in order.
+
+        An item whose ``supersedes`` names an entry marks that entry as
+        replaced by the new one in the same write. ``[]`` when ``only_if``
+        finds the sources gone.
+        """
+        ...
+
+    async def deprecate(
+        self,
+        scope: Scope,
+        *,
+        entries: Sequence[tuple[str, str]],
+        replaced_by: str,
+        only_if: SourceCheck | NoSourceCheck,
+    ) -> bool:
+        """Mark ``(md_path, entry_id)`` entries as replaced by ``replaced_by``."""
+        ...
+
+    async def pending(self, scope: Scope) -> list[str]:
+        """The segments queued for the next update, oldest first."""
+        ...
+
+    async def set_pending(self, scope: Scope, memcell_ids: Sequence[str]) -> None:
+        """Replace the queued segments."""
         ...
 
 

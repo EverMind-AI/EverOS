@@ -194,9 +194,9 @@ def test_every_backend_satisfies_the_ports(
     assert all(isinstance(repo, IndexRepository) for repo in repos)
 
 
-def test_the_registered_repository_set_is_the_eight_business_tables() -> None:
+def test_the_registered_repository_set_is_the_nine_business_tables() -> None:
     names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS}
-    assert len(names) == len(BUSINESS_SCHEMAS) == 8
+    assert len(names) == len(BUSINESS_SCHEMAS) == 9
 
 
 def test_all_logical_schemas_are_portable_and_validate_bm25_fields() -> None:
@@ -322,6 +322,7 @@ async def test_count_duplicate_keys_uses_the_key_only_backend_read(
         "image_memory",
         "user_profile",
         "knowledge_topic",
+        "group_profile_item",
     }
 
 

@@ -12,6 +12,7 @@ __all__ = [
     "InMemoryAgentSkillIndex",
     "InMemoryAtomicFactIndex",
     "InMemoryEpisodeIndex",
+    "InMemoryGroupProfileIndex",
     "InMemoryImageMemoryIndex",
     "InMemoryProfileIndex",
 ]
@@ -19,11 +20,13 @@ __all__ = [
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from everos.core.utils.datetime import from_timestamp_ms
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
     AtomicFact,
     Episode,
+    GroupProfileItem,
     ImageMemory,
     Profile,
 )
@@ -286,6 +289,86 @@ def _image_fields(row: Stored[ImageMemory]) -> Mapping[str, Any]:
         "owner_type": row.scope.owner_type,
         "deprecated_by": None,
     }
+
+
+class InMemoryGroupProfileIndex:
+    """Seeded group-profile rows; marks (``deprecated_by``) kept per entry id.
+
+    Mirrors the adapter: filters see the row's columns under their domain
+    names (times as datetimes, ``source_memcell_ids`` a list), ``find``
+    returns newest ``observed_at`` first, ``find_by_entry_ids`` ignores the
+    marks, and every item comes back with the status its mark gives.
+    ``sparse_search`` scores by the number of query terms a statement holds.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[Stored[GroupProfileItem]] = []
+        self.marks: dict[str, str] = {}
+
+    def seed(self, *rows: Stored[GroupProfileItem]) -> None:
+        self.rows.extend(rows)
+
+    def _read(self, row: Stored[GroupProfileItem]) -> Stored[GroupProfileItem]:
+        item = row.item.read_back(
+            item_id=row.ref.entry_id, mark=self.marks.get(row.ref.entry_id)
+        )
+        return Stored(ref=row.ref, scope=row.scope, item=item)
+
+    def _fields(self, row: Stored[GroupProfileItem]) -> Mapping[str, Any]:
+        item = row.item
+        return {
+            **item.model_dump(exclude={"sources"}),
+            "source_memcell_ids": item.source_memcell_ids,
+            "source_start": from_timestamp_ms(item.source_start),
+            "source_end": from_timestamp_ms(item.source_end),
+            "observed_at": from_timestamp_ms(item.observed_at),
+            "id": row.ref.id,
+            "entry_id": row.ref.entry_id,
+            "md_path": row.ref.md_path,
+            "app_id": row.scope.app_id,
+            "project_id": row.scope.project_id,
+            "owner_type": row.scope.owner_type,
+            "deprecated_by": self.marks.get(row.ref.entry_id),
+        }
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[Stored[GroupProfileItem]]:
+        found = sorted(
+            (row for row in self.rows if matches(where, self._fields(row))),
+            key=lambda row: (row.item.observed_at, row.ref.entry_id),
+            reverse=True,
+        )
+        read = [self._read(row) for row in found]
+        return read if limit is None else read[:limit]
+
+    async def sparse_search(
+        self, terms: Sequence[str], where: Filter, *, limit: int
+    ) -> list[SearchHit[GroupProfileItem]]:
+        wanted = {t.lower() for t in terms}
+        scored: list[tuple[float, Stored[GroupProfileItem]]] = []
+        for row in self.rows:
+            if not matches(where, self._fields(row)):
+                continue
+            text = f"{row.item.statement} {row.item.name} {row.item.summary}"
+            score = float(sum(1 for word in text.lower().split() if word in wanted))
+            if score:
+                scored.append((score, row))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [
+            SearchHit(stored=self._read(row), score=score)
+            for score, row in scored[:limit]
+        ]
+
+    async def find_by_entry_ids(
+        self, scope: Scope, entry_ids: Sequence[str]
+    ) -> list[Stored[GroupProfileItem]]:
+        wanted = set(entry_ids)
+        return [
+            self._read(r)
+            for r in self.rows
+            if _same_space(r.scope, scope) and r.ref.entry_id in wanted
+        ]
 
 
 class InMemoryProfileIndex:

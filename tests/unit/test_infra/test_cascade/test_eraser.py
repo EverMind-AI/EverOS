@@ -106,6 +106,26 @@ async def test_erase_failure_requeues_md_paths() -> None:
     assert len(fact_repo.deletes) == 1  # the other table still erased
 
 
+async def test_a_requeued_file_carries_the_kind_its_path_matches() -> None:
+    """A table is not a cascade kind: ``group_profile_item`` rows come from the
+    ``group_profile`` kind, and the ledger's kind is what picks the handler."""
+    ledger = _RecordingLedger()
+    eraser = FencedIndexEraser(
+        index_repositories(group_profile_item=_RecordingRepo(hang=True)),
+        DeleteFence(),
+        ledger,  # type: ignore[arg-type]
+        timeout_s=0.05,
+    )
+    group = Scope(app_id="a", project_id="p", owner_id="trip", owner_type="group")
+    md_path = "a/p/groups/trip/profile/group_profile-2026-03-02.md"
+
+    await eraser.erase(
+        group, {"group_profile_item": [_ref("gp_20260302_00000001", md_path)]}
+    )
+
+    assert ledger.enqueued == [(md_path, "group_profile")]
+
+
 async def test_erase_owner_deletes_by_owner_and_never_raises() -> None:
     profile = _RecordingRepo()
     eraser = FencedIndexEraser(

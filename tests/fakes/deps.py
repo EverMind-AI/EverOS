@@ -28,6 +28,7 @@ from .indexes import (
     InMemoryAgentSkillIndex,
     InMemoryAtomicFactIndex,
     InMemoryEpisodeIndex,
+    InMemoryGroupProfileIndex,
     InMemoryImageMemoryIndex,
     InMemoryProfileIndex,
 )
@@ -39,6 +40,7 @@ from .stores import (
     InMemoryEpisodeStore,
     InMemoryForesightStore,
     InMemoryForgetLogStore,
+    InMemoryGroupProfileStore,
     InMemoryGroupStore,
     InMemoryImageMemoryStore,
     InMemoryImageStore,
@@ -90,6 +92,7 @@ def make_stores(**overrides: Any) -> Stores:
         "groups": InMemoryGroupStore(),
         "member_profile": InMemoryMemberProfileStore(),
         "scene": InMemorySceneStore(),
+        "group_profile": InMemoryGroupProfileStore(),
     }
     return Stores(**{**fields, **overrides})
 
@@ -104,6 +107,7 @@ def make_indexes(**overrides: Any) -> Indexes:
         "image_memory": InMemoryImageMemoryIndex(),
         "profile": InMemoryProfileIndex(),
         "knowledge_topic": UnusedPort("knowledge_topic"),
+        "group_profile": InMemoryGroupProfileIndex(),
     }
     return Indexes(**{**fields, **overrides})
 
