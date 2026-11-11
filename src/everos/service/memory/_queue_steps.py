@@ -42,6 +42,9 @@ from everos.memory.ports import MemorizeInboxStore, SessionKey
 
 from ._queue_models import QUEUE_LOGGER, Deliver, QueueHealth, error_summary
 
+PURGE_DISCARDED = "purge_in_progress: discarded by purge; do not resend"
+"""``last_error`` of a row a purge of its scope superseded before delivery."""
+
 logger = get_logger(QUEUE_LOGGER)
 
 # A status write that fails (sqlite busy past its timeout, disk full) is
@@ -177,17 +180,25 @@ async def deliver_row(
     deliver: Deliver,
     mark: Callable[..., Awaitable[None]],
     cfg: AsyncQueueSettings,
-) -> None:
+    should_discard: Callable[[MemorizeTask], bool] | None = None,
+) -> str:
     """Deliver one claimed row, retrying up to ``max_attempts``; record the end.
 
     ``mark`` writes the row's status (the worker's, which tracks lost writes).
+    ``should_discard`` is asked before every attempt: a row a purge of its
+    scope superseded ends ``failed`` without being delivered.
+
+    Returns:
+        The status the row ended in (``success`` / ``failed``).
     """
     # Carry the accepting request's id so spans and logs emitted inside
     # memorize() correlate with the 202 the client received.
     token = set_request_id(row.request_id)
     try:
         with bound_log_context(request_id=row.request_id):
-            await _deliver_with_retries(row, deliver=deliver, mark=mark, cfg=cfg)
+            return await _deliver_with_retries(
+                row, deliver=deliver, mark=mark, cfg=cfg, should_discard=should_discard
+            )
     finally:
         reset_request_id(token)
 
@@ -198,9 +209,24 @@ async def _deliver_with_retries(
     deliver: Deliver,
     mark: Callable[..., Awaitable[None]],
     cfg: AsyncQueueSettings,
-) -> None:
+    should_discard: Callable[[MemorizeTask], bool] | None = None,
+) -> str:
     assert row.id is not None
     for attempt in range(1, cfg.max_attempts + 1):
+        if should_discard is not None and should_discard(row):
+            await mark(
+                row.id,
+                status="failed",
+                attempt=attempt - 1,
+                payload_json="",
+                last_error=PURGE_DISCARDED,
+            )
+            logger.info(
+                "memorize_queue_discarded_by_purge",
+                row_id=row.id,
+                session_id=row.session_id,
+            )
+            return "failed"
         try:
             # Inside the try: a row whose body was hand-edited into
             # garbage fails with that reason, not the whole pass.
@@ -239,7 +265,7 @@ async def _deliver_with_retries(
                 message_count=row.message_count,
                 error=error,
             )
-            return
+            return "failed"
         # Drop the body: nothing reads a delivered row's payload, and
         # keeping it would hold seven days of request bodies on disk.
         await mark(row.id, status="success", attempt=attempt, payload_json="")
@@ -249,7 +275,8 @@ async def _deliver_with_retries(
             session_id=row.session_id,
             attempt=attempt,
         )
-        return
+        return "success"
+    raise AssertionError("max_attempts < 1")  # the settings forbid it
 
 
 async def fail_abandoned(inbox: MemorizeInboxStore, *, exclude_ids: list[int]) -> bool:

@@ -69,6 +69,7 @@ from everos.core.observability.tracing import (
     shutdown_score_sink,
     shutdown_tracing,
 )
+from everos.core.purge_marks import MARKS, PurgeMarks
 from everos.infra.cascade import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
     CascadeAdmin,
@@ -355,8 +356,9 @@ def build_application(
         fence=fence,
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
+    marks = MARKS.for_root(root.root)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser
+        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser, marks
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -525,11 +527,13 @@ def _build_memory_service(
     tokenizer: Tokenizer,
     bus: EventBus,
     index_eraser: IndexEraser,
+    purge_marks: PurgeMarks,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
+        purge_marks=purge_marks,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(

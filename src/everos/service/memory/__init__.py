@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
+    from everos.core.purge_marks import PurgeMarks
     from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
@@ -86,6 +87,9 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
+        purge_marks: The root's purge marks: the async queue claims nothing
+            while a purge runs and drops rows a purge superseded. ``None``
+            ignores purges.
     """
 
     def __init__(
@@ -102,6 +106,7 @@ class MemoryService:
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
+        purge_marks: PurgeMarks | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -126,6 +131,7 @@ class MemoryService:
             inbox=stores.memorize_inbox,
             deliver=self._memorize,
             accept_async=queue_cfg.enabled,
+            marks=purge_marks,
         )
 
     # ── lifecycle ──────────────────────────────────────────────────────────
@@ -220,6 +226,10 @@ class MemoryService:
         except asyncio.CancelledError:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
+
+    def wake_queue(self) -> None:
+        """Let the async queue claim again at once (a purge ended)."""
+        self._queue.wake()
 
     async def finish_interrupted_deletions(self) -> int:
         """Finish whole-owner deletions a crash cut short (startup)."""
