@@ -217,8 +217,8 @@ def without_items(
     def keep(item: Any) -> bool:
         return (item.model_extra or {}).get("item_id") not in gone
 
-    explicit = [i for i in profile.explicit_info if not keep(i)]
-    implicit = [i for i in profile.implicit_traits if not keep(i)]
+    explicit = [(n, i) for n, i in enumerate(profile.explicit_info) if not keep(i)]
+    implicit = [(n, i) for n, i in enumerate(profile.implicit_traits) if not keep(i)]
     history_gone = set(edit.history)
     cleared = bool(explicit or implicit)
     kept = held.model_copy(
@@ -235,11 +235,12 @@ def without_items(
             "pending_memcell_ids": [*held.pending_memcell_ids, *edit.queue],
         }
     )
+    # Each removed item with its place, so an undo puts it back where it was.
     record = {
         "member_id": held.member_id,
-        "explicit_info": [i.model_dump(mode="json") for i in explicit],
-        "implicit_traits": [i.model_dump(mode="json") for i in implicit],
-        "history": [held.history[n] for n in sorted(history_gone)],
+        "explicit_info": [[n, i.model_dump(mode="json")] for n, i in explicit],
+        "implicit_traits": [[n, i.model_dump(mode="json")] for n, i in implicit],
+        "history": [[n, held.history[n]] for n in sorted(history_gone)],
         "summary": profile.summary if cleared else None,
         "queued": list(edit.queue),
     }
@@ -255,39 +256,54 @@ def with_items(
         (i.model_extra or {}).get("item_id")
         for i in (*profile.explicit_info, *profile.implicit_traits)
     }
-    explicit = [
-        ExplicitInfoItem.model_validate(i)
-        for i in change.get("explicit_info") or []
-        if i.get("item_id") not in present
-    ]
-    implicit = [
-        ImplicitTraitItem.model_validate(i)
-        for i in change.get("implicit_traits") or []
-        if i.get("item_id") not in present
-    ]
+    explicit = _placed(ExplicitInfoItem, change.get("explicit_info"), present)
+    implicit = _placed(ImplicitTraitItem, change.get("implicit_traits"), present)
     queued = set(change.get("queued") or [])
     summary = change.get("summary")
     restored = held.model_copy(
         update={
             "profile": profile.model_copy(
                 update={
-                    "explicit_info": [*profile.explicit_info, *explicit],
-                    "implicit_traits": [*profile.implicit_traits, *implicit],
+                    "explicit_info": _put_back(profile.explicit_info, explicit),
+                    "implicit_traits": _put_back(profile.implicit_traits, implicit),
                     "summary": summary
                     if summary is not None and not profile.summary
                     else profile.summary,
                 }
             ),
-            "history": [*(change.get("history") or []), *held.history],
+            "history": _put_back(
+                held.history,
+                [(int(n), dict(h)) for n, h in change.get("history") or []],
+            ),
             "pending_memcell_ids": [
                 m for m in held.pending_memcell_ids if m not in queued
             ],
         }
     )
     ids = [
-        str((i.model_extra or {}).get("item_id") or "") for i in (*explicit, *implicit)
+        str((i.model_extra or {}).get("item_id") or "")
+        for _, i in (*explicit, *implicit)
     ]
     return restored, ids
+
+
+def _placed[ItemT: (ExplicitInfoItem, ImplicitTraitItem)](
+    model: type[ItemT], recorded: Any, present: set[Any]
+) -> list[tuple[int, ItemT]]:
+    """An undo's removed items with their places, but those the profile has."""
+    return [
+        (int(n), model.model_validate(i))
+        for n, i in recorded or []
+        if i.get("item_id") not in present
+    ]
+
+
+def _put_back[T](items: list[T], placed: list[tuple[int, T]]) -> list[T]:
+    """``items`` with each ``(place, item)`` inserted where it was, in order."""
+    out = list(items)
+    for n, item in sorted(placed, key=lambda pair: pair[0]):
+        out.insert(min(n, len(out)), item)
+    return out
 
 
 def forget_result(

@@ -385,6 +385,10 @@ async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
     world = chat.world
     before = _markdown(world)
     episodes_before = {p: t for p, t in before.items() if "/episodes/" in p}
+    profiles_before = {
+        m: await world.stores.member_profile.read(world.scope("trip"), m)
+        for m in ("u_betty", "u_chen", "u_dan")
+    }
     result = await _forget(world, "u_betty", _message("m-1"))
     await world.project()
     assert SECRET not in await _search_text(world, "u_chen")
@@ -408,9 +412,9 @@ async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
     for path, text in profile_before.items():
         assert set(_entries(text).items()) <= set(_entries(after[path]).items())
     assert SECRET in await _search_text(world, "u_chen")
-    member = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
-    assert member is not None
-    assert any(SECRET in i.description for i in member.profile.explicit_info)
+    for member_id, held in profiles_before.items():  # no update ran meanwhile
+        back = await world.stores.member_profile.read(world.scope("trip"), member_id)
+        assert back == held, member_id
     # The message reads again: nothing forgets it any more.
     assert await world.stores.message_forget.forgotten(world.session("s_trip")) == set()
     again = await world.memory.undo_group_forget(
