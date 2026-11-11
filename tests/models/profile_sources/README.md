@@ -12,6 +12,11 @@ Repeat with `Index.cfg`, `Fallback.cfg`, and `SkipCleanup.cfg`, each with a dist
 `CurrentSourceIncluded`, `NoCompletedDeletedSource`, and
 `NoCompletedDeletedSource`.
 
+With TLC 2.19, the member configuration explored 895 distinct states (2,620
+generated), reaching depth 17 without an invariant or liveness violation.
+The three counterexamples were also observed; rerun all four configurations
+when changing the model or its guarantees.
+
 The model bounds are one owner, one cluster, two episodes, and one queued profile
 task triggered by episode 2. `Persist`, `Link`, and `Emit` represent the user
 pipeline and `trigger_profile_clustering`. `Index` and `Erase` represent the
