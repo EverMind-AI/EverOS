@@ -60,6 +60,7 @@ from everos.memory.extract.llm_retry import (
     failure_reason,
     retry_llm_output,
 )
+from everos.memory.extract.pipeline.group_render import speaker_with_id
 from everos.memory.groups import normalise_space, verbatim_part
 from everos.memory.prompts import LENIENT_REPLY, PromptTemplate
 
@@ -69,7 +70,7 @@ logger = get_logger(__name__)
 
 CONSTRAINT_BIND = PromptTemplate(
     id="search.constraint_bind",
-    version=1,
+    version=2,
     parts=(
         """You check which constraints an answer to a question must respect. \
 The constraints come from a group chat's memory: decisions the members made, \
@@ -82,11 +83,17 @@ to whom it applies, and support that with words copied from the conversation.
 2. "applies" is true when the answer must respect the constraint, false when \
 the constraint is beside the point of the question.
 3. "applies_to" is "group" when the constraint holds for the whole group, \
-otherwise the list of member ids it holds for, taken from <members>.
-4. "message" is the id in square brackets at the start of a conversation \
-line; "quote" is words copied exactly from that line's text -- not its time or \
-speaker. Copy; never paraphrase, shorten inside, correct or translate.
-5. {language_rule}
+otherwise the list of member ids it holds for (at least one), taken from \
+<members>. Each conversation line shows its speaker's member id in \
+parentheses after the name.
+4. Cite one message: "segment" is the id after "=== SEGMENT" at the head of \
+the block the message is in; "message" is the id in square brackets at the \
+start of the message's line; "quote" is words copied exactly from that \
+line's text -- not the speaker. Copy; never paraphrase, shorten inside, \
+correct or translate.
+5. A constraint that applies needs its citation. When "applies" is false you \
+may cite nothing: leave "segment", "message" and "quote" empty.
+6. {language_rule}
 </rules>
 
 Reply with JSON only, in this shape:
@@ -337,8 +344,6 @@ def _conversation(cells: Mapping[str, MemCell]) -> str:
         for item in cell.items:
             if isinstance(item, ChatMessage):
                 text = normalise_space(str(item.content or ""))
-                lines.append(
-                    f"[{item.id}] {item.sender_name or item.sender_id}: {text}"
-                )
+                lines.append(f"[{item.id}] {speaker_with_id(item)}: {text}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

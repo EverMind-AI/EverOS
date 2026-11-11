@@ -5,8 +5,8 @@ What these pin:
 
 - the prompt is registered (``chat.group_profile_update``, version and
   fingerprint pinned) and names the conversation's language, resolved in
-  code; it shows the segments under their markers, one ``[id] time speaker:
-  text`` line per message, and the current items with their ids;
+  code; it shows the segments under their markers, one ``[id] time speaker
+  (member id): text`` line per message, and the current items with their ids;
 - a reply in loose form -- keys of unused fields left out, one id where a list
   is expected -- is read, and the verifier still judges what it says;
 - a call that yields nothing usable is not raised: it is counted, the batch
@@ -167,8 +167,8 @@ async def _items(deps: Any) -> list[Any]:
 
 def test_the_prompt_is_registered_and_pinned() -> None:
     assert GROUP_PROFILE_UPDATE.id == "chat.group_profile_update"
-    assert GROUP_PROFILE_UPDATE.version == 1
-    assert GROUP_PROFILE_UPDATE.fingerprint == "2d3f0bf52d5044f4"
+    assert GROUP_PROFILE_UPDATE.version == 2
+    assert GROUP_PROFILE_UPDATE.fingerprint == "b4d4d70a1248c9c2"
 
 
 async def test_a_batch_runs_at_the_batch_size_once_per_segment(groups: Any) -> None:
@@ -188,7 +188,7 @@ async def test_a_batch_runs_at_the_batch_size_once_per_segment(groups: Any) -> N
     (prompt,) = model.prompts
     for n in (1, 2, 3):
         assert f"=== SEGMENT mc_{n} ===" in prompt
-    assert "[m-1] 1970-01-01 00:00 Chen: note 1" in prompt
+    assert "[m-1] 1970-01-01 00:00 Chen (u_chen): note 1" in prompt
     assert await deps.stores.group_profile.pending(_SCOPE) == []
 
 

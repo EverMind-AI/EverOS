@@ -20,7 +20,8 @@ seeded as the update strategy writes them. What these pin:
 - a binding call that yields nothing usable leaves the rules layer's block
   and is counted -- the search does not fail;
 - quotes match with curly or straight quotation marks, and what is returned
-  is the message's own words.
+  is the message's own words; the binding prompt is pinned and shows each
+  speaker's member id.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from everos.component.llm import LLMCallError
 from everos.config import Settings
 from everos.core.observability.metrics import get_metrics_registry
 from everos.memory.models import ProfileSource
+from everos.memory.search.constraints import CONSTRAINT_BIND
 from everos.service import SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
@@ -314,6 +316,12 @@ async def test_the_model_layer_runs_only_when_configured(tmp_path: Path) -> None
         await _assert_verbatim(world, constraints)
 
 
+def test_the_binding_prompt_is_registered_and_pinned() -> None:
+    assert CONSTRAINT_BIND.id == "search.constraint_bind"
+    assert CONSTRAINT_BIND.version == 2
+    assert CONSTRAINT_BIND.fingerprint == "58044af1423a7cdf"
+
+
 async def test_a_binding_that_does_not_apply_needs_no_citation(tmp_path: Path) -> None:
     bindings = [
         # Beside the point, nothing cited, no scope: bound, its source and
@@ -360,6 +368,7 @@ async def test_a_binding_that_does_not_apply_needs_no_citation(tmp_path: Path) -
         assert third.source.message_id == "m-6"
         assert third.source.quote == "Let's leave on April 30 instead."
         assert fourth.applies is None
+        assert "Chen (u_chen): Offsite flights" in model.prompts[0]
         await _assert_verbatim(world, [first, second, third, fourth])
 
 

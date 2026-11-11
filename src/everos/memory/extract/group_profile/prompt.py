@@ -10,7 +10,9 @@ One call per batch of segments. It is shown:
   stored and are not shown), the current decisions, open dissent and active
   roles;
 * the new segments, each opened by ``=== SEGMENT <memcell_id> ===``, one line
-  per message: ``[<message_id>] <time> <speaker>: <text>``.
+  per message: ``[<message_id>] <time> <speaker> (<member_id>): <text>`` --
+  the id is what the reply names people by (version 2; version 1 showed the
+  name alone).
 
 It answers with operations (:mod:`.reply`), each citing evidence as
 ``(segment, message, quote)``. Code checks every one (:mod:`.verify`).
@@ -46,7 +48,7 @@ from everalgo.user_memory._language import (
 )
 
 from everos.core.utils.datetime import from_timestamp_ms
-from everos.memory.extract.pipeline.group_render import label_cell
+from everos.memory.extract.pipeline.group_render import label_cell, speaker_with_id
 from everos.memory.models import GroupProfileItem, MembershipInterval, Roster
 from everos.memory.prompts import PromptTemplate
 
@@ -60,7 +62,7 @@ MAX_ROLES = 30
 
 GROUP_PROFILE_UPDATE = PromptTemplate(
     id="chat.group_profile_update",
-    version=1,
+    version=2,
     parts=(
         # 0: the system prompt; {members} and {language_rule} are filled in.
         """You keep the shared profile of a group chat: the topics the group \
@@ -116,9 +118,12 @@ does).
 in square brackets at the start of the message's line, quote = words copied \
 exactly from that message's text -- not its time or speaker. Copy; never \
 paraphrase, shorten inside, correct or translate a quote.
-2. People. Use member ids from <members> in decided_by, agreed_by, \
-assignees, applies_to, held_by and member_id. decided_by, agreed_by, held_by \
-and member_id must be people whose own messages the operation cites.
+2. People. Name people by their member ids -- the ids in <members>, also \
+shown in parentheses after each speaker's name -- in decided_by, agreed_by, \
+assignees, applies_to, held_by and member_id. Everyone you name in \
+decided_by, agreed_by or held_by, and the member_id of a role, must have \
+written a message the operation cites: cite one message of each of them in \
+evidence, or leave them out.
 3. The assistant. A decision needs at least one member's own message that \
 makes or confirms it; the assistant's suggestion alone is not a decision. \
 Never give the assistant a role or a dissent.
@@ -282,8 +287,8 @@ def render_segments(segments: Sequence[Segment], roster: Roster) -> str:
     """Each segment under its marker, one ``[id] time speaker: text`` line per message.
 
     Speakers carry their roster names (an assistant as ``"<name>
-    (assistant)"``); a message's line breaks become spaces so every message is
-    one line.
+    (assistant)"``) and their member ids, ``Chen (u_chen)``; a message's line
+    breaks become spaces so every message is one line.
     """
     blocks: list[str] = []
     for segment in segments:
@@ -292,8 +297,7 @@ def render_segments(segments: Sequence[Segment], roster: Roster) -> str:
             if not isinstance(item, ChatMessage):
                 continue
             when = from_timestamp_ms(item.timestamp).strftime("%Y-%m-%d %H:%M")
-            speaker = item.sender_name or item.sender_id
             text = " ".join(str(item.content or "").split())
-            lines.append(f"[{item.id}] {when} {speaker}: {text}")
+            lines.append(f"[{item.id}] {when} {speaker_with_id(item)}: {text}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
