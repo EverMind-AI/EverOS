@@ -6,8 +6,10 @@ implicit joins). The roster itself -- events folded into membership intervals
 -- is :func:`everos.memory.models.fold_roster`; who may read what is
 :mod:`everos.memory.access`. :func:`named_members` finds the members a text
 names by their roster names and aliases (attribution, and the members a query
-names). :func:`without_forgotten` reads a segment without the messages a live
-forget names -- what every reader of a group segment does (section 9.4).
+names); :func:`record_audience` who was there when a record's sources were
+said, and who joined since (section 8.6). :func:`without_forgotten` reads a
+segment without the messages a live forget names -- what every reader of a
+group segment does (section 9.4).
 
 External usage::
 
@@ -19,6 +21,8 @@ External usage::
 
 from __future__ import annotations
 
+from .audience import RecordAudience as RecordAudience
+from .audience import record_audience as record_audience
 from .forgotten import readable_segments as readable_segments
 from .forgotten import without_forgotten as without_forgotten
 from .forgotten import without_pictures as without_pictures
@@ -38,12 +42,14 @@ __all__ = [
     "BatchMessage",
     "GroupMetaUpdate",
     "NamedMember",
+    "RecordAudience",
     "RosterChange",
     "RosterManager",
     "implicit_joins",
     "named_members",
     "names_of",
     "readable_segments",
+    "record_audience",
     "roster_names",
     "without_forgotten",
     "without_pictures",
