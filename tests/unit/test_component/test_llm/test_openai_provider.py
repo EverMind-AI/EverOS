@@ -232,6 +232,56 @@ async def test_zero_temperature_is_sent() -> None:
     assert upstream.bodies[0]["temperature"] == 0.0
 
 
+# ---------------------------------------------------------------------------
+# Retry temperature ([llm] retry_temperature)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_retry_is_sampled_at_the_retry_temperature() -> None:
+    """At 0.0 the identical request tends to reproduce the identical bad reply."""
+    upstream = _Upstream(_completion("not json"), _completion("{}"), _completion())
+    await _provider(
+        upstream, temperature=0.0, retry_temperature=0.3, invalid_reply_retries=2
+    ).achat(_prompt(), response_format=_Reply)
+    assert [body["temperature"] for body in upstream.bodies] == [0.0, 0.3, 0.3]
+    # Nothing else in the request changes.
+    first, *retries = upstream.bodies
+    for body in retries:
+        assert {k: v for k, v in body.items() if k != "temperature"} == {
+            k: v for k, v in first.items() if k != "temperature"
+        }
+
+
+async def test_a_first_attempt_that_succeeds_sends_only_the_temperature() -> None:
+    upstream = _Upstream(_completion())
+    await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+        _prompt(), response_format=_Reply
+    )
+    assert [body["temperature"] for body in upstream.bodies] == [0.0]
+
+
+async def test_a_call_temperature_wins_and_a_retry_never_lowers_it() -> None:
+    upstream = _Upstream(_completion("not json"), _completion())
+    await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+        _prompt(), response_format=_Reply, temperature=0.8
+    )
+    assert [body["temperature"] for body in upstream.bodies] == [0.8, 0.8]
+
+
+@pytest.mark.parametrize(
+    ("temperature", "retry_temperature"), [(None, 0.3), (0.0, None), (None, None)]
+)
+async def test_without_both_temperatures_a_retry_resends_the_request_unchanged(
+    temperature: float | None, retry_temperature: float | None
+) -> None:
+    upstream = _Upstream(_completion("not json"), _completion())
+    await _provider(
+        upstream, temperature=temperature, retry_temperature=retry_temperature
+    ).achat(_prompt(), response_format=_Reply)
+    assert upstream.bodies[0] == upstream.bodies[1]
+    assert upstream.bodies[0].get("temperature") == temperature
+
+
 async def test_call_extra_overrides_configured_extra() -> None:
     configured = {"extra_body": {"a": 1}, "top_p": 0.5}
     upstream = _Upstream(_completion())

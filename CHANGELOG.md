@@ -102,6 +102,16 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **Extraction is sampled at temperature 0 again.** `[llm] temperature`
+  (default `0.0`) is sent on every boundary, episode, atomic-fact, profile,
+  picture-route and group call that sets none of its own. Every request sent
+  0.0 until 2026-10-30, when the provider's default became "leave it out";
+  DeepSeek then samples at 1.0, and two runs over the same 10K-word
+  transcript (2026-11-11) cut 5 and 9 memcells and cost 50% apart. A retry
+  after an unusable reply is sampled at `[llm] retry_temperature` (default
+  `0.3`) when that is higher, since at 0.0 the identical request tends to
+  reproduce the identical bad reply. `"none"` leaves either field out, for an
+  endpoint that rejects it. `[decider]` and `[multimodal]` are unchanged.
 - **The multi-round decider is greedy and reads the full episode body.**
   `[decider] temperature` (default `0.0`) is sent on every call. Left out, a
   vLLM endpoint applied the model's `generation_config` (Qwen3.8-27B:
