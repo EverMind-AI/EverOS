@@ -16,7 +16,9 @@ from .md_change_state import MdChangeStateRepo as MdChangeStateRepo
 from .md_change_state import QueueSummary as QueueSummary
 from .memcell import MemcellRepo as MemcellRepo
 from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
+from .purge_job import PurgeJobRepo as PurgeJobRepo
 from .reflection_report import ReflectionReportRepo as ReflectionReportRepo
+from .scope_purge import ScopePurgeRepo as ScopePurgeRepo
 from .session_cut import SessionCutRepo as SessionCutRepo
 from .session_purge import SessionPurgeRepo as SessionPurgeRepo
 from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
@@ -31,8 +33,10 @@ __all__ = [
     "MdChangeStateRepo",
     "MemcellRepo",
     "MemorizeInboxRepo",
+    "PurgeJobRepo",
     "QueueSummary",
     "ReflectionReportRepo",
+    "ScopePurgeRepo",
     "SessionCutRepo",
     "SessionPurgeRepo",
     "TopicUpsertPayload",
