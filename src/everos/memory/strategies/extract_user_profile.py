@@ -98,10 +98,22 @@ async def _select_via_cluster(
 ) -> list[str]:
     """Cluster path (Tier 2+): resolve memcells via the user's cluster set.
 
+    Always includes the event's own ``memcell_id``, as the direct path
+    does. The other members are resolved through the episode index, which
+    the cascade daemon fills on its own schedule, so the episode that
+    triggered this run is usually not there yet: reading the index alone
+    dropped the newest memcell from every run, and an owner whose whole
+    conversation is one memcell got no profile at all
+    (``profile_extraction_below_min_memcells memcell_count=0``, measured
+    2026-11-11 on a two-owner audio transcript). The event carries the id
+    so this path never waits for the index; the memcell itself is then
+    read from the SQLite ledger.
+
     The caller (:func:`extract_user_profile`) already fetched
     ``user_clusters`` for the strategy-entry throttle; we take it as a
     parameter to avoid a redundant cluster-store round-trip.
     """
+    memcell_ids: dict[str, None] = {event.memcell_id: None}  # ordered set
     # Pick clusters fresher than the existing profile (always include
     # the one we just updated).
     target_clusters = [
@@ -110,7 +122,7 @@ async def _select_via_cluster(
         if c.last_ts > last_profile_ts or c.id == event.cluster_id
     ]
     if not target_clusters:
-        return []
+        return list(memcell_ids)
 
     # Resolve cluster members (episode entry_ids) → memcell_ids.
     # Cluster members store episode entry_ids. To reach the memcell
@@ -119,11 +131,12 @@ async def _select_via_cluster(
     # whose source memcells were already processed before Reflection.
     entry_ids = [m for c in target_clusters for m in c.members]
     episodes = await deps.indexes.episode.find_by_entry_ids(scope, entry_ids)
-    return [
-        ep.item.parent_id
+    memcell_ids.update(
+        (ep.item.parent_id, None)
         for ep in episodes
         if ep.item.parent_type == "memcell" and ep.item.parent_id
-    ]
+    )
+    return list(memcell_ids)
 
 
 async def _select_via_timestamp(

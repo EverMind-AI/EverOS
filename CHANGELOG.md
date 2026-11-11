@@ -173,6 +173,23 @@ machinery that keeps a deleted memory from coming back.
   merged episode's atomic facts to be extracted first.
 - `reflection_report.deprecated_fact_count` is kept in `system.db` for stores
   that have it and is always written `0`.
+- **Extraction is sampled at temperature 0 again.** `[llm] temperature`
+  (default `0.0`) is sent on every boundary, episode, profile, picture-route
+  and group call that sets none of its own. Every request sent 0.0 until
+  2026-10-30, when the provider's default became "leave it out"; DeepSeek
+  then samples at 1.0, and two runs over the same 10K-word
+  transcript (2026-11-11) cut 5 and 9 memcells and cost 50% apart. A retry
+  after an unusable reply is sampled at `[llm] retry_temperature` (default
+  `0.3`) when that is higher, since at 0.0 the identical request tends to
+  reproduce the identical bad reply. `"none"` leaves either field out, for an
+  endpoint that rejects it. `[decider]` and `[multimodal]` are unchanged.
+- **Boundary requests put the window's count after the messages.** Every add
+  re-sends the session's uncut buffer, and everalgo renders the count in
+  front of it (`<messages count="N">`), so consecutive calls of a session
+  shared a provider cache prefix only through the system prompt. The count
+  now follows the records (`</messages>` then `<count>N</count>`), so each
+  call repeats the previous call's records as a prefix; the records, their
+  numbering and the system message are byte-identical.
 
 - **The multi-round decider is greedy and reads the full episode body.**
   `[decider] temperature` (default `0.0`) is sent on every call. Left out, a
@@ -239,6 +256,14 @@ machinery that keeps a deleted memory from coming back.
   request cut a session's group lookup mid-read; a by-id delete read an
   episode's cluster outside the cluster lock; a skill file moved by a
   whole-agent delete was read as an error.
+- **An owner whose conversation is one memcell gets a profile.** The profile
+  strategy resolved the memcells of the triggering cluster through the
+  episode index, which the cascade fills on its own schedule, so the episode
+  that triggered the run was usually not indexed yet: every run missed its
+  newest memcell, and an owner with a single memcell logged
+  `profile_extraction_below_min_memcells memcell_count=0` and got no profile.
+  The event's own memcell is now always selected and read from the SQLite
+  ledger, as the direct (no-embedding) path already did.
 - **Extractions are written in the conversation's language.** No extraction
   prompt named a language, so the model was left to work it out, and the 2.0
   backbone answered English picture cells in Chinese -- episode, picture

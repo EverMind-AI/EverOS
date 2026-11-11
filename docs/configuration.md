@@ -131,8 +131,10 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
 | `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
-| `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
+| `invalid_reply_retries` | int | `1` | No | Extra attempts after a reply that fails validation, sampled at `retry_temperature`. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
+| `temperature` | float | `0.0` | No | Sampling temperature of every extraction call that sets none of its own, so the same conversation cuts the same memcells. `"none"` leaves the field out of the request, for an endpoint that rejects it. |
+| `retry_temperature` | float | `0.3` | No | Temperature of a retry after an unusable reply, used only when above the first attempt's; at 0.0 the identical request tends to reproduce the identical bad reply. `"none"` resends the request unchanged. |
 
 ### `[multimodal]`
 

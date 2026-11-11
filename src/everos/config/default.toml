@@ -78,8 +78,14 @@ base_url = "https://openrouter.ai/api/v1"
 # "json_object" (JSON mode) or "prompt_only" (prompt alone). Not every endpoint
 # accepts a strict schema -- on OpenRouter, sending one can reroute the request.
 # response_format_mode = "json_schema"
-# Extra attempts of the identical request after a reply that fails validation.
+# Extra attempts after a reply that fails validation (sampled at retry_temperature).
 # invalid_reply_retries = 1
+# Sampling temperature of every extraction call; 0.0 keeps runs repeatable. "none"
+# leaves the field out, for an endpoint that rejects it (EVEROS_LLM__TEMPERATURE=none).
+temperature = 0.0
+# Temperature of a retry after an unusable reply, so the retry does not reproduce
+# the same reply; used only when above the first attempt's temperature.
+retry_temperature = 0.3
 # Deadline of one request in seconds. Raise it for slow self-hosted endpoints;
 # one extraction call may take up to (invalid_reply_retries + 1) x this.
 # timeout_seconds = 60.0

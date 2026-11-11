@@ -50,6 +50,9 @@ class LLMClientConfig:
         extra: Request fields merged into every call.
         response_format_mode: How the reply format is requested.
         invalid_reply_retries: Extra attempts after an unusable reply.
+        temperature: Sent on every call that sets none; ``None`` leaves it out.
+        retry_temperature: Sent on a retry after an unusable reply, when above
+            the first attempt's temperature; ``None`` resends unchanged.
     """
 
     model: str
@@ -60,6 +63,8 @@ class LLMClientConfig:
     extra: dict[str, Any] = field(default_factory=dict)
     response_format_mode: ResponseFormatMode = "json_schema"
     invalid_reply_retries: int = 1
+    temperature: float | None = None
+    retry_temperature: float | None = None
 
 
 def build_llm_provider(
@@ -83,6 +88,8 @@ def build_llm_provider(
         extra=config.extra,
         response_format_mode=config.response_format_mode,
         invalid_reply_retries=config.invalid_reply_retries,
+        temperature=config.temperature,
+        retry_temperature=config.retry_temperature,
         observer=observer,
     )
 
@@ -180,6 +187,8 @@ def resolve_llm_config(settings: Settings) -> LLMClientConfig:
         extra=dict(cfg.extra),
         response_format_mode=cfg.response_format_mode,
         invalid_reply_retries=cfg.invalid_reply_retries,
+        temperature=cfg.temperature,
+        retry_temperature=cfg.retry_temperature,
     )
 
 

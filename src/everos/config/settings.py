@@ -169,6 +169,8 @@ class LLMSettings(BaseModel):
         EVEROS_LLM__EXTRA
         EVEROS_LLM__RESPONSE_FORMAT_MODE
         EVEROS_LLM__INVALID_REPLY_RETRIES
+        EVEROS_LLM__TEMPERATURE
+        EVEROS_LLM__RETRY_TEMPERATURE
     """
 
     model: str = "gpt-4.1-mini"
@@ -223,10 +225,37 @@ class LLMSettings(BaseModel):
     neither -- and sending a format the provider lacks reroutes the request.
     """
     invalid_reply_retries: int = Field(default=1, ge=0)
-    """Extra attempts of the identical request after a reply that fails
-    validation against the operator's model, has no choice, or was aborted by
-    the server. Bounded here, cheaply, rather than by rerunning the whole
-    operator; ``0`` hands the first failure straight to the caller."""
+    """Extra attempts after a reply that fails validation against the
+    operator's model, has no choice, or was aborted by the server. Bounded
+    here, cheaply, rather than by rerunning the whole operator; ``0`` hands the
+    first failure straight to the caller. A retry is the same request, except
+    that it is sampled at :attr:`retry_temperature`."""
+    temperature: float | None = Field(default=0.0, ge=0)
+    """Sampling temperature of every extraction call (boundary, episode, profile,
+    the picture route, group memory), unless a call sets its own.
+    ``None`` leaves the field out of the request, so the endpoint's default applies.
+
+    0.0 because extraction should be repeatable: the same conversation should cut
+    the same memcells and write the same memories. Every request sent 0.0 until
+    2026-10-30, when the provider's default became "leave it out"; DeepSeek then
+    samples at 1.0, and two runs over the same 10K-word transcript (2026-11-11) cut
+    5 and 9 memcells and cost 50% apart. ``None`` is for an endpoint that rejects
+    the field."""
+    retry_temperature: float | None = Field(default=0.3, ge=0)
+    """Sampling temperature of a retry after an unusable reply
+    (:attr:`invalid_reply_retries`). At temperature 0 the identical request tends to
+    reproduce the identical bad reply, so a retry samples a little more freely.
+    Used only when it is above the first attempt's temperature; ``None``, or a
+    first attempt that sends no temperature, resends the request unchanged."""
+
+    @field_validator("temperature", "retry_temperature", mode="before")
+    @classmethod
+    def _none_spelled_out(cls, value: object) -> object:
+        """``"none"`` / ``"null"`` mean ``None``: a TOML file and an environment
+        variable have no other way to leave the field out."""
+        if isinstance(value, str) and value.strip().lower() in ("none", "null"):
+            return None
+        return value
 
 
 class DeciderSettings(BaseModel):

@@ -20,7 +20,8 @@ method per step:
 4. ``_validate`` -- ``model_validate_json`` against the caller's
    ``response_format``; a mismatch fails only this attempt (§7.1).
 5. ``_request_valid_reply`` -- at most ``1 + invalid_reply_retries`` attempts
-   of the identical request, each completion reported to the observer.
+   of the same request, each completion reported to the observer; a retry is
+   sampled at ``retry_temperature`` when that is above the first attempt's.
 
 ``achat_raw`` is the one call outside that contract: the same request, sent
 once, with the reply handed back unchecked as a :class:`RawReply`. It exists
@@ -127,6 +128,10 @@ class OpenAIProvider:
             ``prompt_only`` nothing (the prompt alone asks for JSON).
         invalid_reply_retries: Extra attempts after an attempt whose reply
             fails validation, carries no choice, or was aborted upstream.
+        retry_temperature: Temperature of those extra attempts, when it is
+            above the first attempt's: at a low temperature the identical
+            request tends to reproduce the identical bad reply. ``None``, or a
+            first attempt that sends no temperature, resends it unchanged.
         observer: Notified of every completion received, failed ones included.
         http_client: Passed to ``openai.AsyncOpenAI``; tests inject an
             ``httpx.AsyncClient`` over ``httpx.MockTransport`` here.
@@ -148,6 +153,7 @@ class OpenAIProvider:
         extra: Mapping[str, Any] | None = None,
         response_format_mode: ResponseFormatMode = "json_schema",
         invalid_reply_retries: int = 1,
+        retry_temperature: float | None = None,
         observer: LLMCallObserver | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -163,6 +169,7 @@ class OpenAIProvider:
         self._extra: dict[str, Any] = dict(extra or {})
         self._response_format_mode: ResponseFormatMode = response_format_mode
         self._invalid_reply_retries = invalid_reply_retries
+        self._retry_temperature = retry_temperature
         self._observer: LLMCallObserver = observer or NullObserver()
         client_kwargs: dict[str, Any] = {
             "api_key": api_key,
@@ -360,8 +367,9 @@ class OpenAIProvider:
         attempts = 1 + self._invalid_reply_retries
         failure: _AttemptFailedError | None = None
         for attempt in range(1, attempts + 1):
+            sent = request if attempt == 1 else self._retry_request(request)
             try:
-                return await self._attempt(request, response_format, attempt)
+                return await self._attempt(sent, response_format, attempt)
             except _AttemptFailedError as exc:
                 failure = exc
                 self._log_failed_attempt(exc, attempt, attempts)
@@ -371,6 +379,15 @@ class OpenAIProvider:
             f"response_format_mode={self._response_format_mode!r}): {failure}",
             reason=failure.reason if failure else "invalid_reply",
         ) from (failure.__cause__ if failure else None)
+
+    def _retry_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """``request`` as a retry sends it: at ``retry_temperature`` when that is
+        above the temperature the first attempt sent, else unchanged."""
+        first = request.get("temperature")
+        retry = self._retry_temperature
+        if retry is None or first is None or first >= retry:
+            return request
+        return {**request, "temperature": retry}
 
     async def _attempt(
         self, request: dict[str, Any], response_format: type[BaseModel], attempt: int
