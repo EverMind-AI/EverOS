@@ -533,9 +533,34 @@ class OfflineEngine:
 
         Closes the +1 the matching enqueue path opened, in ``finally``
         so cancellation, retries, and crashes all release the count.
+
+        A job persisted by an earlier release can name a strategy or an
+        event class this one no longer has (``extract_atomic_facts`` and
+        ``AtomicFactsExtracted`` were removed in 2.0): crash recovery
+        re-enqueues its RUNNING row and the jobstore restores its pending
+        job. Such a run is dropped with a warning instead of raising out of
+        the scheduler on every start.
         """
         try:
-            cls = resolve_topic(event_topic)
+            if not self._registry.has(strategy_name):
+                logger.warning(
+                    "ome_run_dropped_unknown_strategy",
+                    strategy_name=strategy_name,
+                    run_id=run_id,
+                    event_topic=event_topic,
+                )
+                return
+            try:
+                cls = resolve_topic(event_topic)
+            except (ImportError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "ome_run_dropped_unknown_event",
+                    strategy_name=strategy_name,
+                    run_id=run_id,
+                    event_topic=event_topic,
+                    error=str(exc),
+                )
+                return
             event = cls.model_validate_json(event_payload)
             meta = self._registry.get(strategy_name)
             await self._runner.run(
