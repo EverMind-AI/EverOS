@@ -43,6 +43,7 @@ from everos.infra.ome.events import resolve_topic
 from everos.infra.ome.exceptions import (
     OMEError,
 )
+from everos.infra.ome.gate import RunGate
 from everos.infra.ome.lock import OmeLock
 from everos.infra.ome.records import (
     RunRecord,
@@ -98,6 +99,7 @@ class OfflineEngine:
         self._owns_lock = lock is None
         self._started = False
         self._on_dead_letter: Callable[[RunRecord], None] | None = None
+        self._run_gate: RunGate | None = None
 
         # late-bound (set in start())
         self._counter_store: CounterStore | None = None
@@ -161,6 +163,17 @@ class OfflineEngine:
             return
         self._on_dead_letter = callback
 
+    def set_run_gate(self, gate: RunGate) -> None:
+        """Consult ``gate`` before every strategy attempt (see :mod:`.gate`).
+
+        Like :meth:`on_dead_letter`, it must be set before :meth:`start`; a
+        call after it is ignored and logged.
+        """
+        if self._started:
+            logger.warning("set_run_gate_after_start_ignored")
+            return
+        self._run_gate = gate
+
     async def start(self) -> None:
         """Boot the engine: acquire the jobstore lock, validate the strategy
         DAG, wire up late-bound stores, launch APScheduler, run crash
@@ -221,6 +234,7 @@ class OfflineEngine:
             emit_hook=self._dispatch_event,
             config=self._config,
             on_dead_letter=self._on_dead_letter,
+            gate=self._run_gate,
         )
         self._idle_store = IdleStore(storage=self._storage)
 
