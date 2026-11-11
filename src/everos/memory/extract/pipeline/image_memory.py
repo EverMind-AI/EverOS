@@ -43,6 +43,14 @@ validated. Each of those cost a second call carrying every picture again
 (2026-11-11, 4.2% of MemEye's picture calls). The JSON schema a call sends is
 unchanged; the reply models' docstrings are part of it, so they stay as they
 are.
+
+The call's output is capped by the number of pictures it reads
+(:func:`reply_token_cap`), and a reply cut at that cap is sampled again once,
+warmer, before the cell fails. At temperature 0 a long transcription in
+``ocr`` can repeat itself until the output limit: on 2026-11-11 two or three
+of MemEye's 168 picture calls (text-dense comic pages) did so in each of three
+builds, ran to the 32,768-token cap the builds set, and left their cells with
+neither an episode nor picture memories.
 """
 
 from __future__ import annotations
@@ -74,6 +82,34 @@ from everos.memory.extract.pipeline.profile_delta import (
 from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 
 logger = get_logger(__name__)
+
+REPLY_TOKENS_BASE = 2_048
+"""Output budget of a picture call before its pictures (:func:`reply_token_cap`)."""
+
+REPLY_TOKENS_PER_PICTURE = 1_024
+"""Output budget each picture adds (:func:`reply_token_cap`)."""
+
+REPLY_TOKENS_CEILING = 32_768
+"""The cap never exceeds this: the output limit the 2.0 store builds set."""
+
+
+def reply_token_cap(pictures: int) -> int:
+    """``max_tokens`` of a picture call reading ``pictures`` pictures.
+
+    ``2,048 + 1,024`` per picture, at most :data:`REPLY_TOKENS_CEILING`. The
+    numbers come from the 914 complete picture replies DeepSeek V4.1 Flash
+    wrote on 2026-11-11 (MemEye, CUE-Mem and MemLens, temperatures 0 and 1):
+    the longest was 2,423 tokens, for 8 pictures (cap 10,240), the longest for
+    one picture 1,486 (cap 3,072), and none came within 1,586 tokens of its
+    cap -- so a reply that reaches the cap is a runaway (an ``ocr``
+    transcription repeating itself), not a long answer. Without the cap a
+    runaway ran to the builds' 32,768 tokens, 57 times the average reply's
+    output (573). A ``max_tokens`` the deployment sets lower still wins
+    (``[llm] extra``).
+    """
+    return min(
+        REPLY_TOKENS_BASE + REPLY_TOKENS_PER_PICTURE * pictures, REPLY_TOKENS_CEILING
+    )
 
 
 class ImageFact(StrictOutputModel):
@@ -374,9 +410,16 @@ async def extract(
 ) -> ImageEpisodeReply:
     """One call: the episode and every picture's memory, from the same reading.
 
+    The call asks for at most ``max_tokens`` output tokens, by default
+    :func:`reply_token_cap` of its pictures, and a reply cut there is retried
+    like an invalid one (``retry_cut``): once more by default, sampled at
+    ``[llm] retry_temperature``, with the same cap. The first attempt keeps
+    the configured temperature.
+
     Raises:
-        everos.component.llm.errors.LLMCallError: The upstream failed, or no
-            attempt produced a reply that validates.
+        everos.component.llm.errors.LLMCallError: The upstream failed, no
+            attempt produced a reply that validates, or every attempt was cut
+            at the cap (``cut_short``).
     """
     messages = build_messages(
         memcell,
@@ -384,25 +427,32 @@ async def extract(
         custom_instructions=custom_instructions,
         output_language=output_language,
     )
+    cap = reply_token_cap(len(pictures)) if max_tokens is None else max_tokens
     text = await llm.achat(
         messages,
         response_format=ImageEpisodeReply,
-        max_tokens=max_tokens,
+        max_tokens=cap,
+        retry_cut=True,
     )
     logger.info(
         "memory.images.extracted",
         pictures=len(pictures),
         reply_chars=len(text),
+        max_tokens=cap,
     )
     return parse_reply(ImageEpisodeReply, text, operator="image memory extraction")
 
 
 __all__ = [
+    "REPLY_TOKENS_BASE",
+    "REPLY_TOKENS_CEILING",
+    "REPLY_TOKENS_PER_PICTURE",
     "ImageEpisodeReply",
     "ImageFact",
     "build_messages",
     "build_system_prompt",
     "extract",
     "render_conversation",
+    "reply_token_cap",
     "to_episode",
 ]
