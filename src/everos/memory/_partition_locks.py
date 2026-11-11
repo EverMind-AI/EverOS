@@ -87,6 +87,32 @@ def group_profile_lock(
     )
 
 
+def group_scenes_lock(
+    app_id: str, project_id: str, group_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one group's scenes holds (section 7.7).
+
+    The scene strategy places an episode and writes a version under it; a
+    forget inside the group rewrites the scenes of the episodes it changed
+    under it (section 9.4).
+    """
+    return get_partition_lock(
+        "update_group_scenes", f"{app_id}:{project_id}:{group_id}"
+    )
+
+
+def group_forget_lock(
+    app_id: str, project_id: str, group_id: str
+) -> AbstractAsyncContextManager[None]:
+    """One forget (or undo) of one group at a time (section 9.4).
+
+    A forget plans from what the group holds and changes it; two at once
+    would each plan over what the other is taking out. Taken before any
+    other lock a forget holds.
+    """
+    return get_partition_lock("group_forget", f"{app_id}:{project_id}:{group_id}")
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
     LOCKS.reset()

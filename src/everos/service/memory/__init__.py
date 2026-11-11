@@ -24,6 +24,9 @@ __all__ = [
     "FlushResult",
     "ForgetResult",
     "ForgottenPicture",
+    "GroupForgetResult",
+    "GroupForgetTarget",
+    "GroupUndoResult",
     "GroupUpsertResult",
     "GroupView",
     "MemorizeResult",
@@ -45,10 +48,17 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from everos.component.images import ImageLimits
-from everos.core.errors import InvalidInputError, PathTraversalError, SessionBusyError
+from everos.core.errors import (
+    ConflictError,
+    ForbiddenError,
+    InvalidInputError,
+    NotFoundError,
+    PathTraversalError,
+    SessionBusyError,
+)
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
-from everos.memory.access import AccessPolicy, resolve_identity
+from everos.memory.access import AccessPolicy, authorize_manage, resolve_identity
 from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     keep_question_pictures,
@@ -63,6 +73,10 @@ from ._forget import ForgetResult as ForgetResult
 from ._forget import ForgottenPicture as ForgottenPicture
 from ._forget_session import SessionForgetManager
 from ._forget_session import SessionForgetResult as SessionForgetResult
+from ._group_forget import GroupForgetManager, GroupReextraction
+from ._group_forget import GroupForgetResult as GroupForgetResult
+from ._group_forget import GroupForgetTarget as GroupForgetTarget
+from ._group_forget import GroupUndoResult as GroupUndoResult
 from ._groups import GroupUpsertResult as GroupUpsertResult
 from ._groups import GroupUseCases
 from ._groups import GroupView as GroupView
@@ -85,6 +99,8 @@ from ._undo import UndoManager
 from ._undo import UndoResult as UndoResult
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from everalgo.llm import LLMClient
 
     from everos.component.parser import RawFileBuilder
@@ -102,6 +118,15 @@ logger = get_logger(__name__)
 
 _DRAIN_TIMEOUT_SECONDS = 30.0
 """How long :meth:`MemoryService.aclose` waits for extractions still running."""
+
+_GROUP_FORGET_ANSWERS: tuple[type[BaseException], ...] = (
+    ForbiddenError,
+    NotFoundError,
+    ConflictError,
+    InvalidInputError,
+    SessionBusyError,
+)
+"""What a group forget answers the caller with, rather than fails with."""
 
 
 class MemoryService:
@@ -144,7 +169,9 @@ class MemoryService:
     ) -> None:
         self._search_manager = search_manager
         self._indexes = indexes
-        self._access = access or AccessPolicy(stores.groups)
+        self._access = access or AccessPolicy(
+            stores.groups, forgotten=stores.message_forget
+        )
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
         self._stores = stores
@@ -173,6 +200,18 @@ class MemoryService:
         self._reviser = RevisionManager(stores=stores)
         self._session_forgetter = SessionForgetManager(
             stores=stores, images=stores.images, eraser=index_eraser
+        )
+        # Forget inside a group (docs/group-memory.md, 9.4): re-extraction
+        # runs the group pipeline's own episode call.
+        self._group_forgetter = GroupForgetManager(
+            stores=stores,
+            indexes=indexes,
+            eraser=index_eraser,
+            pipeline=group_pipeline
+            if isinstance(group_pipeline, GroupReextraction)
+            else None,
+            extractions=self._extractions,
+            session_wait_seconds=settings.memorize.delete_wait_seconds,
         )
         self._memorizer = Memorizer(
             settings=settings,
@@ -270,8 +309,14 @@ class MemoryService:
         hits = await self._indexes.image_memory.find(
             all_of(eq("image_id", image_id), is_null("deprecated_by")), limit=1000
         )
+        references = [hit.stored for hit in hits]
         return await self._access.picture_visible(
-            identity, [hit.stored for hit in hits]
+            identity,
+            references,
+            # Asked only of a hash nothing refers to any more: whether a group
+            # forget took its last memory out (docs/group-memory.md, 9.4).
+            forgotten_in_group=not references
+            and await self._stores.forget_log.holds_picture(image_id),
         )
 
     async def get(
@@ -312,7 +357,162 @@ class MemoryService:
         """A group's meta and roster, for a current member (``GET /groups/{id}``)."""
         return await self._group_cases().read(**request)
 
+    # ── group forget use cases ─────────────────────────────────────────────
+
+    async def forget_in_group(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        group_id: str,
+        asker_id: str | None,
+        target: GroupForgetTarget,
+        reason: str | None = None,
+        dry_run: bool = False,
+        asserted_asker: str | None = None,
+    ) -> GroupForgetResult:
+        """Forget messages, a member, a session, records or a picture of a group.
+
+        docs/group-memory.md, sections 5.5 and 9.4: the target travels to
+        everything derived from it, and the forget is reversible by its
+        ``forget_id``. ``dry_run`` touches nothing and reports what the real
+        run would.
+
+        Raises:
+            ForbiddenError: Not a current member, or not allowed this target.
+            NotFoundError: The group holds no such message, session, member,
+                record or picture.
+            SessionBusyError: A session of the forget stays busy.
+            InvalidInputError: No asker.
+        """
+        return await self._run_to_completion(
+            self._group_forgetter.forget(
+                scope=_group_scope(app_id, project_id, group_id),
+                identity=resolve_identity(header=asserted_asker, body_asker=asker_id),
+                target=target,
+                reason=reason,
+                dry_run=dry_run,
+            ),
+            label="memory_group_forget",
+        )
+
+    async def undo_group_forget(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        group_id: str,
+        asker_id: str | None,
+        forget_id: str,
+        asserted_asker: str | None = None,
+    ) -> GroupUndoResult:
+        """Undo one forget of a group by its id, with the forget's authorisation.
+
+        Raises:
+            ForbiddenError: Not a current member, or not allowed the forget.
+            NotFoundError: No forget of this group has that id.
+            ConflictError: A later forget rewrote what this one wrote.
+        """
+        return await self._run_to_completion(
+            self._group_forgetter.undo(
+                scope=_group_scope(app_id, project_id, group_id),
+                identity=resolve_identity(header=asserted_asker, body_asker=asker_id),
+                forget_id=forget_id,
+            ),
+            label="memory_group_forget_undo",
+        )
+
     # ── delete use cases ───────────────────────────────────────────────────
+
+    async def delete_in_group(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        group_id: str,
+        asker_id: str | None,
+        session_id: str | None,
+        member_id: str | None,
+        asserted_asker: str | None = None,
+    ) -> tuple[DeleteResult, GroupForgetResult]:
+        """``/delete`` with a group scope: an owner's or admin's forget.
+
+        docs/group-memory.md, section 15: in Step 2 a group-scoped delete is
+        owner/admin only and behaves as a forget -- soft, propagated, and
+        reversible by the returned forget's id -- not as a hard delete.
+
+        Raises:
+            ForbiddenError: The asker is not an owner or admin of the group.
+            InvalidInputError: Neither a session nor a member is named.
+        """
+        if (session_id is None) == (member_id is None):
+            raise InvalidInputError(
+                "a group-scoped delete names one session_id or one user_id (member)"
+            )
+        identity = resolve_identity(header=asserted_asker, body_asker=asker_id)
+        if identity.asker_id is None:
+            raise InvalidInputError("asker_id is required for a group-scoped delete")
+        scope = _group_scope(app_id, project_id, group_id)
+        record = await self._stores.groups.get(scope)
+        if record is None:
+            raise ForbiddenError(
+                f"the asker is not a current member of group {group_id!r}"
+            )
+        authorize_manage(record.roster, identity.asker_id)
+        target = (
+            GroupForgetTarget(kind="session", session_id=session_id)
+            if session_id is not None
+            else GroupForgetTarget(kind="member", member_id=member_id)
+        )
+        forgotten = await self._run_to_completion(
+            self._group_forgetter.forget(
+                scope=scope, identity=identity, target=target, reason="delete"
+            ),
+            label="memory_group_delete",
+        )
+        count = (
+            len(forgotten.episodes)
+            + len(forgotten.image_memories)
+            + len(forgotten.scenes)
+            + len(forgotten.member_profile_items)
+            + len(forgotten.stale_member_profile_items)
+            + len(forgotten.group_profile_items)
+            + len(forgotten.stale_group_profile_items)
+            + len(forgotten.member_profiles)
+        )
+        filters = ["group_id", "session_id" if session_id is not None else "user_id"]
+        logger.info(
+            "memory_deleted_in_group",
+            app_id=app_id,
+            project_id=project_id,
+            group_id=group_id,
+            filters=filters,
+            count=count,
+            forget_id=forgotten.forget_id,
+        )
+        return DeleteResult(filters=filters, count=count), forgotten
+
+    async def _run_to_completion[T](
+        self, step: Coroutine[Any, Any, T], *, label: str
+    ) -> T:
+        """Run a forget (or its undo) to its end even if the caller goes away.
+
+        Cut in half by a disconnect, a forget would leave a group half
+        forgotten; like a deletion it is supervised and only shielded here.
+        Its own answers (403, 404, 409, 503) are not logged as failures.
+        """
+        task = self._extractions.supervise(
+            step,
+            session_id=None,
+            memcell_ids=[],
+            label=label,
+            expected=_GROUP_FORGET_ANSWERS,
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning(f"{label}_continues_after_cancel")
+            raise
 
     async def delete(
         self,
@@ -329,11 +529,11 @@ class MemoryService:
         half would leave the scope half deleted.
 
         Raises:
-            InvalidInputError: The session belongs to a group. A group-scoped
-                delete is a propagated forget that is not available before
-                Step 2 (docs/group-memory.md, section 5.5); deleting the
-                session's buffer and memcells alone would leave the group's
-                memory of it half removed.
+            InvalidInputError: The session belongs to a group. Inside a group
+                a delete is an owner's or admin's propagated forget
+                (:meth:`delete_in_group`, which needs ``group_id`` and
+                ``asker_id``); deleting the session's buffer and memcells
+                alone would leave the group's memory of it half removed.
         """
         if session_id is not None:
             bound = await self._stores.groups.binding(
@@ -341,8 +541,8 @@ class MemoryService:
             )
             if bound is not None:
                 raise InvalidInputError(
-                    "the session belongs to a group; group-scoped delete is not "
-                    "available yet"
+                    "the session belongs to a group; name group_id and asker_id "
+                    "to delete it inside the group"
                 )
         task = self._extractions.supervise(
             self._deleter.delete(
@@ -685,6 +885,12 @@ class MemoryService:
         return await self._memorizer.run(
             payload, is_final=is_final, defer_extraction=defer_extraction
         )
+
+
+def _group_scope(app_id: str, project_id: str, group_id: str) -> Scope:
+    return Scope(
+        app_id=app_id, project_id=project_id, owner_id=group_id, owner_type="group"
+    )
 
 
 def _image_limits_from(settings: Settings) -> ImageLimits:

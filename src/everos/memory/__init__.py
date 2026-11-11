@@ -19,6 +19,10 @@ adapters that implement them. The domain layer here is reserved for actual
 business logic (extract / search / reflection / custom_instructions).
 """
 
+from ._partition_locks import group_forget_lock as group_forget_lock
+from ._partition_locks import group_profile_lock as group_profile_lock
+from ._partition_locks import group_scenes_lock as group_scenes_lock
+from ._partition_locks import member_profile_lock as member_profile_lock
 from ._partition_locks import user_cluster_lock as user_cluster_lock
 from .models import AgentCase as AgentCase
 from .models import AtomicFact as AtomicFact
@@ -38,5 +42,9 @@ __all__ = [
     "IngestResult",
     "MemCell",
     "ToolCall",
+    "group_forget_lock",
+    "group_profile_lock",
+    "group_scenes_lock",
+    "member_profile_lock",
     "user_cluster_lock",
 ]

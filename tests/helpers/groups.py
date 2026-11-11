@@ -36,6 +36,7 @@ from PIL import Image
 from everos.component.images import ImageLimits
 from everos.component.tokenizer import build_tokenizer
 from everos.config import Settings
+from everos.infra.cascade import DeleteFence, FencedIndexEraser
 from everos.infra.cascade.registry import match_kind
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
@@ -66,7 +67,6 @@ from tests.fakes import (
     make_providers,
 )
 from tests.fakes.storage import Storage, make_storage
-from tests.fakes.stores import UnusedPort
 
 DIM = 8
 APP = "default"
@@ -149,13 +149,18 @@ class GroupWorld:
             instructions=bundled_instructions(),
         )
         bus = _Bus()
+        # The eraser a forget erases index rows through, as the bootstrap
+        # builds it; the cascade is the test's own :meth:`project`.
+        eraser = FencedIndexEraser(
+            storage.repos, DeleteFence(), storage.sqlite.md_change_state
+        )
         memory = _build_memory_service(
             settings,
             make_providers(llm=model, embedding=embedding, rerank=None),
             deps,
             build_tokenizer(),
             bus,
-            UnusedPort("index_eraser"),
+            eraser,
         )
         try:
             yield cls(

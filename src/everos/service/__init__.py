@@ -50,6 +50,9 @@ from .knowledge import TopicDetail as TopicDetail
 from .knowledge import TopicOverview as TopicOverview
 from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import FlushResult as FlushResult
+from .memory import GroupForgetResult as GroupForgetResult
+from .memory import GroupForgetTarget as GroupForgetTarget
+from .memory import GroupUndoResult as GroupUndoResult
 from .memory import GroupUpsertResult as GroupUpsertResult
 from .memory import GroupView as GroupView
 from .memory import MemorizeResult as MemorizeResult
@@ -107,6 +110,9 @@ __all__ = [
     "FlushResult",
     "GetRequest",
     "GetResponse",
+    "GroupForgetResult",
+    "GroupForgetTarget",
+    "GroupUndoResult",
     "GroupUpsertResult",
     "GroupView",
     "HealthReport",

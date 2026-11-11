@@ -631,7 +631,7 @@ def _build_memory_service(
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     # The one access policy every read path asks (docs/group-memory.md, D9).
-    access = AccessPolicy(stores.groups)
+    access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
     return MemoryService(
         index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
@@ -668,6 +668,7 @@ def _build_memory_service(
             image_memory_store=stores.image_memory,
             image_limits=_image_limits(settings),
             member_profiles=stores.member_profile,
+            message_forget=stores.message_forget,
         ),
         bus=bus,
         search_manager=SearchManager(

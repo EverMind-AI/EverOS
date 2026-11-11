@@ -33,22 +33,20 @@ from __future__ import annotations
 import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.clustering import cluster_by_geometry
-from everalgo.types import Episode as AlgoEpisode
-from everalgo.user_memory import EpisodeReflector
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import get_partition_lock
+from everos.memory._partition_locks import group_scenes_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import GroupEpisodeExtracted
+from everos.memory.extract.pipeline.group_scene import narrate_scene, scene_version
 from everos.memory.mappers import cluster as cluster_mapper
-from everos.memory.models import Episode, Origin, Scene, mint_cluster_id
+from everos.memory.models import mint_cluster_id
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
     Event,
     Immediate,
     Scope,
-    Stored,
     StrategySpec,
 )
 
@@ -75,8 +73,7 @@ async def update_group_scenes(
     )
     # Before the lock: a model call under it would hold every other writer.
     vector = np.asarray(await deps.embedding.embed(event.episode_text), np.float32)
-    partition = f"{event.app_id}:{event.project_id}:{event.group_id}"
-    async with get_partition_lock("update_group_scenes", partition):
+    async with group_scenes_lock(event.app_id, event.project_id, event.group_id):
         if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
             return []
         existing = [
@@ -148,45 +145,23 @@ async def _write_version(
     )
     if len(members) < 2:
         return  # a member is gone from markdown; the next episode retries
-    reflector = EpisodeReflector(llm=deps.llm)
-    custom = deps.instructions.load("reflect")
-    if previous is None:
-        narrative = await reflector.areflect(
-            [_algo(m) for m in members],
-            custom_instructions=custom,
-            output_language=event.language,
-        )
-    else:
-        known = set(previous.item.member_ids)
-        new = [m for m in members if m.ref.entry_id not in known] or members[-1:]
-        narrative = await reflector.areflect(
-            [_algo(m) for m in new],
-            old_episode=AlgoEpisode(
-                owner_id=scope.owner_id,
-                episode=previous.item.narrative,
-                subject=previous.item.subject,
-                summary=previous.item.summary,
-                timestamp=previous.item.timestamp,
-            ),
-            custom_instructions=custom,
-            output_language=event.language,
-        )
-    items = [m.item for m in members]
-    scene = Scene(
+    previous_scene = previous.item if previous is not None else None
+    known = set(previous_scene.member_ids) if previous_scene is not None else set()
+    new = [m for m in members if m.ref.entry_id not in known] or members[-1:]
+    narrative = await narrate_scene(
+        deps.llm,
         owner_id=scope.owner_id,
+        members=members if previous_scene is None else new,
+        previous=previous_scene,
+        custom_instructions=deps.instructions.load("reflect"),
+        language=event.language,
+    )
+    scene = scene_version(
+        scope,
         scene_id=scene_id,
         version=previous.item.version + 1 if previous is not None else 1,
-        member_ids=[m.ref.entry_id for m in members],
-        subject=narrative.subject,
-        summary=narrative.summary,
-        narrative=narrative.episode,
-        timestamp=max(i.timestamp for i in items),
-        source_start=min(
-            i.source_start if i.source_start is not None else i.timestamp for i in items
-        ),
-        sender_ids=_union(i.sender_ids for i in items),
-        subject_ids=_union(i.subject_ids for i in items),
-        origin=_origin(items),
+        members=members,
+        narrative=narrative,
         language=event.language,
     )
     ref = await deps.stores.scene.append(
@@ -200,37 +175,6 @@ async def _write_version(
         members=len(members),
         entry_id=ref.entry_id if ref is not None else None,
     )
-
-
-def _algo(stored: Stored[Episode]) -> AlgoEpisode:
-    episode = stored.item
-    return AlgoEpisode(
-        owner_id=episode.owner_id,
-        episode=episode.episode,
-        subject=episode.subject,
-        summary=episode.summary,
-        timestamp=episode.timestamp,
-    )
-
-
-def _union(lists: object) -> list[str]:
-    out: list[str] = []
-    for values in lists:  # type: ignore[attr-defined]
-        for value in values:
-            if value not in out:
-                out.append(value)
-    return out
-
-
-def _origin(episodes: list[Episode]) -> Origin | None:
-    """``member`` / ``assistant`` when every member episode agrees, else ``mixed``."""
-    origins = {e.origin for e in episodes if e.origin is not None}
-    if not origins:
-        return None
-    if len(origins) == 1:
-        (origin,) = origins
-        return origin
-    return "mixed"
 
 
 UPDATE_GROUP_SCENES_SPEC = StrategySpec(

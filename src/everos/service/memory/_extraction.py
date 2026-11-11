@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from everos.core.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Collection, Coroutine
 
 logger = get_logger("everos.service.memory")
 
@@ -33,6 +33,7 @@ class ExtractionSupervisor:
 
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
+        self._sessions: dict[asyncio.Task[Any], str] = {}
 
     def supervise[T](
         self,
@@ -50,9 +51,12 @@ class ExtractionSupervisor:
         """
         task: asyncio.Task[T] = asyncio.ensure_future(coro)
         self._tasks.add(task)
+        if session_id is not None:
+            self._sessions[task] = session_id
 
         def _done(t: asyncio.Task[T]) -> None:
             self._tasks.discard(t)
+            self._sessions.pop(t, None)
             if t.cancelled():
                 logger.error(
                     f"{label}_cancelled",
@@ -82,6 +86,20 @@ class ExtractionSupervisor:
         if pending:
             await asyncio.wait(pending, timeout=wait_seconds)
         return sum(1 for t in self._tasks if not t.done())
+
+    async def settle(self, session_ids: Collection[str], wait_seconds: float) -> int:
+        """Wait up to ``wait_seconds`` for what runs for ``session_ids``.
+
+        A forget inside a group waits for the extractions of the sessions it
+        touches, so every segment cut before it was recorded is written by the
+        time it looks (docs/group-memory.md, 9.4). Returns how many are still
+        running.
+        """
+        wanted = set(session_ids)
+        pending = {t for t, s in self._sessions.items() if s in wanted and not t.done()}
+        if pending:
+            await asyncio.wait(pending, timeout=wait_seconds)
+        return sum(1 for t in pending if not t.done())
 
     async def shutdown(self, wait_seconds: float) -> None:
         """:meth:`drain` for shutdown: log what runs, and what is abandoned."""
