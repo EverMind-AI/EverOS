@@ -107,8 +107,9 @@ class PurgeMarks:
         self._scope: PurgeScope | None = None
         self._tombstones: list[Tombstone] = []
         self._waiters: list[asyncio.Future[None]] = []
-        self.waiting_events: set[str] = set()
-        """Ids of events held at the OME gate until the mark lifts."""
+        self.waiting_runs: set[str] = set()
+        """Ids of OME runs held at the gate until the mark lifts. Per run, not
+        per event: the other strategies of the same event may be running."""
 
     @property
     def active_job_id(self) -> str | None:

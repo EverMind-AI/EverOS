@@ -378,11 +378,11 @@ class PurgeRunner:
         if inflight.session_keys & self._locks.held_keys("session"):
             return False
         if inflight.run_ids:
-            waiting = self._marks.waiting_events
+            waiting = self._marks.waiting_runs
             running = {
                 r.run_id
                 for r in await self._engine.running_runs()
-                if r.event_id not in waiting  # held at the gate: would wait on us
+                if r.run_id not in waiting  # held at the gate: would wait on us
             }
             if inflight.run_ids & running:
                 return False

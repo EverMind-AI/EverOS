@@ -42,14 +42,12 @@ class PurgeRunGate:
         return "wait" if self._marks.active_job_id is not None else "run"
 
     @asynccontextmanager
-    async def lifted(self, event: object) -> AsyncIterator[None]:
-        event_id = getattr(event, "event_id", None)
-        if event_id is not None:
-            self._marks.waiting_events.add(event_id)
+    async def lifted(self, event: object, run_id: str) -> AsyncIterator[None]:
+        self._marks.waiting_runs.add(run_id)
         try:
             await self._marks.wait_lifted()
         finally:
-            self._marks.waiting_events.discard(event_id)
+            self._marks.waiting_runs.discard(run_id)
         yield
 
     @contextmanager

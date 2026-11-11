@@ -244,7 +244,7 @@ class Runner:
             return True
         verdict = self._gate.verdict(event)
         while verdict == "wait":
-            async with acquire_without_slot(self._gate.lifted(event)):
+            async with acquire_without_slot(self._gate.lifted(event, run_id)):
                 pass
             verdict = self._gate.verdict(event)
         if verdict == "discard":

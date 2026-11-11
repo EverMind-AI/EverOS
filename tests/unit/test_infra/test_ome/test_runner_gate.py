@@ -49,7 +49,7 @@ class _Gate:
         return "wait" if held else "run"
 
     @asynccontextmanager
-    async def lifted(self, event: object) -> AsyncIterator[None]:
+    async def lifted(self, event: object, run_id: str) -> AsyncIterator[None]:
         await self.opened.wait()
         yield
 
@@ -174,7 +174,7 @@ async def test_purge_gate_holds_until_the_mark_lifts(
         runner.run(_body(calls), event, run_id="r1", max_retries_snapshot=0)
     )
     await asyncio.sleep(0.1)
-    assert calls == [] and marks.waiting_events == {event.event_id}
+    assert calls == [] and marks.waiting_runs == {"r1"}
     marks.lift_mark()
     await asyncio.wait_for(held, timeout=2)
-    assert calls == ["other"] and marks.waiting_events == set()
+    assert calls == ["other"] and marks.waiting_runs == set()

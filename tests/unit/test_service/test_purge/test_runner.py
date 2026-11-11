@@ -281,10 +281,31 @@ async def test_settle_wait_skips_gated_runs(storage: Storage) -> None:
     job = await p.service.confirm(
         (await p.service.request("project", "a1", "p1")).nonce
     )
-    p.marks.waiting_events.add("e1")  # it waits at the gate for this purge
+    p.marks.waiting_runs.add("old")  # it waits at the gate for this purge
     started = asyncio.get_running_loop().time()
     assert await p.run_to_end(job.job_id) == "succeeded"
     assert asyncio.get_running_loop().time() - started < 2
+
+
+async def test_settle_wait_still_waits_when_a_sibling_run_is_gated(
+    storage: Storage,
+) -> None:
+    await storage.create_schema()
+    p = make_purge(storage, settle_wait_seconds=5)
+    old = FakeRun(
+        "old", "e1", get_utc_now() - timedelta(seconds=1), payload("a1", "p1")
+    )
+    p.engine.running = [old]
+    job = await p.service.confirm(
+        (await p.service.request("project", "a1", "p1")).nonce
+    )
+    # Another strategy of the same event waits at the gate; "old" runs on.
+    p.marks.waiting_runs.add("sibling")
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.5, p.engine.running.clear)
+    started = loop.time()
+    assert await p.run_to_end(job.job_id) == "succeeded"
+    assert 0.5 <= loop.time() - started < 3
 
 
 async def test_steps_deleted_accumulate_across_attempts(

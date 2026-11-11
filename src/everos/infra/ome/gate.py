@@ -24,8 +24,8 @@ class RunGate(Protocol):
         """``run`` it, ``discard`` it (recorded as done), or ``wait``."""
         ...
 
-    def lifted(self, event: object) -> AbstractAsyncContextManager[None]:
-        """Entered once ``event`` may be looked at again."""
+    def lifted(self, event: object, run_id: str) -> AbstractAsyncContextManager[None]:
+        """Entered once ``event`` may be looked at again (``run_id`` waits)."""
         ...
 
     def bind(self, event: object) -> AbstractContextManager[None]:
