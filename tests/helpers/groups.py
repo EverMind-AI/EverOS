@@ -25,6 +25,7 @@ __all__ = ["GroupWorld", "join", "leave"]
 import base64
 import contextlib
 import io
+import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,6 +96,11 @@ def _refuse(*_args: Any, **_kwargs: Any) -> str:
     raise AssertionError("a read path called the model")
 
 
+def _keep_first_ten(*_args: Any, **_kwargs: Any) -> str:
+    """The default decider: keep the first ten candidates, stop."""
+    return json.dumps({"core": list(range(10)), "next_queries": []})
+
+
 class _Bus:
     def __init__(self) -> None:
         self.events: list[Any] = []
@@ -123,9 +129,17 @@ class GroupWorld:
         tmp_path: Path,
         *,
         llm: Any = None,
+        decider: Any = None,
         settings: Settings | None = None,
         mode: str = "chat",
     ) -> AsyncIterator[GroupWorld]:
+        """The stack over ``tmp_path``.
+
+        ``llm`` is the extraction model (default: one that fails the test if
+        a read path calls it). ``decider`` is the multi-round search's model
+        (default: a scripted one that keeps the first ten candidates and
+        stops).
+        """
         base = settings or Settings()
         settings = base.model_copy(
             update={
@@ -158,7 +172,12 @@ class GroupWorld:
         )
         memory = _build_memory_service(
             settings,
-            make_providers(llm=model, embedding=embedding, rerank=None),
+            make_providers(
+                llm=model,
+                decider=decider or FakeLLMClient(handler=_keep_first_ten),
+                embedding=embedding,
+                rerank=None,
+            ),
             deps,
             build_tokenizer(),
             bus,

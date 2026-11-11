@@ -1,7 +1,7 @@
 """Tests for the two Reflection strategies.
 
 ``reflect_episodes`` (Cron) merges and returns the merged episodes;
-``finish_reflection`` deprecates once their facts exist. Both are thin
+``finish_reflection`` deprecates on the merged episode's event. Both are thin
 entry points — the Reflection logic itself is tested in
 ``test_reflection/test_orchestrator.py``.
 """
@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, patch
 import structlog.testing
 
 from everos.memory.events import (
-    AtomicFactsExtracted,
     EpisodeExtracted,
     ReflectedEpisode,
     ReflectionContext,
@@ -48,14 +47,18 @@ def _context() -> ReflectionContext:
     )
 
 
-def _facts_event(**overrides: object) -> AtomicFactsExtracted:
+def _merged_event(**overrides: object) -> EpisodeExtracted:
+    """The merged episode's event, as ``reflect_episodes`` publishes it."""
     fields: dict[str, object] = {
+        "memcell_id": "ep_merged",
         "episode_entry_id": "ep_merged",
+        "episode_text": "merged narrative",
+        "episode_timestamp_ms": 1_700_000_000_000,
         "owner_id": "u_alice",
         "source": "reflection",
         "reflection": _context(),
     }
-    return AtomicFactsExtracted(**{**fields, **overrides})
+    return EpisodeExtracted(**{**fields, **overrides})
 
 
 # ── reflect_episodes ─────────────────────────────────────────────────────
@@ -137,18 +140,19 @@ async def test_reflect_returns_every_owner_merge() -> None:
 def test_finish_spec() -> None:
     spec = FINISH_REFLECTION_SPEC
     assert spec.name == "finish_reflection"
-    assert spec.trigger.on == [AtomicFactsExtracted]
+    # On the merged episode itself: nothing downstream of it gates the finish.
+    assert spec.trigger.on == [EpisodeExtracted]
     assert spec.emits == frozenset()
     assert spec.max_retries == 1
     assert spec.enabled is True
 
 
-def test_finish_applies_only_to_reflection_facts() -> None:
+def test_finish_applies_only_to_a_merged_episode() -> None:
     applies = FINISH_REFLECTION_SPEC.applies_to
     assert callable(applies)
     deps = make_deps()
-    assert applies(_facts_event(), deps) is True
-    assert applies(_facts_event(source="pipeline", reflection=None), deps) is False
+    assert applies(_merged_event(), deps) is True
+    assert applies(_merged_event(source="pipeline", reflection=None), deps) is False
 
 
 async def test_finish_hands_the_context_to_the_finisher() -> None:
@@ -157,7 +161,7 @@ async def test_finish_hands_the_context_to_the_finisher() -> None:
         "everos.memory.strategies.finish_reflection.ReflectionFinisher"
     ) as finisher_cls:
         finisher_cls.return_value.finish = AsyncMock(return_value=None)
-        events = await finish_reflection(_facts_event(), deps)
+        events = await finish_reflection(_merged_event(), deps)
 
     assert events == []
     finisher_cls.return_value.finish.assert_awaited_once_with(
@@ -170,4 +174,4 @@ async def test_finish_returns_without_side_effects_when_embedding_unavailable() 
         "everos.memory.strategies.finish_reflection.ReflectionFinisher",
         side_effect=AssertionError("finisher must not be built"),
     ):
-        assert await finish_reflection(_facts_event(), make_deps(embedding=None)) == []
+        assert await finish_reflection(_merged_event(), make_deps(embedding=None)) == []

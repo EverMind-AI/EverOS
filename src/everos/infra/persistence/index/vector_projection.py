@@ -71,8 +71,6 @@ VECTOR_PROJECTIONS: dict[str, VectorProjection] = {
         VectorProjection(
             "episode", lambda r: r["episode"], lambda r: r.get("subject") or None
         ),
-        VectorProjection("atomic_fact", lambda r: r["fact"]),
-        VectorProjection("foresight", lambda r: r["foresight"]),
         VectorProjection("agent_case", lambda r: r["task_intent"]),
         VectorProjection("agent_skill", _skill_text),
         VectorProjection("image_memory", lambda r: r["description"]),

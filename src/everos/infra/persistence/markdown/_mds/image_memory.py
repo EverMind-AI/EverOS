@@ -2,7 +2,7 @@
 
 Path: ``users/<scope_id>/images/image-<YYYY-MM-DD>.md``.
 
-Deliberately *not* dot-prefixed, unlike ``.atomic_facts/``: an image memory
+Deliberately *not* dot-prefixed, unlike an agent's ``.cases/``: an image memory
 is material the user asked to have remembered, and its original is referenced
 by a relative path so an editor renders the picture inline (see
 :mod:`everos.component.images` for the layout the relative path resolves

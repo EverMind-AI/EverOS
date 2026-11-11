@@ -38,11 +38,11 @@ logger = get_logger(__name__)
 Sender = Callable[[dict], Awaitable[None]]
 
 # A Langfuse chart aggregates scores by *name*, so a single name may only ever
-# carry values on one scale. HYBRID / AGENTIC top scores are calibrated to a
-# comparable [0, 1]; KEYWORD (unbounded BM25) and single-route VECTOR are not,
-# and averaging the two together would be meaningless. Hence two names: a
-# dashboard built on ``recall_top_score`` stays comparable across methods and
-# over time, and the raw scores remain available under their own name.
+# carry values on one scale. A calibrated top score (comparable [0, 1]) and an
+# uncalibrated one (the multi-round search's max RRF score) must never share a
+# name: averaging the two would be meaningless. Hence two names: a dashboard
+# built on ``recall_top_score`` stays comparable over time, and raw scores
+# remain available under their own name. Memory search reports raw scores.
 SCORE_TOP_CALIBRATED = "recall_top_score"
 SCORE_TOP_RAW = "recall_top_score_raw"
 SCORE_HIT = "recall_hit"
@@ -210,8 +210,8 @@ def emit_recall_scores(
     """Enqueue a top score (always) + recall_hit (only when ``hit`` is a
     verdict); no-op when the sink is off.
 
-    ``hit=None`` means the method's score is uncalibrated (KEYWORD /
-    single-route VECTOR): no hit verdict is pushed, and the top score is
+    ``hit=None`` means the method's score is uncalibrated (the multi-round
+    search's RRF score): no hit verdict is pushed, and the top score is
     reported as :data:`SCORE_TOP_RAW` instead of :data:`SCORE_TOP_CALIBRATED`
     so the two scales never land under one score name.
 

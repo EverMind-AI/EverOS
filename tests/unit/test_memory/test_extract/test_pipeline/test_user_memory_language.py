@@ -4,7 +4,7 @@ The defect this pins: with no language named, every extraction prompt asked
 the model to work the language out (everalgo's participant rule), and the
 2.0 backbone answered English conversations in Chinese -- a whole picture
 cell at a time, descriptions included -- and the language read back off that
-reply then pinned the cell's facts and the owner's profile to Chinese.
+reply then pinned the cell's extractions and the owner's profile to Chinese.
 
 The contract now:
 
@@ -150,7 +150,7 @@ async def test_an_english_chat_s_picture_only_cell_is_told_english() -> None:
 
 
 async def test_the_conversation_s_language_is_pinned_not_the_reply_s() -> None:
-    """A reply that drifted into Chinese does not drag the facts after it."""
+    """A reply that drifted into Chinese does not drag the episode after it."""
     llm = _replying(_CHINESE_PICTURE_REPLY)
     pipeline, episodes = await _pipeline(
         llm, ("mc_1", _EARLIER), ("mc_2", _PICTURE_ONLY)

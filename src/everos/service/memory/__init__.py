@@ -277,7 +277,7 @@ class MemoryService:
     async def search(
         self, req: SearchRequest, *, asserted_asker: str | None = None
     ) -> SearchResponse:
-        """Hybrid retrieval across the configured memory backends.
+        """Multi-round retrieval over a user's or a group's memory.
 
         Pictures attached to the question are stored first (content-addressed,
         no memory, no reference) and handed to the manager as content hashes,

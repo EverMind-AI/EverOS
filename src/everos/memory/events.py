@@ -27,29 +27,15 @@ def parse_group_key(key: str) -> tuple[str, str, str] | None:
     return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
 
 
-class UserPipelineStarted(Event):
-    """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
-
-    Hot-path emit, so atomic_fact / foresight / clustering strategies can
-    start in parallel with the in-pipeline Episode extraction. Carries the
-    algo-side ``MemCell`` so crash recovery has the full payload (OME
-    serialises events to JSON via Pydantic v2 nested-model handling).
-    """
-
-    memcell_id: str
-    session_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    memcell: MemCell
-
-
 class AgentPipelineStarted(Event):
     """Fired at the start of :class:`AgentMemoryPipeline.run`, once per cell.
 
     Only emitted in ``mode="agent"`` (the agent pipeline does not run in
     chat mode). Subscribers handle the agent-side processing chain
     (case extraction, agent-skill clustering) in parallel with the user
-    chain. Payload mirrors :class:`UserPipelineStarted`.
+    chain. Carries the algo-side ``MemCell`` so crash recovery has the full
+    payload (OME serialises events to JSON via Pydantic v2 nested-model
+    handling).
 
     ``group_id`` is the group the cell's session is bound to: a case learned
     from it carries the group (docs/group-memory.md, section 9.1).
@@ -76,10 +62,9 @@ class ReflectedEpisode(BaseModel):
 class ReflectionContext(BaseModel):
     """What finishing one Reflection merge needs, captured when it was merged.
 
-    The merge step writes the merged episode and publishes it for fact
-    extraction; the finishing step runs only after the facts exist, so the
-    snapshot it acts on travels with the events instead of living in a
-    waiting coroutine.
+    The merge step writes the merged episode and publishes it; the finishing
+    step runs on that event, so the snapshot it acts on travels with the
+    event instead of living in a waiting coroutine.
 
     Attributes:
         cluster_id: The cluster that was merged.
@@ -123,9 +108,8 @@ class EpisodeExtracted(Event):
     project_id: str = "default"
     source: str = "pipeline"
     reflection: ReflectionContext | None = None
-    """Set on Reflection's merged episode (``source="reflection"``); carried
-    through to :class:`AtomicFactsExtracted` so the step that finishes the
-    merge knows what to deprecate."""
+    """Set on Reflection's merged episode (``source="reflection"``): what the
+    step that finishes the merge (``finish_reflection``) deprecates."""
     language: str | None = None
     """The episode's ``OutputLanguage`` value (see ``Episode.language``); the
     extractions this event drives write in it. ``None`` lets each extractor
@@ -181,23 +165,6 @@ class GroupFlushed(Event):
     session_id: str
     app_id: str = "default"
     project_id: str = "default"
-
-
-class AtomicFactsExtracted(Event):
-    """Fired by ``extract_atomic_facts`` once an episode's facts are written.
-
-    Fired even when the episode yielded no facts: Reflection finishes a
-    merge on this event, and a merged episode without facts must still
-    retire the members it replaced.
-    """
-
-    episode_entry_id: str
-    owner_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    source: str = "pipeline"
-    fact_entry_ids: list[str] = Field(default_factory=list)
-    reflection: ReflectionContext | None = None
 
 
 class AgentCaseExtracted(Event):

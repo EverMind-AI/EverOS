@@ -2,14 +2,14 @@
 
 Pins the behavior every Task in the embed-soft-dependency refactor
 promises for a user who has configured only an LLM: writes still work,
-keyword search still works, everything that needs embedding/rerank
-fails fast with a 422 instead of a silent 200 or a 500, and the
-background strategy engine never registers a strategy it cannot run.
+everything that needs embedding/rerank -- memory search included, since
+multi-round retrieval embeds every sub-query -- fails fast with a 422
+instead of a silent 200 or a 500, and the background strategy engine never
+registers a strategy it cannot run.
 """
 
 from __future__ import annotations
 
-import pytest
 from httpx import AsyncClient
 
 from everos.service import Application
@@ -31,55 +31,26 @@ async def test_add_memory_writes_null_vector(tier1_runtime: AsyncClient) -> None
 
 
 # ---------------------------------------------------------------------------
-# 2. KEYWORD_ONLY search works even with vector=NULL rows
+# 2. Memory search needs the embedder: 422 with the right feature tag
 # ---------------------------------------------------------------------------
 
 
-async def test_keyword_search_returns_results(tier1_runtime: AsyncClient) -> None:
-    await add_and_flush(tier1_runtime, session_id="s_tier1_kw")
+async def test_search_without_embedding_422(tier1_runtime: AsyncClient) -> None:
+    await add_and_flush(tier1_runtime, session_id="s_tier1_search")
 
     resp = await tier1_runtime.post(
         "/api/v1/memory/search",
-        json={
-            "user_id": "u_alice",
-            "query": "hiking",
-            "method": "keyword",
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    episodes = resp.json()["data"]["episodes"]
-    assert episodes, "BM25 keyword search must find the vector=NULL episode"
-
-
-# ---------------------------------------------------------------------------
-# 3-5. VECTOR / HYBRID (user) / AGENTIC all 422 with the right feature tag
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "method,expected_feature",
-    [
-        ("vector", "vector"),
-        ("hybrid", "user_hybrid"),
-        ("agentic", "agentic_search"),
-    ],
-)
-async def test_embed_dependent_search_methods_422(
-    tier1_runtime: AsyncClient, method: str, expected_feature: str
-) -> None:
-    resp = await tier1_runtime.post(
-        "/api/v1/memory/search",
-        json={"user_id": "u_alice", "query": "hiking", "method": method},
+        json={"user_id": "u_alice", "query": "hiking", "method": "llm_multiround"},
     )
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
     assert "embedding" in body["error"]["message"]
-    assert expected_feature in body["error"]["message"]
+    assert "llm_multiround" in body["error"]["message"]
 
 
 # ---------------------------------------------------------------------------
-# 6. Knowledge endpoints all gated off
+# 3. Knowledge endpoints all gated off
 # ---------------------------------------------------------------------------
 
 
@@ -103,7 +74,7 @@ async def test_knowledge_search_422(tier1_runtime: AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. /health reflects the Tier 1 capability matrix
+# 4. /health reflects the Tier 1 capability matrix
 # ---------------------------------------------------------------------------
 
 
@@ -119,9 +90,7 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
 
     disabled = set(body["disabled_features"])
     expected_subset = {
-        "vector_search",
-        "hybrid_search",
-        "agentic_search",
+        "memory_search",
         "reflection",
         "skill_extraction",
         "knowledge",
@@ -130,7 +99,7 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
 
 
 # ---------------------------------------------------------------------------
-# 8. OME registers every strategy in Tier 1 (body-guard, not registration-guard)
+# 5. OME registers every strategy in Tier 1 (body-guard, not registration-guard)
 # ---------------------------------------------------------------------------
 
 

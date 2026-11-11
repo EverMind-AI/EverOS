@@ -20,10 +20,8 @@ from pathlib import PurePosixPath
 from everos.infra.persistence.markdown import (
     AgentCaseDailyFrontmatter,
     AgentSkillFrontmatter,
-    AtomicFactDailyFrontmatter,
     BaseFrontmatter,
     EpisodeDailyFrontmatter,
-    ForesightDailyFrontmatter,
     GroupEpisodeDailyFrontmatter,
     GroupFrontmatter,
     GroupImageMemoryDailyFrontmatter,
@@ -38,9 +36,7 @@ from everos.infra.persistence.markdown import (
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     GroupProfileItem,
     ImageMemory,
     KnowledgeTopic,
@@ -50,9 +46,7 @@ from everos.infra.persistence.records import (
 from ._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
-    AtomicFactHandler,
     EpisodeHandler,
-    ForesightHandler,
     GroupMemberProfileHandler,
     GroupProfileHandler,
     GroupRosterHandler,
@@ -113,18 +107,6 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=EpisodeDailyFrontmatter,
         index_schema=Episode,
         handler_factory=EpisodeHandler,
-    ),
-    KindSpec(
-        name="atomic_fact",
-        frontmatter_schema=AtomicFactDailyFrontmatter,
-        index_schema=AtomicFact,
-        handler_factory=AtomicFactHandler,
-    ),
-    KindSpec(
-        name="foresight",
-        frontmatter_schema=ForesightDailyFrontmatter,
-        index_schema=Foresight,
-        handler_factory=ForesightHandler,
     ),
     KindSpec(
         name="agent_case",

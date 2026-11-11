@@ -1,7 +1,7 @@
 """Base business writer for daily-log markdown files.
 
-Daily-log files (memcell / episode / case / atomic_fact / foresight)
-share three things:
+Daily-log files (memcell / episode / case / image memory) share three
+things:
 
     * scope (user-track or agent-track, derived from the schema)
     * filename pattern: ``<FILE_PREFIX>-<YYYY-MM-DD>.md`` under
@@ -99,8 +99,8 @@ class BaseDailyWriter:
         """Append a single rendered entry; return the freshly minted ``EntryId``.
 
         Unifies the per-schema ``append_entry`` previously duplicated across
-        :class:`AtomicFactWriter` / :class:`ForesightWriter` /
-        :class:`EpisodeWriter` / :class:`AgentCaseWriter`. The whole flow
+        the daily-log writers (:class:`EpisodeWriter`,
+        :class:`AgentCaseWriter`, ...). The whole flow
         (read ``entry_count``, allocate ``EntryId``, render entry body,
         update frontmatter, atomic write) runs inside one per-path lock,
         eliminating the read-modify-write race that previously allowed

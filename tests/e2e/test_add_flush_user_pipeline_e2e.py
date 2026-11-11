@@ -1,7 +1,7 @@
 """Add + Flush user pipeline — a hermetic canned run and a long real-LLM drive.
 
-``test_add_flush_search_get_on_canned_user_track`` runs anywhere: every
-model call is answered from the canned user-track scripts.
+``test_add_flush_get_on_canned_user_track`` runs anywhere: every model
+call is answered from the canned user-track scripts.
 
 The rest is the long real-conversation smoke:
 
@@ -16,8 +16,7 @@ verifies:
 2. After /flush the buffer is empty and the memcell table has rows.
 3. After cascade drains, episode md files exist and LanceDB rows
    reflect them with valid content_sha256 + vector.
-4. OME-driven async strategies have produced atomic_fact / foresight /
-   profile md files.
+4. OME-driven async strategies have produced the profile md file.
 
 Real LLM + real embedder (creds via ``.env``). Marked ``slow`` —
 ``pytest -m slow tests/integration/test_add_flush_core_pipeline_smoke.py``.
@@ -35,19 +34,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from everos.infra.persistence.markdown import (
-    AtomicFactDailyFrontmatter,
-    EpisodeDailyFrontmatter,
-    ForesightDailyFrontmatter,
-)
+from everos.infra.persistence.markdown import EpisodeDailyFrontmatter
 from tests.fakes import make_providers, user_track_llm, user_track_script
 from tests.fakes.storage import StorageView
 
-# Directory names live on the frontmatter schemas (single source of truth);
-# atomic_facts / foresights are dotfile-hidden so users only see episodes.
+# The directory name lives on the frontmatter schema (single source of truth).
 _EPISODE_DIR = EpisodeDailyFrontmatter.DIR_NAME
-_ATOMIC_FACT_DIR = AtomicFactDailyFrontmatter.DIR_NAME
-_FORESIGHT_DIR = ForesightDailyFrontmatter.DIR_NAME
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,7 +85,7 @@ def _count_episode_entries(md_files: list[Path]) -> int:
             # We count any second-level heading that isn't the standard
             # subsection headers used inside an entry.
             if stripped.startswith("## ") and not stripped.startswith(
-                ("## Subject", "## Summary", "## Content", "## Fact", "## Foresight")
+                ("## Subject", "## Summary", "## Content")
             ):
                 n += 1
     return n
@@ -233,10 +225,10 @@ async def test_long_conversation_produces_all_memory_types(
     )
 
     # ── Stage 3 + 4: wait for cascade to drain ────────────────────────────
-    # Cascade syncs md → LanceDB. OME async strategies (atomic / foresight /
-    # profile) also write md, which then cascade picks up. So one wait on
-    # cascade-drain effectively covers both pipelines, IF OME has already
-    # emitted its strategies (which memorize.py does inline via engine.emit).
+    # Cascade syncs md → LanceDB. OME async strategies (profile) also write
+    # md, which then cascade picks up. So one wait on cascade-drain
+    # effectively covers both pipelines, IF OME has already emitted its
+    # strategies (which memorize.py does inline via engine.emit).
     await cascade_done_poll(deadline_seconds=600.0)
 
     # ── Stage 5: artifacts on disk + LanceDB ──────────────────────────────
@@ -258,26 +250,7 @@ async def test_long_conversation_produces_all_memory_types(
         f"LanceDB episode rows ({lance_episode_count}) < md entries ({episode_entries})"
     )
 
-    # 5.3 atomic_fact
-    af_files = _list_md_files(memory_root, _ATOMIC_FACT_DIR)
-    assert af_files, "no atomic_fact md files — extract_atomic_facts did not emit"
-
-    lance_af_count = await storage_view.repos.atomic_fact.count()
-    assert lance_af_count >= 1, (
-        f"LanceDB atomic_fact rows = {lance_af_count}; expected ≥ 1"
-    )
-
-    # 5.4 foresight
-    # Foresight extractor is correctly invoked (log: ``foresights_extracted``
-    # per memcell) but daily-life chat about kids / work / hobbies rarely
-    # yields explicit future-intent statements, so count is usually 0.
-    # We assert the LanceDB table exists (count returns 0 cleanly) — not
-    # that any row was emitted.
-
-    lance_fs_count = await storage_view.repos.foresight.count()
-    assert lance_fs_count >= 0, f"foresight table broken: count={lance_fs_count}"
-
-    # 5.5 profile (md only — profile retrieval path is stub; we only assert
+    # 5.3 profile (md only — profile retrieval path is stub; we only assert
     # the writer wrote something). Profile lives as a single file
     # ``users/<user_id>/user.md`` (schema: ``UserProfileFrontmatter.PROFILE_FILENAME``).
     from everos.infra.persistence.markdown import UserProfileFrontmatter
@@ -307,9 +280,7 @@ async def test_long_conversation_produces_all_memory_types(
     #
     # ``expect_at_least`` pins the kinds this pipeline MUST produce so an
     # empty glob (kind not emitted at all) fails loudly — without this
-    # guard the parity check would silently pass on zero files. Foresight
-    # is NOT pinned because the LLM frequently yields 0 future-intent
-    # statements on daily-life chat (see commentary above stage 5.4).
+    # guard the parity check would silently pass on zero files.
     from tests._consistency_assertions import assert_md_lance_strict_consistent
 
     await assert_md_lance_strict_consistent(
@@ -317,7 +288,6 @@ async def test_long_conversation_produces_all_memory_types(
         storage_view.repos,
         expect_at_least={
             "episode": 1,
-            "atomic_fact": 1,
             "user_profile": 1,
         },
     )
@@ -385,16 +355,18 @@ async def _poll_until(
             await asyncio.sleep(0.2)
 
 
-async def test_add_flush_search_get_on_canned_user_track(
+async def test_add_flush_get_on_canned_user_track(
     core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``/add`` -> ``/flush`` -> ``/search`` -> ``/get`` on the canned user track.
+    """``/add`` -> ``/flush`` -> ``/get`` on the canned user track.
 
     Real application (boundary, episode pipeline, OME strategies, cascade,
     LanceDB), Tier 1 (no embedding), every model call answered from
     ``tests/fakes/llm_scripts/user_track``. The add buffers (the boundary
     reply judges the tail still open), the flush cuts one cell, and the canned
-    episode, atomic facts and profile all become readable through the API.
+    episode and profile become readable through the API. ``/search`` is
+    refused: multi-round retrieval, the only search method, embeds every
+    sub-query, and this deployment has no embedder.
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
@@ -449,18 +421,6 @@ async def test_add_flush_search_get_on_canned_user_track(
             data = resp.json()["data"]
             return data["episodes" if memory_type == "episode" else "profiles"]
 
-        async def _search() -> list[dict]:
-            resp = await client.post(
-                "/api/v1/memory/search",
-                json={
-                    "user_id": "u_alice",
-                    "query": "Kyoto ryokan",
-                    "method": "keyword",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            return resp.json()["data"]["episodes"]
-
         async def _indexed() -> bool:
             return bool(await _get("episode")) and bool(await _get("profile"))
 
@@ -476,15 +436,14 @@ async def test_add_flush_search_get_on_canned_user_track(
             i["description"] for i in got_profile["profile_data"]["explicit_info"]
         ] == [i["description"] for i in profile["explicit_info"]]
 
-        async def _found() -> bool:
-            return bool(await _search())
-
-        await _poll_until(_found)
-        (hit,) = await _search()
-        assert hit["episode"] == episode["content"]
+        search = await client.post(
+            "/api/v1/memory/search",
+            json={"user_id": "u_alice", "query": "Kyoto ryokan"},
+        )
+        assert search.status_code == 422, search.text
+        assert search.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
 
     replies = [call.response_format.__name__ for call in llm.calls]
     assert replies.count("_BatchReply") == 2  # the add and the flush
     assert replies.count("_EpisodeReply") == 1
-    assert "_AtomicFactsReply" in replies
     assert "_ProfileItems" in replies

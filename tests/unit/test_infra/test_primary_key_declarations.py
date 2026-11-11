@@ -12,9 +12,7 @@ from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     GroupProfileItem,
     IndexRecord,
     KnowledgeTopic,
@@ -24,9 +22,7 @@ from tests.fakes import TEST_DIM
 
 BUSINESS_TABLES = (
     Episode,
-    AtomicFact,
     AgentCase,
-    Foresight,
     AgentSkill,
     UserProfile,
     KnowledgeTopic,

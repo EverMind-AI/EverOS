@@ -252,7 +252,6 @@ async def test_report_delete_for_owner_scoped(storage: Storage) -> None:
                 mode="init",
                 source_members=[("e1", "episode")],
                 merged_entry_id="m",
-                deprecated_fact_count=0,
             )
         )
 

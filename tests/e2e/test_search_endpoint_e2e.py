@@ -1,86 +1,105 @@
-"""End-to-end integration tests for ``POST /api/v1/memory/search``.
+"""End-to-end tests for ``POST /api/v2/memory/search``.
 
-White-box e2e (per the project's testing taxonomy): real LanceDB writes
-+ real embedder (when the method needs one) + real reranker / LLM
-client when the method needs them. Data is reloaded from the
-``tests/fixtures/search_seed/`` slice (16 episodes / 20 atomic_facts /
-2 user_profiles produced by ``_dump_search_seed.py``) so the test
-verifies recall on **real** vectors and **real** BM25 tokens.
+Multi-round retrieval (``llm_multiround``) is the only search method: each
+round embeds its sub-queries, fuses BM25 and vector recall per sub-query, and
+asks a decider which candidates to keep. White-box e2e: the real application
+and route over real LanceDB rows reloaded from the
+``tests/fixtures/search_seed/`` slice (16 episodes / 2 user_profiles produced
+by ``_dump_search_seed.py``, with real vectors and real BM25 tokens).
 
-Coverage matrix (see 21_test_taxonomy_debate.md context):
+The contract tests run on a fake 1024-wide embedder and a scripted decider
+that keeps the first ten candidates (:func:`tests.fakes.memorize_llm`), so
+they need no credentials and pin what the route promises whatever the
+ranking:
 
-- methods: keyword / vector / hybrid / agentic (user owner only —
-  agent_case / agent_skill ship in a separate pipeline)
-- owner_id / owner_type isolation
+- the default method, and the decider actually running
+- owner isolation
 - top_k (specific value + -1 unlimited)
-- radius (cosine threshold)
 - include_profile (true / false)
 - filter DSL: session_id eq / timestamp range / sender_id in /
-  parent_id (= memcell bridge) / top-level OR / nested AND-OR
-- Hierarchical fact eviction: hybrid method embeds atomic_facts that share
-  the matched episode's memcell parent
+  parent_id (memcell) / top-level OR / nested AND-OR, and its 422
+- the envelope (``episodes`` / ``images`` / ``profiles`` /
+  ``unprocessed_messages`` / ``scope``)
+- unprocessed_messages from the boundary-detection buffer
+- timezone discipline across a display-tz switch
 
-Methods other than ``keyword`` require ``EMBEDDING_*`` creds in .env —
-they carry ``@pytest.mark.live_llm`` (and ``@pytest.mark.slow`` where
-applicable). CI's default ``-m 'not slow and not live_llm'`` deselects
-them. Run with ``pytest -m live_llm ...`` locally to exercise.
+Request validation (the removed methods and their options, agent scopes) is
+pinned by the unit suite's ``test_search_route_validation.py``; an agent's
+cases and skills are listed by ``/memory/get`` (``test_get_endpoint_e2e.py``).
+
+``test_multiround_recall_with_real_providers`` drives the same route with the
+real embedder and decider from ``.env``: it carries ``@pytest.mark.live_llm``
+and ``@pytest.mark.slow``, which CI's default
+``-m 'not slow and not live_llm'`` deselects.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
-import time
-from collections.abc import AsyncIterator, Sequence
-from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager
 from typing import Any
 
-import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 
-from everos.component.embedding import build_embedding_provider
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.lancedb import (
-    AgentCase,
-    AgentSkill,
-    AtomicFact,
-    Episode,
-    UserProfile,
-)
-from everos.memory.models import mint_cluster_id
-from everos.service import build_application, build_providers
+from everos.infra.persistence.lancedb import Episode, UserProfile
+from everos.service import Providers, build_application
+from tests.fakes import FakeEmbeddingProvider, make_providers, memorize_llm
 from tests.fakes.storage import StorageView
 
-# ── Fixture: app with no lifespan + per-test singleton reset ──────────
+_SEARCH = "/api/v2/memory/search"
+
+# ── Fixtures: the application over the test's memory root, no lifespan ──
+
+
+@asynccontextmanager
+async def _serve(
+    storage_view: StorageView, providers: Providers | None
+) -> AsyncIterator[AsyncClient]:
+    """An HTTP client on an unstarted application (no cascade, no OME).
+
+    ``providers=None`` builds the providers ``.env`` configures.
+    """
+    # The application is never started, so create the SQLite tables its
+    # ``start`` would; the search reads the boundary buffer from them.
+    await storage_view.create_schema()
+    application = build_application(load_settings(), providers=providers)
+    app = create_app(application=application)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            yield c
+    finally:
+        await application.aclose()
+
+
+@pytest.fixture
+def llm_calls() -> list[str]:
+    """Reply models the scripted model was asked for, in call order."""
+    return []
 
 
 @pytest.fixture
 async def client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
+    storage_view: StorageView, llm_calls: list[str]
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app against a tmp memory root; no lifespan (no cascade/OME)."""
-    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
-
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    load_settings.cache_clear()
-
-    # Run ``metadata.create_all`` since the application is never started and
-    # therefore skips the schema pass of ``Application.start``. The AGENTIC
-    # cluster-path tests need the ``cluster`` table; other search paths
-    # don't touch sqlite but the schema is cheap to materialise.
-    async with storage_view.database.engine.begin() as conn:
-        await conn.run_sync(_SQLModel.metadata.create_all)
-
-    # A fresh application per test builds its search manager against the
-    # just-monkey-patched memory root + .env creds.
-    app = create_app(application=build_application(load_settings()))
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    """The app on a fake 1024-wide embedder and a keep-the-first-ten decider."""
+    providers = make_providers(
+        llm=memorize_llm(calls=llm_calls),
+        embedding=FakeEmbeddingProvider(dim=1024),
+    )
+    async with _serve(storage_view, providers) as c:
         yield c
 
-    load_settings.cache_clear()
+
+@pytest.fixture
+async def live_client(storage_view: StorageView) -> AsyncIterator[AsyncClient]:
+    """The app on the real embedder and decider ``.env`` configures."""
+    async with _serve(storage_view, None) as c:
+        yield c
 
 
 # ── Seed loading helpers ──────────────────────────────────────────────
@@ -89,27 +108,18 @@ async def client(
 async def _seed_episodes(
     storage_view: StorageView, rows: list[dict[str, Any]]
 ) -> list[Episode]:
-    """Validate + add episode rows + build FTS index.
+    """Validate + add episode rows + build the FTS index.
 
     Tests should pre-mutate per-row fields (e.g. ``session_id``) in the
     list passed in, rather than calling this multiple times. LanceDB's
     FTS index covers rows present at the time of index creation; calling
     :func:`ensure_business_indexes` here rebuilds the index over the
-    current row set so sparse_recall can see them.
+    current row set so the BM25 recall can see them.
     """
     seeded = [Episode.model_validate(r) for r in rows]
     await storage_view.repos.episode.add(seeded)
     await storage_view.index.ensure_business_indexes()
     return seeded
-
-
-async def _seed_atomic_facts(
-    storage_view: StorageView, rows: list[dict[str, Any]]
-) -> list[AtomicFact]:
-    facts = [AtomicFact.model_validate(r) for r in rows]
-    await storage_view.repos.atomic_fact.add(facts)
-    await storage_view.index.ensure_business_indexes()
-    return facts
 
 
 async def _seed_user_profiles(
@@ -121,140 +131,8 @@ async def _seed_user_profiles(
     return profiles
 
 
-async def _seed_user_memory_cluster(
-    storage_view: StorageView, eps: list[dict], *, owner_id: str
-) -> None:
-    """Seed one ``user_memory`` cluster covering every episode in ``eps``.
-
-    The AGENTIC episode path goes through ``acluster_retrieve`` (see
-    ``memory/search/agentic.py``), which narrows hybrid candidates to the
-    union of cluster member ids. Production user_memory clusters store
-    episode ``entry_id`` members (``member_type="episode"``; see
-    ``strategies/trigger_profile_clustering.py``), matching the entry_id
-    keying of ``fetch_all_for_owner``. Tests that exercise the AGENTIC
-    method therefore need at least one cluster whose members cover the
-    seeded episodes' ``entry_id``s — otherwise ``cluster_scoped`` yields
-    nothing and the agentic pipeline returns ``[]``.
-
-    Centroid is embedded from one of the episode bodies via the live
-    embedder; with a single cluster the cosine ranking against the query
-    is trivial (only one candidate), so any reasonable anchor works.
-    """
-    entry_ids = list({ep["entry_id"] for ep in eps})
-    centroid_text = eps[0]["episode"]
-    centroid_vec = await build_embedding_provider(load_settings().embedding).embed(
-        centroid_text
-    )
-    await storage_view.sqlite.cluster.upsert_with_members(
-        AlgoCluster(
-            id=mint_cluster_id(),
-            centroid=np.asarray(centroid_vec, dtype=np.float32),
-            count=len(entry_ids),
-            last_ts=int(time.time() * 1000),
-            preview=[ep["episode"][:80] for ep in eps[:3]],
-            members=entry_ids,
-        ),
-        owner_id=owner_id,
-        owner_type="user",
-        kind="user_memory",
-        member_type="episode",
-    )
-
-
-# Minimal agent_case / agent_skill row factories. The search_seed slice
-# only ships user-side rows (episode / atomic_fact / foresight /
-# user_profile), so agent-owner tests construct synthetic rows directly.
-# ``vector`` defaults to zero-filled (fine for BM25-only / dispatch
-# coverage where the test never queries the dense path); live_llm tests
-# that exercise vector / hybrid recall must pass real embeddings via
-# the ``vector`` kwarg so LanceDB's ``nearest_to`` returns the row
-# (zero vectors are undefined under cosine distance).
-def _agent_case(
-    entry: str,
-    *,
-    owner: str = "a1",
-    session: str = "sess_x",
-    day: int = 1,
-    task_intent: str | None = None,
-    approach: str | None = None,
-    vector: Sequence[float] | None = None,
-) -> AgentCase:
-    intent = task_intent if task_intent is not None else f"intent {entry}"
-    appr = approach if approach is not None else f"approach {entry}"
-    return AgentCase(
-        id=f"{owner}_{entry}",
-        entry_id=entry,
-        owner_id=owner,
-        owner_type="agent",
-        session_id=session,
-        timestamp=_dt.datetime(2026, 1, day, tzinfo=_dt.UTC),
-        parent_type="memcell",
-        parent_id="mc_99",
-        quality_score=0.8,
-        task_intent=intent,
-        task_intent_tokens=intent,
-        approach=appr,
-        approach_tokens=appr,
-        key_insight=None,
-        md_path=f"agents/{owner}/cases/{entry}.md",
-        content_sha256="abc",
-        vector=list(vector) if vector is not None else [0.0] * 1024,
-    )
-
-
-def _agent_skill(
-    name: str,
-    *,
-    owner: str = "a1",
-    description: str | None = None,
-    content: str | None = None,
-    vector: Sequence[float] | None = None,
-    source_case_ids: Sequence[str] | None = None,
-) -> AgentSkill:
-    desc = description if description is not None else f"desc {name}"
-    body = content if content is not None else f"content {name}"
-    return AgentSkill(
-        id=f"{owner}_{name}",
-        owner_id=owner,
-        owner_type="agent",
-        name=name,
-        description=desc,
-        description_tokens=desc,
-        content=body,
-        content_tokens=body,
-        confidence=0.9,
-        maturity_score=0.7,
-        source_case_ids=(
-            list(source_case_ids) if source_case_ids is not None else [f"{owner}_ac_1"]
-        ),
-        md_path=f"agents/{owner}/skills/{name}/SKILL.md",
-        content_sha256="abc",
-        vector=list(vector) if vector is not None else [0.0] * 1024,
-    )
-
-
-async def _seed_agent_cases(
-    storage_view: StorageView, rows: list[AgentCase]
-) -> list[AgentCase]:
-    await storage_view.repos.agent_case.add(rows)
-    await storage_view.index.ensure_business_indexes()
-    return rows
-
-
-async def _seed_agent_skills(
-    storage_view: StorageView, rows: list[AgentSkill]
-) -> list[AgentSkill]:
-    await storage_view.repos.agent_skill.add(rows)
-    await storage_view.index.ensure_business_indexes()
-    return rows
-
-
 def _eps_for_owner(seed: dict, owner: str) -> list[dict]:
     return [r for r in seed["episode"] if r["owner_id"] == owner]
-
-
-def _facts_for_owner(seed: dict, owner: str) -> list[dict]:
-    return [r for r in seed["atomic_fact"] if r["owner_id"] == owner]
 
 
 def _profiles_for_owner(seed: dict, owner: str) -> list[dict]:
@@ -264,370 +142,73 @@ def _profiles_for_owner(seed: dict, owner: str) -> list[dict]:
 def _post(
     client: AsyncClient,
     *,
-    owner_id: str = "caroline",
-    owner_type: str = "user",
+    user_id: str = "caroline",
     query: str = "support",
     method: str | None = None,
     top_k: int | None = None,
-    radius: float | None = None,
     include_profile: bool | None = None,
-    enable_llm_rerank: bool | None = None,
     filters: dict | None = None,
-):
-    """Build a search request body with sensible defaults; return the coroutine.
-
-    Callers still pass ``owner_id`` / ``owner_type`` (this helper's internal
-    shape); the wire body uses ``user_id`` or ``agent_id`` per the public
-    contract — the helper dispatches by ``owner_type``.
-    """
-    body: dict[str, Any] = {"query": query}
-    if owner_type == "agent":
-        body["agent_id"] = owner_id
-    else:
-        body["user_id"] = owner_id
+) -> Awaitable[Response]:
+    """Build a search request body; ``method`` is left to its default."""
+    body: dict[str, Any] = {"user_id": user_id, "query": query}
     if method is not None:
         body["method"] = method
     if top_k is not None:
         body["top_k"] = top_k
-    if radius is not None:
-        body["radius"] = radius
     if include_profile is not None:
         body["include_profile"] = include_profile
-    if enable_llm_rerank is not None:
-        body["enable_llm_rerank"] = enable_llm_rerank
     if filters is not None:
         body["filters"] = filters
-    return client.post("/api/v1/memory/search", json=body, timeout=60.0)
+    return client.post(_SEARCH, json=body, timeout=60.0)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 1. method × owner_type dispatch
+# 1. Multi-round recall
 # ═══════════════════════════════════════════════════════════════════════
 
 
-async def test_keyword_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
+async def test_search_recalls_the_owners_episodes(
+    client: AsyncClient,
+    search_seed: dict,
+    storage_view: StorageView,
+    llm_calls: list[str],
 ) -> None:
-    """``method=keyword`` runs BM25-only — no embedder needed."""
+    """The default method runs the multi-round loop over the owner's episodes."""
     await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
-    resp = await _post(client, query="LGBTQ", method="keyword")
+    resp = await _post(client, query="LGBTQ support group")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert isinstance(data["episodes"], list)
-    # At least one Caroline episode mentions LGBTQ explicitly.
-    assert len(data["episodes"]) >= 1
+    assert data["episodes"]
     for ep in data["episodes"]:
         assert ep["user_id"] == "caroline"
-        # keyword path never populates nested atomic_facts.
-        assert ep["atomic_facts"] == []
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_vector_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """``method=vector`` embeds the query and ranks by cosine.
-
-    Seeds atomic_facts alongside episodes because the MaxSim path walks
-    atomic_fact ANN → max-pool by parent_id → fetch episodes; an
-    episode-only corpus would return 0 hits.
-    """
-    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-    await _seed_atomic_facts(storage_view, _facts_for_owner(search_seed, "caroline"))
-
-    # top_k>0 disables the default unlimited-radius (0.5) quality floor,
-    # so we can verify dense recall finds *something* without the
-    # threshold cutting off all candidates.
-    resp = await _post(client, query="career", method="vector", top_k=5)
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert len(data["episodes"]) >= 1
-    for ep in data["episodes"]:
-        assert ep["user_id"] == "caroline"
-        assert ep["score"] > 0  # cosine similarity in [0, 1]
-        # vector path doesn't run hierarchical fact eviction, so no nested facts.
-        assert ep["atomic_facts"] == []
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_hybrid_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """``method=hybrid`` (default) runs sparse + dense + fusion."""
-    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-
-    resp = await _post(client, query="counseling")  # method=hybrid default
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert len(data["episodes"]) >= 1
-    for ep in data["episodes"]:
-        assert ep["user_id"] == "caroline"
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_agentic_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """``method=agentic`` runs the cross-encoder rerank loop.
-
-    The agentic episode pipeline (see ``memory/search/agentic.py``) is
-    fact-MaxSim → hybrid_full → cluster_scoped → aagentic_retrieve, so
-    the corpus needs atomic_facts (for the MaxSim child retrieve) and
-    at least one ``user_memory`` cluster covering the seeded episodes'
-    memcell ids (for the ``acluster_retrieve`` narrowing step).
-    """
-    eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(storage_view, eps)
-    await _seed_atomic_facts(storage_view, _facts_for_owner(search_seed, "caroline"))
-    await _seed_user_memory_cluster(storage_view, eps, owner_id="caroline")
-
-    resp = await _post(client, query="support group", method="agentic")
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert len(data["episodes"]) >= 1
-    for ep in data["episodes"]:
-        assert ep["user_id"] == "caroline"
-
-
-# ── Agent owner_type dispatch (separate path: agent_case + agent_skill) ─
-
-
-async def _seed_one_agent_corpus(storage_view: StorageView, owner: str = "a1") -> None:
-    """Single seed used by the parametrized agent dispatch test.
-
-    One case + one skill sharing surface tokens with the test query
-    ("refactor authentication") so BM25 deterministically hits both
-    tables; dense / agentic methods exercise the same rows. Both rows
-    are embedded with the real embedder so LanceDB's ``nearest_to``
-    can rank them (zero vectors are undefined under cosine distance —
-    the dense path returns 0 hits for them).
-    """
-    case_intent = "refactor authentication middleware"
-    case_approach = "split provider lookup from session decode"
-    skill_desc = "refactor authentication middleware reliably"
-    skill_body = "step-by-step approach for auth refactors"
-
-    embedder = build_providers(load_settings()).embedding
-    if embedder is not None:
-        case_vec, skill_vec = await embedder.embed_batch(
-            [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
-        )
-    else:
-        # No embedder credentials → leave zeros; only keyword assertions
-        # will pass, vector/hybrid/agentic methods are skipped anyway.
-        case_vec = [0.0] * 1024
-        skill_vec = [0.0] * 1024
-
-    await _seed_agent_cases(
-        storage_view,
-        [
-            _agent_case(
-                "ac_001",
-                owner=owner,
-                task_intent=case_intent,
-                approach=case_approach,
-                vector=case_vec,
-            ),
-        ],
-    )
-    await _seed_agent_skills(
-        storage_view,
-        [
-            _agent_skill(
-                "refactor_auth_middleware",
-                owner=owner,
-                description=skill_desc,
-                content=skill_body,
-                vector=skill_vec,
-            ),
-        ],
-    )
-
-
-@pytest.mark.parametrize(
-    "method",
-    [
-        pytest.param("keyword", id="keyword"),
-        pytest.param(
-            "vector",
-            id="vector",
-            marks=[pytest.mark.slow, pytest.mark.live_llm],
-        ),
-        pytest.param(
-            "hybrid",
-            id="hybrid",
-            marks=[pytest.mark.slow, pytest.mark.live_llm],
-        ),
-        pytest.param(
-            "agentic",
-            id="agentic",
-            marks=[pytest.mark.slow, pytest.mark.live_llm],
-        ),
-    ],
-)
-async def test_search_agent_dispatch_per_method(
-    client: AsyncClient, method: str, storage_view: StorageView
-) -> None:
-    """``owner_type=agent`` × every ranking method.
-
-    Shared seed (one matching case + one matching skill) and shared
-    query keep this a true dispatch matrix:
-
-    - ``keyword`` is asserted strictly — BM25 over matching surface
-      tokens must recall **both** tables.
-    - ``vector`` / ``hybrid`` / ``agentic`` are looser (``>=1`` from
-      either table) because dense recall + rerank may legitimately
-      favour one side over the other on a 1-row corpus.
-
-    All methods must enforce the owner_type hard partition:
-    ``episodes`` / ``profiles`` stay empty.
-    """
-    await _seed_one_agent_corpus(storage_view)
-
-    resp = await _post(
-        client,
-        owner_id="a1",
-        owner_type="agent",
-        query="refactor authentication",
-        method=method,
-        top_k=5 if method in ("vector", "hybrid", "agentic") else None,
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-
-    if method == "keyword":
-        assert len(data["agent_cases"]) >= 1
-        assert len(data["agent_skills"]) >= 1
-    else:
-        assert len(data["agent_cases"]) >= 1 or len(data["agent_skills"]) >= 1
-
-    for ac in data["agent_cases"]:
-        assert ac["agent_id"] == "a1"
-    for sk in data["agent_skills"]:
-        assert sk["agent_id"] == "a1"
-    assert data["episodes"] == []
+        assert ep["type"] == "Conversation"
+        assert isinstance(ep["score"], float)
+    # One-to-one memory: no pictures were seeded, no profile was asked for,
+    # and a user search carries no group scope.
+    assert data["images"] == []
     assert data["profiles"] == []
+    assert data["scope"] is None
+    # The decider ran: this is the multi-round loop, not a fallback.
+    assert "_DecisionReply" in llm_calls
 
 
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_hybrid_with_llm_rerank_returns_hits(
+async def test_naming_the_method_runs_the_same_search(
     client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
-    """``method=hybrid`` + ``enable_llm_rerank=true`` runs the phase-5 LLM pass.
-
-    Default hybrid stops after hierarchical eviction / LR fusion; opting in adds one
-    ``chat`` call that re-ranks the top-K. The route must accept the
-    flag and still return well-formed episodes.
-    """
+    """``method="llm_multiround"`` is accepted and changes nothing."""
     await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
-    resp = await _post(
-        client,
-        query="counseling",
-        method="hybrid",
-        enable_llm_rerank=True,
-        top_k=5,
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert len(data["episodes"]) >= 1
-    for ep in data["episodes"]:
-        assert ep["user_id"] == "caroline"
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_hybrid_rerank_bridges_skill_via_case_lineage(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """Case→skill bridge: a skill whose own text does NOT directly match the
-    query is surfaced because its ``source_case_ids`` lineage includes a
-    case that does match. Exercised only on the HYBRID + ``enable_llm_rerank``
-    serial path (``_search_cases_and_skills``).
-
-    Seeds one case whose text contains the query keywords and one skill
-    whose text is intentionally worded off the direct query terms but stays
-    in the same domain. The direct skill recall (BM25 + cosine) cannot
-    surface it on its own; the bridge is the path that does, and LLM
-    rerank keeps it because the topic is genuinely relevant.
-    """
-    case_id_with_owner = "a_bridge_ac_1"  # mirrors AgentCase.id = "<owner>_<entry_id>"
-    case_intent = "refactor authentication middleware"
-    case_approach = "split provider lookup from session decode"
-    # Skill is the *generalised lesson* from this case — same domain (auth /
-    # identity / middleware layering) but worded so the query keywords
-    # ("refactor authentication") do not surface it via direct BM25 or
-    # dense recall in isolation. Only the case→skill bridge should
-    # promote it; LLM rerank then keeps it because the topic *is* relevant.
-    skill_desc = "isolate session token decoding from provider negotiation"
-    skill_body = (
-        "Principles for splitting identity verification layers across "
-        "middleware tiers so token parsing and provider lookup evolve "
-        "independently."
-    )
-
-    embedder = build_providers(load_settings()).embedding
-    assert embedder is not None, "live_llm test requires a real embedder"
-    case_vec, skill_vec = await embedder.embed_batch(
-        [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
-    )
-
-    await _seed_agent_cases(
-        storage_view,
-        [
-            _agent_case(
-                "ac_1",
-                owner="a_bridge",
-                task_intent=case_intent,
-                approach=case_approach,
-                vector=case_vec,
-            ),
-        ],
-    )
-    await _seed_agent_skills(
-        storage_view,
-        [
-            _agent_skill(
-                "graphql_resolver_patterns",
-                owner="a_bridge",
-                description=skill_desc,
-                content=skill_body,
-                source_case_ids=[case_id_with_owner],
-                vector=skill_vec,
-            ),
-        ],
-    )
-
-    resp = await _post(
-        client,
-        owner_id="a_bridge",
-        owner_type="agent",
-        query="refactor authentication",
-        method="hybrid",
-        enable_llm_rerank=True,
-        top_k=5,
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-
-    case_ids = [c["id"] for c in data["agent_cases"]]
-    skill_ids = [s["id"] for s in data["agent_skills"]]
-    assert case_id_with_owner in case_ids, (
-        f"case should match the query directly; got {case_ids}"
-    )
-    assert "a_bridge_graphql_resolver_patterns" in skill_ids, (
-        "skill should be surfaced via case lineage bridge, not direct text "
-        f"match (its text is intentionally worded off the query); got {skill_ids}"
-    )
+    default = await _post(client, query="counseling")
+    named = await _post(client, query="counseling", method="llm_multiround")
+    assert default.status_code == named.status_code == 200, named.text
+    default_ids = [ep["id"] for ep in default.json()["data"]["episodes"]]
+    assert default_ids
+    assert [ep["id"] for ep in named.json()["data"]["episodes"]] == default_ids
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 2. owner_id / owner_type isolation
+# 2. Owner isolation
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -641,10 +222,8 @@ async def test_search_owner_isolation(
         + _eps_for_owner(search_seed, "melanie"),
     )
 
-    resp_c = await _post(
-        client, owner_id="caroline", query="caroline", method="keyword"
-    )
-    resp_m = await _post(client, owner_id="melanie", query="caroline", method="keyword")
+    resp_c = await _post(client, user_id="caroline", query="caroline")
+    resp_m = await _post(client, user_id="melanie", query="caroline")
     assert resp_c.status_code == 200
     assert resp_m.status_code == 200
 
@@ -656,53 +235,6 @@ async def test_search_owner_isolation(
     assert all(ep["user_id"] == "melanie" for ep in resp_m.json()["data"]["episodes"])
 
 
-async def test_search_owner_isolation_two_agents(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """Two agent owners share a hot keyword — each sees only its own rows."""
-    await _seed_agent_cases(
-        storage_view,
-        [
-            _agent_case(
-                "ac_a1_001",
-                owner="a1",
-                task_intent="optimize batch loader latency",
-                approach="parallelize per-shard fetches",
-            ),
-            _agent_case(
-                "ac_a2_001",
-                owner="a2",
-                task_intent="optimize batch loader latency",
-                approach="cache hot keys in process memory",
-            ),
-        ],
-    )
-
-    resp_a1 = await _post(
-        client,
-        owner_id="a1",
-        owner_type="agent",
-        query="batch loader",
-        method="keyword",
-    )
-    resp_a2 = await _post(
-        client,
-        owner_id="a2",
-        owner_type="agent",
-        query="batch loader",
-        method="keyword",
-    )
-    assert resp_a1.status_code == 200
-    assert resp_a2.status_code == 200
-
-    a1_ids = {ac["id"] for ac in resp_a1.json()["data"]["agent_cases"]}
-    a2_ids = {ac["id"] for ac in resp_a2.json()["data"]["agent_cases"]}
-    assert a1_ids and a2_ids
-    assert a1_ids.isdisjoint(a2_ids)
-    assert all(ac["agent_id"] == "a1" for ac in resp_a1.json()["data"]["agent_cases"])
-    assert all(ac["agent_id"] == "a2" for ac in resp_a2.json()["data"]["agent_cases"])
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # 3. top_k
 # ═══════════════════════════════════════════════════════════════════════
@@ -711,52 +243,31 @@ async def test_search_owner_isolation_two_agents(
 async def test_search_top_k_caps_result_count(
     client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
-    """``top_k=2`` returns at most 2 episodes."""
+    """``top_k=2`` returns at most 2 memories."""
     await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-    resp = await _post(client, query="caroline", method="keyword", top_k=2)
+    resp = await _post(client, query="caroline", top_k=2)
     assert resp.status_code == 200
-    assert len(resp.json()["data"]["episodes"]) <= 2
+    data = resp.json()["data"]
+    assert data["episodes"]
+    assert len(data["episodes"]) + len(data["images"]) <= 2
 
 
 async def test_search_top_k_unlimited_returns_all_matching(
     client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
-    """``top_k=-1`` (default) means unlimited; should exceed any specific cap."""
+    """``top_k=-1`` (default) means unlimited, capped by what is stored."""
     eps = _eps_for_owner(search_seed, "caroline")
     await _seed_episodes(storage_view, eps)
-    resp = await _post(client, query="caroline", method="keyword", top_k=-1)
-    assert resp.status_code == 200
+    unlimited = await _post(client, query="caroline", top_k=-1)
+    capped = await _post(client, query="caroline", top_k=2)
+    assert unlimited.status_code == capped.status_code == 200
+    n_unlimited = len(unlimited.json()["data"]["episodes"])
     # Caroline has 8 seeded episodes; unlimited returns up to that.
-    assert len(resp.json()["data"]["episodes"]) <= len(eps)
+    assert len(capped.json()["data"]["episodes"]) <= n_unlimited <= len(eps)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 4. radius (vector-only cosine threshold)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_search_radius_filters_low_similarity(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """A near-1.0 radius drops all but the closest hits (likely 0)."""
-    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-
-    loose = await _post(client, query="career", method="vector", radius=0.0)
-    strict = await _post(client, query="career", method="vector", radius=0.95)
-    assert loose.status_code == 200 and strict.status_code == 200
-
-    n_loose = len(loose.json()["data"]["episodes"])
-    n_strict = len(strict.json()["data"]["episodes"])
-    # Only episodes are seeded, no atomic facts: VECTOR must still find them
-    # through the episode vector (issue #502).
-    assert n_loose > 0
-    assert n_strict <= n_loose
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 5. include_profile
+# 4. include_profile
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -769,7 +280,7 @@ async def test_search_include_profile_false_returns_no_profile(
         storage_view, _profiles_for_owner(search_seed, "caroline")
     )
 
-    resp = await _post(client, query="LGBTQ", method="keyword")
+    resp = await _post(client, query="LGBTQ")
     assert resp.status_code == 200
     assert resp.json()["data"]["profiles"] == []
 
@@ -783,7 +294,7 @@ async def test_search_include_profile_true_returns_profile(
         storage_view, _profiles_for_owner(search_seed, "caroline")
     )
 
-    resp = await _post(client, query="LGBTQ", method="keyword", include_profile=True)
+    resp = await _post(client, query="LGBTQ", include_profile=True)
     assert resp.status_code == 200
     profiles = resp.json()["data"]["profiles"]
     assert len(profiles) == 1
@@ -798,41 +309,8 @@ async def test_search_include_profile_true_returns_profile(
     assert isinstance(pd.get("implicit_traits"), list)
 
 
-async def test_search_include_profile_ignored_for_agent_owner(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """``include_profile=true`` is silently ignored when ``owner_type=agent``.
-
-    Profile rows belong to user owners only (see
-    :meth:`SearchManager._fetch_profile`); the agent dispatch returns
-    ``profiles=[]`` even when a user profile matching the query exists.
-    """
-    # Seed a user profile that would match under user-owner search; the
-    # agent-owner request must NOT pick it up.
-    await _seed_user_profiles(
-        storage_view, _profiles_for_owner(search_seed, "caroline")
-    )
-    # FTS indexes are built lazily by _seed_*; build them for the agent
-    # tables so sparse_recall returns [] gracefully on the agent path.
-    await storage_view.index.ensure_business_indexes()
-
-    resp = await _post(
-        client,
-        owner_id="agent_x",
-        owner_type="agent",
-        query="LGBTQ",
-        method="keyword",
-        include_profile=True,
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert data["profiles"] == []
-    # Sanity: agent owner doesn't accidentally recall user-side rows.
-    assert data["episodes"] == []
-
-
 # ═══════════════════════════════════════════════════════════════════════
-# 6. filter DSL (parity with /get's compile_filters_for_get)
+# 5. filter DSL (parity with /get's compile_filters_for_get)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -849,12 +327,7 @@ async def test_search_filter_by_session_id(
         + [{**r, "session_id": "sess_other"} for r in base[half:]],
     )
 
-    resp = await _post(
-        client,
-        query="caroline",
-        method="keyword",
-        filters={"session_id": "sess_target"},
-    )
+    resp = await _post(client, query="caroline", filters={"session_id": "sess_target"})
     assert resp.status_code == 200
     eps = resp.json()["data"]["episodes"]
     assert eps
@@ -874,10 +347,7 @@ async def test_search_filter_by_sender_id_in(
     )
 
     resp = await _post(
-        client,
-        query="caroline",
-        method="keyword",
-        filters={"sender_id": {"in": ["alice"]}},
+        client, query="caroline", filters={"sender_id": {"in": ["alice"]}}
     )
     assert resp.status_code == 200
     eps = resp.json()["data"]["episodes"]
@@ -888,10 +358,7 @@ async def test_search_filter_by_sender_id_in(
 async def test_search_filter_by_parent_id_memcell(
     client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
-    """``filters: {parent_id: ...}`` — verifies memcell-based slicing.
-
-    Same memcell is the bridge between episodes and atomic_facts.
-    """
+    """``filters: {parent_id: ...}`` — verifies memcell-based slicing."""
     base = _eps_for_owner(search_seed, "caroline")
     target_mc = base[0]["parent_id"]
     target_eps = [r for r in base if r["parent_id"] == target_mc]
@@ -901,7 +368,6 @@ async def test_search_filter_by_parent_id_memcell(
     resp = await _post(
         client,
         query="caroline",
-        method="keyword",
         filters={"parent_id": target_mc, "parent_type": "memcell"},
     )
     assert resp.status_code == 200
@@ -926,7 +392,6 @@ async def test_search_filter_top_level_or(
     resp = await _post(
         client,
         query="caroline",
-        method="keyword",
         filters={"OR": [{"session_id": "sess_a"}, {"session_id": "sess_b"}]},
     )
     assert resp.status_code == 200
@@ -965,7 +430,6 @@ async def test_search_filter_nested_and_or(
     resp = await _post(
         client,
         query="caroline",
-        method="keyword",
         filters={
             "OR": [
                 {
@@ -993,7 +457,7 @@ async def test_search_filter_nested_and_or(
 async def test_search_filter_by_timestamp_range(
     client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
-    """``timestamp`` filter with ``gte`` / ``lt`` operators narrows by time.
+    """``timestamp`` filter with the ``gte`` operator narrows by time.
 
     Caroline's 8 seed episodes span 2023-05-08 → 2023-07-15; the
     ``2023-07-01`` cut splits them into a "before" and "after" group.
@@ -1007,16 +471,13 @@ async def test_search_filter_by_timestamp_range(
 
     resp = await _post(
         client,
-        query="caroline",
-        method="keyword",
+        query="counseling",
         top_k=-1,
         filters={"timestamp": {"gte": cutoff}},
     )
     assert resp.status_code == 200
     returned = {ep["id"] for ep in resp.json()["data"]["episodes"]}
-    # Every returned episode must be on/after the cutoff; the converse
-    # (every expected episode came back) depends on the keyword match, so
-    # we only require non-empty + correctness.
+    # Every returned episode must be on/after the cutoff.
     assert returned
     assert returned <= expected_after
 
@@ -1030,7 +491,6 @@ async def test_search_filter_no_match_returns_empty(
     resp = await _post(
         client,
         query="caroline",
-        method="keyword",
         filters={"session_id": "sess_that_does_not_exist"},
     )
     assert resp.status_code == 200
@@ -1038,228 +498,6 @@ async def test_search_filter_no_match_returns_empty(
     assert body["data"]["episodes"] == []
     rid = body["request_id"]
     assert len(rid) == 32 and all(c in "0123456789abcdef" for c in rid)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 7. Hierarchical fact eviction — the memcell-bridge contract
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """HYBRID + hierarchical eviction end-to-end with memcell facts.
-
-    Verifies the wiring:
-    - hybrid recall over episodes returns hits
-    - the ``parent_id == memcell_id`` bridge picks up atomic_facts whose
-      parent matches any candidate episode's parent (``facts_for_episodes``)
-
-    .. note:: Fact *embedding* into ``episode.atomic_facts`` is NOT
-       asserted because ``atomic_fact_recaller.facts_for_episodes``
-       currently emits ``FactCandidate(score=0.0)`` for every prefetched
-       fact (it's a parent_id lookup, not a query-aware recall). The
-       Hierarchical eviction ``_expand_heap`` skips facts with non-positive scores, so
-       they never promote into the top-N. Once facts get a real
-       query-aware relevance score (e.g. by running a separate dense
-       recall on atomic_fact too), tighten this assertion to verify
-       at least one fact gets embedded with parent_id matching its
-       host episode.
-    """
-    eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(storage_view, eps)
-    ep_entry_ids = {r["entry_id"] for r in eps}
-    matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
-    ]
-    assert matching_facts, "seed should have at least one fact bridging an episode"
-    await _seed_atomic_facts(storage_view, matching_facts)
-
-    resp = await _post(client, query="counseling", method="hybrid", top_k=5)
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["episodes"], "hybrid should return at least one episode"
-    # Whichever facts *do* get embedded must bridge to their host episode
-    # via ``parent_id == episode.entry_id`` (the current fact-linkage
-    # invariant; see extract_atomic_facts).
-    for ep in data["episodes"]:
-        if not ep["atomic_facts"]:
-            continue
-        host_entry = next((e["entry_id"] for e in eps if e["id"] == ep["id"]), None)
-        for fact in ep["atomic_facts"]:
-            seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
-            if seed_fact is not None:
-                assert seed_fact["parent_id"] == host_entry
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
-    client: AsyncClient,
-    search_seed: dict,
-    monkeypatch: pytest.MonkeyPatch,
-    storage_view: StorageView,
-) -> None:
-    """Hierarchical eviction end-to-end fact injection, exercised with ``alpha=0``.
-
-    Companion to :func:`test_search_hybrid_hierarchical_eviction_with_memcell_facts`.
-    The sibling asserts the contract under prod defaults
-    (``alpha=1`` × ``fact.score=0`` → final ≤ 0 → fact never enters the
-    top-N). This test patches ``RankConfig.alpha=0`` so facts inherit
-    the parent episode's score and enter the heap — verifying the
-    injection wire end-to-end.
-
-    Drop the monkeypatch (or rewrite this test) once
-    :mod:`everos.memory.search.recall.atomic_fact`'s ``facts_for_episodes``
-    emits query-aware fact scores (currently hardcoded ``score=0.0``).
-    """
-    from everos.memory.search import manager as mgr
-
-    class _AlphaZeroConfig(mgr.RankConfig):
-        alpha: float = 0.0
-
-    monkeypatch.setattr(mgr, "RankConfig", _AlphaZeroConfig)
-
-    eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(storage_view, eps)
-    ep_entry_ids = {r["entry_id"] for r in eps}
-    matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
-    ]
-    assert matching_facts, "seed should have at least one fact bridging an episode"
-    await _seed_atomic_facts(storage_view, matching_facts)
-
-    resp = await _post(client, query="counseling", method="hybrid", top_k=10)
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["episodes"], "hybrid should return at least one episode"
-
-    facts_attached = sum(len(ep["atomic_facts"]) for ep in data["episodes"])
-    assert facts_attached >= 1, (
-        "alpha=0 should let hierarchical eviction promote >=1 fact"
-    )
-
-    # Fact-linkage invariant — every attached fact's parent_id must match
-    # its host episode's entry_id (current fact→episode bridge).
-    eps_by_id = {e["id"]: e for e in eps}
-    for ep in data["episodes"]:
-        host = eps_by_id.get(ep["id"])
-        if host is None:
-            continue
-        for fact in ep["atomic_facts"]:
-            seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
-            if seed_fact is not None:
-                assert seed_fact["parent_id"] == host["entry_id"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 8. Request validation — Pydantic 422 surface
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        pytest.param(
-            {"owner_id": "x", "owner_type": "robot", "query": "q"},
-            id="invalid_owner_type",
-        ),
-        pytest.param(
-            {"owner_id": "", "owner_type": "user", "query": "q"},
-            id="empty_owner_id",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": ""},
-            id="empty_query",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": "q", "top_k": 0},
-            id="top_k_zero",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": "q", "top_k": -2},
-            id="top_k_below_unlimited",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": "q", "top_k": 101},
-            id="top_k_above_cap",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": "q", "radius": 1.1},
-            id="radius_above_one",
-        ),
-        pytest.param(
-            {"owner_id": "x", "owner_type": "user", "query": "q", "radius": -0.1},
-            id="radius_negative",
-        ),
-    ],
-)
-async def test_search_rejects_invalid_request(
-    client: AsyncClient, payload: dict
-) -> None:
-    """Pydantic / model_validator rejects malformed search requests as 422.
-
-    Pins the request contract: ``owner_type`` literal, non-empty
-    ``owner_id`` / ``query``, ``top_k`` in {-1} ∪ [1, 100], ``radius``
-    in [0.0, 1.0]. Anything else short-circuits at the route layer
-    without ever touching the SearchManager.
-    """
-    resp = await client.post("/api/v1/memory/search", json=payload, timeout=10.0)
-    assert resp.status_code == 422, resp.text
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 9. Envelope shape & error surface
-# ═══════════════════════════════════════════════════════════════════════
-
-
-async def test_search_returns_empty_envelope_for_unknown_owner(
-    client: AsyncClient,
-) -> None:
-    """Owner with no seeded rows → 200 with all five arrays empty.
-
-    Pins the envelope-shape invariant: ``data.{episodes, profiles,
-    agent_cases, agent_skills, unprocessed_messages}`` always exist;
-    an empty result is a successful response, not 404.
-    """
-    resp = await _post(client, owner_id="ghost", query="anything", method="keyword")
-    assert resp.status_code == 200
-    body = resp.json()
-    rid = body["request_id"]
-    assert len(rid) == 32 and all(c in "0123456789abcdef" for c in rid)
-    data = body["data"]
-    assert data == {
-        "episodes": [],
-        "profiles": [],
-        "agent_cases": [],
-        "agent_skills": [],
-        "unprocessed_messages": [],
-    }
-
-
-async def test_search_user_owner_has_empty_agent_arrays(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """User-owner dispatch never populates ``agent_cases`` / ``agent_skills``.
-
-    Belt-and-braces for the owner_type hard partition: even when both
-    user *and* agent rows live in storage, a user-owner request must
-    leave the agent arrays empty (and vice versa via the sibling agent
-    test). Guards against future regressions that might leak cross-type
-    rows when the dispatch logic is refactored.
-    """
-    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-    await _seed_agent_cases(storage_view, [_agent_case("ac_leak", owner="a1")])
-    await _seed_agent_skills(storage_view, [_agent_skill("leak_skill", owner="a1")])
-
-    resp = await _post(client, query="caroline", method="keyword")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["episodes"]
-    assert data["agent_cases"] == []
-    assert data["agent_skills"] == []
 
 
 async def test_search_filter_error_returns_422(
@@ -1275,10 +513,7 @@ async def test_search_filter_error_returns_422(
     await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(
-        client,
-        query="caroline",
-        method="keyword",
-        filters={"this_field_does_not_exist": "x"},
+        client, query="caroline", filters={"this_field_does_not_exist": "x"}
     )
     assert resp.status_code == 422, resp.text
     # Project's global exception handler shapes errors as
@@ -1291,178 +526,45 @@ async def test_search_filter_error_returns_422(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 10. Advanced combinations — method × filter, profile × method
+# 6. Envelope shape
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_vector_search_with_session_filter(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
+async def test_search_returns_empty_envelope_for_unknown_owner(
+    client: AsyncClient,
 ) -> None:
-    """``method=vector`` + ``filters={session_id: ...}`` narrows by session.
+    """Owner with no seeded rows → 200 with every array empty.
 
-    Verifies the filter ``where`` clause is composed with the vector
-    recall query (not bypassed by the dense path). Half the seed gets
-    a target session, half gets another; only target hits may come back.
-
-    The MaxSim path filters atomic_facts first (then max-pools to
-    episodes), so the per-episode session_id mutation has to propagate
-    to each fact via its parent memcell id — otherwise the where clause
-    drops every fact and recall returns 0.
+    Pins the envelope-shape invariant: ``data.{episodes, images, profiles,
+    unprocessed_messages}`` always exist (``scope`` is null on a user
+    search); an empty result is a successful response, not 404.
     """
-    base = _eps_for_owner(search_seed, "caroline")
-    facts = _facts_for_owner(search_seed, "caroline")
-    half = len(base) // 2
-    target_parent_ids = {r["entry_id"] for r in base[:half]}
-
-    await _seed_episodes(
-        storage_view,
-        [{**r, "session_id": "sess_target"} for r in base[:half]]
-        + [{**r, "session_id": "sess_other"} for r in base[half:]],
-    )
-    await _seed_atomic_facts(
-        storage_view,
-        [
-            {
-                **f,
-                "session_id": (
-                    "sess_target"
-                    if f["parent_id"] in target_parent_ids
-                    else "sess_other"
-                ),
-            }
-            for f in facts
-        ],
-    )
-
-    resp = await _post(
-        client,
-        query="caroline",
-        method="vector",
-        top_k=10,
-        filters={"session_id": "sess_target"},
-    )
-    assert resp.status_code == 200, resp.text
-    eps = resp.json()["data"]["episodes"]
-    assert eps
-    assert all(ep["session_id"] == "sess_target" for ep in eps)
-
-
-@pytest.mark.slow
-@pytest.mark.live_llm
-async def test_agentic_search_with_timestamp_filter(
-    client: AsyncClient, search_seed: dict, storage_view: StorageView
-) -> None:
-    """``method=agentic`` + ``filters={timestamp: {gte: ...}}`` honors the cutoff.
-
-    The agentic path runs its own cross-encoder rerank loop; the
-    ``where`` clause must still apply at recall, not be silently
-    dropped by the agentic pipeline. Same seed requirements as the
-    non-filter agentic test (facts + cluster).
-    """
-    eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(storage_view, eps)
-
-    cutoff = "2023-07-01T00:00:00"
-    expected_after = {r["id"] for r in eps if r["timestamp"] >= cutoff}
-    assert expected_after, "seed should have at least one episode after the cutoff"
-
-    # The search_seed slice ships every caroline fact attached to one
-    # episode (mc_a7a1a4cfd8e6, 2023-05-08); under maxsim_atomic the
-    # cutoff would filter all facts out and recall would be empty. Spread
-    # the facts round-robin across the post-cutoff episodes (matching both
-    # ``parent_id`` and ``timestamp``) so the filter exercises real
-    # narrowing on a non-empty fact set.
-    eps_post = [r for r in eps if r["timestamp"] >= cutoff]
-    facts = _facts_for_owner(search_seed, "caroline")
-    await _seed_atomic_facts(
-        storage_view,
-        [
-            {
-                **f,
-                "parent_id": eps_post[i % len(eps_post)]["entry_id"],
-                "timestamp": eps_post[i % len(eps_post)]["timestamp"],
-            }
-            for i, f in enumerate(facts)
-        ],
-    )
-    await _seed_user_memory_cluster(storage_view, eps, owner_id="caroline")
-
-    # ``counseling`` matches the post-cutoff caroline corpus (July 6 episode
-    # is explicitly about counseling + mental health), so the agentic
-    # pipeline's LLM sufficiency check has concrete content to score on
-    # — a vague query like ``support`` against the narrow filtered set
-    # makes the LLM step return ``[]`` and the test flakes.
-    resp = await _post(
-        client,
-        query="counseling",
-        method="agentic",
-        top_k=10,
-        filters={"timestamp": {"gte": cutoff}},
-    )
-    assert resp.status_code == 200, resp.text
-    eps_out = resp.json()["data"]["episodes"]
-    assert eps_out
-    returned = {ep["id"] for ep in eps_out}
-    assert returned <= expected_after
-
-
-@pytest.mark.parametrize(
-    "method",
-    [
-        pytest.param(
-            "vector",
-            id="vector",
-            marks=[pytest.mark.slow, pytest.mark.live_llm],
-        ),
-        pytest.param(
-            "hybrid",
-            id="hybrid",
-            marks=[pytest.mark.slow, pytest.mark.live_llm],
-        ),
-    ],
-)
-async def test_search_include_profile_independent_of_method(
-    client: AsyncClient, search_seed: dict, method: str, storage_view: StorageView
-) -> None:
-    """``include_profile=true`` works regardless of ranking method.
-
-    Profile fetch is decoupled from the recall pipeline (see
-    :meth:`SearchManager._fetch_profile` — it gates on
-    ``include_profile && owner_type=="user"`` and ignores ``method``).
-    Pin that contract: vector / hybrid must also surface the profile,
-    not just keyword.
-    """
-    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
-    await _seed_user_profiles(
-        storage_view, _profiles_for_owner(search_seed, "caroline")
-    )
-
-    resp = await _post(
-        client,
-        query="LGBTQ",
-        method=method,
-        include_profile=True,
-        top_k=5,
-    )
-    assert resp.status_code == 200, resp.text
-    profiles = resp.json()["data"]["profiles"]
-    assert len(profiles) == 1
-    p = profiles[0]
-    assert p["user_id"] == "caroline"
-    assert p["score"] is None  # direct fetch — no ranking
+    resp = await _post(client, user_id="ghost", query="anything")
+    assert resp.status_code == 200
+    body = resp.json()
+    rid = body["request_id"]
+    assert len(rid) == 32 and all(c in "0123456789abcdef" for c in rid)
+    assert body["data"] == {
+        "episodes": [],
+        "images": [],
+        "profiles": [],
+        "unprocessed_messages": [],
+        "scope": None,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 11. unprocessed_messages — in-flight boundary-detection buffer
+# 7. unprocessed_messages — in-flight boundary-detection buffer
 # ═══════════════════════════════════════════════════════════════════════
 #
 # Buffer rows have no owner attribution (boundary detection runs before
 # owner inference). The /search route surfaces them ONLY when ``filters``
 # carries a top-level ``session_id`` eq scalar — the only meaningful
 # query dimension on the unattributed buffer. Compound shapes (AND / OR,
-# operator maps) do NOT trigger the lookup.
+# operator maps) do NOT trigger the lookup. A user search sees a session's
+# buffer only when the user took part in it (a buffered message of theirs, or
+# memory of theirs from that session), so every buffer below holds one of
+# caroline's messages.
 #
 # White-box: the helpers below write directly into the
 # ``unprocessed_buffer`` SQLite table via the public repo (no /add
@@ -1578,10 +680,7 @@ async def test_search_unprocessed_messages_returned_for_top_level_session_filter
     )
 
     resp = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_inflight"},
+        client, query="anything", filters={"session_id": "sess_inflight"}
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
@@ -1632,7 +731,7 @@ async def test_search_unprocessed_messages_empty_without_top_level_session_filte
     )
 
     # 1. No filters at all.
-    resp_no_filter = await _post(client, query="anything", method="keyword")
+    resp_no_filter = await _post(client, query="anything")
     assert resp_no_filter.status_code == 200, resp_no_filter.text
     assert resp_no_filter.json()["data"]["unprocessed_messages"] == []
 
@@ -1640,7 +739,6 @@ async def test_search_unprocessed_messages_empty_without_top_level_session_filte
     resp_and = await _post(
         client,
         query="anything",
-        method="keyword",
         filters={"AND": [{"session_id": "sess_inflight"}]},
     )
     assert resp_and.status_code == 200, resp_and.text
@@ -1650,7 +748,6 @@ async def test_search_unprocessed_messages_empty_without_top_level_session_filte
     resp_op = await _post(
         client,
         query="anything",
-        method="keyword",
         filters={"session_id": {"eq": "sess_inflight"}},
     )
     assert resp_op.status_code == 200, resp_op.text
@@ -1663,7 +760,7 @@ async def test_search_unprocessed_messages_assistant_role_round_trips(
     """Buffer surfacing carries the original ``role`` through the wire.
 
     Pins that role / content shape survive the round trip — the buffered
-    row was inserted with ``role="assistant"`` and a multi-content payload
+    reply was inserted with ``role="assistant"`` and a multi-content payload
     would degrade to the opaque ``list[dict]`` shorthand, while a single
     text item collapses to ``str``.
     """
@@ -1672,6 +769,11 @@ async def test_search_unprocessed_messages_assistant_role_round_trips(
         storage_view,
         "sess_assistant",
         [
+            {
+                "message_id": "msg_buf_user",
+                "sender_id": "caroline",
+                "text": "what was the name of that museum?",
+            },
             {
                 "message_id": "msg_buf_asst",
                 "sender_id": "bot",
@@ -1682,20 +784,19 @@ async def test_search_unprocessed_messages_assistant_role_round_trips(
     )
 
     resp = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_assistant"},
+        client, query="anything", filters={"session_id": "sess_assistant"}
     )
     assert resp.status_code == 200, resp.text
     msgs = resp.json()["data"]["unprocessed_messages"]
-    assert [m["id"] for m in msgs] == ["msg_buf_asst"]
-    assert msgs[0]["role"] == "assistant"
-    assert msgs[0]["content"] == "assistant-side buffered reply"
+    assert [m["id"] for m in msgs] == ["msg_buf_user", "msg_buf_asst"]
+    assert msgs[0]["role"] == "user"
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["sender_id"] == "bot"
+    assert msgs[1]["content"] == "assistant-side buffered reply"
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 12. Timezone discipline — storage UTC vs display tz, no drift on switch
+# 8. Timezone discipline — storage UTC vs display tz, no drift on switch
 # ═══════════════════════════════════════════════════════════════════════
 #
 # Q2's core promise: a row written under ``EVEROS_MEMORY__TIMEZONE=X``
@@ -1769,7 +870,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
         project_id="default",
         session_id="sess_tz_drift",
         track="memorize",
-        sender_id="alice",
+        sender_id="caroline",
         sender_name=None,
         role="user",
         timestamp=target_instant_utc,
@@ -1790,10 +891,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
 
     # Step 2: /search under Shanghai display tz → expect +08:00 offset.
     resp_sh = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_tz_drift"},
+        client, query="anything", filters={"session_id": "sess_tz_drift"}
     )
     assert resp_sh.status_code == 200, resp_sh.text
     msgs_sh = resp_sh.json()["data"]["unprocessed_messages"]
@@ -1825,10 +923,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
 
     # Step 5: /search the same row under UTC display tz.
     resp_utc = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_tz_drift"},
+        client, query="anything", filters={"session_id": "sess_tz_drift"}
     )
     assert resp_utc.status_code == 200, resp_utc.text
     msgs_utc = resp_utc.json()["data"]["unprocessed_messages"]
@@ -1877,14 +972,11 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     # Step 1: Shanghai display tz.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
     resp_sh = await _post(
-        client,
-        query="caroline",
-        method="keyword",
-        filters={"session_id": "sess_ep_tz"},
+        client, query="caroline", filters={"session_id": "sess_ep_tz"}
     )
     assert resp_sh.status_code == 200, resp_sh.text
     eps_sh = resp_sh.json()["data"]["episodes"]
-    assert eps_sh, "seed should have produced a keyword match"
+    assert eps_sh, "the seeded episode should be recalled"
     ts_sh = eps_sh[0]["timestamp"]
     assert ts_sh.endswith("+08:00"), ts_sh
     assert "T14:00:00" in ts_sh, ts_sh
@@ -1892,10 +984,7 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     # Step 2: switch to UTC.
     await _switch_display_tz(monkeypatch, "UTC")
     resp_utc = await _post(
-        client,
-        query="caroline",
-        method="keyword",
-        filters={"session_id": "sess_ep_tz"},
+        client, query="caroline", filters={"session_id": "sess_ep_tz"}
     )
     assert resp_utc.status_code == 200, resp_utc.text
     eps_utc = resp_utc.json()["data"]["episodes"]
@@ -1947,7 +1036,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
         project_id="default",
         session_id="sess_rev",
         track="memorize",
-        sender_id="alice",
+        sender_id="caroline",
         sender_name=None,
         role="user",
         timestamp=target_instant_utc,
@@ -1965,12 +1054,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
     )
 
     # Step 2: read under UTC → expect Z / +00:00 + 06:00 wall clock.
-    resp_utc = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_rev"},
-    )
+    resp_utc = await _post(client, query="anything", filters={"session_id": "sess_rev"})
     assert resp_utc.status_code == 200, resp_utc.text
     msgs_utc = resp_utc.json()["data"]["unprocessed_messages"]
     ts_utc = msgs_utc[0]["timestamp"]
@@ -1979,12 +1063,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
 
     # Step 3: switch to Shanghai, read again → expect +08:00 + 14:00 wall clock.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
-    resp_sh = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_rev"},
-    )
+    resp_sh = await _post(client, query="anything", filters={"session_id": "sess_rev"})
     assert resp_sh.status_code == 200, resp_sh.text
     msgs_sh = resp_sh.json()["data"]["unprocessed_messages"]
     ts_sh = msgs_sh[0]["timestamp"]
@@ -2030,7 +1109,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
         project_id="default",
         session_id="sess_mixed",
         track="memorize",
-        sender_id="alice",
+        sender_id="caroline",
         sender_name=None,
         role="user",
         timestamp=instant_a,
@@ -2049,7 +1128,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
         project_id="default",
         session_id="sess_mixed",
         track="memorize",
-        sender_id="alice",
+        sender_id="caroline",
         sender_name=None,
         role="user",
         timestamp=instant_b,
@@ -2073,10 +1152,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     # Step 3: query under Shanghai → both rows render +08:00, instants preserved.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
     resp_sh = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_mixed"},
+        client, query="anything", filters={"session_id": "sess_mixed"}
     )
     assert resp_sh.status_code == 200, resp_sh.text
     msgs_sh = resp_sh.json()["data"]["unprocessed_messages"]
@@ -2094,10 +1170,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     # Step 4: query under UTC → both render Z/+00:00, instants preserved.
     await _switch_display_tz(monkeypatch, "UTC")
     resp_utc = await _post(
-        client,
-        query="anything",
-        method="keyword",
-        filters={"session_id": "sess_mixed"},
+        client, query="anything", filters={"session_id": "sess_mixed"}
     )
     assert resp_utc.status_code == 200, resp_utc.text
     msgs_utc = resp_utc.json()["data"]["unprocessed_messages"]
@@ -2110,3 +1183,44 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     instant_b_utc = from_iso_format(by_id_utc["msg_mixed_b"]).astimezone(_real_dt.UTC)
     assert instant_a_utc == instant_a
     assert instant_b_utc == instant_b
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 9. Real providers — dense recall on the seed's real vectors
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.slow
+@pytest.mark.live_llm
+async def test_multiround_recall_with_real_providers(
+    live_client: AsyncClient, search_seed: dict, storage_view: StorageView
+) -> None:
+    """The real embedder and decider recall the owner's episodes, filtered.
+
+    The seed's vectors come from the real embedder, so here the query's
+    vector is comparable to them and the decider reads real candidates.
+    Caroline's July 6 episode is about counseling and mental health; the
+    ``2023-07-01`` cut keeps it and drops her earlier episodes.
+    """
+    eps = _eps_for_owner(search_seed, "caroline")
+    await _seed_episodes(storage_view, eps + _eps_for_owner(search_seed, "melanie"))
+
+    cutoff = "2023-07-01T00:00:00"
+    expected_after = {r["id"] for r in eps if r["timestamp"] >= cutoff}
+
+    resp = await live_client.post(
+        _SEARCH,
+        json={
+            "user_id": "caroline",
+            "query": "How is Caroline looking after her mental health?",
+            "method": "llm_multiround",
+            "top_k": 5,
+            "filters": {"timestamp": {"gte": cutoff}},
+        },
+        timeout=300.0,
+    )
+    assert resp.status_code == 200, resp.text
+    returned = resp.json()["data"]["episodes"]
+    assert returned
+    assert all(ep["user_id"] == "caroline" for ep in returned)
+    assert {ep["id"] for ep in returned} <= expected_after

@@ -1,27 +1,22 @@
 """Tier 2 (LLM + embed, no rerank) end-to-end acceptance test.
 
 Pins the behavior promised for a user who has configured LLM + embed
-but not rerank: writes get real vectors, VECTOR/HYBRID (user) search
-work, AGENTIC and knowledge stay gated on rerank, agent HYBRID has two
-lanes gated independently by ``enable_llm_rerank``, and the embed-
-dependent OME strategies (reflection / clustering / skill extraction)
-are now registered.
+but not rerank: writes get real vectors, memory search (multi-round
+retrieval, which needs no rerank) works, knowledge stays gated on rerank,
+and the embed-dependent OME strategies (reflection / clustering / skill
+extraction) are now registered.
 """
 
 from __future__ import annotations
 
-import pytest
 from httpx import AsyncClient
 
 from everos.service import Application
 
-from .conftest import add_and_flush, episode_rows, seed_atomic_fact_for_episode
-
-_STUB_VECTOR = [0.1] * 1024
-
+from .conftest import add_and_flush, episode_rows
 
 # ---------------------------------------------------------------------------
-# 1. Memory add + KEYWORD / VECTOR / HYBRID (user) all succeed
+# 1. Memory add + multi-round search succeed
 # ---------------------------------------------------------------------------
 
 
@@ -34,79 +29,19 @@ async def test_add_memory_writes_real_vector(tier2_runtime: AsyncClient) -> None
     assert len(rows[0]["vector"]) == 1024
 
 
-@pytest.mark.parametrize("method", ["keyword", "vector", "hybrid"])
-async def test_user_search_methods_succeed(
-    tier2_runtime: AsyncClient, method: str
-) -> None:
-    await add_and_flush(tier2_runtime, session_id=f"s_tier2_{method}")
-    # Seed a fact so VECTOR takes the atomic_fact MaxSim path rather than
-    # the episode-vector fallback -- see seed_atomic_fact_for_episode.
-    episode_row = (await episode_rows("u_alice"))[0]
-    await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
+async def test_user_search_succeeds_without_rerank(tier2_runtime: AsyncClient) -> None:
+    await add_and_flush(tier2_runtime, session_id="s_tier2_search")
 
     resp = await tier2_runtime.post(
         "/api/v1/memory/search",
-        json={"user_id": "u_alice", "query": "hiking", "method": method},
+        json={"user_id": "u_alice", "query": "hiking", "method": "llm_multiround"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"]["episodes"], f"{method} search must find the episode"
+    assert resp.json()["data"]["episodes"], "multi-round search must find it"
 
 
 # ---------------------------------------------------------------------------
-# 2. AGENTIC still 422 (needs rerank)
-# ---------------------------------------------------------------------------
-
-
-async def test_agentic_search_422(tier2_runtime: AsyncClient) -> None:
-    resp = await tier2_runtime.post(
-        "/api/v1/memory/search",
-        json={"user_id": "u_alice", "query": "hiking", "method": "agentic"},
-    )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
-    assert "rerank" in body["error"]["message"]
-    assert "agentic_search" in body["error"]["message"]
-
-
-# ---------------------------------------------------------------------------
-# 3-4. Agent HYBRID: cross-encoder lane 422, LLM lane 200
-# ---------------------------------------------------------------------------
-
-
-async def test_agent_hybrid_cross_encoder_lane_422(tier2_runtime: AsyncClient) -> None:
-    resp = await tier2_runtime.post(
-        "/api/v1/memory/search",
-        json={
-            "agent_id": "a_bob",
-            "query": "hiking",
-            "method": "hybrid",
-            "enable_llm_rerank": False,
-        },
-    )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
-    assert "rerank" in body["error"]["message"]
-    assert "agent_hybrid" in body["error"]["message"]
-    assert "enable_llm_rerank=true" in body["error"]["message"]
-
-
-async def test_agent_hybrid_llm_rerank_lane_200(tier2_runtime: AsyncClient) -> None:
-    resp = await tier2_runtime.post(
-        "/api/v1/memory/search",
-        json={
-            "agent_id": "a_bob",
-            "query": "hiking",
-            "method": "hybrid",
-            "enable_llm_rerank": True,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-
-
-# ---------------------------------------------------------------------------
-# 5. Knowledge still 422 (needs rerank; embed alone isn't enough)
+# 2. Knowledge still 422 (needs rerank; embed alone isn't enough)
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +58,7 @@ async def test_knowledge_create_document_422(tier2_runtime: AsyncClient) -> None
 
 
 # ---------------------------------------------------------------------------
-# 6. /health reflects the Tier 2 capability matrix
+# 3. /health reflects the Tier 2 capability matrix
 # ---------------------------------------------------------------------------
 
 
@@ -138,16 +73,14 @@ async def test_health_reports_tier2_capabilities(tier2_runtime: AsyncClient) -> 
     assert caps["rerank"] is False
 
     disabled = set(body["disabled_features"])
-    assert "agentic_search" in disabled
     assert "knowledge" in disabled
-    assert "vector_search" not in disabled
-    assert "hybrid_search" not in disabled
+    assert "memory_search" not in disabled
     assert "reflection" not in disabled
     assert "skill_extraction" not in disabled
 
 
 # ---------------------------------------------------------------------------
-# 7. Embed-dependent OME strategies are registered now that embed is available
+# 4. Embed-dependent OME strategies are registered now that embed is available
 # ---------------------------------------------------------------------------
 
 

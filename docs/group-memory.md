@@ -1375,7 +1375,10 @@ The first half of Step 1 differs from the text above in these places:
   every other v2 route.
 - **Picture bytes.** An asker who holds a personal memory of the same picture
   (the same hash) may also fetch it.
-- **Not supported for group scopes yet:** `agentic` search answers 422.
+- **One search method.** Multi-round retrieval (`llm_multiround`) is the only
+  search method in 2.0, for one-to-one and group scopes alike; any other
+  method answers 422. Agent memory is listed by `/memory/get` (with
+  `context_group_id`), not searched: a search with `agent_id` answers 422.
 - **Client message ids** are kept only on group batches. They are not yet
   persisted in memcells.
 - **Agent-scope buffer reads** follow the users' rule: the agent must be a
@@ -1550,8 +1553,8 @@ Step 2 differs from the text above in these places:
   episodes; an episode's scene is not looked up (scene membership is not
   indexed). A linked record scores 0 and reaches the final injection only if
   the decider makes it core. Nothing is expanded after the last round.
-- **Constraints.** The core is the decider's on the multi-round route and the
-  returned records on the others. A decision whose newer version the asker
+- **Constraints.** The core is the decider's (multi-round retrieval is the
+  only search method in 2.0). A decision whose newer version the asker
   cannot see is returned as it is, `superseded`, without naming its
   successor. A metadata constraint quotes at most 300 characters of its
   message (a prefix). The model layer only refines: a failing binding is
@@ -1564,9 +1567,8 @@ Step 2 differs from the text above in these places:
   answer, counted in `everos_constraint_bind_failures_total`; it no longer
   fails the search with a 503. Quotes are checked again at read time
   against the segment read without forgotten messages.
-- **Partial memory.** `coverage` is reported for group scopes on the
-  multi-round method only; a loop ended by the no-new-core patience counts as
-  `partial`. The group profile is attached by default, each kind capped at
+- **Partial memory.** `coverage` is reported for group scopes only; a loop
+  ended by the no-new-core patience counts as `partial`. The group profile is attached by default, each kind capped at
   `[search] group_profile_cap` (default 20). The decline share on
   GroupAssistBench L2 is reported with task 18.
 - **Who knew what.** `present` reads membership stays, not visibility
@@ -1577,10 +1579,10 @@ Step 2 differs from the text above in these places:
   read of a project with groups answers 422 without an asker and 403 for a
   non-member. Fetching a document or topic by id is not scoped to its
   project (as before).
-- **One-to-one.** Search and get responses of user and agent scopes carry the
-  new fields with their empty defaults (`audience`, `group_profile`,
-  `constraints`, `coverage`); the golden test lists them as added fields and
-  its fixture is unchanged.
+- **One-to-one.** Search responses of user scopes and get responses of user
+  and agent scopes carry the new fields with their empty defaults
+  (`audience`, `group_profile`, `constraints`, `coverage`); the golden test
+  lists them as added fields and its fixture is unchanged.
 - **Real-model check (2026-11-11).** DeepSeek V4.1 Flash, JSON mode,
   thinking off; gab04 (all 68 messages), gab27 (first 300), `team_chat_en`
   (first 300), then 22 keyword searches with `[search] constraints =

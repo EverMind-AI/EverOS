@@ -19,8 +19,8 @@ own: member-in-group profile items on both sides of a window, a scene spanning
 a member's absence, agent cases learned in this and another group, and the
 group write path with its strategies.
 
-Every case asserts the record is absent from search (keyword, vector,
-hybrid and the multi-round decider's very input), get, attached pictures,
+Every case asserts the record is absent from search (the multi-round
+retrieval's results and its decider's very input), get, attached pictures,
 attached profiles, the session buffer and picture bytes. Zero leaks is the
 pass mark. Read paths of section 9.3 that do not exist yet are listed in
 :data:`NOT_YET` with the reason, so the table is accounted for row by row.
@@ -126,7 +126,8 @@ class _Fixture:
 @pytest.fixture
 async def fixture(tmp_path: Path) -> AsyncIterator[_Fixture]:
     decider = _RecordingDecider()
-    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=decider)) as world:
+    model = FakeLLMClient(handler=decider)
+    async with GroupWorld.open(tmp_path, llm=model, decider=model) as world:
         await world.roster(
             "trip",
             [
@@ -182,12 +183,11 @@ async def fixture(tmp_path: Path) -> AsyncIterator[_Fixture]:
             yield _Fixture(world=world, decider=decider, picture=picture, client=c)
 
 
-def _search(method: str, **scope: Any) -> SearchRequest:
+def _search(**scope: Any) -> SearchRequest:
     return SearchRequest(
         app_id=APP,
         project_id=PROJECT,
         query="marker plan Lisbon offsite",
-        method=method,
         top_k=20,
         filters={"session_id": "s_group"},
         include_profile=True,
@@ -201,28 +201,26 @@ def _everything_text(response: Any) -> str:
 
 
 @pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
-@pytest.mark.parametrize("method", ["keyword", "vector", "hybrid", "llm_multiround"])
 async def test_search_returns_nothing_outside_the_askers_windows(
-    fixture: _Fixture, asker: str, method: str
+    fixture: _Fixture, asker: str
 ) -> None:
     """Rows 1-4: every recall, the decider's input, attached pictures and
     profiles, and the session buffer."""
     fixture.decider.prompts.clear()
     response = await fixture.world.memory.search(
-        _search(method, group_id="trip", asker_id=asker)
+        _search(group_id="trip", asker_id=asker)
     )
     blob = _everything_text(response)
     seen_by_decider = "\n".join(fixture.decider.prompts)
 
     visible = [t for t, (s, e) in GROUP_RECORDS.items() if _visible(asker, s, e)]
-    if method == "llm_multiround":
-        # The decider really ran, and saw the asker's own records.
-        assert any(text in seen_by_decider for text in visible), (asker, method)
-    assert any(text in blob for text in visible), (asker, method)
+    # The decider really ran, and saw the asker's own records.
+    assert any(text in seen_by_decider for text in visible), asker
+    assert any(text in blob for text in visible), asker
     for text, (start, end) in GROUP_RECORDS.items():
         if not _visible(asker, start, end):
-            assert text not in blob, (asker, method, text)
-            assert text not in seen_by_decider, (asker, method, text)
+            assert text not in blob, (asker, text)
+            assert text not in seen_by_decider, (asker, text)
     # The picture (at 1500) and the early buffered message.
     if not _visible(asker, T0 + 1500, T0 + 1500):
         assert PICTURE not in blob and fixture.picture not in json.dumps(
@@ -244,9 +242,7 @@ async def test_former_and_non_members_read_nothing_of_the_group(
 ) -> None:
     """Rows 1, 5 and 10: a former member and a stranger are refused outright."""
     with pytest.raises(ForbiddenError):
-        await fixture.world.memory.search(
-            _search("keyword", group_id="trip", asker_id=asker)
-        )
+        await fixture.world.memory.search(_search(group_id="trip", asker_id=asker))
     with pytest.raises(ForbiddenError):
         await fixture.world.memory.get(
             GetRequest(
@@ -290,12 +286,10 @@ async def test_personal_memory_is_read_by_its_owner_only(
 ) -> None:
     """Row 4 and section 9.1: a personal record read by another user."""
     with pytest.raises(ForbiddenError):
-        await fixture.world.memory.search(
-            _search("keyword", user_id="u_chen", asker_id=reader)
-        )
+        await fixture.world.memory.search(_search(user_id="u_chen", asker_id=reader))
     # Without an asker the read is the owner's own; another owner id sees
     # neither Chen's memory nor the group's buffer.
-    other = await fixture.world.memory.search(_search("keyword", user_id=reader))
+    other = await fixture.world.memory.search(_search(user_id=reader))
     blob = _everything_text(other)
     assert "personal marker" not in blob
     assert "buffered marker" not in blob
@@ -306,7 +300,7 @@ async def test_a_group_buffer_never_reads_through_a_personal_scope(
     fixture: _Fixture,
 ) -> None:
     """Row 3: Chen sent those messages, but the session is the group's."""
-    mine = await fixture.world.memory.search(_search("keyword", user_id="u_chen"))
+    mine = await fixture.world.memory.search(_search(user_id="u_chen"))
     assert mine.data.unprocessed_messages == []
 
 
@@ -422,15 +416,10 @@ async def _record_id(world: GroupWorld, text: str) -> str:
 async def _everything_read_by(fixture: _Fixture, asker: str) -> str:
     """Every read path's answer to ``asker``, in one blob."""
     world = fixture.world
-    blobs = []
-    for method in ("keyword", "vector", "hybrid", "llm_multiround"):
-        response = await world.memory.search(
-            _search(method, group_id="trip", asker_id=asker).model_copy(
-                update={"filters": None}
-            )
-        )
-        blobs.append(_everything_text(response))
-    blobs.append("\n".join(fixture.decider.prompts))
+    response = await world.memory.search(
+        _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None})
+    )
+    blobs = [_everything_text(response), "\n".join(fixture.decider.prompts)]
     for memory_type, extra in (
         ("episode", {}),
         ("image_memory", {}),
@@ -532,7 +521,7 @@ async def test_profile_items_outside_the_window_never_attach(
     await world.project()
     # The query names Chen, so his profile is attached for every asker.
     response = await world.memory.search(
-        _search("keyword", group_id="trip", asker_id=asker).model_copy(
+        _search(group_id="trip", asker_id=asker).model_copy(
             update={"query": "What does u_chen plan in Lisbon?"}
         )
     )
@@ -561,9 +550,8 @@ async def test_profile_items_outside_the_window_never_attach(
 
 
 @pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
-@pytest.mark.parametrize("method", ["keyword", "hybrid", "llm_multiround"])
 async def test_a_scene_reaches_only_askers_who_see_all_its_episodes(
-    fixture: _Fixture, asker: str, method: str
+    fixture: _Fixture, asker: str
 ) -> None:
     """Section 9.1: a record with several sources is visible only if all are."""
     world = fixture.world
@@ -588,12 +576,10 @@ async def test_a_scene_reaches_only_askers_who_see_all_its_episodes(
     fixture.decider.prompts.clear()
     # No session filter: a scene spans episodes and belongs to no session.
     response = await world.memory.search(
-        _search(method, group_id="trip", asker_id=asker).model_copy(
-            update={"filters": None}
-        )
+        _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None})
     )
     visible = _visible(asker, T0 + 1_000, T0 + 9_000)
-    assert (text in _everything_text(response)) == visible, (asker, method)
+    assert (text in _everything_text(response)) == visible, asker
     if not visible:
         assert text not in "\n".join(fixture.decider.prompts)
     listed = await world.memory.get(
@@ -634,24 +620,28 @@ async def test_an_agent_case_from_another_group_stays_there(fixture: _Fixture) -
         )
     await world.project()
 
-    def search(**scope: Any) -> SearchRequest:
-        return SearchRequest(
+    def listing(**scope: Any) -> GetRequest:
+        # Agent memory is read through get: multi-round search covers user
+        # and group memory only, and refuses an agent scope.
+        return GetRequest(
             app_id=APP,
             project_id=PROJECT,
             agent_id="bot_ava",
-            query="case marker Lisbon",
-            method="keyword",
+            memory_type="agent_case",
             **scope,
         )
 
-    in_trip = _everything_text(
-        await world.memory.search(search(context_group_id="trip", asker_id="u_chen"))
+    def text(response: Any) -> str:
+        return json.dumps(response.data.model_dump(mode="json"))
+
+    in_trip = text(
+        await world.memory.get(listing(context_group_id="trip", asker_id="u_chen"))
     )
     assert "trip case marker" in in_trip and "other case marker" not in in_trip
-    plain = _everything_text(await world.memory.search(search()))
+    plain = text(await world.memory.get(listing()))
     assert "case marker" not in plain
     with pytest.raises(ForbiddenError):
-        await world.memory.search(search(context_group_id="trip", asker_id="u_zoe"))
+        await world.memory.get(listing(context_group_id="trip", asker_id="u_zoe"))
 
 
 async def test_group_strategies_read_only_the_groups_own_segments(
@@ -710,7 +700,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
         )
         await world.run(*STRATEGY_SPECS)
         kinds = {type(e).__name__ for e in world.bus.events}
-        assert not kinds & {"UserPipelineStarted", "EpisodeExtracted"}
+        assert "EpisodeExtracted" not in kinds
         group_cells = {
             e.memcell_id
             for e in world.bus.events
@@ -838,9 +828,8 @@ async def _seed_constrained(world: GroupWorld) -> None:
 
 
 @pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
-@pytest.mark.parametrize("method", ["keyword", "llm_multiround"])
 async def test_constraints_and_attachments_follow_the_windows(
-    fixture: _Fixture, asker: str, method: str
+    fixture: _Fixture, asker: str
 ) -> None:
     """Section 13.5: a constraint or attached profile item from an invisible source."""
     world = fixture.world
@@ -853,7 +842,6 @@ async def test_constraints_and_attachments_follow_the_windows(
             group_id="trip",
             asker_id=asker,
             query="marker plan Lisbon offsite",
-            method=method,
             top_k=20,
         )
     )
@@ -863,7 +851,7 @@ async def test_constraints_and_attachments_follow_the_windows(
     for word, (start, end) in CONSTRAINED.items():
         seen = _visible(asker, T0 + start, T0 + end)
         for marker in (f"{word}episode", f"{word}decision", f"{word}quote"):
-            assert (marker in blob) == seen, (asker, method, marker)
+            assert (marker in blob) == seen, (asker, marker)
 
 
 async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -> None:
@@ -881,7 +869,6 @@ async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -
             project_scope=True,
             asker_id="u_evan",
             query="marker plan Lisbon offsite",
-            method="keyword",
             top_k=20,
         )
     )

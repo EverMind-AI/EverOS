@@ -1,19 +1,17 @@
 """Private helpers shared across the search e2e tests.
 
 * :func:`pick_query_seeds` — scans the session corpus's
-  ``.atomic_facts/`` md files and returns a list of
-  ``(owner_id, fact_text)`` tuples to use as deterministic search
-  queries. Bootstrapping queries off the corpus's own extraction
-  output gives us a closed-loop correctness signal — what was
-  written should be findable.
+  ``episodes/`` md files and returns a list of ``(owner_id, subject)``
+  tuples to use as deterministic search queries. Bootstrapping queries
+  off the corpus's own extraction output gives us a closed-loop
+  correctness signal — what was written should be findable.
 
 * :func:`assert_recall` — the canonical "this search returned at
-  least one sensible hit for ``owner``" assertion bundle. Used by
-  the keyword / vector / hybrid recall tests so the assertion logic
-  is in one place.
+  least one sensible hit for ``owner``" assertion bundle, so the
+  assertion logic is in one place.
 
-* :func:`flatten_hits` — collapses ``SearchData``'s four arrays into
-  one ``(owner_id, score, text)`` tuple list for relevance checks.
+* :func:`flatten_hits` — collapses ``SearchData``'s episode and profile
+  arrays into one ``(owner_id, score, text)`` tuple list.
 
 The helpers do **not** hardcode topical keywords ("hiking" / "work")
 — they are derived from what the pipeline produced. This keeps the
@@ -70,16 +68,15 @@ def pick_query_seeds(
     *,
     limit: int = _DEFAULT_SEED_LIMIT,
 ) -> list[tuple[str, str]]:
-    """Sample ``(owner_id, fact_text)`` tuples from atomic_facts md files.
+    """Sample ``(owner_id, subject)`` tuples from the episode md files.
 
-    Walks ``users/<owner>/.atomic_facts/atomic_fact-*.md`` and parses
-    the ``## Fact\\n<text>`` sections inside each daily-log entry.
-    Returns deterministic seeds (insertion order of ``rglob`` is
-    sort-stable thanks to the explicit ``sorted`` call) so a flaky
-    test surfaces a real regression, not query-rotation variance.
+    Walks ``users/<owner>/episodes/episode-*.md`` and parses the
+    ``### Subject`` sections inside each daily-log entry. Returns
+    deterministic seeds (the explicit ``sorted`` calls) so a flaky test
+    surfaces a real regression, not query-rotation variance.
 
     Raises:
-        AssertionError: if no facts were extracted — that's a fixture
+        AssertionError: if no episode was extracted — that's a fixture
             failure, not a test failure, and should fail loudly.
     """
     seeds: list[tuple[str, str]] = []
@@ -88,54 +85,51 @@ def pick_query_seeds(
         raise AssertionError(f"expected {users_dir} to exist after ingest")
 
     for owner_dir in sorted(users_dir.iterdir()):
-        if not owner_dir.is_dir():
+        episodes_dir = owner_dir / "episodes"
+        if not episodes_dir.is_dir():
             continue
-        facts_dir = owner_dir / ".atomic_facts"
-        if not facts_dir.is_dir():
-            continue
-        for md in sorted(facts_dir.rglob("*.md")):
-            for fact in _extract_fact_sections(md):
-                if fact:
-                    seeds.append((owner_dir.name, fact))
-                    if len(seeds) >= limit:
-                        return seeds
+        for md in sorted(episodes_dir.rglob("*.md")):
+            for subject in _extract_sections(md, "### Subject"):
+                seeds.append((owner_dir.name, subject))
+                if len(seeds) >= limit:
+                    return seeds
     if not seeds:
         raise AssertionError(
-            f"no atomic_fact md entries under {users_dir} — pipeline did "
-            "not produce any facts; cannot bootstrap search queries"
+            f"no episode md entries under {users_dir} — pipeline did "
+            "not produce any episodes; cannot bootstrap search queries"
         )
     return seeds
 
 
-def _extract_fact_sections(md: Path) -> list[str]:
-    """Return every ``### Fact`` section body in a daily-log md file.
+def _extract_sections(md: Path, heading: str) -> list[str]:
+    """Return every ``heading`` section body in a daily-log md file.
 
     Daily-log entries are ``## <entry-id>`` blocks; the labelled body
-    sections inside an entry are h3 (``### Fact``, ``### Foresight``,
-    …). We scan linearly for ``### Fact`` and collect lines until the
+    sections inside an entry are h3 (``### Subject``, ``### Summary``,
+    …). We scan linearly for ``heading`` and collect lines until the
     next heading at any level or the end-of-entry marker.
     """
     body = md.read_text(encoding="utf-8")
     sections: list[str] = []
-    in_fact = False
+    inside = False
     buf: list[str] = []
     for line in body.splitlines():
         stripped = line.lstrip()
-        if stripped.startswith("### Fact"):
-            if in_fact:
+        if stripped.startswith(heading):
+            if inside:
                 sections.append("\n".join(buf).strip())
-            in_fact = True
+            inside = True
             buf = []
             continue
         # Any subsequent heading or entry-end marker closes the section.
-        if in_fact and (stripped.startswith("#") or stripped.startswith("<!-- /entry")):
+        if inside and (stripped.startswith("#") or stripped.startswith("<!-- /entry")):
             sections.append("\n".join(buf).strip())
-            in_fact = False
+            inside = False
             buf = []
             continue
-        if in_fact:
+        if inside:
             buf.append(line)
-    if in_fact:
+    if inside:
         sections.append("\n".join(buf).strip())
     return [s for s in sections if s]
 
@@ -144,13 +138,10 @@ def _extract_fact_sections(md: Path) -> list[str]:
 
 
 def flatten_hits(data: dict[str, Any]) -> list[tuple[str | None, float, str]]:
-    """Collapse ``SearchData``'s four arrays into ``(owner_id, score, text)``.
+    """Collapse ``SearchData``'s episodes and profiles into ``(owner, score, text)``.
 
-    Stable shape across track-kinds so the recall / partition tests
-    don't have to branch. Episodes / profiles carry ``user_id`` on the
-    item; cases / skills carry ``agent_id`` — both project to the
-    generic ``owner`` slot here. ``owner`` may be ``None`` for profile
-    hits where the owner is implicit.
+    Stable shape so the recall / partition tests don't have to branch.
+    ``owner`` may be ``None`` for profile hits where the owner is implicit.
     """
     out: list[tuple[str | None, float, str]] = []
     for ep in data.get("episodes", []):
@@ -169,22 +160,6 @@ def flatten_hits(data: dict[str, Any]) -> list[tuple[str | None, float, str]]:
                 str(pf.get("profile_data") or ""),
             )
         )
-    for cs in data.get("agent_cases", []):
-        out.append(
-            (
-                cs.get("agent_id"),
-                float(cs.get("score") or 0.0),
-                cs.get("approach") or cs.get("task_intent") or "",
-            )
-        )
-    for sk in data.get("agent_skills", []):
-        out.append(
-            (
-                sk.get("agent_id"),
-                float(sk.get("score") or 0.0),
-                sk.get("content") or sk.get("description") or "",
-            )
-        )
     return out
 
 
@@ -193,14 +168,13 @@ async def assert_recall(
     *,
     owner_id: str,
     query: str,
-    method: str,
     min_score: float = 0.0,
     top_k: int = 10,
 ) -> dict[str, Any]:
-    """Hit ``/search`` and lock the four standard recall invariants.
+    """Hit ``/search`` (multi-round) and lock the four standard recall invariants.
 
     1. **Status** 200 — the route compiled.
-    2. **Existence** — ``total >= 1`` across the four arrays.
+    2. **Existence** — ``total >= 1`` across the episodes and profiles.
     3. **Owner partition** — every non-``None`` ``owner_id`` matches
        the queried owner. Profile hits may carry ``None`` so they're
        skipped from the check.
@@ -214,27 +188,22 @@ async def assert_recall(
         json={
             "user_id": owner_id,
             "query": query,
-            "method": method,
+            "method": "llm_multiround",
             "top_k": top_k,
         },
-        timeout=120.0,
+        timeout=300.0,
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     hits = flatten_hits(body["data"])
-    assert hits, (
-        f"no hits for owner={owner_id} query={query!r} method={method} — "
-        f"recall is broken"
-    )
+    assert hits, f"no hits for owner={owner_id} query={query!r} — recall is broken"
     for hit_owner, _score, _text in hits:
         if hit_owner is not None:
             assert hit_owner == owner_id, (
                 f"partition leak: got owner={hit_owner!r} when querying {owner_id!r}"
             )
     top_score = max(score for _o, score, _t in hits)
-    assert top_score >= min_score, (
-        f"top hit score {top_score:.3f} < min {min_score} for method={method}"
-    )
+    assert top_score >= min_score, f"top hit score {top_score:.3f} < min {min_score}"
     return body
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 __all__ = [
     "AGENT_TRACK_OPERATORS",
+    "DECIDER_KEEP_FIRST_TEN",
     "KNOWLEDGE_OPERATORS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
@@ -44,13 +45,15 @@ from everalgo.testing import FakeLLMClient
 UNUSABLE_REPLY = "this is not JSON"
 """A reply no operator can parse: it raises ``LLMOutputError``."""
 
+DECIDER_KEEP_FIRST_TEN = json.dumps({"core": list(range(10)), "next_queries": []})
+"""A multi-round decider reply: keep the first ten candidates, stop."""
+
 _SCRIPTS = Path(__file__).parent / "llm_scripts"
 _WINDOW = re.compile(r'<messages count="(\d+)">')
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
     "episode": "_EpisodeReply",
-    "atomic_facts": "_AtomicFactsReply",
     "profile_init": "_ProfileItems",
     "profile_update": "_MemCellUpdateOutput",
     "reflect": "_ReflectOutput",
@@ -131,8 +134,9 @@ def memorize_llm(
         KeyError: An override names an unknown user-track operator.
 
     Other user-track operators, and knowledge extraction, answer from their
-    canned scripts; anything else gets an unusable reply (its background
-    strategy logs and gives up).
+    canned scripts; the multi-round search's decider keeps the first ten
+    candidates and stops (:data:`DECIDER_KEEP_FIRST_TEN`); anything else gets
+    an unusable reply (its background strategy logs and gives up).
     """
     queue = None if callable(boundaries) else [list(b) for b in boundaries]
     episode = json.dumps(
@@ -157,6 +161,8 @@ def memorize_llm(
             return boundary_reply(cuts, tail_complete=tail_complete)
         if name == "_EpisodeReply":
             return episode
+        if name == "_DecisionReply":
+            return DECIDER_KEEP_FIRST_TEN
         return canned.get(name, UNUSABLE_REPLY)
 
     return FakeLLMClient(handler=_answer)

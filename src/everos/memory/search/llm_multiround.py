@@ -1,8 +1,8 @@
 """Episode LLM-guided multi-round retrieval (per-sub-query RRF blocks).
 
-Genuinely *iterative* multi-round retrieval, unlike ``agentic`` (a fixed round1
-+ single round2 fallback). Each round an injected **decider** looks at the
-question + retrieved evidence and, in one shot:
+Genuinely *iterative* multi-round retrieval -- the only search method. Each
+round an injected **decider** looks at the question + retrieved evidence and,
+in one shot:
 
   1. **selects** the *core* memories that carry information the answer needs,
   2. decides to **stop** (the core answers a self-contained question), else
@@ -85,8 +85,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from everos.component.llm import RawReply, TokenUsage
-    from everos.component.rerank import RerankProvider
-    from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
     from everos.memory.search.recall.image_memory import ImageMemoryRecaller
 
@@ -1009,11 +1007,9 @@ async def search_episodes_llm_multiround(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
-    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
-    reranker: RerankProvider | None = None,
     decider: RoundDecider | None = None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
@@ -1034,11 +1030,9 @@ async def search_episodes_llm_multiround(
         app_id=app_id,
         project_id=project_id,
         episode_recaller=episode_recaller,
-        atomic_fact_recaller=atomic_fact_recaller,
         embed_query_fn=embed_query_fn,
         llm=llm,
         top_k=top_k,
-        reranker=reranker,
         decider=decider,
         tuning_source=tuning_source,
         trace_path_source=trace_path_source,
@@ -1056,11 +1050,9 @@ async def search_episodes_and_images_llm_multiround(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
-    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
-    reranker: RerankProvider | None = None,
     decider: RoundDecider | None = None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
@@ -1085,12 +1077,9 @@ async def search_episodes_and_images_llm_multiround(
         app_id / project_id: Scope segments (parity; recall is owner-scoped via
             ``where``).
         episode_recaller: Episode sparse + dense recall.
-        atomic_fact_recaller: Accepted for call-site parity; this scheme recalls at the
-            episode level and does not drill facts.
         embed_query_fn: Async ``(str) -> vector`` query embedder.
         llm: LLM client for the decider.
         top_k: Maximum episodes to return.
-        reranker: Accepted for parity but UNUSED — no cross-encoder stage.
         decider: Round-control hook. When given, it REPLACES the built-in
             :class:`LLMRoundDecider` and drives every round, which is how a
             Phase-2 RL policy reuses this loop as its environment.
@@ -1114,11 +1103,9 @@ async def search_episodes_and_images_llm_multiround(
         app_id=app_id,
         project_id=project_id,
         episode_recaller=episode_recaller,
-        atomic_fact_recaller=atomic_fact_recaller,
         embed_query_fn=embed_query_fn,
         llm=llm,
         top_k=top_k,
-        reranker=reranker,
         decider=decider,
         tuning_source=tuning_source,
         trace_path_source=trace_path_source,
@@ -1138,11 +1125,9 @@ async def run_llm_multiround(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
-    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
-    reranker: RerankProvider | None = None,
     decider: RoundDecider | None = None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
@@ -1168,11 +1153,9 @@ async def run_llm_multiround(
         app_id=app_id,
         project_id=project_id,
         episode_recaller=episode_recaller,
-        atomic_fact_recaller=atomic_fact_recaller,
         embed_query_fn=embed_query_fn,
         llm=llm,
         top_k=top_k,
-        reranker=reranker,
         decider=decider,
         tuning_source=tuning_source,
         trace_path_source=trace_path_source,
@@ -1504,11 +1487,9 @@ async def _search_episodes_subq(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
-    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
-    reranker: RerankProvider | None,
     decider: RoundDecider | None,
     tuning_source: Callable[[], DeciderSettings],
     trace_path_source: Callable[[], str | None],
@@ -1534,8 +1515,7 @@ async def _search_episodes_subq(
     After the loop, :func:`_finalize_injection` assembles the top_k: core-first
     (hard guarantee) + each sub-query's top non-core + max-RRF-score fill.
 
-    ``reranker`` is accepted for call-site parity but intentionally UNUSED — this
-    scheme has no cross-encoder stage (the CE was net-negative). ``decider``, when
+    There is no cross-encoder stage (the CE was net-negative). ``decider``, when
     supplied, replaces :class:`LLMRoundDecider` for every round: that is the seam an RL
     policy occupies so the loop it trains against is this loop rather than a copy.
 
@@ -1554,7 +1534,7 @@ async def _search_episodes_subq(
     # accumulation and the stop conditions. Re-implementing diverged: measured against
     # this loop, a hand-built environment retrieved a different candidate set on 25/25
     # sampled sub-queries (Jaccard median 0.538): the HTTP search route it called
-    # dispatches to the hierarchy/heap-expand hybrid pipeline, not this file's
+    # dispatched to the (since removed) heap-expand hybrid pipeline, not this file's
     # per-sub-query rrf(sparse, dense)[:topk].
     decide = decider or LLMRoundDecider(llm, tuning_source=tuning_source)
 
@@ -2041,8 +2021,7 @@ def _dataset_from_owner(owner_id: str) -> str:
 def _trace_cand_pool(cands: object) -> list[dict[str, object]]:
     """Serialize a candidate pool (dict[id]->Candidate or list) for the full-retrieval
     attribution trace: id + session_id + score + source + metadata (session / entry_id /
-    fact provenance). Lets a bad case be split into recall-miss vs rerank-miss vs
-    decider-miss, and drilled to the atomic fact that surfaced each episode."""
+    parent provenance). Lets a bad case be split into recall-miss vs decider-miss."""
     items = cands.values() if isinstance(cands, dict) else (cands or [])
     out: list[dict[str, object]] = []
     for c in items:

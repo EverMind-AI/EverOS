@@ -122,8 +122,8 @@ semantics, retry with backoff. The markdown file is durable
 regardless; index lag never loses data.
 
 The same applies one level up for everything an OME strategy produces
-**after** the extraction call returns: agent cases and skills (agent track),
-profiles, atomic facts. `/flush` returns once the episode is on disk; the
+**after** the extraction call returns: agent cases and skills (agent track)
+and profiles. `/flush` returns once the episode is on disk; the
 `extract_agent_case` strategy then runs its own LLM call, and skill
 clustering runs after that, so `/get` with `memory_type: "agent_case"` can
 legitimately report `total_count: 0` for tens of seconds after a flush that
@@ -180,8 +180,8 @@ storage. This is the same rule users see when reading rendered output:
 #### Other conventions
 
 - **Server-generated IDs** follow `<owner>_<kind>_<YYYYMMDD>_<NNN>`,
-  e.g. `alice_ep_20260528_00000001` for an episode, `alice_af_...`
-  for an atomic fact. See
+  e.g. `alice_ep_20260528_00000001` for an episode, `alice_im_...`
+  for a picture memory. See
   [storage_layout.md §4](storage_layout.md) for the encoding.
 - **All endpoints are POST** for `/api/v2/memory/*` even when the
   semantics look like a read (`/search`, `/get`) — the request bodies
@@ -508,14 +508,14 @@ Examples:
 
 | Value | Behaviour |
 |---|---|
-| `"keyword"` | BM25 only — pure lexical match, no embedding cost |
-| `"vector"` | Dense vector ANN only — semantic recall, no lexical |
-| `"hybrid"` *(default)* | Reciprocal-rank fuse of BM25 + vector + optional scalar filter against the configured derived index backend |
-| `"agentic"` | Iterative cluster-path retrieval driven by a cross-encoder rerank loop; higher quality at higher latency / cost |
+| `"llm_multiround"` *(default, and the only one)* | Multi-round retrieval: every round recalls each current sub-query by BM25 + vector against the configured derived index backend, fuses each sub-query's two lists with reciprocal-rank fusion, and lets a decider model select the core memories, stop, or issue follow-up sub-queries. Episodes, scenes and picture memories compete in one candidate pool. |
 
-`"hybrid"` is the default because it balances recall and precision
-without requiring the agentic loop. `"agentic"` calls the LLM in a loop
-and should be reserved for offline or background workflows.
+The keyword, vector, hybrid and agentic methods were removed in 2.0
+together with atomic facts. A request naming one of them, or any other
+value, is refused with `422 INVALID_INPUT` and a message that says only
+`"llm_multiround"` is supported. Multi-round retrieval needs an
+`[embedding]` provider and calls the `[decider]` model (falling back to
+`[llm]`) once per round.
 
 ### GetMemoryType
 
@@ -880,103 +880,79 @@ next `/flush`.
 
 ### POST /api/v2/memory/search
 
-Hybrid retrieval over the memory store. Combines BM25, dense vector
-ANN, optional scalar filtering, optional cross-encoder rerank, and
-optional final LLM rerank. Returns ranked items grouped by kind.
+Multi-round retrieval over a user's or a group's memory (see
+[SearchMethod](#searchmethod)). Returns the selected episodes and picture
+memories, ranked together, plus optional profiles.
 
 #### Request body
 
 | Field | Type | Required | Default | Constraints |
 |---|---|---|---|---|
-| `user_id` | `string \| null` | XOR with `agent_id` | `null` | `minLength=1` if set |
-| `agent_id` | `string \| null` | XOR with `user_id` | `null` | `minLength=1` if set |
+| `user_id` | `string \| null` | one owner scope | `null` | `minLength=1` if set |
+| `group_id` / `group_ids` | `string` / `array<string>` | one owner scope | `null` | see [group-memory.md](group-memory.md) |
+| `asker_id` | `string \| null` | for a group scope | `null` | `minLength=1` if set |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `query` | `string` | yes | — | `minLength=1` |
-| `method` | [SearchMethod](#searchmethod) | no | `"hybrid"` | — |
+| `method` | [SearchMethod](#searchmethod) | no | `"llm_multiround"` | only `"llm_multiround"` |
 | `top_k` | `integer` | no | `-1` | `-1` or `1..100` |
-| `radius` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
-| `min_score` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
 | `include_profile` | `boolean` | no | `false` | — |
-| `enable_llm_rerank` | `boolean` | no | `false` | — |
+| `images` | `array` | no | `[]` | at most 4 pictures that are part of the question |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
 
-**`user_id` / `agent_id`** — **Exactly one** must be set. Determines
-which track is searched: `user_id` → user-memory (episodes /
-profiles); `agent_id` → agent-memory (cases / skills).
+**Owner scope** — **Exactly one** of `user_id`, `group_id` and
+`group_ids` must be set. Agent memory is not searchable: an `agent_id`
+(with or without `context_group_id`) is refused with `422` and a message
+pointing at [`/memory/get`](#post-apiv2memoryget), which lists an agent's
+cases and skills.
 
 **`app_id` / `project_id`** — Scope identifiers; results never cross
 scopes.
 
-**`query`** — The retrieval query. The same string is fed to BM25
-tokenization and to the embedding model, then the two recall lists
-are fused.
+**`query`** — The question the multi-round loop starts from. Round 0
+recalls it by BM25 and by its embedding; later rounds recall the
+decider's sub-queries the same way.
 
-**`method`** — Retrieval method; see [SearchMethod](#searchmethod).
-Default `"hybrid"` is the recommended starting point.
+**`method`** — Optional; `"llm_multiround"` is the default and the only
+accepted value. `"keyword"`, `"vector"`, `"hybrid"`, `"agentic"` and any
+other value return `422 INVALID_INPUT`.
 
-**`top_k`** — Maximum number of items to return per kind. Two modes:
-- `-1` (default) — "Use server defaults." Recall falls back to a
-  fixed internal cap, and a server-side `radius` default kicks in if
-  the caller did not pass one (see `radius` below). Use for "give me
-  whatever you find worth returning."
-- `1..100` — Explicit cap. Recall is sized as `top_k × multiplier`
-  and **no** default `radius` is applied unless you set it yourself.
-
+**`top_k`** — Maximum number of items to return (episodes and pictures
+share it). `-1` (default) caps at 100; `1..100` is an explicit cap.
 Values of `0` or outside `-1` / `1..100` are rejected with `422`.
 
-**`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`,
-applied to the **dense (vector) recall before fusion or rerank**:
-candidates whose raw cosine is below it never enter the pool. Every
-method's vector route honours it (`vector`, `hybrid`, `agentic`);
-`keyword` has no cosine and ignores it. Use it to cut a long tail of
-weak matches. Three-level fallback for the effective radius:
-
-1. Caller-supplied `radius` (including the literal `0.0`) always wins.
-2. With `top_k=-1` and no caller-supplied `radius`, a server-side
-   default radius kicks in.
-3. With `top_k>0` and no caller-supplied `radius`, no threshold is
-   applied (`null`).
-
-**`min_score`** — Optional **post-fusion relevance floor** in
-`[0.0, 1.0]`. Results below this score are evicted after fusion,
-independent of `radius` (which is a per-recall cosine threshold).
-
-**`include_profile`** — When `user_id` is set, also fetch the user's
-profile and include it in `data.profiles`. The profile is not
-ranked; `score` is `null`. Ignored when `agent_id` is set.
-
-**`enable_llm_rerank`** — Opt-in LLM rerank pass for
-`method: "hybrid"`. Applies to `agent_case` and `agent_skill` fusion
-only; the episode hybrid path has built-in fact eviction and
-ignores this flag. Adds one LLM call per request. Ignored by
-`keyword` / `vector` (no fusion to rerank) and `agentic` (uses its
-own cross-encoder loop).
+**`include_profile`** — For a user scope, also fetch the user's
+profile into `data.profiles`; for a group scope, the asker's and the
+named members' member-in-group profiles. Profiles are not ranked;
+`score` is `null`.
 
 **`filters`** — Optional filter-DSL node; see
 [FilterNode](#filternode-filter-dsl). Applied **before** ranking, so
 it does not perturb the ranker.
 
+The `radius`, `min_score` and `enable_llm_rerank` fields of 1.x tuned the
+removed methods; a request that still sends them is refused as an unknown
+field (`422`).
+
 #### Response body
 
-`200 OK` returns a SuccessEnvelope wrapping `SearchData`. All five
-arrays are always present so client code can iterate without
-branching on owner type; arrays that do not apply to the requested
-owner kind stay as `[]`.
+`200 OK` returns a SuccessEnvelope wrapping `SearchData`. Every array is
+always present so client code can iterate without branching on the
+owner scope; arrays that do not apply stay `[]`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `episodes` | `array<SearchEpisodeItem>` | Populated when `user_id` is set |
-| `profiles` | `array<SearchProfileItem>` | Populated when `user_id` is set **and** `include_profile=true` |
-| `agent_cases` | `array<SearchAgentCaseItem>` | Populated when `agent_id` is set |
-| `agent_skills` | `array<SearchAgentSkillItem>` | Populated when `agent_id` is set |
-| `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Independent of `user_id` / `agent_id` (buffer rows have no owner attribution — boundary detection runs before owner inference) |
+| `episodes` | `array<SearchEpisodeItem>` | The selected episodes (and group scenes) |
+| `images` | `array<SearchImageItem>` | Picture memories ranked in the same pool as the episodes |
+| `profiles` | `array<SearchProfileItem>` | Populated **only** when `include_profile=true` |
+| `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Buffer rows have no owner attribution — boundary detection runs before owner inference |
+| `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows |
 
 #### SearchEpisodeItem
 
-User-track conversation episode hit. `score` is the fused retrieval
-score; `atomic_facts` lists single-sentence facts that matched the
-query within this episode (already nested, no separate call needed).
+Conversation episode (or group scene) selected by the search. `score` is
+the multi-round fusion score: the highest reciprocal-rank-fusion score
+the episode reached across the sub-queries that recalled it.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -991,23 +967,12 @@ query within this episode (already nested, no separate call needed).
 | `subject` | `string` | One-line subject / title |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
-| `score` | `number` | Fused retrieval score for this episode |
-| `atomic_facts` | `array<SearchAtomicFactItem>` | Sub-facts extracted from the same episode that matched the query |
+| `score` | `number` | Fusion score for this episode |
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
 > under two projects (each project keeps its own daily files and sequence);
 > address a row globally by `(app_id, project_id, id)`. Within one response
 > ids never repeat, because a request is always scoped to one project.
-
-#### SearchAtomicFactItem
-
-A single-sentence fact pulled out of an episode during extraction.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `string` | `<user_id>_af_<YYYYMMDD>_<NNN>` |
-| `content` | `string` | The fact as a single sentence |
-| `score` | `number` | Same score scale as the parent episode |
 
 #### SearchProfileItem
 
@@ -1023,44 +988,6 @@ User profile. Only populated when `include_profile=true` and
 | `profile_data` | `object` | Free-form structured profile fields produced by extraction (schema is profile-specific) |
 | `score` | `number \| null` | `null` for direct fetches (no query-aware profile ranking yet) |
 
-#### SearchAgentCaseItem
-
-Agent-track case hit. Returned only when the request uses `agent_id`.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
-| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
-| `agent_id` | `string` | Owner |
-| `app_id` | `string` | Scope |
-| `project_id` | `string` | Scope |
-| `session_id` | `string` | The agent run this case came from |
-| `task_intent` | `string` | What the agent was trying to do (one-sentence framing) |
-| `approach` | `string` | How the agent went about it |
-| `quality_score` | `number` | Quality assessed at extraction time, in `[0, 1]` |
-| `key_insight` | `string \| null` | One-line takeaway; `null` if extraction did not produce one |
-| `timestamp` | `string` | ISO-8601 UTC of when the run happened |
-| `score` | `number` | Fused retrieval score for this case |
-
-#### SearchAgentSkillItem
-
-Agent-track skill hit — a named procedural memory produced by
-clustering related cases.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `string` | `<agent_id>_sk_<YYYYMMDD>_<NNN>` |
-| `agent_id` | `string` | Owner |
-| `app_id` | `string` | Scope |
-| `project_id` | `string` | Scope |
-| `name` | `string` | Skill name (a stable, human-meaningful slug) |
-| `description` | `string` | One-line description |
-| `content` | `string` | Full skill body (procedure / playbook text) |
-| `confidence` | `number` | Extraction confidence in `[0, 1]` |
-| `maturity_score` | `number` | Maturity assessed at clustering time, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
-| `score` | `number` | Fused retrieval score for this skill |
-
 #### UnprocessedMessageDTO
 
 A raw message still sitting in the boundary-detection buffer — sent to
@@ -1069,8 +996,8 @@ when the request's `filters` contains `session_id` as a top-level eq
 scalar (`{"session_id": "<sid>"}`); compound shapes (`AND` / `OR`
 combinators, operator maps such as `{"eq": ...}` / `{"in": ...}`) do
 not trigger the lookup because there is no defensible buffer-scope
-mapping for them. Buffer rows have no `user_id` / `agent_id`
-attribution, so `session_id` is the only meaningful query dimension.
+mapping for them. Buffer rows have no `user_id` attribution, so
+`session_id` is the only meaningful query dimension.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1096,11 +1023,12 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
+    "method": "llm_multiround",
     "top_k": 5
   }'
 ```
 
-Response (real capture):
+Response (abridged):
 
 ```json
 {
@@ -1119,19 +1047,11 @@ Response (real capture):
                 "subject": "Alice's Outdoor Activities and Daily Routine on May 28, 2026: Climbing, Coffee, and Biking",
                 "episode": "On May 28, 2026 at 11:30 AM UTC, Alice shared that she loves climbing in Yosemite every spring, highlighting a recurring seasonal activity. She also mentioned that her favorite coffee shop is Blue Bottle located in SOMA, indicating a preferred local spot. Additionally, Alice stated that she bikes to work most days, describing a habitual mode of transportation.",
                 "type": "Conversation",
-                "score": 0.6298899054527283,
-                "atomic_facts": [
-                    {
-                        "id": "alice_af_20260528_00000001",
-                        "content": "Alice said she loves climbing in Yosemite every spring.",
-                        "score": 0.6298899054527283
-                    }
-                ]
+                "score": 0.01639344262295082
             }
         ],
+        "images": [],
         "profiles": [],
-        "agent_cases": [],
-        "agent_skills": [],
         "unprocessed_messages": []
     }
 }
@@ -1209,8 +1129,7 @@ branching on `memory_type`; exactly one is populated.
 #### GetEpisodeItem
 
 Same shape as [SearchEpisodeItem](#searchepisodeitem) **minus**
-`score` and `atomic_facts` (listing is unranked and does not nest
-sub-facts).
+`score` (listing is unranked).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1243,8 +1162,7 @@ sub-facts).
 
 #### GetAgentCaseItem
 
-Same shape as [SearchAgentCaseItem](#searchagentcaseitem) **minus**
-`score`.
+An agent case (agent memory is listed here; it is not searchable).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1262,8 +1180,8 @@ Same shape as [SearchAgentCaseItem](#searchagentcaseitem) **minus**
 
 #### GetAgentSkillItem
 
-Same shape as [SearchAgentSkillItem](#searchagentskillitem) **minus**
-`score`.
+An agent skill — a named procedural memory produced by clustering related
+cases.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1345,9 +1263,9 @@ an unknown field) is `422`.
 
 | Request sets | Memories deleted | Conversation state (buffers, memcells, session status) | Clusters, Reflection reports |
 |---|---|---|---|
-| `session_id` | every owner's episodes, atomic facts, foresights and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
+| `session_id` | every owner's episodes, picture memories and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
 | `user_id` | everything of the user, `user.md` included | kept | the user's clusters and reports deleted |
-| `user_id` + `session_id` | the user's episodes, atomic facts and foresights of the session | kept | kept |
+| `user_id` + `session_id` | the user's episodes and picture memories of the session | kept | kept |
 | `agent_id` | every case and skill of the agent | kept | the agent's case clusters deleted |
 | `agent_id` + `session_id` | the agent's cases of the session | kept | kept |
 
@@ -1444,7 +1362,7 @@ app or project is skipped like one that matches nothing.
 #### What it deletes
 
 For each id: the episode; every episode Reflection merged into it,
-transitively; the atomic facts of all of those; their membership in their
+transitively; their membership in their
 cluster (the cluster's count, latest timestamp and preview follow the
 remaining members; a cluster left empty is deleted); and their index rows.
 Deleting one source of a merged episode keeps the merged episode.

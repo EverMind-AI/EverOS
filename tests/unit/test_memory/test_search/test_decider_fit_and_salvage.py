@@ -518,11 +518,6 @@ class _Recaller:
         return recalled(*self._seed)
 
 
-class _Facts:
-    async def facts_for_episodes(self, *a: Any, **k: Any) -> dict[str, list[Any]]:
-        return {}
-
-
 async def _embed(_q: str) -> list[float]:
     return [0.1, 0.2]
 
@@ -533,7 +528,6 @@ async def _search(llm: Any, seed: list[SearchHit[Any]], *, decider: Any = None):
         owner_id="alice_0",
         where="owner_id = 'alice'",
         episode_recaller=_Recaller(seed),
-        atomic_fact_recaller=_Facts(),
         embed_query_fn=_embed,
         llm=llm,
         top_k=5,

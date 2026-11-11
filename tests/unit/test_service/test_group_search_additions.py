@@ -51,7 +51,7 @@ async def _world(
         update={"search": base.search.model_copy(update={"group_profile_cap": cap})}
     )
     async with GroupWorld.open(
-        tmp_path, llm=FakeLLMClient(handler=decider), settings=settings
+        tmp_path, decider=FakeLLMClient(handler=decider), settings=settings
     ) as world:
         await world.roster(
             "trip",
@@ -142,9 +142,9 @@ async def test_the_group_profile_is_attached_by_default_and_capped(
 
 async def test_group_records_carry_their_audience(tmp_path: Path) -> None:
     async for world in _world(tmp_path, _Decider(([0, 1], []))):
-        response = await world.memory.search(_request(asker="u_chen", method="keyword"))
+        response = await world.memory.search(_request(asker="u_chen"))
         personal = await world.memory.search(
-            _request(asker=None, group_id=None, user_id="u_chen", method="keyword")
+            _request(asker=None, group_id=None, user_id="u_chen")
         )
 
         by_text = {e.episode: e.audience for e in response.data.episodes}

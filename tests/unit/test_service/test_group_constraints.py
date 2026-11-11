@@ -167,6 +167,8 @@ async def _world(
 
 
 async def _constraints(world: GroupWorld, asker: str) -> list[Any]:
+    # The world's decider keeps the first ten candidates and stops: every
+    # record the asker can see is in the core the constraints are built from.
     response = await world.memory.search(
         SearchRequest(
             app_id=APP,
@@ -174,7 +176,6 @@ async def _constraints(world: GroupWorld, asker: str) -> list[Any]:
             group_id="trip",
             asker_id=asker,
             query=QUERY,
-            method="keyword",
             top_k=10,
         )
     )

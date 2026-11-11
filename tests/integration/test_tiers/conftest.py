@@ -95,12 +95,10 @@ class StubReranker:
 
 def make_fake_llm() -> FakeLLMClient:
     """The memorize-path model: no boundary cut before a flush, a "Hiking"
-    episode, no atomic facts (the suites seed the facts they count), and
-    canned replies for the other user-track operators."""
+    episode, and canned replies for the other user-track operators."""
     return memorize_llm(
         episode_title="Hiking",
         episode_content="Alice loves hiking in the mountains every weekend.",
-        atomic_facts="atomic_facts_empty",
     )
 
 
@@ -369,57 +367,6 @@ async def add_and_flush(
         await wait_drained(deadline_seconds=deadline_seconds)
 
     return flush_resp.json()
-
-
-async def seed_atomic_fact_for_episode(
-    episode_row: dict[str, Any],
-    *,
-    vector: list[float],
-    fact: str = "Alice enjoys hiking in the mountains.",
-) -> None:
-    """Seed one real ``AtomicFact`` row linked to an already-cascaded episode.
-
-    The manager's VECTOR method (``_maxsim_atomic_recall``) scans
-    ``atomic_fact`` (denser, finer-grained) and max-pools back to the
-    parent episode via ``AtomicFact.parent_id == Episode.entry_id`` (see
-    ``extract_atomic_facts.py``: ``parent_id=event.episode_entry_id``);
-    it only ANN-searches the episode table when no fact is in scope.
-    A Tier 2/3 test that wants ``method="vector"`` to exercise the MaxSim
-    path therefore needs at least one embedded atomic fact --
-    normally produced by the ``extract_atomic_facts`` OME strategy, which
-    this suite's fake LLM does not attempt to satisfy (its canned
-    response only matches the boundary/episode JSON contract). Seeding
-    the fact row directly exercises the same recall code path without
-    depending on a second, unrelated LLM JSON contract.
-    """
-    import hashlib
-
-    from everos.core.utils.datetime import get_utc_now
-    from everos.infra.persistence.records import AtomicFact
-
-    entry_id = f"af_seed_{episode_row['entry_id']}"
-    owner_id = episode_row["owner_id"]
-    await tier_storage().repos.atomic_fact.upsert(
-        [
-            AtomicFact(
-                id=f"{owner_id}_{entry_id}",
-                entry_id=entry_id,
-                owner_id=owner_id,
-                owner_type=episode_row["owner_type"],
-                app_id=episode_row["app_id"],
-                project_id=episode_row["project_id"],
-                session_id=episode_row.get("session_id"),
-                timestamp=get_utc_now(),
-                parent_id=episode_row["entry_id"],
-                sender_ids=episode_row["sender_ids"],
-                fact=fact,
-                fact_tokens=fact.lower(),
-                md_path=f"users/{owner_id}/.atomic_facts/atomic_fact-seed.md",
-                content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
-                vector=vector,
-            )
-        ]
-    )
 
 
 def add_payload(

@@ -22,7 +22,6 @@ from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory.deps import Stores
 from everos.memory.models import (
     AgentCase,
-    AtomicFact,
     Episode,
     ImageMemory,
     MemcellRecord,
@@ -103,9 +102,8 @@ async def _seed(stores: Stores, session: str, *, project: str = "p") -> None:
         ],
     )
     for owner in ("u1", "u2"):
-        scope = _user(owner, project)
-        (ep,) = await stores.episode.append_many(
-            scope,
+        await stores.episode.append_many(
+            _user(owner, project),
             [
                 Episode(
                     owner_id=owner,
@@ -115,19 +113,6 @@ async def _seed(stores: Stores, session: str, *, project: str = "p") -> None:
                     summary="s",
                     session_id=session,
                     parent_id=f"mc_{project}_{session}",
-                )
-            ],
-            only_if=NO_SOURCE_CHECK,
-        )
-        await stores.atomic_fact.append_many(
-            scope,
-            [
-                AtomicFact(
-                    owner_id=owner,
-                    content="f",
-                    timestamp=_TS,
-                    session_id=session,
-                    parent_id=ep.entry_id,
                 )
             ],
             only_if=NO_SOURCE_CHECK,
@@ -245,17 +230,17 @@ async def test_filters_and_count_per_scope(
     d = _deleter(stores, eraser)
 
     r = await _delete(d, user_id="u1", session_id="s1")
-    assert (r.filters, r.count) == (["user_id", "session_id"], 2)
+    assert (r.filters, r.count) == (["user_id", "session_id"], 1)
     r = await _delete(d, agent_id="a1", session_id="s1")
     assert (r.filters, r.count) == (["agent_id", "session_id"], 1)
-    r = await _delete(d, session_id="s1")  # what is left of s1: u2's two
-    assert (r.filters, r.count) == (["session_id"], 2)
-    r = await _delete(d, user_id="u1")  # s2's two entries + user.md
-    assert (r.filters, r.count) == (["user_id"], 3)
+    r = await _delete(d, session_id="s1")  # what is left of s1: u2's episode
+    assert (r.filters, r.count) == (["session_id"], 1)
+    r = await _delete(d, user_id="u1")  # s2's episode + user.md
+    assert (r.filters, r.count) == (["user_id"], 2)
     r = await _delete(d, agent_id="a1")  # s2's case
     assert (r.filters, r.count) == (["agent_id"], 1)
     assert await _entries(storage, "user", "u1") == 0
-    assert await _entries(storage, "user", "u2") == 2  # s2 only
+    assert await _entries(storage, "user", "u2") == 1  # s2 only
     assert await _entries(storage, "agent", "a1") == 0
 
 
@@ -268,7 +253,7 @@ async def test_owners_from_memcell_senders_users_and_agents(
 
     result = await _delete(_deleter(stores, eraser), session_id="s1")
 
-    assert result.count == 5  # u1: ep + fact, u2: ep + fact, a1: case
+    assert result.count == 3  # u1: ep, u2: ep, a1: case
     for owner_type, owner in (("user", "u1"), ("user", "u2"), ("agent", "a1")):
         assert await _entries(storage, owner_type, owner) == 0
     erased = {(s.owner_type, s.owner_id): ids for s, ids in eraser.erased}
@@ -302,7 +287,7 @@ async def test_session_delete_removes_its_picture_memories(
 
     result = await _delete(_deleter(stores, eraser), session_id="s1")
 
-    assert result.count == 6  # u1: ep + fact + picture, u2: ep + fact, a1: case
+    assert result.count == 4  # u1: ep + picture, u2: ep, a1: case
     erased = {(s.owner_type, s.owner_id): ids for s, ids in eraser.erased}
     assert len(erased[("user", "u1")]["image_memory"]) == 1
     assert await stores.image_memory.entries_for_session(_user("u1"), "s1") == []
@@ -324,7 +309,7 @@ async def test_retry_finds_an_owner_left_with_only_pictures(
 
     result = await _delete(_deleter(stores, eraser), session_id="s1")
 
-    assert result.count == 6
+    assert result.count == 4  # u1: ep, u2: ep, a1: case, u3: picture
     assert await _entries(storage, "user", "u3") == 0
 
 
@@ -340,7 +325,7 @@ async def test_owners_found_by_scan_when_memcells_are_gone(
 
     result = await _delete(_deleter(stores, eraser), session_id="s1")
 
-    assert result.count == 5
+    assert result.count == 3
 
 
 async def test_partial_failure_raises_deletion_incomplete(
@@ -352,7 +337,10 @@ async def test_partial_failure_raises_deletion_incomplete(
     """R30: a rewrite fails midway -> 500-class error; the same request
     finishes the job and the counts add up."""
     await _seed(stores, "s1")
-    original = type(stores.atomic_fact).remove_session
+    await stores.image_memory.append(
+        _user("u1"), _picture("u1", "s1"), only_if=NO_SOURCE_CHECK
+    )
+    original = type(stores.image_memory).remove_session
     calls = {"n": 0}
 
     async def failing(self: Any, scope: Scope, session_id: str) -> Any:
@@ -361,7 +349,7 @@ async def test_partial_failure_raises_deletion_incomplete(
             raise OSError(28, "No space left on device")
         return await original(self, scope, session_id)
 
-    monkeypatch.setattr(type(stores.atomic_fact), "remove_session", failing)
+    monkeypatch.setattr(type(stores.image_memory), "remove_session", failing)
     d = _deleter(stores, eraser)
 
     with pytest.raises(DeletionIncompleteError):
@@ -370,7 +358,7 @@ async def test_partial_failure_raises_deletion_incomplete(
     again = await _delete(d, session_id="s1")
 
     assert first_pass > 0
-    assert again.count == 5 - 1  # u1's episode went in the failed pass
+    assert again.count == 4 - 1  # u1's episode went in the failed pass
     for owner_type, owner in (("user", "u1"), ("user", "u2"), ("agent", "a1")):
         assert await _entries(storage, owner_type, owner) == 0
 
@@ -378,7 +366,7 @@ async def test_partial_failure_raises_deletion_incomplete(
 async def test_resend_count_zero(stores: Stores, eraser: _RecordingEraser) -> None:
     await _seed(stores, "s1")
     d = _deleter(stores, eraser)
-    assert (await _delete(d, session_id="s1")).count == 5
+    assert (await _delete(d, session_id="s1")).count == 3
     assert (await _delete(d, session_id="s1")).count == 0
     assert (await _delete(d, session_id="never")).count == 0
     assert (await _delete(d, user_id="nobody")).count == 0
@@ -393,7 +381,7 @@ async def test_session_delete_scoped_to_request_project(
 
     await _delete(_deleter(stores, eraser), session_id="s1")
 
-    assert await _entries(storage, "user", "u1", project="q") == 2
+    assert await _entries(storage, "user", "u1", project="q") == 1
     assert await stores.memcell.find_by_ids(["mc_q_s1"])
 
 
@@ -420,7 +408,6 @@ async def test_owner_delete_removes_clusters_reports_and_profile_rows(
             mode="init",
             source_members=[],
             merged_entry_id="m",
-            deprecated_fact_count=0,
         )
     )
 

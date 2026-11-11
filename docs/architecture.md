@@ -109,8 +109,8 @@ interpret storage layout.
 | Module | Contents |
 |---|---|
 | `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `SearchHit`, `ScoredKnowledgeTopic` |
-| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ForesightStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
-| `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AtomicFactIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
+| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
+| `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
 | `ports/events.py` | `Event` (frozen, JSON round-trippable, identified by `topic()`) and the scheduler ticks `CronTick` / `IdleTick` / `ManualTick` |
 | `ports/strategy.py` | the triggers `Immediate` / `Cron` / `Idle`, the `Counter` gate, and `StrategySpec` — one strategy's name, function, trigger, `emits`, `applies_to`, gate, retries and enabled flag |
 | `ports/event_bus.py` | `EventBus`, the port through which the service publishes events |
@@ -256,8 +256,11 @@ User query
 1. MemoryService.search
    │
    ▼
-2. memory.search (hybrid)     BM25 + vector ANN + scalar filter
-                              through the configured index backend
+2. memory.search              multi-round retrieval: per round, BM25 +
+   (llm_multiround)           vector ANN + scalar filter per sub-query
+                              through the configured index backend,
+                              fused by RRF; a decider model selects
+                              the core and the next sub-queries
    │
    ▼
 3. (optional) read md         original markdown for context
@@ -427,8 +430,8 @@ index backend:
 - Entry-level diff (added / changed / removed)
 - Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
-- Handlers for the business kinds: episode, atomic_fact, foresight,
-  image_memory, user_profile, agent_case, agent_skill, knowledge_document,
+- Handlers for the business kinds: episode, image_memory, user_profile,
+  agent_case, agent_skill, knowledge_document,
   knowledge_topic, and the group kinds -- group_episode, group_scene and
   group_image_memory into the episode and picture tables, group_member_profile
   into ``user_profile``, group_profile into its own ``group_profile_item``
@@ -447,12 +450,13 @@ extraction, reflection. See [custom_instructions.md](custom_instructions.md).
 ### `memory/reflection/`
 
 Offline memory self-improvement (`orchestrator.py`): Select → Merge →
-Re-extract → Deprecate, merging fragmented episodes within a cluster into a
-single coherent narrative. `ReflectionOrchestrator` selects and merges, driven
-by the `reflect_episodes` OME strategy (cron, disabled by default), and returns
-the merged episode with a `ReflectionContext`; once `extract_atomic_facts` has
-re-extracted its facts, `finish_reflection` hands that context to
-`ReflectionFinisher`, which deprecates the replaced members.
+Deprecate, merging fragmented episodes within a cluster into a single
+coherent narrative. `ReflectionOrchestrator` selects and merges, driven by
+the `reflect_episodes` OME strategy (cron, disabled by default), and returns
+the merged episode with a `ReflectionContext`; `finish_reflection` runs on
+that merged episode's `EpisodeExtracted` event and hands the context to
+`ReflectionFinisher`, which deprecates the replaced members. Nothing else
+has to run between the merge and the deprecation.
 
 ### `memory/strategies/`
 
@@ -466,10 +470,10 @@ function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
-- `extract_atomic_facts` / `extract_foresight` / `extract_user_profile` — user pipeline
+- `extract_user_profile` — user pipeline
 - `extract_agent_case` / `extract_agent_skill` — agent pipeline
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
-  (cron merge, then deprecation once the merged episode's facts exist)
+  (cron merge, then deprecation on the merged episode's event)
 - `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
 - `update_member_profiles` / `update_group_scenes` — group memory: the
   member-in-group profiles (on each group episode, throttled, and on
@@ -511,8 +515,7 @@ sound dependency structure.
     ├── users/<user_id>/
     │   ├── user.md                                     # profile (single-file rewrite)
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # daily-log append
-    │   ├── .atomic_facts/atomic_fact-<YYYY-MM-DD>.md   # hidden, framework-derived
-    │   └── .foresights/foresight-<YYYY-MM-DD>.md       # hidden, framework-derived
+    │   └── images/image-<YYYY-MM-DD>.md                # one entry per picture
     ├── agents/<agent_id>/
     │   ├── .cases/agent_case-<YYYY-MM-DD>.md           # hidden, framework-derived
     │   └── skills/skill_<name>/SKILL.md                # named-dir
@@ -542,10 +545,11 @@ optional `everalgo-parser` extra), imported under the `everalgo` namespace,
 providing memory algorithms, parsing, and their data contracts:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
-- `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
+- `everalgo.user_memory` — ConvMemCell / Episode / Profile extractors (the package
+  also ships atomic-fact and foresight extractors; EverOS 2.0 does not call them)
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
 - `everalgo.boundary` — boundary detection (conversation -> MemCells)
-- `everalgo.rank` — fusion + rerank
+- `everalgo.rank` — fusion (multi-round RRF) + the knowledge rerank
 - `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
 
 The integration separates responsibilities:

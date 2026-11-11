@@ -17,10 +17,8 @@ from collections.abc import Sequence
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
-from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import ChatMessage as AlgoMessage
 from everalgo.types import Episode as AlgoEpisode
-from everalgo.types import Foresight as AlgoForesight
 from everalgo.types import MemCell as MemCell
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -119,9 +117,9 @@ class Episode(BaseModel):
     with ``""``. ``subject`` is the episode's title.
 
     ``parent_id`` is the source memcell id. The new everalgo types no
-    longer carry ``parent_id`` on Episode / Foresight / AtomicFact, so
-    everos fills it from the memcell currently being processed (the
-    pipeline knows the id — it created the memcell). ``parent_type`` is
+    longer carry ``parent_id`` on Episode, so everos fills it from the
+    memcell currently being processed (the pipeline knows the id — it
+    created the memcell). ``parent_type`` is
     ``"cluster"`` for an episode Reflection merged out of a cluster, in
     which case ``parent_id`` is that cluster's id.
 
@@ -204,115 +202,6 @@ class Episode(BaseModel):
         data["parent_id"] = parent_id
         data["language"] = language
         data["image_ids"] = list(image_ids)
-        return cls.model_validate(data)
-
-
-class AtomicFact(BaseModel):
-    """Domain AtomicFact — algo-emitted business fields + everos context.
-
-    Composed (not inherited) from :class:`everalgo.types.AtomicFact`. Mirrors
-    :class:`Episode`: everos keeps the *semantic* fields algo emits
-    (``owner_id`` / ``content`` / ``timestamp``) and adds engineering context
-    (``session_id`` / ``parent_id``) so md writer + cascade can audit-link
-    back to the source episode.
-
-    No ``sender_ids``: an atomic fact is a statement about its ``owner_id``;
-    the surrounding participants are not part of the fact itself. (Episode
-    keeps ``sender_ids`` because the narrative is *about* the conversation
-    as a whole.)
-
-    ``parent_id`` is the source episode entry_id, supplied by the caller
-    because the new everalgo types no longer carry it on AtomicFact.
-    """
-
-    owner_id: str
-    content: str
-    timestamp: int
-
-    # everos engineering metadata.
-    session_id: str | None = None
-    parent_id: str
-
-    model_config = ConfigDict(extra="allow")
-
-    @classmethod
-    def from_algo(
-        cls,
-        algo_fact: AlgoAtomicFact,
-        *,
-        owner_id: str,
-        session_id: str | None,
-        parent_id: str,
-    ) -> AtomicFact:
-        """Build a domain AtomicFact from an algo AtomicFact plus context.
-
-        ``owner_id`` is supplied by the caller (not read from ``algo_fact``)
-        because atomic_fact extraction uses a subject-agnostic prompt — one
-        LLM call produces facts per owner. The algo-side ``owner_id`` is
-        therefore a placeholder; the caller knows the real one. Same
-        rationale for ``parent_id``: algo no longer carries the source
-        episode entry_id; caller injects the authoritative value (any
-        ``extra='allow'`` smuggled values are dropped).
-        """
-        data = algo_fact.model_dump(exclude={"parent_id", "owner_id"})
-        data["owner_id"] = owner_id
-        data["session_id"] = session_id
-        data["parent_id"] = parent_id
-        return cls.model_validate(data)
-
-
-class Foresight(BaseModel):
-    """Domain Foresight — algo-emitted business fields + everos context.
-
-    Composed (not inherited) from :class:`everalgo.types.Foresight`. Mirrors
-    :class:`Episode`: everos keeps the semantic fields algo emits
-    (``owner_id`` / ``foresight`` / ``evidence`` / ``timestamp`` plus the
-    optional time-window trio) and adds engineering context
-    (``session_id`` / ``parent_id``).
-
-    Extraction is per-sender (like Episode, unlike AtomicFact's
-    subject-agnostic fan-out): a foresight is a forward-looking statement
-    *about* a specific user, so the algo is invoked once per user sender
-    and the emitted ``owner_id`` already matches — no fan-out override
-    needed.
-
-    No ``sender_ids``: a foresight is a prediction about its ``owner_id``;
-    other participants in the source conversation are not part of the
-    foresight itself.
-    """
-
-    owner_id: str
-    foresight: str
-    evidence: str
-    timestamp: int
-    start_time: str | None = None
-    end_time: str | None = None
-    duration_days: int | None = None
-
-    # everos engineering metadata.
-    session_id: str | None = None
-    parent_id: str
-
-    model_config = ConfigDict(extra="allow")
-
-    @classmethod
-    def from_algo(
-        cls,
-        algo_foresight: AlgoForesight,
-        *,
-        session_id: str | None,
-        parent_id: str,
-    ) -> Foresight:
-        """Build a domain Foresight from an algo Foresight plus context.
-
-        Per-sender extraction: the algo's ``owner_id`` is authoritative
-        (it was invoked with the target sender). Only the engineering
-        metadata is injected here. Any algo-side ``parent_id`` smuggled
-        through ``extra='allow'`` is dropped in favour of the caller's.
-        """
-        data = algo_foresight.model_dump(exclude={"parent_id"})
-        data["session_id"] = session_id
-        data["parent_id"] = parent_id
         return cls.model_validate(data)
 
 
@@ -965,7 +854,6 @@ class ReflectionReport(BaseModel):
         mode: ``"init"`` or ``"update"``.
         source_members: ``(member_id, member_type)`` pairs consumed.
         merged_entry_id: Entry id of the merged episode.
-        deprecated_fact_count: Atomic facts marked deprecated.
     """
 
     id: str
@@ -976,7 +864,6 @@ class ReflectionReport(BaseModel):
     mode: Literal["init", "update"]
     source_members: list[tuple[str, str]]
     merged_entry_id: str
-    deprecated_fact_count: int
 
     @property
     def source_count(self) -> int:
@@ -1204,11 +1091,8 @@ __all__ = [
     "AgentCase",
     "AgentSkill",
     "AlgoAgentCase",
-    "AlgoAtomicFact",
     "AlgoEpisode",
-    "AlgoForesight",
     "AlgoMessage",
-    "AtomicFact",
     "CanonicalMessage",
     "Cluster",
     "ClusterKind",
@@ -1216,7 +1100,6 @@ __all__ = [
     "Episode",
     "EpisodeParentType",
     "ExplicitInfoItem",
-    "Foresight",
     "Group",
     "GroupProfileItem",
     "GroupProfileKind",

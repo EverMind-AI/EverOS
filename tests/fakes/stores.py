@@ -10,10 +10,8 @@ from __future__ import annotations
 __all__ = [
     "InMemoryAgentCaseStore",
     "InMemoryAgentSkillStore",
-    "InMemoryAtomicFactStore",
     "InMemoryClusterStore",
     "InMemoryEpisodeStore",
-    "InMemoryForesightStore",
     "InMemoryForgetLogStore",
     "InMemoryGroupStore",
     "InMemoryImageMemoryStore",
@@ -36,12 +34,10 @@ from everos.memory.models import (
     FORGOTTEN_MARK,
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Cluster,
     ClusterKind,
     ClusterMemberType,
     Episode,
-    Foresight,
     Group,
     GroupProfileItem,
     ImageMemory,
@@ -310,52 +306,6 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             md_path=f"{scope.owner_type}s/{scope.owner_id}/episodes/2026-01-01.md",
         )
         self.records.append(Stored(ref=ref, scope=scope, item=episode))
-
-
-class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
-    def __init__(self) -> None:
-        super().__init__("af", ".atomic_facts")
-
-    async def remove_by_parents(
-        self, scope: Scope, parent_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        parents = set(parent_ids)
-        return self._remove(scope, lambda fact: fact.parent_id in parents)
-
-    async def append_many(
-        self,
-        scope: Scope,
-        facts: Sequence[AtomicFact],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts, only_if)
-
-    async def deprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        replaced_by: str,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        return await self._deprecate(
-            entries=entries, replaced_by=replaced_by, only_if=only_if
-        )
-
-
-class InMemoryForesightStore(_DailyLog[Foresight]):
-    def __init__(self) -> None:
-        super().__init__("fs", ".foresights")
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, items, only_if)
 
 
 class InMemoryAgentCaseStore(_DailyLog[AgentCase]):

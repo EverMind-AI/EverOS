@@ -335,10 +335,9 @@ class ProviderNotConfiguredError(ConfigurationError):
         provider: Which provider is missing. One of ``"llm"``,
             ``"embedding"``, ``"rerank"``, ``"multimodal_llm"``.
         feature: Optional user-facing feature that required this
-            provider (e.g. ``"knowledge"``, ``"agent_hybrid"``).
+            provider (e.g. ``"knowledge"``, ``"llm_multiround"``).
         alternative_hint: Optional alternative workaround the user can
-            take without configuring the missing provider (e.g. flip
-            ``enable_llm_rerank=true`` to use the LLM lane).
+            take without configuring the missing provider.
     """
 
     def __init__(

@@ -35,7 +35,7 @@ from everos.memory.models import Cluster, ClusterKind, Episode
 from everos.memory.ports import Scope
 from everos.memory.reflection.orchestrator import ReflectionFinisher
 from everos.memory.strategies import trigger_profile_clustering
-from tests.fakes import make_deps, make_indexes, make_stores, seed_sources
+from tests.fakes import make_deps, make_stores, seed_sources
 
 _DIM = 8
 _T0 = 1_700_000_000_000
@@ -135,12 +135,9 @@ async def _scenario(cluster_store: SqliteClusterStore, *, joiner: bool) -> Clust
             parent_id=_CLUSTER,
         ),
     )
-    indexes = make_indexes()
     finisher = ReflectionFinisher(
         cluster_store=cluster_store,
         episode_store=stores.episode,
-        atomic_fact_store=stores.atomic_fact,
-        atomic_fact_index=indexes.atomic_fact,
         report_store=stores.reflection_report,
         embedder=_Embedder(),
     )
@@ -235,8 +232,6 @@ async def test_reflection_waits_for_clustering_read_to_write(
     finisher = ReflectionFinisher(
         cluster_store=cluster_store,
         episode_store=stores.episode,
-        atomic_fact_store=stores.atomic_fact,
-        atomic_fact_index=make_indexes().atomic_fact,
         report_store=stores.reflection_report,
         embedder=_Embedder(),
     )

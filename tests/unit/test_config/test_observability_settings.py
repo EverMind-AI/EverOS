@@ -61,7 +61,6 @@ def test_recall_score_defaults() -> None:
     assert obs.langfuse_secret_key is None
     assert obs.langfuse_host is None
     assert obs.emit_recall_scores is True
-    assert obs.recall_hit_threshold == 0.6
 
 
 def test_secret_key_is_not_leaked_in_repr() -> None:
@@ -79,8 +78,6 @@ def test_env_overrides_recall_score_fields(
     root.mkdir()
     monkeypatch.setenv("EVEROS_OBSERVABILITY__LANGFUSE_HOST", "https://lf.example")
     monkeypatch.setenv("EVEROS_OBSERVABILITY__EMIT_RECALL_SCORES", "false")
-    monkeypatch.setenv("EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD", "0.8")
     s = Settings(_everos_root=root)
     assert s.observability.langfuse_host == "https://lf.example"
     assert s.observability.emit_recall_scores is False
-    assert s.observability.recall_hit_threshold == 0.8

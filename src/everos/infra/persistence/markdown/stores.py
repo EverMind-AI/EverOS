@@ -11,9 +11,7 @@ from __future__ import annotations
 __all__ = [
     "MarkdownAgentCaseStore",
     "MarkdownAgentSkillStore",
-    "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
-    "MarkdownForesightStore",
     "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
     "MarkdownMemberProfileStore",
@@ -43,9 +41,7 @@ from everos.memory.models import (
     FORGOTTEN_MARK,
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     GroupProfileItem,
     ImageMemory,
     MemberProfile,
@@ -77,10 +73,8 @@ from ._readers import AgentSkillReader, ProfileReader
 from ._writers import (
     AgentCaseWriter,
     AgentSkillWriter,
-    AtomicFactWriter,
     BaseDailyWriter,
     EpisodeWriter,
-    ForesightWriter,
     GroupEpisodeWriter,
     GroupImageMemoryWriter,
     GroupProfileWriter,
@@ -135,7 +129,7 @@ class _DailyLogStore[T]:
 
         A group owns only the kinds that declare a group writer (episodes and
         picture memories); every other kind refuses a group scope, so nothing
-        can write, say, an atomic fact under ``groups/``.
+        can write, say, an agent case under ``groups/``.
         """
         if scope.owner_type != "group":
             return self._writer
@@ -591,79 +585,6 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
                 continue
             found += [(path, entry) for entry in parsed.entries if entry.id in ids]
         return found
-
-
-class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
-    """Atomic-fact daily logs (``users/<id>/.atomic_facts/``).
-
-    Args:
-        root: Memory root the files live under.
-    """
-
-    _KIND = "atomic_fact"
-
-    def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, AtomicFactWriter(root), _atomic_fact_entry)
-
-    async def append_many(
-        self,
-        scope: Scope,
-        facts: Sequence[AtomicFact],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, facts, only_if)
-
-    async def deprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        replaced_by: str,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        return await self._deprecate(
-            scope, entries=entries, replaced_by=replaced_by, only_if=only_if
-        )
-
-    async def remove_by_parents(
-        self, scope: Scope, parent_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        """Remove the owner's facts whose parent episode is one of ``parent_ids``."""
-        parents = set(parent_ids)
-        if not parents:
-            return []
-        needles = [f"**parent_id**: {parent}" for parent in parents]
-        removed: list[MemoryRef] = []
-        for path in await self._files_mentioning(scope, *needles):
-            removed += await self._rewrite(
-                scope,
-                path,
-                lambda e: e.as_structured().inline.get("parent_id") in parents,
-            )
-        return removed
-
-
-class MarkdownForesightStore(_DailyLogStore[Foresight]):
-    """Foresight daily logs (``users/<id>/.foresights/``).
-
-    Args:
-        root: Memory root the files live under.
-    """
-
-    _KIND = "foresight"
-
-    def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, ForesightWriter(root), _foresight_entry)
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, items, only_if)
 
 
 class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
@@ -1694,36 +1615,6 @@ def _scene_from_entry(entry: Entry, *, owner_id: str) -> Scene:
         origin=inline.get("origin") or None,  # type: ignore[arg-type]
         language=inline.get("language") or None,
     )
-
-
-def _atomic_fact_entry(fact: AtomicFact) -> EntryBody:
-    inline: dict[str, object] = {
-        "owner_id": fact.owner_id,
-        "timestamp": _iso(fact.timestamp),
-        "parent_type": "episode",
-        "parent_id": fact.parent_id,
-    }
-    if fact.session_id is not None:
-        inline["session_id"] = fact.session_id
-    return inline, {"Fact": fact.content}
-
-
-def _foresight_entry(foresight: Foresight) -> EntryBody:
-    """Optional time-window fields are written only when set."""
-    inline: dict[str, object] = {
-        "owner_id": foresight.owner_id,
-        "session_id": foresight.session_id,
-        "timestamp": _iso(foresight.timestamp),
-        "parent_type": "memcell",
-        "parent_id": foresight.parent_id,
-    }
-    if foresight.start_time:
-        inline["start_time"] = foresight.start_time
-    if foresight.end_time:
-        inline["end_time"] = foresight.end_time
-    if foresight.duration_days is not None:
-        inline["duration_days"] = foresight.duration_days
-    return inline, {"Foresight": foresight.foresight, "Evidence": foresight.evidence}
 
 
 def _agent_case_entry(case: AgentCase) -> EntryBody:

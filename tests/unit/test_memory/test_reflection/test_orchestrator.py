@@ -4,8 +4,8 @@ Every storage dependency is a mock of its port. Tests verify:
 - candidate selection filtering logic (INIT vs UPDATE)
 - full INIT-mode merge, returning the merged episode with its context
 - UPDATE-mode old_episode passthrough
-- the finisher deprecates in markdown only (episodes and their facts),
-  never in the index — the cascade carries it there
+- the finisher deprecates episodes in markdown only, never in the
+  index — the cascade carries it there
 - LLM failure skips cluster gracefully
 - empty candidates return empty list
 """
@@ -20,11 +20,10 @@ import pytest
 import structlog.testing
 
 from everos.core.locks import LOCKS
-from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
-from everos.memory.models import AtomicFact, Cluster, Episode
-from everos.memory.ports import MemoryRef, Scope, SearchHit, Stored
+from everos.memory.models import Cluster, Episode
+from everos.memory.ports import MemoryRef, Scope, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from everos.memory.reflection.orchestrator import _MAX_CLUSTERS_PER_RUN
 
@@ -50,23 +49,6 @@ class _FakeAlgoResult:
     subject: str
     timestamp: int
     summary: str = "merged summary"
-
-
-def _fact_hit(entry_id: str, md_path: str) -> SearchHit[AtomicFact]:
-    """A filtered-scan match of one live atomic fact."""
-    return SearchHit(
-        stored=Stored(
-            ref=MemoryRef(id=f"u_alice_{entry_id}", entry_id=entry_id, md_path=md_path),
-            scope=_SCOPE,
-            item=AtomicFact(
-                owner_id="u_alice",
-                content="a fact",
-                timestamp=0,
-                parent_id="ep_20260601_0001",
-            ),
-        ),
-        score=None,
-    )
 
 
 def _stored_episode(
@@ -118,8 +100,6 @@ class _Ports:
     cluster_store: MagicMock
     episode_store: MagicMock
     episode_index: MagicMock
-    atomic_fact_store: MagicMock
-    atomic_fact_index: MagicMock
     report_store: MagicMock
     reflector: MagicMock
     embedder: MagicMock
@@ -139,8 +119,6 @@ class _Ports:
         return ReflectionFinisher(
             cluster_store=self.cluster_store,
             episode_store=self.episode_store,
-            atomic_fact_store=self.atomic_fact_store,
-            atomic_fact_index=self.atomic_fact_index,
             report_store=self.report_store,
             embedder=self.embedder,
         )
@@ -148,7 +126,7 @@ class _Ports:
 
 @pytest.fixture
 def ports() -> _Ports:
-    ports = _Ports(*(MagicMock() for _ in range(9)))
+    ports = _Ports(*(MagicMock() for _ in range(7)))
     # Nothing was deleted: every source is still in md, every memcell exists.
     ports.episode_store.exists = AsyncMock(side_effect=lambda _scope, ids: set(ids))
     ports.memcell_store.find_by_ids = AsyncMock(
@@ -188,8 +166,6 @@ def _arm_cluster_flow(
         return_value=[_merged_ref(merged_entry_id)]
     )
     ports.episode_store.deprecate = AsyncMock()
-    ports.atomic_fact_index.find = AsyncMock(return_value=[])
-    ports.atomic_fact_store.deprecate = AsyncMock()
     ports.cluster_store.replace_members = AsyncMock()
     ports.embedder.embed = AsyncMock(return_value=[0.1] * 1024)
     ports.report_store.create = AsyncMock()
@@ -253,62 +229,6 @@ async def test_empty_candidates_returns_empty(ports: _Ports) -> None:
     assert merged == []
 
 
-async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
-    ports: _Ports,
-) -> None:
-    """``parent_id`` restarts per (app, project, day), so the fact lookup
-    carries the scope; the marks land in each fact's own md file."""
-    scope = Scope(
-        app_id="claude-code", project_id="alpha", owner_id="u_alice", owner_type="user"
-    )
-    ports.atomic_fact_index.find = AsyncMock(
-        return_value=[
-            _fact_hit(eid, md_path)
-            for eid, md_path in (
-                ("af_1", "facts/a.md"),
-                ("af_2", "facts/a.md"),
-                ("af_3", "facts/b.md"),
-            )
-        ]
-    )
-    ports.atomic_fact_store.deprecate = AsyncMock()
-
-    marked = await ports.finisher()._deprecate_facts(
-        scope=scope,
-        parent_ids={"ep_20260601_0001"},
-        merged_entry_id="ep_20260614_0001",
-        only_if=_unchanged,
-    )
-
-    assert marked == 3
-    rendered = render_predicate(ports.atomic_fact_index.find.await_args.args[0])
-    assert "(app_id = 'claude-code')" in rendered
-    assert "(project_id = 'alpha')" in rendered
-    assert "'ep_20260601_0001'" in rendered
-    assert "deprecated_by IS NULL" in rendered
-    ports.atomic_fact_store.deprecate.assert_awaited_once_with(
-        scope,
-        entries=[
-            ("facts/a.md", "af_1"),
-            ("facts/a.md", "af_2"),
-            ("facts/b.md", "af_3"),
-        ],
-        replaced_by="ep_20260614_0001",
-        only_if=ANY,
-    )
-
-
-async def test_deprecate_facts_without_parents_reads_nothing(ports: _Ports) -> None:
-    ports.atomic_fact_index.find = AsyncMock()
-
-    marked = await ports.finisher()._deprecate_facts(
-        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m", only_if=_unchanged
-    )
-
-    assert marked == 0
-    ports.atomic_fact_index.find.assert_not_awaited()
-
-
 async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) -> None:
     ports.episode_store.append_many = AsyncMock(return_value=[_merged_ref("ep_m")])
 
@@ -337,8 +257,8 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
 
 
 async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
-    """Full INIT flow: 2 episode members -> merge -> write -> (facts) ->
-    finish: deprecate both originals and move the cluster onto the merge."""
+    """Full INIT flow: 2 episode members -> merge -> write -> finish:
+    deprecate both originals and move the cluster onto the merge."""
     ep1 = _stored_episode(entry_id="ep_20260601_0001", parent_id="mc_001")
     ep2 = _stored_episode(entry_id="ep_20260601_0002", parent_id="mc_002")
     _arm_cluster_flow(
@@ -360,7 +280,7 @@ async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
     assert merged.session_id is None
     assert merged.reflection is not None
     assert merged.reflection.mode == "init"
-    # Nothing is retired before the merged episode's facts exist.
+    # The merge itself retires nothing; the finishing step does.
     ports.episode_store.deprecate.assert_not_called()
 
     report = await ports.finisher().finish(
@@ -536,8 +456,6 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
         episodes=[ep1, ep2],
         merged_entry_id="ep_m",
     )
-    ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "f.md")])
-
     report = await ports.finisher().finish(
         scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
     )
@@ -548,14 +466,9 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
         replaced_by="ep_m",
         only_if=ANY,
     )
-    ports.atomic_fact_store.deprecate.assert_awaited_once_with(
-        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m", only_if=ANY
-    )
     ports.episode_index.update.assert_not_called()
-    ports.atomic_fact_index.update.assert_not_called()
     assert report is not None
     assert report.source_members == [("ep_1", "episode"), ("ep_2", "episode")]
-    assert report.deprecated_fact_count == 1
     ports.report_store.create.assert_awaited_once_with(report)
     ports.cluster_store.replace_members.assert_awaited_once()
     ports.embedder.embed.assert_awaited_once_with("merged")
@@ -595,17 +508,14 @@ def _context(*episodes: Stored[Episode]) -> ReflectionContext:
     )
 
 
-async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
-    ports: _Ports,
-) -> None:
-    """Episode counts include selected duplicates; fact counts include all hits."""
+async def test_retirement_counts_keep_selected_duplicates(ports: _Ports) -> None:
+    """Episode counts include selected duplicates; one with no md location is
+    not marked."""
     selected = ReflectedEpisode(entry_id="ep_1", md_path="a.md", parent_id="mc_1")
     missing = ReflectedEpisode(entry_id="ep_2", md_path="", parent_id="mc_1")
     unrelated = ReflectedEpisode(entry_id="ep_3", md_path="b.md", parent_id="mc_3")
     ports.episode_store.deprecate = AsyncMock()
-    ports.atomic_fact_store.deprecate = AsyncMock()
-    finisher = ports.finisher()
-    marked = await finisher._deprecate_episodes(
+    marked = await ports.finisher()._deprecate_episodes(
         scope=_SCOPE,
         episodes=[selected, missing, selected, unrelated],
         to_deprecate={"mc_1"},
@@ -619,17 +529,6 @@ async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
         replaced_by="ep_m",
         only_if=ANY,
     )
-    ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "")])
-    assert (
-        await finisher._deprecate_facts(
-            scope=_SCOPE,
-            parent_ids={"ep_1"},
-            merged_entry_id="ep_m",
-            only_if=_unchanged,
-        )
-        == 1
-    )
-    ports.atomic_fact_store.deprecate.assert_not_awaited()
 
 
 # ── Finish under deletions (memory delete, spec 1 §5.5, spec 2 R7) ───────

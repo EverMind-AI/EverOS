@@ -1,11 +1,11 @@
 """Contract: strategy-written md must round-trip through cascade handler.
 
 Guards against silent-breakage class: strategy writes section keys
-(e.g. ``{"fact": ...}``) that the cascade handler reads under a different
-case (e.g. ``sections.get("Fact")``). Without this contract, the worker
-still upserts a LanceDB row but with empty ``fact`` / ``foresight``
-text, empty BM25 tokens, and a vector for the empty string — search
-fails silently. Earlier unit tests stop at the strategy boundary (mock
+(e.g. ``{"task_intent": ...}``) that the cascade handler reads under a
+different case (e.g. ``sections.get("TaskIntent")``). Without this contract,
+the worker still upserts a LanceDB row but with empty ``task_intent`` /
+``approach`` text, empty BM25 tokens, and a vector for the empty string —
+search fails silently. Earlier unit tests stop at the strategy boundary (mock
 the writer) or at the writer boundary (skip the strategy); neither
 catches a key-name drift.
 """
@@ -18,34 +18,20 @@ from unittest.mock import AsyncMock, patch
 
 import anyio
 from everalgo.agent_memory import CaseExtractionResult
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
+from everalgo.types import AgentCase, ChatMessage, MemCell
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade._projections import (
-    AgentCaseHandler,
-    AtomicFactHandler,
-    ForesightHandler,
-)
+from everos.infra.cascade._projections import AgentCaseHandler
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
-    MarkdownAtomicFactStore,
-    MarkdownForesightStore,
     MarkdownReader,
 )
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import (
-    AgentPipelineStarted,
-    EpisodeExtracted,
-    UserPipelineStarted,
-)
-from everos.memory.strategies import (
-    extract_agent_case,
-    extract_atomic_facts,
-    extract_foresight,
-)
+from everos.memory.events import AgentPipelineStarted
+from everos.memory.strategies import extract_agent_case
 from tests.fakes import handler_deps, make_deps, make_stores, seed_sources
 
 
@@ -68,50 +54,14 @@ class _StubEmbedder(EmbeddingProvider):
 
 
 def _markdown_deps(tmp_path: Path) -> MemoryDeps:
-    """Deps whose daily-log stores write real markdown under ``tmp_path``."""
+    """Deps whose agent-case store writes real markdown under ``tmp_path``."""
     root = MemoryRoot(root=tmp_path)
-    deps = make_deps(
-        stores=make_stores(
-            atomic_fact=MarkdownAtomicFactStore(root),
-            foresight=MarkdownForesightStore(root),
-            agent_case=MarkdownAgentCaseStore(root),
-        )
-    )
-    return seed_sources(deps, memcell_id="mc_a", episode_entry_id="ep_20260517_0001")
-
-
-def _episode_event(owner_id: str) -> EpisodeExtracted:
-    return EpisodeExtracted(
-        memcell_id="mc_a",
-        episode_entry_id="ep_20260517_0001",
-        episode_text="hi",
-        episode_timestamp_ms=1_700_000_000_000,
-        owner_id=owner_id,
-        session_id="s1",
-    )
-
-
-def _event(owner_id: str) -> UserPipelineStarted:
-    return UserPipelineStarted(
-        memcell_id="mc_a",
-        session_id="s1",
-        memcell=MemCell(
-            items=[
-                ChatMessage(
-                    id="m1",
-                    role="user",
-                    content="hi",
-                    timestamp=1_700_000_000_000,
-                    sender_id=owner_id,
-                ),
-            ],
-            timestamp=1_700_000_000_000,
-        ),
-    )
+    deps = make_deps(stores=make_stores(agent_case=MarkdownAgentCaseStore(root)))
+    return seed_sources(deps, memcell_id="mc_a")
 
 
 async def _build_row_from_md(
-    handler: AtomicFactHandler | ForesightHandler | AgentCaseHandler,
+    handler: AgentCaseHandler,
     md_root: Path,
     md_glob: str,
     *,
@@ -137,81 +87,6 @@ async def _build_row_from_md(
         [pe], owner_id, owner_type, "default", "default", rel
     )
     return row
-
-
-async def test_atomic_fact_strategy_md_feeds_handler_with_content(
-    tmp_path: Path,
-) -> None:
-    """Strategy → md → AtomicFactHandler must carry the fact text intact."""
-
-    facts = [
-        AtomicFact(
-            owner_id="u_alice",
-            content="alice likes hiking",
-            timestamp=1_700_000_000_000,
-        ),
-    ]
-    with (
-        patch(
-            "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
-        ) as mock_ext,
-    ):
-        mock_ext.return_value.aextract_from_text = AsyncMock(return_value=facts)
-        await extract_atomic_facts(_episode_event("u_alice"), _markdown_deps(tmp_path))
-
-    handler = AtomicFactHandler(
-        handler_deps(
-            memory_root=MemoryRoot(root=tmp_path),
-            tokenizer=_StubTokenizer(),
-            embedding=_StubEmbedder(),
-        )
-    )
-    row = await _build_row_from_md(
-        handler, tmp_path, "*/*/users/u_alice/.atomic_facts/atomic_fact-*.md"
-    )
-    # Regression guard: section key drift would land here as fact="".
-    assert row.fact == "alice likes hiking"
-    assert row.fact_tokens == "alice likes hiking"
-    assert len(row.vector) == 1024
-
-
-async def test_foresight_strategy_md_feeds_handler_with_content(
-    tmp_path: Path,
-) -> None:
-    """Strategy → md → ForesightHandler must carry foresight + evidence text."""
-
-    foresights = [
-        Foresight(
-            owner_id="u_alice",
-            foresight="plans trip to tokyo",
-            evidence="said so explicitly",
-            timestamp=1_700_000_000_000,
-        ),
-    ]
-    with (
-        patch(
-            "everos.memory.strategies.extract_foresight.ForesightExtractor"
-        ) as mock_ext,
-    ):
-        mock_ext.return_value.aextract = AsyncMock(return_value=foresights)
-        await extract_foresight(_event("u_alice"), _markdown_deps(tmp_path))
-
-    handler = ForesightHandler(
-        handler_deps(
-            memory_root=MemoryRoot(root=tmp_path),
-            tokenizer=_StubTokenizer(),
-            embedding=_StubEmbedder(),
-        )
-    )
-    row = await _build_row_from_md(
-        handler, tmp_path, "*/*/users/u_alice/.foresights/foresight-*.md"
-    )
-    # Regression guard: section key drift would land here as foresight="".
-    assert row.foresight == "plans trip to tokyo"
-    assert row.foresight_tokens == "plans trip to tokyo"
-    assert row.evidence == "said so explicitly"
-    assert row.evidence_tokens == "said so explicitly"
-    assert len(row.vector) == 1024
 
 
 def _agent_event() -> AgentPipelineStarted:

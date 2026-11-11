@@ -64,6 +64,10 @@ class StrategyRegistry:
         """Return meta by name (raises ``KeyError`` if absent)."""
         return self._strategies[name]
 
+    def has(self, name: str) -> bool:
+        """Whether a strategy of this name is registered."""
+        return name in self._strategies
+
     def all(self) -> list[StrategyMeta]:
         """Return a snapshot list of every registered strategy."""
         return list(self._strategies.values())

@@ -12,7 +12,8 @@ golden file produced at the commit *before* group memory:
   the only normalised parts: they are the day the test runs);
 * every index row the cascade projects from that markdown (vectors as a hash);
 * the events the pipeline published;
-* search and get responses for the owners, over keyword, vector and hybrid.
+* search and get responses for the owners, over multi-round retrieval (the
+  only search method) with a scripted decider.
 
 The conversations are a LoCoMo excerpt (two human senders in one session: the
 per-sender fan-out), the tracked solo assistant chat (one user and an
@@ -220,6 +221,9 @@ def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:
         return json.dumps(_episode_from(prompt))
     if name == "ImageEpisodeReply":
         return _picture_reply(prompt)
+    if name == "_DecisionReply":
+        # The multi-round decider: keep the first three candidates, stop.
+        return json.dumps({"core": [0, 1, 2], "next_queries": []})
     raise AssertionError(f"unexpected model call: {name}")
 
 
@@ -498,20 +502,15 @@ async def _run(root: Path) -> dict[str, Any]:
 
         searches: dict[str, Any] = {}
         for owner in ("caroline", "melanie", "user_001", "u_pic"):
-            for method, query in (
-                ("keyword", "support group"),
-                ("vector", "travel to Beijing"),
-                ("hybrid", "cat"),
-            ):
+            for query in ("support group", "travel to Beijing", "cat"):
                 response = await memory.search(
-                    SearchRequest(user_id=owner, query=query, method=method, top_k=5)
+                    SearchRequest(user_id=owner, query=query, top_k=5)
                 )
-                searches[f"{owner}:{method}"] = response.data.model_dump(mode="json")
+                searches[f"{owner}:{query}"] = response.data.model_dump(mode="json")
         buffered = await memory.search(
             SearchRequest(
                 user_id="caroline",
                 query="support group",
-                method="keyword",
                 top_k=3,
                 filters={"session_id": "s_locomo"},
             )
@@ -522,7 +521,6 @@ async def _run(root: Path) -> dict[str, Any]:
                 SearchRequest(
                     user_id="u_pic",
                     query="cat",
-                    method="keyword",
                     top_k=3,
                     include_profile=True,
                 )

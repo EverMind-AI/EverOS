@@ -30,12 +30,9 @@ from everos.memory.ports import (
     AgentCaseStore,
     AgentSkillIndex,
     AgentSkillStore,
-    AtomicFactIndex,
-    AtomicFactStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
-    ForesightStore,
     ForgetLogStore,
     GroupProfileIndex,
     GroupProfileStore,
@@ -66,8 +63,6 @@ class Stores:
     """Every write-side store, typed by its port."""
 
     episode: EpisodeStore
-    atomic_fact: AtomicFactStore
-    foresight: ForesightStore
     image_memory: ImageMemoryStore
     images: ImageStore
     forget_log: ForgetLogStore
@@ -93,7 +88,6 @@ class Indexes:
     """Every read-side index of the configured engine, typed by its port."""
 
     episode: EpisodeIndex
-    atomic_fact: AtomicFactIndex
     agent_case: AgentCaseIndex
     agent_skill: AgentSkillIndex
     image_memory: ImageMemoryIndex

@@ -89,7 +89,7 @@ async def test_invalid_memory_type_value_returns_422(client: AsyncClient) -> Non
         "/api/v1/memory/get",
         json={
             "user_id": "u1",
-            "memory_type": "atomic_fact",  # not a top-level kind
+            "memory_type": "atomic_fact",  # a removed kind, never accepted
         },
     )
     assert resp.status_code == 422

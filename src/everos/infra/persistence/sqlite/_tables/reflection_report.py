@@ -21,7 +21,10 @@ class ReflectionReport(BaseTable, table=True):
         source_members: JSON-encoded list of member ids consumed.
         source_count: Number of source members consumed.
         merged_entry_id: Entry id of the merged output written to storage.
-        deprecated_fact_count: Number of facts deprecated during merge.
+        deprecated_fact_count: Always ``0``. Kept because a ``system.db``
+            written before EverOS 2.0 removed atomic facts has the column
+            ``NOT NULL`` without a default, so an insert that left it out
+            would fail there.
         status: Completion status, default ``"completed"``.
         created_at: UTC timestamp when the report was created.
     """
@@ -37,6 +40,6 @@ class ReflectionReport(BaseTable, table=True):
     source_members: str
     source_count: int
     merged_entry_id: str
-    deprecated_fact_count: int
+    deprecated_fact_count: int = 0
     status: str = Field(default="completed")
     created_at: UtcDatetime = Field(default_factory=get_utc_now)

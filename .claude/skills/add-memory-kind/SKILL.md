@@ -7,8 +7,8 @@ description: Add a new business memory kind end-to-end. Pick the storage combina
 
 ## When to invoke
 
-Adding a new persisted business entity (Episode, Case, Skill, AtomicFact,
-Foresight, Profile, or something custom). Multiple storage layers may be
+Adding a new persisted business entity (Episode, Case, Skill, ImageMemory,
+Profile, or something custom). Multiple storage layers may be
 involved; this skill walks the decision then the wiring.
 
 ## 1. Decide the storage combination
@@ -43,7 +43,7 @@ Three strategies — declared in the EverOS Markdown First spec:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<prefix>-YYYY-MM-DD.md` | append entries | memcell / episode / case / atomic_fact / foresight |
+| **Daily-log append** | `<prefix>-YYYY-MM-DD.md` | append entries | memcell / episode / case / image_memory |
 | **Skill-named in-place** | `skill_<name>.md` | overwrite the file | skills (procedural memory) |
 | **Single-file rewrite** | `user.md` / `agent.md` / `soul.md` / `behaviors.md` / `tools.md` | overwrite the file | profiles / playbooks |
 

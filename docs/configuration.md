@@ -183,7 +183,7 @@ message it arrived in.
 | `max_retries` | int | `3` | No | Retry count on failure. |
 | `batch_size` | int | `10` | No | Texts per batch request. |
 | `max_concurrent` | int | `10` | No | Max parallel batch requests from write paths. |
-| `query_max_concurrent` | int | `16` | No | Separate budget for interactive query embeds, so a search is not queued behind cascade writes. Each hybrid or vector search holds one slot for one embedding call, so the sustainable search rate is about this value divided by the endpoint's per-call latency; lower it if the endpoint is rate-limited. |
+| `query_max_concurrent` | int | `16` | No | Separate budget for interactive query embeds, so a search is not queued behind cascade writes. Each query embedding holds one slot — a multi-round search embeds its question, then each later round's sub-queries — so the sustainable rate of embedding calls is about this value divided by the endpoint's per-call latency; lower it if the endpoint is rate-limited. |
 
 `timeout_seconds` bounds one request, and one request carries up to
 `batch_size` texts (the cascade embeds a file's changed entries in one

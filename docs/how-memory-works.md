@@ -59,10 +59,8 @@ visually distinct from a user-named one).
 │       │       ├── user.md                 single-file   (profile)
 │       │       ├── episodes/
 │       │       │   └── episode-<YYYY-MM-DD>.md      daily-log append
-│       │       ├── .atomic_facts/                   daily-log (hidden)
-│       │       │   └── atomic_fact-<YYYY-MM-DD>.md
-│       │       └── .foresights/                     daily-log (hidden)
-│       │           └── foresight-<YYYY-MM-DD>.md
+│       │       └── images/
+│       │           └── image-<YYYY-MM-DD>.md        daily-log append (pictures)
 │       ├── agents/
 │       │   └── <agent_id>/
 │       │       ├── .cases/                          daily-log (hidden)
@@ -123,7 +121,7 @@ index catches up asynchronously.
                                      ▼                              ▼
                           ┌───────────────────  Offline Memory Engine (OME)  ───────────────────┐
                           │  async strategies write derived .md:                                 │
-                          │  atomic_facts · foresight · user profile · agent cases · agent skills │
+                          │  user profile · agent cases · agent skills                          │
                           └───────────────────────────────┬──────────────────────────────────────┘
                                                            ▼
                                             cascade daemon watches the .md tree
@@ -152,22 +150,22 @@ index catches up asynchronously.
   [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
   `extracted`, the episode file is already on disk.
-- Everything else (atomic facts, foresight, profile, agent cases/skills)
-  is produced **asynchronously** by the OME — see
+- Everything else (profile, agent cases/skills) is produced
+  **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
 - The **cascade daemon** turns every `.md` write into LanceDB rows so the
   content becomes searchable.
 
 ## Memory types & storage strategies
 
-Eight business memory kinds today, each user-, agent-, or globally owned,
-each picking one of three on-disk patterns:
+The one-to-one business memory kinds, each user-, agent-, or globally owned,
+each picking one of three on-disk patterns (group memory has its own kinds,
+see [group-memory.md](group-memory.md)):
 
 | Kind | Owner | Dir / file | Strategy | Produced by |
 |---|---|---|---|---|
 | **episode** | user | `episodes/episode-<date>.md` | daily-log | extraction (sync) |
-| **atomic_fact** | user | `.atomic_facts/atomic_fact-<date>.md` (hidden) | daily-log | OME |
-| **foresight** | user | `.foresights/foresight-<date>.md` (hidden) | daily-log | OME |
+| **image_memory** | user | `images/image-<date>.md` | daily-log | extraction (sync) |
 | **profile** | user | `user.md` | single-file rewrite | OME |
 | **agent_case** | agent | `.cases/agent_case-<date>.md` (hidden) | daily-log | OME |
 | **agent_skill** | agent | `skills/skill_<name>/SKILL.md` | skill-named dir | OME (clustering) |
@@ -215,8 +213,6 @@ derived later by the OME, an in-process async strategy engine. When
 extraction carves a MemCell, it emits an event; OME strategies pick it up
 and write their markdown when ready:
 
-- `extract_atomic_facts` — single-sentence facts from an episode
-- `extract_foresight` — anticipatory notes
 - `extract_user_profile` — the aggregated `user.md`
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design, and the
@@ -228,19 +224,18 @@ and write their markdown when ready:
 - `trigger_skill_clustering` — triggers agent skill clustering
 - `reflect_episodes` (cron, default off) — offline memory consolidation.
   Merges fragmented episodes within a cluster into a single coherent
-  narrative, re-extracts atomic facts, and deprecates the originals.
-  Enable via `ome.toml`.
+  narrative and deprecates the originals. Enable via `ome.toml`.
 
 Strategies are configurable without a code change via **`ome.toml`** at the
-memory root (hot-reloaded within ~2 s). Example — turn two off:
+memory root (hot-reloaded within ~2 s). Example — turn one off:
 
 ```toml
-[strategies.extract_foresight]
-enabled = false
-
 [strategies.extract_user_profile]
 enabled = false
 ```
+
+EverOS 2.0 keeps no atomic facts and no foresight: an `ome.toml` that still
+names `extract_atomic_facts` or `extract_foresight` only logs a warning.
 
 OME keeps its own state in `.index/sqlite/ome.db` (run records, counters)
 and its scheduler jobstore in `.index/sqlite/ome.aps.db` (split so the sync
@@ -252,8 +247,8 @@ lock).
 The `reflect_episodes` strategy runs on a cron schedule (default
 `0 2 * * 1` — every Monday at 02:00, disabled by default). It selects clusters with multiple
 members, calls the LLM to merge their episodes into a single narrative,
-writes the merged episode to markdown, re-extracts atomic facts, and
-deprecates the originals via `deprecated_by`. The merged episode uses
+writes the merged episode to markdown, and deprecates the originals via
+`deprecated_by` as soon as the merged episode is written. The merged episode uses
 `parent_type=cluster` and `session_id=None`. Enable it in `ome.toml`:
 
 ```toml
@@ -263,8 +258,8 @@ enabled = true
 
 !!! tip "Implication for clients"
     After `/flush` returns `extracted`, the **episode** is queryable soon
-    (once cascade indexes it), but **atomic facts / profile / agent cases**
-    appear only after their OME strategy runs — typically seconds later.
+    (once cascade indexes it), but **profile / agent cases** appear only
+    after their OME strategy runs — typically seconds later.
     Poll / retry if you need them immediately.
 
 ## Consistency model

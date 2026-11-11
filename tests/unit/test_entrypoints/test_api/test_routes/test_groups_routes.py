@@ -164,7 +164,7 @@ async def test_the_identity_header_wins_and_must_agree(
     assert mismatch.status_code == 403
     personal = await client.post(
         "/api/v2/memory/search",
-        json={"user_id": "u_chen", "query": "x", "method": "keyword"},
+        json={"user_id": "u_chen", "query": "x"},
         headers={"X-Asker": "u_betty"},
     )
     assert personal.status_code == 403

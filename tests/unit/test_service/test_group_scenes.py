@@ -109,7 +109,6 @@ def _search(asker: str) -> SearchRequest:
         group_id="trip",
         asker_id=asker,
         query="Lisbon offsite venue",
-        method="keyword",
         top_k=20,
     )
 

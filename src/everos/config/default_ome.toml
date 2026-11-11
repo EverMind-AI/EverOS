@@ -26,17 +26,10 @@
 
 # ── User-memory pipeline ────────────────────────────────────────────────
 
-# Atomic fact extraction runs per memcell. Always enabled — search
-# depends on atomic facts for MaxSim retrieval.
-
-# Foresight extraction (runs per memcell). Heavy LLM call.
-#
-# DISABLED BY DEFAULT since 1.2.3: nothing in EverOS reads foresights yet
-# — no search route surfaces them, no operator consumes them — so
-# running it spends one LLM call per sender per memcell on write-only
-# data. Uncomment to opt in; it works on agent and chat input alike.
-# [strategies.extract_foresight]
-# enabled = true
+# Chat memory keeps episodes, picture memories and profiles. Atomic facts
+# and foresight were removed in EverOS 2.0: a [strategies.extract_atomic_facts]
+# or [strategies.extract_foresight] section left in this file only logs a
+# warning.
 
 # Profile clustering trigger (fires on each EpisodeExtracted event).
 # [strategies.trigger_profile_clustering]

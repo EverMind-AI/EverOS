@@ -315,7 +315,7 @@ All error responses use the standard error envelope — see
 ## Searching multimodal memory
 
 Nothing special is required. Because parsed text is folded into the same
-episodes and memory cells as text turns, every retrieval method works
+episodes and memory cells as text turns, multi-round retrieval works
 across multimodal-derived memory unchanged:
 
 ```bash
@@ -324,9 +324,9 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -d '{
     "user_id": "alice",
     "query": "whiteboard from the planning session",
-    "method": "hybrid"
+    "method": "llm_multiround"
   }'
 ```
 
-`keyword`, `vector`, `hybrid` (default), and `agentic` all apply — see
+`llm_multiround` is the only search method — see
 [api.md → SearchMethod](api.md#searchmethod).

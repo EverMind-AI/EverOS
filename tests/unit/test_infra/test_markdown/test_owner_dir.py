@@ -16,7 +16,6 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
     MarkdownAgentSkillStore,
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownImageMemoryStore,
     MarkdownOwnerDirStore,
@@ -27,7 +26,6 @@ from everos.infra.persistence.markdown import owner_dir as owner_dir_module
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     ImageMemory,
     Profile,
@@ -65,17 +63,8 @@ async def _seed_user(root: MemoryRoot, scope: Scope) -> list[str]:
     refs = await episodes.append_many(
         scope, [_episode(f"e{i}") for i in range(3)], only_if=NO_SOURCE_CHECK
     )
-    await MarkdownAtomicFactStore(root).append_many(
-        scope,
-        [
-            AtomicFact(
-                owner_id=scope.owner_id,
-                content="f",
-                timestamp=_TS,
-                parent_id=refs[0].entry_id,
-            )
-        ],
-        only_if=NO_SOURCE_CHECK,
+    await MarkdownImageMemoryStore(root).append_many(
+        scope, [_picture(scope.owner_id)], only_if=NO_SOURCE_CHECK
     )
     await MarkdownProfileStore(root).write(
         scope, Profile(owner_id=scope.owner_id, summary="p", timestamp=_TS)
@@ -92,8 +81,7 @@ async def test_owner_delete_counts_and_keeps_today_counter(root: MemoryRoot) -> 
     deletion = await owners.delete(_user())
 
     assert [r.entry_id for r in deletion.refs["episode"]] == old
-    assert len(deletion.refs["atomic_fact"]) == 1
-    assert deletion.refs["foresight"] == []
+    assert len(deletion.refs["image_memory"]) == 1
     assert deletion.count == 3 + 1 + 1
     owner_dir = root.users_dir("app", "p") / "u1"
     assert sorted(p.name for p in owner_dir.rglob("*") if p.is_file()) == [
@@ -109,9 +97,9 @@ async def test_owner_delete_counts_and_keeps_today_counter(root: MemoryRoot) -> 
     assert not list(root.tmp_dir.glob("delete-*"))
 
 
-def _picture() -> ImageMemory:
+def _picture(owner_id: str = "u1") -> ImageMemory:
     return ImageMemory(
-        owner_id="u1",
+        owner_id=owner_id,
         description="d",
         timestamp=_TS,
         image_id="ab" * 32,
@@ -133,6 +121,7 @@ async def test_owner_delete_inventories_picture_memories(root: MemoryRoot) -> No
     assert [r.entry_id for r in deletion.refs["image_memory"]] == [
         r.entry_id for r in old
     ]
+    assert deletion.refs["episode"] == []  # an empty table is still listed
     assert deletion.count == 2
     (new,) = await pictures.append_many(_user(), [_picture()], only_if=NO_SOURCE_CHECK)
     assert new.entry_id not in {r.entry_id for r in old}

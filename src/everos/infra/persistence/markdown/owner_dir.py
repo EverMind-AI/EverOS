@@ -36,10 +36,8 @@ from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
 from ._mds import AgentSkillFrontmatter, UserProfileFrontmatter
 from ._writers import (
     AgentCaseWriter,
-    AtomicFactWriter,
     BaseDailyWriter,
     EpisodeWriter,
-    ForesightWriter,
     ImageMemoryWriter,
 )
 from .stores import owner_lock
@@ -66,8 +64,6 @@ class MarkdownOwnerDirStore:
         self._logs: dict[str, dict[str, BaseDailyWriter]] = {
             "user": {
                 "episode": EpisodeWriter(root),
-                "atomic_fact": AtomicFactWriter(root),
-                "foresight": ForesightWriter(root),
                 "image_memory": ImageMemoryWriter(root),
             },
             "agent": {"agent_case": AgentCaseWriter(root)},

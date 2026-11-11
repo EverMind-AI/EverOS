@@ -88,11 +88,6 @@ class _Recaller:
         return recalled(*self._seed)
 
 
-class _FactRecaller:
-    async def facts_for_episodes(self, *a: Any, **k: Any) -> dict[str, list[Any]]:
-        return {}
-
-
 def _script_llm(replies: list[str], *, error_first: int = 0) -> FakeLLMClient:
     """Decider LLM: replays ``replies[i]`` per ``achat`` call (last repeats).
 
@@ -147,7 +142,6 @@ def _run(
         owner_id="alice",
         where=_WHERE,
         episode_recaller=recaller,
-        atomic_fact_recaller=_FactRecaller(),
         embed_query_fn=embed,
         llm=llm,
         top_k=top_k,
@@ -445,7 +439,6 @@ async def test_trace_records_every_schema_field(
         owner_id="longmemeval_0",
         where=_WHERE,
         episode_recaller=rec,
-        atomic_fact_recaller=_FactRecaller(),
         embed_query_fn=_embed_empty,
         llm=llm,
         top_k=20,
@@ -671,7 +664,6 @@ async def test_search_keeps_configuration_and_trace_read_boundaries() -> None:
         owner_id="alice",
         where=_WHERE,
         episode_recaller=_Recaller(seed=[_ep("a", 0.9), _ep("b", 0.8)]),
-        atomic_fact_recaller=_FactRecaller(),
         embed_query_fn=_embed_empty,
         llm=_script_llm([]),
         top_k=1,

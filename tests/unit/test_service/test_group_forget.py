@@ -253,22 +253,18 @@ async def _index_rows(world: GroupWorld) -> str:
 
 
 async def _search_text(world: GroupWorld, asker: str) -> str:
-    blobs: list[str] = []
-    for method in ("keyword", "vector", "hybrid"):
-        response = await world.memory.search(
-            SearchRequest(
-                app_id=APP,
-                project_id=PROJECT,
-                query="locker code LISBONVENUE FRIDAYOK plans",
-                method=method,
-                top_k=20,
-                group_id="trip",
-                asker_id=asker,
-                include_profile=True,
-            )
+    response = await world.memory.search(
+        SearchRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            query="locker code LISBONVENUE FRIDAYOK plans",
+            top_k=20,
+            group_id="trip",
+            asker_id=asker,
+            include_profile=True,
         )
-        blobs.append(json.dumps(response.data.model_dump(mode="json")))
-    return "\n".join(blobs)
+    )
+    return json.dumps(response.data.model_dump(mode="json"))
 
 
 async def _gets(world: GroupWorld, asker: str) -> str:
@@ -596,7 +592,6 @@ async def test_a_message_forgotten_while_buffered_is_never_read(
                 app_id=APP,
                 project_id=PROJECT,
                 query="plans",
-                method="keyword",
                 group_id="trip",
                 asker_id="u_chen",
                 filters={"session_id": "s_trip"},

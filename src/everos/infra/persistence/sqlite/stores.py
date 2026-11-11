@@ -618,7 +618,6 @@ def _report_to_row(report: ReflectionReport) -> ReflectionReportRow:
         ),
         source_count=report.source_count,
         merged_entry_id=report.merged_entry_id,
-        deprecated_fact_count=report.deprecated_fact_count,
     )
 
 

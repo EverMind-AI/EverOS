@@ -197,8 +197,8 @@ def set_generation_usage(
     """Record ``gen_ai.*`` model + token attributes on the current span.
 
     Token counts ACCUMULATE: a span that wraps more than one ``chat`` call
-    (e.g. the agentic/rank search path issues several LLM calls under one
-    ``everos.search.rank`` span) sums each call's usage rather than letting
+    (e.g. a strategy span covering an extraction and its retries) sums each
+    call's usage rather than letting
     the last call overwrite the rest. ``model`` is set as-is (last wins).
 
     No-op when OTel is absent or there is no active recording span, so LLM

@@ -119,7 +119,7 @@ def test_get_request_rejects_invalid_memory_type_value() -> None:
         GetRequest.model_validate(
             {
                 "user_id": "u1",
-                "memory_type": "atomic_fact",  # not a top-level kind
+                "memory_type": "atomic_fact",  # a removed kind, never accepted
             }
         )
 

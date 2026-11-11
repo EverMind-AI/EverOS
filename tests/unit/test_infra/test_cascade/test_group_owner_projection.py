@@ -177,11 +177,20 @@ async def test_a_group_picture_memory_carries_its_poster(tmp_path: Path) -> None
 
 
 async def test_other_kinds_refuse_a_group_scope(tmp_path: Path) -> None:
-    """Atomic facts and foresight are not group memory (they leave in 2.0)."""
-    from everos.infra.persistence.markdown import MarkdownAtomicFactStore
-    from everos.memory.models import AtomicFact
+    """A kind without a group writer refuses a group scope: an agent case is
+    learned by an agent, never owned by a group."""
+    from everos.infra.persistence.markdown import MarkdownAgentCaseStore
+    from everos.memory.models import AgentCase
 
-    store = MarkdownAtomicFactStore(MemoryRoot(tmp_path))
-    fact = AtomicFact(owner_id="trip-team", content="x", timestamp=_END, parent_id="e")
+    store = MarkdownAgentCaseStore(MemoryRoot(tmp_path))
+    case = AgentCase(
+        owner_id="trip-team",
+        task_intent="t",
+        approach="a",
+        quality_score=0.5,
+        timestamp=_END,
+        session_id="s1",
+        parent_id="e",
+    )
     with pytest.raises(ValueError, match="no group-owned records"):
-        await store.append_many(_GROUP, [fact], only_if=NoSourceCheck())
+        await store.append(_GROUP, case, only_if=NoSourceCheck())

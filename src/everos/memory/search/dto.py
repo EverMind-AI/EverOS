@@ -2,16 +2,18 @@
 
 Contract per the final design:
 
-* ``owner_type`` is a hard partition. ``user`` returns ``episodes``
-  (and optionally ``profiles``); ``agent`` returns ``agent_cases`` +
-  ``agent_skills``. The four ``data.*`` arrays always exist; routes not
-  applicable to the current ``owner_type`` stay as ``[]``.
-* ``atomic_facts`` are **nested** inside :class:`SearchEpisodeItem`,
-  never returned as a top-level array.
+* The only search method is ``llm_multiround`` (multi-round retrieval):
+  a request naming any other method is refused with a message that says
+  so, and so is a request for an agent's memory, which multi-round
+  retrieval does not cover.
+* ``owner_type`` is a hard partition. ``user`` returns ``episodes`` and
+  ``images`` (and optionally ``profiles``); a group scope (one group, a
+  pool of groups, or a project's groups) returns the group's episodes and
+  pictures (and the member-in-group ``profiles``), with its group profile,
+  constraint block and ``coverage``. Every ``data.*`` array always exists;
+  routes not applicable to the current scope stay ``[]``.
 * Item-side ``owner_type`` / ``type`` fields are intentionally narrowed
-  to the currently-emitted Literal so callers get a tight schema. Loosen
-  them only when a new emission path (agent episodes, agent profiles)
-  ships.
+  to the currently-emitted Literal so callers get a tight schema.
 
 The :class:`FilterNode` model is intentionally permissive
 (``extra="allow"``) because the DSL has an open key shape; the
@@ -23,31 +25,46 @@ from __future__ import annotations
 
 import datetime as _dt
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SearchMethod(StrEnum):
-    """Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."""
+    """The search method. Multi-round retrieval is the only one.
 
-    KEYWORD = "keyword"
-    VECTOR = "vector"
-    HYBRID = "hybrid"
-    AGENTIC = "agentic"
+    The keyword, vector, hybrid and agentic methods were removed with the
+    atomic facts the vector and hybrid routes ranked: a request naming one is
+    refused (see :data:`MULTIROUND_ONLY`).
+    """
+
     LLM_MULTIROUND = "llm_multiround"
-    """LLM-guided iterative multi-round episode retrieval (per-sub-query RRF blocks).
+    """LLM-guided iterative multi-round retrieval (per-sub-query RRF blocks).
 
     Each round fuses every current sub-query's BM25+vector recall with RRF
     INDEPENDENTLY (round 0 = one original-question block), shows an injected
     decider the labelled blocks plus the core accumulated so far, and lets it
-    pin core and issue gap-covering sub-queries. The final injection is
-    core-first + each sub-query's top-1 guarantee + max-RRF-score fill; there is
-    no cross-encoder anywhere. Unlike AGENTIC's fixed round1+round2 this is
-    genuinely iterative, and the decider is pluggable -- a prompted LLM by
-    default, a trained policy in Phase 2, which makes this loop the RL
-    environment. Needs an LLM + embedding provider. User memory only.
+    pin core and issue gap-covering sub-queries. Episodes, scenes and picture
+    memories compete in one candidate pool. The final injection is
+    core-first + each sub-query's top-1 guarantee + max-RRF-score fill; there
+    is no cross-encoder anywhere. The decider is pluggable -- a prompted LLM
+    by default, a trained policy in Phase 2, which makes this loop the RL
+    environment. Needs an LLM + embedding provider. User and group memory.
     """
+
+
+MULTIROUND_ONLY = (
+    "EverOS 2.0 searches memory with multi-round retrieval only: "
+    "method must be 'llm_multiround'"
+)
+"""What a request naming a removed method is told."""
+
+NO_AGENT_SEARCH = (
+    "agent memory is not searchable: multi-round retrieval, the only search "
+    "method, covers user and group memory; list an agent's cases and skills "
+    "with POST /api/v2/memory/get"
+)
+"""What a request for an agent's memory is told."""
 
 
 class FilterNode(BaseModel):
@@ -108,21 +125,24 @@ class QuestionPicture(BaseModel):
 class SearchRequest(BaseModel):
     """Request body for ``POST /api/v2/memory/search``.
 
-    Callers identify the memory owner via ``user_id`` XOR ``agent_id`` —
-    exactly one must be set. Internally the manager + compile_filters keep
-    using ``owner_id`` / ``owner_type`` (the storage tables' columns);
-    those are exposed as derived properties so the rename only affects
-    the wire contract, not the internal recall plumbing.
+    Callers name the memory owner with ``user_id`` or a group scope
+    (``group_id`` / ``group_ids`` / ``project_scope``) -- exactly one.
+    Internally the manager + compile_filters keep using ``owner_id`` /
+    ``owner_type`` (the storage tables' columns); those are exposed as
+    derived properties so the rename only affects the wire contract, not the
+    internal recall plumbing.
+
+    An ``agent_id`` is refused with :data:`NO_AGENT_SEARCH`: agent cases and
+    skills are extracted and listed by ``/memory/get``, but multi-round
+    retrieval does not rank them.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str | None = Field(default=None, min_length=1)
-    agent_id: str | None = Field(default=None, min_length=1)
-    """Memory owner — provide ``user_id`` for user-memory (episodes /
-    profiles) or ``agent_id`` for agent-memory (cases / skills); exactly
-    one owner scope must be set (``user_id``, ``agent_id``, ``group_id`` or
-    ``group_ids``)."""
+    """Memory owner for user memory (episodes, pictures, profiles); exactly one
+    owner scope must be set (``user_id``, ``group_id``, ``group_ids`` or
+    ``project_scope``)."""
     group_id: str | None = Field(default=None, min_length=1)
     group_ids: list[str] | None = Field(default=None, min_length=1, max_length=16)
     """A group scope (docs/group-memory.md, section 5.3): one group, or several
@@ -134,83 +154,65 @@ class SearchRequest(BaseModel):
     audience: Literal["asker", "group"] = "asker"
     """``asker`` (default): the asker's own view. ``group``: only what every
     current member can see -- for a reply posted to the whole group."""
-    context_group_id: str | None = Field(default=None, min_length=1)
-    """With ``agent_id`` only: read the agent's memory in this group's
-    context. Cases the agent learned in a group are returned only in that
-    group's context (docs/group-memory.md, section 9.1), to a current member
-    of it -- the agent itself unless ``asker_id`` names another."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB
     ``where`` so a search never crosses into another space's rows."""
     query: str = Field(min_length=1)
-    method: SearchMethod = SearchMethod.HYBRID
+    method: SearchMethod = SearchMethod.LLM_MULTIROUND
+    """Kept so a caller that names the method keeps working; any other value
+    than ``llm_multiround`` is refused with :data:`MULTIROUND_ONLY`."""
     top_k: int = -1
-    radius: float | None = Field(default=None, ge=0.0, le=1.0)
-    """Cosine floor on dense recall, applied before any fusion or rerank.
-
-    Every method's vector route honours it (VECTOR, HYBRID, AGENTIC);
-    KEYWORD has no cosine and ignores it. ``None`` with ``top_k=-1`` falls
-    back to the server default, see ``_effective_radius``.
-    """
-    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
-    """Post-fusion relevance floor for the episode HYBRID path.
-
-    Applied after heap-expand against the LR-calibrated score in ``[0, 1]``:
-    items scoring below this value are dropped. Independent of ``radius``
-    (which gates raw cosine at recall time); ``None`` disables the floor.
-    Only the episode hybrid path consumes it — other methods ignore it.
-    """
     include_profile: bool = False
     include_group_profile: bool | None = None
     """Attach the visible current group-profile items (section 5.3). Unset:
-    on for a group scope; a user or agent scope has none to attach."""
+    on for a group scope; a user scope has none to attach."""
     constraints: bool | None = None
     """Return the constraint block (section 8.4). Unset: on for a group scope;
-    a user or agent scope has none."""
+    a user scope has none."""
     project_scope: bool = False
     """Search every group of ``project_id`` the asker currently belongs to, as
     one pool (section 8.7); needs ``asker_id`` and no other owner field."""
-    enable_llm_rerank: bool = Field(
-        default=False,
-        description=(
-            "Opt-in LLM rerank pass for HYBRID. Applies to agent_case "
-            "and agent_skill fusion only; the episode hybrid path "
-            "has built-in fact eviction and ignores this flag. "
-            "Ignored by keyword / vector / agentic."
-        ),
-    )
     images: list[QuestionPicture] = Field(
         default_factory=list,
         max_length=4,
         description=(
             "Pictures that are part of the question. They are shown to a "
             "multi-round decider on every round; they create no memory and no "
-            "reference. Routes that cannot use them ignore them."
+            "reference."
         ),
     )
     filters: FilterNode | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_agent_scope(cls, data: Any) -> Any:
+        if isinstance(data, dict) and (
+            data.get("agent_id") is not None or data.get("context_group_id") is not None
+        ):
+            raise ValueError(NO_AGENT_SEARCH)
+        return data
+
+    @field_validator("method", mode="before")
+    @classmethod
+    def _multiround_only(cls, value: Any) -> Any:
+        if value != SearchMethod.LLM_MULTIROUND.value:
+            raise ValueError(f"{MULTIROUND_ONLY} (got {str(value)!r})")
+        return value
+
     @model_validator(mode="after")
-    def _validate_user_xor_agent(self) -> SearchRequest:
+    def _validate_one_scope(self) -> SearchRequest:
         scopes = [
             self.user_id is not None,
-            self.agent_id is not None,
             self.group_id is not None,
             self.group_ids is not None,
             self.project_scope,
         ]
         if sum(scopes) != 1:
             raise ValueError(
-                "exactly one of user_id / agent_id / group_id / group_ids / "
-                "project_scope must be provided"
+                "exactly one of user_id / group_id / group_ids / project_scope "
+                "must be provided"
             )
-        return self
-
-    @model_validator(mode="after")
-    def _validate_context_group(self) -> SearchRequest:
-        if self.context_group_id is not None and self.agent_id is None:
-            raise ValueError("context_group_id is valid with agent_id only")
         return self
 
     @model_validator(mode="after")
@@ -230,36 +232,24 @@ class SearchRequest(BaseModel):
     def owner_id(self) -> str:
         """Derived from whichever owner scope is set (the first group of a pool).
 
-        The xor validator guarantees exactly one is set, so the ``or`` falls
-        through to a real string (never the ``""`` default).
+        The one-scope validator guarantees exactly one is set, so the ``or``
+        falls through to a real string (never the ``""`` default).
         """
         groups = self.scope_group_ids
-        return self.user_id or self.agent_id or (groups[0] if groups else "")
+        return self.user_id or (groups[0] if groups else "")
 
     @property
-    def owner_type(self) -> Literal["user", "agent", "group"]:
-        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set.
+    def owner_type(self) -> Literal["user", "group"]:
+        """``"user"`` or ``"group"``, by the owner scope set.
 
         A project scope is a pool of groups: ``group``.
         """
         if self.user_id is not None:
             return "user"
-        if self.agent_id is not None:
-            return "agent"
         return "group"
 
 
 # ── Item DTOs ────────────────────────────────────────────────────────────
-
-
-class SearchAtomicFactItem(BaseModel):
-    """A single atomic fact nested inside its parent episode."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    content: str
-    score: float
 
 
 class AudienceItem(BaseModel):
@@ -346,7 +336,6 @@ class SearchEpisodeItem(BaseModel):
     """``Scene`` for a group scene version: a narrative over several of the
     group's episodes, competing with them in the same ranking."""
     score: float
-    atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
     audience: AudienceItem | None = None
     """Who heard it, on a group episode (section 8.6); unset otherwise."""
 
@@ -438,46 +427,6 @@ class SearchProfileItem(BaseModel):
     project_id: str = "default"
     profile_data: dict[str, object]
     score: float | None = None
-
-
-class SearchAgentCaseItem(BaseModel):
-    """Agent case hit — always agent-scoped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    entry_id: str
-    """The case's id inside its owner's markdown (``ac_<YYYYMMDD>_<NNNN>``);
-    what a skill's ``source_case_ids`` refers to. ``id`` is the index row key,
-    ``<agent_id>_<entry_id>``."""
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    session_id: str
-    task_intent: str
-    approach: str
-    quality_score: float
-    key_insight: str | None = None
-    timestamp: _dt.datetime
-    score: float
-
-
-class SearchAgentSkillItem(BaseModel):
-    """Agent skill hit — always agent-scoped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    name: str
-    description: str
-    content: str
-    confidence: float
-    maturity_score: float
-    source_case_ids: list[str] = Field(default_factory=list)
-    score: float
 
 
 class UnprocessedMessageDTO(BaseModel):
@@ -687,21 +636,16 @@ class SearchData(BaseModel):
 
     episodes: list[SearchEpisodeItem] = Field(default_factory=list)
     images: list[SearchImageItem] = Field(default_factory=list)
-    """Picture memories that survived the same ranking as the episodes.
-
-    Populated for both owner types — a picture can arrive in a chat or in an
-    agent's trace — because the picture is evidence whichever track it came
-    from."""
+    """Picture memories that survived the same ranking as the episodes: the
+    two kinds compete in one candidate pool."""
     profiles: list[SearchProfileItem] = Field(default_factory=list)
-    agent_cases: list[SearchAgentCaseItem] = Field(default_factory=list)
-    agent_skills: list[SearchAgentSkillItem] = Field(default_factory=list)
     unprocessed_messages: list[UnprocessedMessageDTO] = Field(default_factory=list)
     """In-flight messages still in the boundary-detection buffer for
     the ``filters.session_id`` (if supplied as a top-level eq scalar);
     otherwise stays empty."""
     scope: SearchScope | None = None
-    """The group scope and the asker's windows; ``None`` for a user or agent
-    search, whose scope is the owner the request named."""
+    """The group scope and the asker's windows; ``None`` for a user search,
+    whose scope is the owner the request named."""
     group_profile: SearchGroupProfile | None = None
     """The visible current group-profile items of a group scope
     (``include_group_profile``); ``None`` otherwise."""
@@ -710,8 +654,8 @@ class SearchData(BaseModel):
     coverage: Literal["complete", "partial", "none"] | None = None
     """How far a group scope's multi-round search got: ``complete`` (the
     decider stopped with a core), ``partial`` (the round budget ran out),
-    ``none`` (no core). ``None`` for the methods without a decider and for
-    user and agent scopes, whose responses stay as they were."""
+    ``none`` (no core). ``None`` for a user scope, whose response stays as it
+    was."""
 
 
 class SearchResponse(BaseModel):

@@ -30,7 +30,6 @@ boundary decisions deterministically.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -84,9 +83,6 @@ async def memorize_env_locked(
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-
     started: dict[str, Any] = {"application": None}
 
     async def _setup(*, fake_llm: FakeLLMClient) -> None:
@@ -98,21 +94,6 @@ async def memorize_env_locked(
         load_settings.cache_clear()
 
         await storage.create_schema()
-
-        # Silence OME strategy extractors (we only care about the boundary +
-        # memcell + buffer cycle; downstream strategies are a separate story).
-        mock_af = AsyncMock(return_value=[])
-        mock_fs = AsyncMock(return_value=[])
-        monkeypatch.setattr(
-            af_mod,
-            "AtomicFactExtractor",
-            lambda *a, **k: type("M", (), {"aextract": mock_af})(),
-        )
-        monkeypatch.setattr(
-            fs_mod,
-            "ForesightExtractor",
-            lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
-        )
 
         settings = load_settings()
         application = build_application(

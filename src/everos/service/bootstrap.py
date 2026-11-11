@@ -123,9 +123,6 @@ from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
-    AgentCaseRecaller,
-    AgentSkillRecaller,
-    AtomicFactRecaller,
     EpisodeRecaller,
     ImageMemoryRecaller,
     KnowledgeTopicRecaller,
@@ -691,15 +688,10 @@ def _build_memory_service(
         bus=bus,
         search_manager=SearchManager(
             episode_recaller=EpisodeRecaller(recaller_deps, indexes.episode),
-            atomic_fact_recaller=AtomicFactRecaller(recaller_deps, indexes.atomic_fact),
-            agent_case_recaller=AgentCaseRecaller(recaller_deps, indexes.agent_case),
-            agent_skill_recaller=AgentSkillRecaller(recaller_deps, indexes.agent_skill),
             profile_recaller=ProfileRecaller(indexes.profile),
             session_buffer=stores.session_buffer,
-            cluster_store=stores.cluster,
             embedding=providers.embedding,
             vision_embedding=providers.vision_embedding,
-            reranker=providers.rerank,
             llm_client=providers.llm,
             decider_client=providers.decider,
             tuning_source=SearchConfigSource().tuning,
@@ -787,7 +779,7 @@ async def _log_unbackfilled_hint(admin: CascadeAdmin) -> None:
             "unbackfilled_memory_rows",
             count=total,
             hint="Run `everos cascade backfill` to include them in "
-            "vector/hybrid search (optional).",
+            "multi-round search (optional).",
         )
 
 

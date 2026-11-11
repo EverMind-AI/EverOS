@@ -1,7 +1,7 @@
 """Agent pipeline e2e — a hermetic canned run and a real-LLM SWE-bench drive.
 
-``test_add_flush_search_get_on_canned_agent_track`` runs anywhere: every
-model call is answered from the canned scripts and the embedder is
+``test_add_flush_get_on_canned_agent_track`` runs anywhere: every model
+call is answered from the canned scripts and the embedder is
 :class:`tests.fakes.FakeEmbeddingProvider`.
 
 The rest: 5 SWE-bench trajectories drive /add + /flush.
@@ -333,16 +333,18 @@ async def _poll_until(
             await asyncio.sleep(0.2)
 
 
-async def test_add_flush_search_get_on_canned_agent_track(
+async def test_add_flush_get_on_canned_agent_track(
     core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``/add`` -> ``/flush`` -> ``/get`` -> ``/search`` on the canned agent track.
+    """``/add`` -> ``/flush`` -> ``/get`` on the canned agent track.
 
     Real application in agent mode (boundary, both pipelines, OME strategies,
     cascade, LanceDB), every model call answered from the canned scripts, a
     1024-wide fake embedder (the skill chain needs one), no rerank. The flush
     cuts the trajectory into one cell; the case, its cluster and the skill it
-    drives all become readable through the API for ``agent_id``.
+    drives all become readable through the API for ``agent_id``. An agent's
+    memory is listed by ``/get``, not searched: multi-round retrieval covers
+    user and group memory only.
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
@@ -389,18 +391,6 @@ async def test_add_flush_search_get_on_canned_agent_track(
             assert resp.status_code == 200, resp.text
             return resp.json()["data"][f"{memory_type}s"]
 
-        async def _search() -> dict[str, list[dict]]:
-            resp = await client.post(
-                "/api/v1/memory/search",
-                json={
-                    "agent_id": "agent_42",
-                    "query": "flaky date parsing test",
-                    "method": "keyword",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            return resp.json()["data"]
-
         async def _indexed() -> bool:
             return bool(await _get("agent_case")) and bool(await _get("agent_skill"))
 
@@ -417,15 +407,6 @@ async def test_add_flush_search_get_on_canned_agent_track(
         assert got_skill["content"] == skill["content"]
         (source_case,) = got_skill["source_case_ids"]
         assert got_case["id"].endswith(source_case)
-
-        async def _found() -> bool:
-            data = await _search()
-            return bool(data["agent_cases"]) and bool(data["agent_skills"])
-
-        await _poll_until(_found)
-        found = await _search()
-        assert [c["task_intent"] for c in found["agent_cases"]] == [case["task_intent"]]
-        assert [s["name"] for s in found["agent_skills"]] == [skill["name"]]
 
     assert calls.count("_BatchReply") == 2  # the add and the flush
     assert calls.count("_CaseFilterReply") == 1

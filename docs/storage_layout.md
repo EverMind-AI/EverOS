@@ -29,12 +29,8 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │       ├── user.md                          single-file rewrite (profile)
 │       │       ├── episodes/                         daily-log append
 │       │       │   └── episode-<YYYY-MM-DD>.md
-│       │       ├── images/                           daily-log append
-│       │       │   └── image-<YYYY-MM-DD>.md
-│       │       ├── .atomic_facts/                    daily-log append (hidden)
-│       │       │   └── atomic_fact-<YYYY-MM-DD>.md
-│       │       └── .foresights/                      daily-log append (hidden)
-│       │           └── foresight-<YYYY-MM-DD>.md
+│       │       └── images/                           daily-log append
+│       │           └── image-<YYYY-MM-DD>.md
 │       ├── agents/
 │       │   └── <agent_id>/
 │       │       ├── .cases/                           daily-log append (hidden)
@@ -100,7 +96,7 @@ Each business memory kind picks one of three on-disk patterns:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / atomic_fact / foresight / agent_case / image_memory / group scene versions / group-profile items |
+| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / agent_case / image_memory / group scene versions / group-profile items |
 | **Skill-named dir** | `skills/skill_<name>/SKILL.md` (+ `references/` `scripts/`) | overwrite the file | agent skills (procedural memory) |
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced); `groups/<g>/members/<member_id>.md` | overwrite the file | user profile; member-in-group profile |
 
@@ -219,10 +215,18 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
   as the same rebuildable index backend and lives outside the memory root in a
   configured Milvus Server or Zilliz Cloud deployment.
 
-Episode and AtomicFact index rows carry a `deprecated_by: str | None` column.
+Episode index rows carry a `deprecated_by: str | None` column.
 When an episode is superseded by a Reflection merge,
 `deprecated_by` is set to the merged episode's entry_id. Search filters
 automatically exclude rows where `deprecated_by IS NOT NULL`.
+
+EverOS 2.0 keeps no atomic facts and no foresight. A store written before
+they were removed may still hold `users/<id>/.atomic_facts/` and
+`users/<id>/.foresights/` directories and `atomic_fact` / `foresight` index
+tables: nothing watches, indexes, searches, deletes or rebuilds them any more.
+A cascade change still queued for them is marked failed (`cascade status`
+counts it; health does not), and a background run still pending for their
+strategies is dropped with a warning. They can be deleted by hand.
 
 Both layers are **fully derivable from markdown** — wipe `.index/`
 and the in-process cascade subsystem re-builds everything by scanning the

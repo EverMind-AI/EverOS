@@ -176,7 +176,6 @@ def _free_port() -> int:
 # What each call looks like (read from real request bodies, 2026-11-02):
 BOUNDARY = r"boundary detection expert"
 EPISODE = r"You write episodic memories"
-FACTS = r"information architect"
 
 
 def llm_call(kind: str, token: str) -> str:

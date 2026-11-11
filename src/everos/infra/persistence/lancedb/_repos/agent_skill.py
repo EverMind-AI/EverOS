@@ -35,10 +35,8 @@ class _AgentSkillRepo(LanceIndexContract[AgentSkill], LanceRepoBase[AgentSkill])
     ) -> list[AgentSkill]:
         """Top-K cosine-relevant skills inside one cluster.
 
-        Cosine ranking is pushed down to LanceDB native ANN.
-        ``distance_type("cosine")`` matches
-        :class:`AgentSkillRecaller.dense_recall`, keeping ranking
-        semantics consistent across read paths.
+        Cosine ranking is pushed down to LanceDB native ANN
+        (``distance_type("cosine")``, as every dense search of the index).
 
         Raises:
             ValueError: When ``query_vector`` is empty — no relevance

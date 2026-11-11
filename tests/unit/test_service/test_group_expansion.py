@@ -117,7 +117,7 @@ def make_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         )
         async with GroupWorld.open(
             tmp_path / f"world_{built}",
-            llm=FakeLLMClient(handler=decider),
+            decider=FakeLLMClient(handler=decider),
             settings=settings,
         ) as world:
             await world.roster(

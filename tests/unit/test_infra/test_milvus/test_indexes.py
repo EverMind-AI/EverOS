@@ -56,7 +56,6 @@ def test_each_index_is_bound_to_the_milvus_repository(
     repos = milvus_index.repositories
     indexes = build_indexes(milvus_index)
     assert _bound(indexes.episode) is repos.episode
-    assert _bound(indexes.atomic_fact) is repos.atomic_fact
     assert _bound(indexes.agent_case) is repos.agent_case
     assert _bound(indexes.agent_skill) is repos.agent_skill
     assert _bound(indexes.profile) is repos.user_profile

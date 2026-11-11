@@ -416,9 +416,7 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records._provenance_key",
     "everos.infra.persistence.records -> everos.infra.persistence.records.agent_case",
     "everos.infra.persistence.records -> everos.infra.persistence.records.agent_skill",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.atomic_fact",
     "everos.infra.persistence.records -> everos.infra.persistence.records.episode",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.foresight",
     "everos.infra.persistence.records -> everos.infra.persistence.records.knowledge_topic",
     "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
     # The cascade facade assembles its public surface from its own modules.

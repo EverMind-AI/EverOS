@@ -12,9 +12,7 @@ from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
-    AtomicFactHandler,
     EpisodeHandler,
-    ForesightHandler,
     HandlerDeps,
     ImageMemoryHandler,
     KnowledgeTopicHandler,
@@ -87,8 +85,6 @@ async def _normal_row(
         )
     handlers = {
         "episode": EpisodeHandler,
-        "atomic_fact": AtomicFactHandler,
-        "foresight": ForesightHandler,
         "agent_case": AgentCaseHandler,
         "image_memory": ImageMemoryHandler,
     }
@@ -105,8 +101,6 @@ async def _normal_row(
             sections={
                 "Content": "episode body",
                 "Subject": subject,
-                "Fact": "atomic fact",
-                "Foresight": "future plan",
                 "TaskIntent": "case intent",
                 "Approach": "not the embedding source",
                 "Description": "picture description",

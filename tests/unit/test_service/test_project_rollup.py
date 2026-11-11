@@ -95,7 +95,6 @@ async def test_project_scope_covers_exactly_the_askers_current_groups(
             project_scope=True,
             asker_id="u_chen",
             query="marker plan",
-            method="keyword",
             top_k=20,
         )
     )

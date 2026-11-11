@@ -266,13 +266,12 @@ def search_episodes(
     query: str,
     owner_id: str,
     *,
-    method: str = "hybrid",
     top_k: int = 10,
 ) -> dict[str, Any]:
-    """Run a memory search and return the ``data`` payload."""
+    """Run a memory search (multi-round, the only method); return ``data``."""
     payload = {
         "query": query,
-        "method": method,
+        "method": "llm_multiround",
         "top_k": top_k,
         "user_id": owner_id,
     }
@@ -565,7 +564,7 @@ def tc8_health_update(client: EverosClient) -> TCResult:
 
 
 # ---------------------------------------------------------------------------
-# Test cases (TC9, TC11-TC14) — cross-cutting validation
+# Test cases (TC9, TC11, TC13, TC14) — cross-cutting validation
 # ---------------------------------------------------------------------------
 
 
@@ -612,20 +611,6 @@ def tc11_idempotency(client: EverosClient) -> TCResult:
             merged_before[0].get("id") == merged_after[0].get("id"),
             "same merged episode ID (no duplicate)",
         )
-    tc.print_summary()
-    return tc
-
-
-def tc12_atomic_facts(client: EverosClient) -> TCResult:
-    tc = TCResult("TC12: Atomic Facts Re-extraction")
-    print_section("TC12: Atomic Facts Re-extraction")
-    owner = _owner_id("caroline", 0)
-    result = search_episodes(client, QUERIES["adoption"], owner)
-    merged = [e for e in result.get("episodes", []) if e.get("session_id") is None]
-    tc.check(len(merged) >= 1, "merged episode exists")
-    if merged:
-        facts = merged[0].get("atomic_facts", [])
-        tc.check(len(facts) > 0, f"merged has atomic facts ({len(facts)} found)")
     tc.print_summary()
     return tc
 
@@ -742,7 +727,8 @@ TC_REGISTRY: dict[int, tuple[str, Any]] = {
     9: ("Search Visibility", lambda c, **kw: tc9_search_visibility(c)),
     # TC10 removed: was a duplicate of TC9 visibility checks.
     11: ("Idempotency", lambda c, **kw: tc11_idempotency(c)),
-    12: ("Atomic Facts", lambda c, **kw: tc12_atomic_facts(c)),
+    # TC12 removed: it checked the merged episode's atomic facts, which
+    # EverOS 2.0 no longer extracts.
     13: ("Topic Isolation", lambda c, **kw: tc13_topic_isolation(c)),
     14: (
         "Answer+Judge",

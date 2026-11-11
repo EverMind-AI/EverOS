@@ -21,9 +21,6 @@ the schema it has to produce.
 | `profile_extract.yaml` | `ProfileExtractor.aextract` (every INIT / UPDATE / COMPACT / REGROUP call) | additional-requirements section before the data |
 | `reflect.yaml` | `EpisodeReflector.areflect` | last block of the system message |
 
-Atomic-fact and foresight extraction take no custom instructions on the
-paths EverOS uses.
-
 ## File format
 
 `src/everos/config/custom_instructions/<operator>.yaml`:
