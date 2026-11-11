@@ -1,10 +1,11 @@
-"""Application layer: assembly plus three use-case facades.
+"""Application layer: assembly plus four use-case facades.
 
 :func:`build_application` builds an :class:`Application` from settings; an
 entry point holds that one object and calls its facades --
 :class:`MemoryService` (add / flush / search / get),
-:class:`KnowledgeService` (knowledge documents and search) and
-:class:`OpsService` (cascade, OME, health, tasks). One CLI command or API
+:class:`KnowledgeService` (knowledge documents and search),
+:class:`OpsService` (cascade, OME, health, tasks) and :class:`PurgeService`
+(clear a project, an app or the whole root). One CLI command or API
 endpoint maps to one facade method.
 
 External usage::
@@ -77,6 +78,9 @@ from .ops import SkillsPhaseResult as SkillsPhaseResult
 from .ops import VectorsPhaseResult as VectorsPhaseResult
 from .ops import compute_disabled_features as compute_disabled_features
 from .ops import format_tokens as format_tokens
+from .purge import PurgeJobView as PurgeJobView
+from .purge import PurgeRequestResult as PurgeRequestResult
+from .purge import PurgeService as PurgeService
 
 __all__ = [
     "BACKFILL_PHASES",
@@ -115,6 +119,9 @@ __all__ = [
     "PatchResult",
     "ProviderStatus",
     "Providers",
+    "PurgeJobView",
+    "PurgeRequestResult",
+    "PurgeService",
     "QueueHealth",
     "Queued",
     "QuiesceResult",

@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from everos.service.purge import PurgeJobView, PurgeRequestResult
+from everos.service import PurgeJobView, PurgeRequestResult
 
 from .ids import AppScopeId, ProjectScopeId
 
@@ -23,9 +23,6 @@ PurgeStatus = Literal["queued", "running", "succeeded", "failed"]
 PurgeStepState = Literal["pending", "done", "failed"]
 PurgeNonce = Annotated[
     str, StringConstraints(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-]
-PurgeJobId = Annotated[
-    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 ]
 
 
