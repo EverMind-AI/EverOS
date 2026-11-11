@@ -10,7 +10,10 @@ the JSON columns, so a read can drop the ones outside an asker's windows.
 
 ``pending_memcell_ids`` and ``history`` are not projected: the first is the
 update throttle's bookkeeping, the second is read from markdown when it is
-needed.
+needed. What a read needs of the history goes onto the items instead: an
+item that replaced others carries the values it replaced
+(:func:`~everos.memory.models.with_previous_values`, section 7.4), so an
+entry a forget takes out of the history leaves the row with the file.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from typing import Any, ClassVar
 from everos.infra.persistence.index import IndexRepository, primary_key
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.infra.persistence.records import UserProfile, member_profile_row_id
+from everos.memory.models import with_previous_values
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -55,8 +59,10 @@ class GroupMemberProfileHandler(Handler):
             )
         app_id, project_id = resolve_scope(md_path)
         summary = str(fm.get("summary", ""))
-        explicit_info_json = _dump_json(fm.get("explicit_info", []))
-        implicit_traits_json = _dump_json(fm.get("implicit_traits", []))
+        history = fm.get("history")
+        replaced = history if isinstance(history, list) else []
+        explicit_info_json = _items_json(fm.get("explicit_info", []), replaced)
+        implicit_traits_json = _items_json(fm.get("implicit_traits", []), replaced)
         digest = compute_content_sha256(
             {
                 "frontmatter:summary": summary,
@@ -99,6 +105,13 @@ class GroupMemberProfileHandler(Handler):
         return HandlerOutcome(
             md_path=md_path, kind=self.kind, upserted=0, deleted=deleted, skipped=0
         )
+
+
+def _items_json(items: Any, history: list[Any]) -> str:
+    """A bucket's column: its items as a read shows them, with what they replaced."""
+    return _dump_json(
+        with_previous_values(items, history) if isinstance(items, list) else items
+    )
 
 
 def _dump_json(value: Any) -> str:

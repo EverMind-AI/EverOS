@@ -14,7 +14,11 @@ model. What these pin:
 - a replayed event does not count its segment twice;
 - the operator is told a language, never left to choose one: the event's
   (the group pipeline's resolved language), a flush's resolved from the
-  segments it reads, a stored ``primary_language`` over either.
+  segments it reads, a stored ``primary_language`` over either;
+- through everalgo's own merge: an UPDATE op that rewrites an item by its
+  index makes the new item name the old one (``supersedes``, ``since``) and
+  the old one's history entry name it back; a delete with an add, and a
+  REGROUP rewrite, link nothing; the version keys never reach the model.
 """
 
 from __future__ import annotations
@@ -28,10 +32,12 @@ from typing import Any
 import pytest
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
+from everalgo.user_memory import ProfileExtractor
 
 from everos.config import Settings
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
-from everos.memory.models import Group, RosterEvent
+from everos.memory.mappers import profile as profile_mapper
+from everos.memory.models import ExplicitInfoItem, Group, Profile, RosterEvent
 from everos.memory.ports import Scope
 from everos.memory.strategies import update_member_profiles
 from tests.fakes import make_deps
@@ -283,3 +289,159 @@ async def test_a_stored_language_wins(every: Any) -> None:
     await update_member_profiles(_event("mc_2", "u_chen", language="English"), deps)
 
     assert "Write every output field in German" in model.prompts[-1]
+
+
+def _fact(description: str, category: str = "residence") -> dict[str, str]:
+    return {"evidence": "said so", "description": description, "category": category}
+
+
+class _ScriptedModel:
+    """INIT returns ``init``; each UPDATE returns the next ``updates`` reply."""
+
+    def __init__(
+        self,
+        init: list[dict[str, str]],
+        *updates: list[dict[str, Any]],
+        regroup: list[dict[str, str]] | None = None,
+    ) -> None:
+        self.init = init
+        self.updates = list(updates)
+        self.regroup = regroup
+        self.calls: list[str] = []
+
+    def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
+        name = response_format.__name__
+        self.calls.append(name)
+        if name == "_ProfileItems":
+            return json.dumps({"explicit_info": self.init, "implicit_traits": []})
+        if name == "_MemCellUpdateOutput":
+            ops = self.updates.pop(0)
+            return json.dumps({"operations": ops, "update_note": "n"})
+        if name == "_MemCellRegroupOutput" and self.regroup is not None:
+            return json.dumps({"items": self.regroup, "regroup_note": "n"})
+        raise AssertionError(name)
+
+
+async def _two_updates(model: _ScriptedModel) -> Any:
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "I live in Paris"))
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+    _segment(deps, "mc_2", 2_000, ("u_chen", "We moved to Berlin last week"))
+    await update_member_profiles(_event("mc_2", "u_chen"), deps)
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None
+    return chen
+
+
+async def test_an_update_op_rewriting_a_fact_links_the_new_value(every: Any) -> None:
+    every(1)
+    rewrite = {
+        "action": "update",
+        "type": "explicit_info",
+        "index": 0,
+        "data": _fact("Lives in Berlin"),
+    }
+    model = _ScriptedModel(
+        [_fact("Lives in Paris"), _fact("Cycles to work", "habits")], [rewrite]
+    )
+
+    chen = await _two_updates(model)
+
+    berlin, bike = chen.profile.explicit_info
+    (paris,) = chen.history
+    new = berlin.model_extra or {}
+    assert berlin.description == "Lives in Berlin"
+    # since = the end of the update's span: mc_2's one message, at 2_000 + 1.
+    assert (new["supersedes"], new["since"]) == (paris["item_id"], 2_001)
+    assert new["source_memcell_ids"] == ["mc_2"]
+    assert paris["description"] == "Lives in Paris"
+    assert (paris["superseded_by"], paris["replaced_at"]) == (new["item_id"], 2_001)
+    assert not {"supersedes", "since"} & set(bike.model_extra or {})
+
+
+async def test_a_delete_with_an_add_and_a_regroup_link_nothing(every: Any) -> None:
+    every(1)
+    replace = [
+        {"action": "delete", "type": "explicit_info", "index": 0, "reason": "moved"},
+        {"action": "add", "type": "explicit_info", "data": _fact("Lives in Berlin")},
+    ]
+    chen = await _two_updates(_ScriptedModel([_fact("Lives in Paris")], replace))
+    assert [i.description for i in chen.profile.explicit_info] == ["Lives in Berlin"]
+    assert "supersedes" not in (chen.profile.explicit_info[0].model_extra or {})
+    assert "superseded_by" not in chen.history[0]
+
+    # Nine plans: the UPDATE rewrites one by its index and adds a tenth, so the
+    # group passes its cap and REGROUP rewrites it without any host key.
+    plans = [_fact(f"Plan {n}", "plans") for n in range(9)]
+    rewrite_and_add = [
+        {"action": "update", "type": "explicit_info", "index": 0,
+         "data": _fact("Plan 0, moved to May", "plans")},
+        {"action": "add", "type": "explicit_info", "data": _fact("Plan 9", "plans")},
+    ]  # fmt: skip
+    regrouped = [_fact("Plan 0, moved to May", "plans"), _fact("Plans 1-9", "plans")]
+    model = _ScriptedModel(plans, rewrite_and_add, regroup=regrouped)
+    chen = await _two_updates(model)
+    assert "_MemCellRegroupOutput" in model.calls
+    assert [i.description for i in chen.profile.explicit_info] == [
+        "Plan 0, moved to May",
+        "Plans 1-9",
+    ]
+    for item in chen.profile.explicit_info:
+        assert not {"supersedes", "since"} & set(item.model_extra or {})
+    assert len(chen.history) == 9
+    assert all("superseded_by" not in entry for entry in chen.history)
+
+
+async def test_the_version_keys_never_reach_the_model() -> None:
+    """The UPDATE prompt for a profile with versions is the one without them."""
+
+    def stored(**version: object) -> Profile:
+        return Profile(
+            owner_id="u_chen",
+            summary="",
+            timestamp=1_000,
+            explicit_info=[
+                ExplicitInfoItem(
+                    description="Lives in Berlin",
+                    category="residence",
+                    evidence="said so",
+                    observed_at=1_000,
+                    item_id="pi_berlin",
+                    source_memcell_ids=["mc_1"],
+                    source_start=900,
+                    source_end=1_000,
+                    **version,
+                )
+            ],
+        )
+
+    prompts: list[str] = []
+
+    def model(messages: Any, *, response_format: type, **_: Any) -> str:
+        prompts.append("\n".join(str(m.content) for m in messages))
+        return json.dumps({"operations": [{"action": "none"}], "update_note": "n"})
+
+    cell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                sender_id="u_chen",
+                sender_name="Chen",
+                content="Still in Berlin",
+                timestamp=2_000,
+            )
+        ],
+        timestamp=2_000,
+    )
+    extractor = ProfileExtractor(llm=FakeLLMClient(handler=model))
+    for profile in (stored(), stored(supersedes="pi_paris", since=1_000)):
+        await extractor.aextract(
+            [cell],
+            sender_id="u_chen",
+            old_profile=profile_mapper.to_algo(profile),
+            output_language="English",
+        )
+    plain, versioned = prompts
+    assert versioned == plain
+    assert "supersedes" not in versioned and "pi_paris" not in versioned

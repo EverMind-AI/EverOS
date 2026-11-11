@@ -52,7 +52,7 @@ __all__ = [
     "visible_profile",
 ]
 
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -61,9 +61,13 @@ from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.models import (
     FORGOTTEN_MARK,
     MANAGER_ROLES,
+    MEMBER_PREVIOUS_KEY,
+    MEMBER_VERSION_KEYS,
     CanonicalMessage,
+    ExplicitInfoItem,
     Group,
     ImageMemory,
+    ImplicitTraitItem,
     Profile,
     Roster,
     RosterEvent,
@@ -323,11 +327,16 @@ def visible_profile(
     ``source_end``) lies in one of the asker's windows in the group; an item
     without a span is not. The summary is written over every item, so it is
     kept only when every item is visible. ``None`` when no item is.
+
+    The values a visible item replaced (section 7.4) are shown newest first up
+    to the first one the asker may not see; an item left with none shows no
+    version at all -- no ``supersedes`` naming an item the asker cannot see,
+    no ``since`` -- as a decision whose newer version is out of sight names
+    none.
     """
 
-    def keep(item: object) -> bool:
-        extra = getattr(item, "model_extra", None) or {}
-        start, end = extra.get("source_start"), extra.get("source_end")
+    def keep(entry: Mapping[str, object]) -> bool:
+        start, end = entry.get("source_start"), entry.get("source_end")
         if not isinstance(start, int) or not isinstance(end, int):
             return False
         return visible(
@@ -338,8 +347,16 @@ def visible_profile(
             source_end=end,
         )
 
-    explicit = [i for i in profile.explicit_info if keep(i)]
-    traits = [i for i in profile.implicit_traits if keep(i)]
+    explicit = [
+        _versions_shown(i, keep)
+        for i in profile.explicit_info
+        if keep(i.model_extra or {})
+    ]
+    traits = [
+        _versions_shown(i, keep)
+        for i in profile.implicit_traits
+        if keep(i.model_extra or {})
+    ]
     if not explicit and not traits:
         return None
     whole = len(explicit) == len(profile.explicit_info) and len(traits) == len(
@@ -352,6 +369,30 @@ def visible_profile(
             "summary": profile.summary if whole else "",
         }
     )
+
+
+def _versions_shown[ItemT: (ExplicitInfoItem, ImplicitTraitItem)](
+    item: ItemT, keep: Callable[[Mapping[str, object]], bool]
+) -> ItemT:
+    """``item`` with the values it replaced cut to those ``keep`` lets through."""
+    extra = item.model_extra or {}
+    previous = extra.get(MEMBER_PREVIOUS_KEY)
+    listed = previous if isinstance(previous, list) else []
+    shown: list[object] = []
+    for entry in listed:
+        if not isinstance(entry, Mapping) or not keep(entry):
+            break
+        shown.append(entry)
+    versioned = (MEMBER_PREVIOUS_KEY, *MEMBER_VERSION_KEYS)
+    if shown and len(shown) == len(listed):
+        return item
+    if not shown and not any(key in extra for key in versioned):
+        return item
+    data = {k: v for k, v in item.model_dump().items() if k not in versioned}
+    if shown:
+        data |= {k: extra[k] for k in MEMBER_VERSION_KEYS if k in extra}
+        data[MEMBER_PREVIOUS_KEY] = shown
+    return type(item).model_validate(data)
 
 
 def authorize_manage(roster: Roster, asker_id: str | None) -> None:

@@ -552,7 +552,8 @@ Depart on April 30 instead of May 1.
 
 The member-in-group profile `members/<member_id>.md` uses the 2.0 profile format
 (items with stable ids, per-item source memcells, a history part for replaced
-items) with `group_id` and `member_id` in its frontmatter.
+items, a new value linked to the item it replaced; section 7.4) with
+`group_id` and `member_id` in its frontmatter.
 
 ### 6.2 SQLite
 
@@ -698,6 +699,32 @@ say about one member: preferences, constraints, commitments, expertise.
   run in parallel and two updates for one member never lose each other's items.
 - **Sources.** Every item records its source memcells (the 2.0 profile format).
   A check rejects an item none of whose sources contains a message by the member.
+- **Versions.** When the operator's UPDATE rewrites a fact (`explicit_info`)
+  by its index, the new item is a new value of the old one. It records the
+  old item's id (`supersedes`) and the time of the update (`since`, the end
+  of the update's span); the old item moves to the history with
+  `replaced_at` and the new one's id (`superseded_by`). The link is exact:
+  everalgo keeps a host's keys on the item an UPDATE op patches, so the
+  rewritten item still carries the old `item_id`. No text is compared, and
+  the prompt and the model's output are unchanged. A rewrite that only
+  re-punctuates is not a new value, and an implicit trait is an inferred
+  pattern, not a stated value: a rewrite of one sharpens the inference and is
+  not linked. COMPACT and REGROUP write items without host keys and a dedupe
+  keeps the item already on file, so neither is shown as a value change; a
+  `delete` with an `add` is not linked either, since the reply does not say
+  they are one fact, and neither is an `add` the model chose where an
+  `update` would have fit. When COMPACT or REGROUP runs in the same call as
+  the UPDATE that rewrote an item, the rewritten item comes back without host
+  keys and is not linked.
+- **Reading versions.** The cascade puts the values an item replaced on the
+  item in the index row: `previous`, newest first, at most two, each with
+  `item_id`, `description`, `until` and the old item's span. A read shows
+  them up to the first one outside the asker's windows; an item left with
+  none shows no `since` or `supersedes`, as a decision whose newer version
+  the asker cannot see names none. A value a forget took out of the history
+  is not projected, so it is never shown again, as a previous value either.
+  A forget by record id reaches a replaced value by the id a read lists. The
+  history keeps 200 entries and never drops one a current item still shows.
 - **Limit.** Facts about a member stated only by others reach the group profile
   (Step 2) and the episodes, not this profile, because the operator reads the
   member's own lines.
@@ -1439,7 +1466,9 @@ The second half of Step 1 differs from the text above in these places:
   carries `item_id`, `source_memcell_ids` and the span `source_start` /
   `source_end`. The profile operator does not say which segment an item came
   from, so an item's sources are all the segments of the update that added or
-  rewrote it. The index row id is `<group_id>:<member_id>`.
+  rewrote it. The index row id is `<group_id>:<member_id>`. A new value of an
+  item carries `supersedes` and `since`, its history entry `superseded_by`;
+  the index row's items carry `previous` (section 7.4).
 - **Member-profile visibility.** An item is shown when the span of its
   sources lies in one of the asker's windows. The summary is written over
   every item, so it is shown only when every item is.
