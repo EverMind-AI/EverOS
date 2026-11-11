@@ -279,6 +279,7 @@ def write_episode(
     parent_id: str = "mc_x",
     parent_type: str = "memcell",
     project: str = "default",
+    app: str = "default",
     ts: int = TS,
 ) -> str:
     """Append one episode to ``owner``'s file of ``day`` (YYYY-MM-DD); its id."""
@@ -302,6 +303,7 @@ def write_episode(
             inline=inline,
             sections={"Subject": "s", "Summary": "s", "Content": text},
             date=dt.date.fromisoformat(day),
+            app_id=app,
             project_id=project,
         )
     )

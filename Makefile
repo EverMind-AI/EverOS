@@ -1,4 +1,4 @@
-.PHONY: acceptance help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime check-singletons openapi check-openapi format test integration package cov ci verify-parity clean
+.PHONY: acceptance acceptance-purge help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime check-singletons openapi check-openapi format test integration package cov ci verify-parity clean
 
 help:
 	@echo "Targets:"
@@ -137,6 +137,11 @@ integration:
 # local proxy; needs OPENROUTER_API_KEY and DEEPINFRA_API_KEY in the shell.
 acceptance:
 	uv run pytest tests/acceptance -m acceptance -v
+
+# Purge against a real server with a local fake LLM / embedding / rerank:
+# no credentials, no spend.
+acceptance-purge:
+	uv run pytest tests/acceptance/purge -m acceptance -v
 
 package:
 	rm -rf dist .package-smoke
