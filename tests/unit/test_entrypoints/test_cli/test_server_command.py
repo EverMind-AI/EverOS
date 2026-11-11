@@ -66,7 +66,9 @@ def test_start_cli_flags_override_env(
 ) -> None:
     monkeypatch.setenv("EVEROS_API__HOST", "1.2.3.4")
     monkeypatch.setenv("EVEROS_API__PORT", "9000")
-    monkeypatch.setenv("EVEROS_API__LOG_LEVEL", "debug")
+    # The log level's own key; ``EVEROS_API__LOG_LEVEL`` was never one and is
+    # now refused as unknown.
+    monkeypatch.setenv("EVEROS_LOGGING__LEVEL", "DEBUG")
     from everos.config import load_settings
 
     load_settings.cache_clear()

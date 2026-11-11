@@ -303,6 +303,16 @@ class IndexSchemaMismatchError(ConfigurationError):
     """
 
 
+class UnknownConfigKeyError(ConfigurationError):
+    """The configuration names a key no section has.
+
+    Raised while settings load, for every unknown key at once, each with the
+    file or ``EVEROS_*`` variable it came from and the nearest valid key.
+    Before, such a key was dropped without a word and the run used a default
+    nobody chose.
+    """
+
+
 class StoreVersionError(ConfigurationError):
     """The memory root was built by another EverOS major than this one.
 

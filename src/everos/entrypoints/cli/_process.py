@@ -9,8 +9,25 @@ the configured level (INFO by default) and sets it itself.
 
 from __future__ import annotations
 
-from everos.config import Settings
+import typer
+
+from everos.config import Settings, load_settings
+from everos.core.errors import ConfigurationError
 from everos.service import configure_process
+
+
+def load_settings_or_exit() -> Settings:
+    """The settings, or exit 3 with the reason when they cannot load.
+
+    An unknown key, a bad value: the message already says what to fix, so a
+    traceback would only bury it. Exit code 3 is the CLI's "an operator has
+    one thing to fix" code, as for a refused store.
+    """
+    try:
+        return load_settings()
+    except ConfigurationError as exc:
+        typer.secho(str(exc), err=True)
+        raise typer.Exit(code=3) from None
 
 
 def with_log_level(settings: Settings, level: str) -> Settings:

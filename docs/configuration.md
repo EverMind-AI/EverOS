@@ -46,6 +46,40 @@ Settings are resolved in this order (later wins):
 3. `EVEROS_*` environment variables — container/CI overrides
 4. Programmatic init args (highest priority; internal use)
 
+### Unknown keys are rejected
+
+A key no section declares fails the load -- in `everos.toml`, or as an
+`EVEROS_<SECTION>__<KEY>` variable whose section exists. Every unknown key is
+listed at once, with the file or variable it came from and the nearest valid
+key; the server and the CLI print it and exit with code `3`:
+
+```text
+Unknown configuration keys. EverOS rejects a key it does not know, so a misspelt setting cannot fall back to its default without a word:
+  [llm] modle (from /root/.everos/everos.toml) -- did you mean [llm] model?
+  [decider] fit_to_windows (from EVEROS_DECIDER__FIT_TO_WINDOWS) -- did you mean [decider] fit_to_window?
+```
+
+Before, such a key was dropped silently and the run used a default nobody
+chose. Variables that name no section (`EVEROS_ROOT`, `EVEROS_DISABLE_OME`,
+`EVEROS_LLMMR_TRACE_DUMP`, ...) are not configuration keys and are not checked.
+Inside a free-form field (`[llm] extra`, `[decider] extra`,
+`[observability] headers`) any key is accepted.
+
+A few keys EverOS itself once wrote are accepted, ignored, and logged once as
+`config_key_ignored` with the reason; delete them wherever they appear:
+
+| Key | Why it is ignored |
+|---|---|
+| `[decider] code_pin` | A label evaluation launchers export (`EVEROS_DECIDER__CODE_PIN`); EverOS does not read it |
+| `[decider] full_text` | Removed: the decider always reads the full episode text |
+| `[decider] invalid_reply_retries` | Removed: an unusable reply is one failed attempt of `[decider] retries` |
+| `[knowledge.search] session_lock_timeout_seconds` | Placed there by an older `everos init` template; the lock timeout is `[memorize] session_lock_timeout_seconds` |
+| `[llm] search_timeout_seconds` | Not read by EverOS 2; a decider round's deadline is `[decider] timeout_seconds` |
+| `[memory] root` | Removed in 1.x: the root is `--root`, `EVEROS_ROOT` or `~/.everos` |
+| `[observability] recall_hit_threshold` | Removed with the search hit verdict |
+| `[search] facts_per_episode` | Removed with atomic facts |
+| `[search] vector_strategy` | Removed in 1.x with the vector search method |
+
 ## Memory Root Resolution
 
 The memory root directory is resolved from three sources (first wins):

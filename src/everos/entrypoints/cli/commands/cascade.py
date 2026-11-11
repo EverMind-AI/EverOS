@@ -41,7 +41,7 @@ from typing import Annotated
 
 import typer
 
-from everos.config import Settings, load_settings
+from everos.config import Settings
 from everos.core.errors import (
     EmbeddingProvenanceError,
     IndexSchemaMismatchError,
@@ -51,7 +51,10 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_display_tz
-from everos.entrypoints.cli._process import configure_interactive
+from everos.entrypoints.cli._process import (
+    configure_interactive,
+    load_settings_or_exit,
+)
 from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.service import Application, OpsService, build_application
 
@@ -110,7 +113,7 @@ def _command_settings(
     _apply_root_env(root)
     if verbose is None:
         verbose = bool(ctx.ensure_object(dict).get("verbose", False))
-    return configure_interactive(verbose=verbose, settings=load_settings())
+    return configure_interactive(verbose=verbose, settings=load_settings_or_exit())
 
 
 _ROOT_OPTION_HELP = (

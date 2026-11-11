@@ -200,6 +200,22 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **Unknown configuration keys are rejected.** A key no section declares --
+  in `everos.toml`, or an `EVEROS_<SECTION>__<KEY>` variable of an existing
+  section -- fails the load with `UnknownConfigKeyError`, listing every
+  unknown key with the file or variable it came from and the nearest valid
+  key; the server and the CLI print it and exit with code `3`. Settings used
+  `extra="ignore"`, so a misspelt key silently fell back to its default.
+  Keys EverOS itself once wrote and that the configurations in use still
+  carry are accepted, ignored and logged once as `config_key_ignored`
+  (`[llm] search_timeout_seconds`, `[decider] full_text` /
+  `invalid_reply_retries` / `code_pin`, `[knowledge.search]
+  session_lock_timeout_seconds`, `[observability] recall_hit_threshold`,
+  `[search] facts_per_episode` / `vector_strategy`, `[memory] root`; see
+  [docs/configuration.md](docs/configuration.md#unknown-keys-are-rejected)).
+  Variables that name no section (`EVEROS_ROOT`, `EVEROS_DISABLE_OME`, ...)
+  are not checked. No model call.
+
 - **EverOS 2 opens only the stores EverOS 2 built.** `.index/store_version`
   holds the store's major (`2`). The server, every `everos cascade` command
   and backfill check it before anything in the root changes: a new root is

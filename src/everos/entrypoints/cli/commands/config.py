@@ -7,7 +7,10 @@ import os
 import typer
 
 from everos.config.settings import resolve_root
-from everos.entrypoints.cli._process import configure_interactive
+from everos.entrypoints.cli._process import (
+    configure_interactive,
+    load_settings_or_exit,
+)
 
 app = typer.Typer(
     name="config",
@@ -86,7 +89,7 @@ def show(
     from everos.config import load_settings
 
     load_settings.cache_clear()
-    settings = load_settings()
+    settings = load_settings_or_exit()
 
     for section_name in _SECTION_NAMES:
         section = getattr(settings, section_name, None)

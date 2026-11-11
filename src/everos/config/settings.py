@@ -25,20 +25,34 @@ call. Tests that mutate environment variables must call
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
+import tomllib
+from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+
+from everos.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 _DEFAULT_TOML_PATH = Path(__file__).parent / "default.toml"
 _DEFAULT_ROOT = Path("~/.everos")
@@ -68,7 +82,19 @@ ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
 :attr:`LLMSettings.response_format_mode`."""
 
 
-class MemorySettings(BaseModel):
+class _Section(BaseModel):
+    """One configuration section: a key it does not declare is an error.
+
+    Settings used to ignore unknown keys, so a misspelt key in ``everos.toml``
+    or an ``EVEROS_<SECTION>__<KEY>`` variable fell back to its default without
+    a word. :class:`Settings` reports every unknown key at once, with where it
+    came from; ``extra="forbid"`` keeps a section built on its own as strict.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MemorySettings(_Section):
     """Memory configuration."""
 
     timezone: str = "UTC"
@@ -92,7 +118,7 @@ class MemorySettings(BaseModel):
         return v
 
 
-class ApiSettings(BaseModel):
+class ApiSettings(_Section):
     """HTTP API server bind configuration.
 
     Default ``host = "127.0.0.1"`` keeps the server on loopback only,
@@ -110,7 +136,7 @@ class ApiSettings(BaseModel):
     port: int = Field(default=8000, ge=1, le=65535)
 
 
-class SqliteSettings(BaseModel):
+class SqliteSettings(_Section):
     """SQLite tunables applied as PRAGMAs on every new connection."""
 
     journal_mode: Literal["WAL", "DELETE", "MEMORY", "OFF", "TRUNCATE", "PERSIST"] = (
@@ -153,7 +179,7 @@ class SqliteSettings(BaseModel):
     cache_size_kb: int = Field(default=2048, ge=0)
 
 
-class LLMSettings(BaseModel):
+class LLMSettings(_Section):
     """LLM client configuration.
 
     Read by the service layer when lazily constructing the LLM client
@@ -258,7 +284,7 @@ class LLMSettings(BaseModel):
         return value
 
 
-class DeciderSettings(BaseModel):
+class DeciderSettings(_Section):
     """LLM driving the multi-round retrieval decider.
 
     A flat section mirroring ``[llm]``, kept separate for the same reason
@@ -433,7 +459,7 @@ class DeciderSettings(BaseModel):
     """JPEG quality of the decider's copy."""
 
 
-class MultimodalSettings(BaseModel):
+class MultimodalSettings(_Section):
     """Multimodal parsing LLM config (everalgo-parser).
 
     Flat section mirroring ``[llm]``. The model must accept multimodal
@@ -469,7 +495,7 @@ class MultimodalSettings(BaseModel):
     """Max size (bytes) of a ``file://`` asset; larger files are rejected."""
 
 
-class ImagesSettings(BaseModel):
+class ImagesSettings(_Section):
     """``[images]`` — how picture content items are stored and scaled.
 
     Pictures are content-addressed once per distinct file, so these limits
@@ -514,7 +540,7 @@ class ImagesSettings(BaseModel):
     """Accepted picture formats, by the format ``Pillow`` reports."""
 
 
-class ExtractionSettings(BaseModel):
+class ExtractionSettings(_Section):
     """``[extraction]`` — what the extraction model can read.
 
     ``vision`` says whether the model behind ``[llm]`` accepts ``image_url``
@@ -532,7 +558,7 @@ class ExtractionSettings(BaseModel):
     extractor is a vision model, and the text-only route costs a call."""
 
 
-class EmbeddingSettings(BaseModel):
+class EmbeddingSettings(_Section):
     """Embedding client configuration.
 
     OpenAI-compatible embedding endpoint. ``model`` / ``api_key`` /
@@ -594,7 +620,7 @@ class EmbeddingSettings(BaseModel):
     latency, with headroom."""
 
 
-class VisionEmbeddingSettings(BaseModel):
+class VisionEmbeddingSettings(_Section):
     """``[vision_embedding]`` — the picture's own embedding endpoint.
 
     A separate section rather than another field on ``[embedding]``: the two
@@ -645,7 +671,7 @@ class VisionEmbeddingSettings(BaseModel):
     """Separate budget for the interactive query embed, as on ``[embedding]``."""
 
 
-class RerankSettings(BaseModel):
+class RerankSettings(_Section):
     """Rerank client configuration.
 
     Unlike LLM / embedding (single OpenAI-compatible shape), rerank API
@@ -675,14 +701,14 @@ class RerankSettings(BaseModel):
     max_concurrent: int = Field(default=50, ge=1)
 
 
-class BoundaryDetectionSettings(BaseModel):
+class BoundaryDetectionSettings(_Section):
     """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
 
     hard_token_limit: int = Field(default=65536, ge=1)
     hard_msg_limit: int = Field(default=500, ge=1)
 
 
-class AsyncQueueSettings(BaseModel):
+class AsyncQueueSettings(_Section):
     """``async_mode`` memorize queue (``[memorize.async_queue]``).
 
     With ``enabled`` off, ``async_mode=true`` requests run synchronously; the
@@ -738,7 +764,7 @@ class AsyncQueueSettings(BaseModel):
     row_retention_hours: float = Field(default=7 * 24.0, gt=0, le=366 * 24.0)
 
 
-class MemorizeSettings(BaseModel):
+class MemorizeSettings(_Section):
     """Memorize use-case configuration.
 
     ``mode`` selects what boundary detection sees and which pipelines are
@@ -774,7 +800,7 @@ class MemorizeSettings(BaseModel):
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
 
 
-class AgentMemorySettings(BaseModel):
+class AgentMemorySettings(_Section):
     """Agent-memory extraction (``[agent_memory]``).
 
     ``case_gate_enabled`` puts everalgo's correctness gate in front of
@@ -792,7 +818,7 @@ class AgentMemorySettings(BaseModel):
     case_gate_enabled: bool = False
 
 
-class ClusteringSettings(BaseModel):
+class ClusteringSettings(_Section):
     """Geometry-clustering tunables.
 
     Env binding:
@@ -804,7 +830,7 @@ class ClusteringSettings(BaseModel):
     time_window_days: float = Field(default=7.0, gt=0)
 
 
-class LanceDBSettings(BaseModel):
+class LanceDBSettings(_Section):
     """LanceDB tunables.
 
     ``read_consistency_seconds``:
@@ -921,7 +947,7 @@ class LanceDBSettings(BaseModel):
     turned all their results into Python objects on the event loop together."""
 
 
-class CascadeSettings(BaseModel):
+class CascadeSettings(_Section):
     """Cascade on/off switches and maintenance cadences.
 
     ``enabled``:
@@ -997,7 +1023,7 @@ class CascadeSettings(BaseModel):
     delete_fence_warn_entries: int = Field(default=100_000, gt=0)
 
 
-class OmeSettings(BaseModel):
+class OmeSettings(_Section):
     """Offline memory engine (OME) tunables.
 
     Engine-wide knobs only. Per-strategy overrides (enable / gate / cron) live
@@ -1037,13 +1063,13 @@ class OmeSettings(BaseModel):
         return value or None
 
 
-class IndexSettings(BaseModel):
+class IndexSettings(_Section):
     """Rebuildable derived-index backend selection."""
 
     backend: Literal["lancedb", "milvus"] = "lancedb"
 
 
-class MilvusSettings(BaseModel):
+class MilvusSettings(_Section):
     """Remote Milvus Server or Zilliz Cloud connection settings."""
 
     uri: str = ""
@@ -1063,7 +1089,7 @@ class MilvusSettings(BaseModel):
         return value
 
 
-class KnowledgeSearchSettings(BaseModel):
+class KnowledgeSearchSettings(_Section):
     """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
 
     recall_n: int = 200
@@ -1072,17 +1098,17 @@ class KnowledgeSearchSettings(BaseModel):
     lam: float = Field(0.1, alias="lambda")
     top_k_cap: int = 100
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
-class KnowledgeSettings(BaseModel):
+class KnowledgeSettings(_Section):
     """``[knowledge]`` — knowledge module configuration."""
 
     max_upload_bytes: int = 52_428_800  # 50 MiB
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
-class GroupsSettings(BaseModel):
+class GroupsSettings(_Section):
     """Group memory (``[groups]``, docs/group-memory.md sections 5.2 and 7.4).
 
     ``implicit_create``: a ``/memory/add`` naming an unknown ``group_id``
@@ -1118,7 +1144,7 @@ class GroupsSettings(BaseModel):
     group_profile_idle_seconds: int = Field(default=600, ge=2)
 
 
-class GroupSearchSettings(BaseModel):
+class GroupSearchSettings(_Section):
     """``[search]`` -- what a group search adds around its ranking (sections 8.3-8.5).
 
     ``expansion``: after each round of a group's multi-round search, follow the
@@ -1144,7 +1170,7 @@ class GroupSearchSettings(BaseModel):
     group_profile_cap: int = Field(default=20, ge=1)
 
 
-class AccessSettings(BaseModel):
+class AccessSettings(_Section):
     """Who is asking (``[access]``, docs/group-memory.md section 9.2).
 
     EverOS trusts its caller. A deployment that serves several people puts a
@@ -1156,7 +1182,7 @@ class AccessSettings(BaseModel):
     identity_header: str | None = None
 
 
-class LoggingSettings(BaseModel):
+class LoggingSettings(_Section):
     """``[logging]`` — the process's console log output.
 
     ``everos server start --log-level`` and ``EVEROS_LOG_LEVEL`` override
@@ -1170,7 +1196,7 @@ class LoggingSettings(BaseModel):
     level: str = "INFO"
 
 
-class ObservabilitySettings(BaseModel):
+class ObservabilitySettings(_Section):
     """``[observability]`` — OpenTelemetry tracing export.
 
     Off by default. When ``enabled`` is true a ``TracerProvider`` is built
@@ -1254,8 +1280,170 @@ class _ReadOnlySwitchSource(PydanticBaseSettingsSource):
         return cleared
 
 
+IGNORED_KEYS: Mapping[str, str] = {
+    "decider.code_pin": (
+        "a label the evaluation launchers export (EVEROS_DECIDER__CODE_PIN) to "
+        "record which EverOS build ran; EverOS does not read it"
+    ),
+    "decider.full_text": "removed: the decider always reads the full episode text",
+    "decider.invalid_reply_retries": (
+        "removed: an unusable decider reply is one failed attempt of [decider] retries"
+    ),
+    "knowledge.search.session_lock_timeout_seconds": (
+        "placed here by an older `everos init` template and never read here; "
+        "the lock timeout is [memorize] session_lock_timeout_seconds"
+    ),
+    "llm.search_timeout_seconds": (
+        "not read by EverOS 2; a decider round's deadline is [decider] timeout_seconds"
+    ),
+    "memory.root": (
+        "removed in EverOS 1.x: the root is --root, EVEROS_ROOT or ~/.everos"
+    ),
+    "observability.recall_hit_threshold": "removed with the search hit verdict",
+    "search.facts_per_episode": "removed with atomic facts",
+    "search.vector_strategy": "removed in EverOS 1.x with the vector search method",
+}
+"""Keys accepted and ignored, each logged once with why (``config_key_ignored``).
+
+Every other unknown key fails the load. These are the keys EverOS itself once
+wrote or documented and that configurations in use still carry: ``everos init``
+copied some of them into the ``everos.toml`` of every store built before 2.0's
+clean-up, and benchmark launchers export ``EVEROS_LLM__SEARCH_TIMEOUT_SECONDS``
+and the decider code-pin label. A retired key is safe to delete wherever it
+appears.
+"""
+
+
+def _model_of(annotation: Any) -> type[BaseModel] | None:
+    """The section model a field holds, or ``None`` for a value field."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    return None
+
+
+def _key_names(model: type[BaseModel]) -> dict[str, str]:
+    """Every spelling a key of ``model`` may take (aliases too) -> its field."""
+    names: dict[str, str] = {}
+    for name, field in model.model_fields.items():
+        names[name] = name
+        for alias in (field.alias, field.validation_alias):
+            if isinstance(alias, str):
+                names[alias] = name
+    return names
+
+
+def _unknown_keys(
+    model: type[BaseModel], data: Mapping[str, Any], path: tuple[str, ...] = ()
+) -> list[tuple[str, ...]]:
+    """The paths in ``data`` that ``model`` and its sections do not declare.
+
+    A free-form field (``[llm] extra``, ``[observability] headers``) is a value,
+    so nothing under it is checked.
+    """
+    names = _key_names(model)
+    unknown: list[tuple[str, ...]] = []
+    for key, value in data.items():
+        if key not in names:
+            unknown.append((*path, str(key)))
+            continue
+        section = _model_of(model.model_fields[names[key]].annotation)
+        if section is not None and isinstance(value, Mapping):
+            unknown.extend(_unknown_keys(section, value, (*path, str(key))))
+    return unknown
+
+
+def _drop_ignored(data: dict[str, Any]) -> None:
+    """Remove the :data:`IGNORED_KEYS` from ``data``, naming each one found."""
+    for dotted, why in IGNORED_KEYS.items():
+        *parents, key = dotted.split(".")
+        node: Any = data
+        for part in parents:
+            node = node.get(part) if isinstance(node, Mapping) else None
+        if isinstance(node, dict) and key in node:
+            node.pop(key)
+            logger.warning(
+                "config_key_ignored",
+                key=_label((*parents, key), table=False),
+                source=_source_of((*parents, key)),
+                reason=why,
+            )
+
+
+def _label(path: tuple[str, ...], *, table: bool) -> str:
+    """``[llm] model`` for a key, ``[serch]`` for a section."""
+    if table:
+        return f"[{'.'.join(path)}]"
+    if len(path) == 1:
+        return path[0]
+    return f"[{'.'.join(path[:-1])}] {path[-1]}"
+
+
+def _source_of(path: tuple[str, ...]) -> str:
+    """Where a key was set: its ``EVEROS_*`` variable, or the TOML file."""
+    variable = "EVEROS_" + "__".join(path).upper()
+    if any(name.upper() == variable for name in os.environ):
+        return variable
+    for toml in (resolve_root() / "everos.toml", _DEFAULT_TOML_PATH):
+        if _toml_has(toml, path):
+            return str(toml)
+    return "the settings arguments"
+
+
+def _toml_has(toml: Path, path: tuple[str, ...]) -> bool:
+    try:
+        node: Any = tomllib.loads(toml.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    for part in path:
+        if not isinstance(node, Mapping) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _suggestion(path: tuple[str, ...]) -> str:
+    """`` -- did you mean [llm] model?`` when a valid key is close."""
+    model: type[BaseModel] | None = Settings
+    for part in path[:-1]:
+        names = _key_names(model) if model is not None else {}
+        field = model.model_fields.get(names.get(part, "")) if model else None
+        model = _model_of(field.annotation) if field is not None else None
+    if model is None:
+        return ""
+    close = difflib.get_close_matches(path[-1], list(_key_names(model)), n=1)
+    if not close:
+        return ""
+    candidate = (*path[:-1], close[0])
+    field = model.model_fields.get(_key_names(model)[close[0]])
+    table = field is not None and _model_of(field.annotation) is not None
+    return f" -- did you mean {_label(candidate, table=table)}?"
+
+
+def _unknown_message(data: Mapping[str, Any], unknown: list[tuple[str, ...]]) -> str:
+    lines = [
+        "Unknown configuration keys. EverOS rejects a key it does not know, so "
+        "a misspelt setting cannot fall back to its default without a word:"
+    ]
+    for path in unknown:
+        node: Any = data
+        for part in path:
+            node = node.get(part) if isinstance(node, Mapping) else None
+        label = _label(path, table=isinstance(node, Mapping))
+        lines.append(f"  {label} (from {_source_of(path)}){_suggestion(path)}")
+    lines.append(
+        "Correct or remove them; `everos config show` prints the effective "
+        "configuration."
+    )
+    return "\n".join(lines)
+
+
 class Settings(BaseSettings):
-    """Top-level application settings."""
+    """Top-level application settings.
+
+    Strict: a key no section declares fails the load with
+    :class:`~everos.core.errors.UnknownConfigKeyError`, except the retired
+    keys in :data:`IGNORED_KEYS`, which are logged and dropped.
+    """
 
     memory: MemorySettings = MemorySettings()
     api: ApiSettings = ApiSettings()
@@ -1288,8 +1476,30 @@ class Settings(BaseSettings):
         env_prefix="EVEROS_",
         env_nested_delimiter="__",
         toml_file=_DEFAULT_TOML_PATH,
-        extra="ignore",
+        extra="forbid",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _known_keys_only(cls, data: Any) -> Any:
+        """Drop the retired keys; refuse every other key no section declares.
+
+        Runs on the merged sources (init arguments, the read-only switches,
+        ``EVEROS_*`` variables, ``everos.toml``, ``default.toml``). Raises
+        :class:`UnknownConfigKeyError` itself rather than a ``ValueError``, so
+        the message is not wrapped in a validation error that would echo the
+        whole configuration -- keys included.
+        """
+        if not isinstance(data, dict):
+            return data
+        _drop_ignored(data)
+        unknown = _unknown_keys(cls, data)
+        if unknown:
+            # Deferred: everos.core.errors imports everos.config.
+            from everos.core.errors import UnknownConfigKeyError
+
+            raise UnknownConfigKeyError(_unknown_message(data, unknown))
+        return data
 
     def __init__(self, *, _everos_root: Path | None = None, **kwargs: object) -> None:
         """Initialise settings, optionally pinning the memory-root for testing.

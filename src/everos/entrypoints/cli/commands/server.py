@@ -14,10 +14,10 @@ import sys
 import typer
 import uvicorn
 
-from everos.config import load_settings
 from everos.config.settings import resolve_root
 from everos.core.observability.logging import get_logger
 from everos.core.utils.open_files import low_limit_warning, raise_open_file_limit
+from everos.entrypoints.cli._process import load_settings_or_exit
 from everos.service import configure_process
 
 app = typer.Typer(
@@ -95,7 +95,7 @@ def start(
         # --reload), so the override travels the way --root does: as env.
         os.environ["EVEROS_LOGGING__LEVEL"] = level_override.upper()
 
-    settings = load_settings()
+    settings = load_settings_or_exit()
     configure_process(settings)
 
     host_resolved = host or settings.api.host
