@@ -277,11 +277,96 @@ async def test_primary_language_does_not_reach_the_algo_profile() -> None:
     assert "primary_language" not in old.model_dump()
 
 
+async def test_the_triggering_memcell_counts_before_the_index_has_it() -> None:
+    """The cluster path does not wait for the cascade to index the new episode.
+
+    Measured 2026-11-11 on a two-owner audio transcript: the owner whose whole
+    conversation was one memcell logged ``profile_extraction_below_min_memcells
+    memcell_count=0`` and never got a profile, because the episode that triggered
+    the run was not in the index yet. The event's memcell is read from the
+    ledger instead.
+    """
+    deps = make_deps()
+    scope = _scope()
+    # The cluster holds the new episode, which the index does not have yet;
+    # only the memcell ledger has its memcell.
+    deps.stores.cluster.seed(
+        scope,
+        "user_memory",
+        _cluster(
+            cluster_id="cl_user00000001",
+            members=["ep_20260101_0001"],
+            last_ts=1_700_000_001_000,
+        ),
+    )
+    deps.stores.memcell.seed(
+        "mc_aaaaaaaaaaa1",
+        _memcell("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_001_000),
+    )
+    new_profile = AlgoProfile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": 1_700_000_001_000,
+            "explicit_info": [{"description": "lives in tokyo"}],
+            "implicit_traits": [],
+        }
+    )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        await extract_user_profile(_event(), deps)
+
+    call = extractor_cls.return_value.aextract.call_args
+    assert call is not None, "the single-memcell owner got no profile"
+    assert [mc.timestamp for mc in call.args[0]] == [1_700_000_001_000]
+    assert call.kwargs["old_profile"] is None
+    stored = deps.stores.profile.profiles[scope]
+    assert [i.description for i in stored.explicit_info] == ["lives in tokyo"]
+
+
+async def test_the_triggering_memcell_joins_the_indexed_members() -> None:
+    """An older, indexed member and the new, unindexed one are both read once."""
+    deps = make_deps()
+    _seed(
+        deps,
+        _scope(),
+        cluster_id="cl_user00000001",
+        entry_id="ep_20260101_0001",
+        memcell_id="mc_aaaaaaaaaaa1",
+        last_ts=1_700_000_001_000,
+    )
+    deps.stores.memcell.seed(
+        "mc_bbbbbbbbbbb2",
+        _memcell("mc_bbbbbbbbbbb2", sender_id="u_alice", ts_ms=1_700_000_002_000),
+    )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(
+            return_value=AlgoProfile(
+                owner_id="u_alice",
+                summary="s",
+                timestamp=1_700_000_002_000,
+                explicit_info=[],
+                implicit_traits=[],
+            )
+        )
+        await extract_user_profile(_event(memcell_id="mc_bbbbbbbbbbb2"), deps)
+        # The indexed member's own event: its memcell is not read twice.
+        await extract_user_profile(_event(memcell_id="mc_aaaaaaaaaaa1"), deps)
+
+    first, second = extractor_cls.return_value.aextract.call_args_list
+    assert [mc.timestamp for mc in first.args[0]] == [
+        1_700_000_001_000,
+        1_700_000_002_000,
+    ]
+    assert [mc.timestamp for mc in second.args[0]] == [1_700_000_001_000]
+
+
 async def test_skips_when_no_members() -> None:
     """An empty target cluster set (no fresh clusters) → no extractor call."""
     # Existing profile timestamp newer than every cluster's last_ts → no
     # target_cluster matches `last_ts > last_profile_ts`, and the current
-    # cluster_id names a cluster that does not exist, so nothing is selected.
+    # cluster_id names a cluster that does not exist, so only the event's own
+    # memcell is selected -- and the ledger does not hold it (deleted).
     deps = make_deps()
     deps.stores.cluster.seed(
         _scope(),

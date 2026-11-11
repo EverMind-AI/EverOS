@@ -159,6 +159,14 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **An owner whose conversation is one memcell gets a profile.** The profile
+  strategy resolved the memcells of the triggering cluster through the
+  episode index, which the cascade fills on its own schedule, so the episode
+  that triggered the run was usually not indexed yet: every run missed its
+  newest memcell, and an owner with a single memcell logged
+  `profile_extraction_below_min_memcells memcell_count=0` and got no profile.
+  The event's own memcell is now always selected and read from the SQLite
+  ledger, as the direct (no-embedding) path already did.
 - **Extractions are written in the conversation's language.** No extraction
   prompt named a language, so the model was left to work it out, and the 2.0
   backbone answered English picture cells in Chinese -- episode, picture
