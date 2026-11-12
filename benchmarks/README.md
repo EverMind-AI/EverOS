@@ -209,7 +209,7 @@ DATASET=locomo bash benchmarks/reproduce.sh
 
 | Variable | Default | Values |
 |---|---|---|
-| `DATASET` | `locomo` | `locomo` \| `longmemeval` \| `subtlememory` \| `evermembench` |
+| `DATASET` | `locomo` | `locomo` \| `locomo-step` \| `longmemeval` \| `subtlememory` \| `evermembench` |
 | `CONV` | `all` (with `--smoke`: conversation 0) | conversation indices |
 | `STAGES` | `add search answer judge` | any subset, in order |
 | `RUN` | derived | result directory name |
@@ -224,6 +224,10 @@ so this is parallelism across separate stores, not one deployment scaled out.
 Several runs can go at once, on any mix of benchmarks: each picks free ports for its
 own servers and accepts an answer only from a server it started (`/health` reports the
 answering process's `pid`), so two runs never share a store.
+
+`locomo-step` is LoCoMo with step boundary detection and prompt-only replies on every
+EverOS call: `configs/locomo-step.toml` is `locomo.toml` with those two server settings
+changed. See [Batch or step](#batch-or-step) for what each one costs and scores.
 
 Without the wrapper, the same smoke test is:
 
@@ -243,6 +247,25 @@ uv run python benchmarks/run.py locomo --run-name locomo_smoke --smoke
 
 Each stage appends per-conversation JSONL and skips entries already present, so
 rerunning the same command resumes an interrupted run.
+
+### Scoring another retrieval method on stores you built
+
+A run's stores serve any retrieval method without ingesting again. Give the new run a
+name of its own, skip ADD, and point it at the stores:
+
+```bash
+DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
+  bash benchmarks/reproduce.sh --everos-root benchmarks/results/LoCoMo/locomo/store \
+  --methods hybrid
+```
+
+With a fleet, `--everos-root` names the base and the run reads `store_s0` ..
+`store_s<N-1>` next to it; search-only servers run with the cascade off, so the stores
+are not changed. Use the `DATASET` the stores were built with (`locomo-step` for a step
+store): a store from another results directory is not checked against the config. Do not
+change `--methods` under the original run's name instead -- a results directory re-run
+with other read settings sets its earlier search, answer and judge files aside as
+`*.superseded.jsonl`, and its report then shows only the new method.
 
 ### When something stops the run
 

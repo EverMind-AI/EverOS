@@ -181,7 +181,7 @@ DATASET=locomo bash benchmarks/reproduce.sh
 
 | 变量 | 默认 | 取值 |
 |---|---|---|
-| `DATASET` | `locomo` | `locomo` \| `longmemeval` \| `subtlememory` \| `evermembench` |
+| `DATASET` | `locomo` | `locomo` \| `locomo-step` \| `longmemeval` \| `subtlememory` \| `evermembench` |
 | `CONV` | `all`（带 `--smoke` 时为对话 0） | 对话下标 |
 | `STAGES` | `add search answer judge` | 任意子集，按顺序 |
 | `RUN` | 自动推导 | 结果目录名 |
@@ -191,7 +191,12 @@ DATASET=locomo bash benchmarks/reproduce.sh
 且不超过对话数。每个 server 都是一个独立的 EverOS 实例，有自己的库；对话按序号分片到各个
 实例上（对话 `c` 分给第 `c mod N` 个 server）。EverOS 本身每个库只跑一个进程，所以这是在
 多个独立的库上并行，不是把一套部署水平扩展。`--servers N` 只影响跑得快慢，不影响结果。
-可以同时跑多次、跑不同的 benchmark：每次运行为自己的服务挑空闲端口，并且只认自己启动的服务的应答（`/health` 返回应答进程的 `pid`），两次运行不会共用同一个库。
+可以同时跑多次、跑不同的 benchmark：每次运行为自己的 server 挑空闲端口，并且只认自己启动的
+server 的应答（`/health` 返回应答进程的 `pid`），两次运行不会共用同一个库。
+
+`locomo-step` 是用逐条边界检测、且 EverOS 每次调用都只在 prompt 里要求回复格式的 LoCoMo：
+`configs/locomo-step.toml` 就是 `locomo.toml` 改了这两项 server 设置。两者各自的分数和代价见
+[batch 还是 step](#batch-还是-step)。
 
 不用这个包装脚本时，同样的冒烟测试是：
 
@@ -209,6 +214,23 @@ uv run python benchmarks/run.py locomo --run-name locomo_smoke --smoke
 | JUDGE | 对照参考答案判分；有金标审计时，还会重判有争议的题（见 [每次运行给出两个分数](#每次运行给出两个分数)） |
 
 各阶段按对话追加 JSONL 并跳过已存在的条目，中断后重跑同一条命令即可续跑。
+
+### 在已建好的库上给其他检索方式打分
+
+一次运行建好的库可以直接给任何检索方式用，不必重新写入。给新运行起一个自己的名字，跳过 ADD，
+指向那些库：
+
+```bash
+DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
+  bash benchmarks/reproduce.sh --everos-root benchmarks/results/LoCoMo/locomo/store \
+  --methods hybrid
+```
+
+多个 server 时，`--everos-root` 写库的基础路径，运行会读它旁边的 `store_s0` 到
+`store_s<N-1>`；只跑检索的 server 关掉了 cascade，不会改动这些库。`DATASET` 要和建库时一致
+（step 建的库用 `locomo-step`）：运行不会拿配置去核对另一个结果目录里的库。不要在原运行名下
+直接换 `--methods`：结果目录换了读取设置重跑时，会把之前的检索、回答和判分文件挪成
+`*.superseded.jsonl`，报告里就只剩新的检索方式。
 
 ### 运行被拦下时
 
