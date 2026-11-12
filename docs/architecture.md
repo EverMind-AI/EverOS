@@ -351,8 +351,9 @@ change partial-write failure behavior.
 - `exception_handlers.py` — one table from exception class to status code /
   `ErrorCode`.
 - `middleware/` — the HTTP middleware (CORS defaults, request id, Prometheus
-  metrics, profiling, and the purge gate that lets only reads through while
-  a purge runs); it reaches logging and metrics through
+  metrics, profiling, and write tracking, which stamps each non-GET
+  request's arrival time and registers it while it runs so a purge can
+  wait for it); it reaches logging and metrics through
   `core.observability`.
 
 `entrypoints/cli/`: `main.py` registers the command groups, `commands/` holds

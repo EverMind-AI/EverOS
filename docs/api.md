@@ -1541,7 +1541,8 @@ table, and index rows under the backend this server runs (`lancedb_total`
 or `milvus_total`; the other is `null`). A count that takes longer than
 `[purge] count_timeout_seconds` is `null` and `complete` is `false`; the
 request still succeeds. After a purge `succeeded`, requesting the same
-range again answers a summary of all `0`.
+range again answers a summary of all `0` (if nothing was written to the
+range while the purge ran; see Known gaps).
 
 #### Confirm (`/purge/confirm`)
 
@@ -1618,6 +1619,11 @@ never refused while a purge runs, so `purge_in_progress` appears only in
   read data of the range that is not deleted yet, or that older work wrote
   back meanwhile, and leave some of it once the purge ends. Requesting the
   range again shows it (a non-zero summary); purge again to clear it.
+- Markdown written straight into the range's folder (by hand or by an
+  agent, not through the API) while the purge runs can stay; purge again.
+- Do not downgrade EverOS while a purge runs or right after one: an older
+  version does not know the purge, and background work queued before it can
+  write the range back.
 - The OME run history keeps its rows; the stored event of a failed or
   dead-lettered run of the range is replaced by a `{"purged_by": …}`
   marker. Older LanceDB table versions and SQLite free pages keep deleted
