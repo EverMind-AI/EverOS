@@ -177,32 +177,6 @@ class IndexRepository(Protocol[T]):
 
 
 @runtime_checkable
-class EpisodeIndexRepository(IndexRepository[T], Protocol[T]):
-    """Episode-only reads every backend must also provide."""
-
-    async def count_by_owner(
-        self,
-        owner_id: str,
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        parent_type: str | None = None,
-    ) -> int: ...
-
-    async def list_by_owner_after_ts(
-        self,
-        *,
-        owner_id: str,
-        after_ts: int,
-        parent_type: str,
-        app_id: str = "default",
-        project_id: str = "default",
-        columns: Sequence[str] | None = None,
-        limit: int | None = None,
-    ) -> list[Any]: ...
-
-
-@runtime_checkable
 class IndexBackend(Protocol):
     """Lifecycle contract for one configured derived-index backend."""
 
@@ -244,7 +218,6 @@ class IndexBackend(Protocol):
 
 
 __all__ = [
-    "EpisodeIndexRepository",
     "IndexBackend",
     "IndexRepository",
 ]

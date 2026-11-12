@@ -12,7 +12,7 @@ a real LanceDB and read through the index port. What these pin:
   back marked as such when a read does not filter on it, also when the mark
   arrives after the rows were indexed;
 - every link column filters by its domain name; ``contains`` finds an item by
-  one of its segments, BM25 by its words, ``find_by_entry_ids`` by its id, and
+  one of its segments, BM25 by its words, ``entry_id`` by its id, and
   ``find`` lists newest first;
 - an edit of a window field reaches the row, and an entry the parser refuses
   fails the file instead of indexing half an item.
@@ -275,7 +275,9 @@ async def test_items_are_found_by_segment_by_words_and_by_id(tmp_path: Path) -> 
         assert [s.ref.entry_id for s in await index.find(visible, limit=1)] == [
             flight.entry_id
         ]
-        by_id = await index.find_by_entry_ids(world.scope("trip"), [hotel.entry_id])
+        by_id = await index.find(
+            all_of(world.scope("trip").to_filter(), eq("entry_id", hotel.entry_id))
+        )
         assert [(s.item.item_id, s.item.statement, s.scope) for s in by_id] == [
             (hotel.entry_id, "Betty books the hotel", world.scope("trip"))
         ]

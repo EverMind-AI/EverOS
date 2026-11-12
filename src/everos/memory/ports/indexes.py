@@ -22,7 +22,6 @@ from typing import Protocol, runtime_checkable
 
 from everos.memory.models import (
     Episode,
-    EpisodeParentType,
     GroupProfileItem,
     ImageMemory,
     Profile,
@@ -64,19 +63,6 @@ class EpisodeIndex(Protocol):
         self, where: Filter, page: Page
     ) -> PageResult[Stored[Episode]]: ...
 
-    async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int: ...
-
-    async def list_after(
-        self,
-        scope: Scope,
-        after_ts: int,
-        *,
-        parent_type: EpisodeParentType,
-        limit: int | None = None,
-    ) -> list[Stored[Episode]]:
-        """Episodes newer than ``after_ts`` (epoch milliseconds)."""
-        ...
-
 
 @runtime_checkable
 class ImageMemoryIndex(Protocol):
@@ -111,33 +97,11 @@ class ImageMemoryIndex(Protocol):
 
     async def find(
         self, where: Filter, *, limit: int | None = None
-    ) -> list[SearchHit[ImageMemory]]: ...
+    ) -> list[SearchHit[ImageMemory]]:
+        """Matches of ``where``; every one when ``limit`` is ``None``.
 
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[ImageMemory]]:
-        """The named entries, for re-reading what a forget has to rewrite."""
-        ...
-
-    async def find_by_parent(
-        self, *, parent_type: str, parent_id: str, limit: int = 100
-    ) -> list[Stored[ImageMemory]]:
-        """Pictures that came in with one source segment.
-
-        This is the edge a forget walks: forgetting a segment retires the
-        pictures that arrived with it.
-        """
-        ...
-
-    async def find_by_image_ids(
-        self, scope: Scope, image_ids: Sequence[str]
-    ) -> list[Stored[ImageMemory]]:
-        """The *current* picture memories about these files, one per occurrence.
-
-        What an episode's ``image_ids`` resolve through. Only current rows come
-        back: a forgotten or superseded picture must not be resurrected into an
-        answer just because an episode still refers to it — the reference is
-        history, the content is not current.
+        What an episode's ``image_ids`` resolve through, inside the read
+        scope's predicate (which leaves out superseded and forgotten rows).
         """
         ...
 
@@ -171,10 +135,6 @@ class GroupProfileIndex(Protocol):
     ) -> list[SearchHit[GroupProfileItem]]:
         """BM25 over the items' statements, names and summaries."""
         ...
-
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[GroupProfileItem]]: ...
 
 
 @runtime_checkable

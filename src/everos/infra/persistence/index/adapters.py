@@ -27,7 +27,6 @@ from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
     Episode,
-    EpisodeParentType,
     GroupProfileItem,
     ImageMemory,
     Profile,
@@ -41,17 +40,11 @@ from everos.memory.ports import (
     Scope,
     SearchHit,
     Stored,
-    all_of,
-    is_null,
-    one_of,
     primary_key,
 )
 
 from ..records import member_profile_row_id
-from .protocols import (
-    EpisodeIndexRepository,
-    IndexRepository,
-)
+from .protocols import IndexRepository
 
 logger = get_logger(__name__)
 
@@ -118,47 +111,19 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
         repo: Episode derived-index repository.
     """
 
-    def __init__(self, repo: EpisodeIndexRepository[Any]) -> None:
+    def __init__(self, repo: IndexRepository[Any]) -> None:
         super().__init__(repo, _stored_episode)
-        self._episodes = repo
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[SearchHit[Episode]]:
-        rows = await self._episodes.dense_search(
+        rows = await self._repo.dense_search(
             vector, where, limit=limit, vector_field="subject_vector"
         )
         return [self._hit(row, _cosine_similarity(row)) for row in rows]
 
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         return await self._paginate(where, page)
-
-    async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int:
-        return await self._episodes.count_by_owner(
-            scope.owner_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            parent_type=parent_type,
-        )
-
-    async def list_after(
-        self,
-        scope: Scope,
-        after_ts: int,
-        *,
-        parent_type: EpisodeParentType,
-        limit: int | None = None,
-    ) -> list[Stored[Episode]]:
-        rows = await self._episodes.list_by_owner_after_ts(
-            owner_id=scope.owner_id,
-            after_ts=after_ts,
-            parent_type=parent_type,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            columns=_read_columns(self._episodes.schema),
-            limit=limit,
-        )
-        return [_stored_episode(_fields(r)) for r in rows]
 
 
 class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
@@ -186,37 +151,6 @@ class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
             vector, where, limit=limit, vector_field="visual_vector"
         )
         return [self._hit(row, _cosine_similarity(row)) for row in rows]
-
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[ImageMemory]]:
-        rows = await self._repo.find_by_owner_entries(
-            scope.owner_id,
-            entry_ids,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            skip_vectors=True,
-        )
-        return [_stored_image_memory(_fields(r)) for r in rows]
-
-    async def find_by_parent(
-        self, *, parent_type: str, parent_id: str, limit: int = 100
-    ) -> list[Stored[ImageMemory]]:
-        rows = await self._repo.find_by_parent(parent_type, parent_id, limit=limit)
-        return [_stored_image_memory(_fields(r)) for r in rows]
-
-    async def find_by_image_ids(
-        self, scope: Scope, image_ids: Sequence[str]
-    ) -> list[Stored[ImageMemory]]:
-        rows = await self._repo.search(
-            where=all_of(
-                scope.to_filter(),
-                one_of("image_id", list(image_ids)),
-                is_null("deprecated_by"),
-            ),
-            limit=max(len(image_ids), 1),
-        )
-        return [_stored_image_memory(_fields(r)) for r in rows]
 
     async def paginate(
         self, where: Filter, page: Page
@@ -311,17 +245,6 @@ class GroupProfileIndexAdapter:
                 hits.append(SearchHit(stored=stored, score=_bm25_score(row)))
         return hits
 
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[GroupProfileItem]]:
-        rows = await self._repo.find_by_owner_entries(
-            scope.owner_id,
-            entry_ids,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-        return _stored_group_profile_items([_fields(row) for row in rows])
-
 
 # ── Row -> domain ────────────────────────────────────────────────────────
 
@@ -341,23 +264,6 @@ def _cosine_similarity(row: Row) -> float:
     if distance is None:
         return 0.0
     return min(max(1.0 - float(distance), 0.0), 1.0)
-
-
-def _read_columns(schema: type[BaseModel]) -> list[str]:
-    """Every column a domain read needs: no vectors, no BM25 token columns.
-
-    Vector columns are identified by declaration (:meth:`IndexRecord.
-    vector_columns`), not by a name list: ``image_memory`` now carries two
-    (``vector`` and ``visual_vector``) and they have different widths, so a
-    read that fetched them would hand the caller rows it cannot validate.
-    """
-    tokens = set(getattr(schema, "BM25_FIELDS", ()))
-    vectors = set(schema.vector_columns())  # type: ignore[attr-defined]
-    return [
-        name
-        for name in schema.model_fields
-        if name not in vectors and name not in tokens
-    ]
 
 
 def _scope(fields: Row) -> Scope:

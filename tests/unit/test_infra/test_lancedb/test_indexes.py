@@ -124,7 +124,6 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     (found,) = await index.find(all_of(_USER.to_filter(), eq("entry_id", ref.entry_id)))
     stored = found.stored
     page = await index.paginate(_USER.to_filter(), Page(sort_by="timestamp"))
-    after = await index.list_after(_USER, _TS - 1, parent_type="memcell")
     hits = await index.sparse_search(["trip"], _USER.to_filter(), limit=5)
     dense = await index.dense_search([0.1] * _DIM, _USER.to_filter(), limit=5)
     subject = await index.dense_search_subject([0.1] * _DIM, _USER.to_filter(), limit=5)
@@ -134,8 +133,6 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     assert stored.ref == ref
     assert stored.scope == _USER
     assert page.total == 1 and page.items[0].item == episode
-    assert [s.item for s in after] == [episode]
-    assert await index.count(_USER, parent_type="memcell") == 1
     assert [h.stored.ref for h in hits] == [ref] and hits[0].score is not None
     assert [h.stored.item for h in hits] == [episode]
     assert [h.stored.ref.id for h in dense] == [ref.id]

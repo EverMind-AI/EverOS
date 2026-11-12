@@ -13,7 +13,7 @@ from ..records import (
     ImageMemory,
     UserProfile,
 )
-from .protocols import EpisodeIndexRepository, IndexRepository
+from .protocols import IndexRepository
 
 BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     Episode,
@@ -34,7 +34,7 @@ class IndexRepositories:
     take their repository from here.
     """
 
-    episode: EpisodeIndexRepository[Any]
+    episode: IndexRepository[Any]
     image_memory: IndexRepository[Any]
     user_profile: IndexRepository[Any]
     group_profile_item: IndexRepository[Any]
