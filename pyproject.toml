@@ -92,20 +92,23 @@ dependencies = [
 
     # Algorithm library (everalgo monorepo, published on PyPI).
     #
-    # All eight everalgo packages (the four below, the three transitive ones
-    # after them, and everalgo-parser in the `multimodal` extra) ship on one
-    # contract line -- currently the 2026-10-13 line, built on everalgo-core
-    # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
-    # one another, so a fresh `pip install everos` would otherwise mix lines
-    # the suite has never run together. Pin every one with `==` and raise them
-    # together, with a run of the release smoke against a PyPI-resolved install.
+    # The six everalgo packages EverOS uses (the three below and the three
+    # transitive ones after them) ship on one contract line -- currently the
+    # 2026-10-13 line, built on everalgo-core 0.6.0's `LLMClient.achat`
+    # contract. The packages declare loose ranges on one another, so a fresh
+    # `pip install everos` would otherwise mix lines the suite has never run
+    # together. Pin every one with `==` and raise them together, with a run of
+    # the release smoke against a PyPI-resolved install.
     # Test phase: everalgo-user-memory is a local build of the 2.0 profile
     # (everalgo feat/profile-two-prompts), vendored in vendor/wheels/ and named
     # in [tool.uv.sources]; it goes back to a PyPI pin once everalgo publishes.
     "everalgo-user-memory==0.9.0rc6.dev6",
-    "everalgo-agent-memory==0.6.0rc3",
     "everalgo-rank==0.5.0rc3",
-    "everalgo-knowledge==0.3.0rc2",
+    # Reads a chat message's non-text items (pdf, docs, html, ...) into text
+    # at ingest, and brings Pillow, which the picture store needs. It came in
+    # through everalgo-knowledge until the knowledge base was removed; the
+    # `multimodal` extra adds its SVG support.
+    "everalgo-parser==0.3.0rc2",
     "everalgo-boundary==0.4.1",
     "everalgo-core==0.6.0",
     "everalgo-clustering==0.3.0rc2",
