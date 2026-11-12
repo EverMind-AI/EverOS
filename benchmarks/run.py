@@ -3546,6 +3546,41 @@ def _assert_clean_decider_trace(output_dir: Path, methods: Sequence[str]) -> Non
         )
 
 
+def _assert_no_decider_fallback(trace_dir: Path, owner_id: str) -> None:
+    """Stop one conversation after SEARCH when any of its decider rounds fell back.
+
+    The report refuses a degraded multi-round run anyway
+    (:func:`_assert_clean_decider_trace`); checking each conversation here, before
+    ANSWER, keeps the run from paying for answers and judgements that report will
+    throw away. The startup probe cannot catch this: its one short request can
+    answer while the real decisions, with every candidate shown, run out of output.
+
+    Raises:
+        DeciderTraceValidationError: The owner's trace has a ``decider_failed``
+            round; the message says how to give the decider room.
+    """
+    failed = 0
+    for path in sorted(trace_dir.glob("trace*.jsonl")):
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("dataset") == owner_id and record.get("decider_failed"):
+                    failed += 1
+    if failed:
+        raise DeciderTraceValidationError(
+            f"{owner_id}: {failed} llm_multiround round(s) fell back to a fixed core "
+            "after every decider attempt failed (see `llm_multiround_decider_error` in "
+            "the server log); not answering or judging this conversation. A reasoning "
+            "decider that spends its output cap thinking fails this way: turn thinking "
+            f"off ({_THINKING_OFF_OPENROUTER} on OpenRouter, {_THINKING_OFF} on vLLM)."
+        )
+
+
 _DECIDER_PROBE = Path(__file__).resolve().with_name("decider_probe.py")
 
 _NO_CONTENT_REASONS = frozenset({"cut_short", "no_content", "invalid_reply"})
@@ -3554,6 +3589,9 @@ _NO_CONTENT_REASONS = frozenset({"cut_short", "no_content", "invalid_reply"})
 _THINKING_OFF = (
     'EVEROS_LLM__DECIDER__EXTRA=\'{"extra_body": {"chat_template_kwargs": '
     '{"enable_thinking": false}}}\''
+)
+_THINKING_OFF_OPENROUTER = (
+    'EVEROS_LLM__DECIDER__EXTRA=\'{"extra_body": {"reasoning": {"enabled": false}}}\''
 )
 
 
@@ -4200,6 +4238,8 @@ def run_conversation(
                 pbar=pbar,
                 qa_meta_keys=qa_meta_keys_for(config),
             )
+            if method == _MULTIROUND_METHOD:
+                _assert_no_decider_fallback(conv_dir.parent / "traces", owner_id)
 
         if "answer" in stages:
             search_path = conv_dir / f"search_{method}.jsonl"

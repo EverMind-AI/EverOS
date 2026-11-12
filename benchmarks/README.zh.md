@@ -124,7 +124,15 @@ EverOS 从那里读取。LoCoMo 的配置还把每条消息都记在被提问的
 （见 [6. 结果](#6-结果) 的 decider 列），各配置已预填各自推荐的那个。要使用它，把
 `BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，托管 API 还要填
 `BENCH_DECIDER_API_KEY`；只有想换成别的模型时才需要同时设 `BENCH_DECIDER_MODEL`。不设端点时
-由抽取模型担任 decider，运行会警告这不是已发表的配置。如何部署这些模型不在本指南范围内。
+由抽取模型担任 decider，运行会警告这不是已发表的配置。LoCoMo 的 decider 在 OpenRouter 上就有：
+设 `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，`BENCH_DECIDER_API_KEY` 填 OpenRouter 的 key。
+其余几个如何部署不在本指南范围内。
+
+推理型模型做 decider 时不能开思考。decider 的输出上限是 512 个 token（除非用
+`EVEROS_LLM__DECIDER__MAX_TOKENS` 另设），开着思考的模型可能在给出决定前就把它用完；decider
+始终没给出决定的那一轮会退回固定的结果，测的就成了另一种方法。LoCoMo 的配置为它的 decider
+关掉了思考（`[retrieval_env]` 里的 `EVEROS_LLM__DECIDER__EXTRA`，OpenRouter 的写法）。decider
+仍然退回的运行，会在该对话检索一结束就停下，不再为它付回答的钱，报错信息会写明修法。
 
 decider 以 `EVEROS_LLM__DECIDER__MODEL` / `__BASE_URL` / `__API_KEY`（即 EverOS 的
 `[llm.decider]`）传给运行启动的服务。`llm_multiround` 运行在第一道题之前，`run.py`
@@ -242,6 +250,7 @@ DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
 | `The embedding service did not answer the startup probe` | 检查 `EVEROS_EMBEDDING__BASE_URL` / `__MODEL` / `__API_KEY`，或改用 `--methods keyword`；对提示里给出的 server 日志 `grep embedding_` 可看到 server 自己报的原因 |
 | `No rerank provider is configured` | 设置 `EVEROS_RERANK__API_KEY`，或换一个不是 `agentic` 的方法 |
 | `decider ... did not answer` | `llm_multiround` 运行的 decider 没有回答探测请求，提示里写了原因；见 [3. 配置](#3-配置) 中的 decider 选项 |
+| `llm_multiround round(s) fell back to a fixed core` | decider 在这些轮里每次尝试都失败了；推理型模型按报错信息关掉思考，然后换一个新的 `RUN` 重新检索：在原运行名下续跑会保留已经退回的检索结果 |
 | `decider  no endpoint for ...` | 是警告，不是错误（只在 `llm_multiround` 出现）：运行会继续，改用抽取模型，分数不能和 [6. 结果](#6-结果) 对比 |
 | `Refusing to start: these stores already hold memories` | 删除列出的库后重跑，或加 `--reuse-store` |
 | `No SubtleMemory personas under ...` | `bash benchmarks/download_data.sh subtlememory` |

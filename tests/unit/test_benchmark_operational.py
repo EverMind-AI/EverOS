@@ -10,6 +10,7 @@ reachable with the code as written and is exercised here.
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -581,6 +582,34 @@ def test_a_start_that_lost_a_race_keeps_one_log_per_server(
     assert len(attempts) == 2
     assert len(fleet.procs) == len(fleet.urls) == len(fleet.roots) == 2
     assert len(fleet.logs) == 2
+
+
+def test_a_conversation_whose_decider_fell_back_stops_before_answering(
+    tmp_path: Path,
+) -> None:
+    """The report refuses a degraded multi-round run; this stops paying for it sooner.
+
+    Observed 2026-11-13: a thinking decider spent its 512-token cap before it
+    answered, one question in six fell back to a fixed core, and the run went on to
+    answer and judge every question of a report it would then refuse.
+    """
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    rounds = [
+        {"dataset": "a_conv0", "round_idx": 0, "decider_failed": True},
+        {"dataset": "b_conv1", "round_idx": 0},
+    ]
+    (trace_dir / "trace_port9400.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rounds) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(
+        run_mod.DeciderTraceValidationError, match="1 llm_multiround round"
+    ) as exc:
+        run_mod._assert_no_decider_fallback(trace_dir, "a_conv0")
+    assert '"reasoning": {"enabled": false}' in str(exc.value)
+
+    run_mod._assert_no_decider_fallback(trace_dir, "b_conv1")
 
 
 def test_a_server_replaced_after_startup_stops_the_run_before_it_spends(

@@ -139,8 +139,17 @@ the deciders behind the published numbers (the Decider column in
 use it, set `BENCH_DECIDER_BASE_URL` to an OpenAI-compatible endpoint that serves it,
 plus `BENCH_DECIDER_API_KEY` for a hosted API; set `BENCH_DECIDER_MODEL` as well only
 to run a different model. Without an endpoint the extraction model decides, and the
-run warns that it is not the published configuration. Serving those models is outside
-this guide.
+run warns that it is not the published configuration. LoCoMo's decider is served by
+OpenRouter: set `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1` and
+`BENCH_DECIDER_API_KEY` to the OpenRouter key. Serving the others is outside this guide.
+
+A reasoning model must decide without thinking. The decider's output cap is 512 tokens
+unless `EVEROS_LLM__DECIDER__MAX_TOKENS` sets one, and a model that thinks can spend it
+all before it answers; a round whose decider never answers falls back to a fixed core,
+which is a different method. LoCoMo's configs turn thinking off for theirs
+(`EVEROS_LLM__DECIDER__EXTRA` in `[retrieval_env]`, OpenRouter's spelling). A run whose
+decider still falls back stops that conversation right after SEARCH, before paying for
+its answers, and the message names the fix.
 
 The decider reaches the servers a run starts as `EVEROS_LLM__DECIDER__MODEL` /
 `__BASE_URL` / `__API_KEY` -- EverOS's `[llm.decider]`. Before the first question of
@@ -277,6 +286,7 @@ with other read settings sets its earlier search, answer and judge files aside a
 | `The embedding service did not answer the startup probe` | check `EVEROS_EMBEDDING__BASE_URL` / `__MODEL` / `__API_KEY`, or run `--methods keyword`; `grep embedding_` on the server log it names shows the server's reason |
 | `No rerank provider is configured` | set `EVEROS_RERANK__API_KEY`, or choose a method other than `agentic` |
 | `decider ... did not answer` | the decider of an `llm_multiround` run refused the probe request; the message says why. See the decider option in [3. Configure](#3-configure) |
+| `llm_multiround round(s) fell back to a fixed core` | the decider failed every attempt on those rounds; for a reasoning model, turn thinking off as the message says. Then search again under a new `RUN`: resuming the same one keeps the fallen-back searches |
 | `decider  no endpoint for ...` | a warning, not an error (`llm_multiround` only): the run continues on the extraction model and its score is not comparable to [6. Results](#6-results) |
 | `Refusing to start: these stores already hold memories` | delete the listed store for a clean run, or pass `--reuse-store` |
 | `No SubtleMemory personas under ...` | `bash benchmarks/download_data.sh subtlememory` |
