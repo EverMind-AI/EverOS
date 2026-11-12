@@ -70,10 +70,14 @@ c = BenchmarkConfig.from_toml(os.environ.get("DATASET", "locomo"))
 # `unresolved`, not truthiness: the shipped configs name the decider as
 # ${BENCH_DECIDER_MODEL} so nothing in them is specific to one deployment, and an unset
 # variable arrives here as that literal. Printing it verbatim reported a model nobody is
-# serving; the run itself treats it as "no separate decider" and uses [llm].
-_dec = c.decider_model
+# serving; the run itself treats it as "no separate decider" and uses [llm]. It does the
+# same for a model with no endpoint, so a pre-filled model alone is not the decider.
+# Only llm_multiround consults it, which this banner says because it cannot see a
+# --methods override.
+_dec, _url = c.decider_model, c.decider_base_url
+_no_decider = not _dec or unresolved(_dec) or not _url or unresolved(_url)
 print(f"backbone {c.backbone_model}")
-print(f"decider  {'(= backbone)' if not _dec or unresolved(_dec) else _dec}")
+print(f"decider  {'(= backbone)' if _no_decider else _dec}  (llm_multiround only)")
 print(f"answer   {c.answer_model}")
 print(f"judge    {c.judge_model} x{c.judge_runs}")
 print(f"method   {c.methods} top_k={c.top_k} servers={c.servers}")
