@@ -242,7 +242,14 @@ machinery that keeps a deleted memory from coming back.
   id. `original_path` stays for a caller that wants the bytes as sent; the
   `SearchImageItem` docs no longer tell a caller to give the original to the
   answering model. `ImageStore.ensure_derived` names (and if needed renders) a
-  scaled copy.
+  scaled copy. Measured (2026-11-12, answers only, on the same 2.0 searches;
+  the release's answer seats): on Mem-Gallery (Qwen2.5-VL-7B) the answer input
+  fell from 7,269 to 4,289 tokens per call (a picture 1,316 -> 368 visual
+  tokens), LLM-judge 84.60 -> 84.83 (p 0.33); on CUE-Mem, whose pictures are
+  at most 1,024 px, tokens are unchanged and a picture is 159 KB instead of
+  1.44 MB, accuracy 74.51 -> 74.98 (p 0.25). A seat that shrank a picture to
+  768 px before (MemEye, gpt-5.4-mini) is projected to read more: about 907
+  image tokens a picture instead of 533.
 
 
 ### Changed
