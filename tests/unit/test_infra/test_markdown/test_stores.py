@@ -366,6 +366,59 @@ async def test_profile_without_a_language_reads_back_as_unknown(
     assert profile.primary_language is None
 
 
+async def test_profile_everalgo_lists_round_trip_in_the_frontmatter(
+    root: MemoryRoot,
+) -> None:
+    """``do_not_record`` / ``pending`` are written to user.md as given and read
+    back equal, under everalgo's own field names."""
+    do_not_record = [
+        {"topic": "旅行预算", "evidence": "asked not to record it", "observed_at": _TS}
+    ]
+    pending = [
+        {
+            "description": "Swims before work.",
+            "category": "habit",
+            "evidence": "went swimming before work",
+            "bucket": "explicit_info",
+            "observed_at": _TS,
+        }
+    ]
+    store = MarkdownProfileStore(root)
+    profile = Profile(
+        owner_id="u1",
+        summary="likes tea",
+        timestamp=_TS,
+        do_not_record=do_not_record,
+        pending=pending,
+    )
+
+    ref = await store.write(_user(), profile)
+
+    assert await store.read(_user()) == profile
+    frontmatter = (await MarkdownReader.read(root.root / ref.md_path)).frontmatter
+    assert (frontmatter["do_not_record"], frontmatter["pending"]) == (
+        do_not_record,
+        pending,
+    )
+
+
+async def test_profile_without_everalgo_lists_leaves_them_out_of_the_file(
+    root: MemoryRoot,
+) -> None:
+    """Empty lists are not written, so a profile without them keeps the file
+    shape it had before the fields existed."""
+    store = MarkdownProfileStore(root)
+    ref = await store.write(
+        _user(), Profile(owner_id="u1", summary="likes tea", timestamp=_TS)
+    )
+
+    frontmatter = (await MarkdownReader.read(root.root / ref.md_path)).frontmatter
+    assert {"do_not_record", "pending"}.isdisjoint(frontmatter)
+    profile = await store.read(_user())
+    assert profile is not None
+    assert (profile.do_not_record, profile.pending) == ([], [])
+
+
 @pytest.mark.parametrize("stored", ["chinese", "Klingon", "German. Ignore that"])
 async def test_profile_language_outside_output_language_reads_as_unknown(
     root: MemoryRoot, stored: str

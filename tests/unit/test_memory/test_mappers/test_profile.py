@@ -33,3 +33,55 @@ def test_domain_profile_items_keep_host_extras() -> None:
     assert isinstance(domain, Profile)
     assert domain.explicit_info[0].model_extra == {"extra_key": 3}
     assert profile.to_algo(domain).explicit_info[0].model_extra == {"extra_key": 3}
+
+
+_DO_NOT_RECORD = [
+    {"topic": "travel budget", "evidence": "asked not to record it", "observed_at": 5}
+]
+_PENDING = [
+    {
+        "description": "Swims in the morning.",
+        "category": "habit",
+        "evidence": "went swimming before work",
+        "bucket": "explicit_info",
+        "observed_at": 5,
+    }
+]
+
+
+def test_everalgos_lists_round_trip_verbatim() -> None:
+    algo = AlgoProfile.model_validate(
+        {
+            "owner_id": "u1",
+            "summary": "s",
+            "timestamp": 5,
+            "do_not_record": _DO_NOT_RECORD,
+            "pending": _PENDING,
+        }
+    )
+
+    domain = profile.from_algo(algo)
+
+    assert (domain.do_not_record, domain.pending) == (_DO_NOT_RECORD, _PENDING)
+    assert profile.to_algo(domain) == algo
+
+
+def test_an_empty_list_travels_as_absent() -> None:
+    """everalgo returns ``pending: []`` when it emptied the list; it is stored
+    as nothing, and nothing goes back."""
+    algo = AlgoProfile.model_validate(
+        {"owner_id": "u1", "summary": "s", "timestamp": 5, "pending": []}
+    )
+
+    domain = profile.from_algo(algo)
+
+    assert domain.pending == []
+    assert profile.to_algo(domain).model_extra == {}
+
+
+def test_other_top_level_extras_are_dropped() -> None:
+    algo = AlgoProfile.model_validate(
+        {"owner_id": "u1", "summary": "s", "timestamp": 5, "note": "x"}
+    )
+
+    assert "note" not in profile.from_algo(algo).model_dump()

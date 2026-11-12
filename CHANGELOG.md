@@ -51,9 +51,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **everalgo moves to the 2026-11-11 release candidates**:
   `everalgo-core 0.7.0rc1`, `everalgo-boundary 0.5.0rc1`,
-  `everalgo-user-memory 0.9.0rc5`, `everalgo-agent-memory 0.6.0rc4` and
+  `everalgo-user-memory 0.9.0rc6`, `everalgo-agent-memory 0.6.0rc4` and
   `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
   `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
+  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc6`, which checks every
+  profile item against the episode narratives and keeps a do-not-record list
+  (the next two entries).
+- **Profile items must be grounded in what was said, and new profiles add no
+  `implicit_traits`.** Every item the model writes carries a quote that has to
+  be found in that batch's episode narratives, or the item is dropped. An
+  item claiming a habit, preference or other standing pattern is written only
+  when its quote shows it is regular; otherwise it waits until a later
+  conversation shows it again. No new `implicit_traits` item is created --
+  what a person says about their own values and habits becomes an
+  `explicit_info` item -- while traits already stored are kept and can still
+  be updated or removed. A matter the user asks not to be recorded stays out
+  of the profile from then on, and an item carrying an identification or
+  account number (12 or more digits) is dropped.
+- **`user.md` keeps the extractor's `do_not_record` and `pending` lists** in
+  its frontmatter: the matters the user asked not to be recorded, and the
+  patterns waiting for a second occurrence. They are the extractor's own
+  state: each profile update passes them back to everalgo and stores the
+  lists it returns. They are written only when non-empty, so existing files
+  read and write unchanged; they are not indexed, are never returned by
+  `/get` or `/search`, and go with `user.md` when the user is deleted.
 - **Episode summaries are written by the model.** Each cell's summary comes
   from a second call made at the same time as the episode call
   (`EpisodeSummarizer.asummarize_memcell`, reading the same conversation),

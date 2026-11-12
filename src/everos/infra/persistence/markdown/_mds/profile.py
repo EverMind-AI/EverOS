@@ -6,6 +6,11 @@ Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
 two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
 (``explicit_info`` / ``implicit_traits``). ``profile_timestamp_ms``
 mirrors :attr:`everalgo.types.Profile.timestamp`.
+
+``do_not_record`` and ``pending`` are the extractor's own state, kept here so
+the next extraction reads them back. They are left out of the file while
+empty, so a profile without them reads and writes as before, and they never
+reach the derived index or the API.
 """
 
 from __future__ import annotations
@@ -45,3 +50,15 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     )
     """The ``OutputLanguage`` value the profile is frozen to; left out of the
     file while unknown, and absent from profiles written before it."""
+
+    do_not_record: list[dict[str, Any]] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    """The extractor's do-not-record list, verbatim: the matters the user
+    asked not to be recorded."""
+
+    pending: list[dict[str, Any]] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    """The extractor's pending list, verbatim: pattern items waiting for a
+    later conversation to repeat them."""

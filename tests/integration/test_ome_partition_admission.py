@@ -81,7 +81,7 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
             await release_model.wait()
             return user_track_script(
                 {
-                    "_ProfileItems": "profile_init_empty",
+                    "_EpisodeInitOutput": "profile_init_empty",
                     "_UpdateOutput": "profile_update_empty",
                 }[response_format.__name__]
             )

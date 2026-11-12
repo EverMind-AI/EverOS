@@ -38,6 +38,10 @@ Invariants a change must keep:
 - **Serialised per owner**: ``user.md`` is a read -> LLM merge -> overwrite
   sequence, and the marks are read and written under the same lock.
   Different owners run in parallel.
+- **everalgo's lists ride with the profile.** ``do_not_record`` and
+  ``pending`` go back into every call and the returned ones replace them, an
+  empty ``pending`` included; the extractor runs with its default item
+  checks and never adds a new ``implicit_traits`` item.
 """
 
 from __future__ import annotations

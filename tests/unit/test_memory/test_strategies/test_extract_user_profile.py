@@ -191,6 +191,84 @@ async def test_update_rehydrates_the_stored_profile() -> None:
     assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
 
 
+async def test_the_extractor_keeps_its_item_checks_and_trait_defaults() -> None:
+    """Production never turns the quote / pending checks off, nor lets new
+    traits in: ``ProfileExtractor`` is built with its defaults."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = AsyncMock(
+            return_value=_algo_profile()
+        )
+        await extract_user_profile(_event(), deps)
+
+    kwargs = extractor_cls.call_args.kwargs
+    assert "item_checks" not in kwargs
+    assert "new_traits" not in kwargs
+
+
+# ── everalgo's lists: do_not_record and pending ride with the profile ────
+
+_DO_NOT_RECORD = [
+    {"topic": "travel budget", "evidence": "asked not to record it", "observed_at": 1}
+]
+_PENDING = [
+    {
+        "description": "Swims before work.",
+        "category": "habit",
+        "evidence": "went swimming before work",
+        "bucket": "explicit_info",
+        "observed_at": 1,
+    }
+]
+
+
+def _stored_with_lists() -> Profile:
+    return Profile(
+        owner_id="u_alice",
+        summary="prior",
+        timestamp=_TS - 1,
+        do_not_record=_DO_NOT_RECORD,
+        pending=_PENDING,
+    )
+
+
+async def test_the_stored_lists_reach_everalgo_as_extras() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    deps.stores.profile.profiles[_scope()] = _stored_with_lists()
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    old = extract.call_args.kwargs["old_profile"]
+    assert old.model_extra == {"do_not_record": _DO_NOT_RECORD, "pending": _PENDING}
+
+
+async def test_the_returned_lists_are_stored() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    returned = _algo_profile(do_not_record=_DO_NOT_RECORD, pending=_PENDING)
+    with _extractor(return_value=returned):
+        await extract_user_profile(_event(), deps)
+
+    stored = deps.stores.profile.profiles[_scope()]
+    assert (stored.do_not_record, stored.pending) == (_DO_NOT_RECORD, _PENDING)
+
+
+async def test_a_returned_empty_pending_list_replaces_the_stored_one() -> None:
+    """Every entry confirmed or expired: keeping the old list would let a
+    written item be confirmed a second time."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    deps.stores.profile.profiles[_scope()] = _stored_with_lists()
+    returned = _algo_profile(do_not_record=_DO_NOT_RECORD, pending=[])
+    with _extractor(return_value=returned):
+        await extract_user_profile(_event(), deps)
+
+    stored = deps.stores.profile.profiles[_scope()]
+    assert (stored.do_not_record, stored.pending) == (_DO_NOT_RECORD, [])
+
+
 # ── waiting episodes: folded along, then skipped by their own runs ──────
 
 

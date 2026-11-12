@@ -38,7 +38,10 @@ from everos.memory.get import (
     GetMemoryType,
     GetRequest,
 )
+from everos.memory.models import Profile
+from everos.memory.ports import MemoryRef, Scope, Stored
 from everos.memory.search import FilterNode
+from tests.fakes import InMemoryProfileIndex
 
 # ── Stub repos ──────────────────────────────────────────────────────────
 
@@ -354,6 +357,42 @@ async def test_profile_item_without_description_is_dropped_not_fatal(
     assert [i["description"] for i in item.profile_data["implicit_traits"]] == [
         "patient"
     ]
+
+
+async def test_everalgos_lists_never_reach_profile_data() -> None:
+    """``do_not_record`` / ``pending`` are program state: even a profile that
+    carries them is shaped into the four public keys only."""
+    scope = Scope(
+        app_id="default", project_id="default", owner_id="u1", owner_type="user"
+    )
+    profiles = InMemoryProfileIndex()
+    profiles.rows[scope] = Stored(
+        ref=MemoryRef(id="u1", entry_id="u1", md_path="users/u1/user.md"),
+        scope=scope,
+        item=Profile(
+            owner_id="u1",
+            summary="s",
+            timestamp=1,
+            do_not_record=[{"topic": "budget", "evidence": "e", "observed_at": 1}],
+            pending=[{"description": "d", "bucket": "explicit_info", "observed_at": 1}],
+        ),
+    )
+    mgr = GetManager(
+        episode_index=EpisodeIndexAdapter(_StubRepo()),  # type: ignore[arg-type]
+        agent_case_index=AgentCaseIndexAdapter(_StubRepo()),  # type: ignore[arg-type]
+        agent_skill_index=AgentSkillIndexAdapter(_StubRepo()),  # type: ignore[arg-type]
+        profile_index=profiles,
+    )
+
+    resp = await mgr.get(GetRequest(user_id="u1", memory_type=GetMemoryType.PROFILE))
+
+    (item,) = resp.data.profiles
+    assert set(item.profile_data) == {
+        "summary",
+        "explicit_info",
+        "implicit_traits",
+        "profile_timestamp_ms",
+    }
 
 
 # ── Agent case dispatch ─────────────────────────────────────────────────

@@ -4,9 +4,12 @@
       "action": "add",
       "type": "explicit_info",
       "data": {
-        "evidence": "Alice: I'd like to see the cherry blossoms.",
+        "evidence": "2026-04-02: wants to see the last of the cherry blossoms in Kyoto.",
         "description": "Wants to see the cherry blossoms in Kyoto.",
-        "category": "travel"
+        "category": "travel",
+        "pattern": false,
+        "quote": "to see the last of the cherry blossoms",
+        "regular": ""
       }
     }
   ]

@@ -1,7 +1,7 @@
 """Add + Flush user pipeline — a hermetic canned run and a long real-LLM drive.
 
-``test_add_flush_search_get_on_canned_user_track`` runs anywhere: every
-model call is answered from the canned user-track scripts.
+The tests on the canned user track run anywhere: every model call is
+answered from the canned user-track scripts.
 
 The rest is the long real-conversation smoke:
 
@@ -32,7 +32,9 @@ import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
+import anyio
 import httpx
 import pytest
 from everalgo.testing import FakeLLMClient
@@ -41,6 +43,7 @@ from everos.infra.persistence.markdown import (
     AtomicFactDailyFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
+    MarkdownReader,
 )
 from tests.fakes import make_providers, user_track_llm, user_track_script
 from tests.fakes.storage import StorageView
@@ -502,7 +505,7 @@ async def test_add_flush_search_get_on_canned_user_track(
     assert replies.count("Reply") == 2  # the add and the flush
     assert replies.count("_EpisodeReply") == 1
     assert "_AtomicFactsReply" in replies
-    assert "_ProfileItems" in replies
+    assert "_EpisodeInitOutput" in replies
 
 
 async def test_a_name_sent_once_labels_the_senders_later_lines(
@@ -562,3 +565,109 @@ async def test_a_name_sent_once_labels_the_senders_later_lines(
 
 async def _has(fetch: Callable[[], Awaitable[list[dict]]]) -> bool:
     return bool(await fetch())
+
+
+_PUBLIC_PROFILE_KEYS = {
+    "summary",
+    "explicit_info",
+    "implicit_traits",
+    "profile_timestamp_ms",
+}
+
+
+async def _frontmatter(path: Path) -> dict[str, Any]:
+    """The frontmatter of the md file at ``path``; empty before it exists."""
+    if not await anyio.Path(path).is_file():
+        return {}
+    return (await MarkdownReader.read(path)).frontmatter
+
+
+async def test_everalgos_lists_round_trip_through_user_md(
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INIT -> user.md -> UPDATE on the canned user track.
+
+    The canned INIT reply names one matter not to record and holds one
+    pattern on ``pending``; both land in user.md's frontmatter, stay out of
+    the API's ``profile_data``, and the next conversation's UPDATE request
+    shows the matter to the model as a ``<matter>``.
+    """
+    llm = user_track_llm(boundary="boundary_empty")
+    (matter,) = json.loads(user_track_script("profile_init"))["do_not_record"]
+    user_md = (
+        core_pipeline_runtime / "default_app/default_project/users/u_alice/user.md"
+    )
+
+    async def _talk(session_id: str, start_ms: int) -> None:
+        add = await client.post(
+            "/api/v1/memory/add",
+            json={
+                "session_id": session_id,
+                "messages": [
+                    {
+                        "sender_id": sender,
+                        "sender_name": name,
+                        "role": role,
+                        "timestamp": start_ms + i * 60_000,
+                        "content": text,
+                    }
+                    for i, (sender, name, role, text) in enumerate(_CONVERSATION)
+                ],
+            },
+        )
+        assert add.status_code == 200, add.text
+        flush = await client.post(
+            "/api/v1/memory/flush", json={"session_id": session_id}
+        )
+        assert flush.json()["data"]["status"] == "extracted"
+
+    async def _explicit_count(count: int) -> bool:
+        return len((await _frontmatter(user_md)).get("explicit_info", [])) == count
+
+    async def _profile_data() -> list[dict]:
+        get = await client.post(
+            "/api/v1/memory/get",
+            json={"user_id": "u_alice", "memory_type": "profile"},
+        )
+        search = await client.post(
+            "/api/v1/memory/search",
+            json={
+                "user_id": "u_alice",
+                "query": "Kyoto ryokan",
+                "method": "keyword",
+                "include_profile": True,
+            },
+        )
+        return [
+            p["profile_data"]
+            for resp in (get, search)
+            for p in resp.json()["data"]["profiles"]
+        ]
+
+    async with _canned_user_track_client(monkeypatch, llm) as client:
+        await _talk("s_kyoto", _ALICE_TS)
+        await _poll_until(lambda: _explicit_count(2))
+        after_init = await _frontmatter(user_md)
+        assert [e["topic"] for e in after_init["do_not_record"]] == [matter["topic"]]
+        assert len(after_init["pending"]) == 1
+
+        await _talk("s_kyoto_later", _ALICE_TS + 86_400_000)
+        await _poll_until(lambda: _explicit_count(3))
+        after_update = await _frontmatter(user_md)
+        assert after_update["do_not_record"] == after_init["do_not_record"]
+        assert after_update["pending"] == after_init["pending"]
+
+        async def _get_and_search_return_it() -> bool:
+            return len(await _profile_data()) == 2
+
+        await _poll_until(_get_and_search_return_it)
+        assert all(set(data) == _PUBLIC_PROFILE_KEYS for data in await _profile_data())
+
+    (update_call,) = [
+        c for c in llm.calls if c.response_format.__name__ == "_UpdateOutput"
+    ]
+    request = update_call.messages[-1].content
+    assert f"<matter>{matter['topic']}</matter>" in request
+    (held,) = after_init["pending"]
+    assert '<entry index="0"' in request
+    assert held["description"] in request

@@ -575,7 +575,7 @@ wheels = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.9.0rc5"
+version = "0.9.0rc6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
@@ -583,9 +583,9 @@ dependencies = [
     { name = "everalgo-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/51/63a14e27b9904219ea479b3b4406c4faa92ac94c603f0c72c580c6936582/everalgo_user_memory-0.9.0rc5.tar.gz", hash = "sha256:1e21249f3598ed5e2a2360fccbd004a43d68fb93f01f8cf7138747e14d072a7f", size = 223655, upload-time = "2026-11-11T12:57:30.271Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/c3/971d8d87abf7c408b2c4ebfb02d26aeb78b0e0f8889173aab7694fe5971b/everalgo_user_memory-0.9.0rc6.tar.gz", hash = "sha256:d5f8277053fb7adc6bcdbaaa7c1bc66c7df57e8425069ec31ad2f732549b8a44", size = 272063, upload-time = "2026-11-12T02:45:34.747Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/cc/2d993730b975e0fabf18a6b4ff0b1e9d0f7a58dbc6395314b79f653a24e4/everalgo_user_memory-0.9.0rc5-py3-none-any.whl", hash = "sha256:20d35c1a91ea67e8e52dbb243b9bb43f89fa48bf93df5834c0cf2868ee6ed8f7", size = 101361, upload-time = "2026-11-11T12:57:29.262Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/bb/2f1485f11a72140289f5d1a928f91d82ca15661566cc4bb9179c493acc74/everalgo_user_memory-0.9.0rc6-py3-none-any.whl", hash = "sha256:0120dc7ebbe78aa641bec05849816a3e93901683af451b07a8b1e37a81115e44", size = 127585, upload-time = "2026-11-12T02:45:33.657Z" },
 ]
 
 [[package]]
@@ -676,7 +676,7 @@ requires-dist = [
     { name = "everalgo-parser", specifier = "==0.3.0rc2" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = "==0.3.0rc2" },
     { name = "everalgo-rank", specifier = "==0.5.0rc5" },
-    { name = "everalgo-user-memory", specifier = "==0.9.0rc5" },
+    { name = "everalgo-user-memory", specifier = "==0.9.0rc6" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "jieba", specifier = ">=0.42.1,<1.0" },

@@ -487,6 +487,8 @@ class MarkdownProfileStore:
             primary_language=_known_language(
                 frontmatter.primary_language, owner_id=frontmatter.user_id
             ),
+            do_not_record=frontmatter.do_not_record,
+            pending=frontmatter.pending,
         )
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
@@ -498,6 +500,8 @@ class MarkdownProfileStore:
             implicit_traits=[i.model_dump() for i in profile.implicit_traits],
             profile_timestamp_ms=profile.timestamp,
             primary_language=profile.primary_language,
+            do_not_record=profile.do_not_record,
+            pending=profile.pending,
         )
         async with LOCKS.hold("owner", owner_lock(scope)):
             path = await self._writer.write(

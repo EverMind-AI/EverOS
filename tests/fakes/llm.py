@@ -52,7 +52,7 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "episode": "_EpisodeReply",
     "episode_summary": "_SummaryReply",
     "atomic_facts": "_AtomicFactsReply",
-    "profile_init": "_ProfileItems",
+    "profile_init": "_EpisodeInitOutput",
     "profile_update": "_UpdateOutput",
     "reflect": "_ReflectOutput",
 }
