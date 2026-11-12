@@ -231,6 +231,18 @@ machinery that keeps a deleted memory from coming back.
     questions, +5.6% decider prompt tokens, +2.3% returned context.
   - `ClusterStore.find_cluster_for_member` takes a `kind`: an episode now
     sits in its profile cluster and its scene's.
+- **Search names the answering model's copy of every picture.**
+  `SearchImageItem.model_path` -- on ranked pictures and on those attached to
+  an episode -- is the `[images] model_edge` copy,
+  `figures/.cache/<image_id>-1024.<jpeg|png>` by default: the size extraction
+  read the picture at, and the copy to hand an answering model. Search renders
+  it into the cache when it is missing, so the file is there when the response
+  is read; it is empty only when the original cannot be read.
+  `GET /api/v2/memory/images/{image_id}?variant=model` serves the same copy by
+  id. `original_path` stays for a caller that wants the bytes as sent; the
+  `SearchImageItem` docs no longer tell a caller to give the original to the
+  answering model. `ImageStore.ensure_derived` names (and if needed renders) a
+  scaled copy.
 
 
 ### Changed
@@ -644,6 +656,9 @@ machinery that keeps a deleted memory from coming back.
   change.
 - **Episodes read back from markdown keep their `sender_ids` and `language`.**
   The reader dropped both, so an episode an undo restored lost them.
+- **`GET /memory/images/{image_id}?variant=thumbnail` labels a greyscale
+  picture's copy `image/png`.** The copy is PNG for a greyscale picture, and
+  the route labelled every copy `image/jpeg`.
 
 ### Removed
 

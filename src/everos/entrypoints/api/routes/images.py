@@ -10,10 +10,13 @@ about it, and leaves every version on disk. Collapsing the two would make it
 impossible to tell "this never happened" from "this happened and was retracted",
 which is exactly the distinction an undo depends on.
 
-The two ``GET`` routes serve the decider's thumbnail and the answering model's
-original. They read only — a picture is written once, by ingest — and they
-never list what the store holds, so a reader cannot enumerate another user's
-pictures by guessing. A picture group memory refers to is served only to a
+The ``GET`` route serves a stored picture in one of three copies: the
+answering model's (``variant=model``, the copy a search result names as
+``model_path``), the original as it arrived, and the decider's thumbnail. It
+never changes a memory -- a picture is written once, by ingest; a scaled copy
+is a disposable cache entry rendered on first request -- and it never lists
+what the store holds, so a reader cannot enumerate another user's pictures by
+guessing. A picture group memory refers to is served only to a
 member who can see one of those memories; to anyone else it is a 404 with the
 body of a picture that does not exist.
 """
@@ -323,9 +326,11 @@ async def get_image(
     asker_header: AskerHeaderDep,
     variant: str = Query(
         default="original",
-        pattern="^(original|thumbnail)$",
-        description="``original`` for the answering model; ``thumbnail`` for a "
-        "decider-sized copy, rendered on first request.",
+        pattern="^(original|model|thumbnail)$",
+        description="``model`` for an answering model: the ``[images] model_edge`` "
+        "copy (1024 px on the long side by default) a search result names as "
+        "``model_path``; ``original`` for the bytes as they arrived; ``thumbnail`` "
+        "for the decider-sized copy. Both copies are cached on first request.",
     ),
     asker_id: str | None = Query(
         default=None,
@@ -335,10 +340,13 @@ async def get_image(
 ) -> Response:
     """One stored picture, by id, as bytes.
 
+    ``model`` renders at ``[images] model_edge`` and ``cache_quality`` -- the
+    copy extraction read the picture at and the one to show an answering model.
     ``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size
     the retrieval loop shows the decider — so a caller can preview exactly what
-    it saw. A picture the asker may not see answers exactly as one that does not
-    exist (docs/group-memory.md, section 9.1).
+    it saw. A copy is JPEG, or PNG for a greyscale picture, and is labelled as
+    what it is. A picture the asker may not see answers exactly as one that does
+    not exist (docs/group-memory.md, section 9.1).
     """
     if not await app.memory.picture_visible(
         image_id, asker_id=asker_id, asserted_asker=asker_header
@@ -346,19 +354,26 @@ async def get_image(
         raise HTTPException(status_code=404, detail="no such picture")
     settings = load_settings()
     try:
-        if variant == "thumbnail":
-            data = await app.images.read_derived(
-                image_id,
-                edge=settings.decider.image_thumbnail_edge,
-                quality=settings.decider.image_quality,
-            )
-            return Response(content=data, media_type="image/jpeg")
+        if variant != "original":
+            if variant == "model":
+                edge = settings.images.model_edge
+                quality = settings.images.cache_quality
+            else:
+                edge = settings.decider.image_thumbnail_edge
+                quality = settings.decider.image_quality
+            data = await app.images.read_derived(image_id, edge=edge, quality=quality)
+            return Response(content=data, media_type=_copy_media_type(data))
         data = await app.images.read(image_id)
         info = await app.images.metadata(image_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such picture") from exc
     media_type = _MEDIA_TYPES.get(info.media_type if info else "jpeg", "image/jpeg")
     return Response(content=data, media_type=media_type)
+
+
+def _copy_media_type(data: bytes) -> str:
+    """A scaled copy's media type: PNG for a greyscale picture, else JPEG."""
+    return "image/png" if data.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
 
 
 def _target(req: GroupForgetRequest) -> GroupForgetTarget:

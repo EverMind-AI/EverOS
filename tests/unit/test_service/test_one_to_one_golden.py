@@ -88,6 +88,10 @@ _GROUP_COLUMNS: Mapping[str, object] = {
     "source_end": None,
 }
 
+_GOLDEN_PICTURE = "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
+"""Content hash of the picture chat's one picture (its ``thumbnail_path`` in the
+golden names it)."""
+
 _GROUP_ITEM_FIELDS: Mapping[str, object] = {
     # docs/group-memory.md, section 5.3: "One-to-one responses carry the new
     # fields with empty defaults."
@@ -115,6 +119,9 @@ ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
         "coverage": None,
         # The decider rounds that fell back; empty when every round was decided.
         "degraded": [],
+        # The answering model's copy of the picture chat's one picture: its
+        # [images] model_edge (1024) copy, named after the golden's own hash.
+        "model_path": f"figures/.cache/{_GOLDEN_PICTURE}-1024.jpeg",
     },
     "get": {**_GROUP_ITEM_FIELDS, "scenes": [], "images": [], "group_profile": []},
 }
@@ -122,7 +129,9 @@ ADDED_FIELDS: Mapping[str, Mapping[str, object]] = {
 
 Keyed by the output they appear in (``episode_row``, ``image_memory_row``,
 ``user_profile_row``, ``search``, ``get``). A field listed here may appear in
-the actual output with exactly this value; any other new field fails.
+the actual output with exactly this value; any other new field fails. A field
+whose value follows from what the golden already holds (``model_path``, a path
+named after the golden picture's hash) is listed with that value.
 """
 
 

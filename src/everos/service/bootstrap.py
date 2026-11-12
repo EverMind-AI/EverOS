@@ -741,6 +741,7 @@ def _build_memory_service(
             trace_path_source=SearchConfigSource().trace_path,
             image_recaller=ImageMemoryRecaller(recaller_deps, indexes.image_memory),
             image_store=stores.images,
+            image_limits=_image_limits(settings),
             access=access,
             group_profile_index=indexes.group_profile,
             episode_index=indexes.episode,

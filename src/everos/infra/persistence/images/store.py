@@ -49,6 +49,9 @@ logger = get_logger(__name__)
 
 _FIGURES_DIR = "figures"
 _CACHE_DIR = ".cache"
+_DERIVED_EXTENSIONS = ("jpeg", "png")
+"""What :func:`~everos.component.images.scaled_copy` writes: JPEG, or PNG for a
+greyscale picture."""
 
 
 class FileImageStore:
@@ -229,6 +232,30 @@ class FileImageStore:
 
     async def read_derived(self, image_id: str, *, edge: int, quality: int) -> bytes:
         """Bytes of the ``edge``-sized copy, rendering it on first request."""
+        rendered, _ = await self._render_derived(image_id, edge=edge, quality=quality)
+        return rendered
+
+    async def ensure_derived(self, image_id: str, *, edge: int, quality: int) -> str:
+        """Root-relative path of the ``edge``-sized copy, rendered only if missing.
+
+        A copy already on disk is named without decoding anything: it is a pure
+        function of the original, so the extension it was written under is the
+        one this picture always renders to.
+
+        Raises:
+            FileNotFoundError: No copy on disk and no original to render it from.
+        """
+        for extension in _DERIVED_EXTENSIONS:
+            relative = derived_relpath(image_id, edge, extension)
+            if await anyio.Path(self._resolve(relative)).is_file():
+                return relative
+        _, relative = await self._render_derived(image_id, edge=edge, quality=quality)
+        return relative
+
+    async def _render_derived(
+        self, image_id: str, *, edge: int, quality: int
+    ) -> tuple[bytes, str]:
+        """Render the ``edge``-sized copy, write it if new; ``(bytes, relpath)``."""
         path = await self.path_of(image_id)
         data = await anyio.Path(path).read_bytes()
         rendered, extension = await anyio.to_thread.run_sync(
@@ -241,9 +268,9 @@ class FileImageStore:
         )
         # The renderer answers PNG for a greyscale picture; the name has to say
         # what the bytes are or a browser will refuse to display it.
-        target = self._root.root / derived_relpath(image_id, edge, extension)
-        await self._write_atomic(target, rendered, expected_hash=None)
-        return rendered
+        relative = derived_relpath(image_id, edge, extension)
+        await self._write_atomic(self._resolve(relative), rendered, expected_hash=None)
+        return rendered, relative
 
     async def exists(self, image_id: str) -> bool:
         """Whether the original is on disk."""

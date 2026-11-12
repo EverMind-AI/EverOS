@@ -1053,6 +1053,10 @@ class InMemoryImageStore:
     async def read_derived(self, image_id: str, *, edge: int, quality: int) -> bytes:
         return await self.read(image_id)
 
+    async def ensure_derived(self, image_id: str, *, edge: int, quality: int) -> str:
+        await self.read(image_id)  # an unknown id fails as the real store's does
+        return f"figures/.cache/{image_id}-{edge}.jpeg"
+
     async def relpath_of(self, image_id: str) -> str:
         if image_id not in self.images:
             raise FileNotFoundError(image_id)

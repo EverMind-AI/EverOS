@@ -196,7 +196,7 @@ message it arrived in.
 | `max_request_bytes` | int | `33554432` | No | Decoded picture bytes one add request may carry. |
 | `max_per_request` | int | `16` | No | Pictures one add request may carry. |
 | `thumbnail_edge` | int | `448` | No | Long side of the decider's copy, px. |
-| `model_edge` | int | `1024` | No | Long side of the extraction / answer model's copy, px. |
+| `model_edge` | int | `1024` | No | Long side of the extraction / answer model's copy, px. A search result names this copy as `model_path`; `GET /memory/images/{id}?variant=model` serves it. |
 | `cache_quality` | int | `85` | No | JPEG quality of both derived copies. |
 | `formats` | list[string] | `["png","jpeg","webp","gif"]` | No | Accepted formats, by Pillow's name in lowercase. |
 

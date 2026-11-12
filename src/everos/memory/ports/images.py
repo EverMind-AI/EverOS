@@ -8,10 +8,10 @@ reference), not where the bytes live.
 same :class:`StoredImage` and only adds a reference, which is what makes a
 forwarded picture cost nothing.
 
-``read``/``thumbnail`` return bytes rather than paths because their only callers
+``read``/``read_derived`` return bytes rather than paths because their callers
 hand those bytes to a model as a data URI; a caller that wants a path for the
-API response uses ``path_of``, which also enforces that the path stays inside
-the memory root.
+API response uses ``path_of`` (the original) or ``ensure_derived`` (a scaled
+copy), both of which keep the path inside the memory root.
 """
 
 from __future__ import annotations
@@ -64,6 +64,19 @@ class ImageStore(Protocol):
 
     async def read_derived(self, image_id: str, *, edge: int, quality: int) -> bytes:
         """Bytes of the ``edge``-sized copy, rendered on first request."""
+        ...
+
+    async def ensure_derived(self, image_id: str, *, edge: int, quality: int) -> str:
+        """Memory-root-relative path of the ``edge``-sized copy, rendered if missing.
+
+        For a caller that hands the copy on by path rather than by bytes: a
+        search result names the answering model's copy, and the file must be
+        there when the result is read. The extension is the copy's own (a
+        greyscale picture's copy is PNG), so it is the store that answers.
+
+        Raises:
+            FileNotFoundError: The store holds no such picture.
+        """
         ...
 
     async def path_of(self, image_id: str) -> Path:

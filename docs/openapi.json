@@ -1117,7 +1117,7 @@
           "memory"
         ],
         "summary": "Get Image",
-        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A picture the asker may not see answers exactly as one that does not\nexist (docs/group-memory.md, section 9.1).",
+        "description": "One stored picture, by id, as bytes.\n\n``model`` renders at ``[images] model_edge`` and ``cache_quality`` -- the\ncopy extraction read the picture at and the one to show an answering model.\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A copy is JPEG, or PNG for a greyscale picture, and is labelled as\nwhat it is. A picture the asker may not see answers exactly as one that does\nnot exist (docs/group-memory.md, section 9.1).",
         "operationId": "get_image_api_v1_memory_images__image_id__get",
         "parameters": [
           {
@@ -1135,12 +1135,12 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(original|thumbnail)$",
-              "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request.",
+              "pattern": "^(original|model|thumbnail)$",
+              "description": "``model`` for an answering model: the ``[images] model_edge`` copy (1024 px on the long side by default) a search result names as ``model_path``; ``original`` for the bytes as they arrived; ``thumbnail`` for the decider-sized copy. Both copies are cached on first request.",
               "default": "original",
               "title": "Variant"
             },
-            "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+            "description": "``model`` for an answering model: the ``[images] model_edge`` copy (1024 px on the long side by default) a search result names as ``model_path``; ``original`` for the bytes as they arrived; ``thumbnail`` for the decider-sized copy. Both copies are cached on first request."
           },
           {
             "name": "asker_id",
@@ -2964,7 +2964,7 @@
           "memory"
         ],
         "summary": "Get Image",
-        "description": "One stored picture, by id, as bytes.\n\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A picture the asker may not see answers exactly as one that does not\nexist (docs/group-memory.md, section 9.1).",
+        "description": "One stored picture, by id, as bytes.\n\n``model`` renders at ``[images] model_edge`` and ``cache_quality`` -- the\ncopy extraction read the picture at and the one to show an answering model.\n``thumbnail`` renders at ``[decider].image_thumbnail_edge`` — the same size\nthe retrieval loop shows the decider — so a caller can preview exactly what\nit saw. A copy is JPEG, or PNG for a greyscale picture, and is labelled as\nwhat it is. A picture the asker may not see answers exactly as one that does\nnot exist (docs/group-memory.md, section 9.1).",
         "operationId": "get_image_api_v2_memory_images__image_id__get",
         "parameters": [
           {
@@ -2982,12 +2982,12 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(original|thumbnail)$",
-              "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request.",
+              "pattern": "^(original|model|thumbnail)$",
+              "description": "``model`` for an answering model: the ``[images] model_edge`` copy (1024 px on the long side by default) a search result names as ``model_path``; ``original`` for the bytes as they arrived; ``thumbnail`` for the decider-sized copy. Both copies are cached on first request.",
               "default": "original",
               "title": "Variant"
             },
-            "description": "``original`` for the answering model; ``thumbnail`` for a decider-sized copy, rendered on first request."
+            "description": "``model`` for an answering model: the ``[images] model_edge`` copy (1024 px on the long side by default) a search result names as ``model_path``; ``original`` for the bytes as they arrived; ``thumbnail`` for the decider-sized copy. Both copies are cached on first request."
           },
           {
             "name": "asker_id",
@@ -9056,6 +9056,11 @@
             "type": "string",
             "title": "Thumbnail Path"
           },
+          "model_path": {
+            "type": "string",
+            "title": "Model Path",
+            "default": ""
+          },
           "media_type": {
             "type": "string",
             "title": "Media Type",
@@ -9105,7 +9110,7 @@
           "score"
         ],
         "title": "SearchImageItem",
-        "description": "Image-memory hit — one appearance of one picture.\n\n``id`` and ``image_id`` are different identities on purpose: ``id`` names\nthis *record* (a time, a provenance, a description), while ``image_id``\nnames the *file*, which is stored once however many records refer to it and\nis what ``forget`` takes.\n\n``original_path`` and ``thumbnail_path`` are memory-root-relative. The\ncaller resolves them against its own root to hand the answering model the\noriginal — never the thumbnail, which exists so the decider can look at\nmany pictures cheaply.\n\n``name`` is the file name the client sent with this occurrence, when it\nsent one. It is not an identity (the same picture may arrive under two\nnames) but it is the only handle a caller has for saying which picture of\nits own input this memory is about."
+        "description": "Image-memory hit — one appearance of one picture.\n\n``id`` and ``image_id`` are different identities on purpose: ``id`` names\nthis *record* (a time, a provenance, a description), while ``image_id``\nnames the *file*, which is stored once however many records refer to it and\nis what ``forget`` takes.\n\nThe three paths are memory-root-relative; a caller resolves them against\nits own root. ``model_path`` is the copy to hand an answering model: the\n``[images] model_edge`` copy (1024 px on the long side by default), the\nsame size the extraction model read the picture at.\n``GET /memory/images/{image_id}?variant=model`` serves the same bytes by\nid. ``original_path`` is the picture byte for byte as it arrived, for a\ncaller that wants it (a download, an export); it can be many times the\ncopy's size and visual tokens. ``thumbnail_path`` is the decider's copy,\nsmall so it can look at many pictures cheaply; it is not meant for an\nanswer.\n\n``name`` is the file name the client sent with this occurrence, when it\nsent one. It is not an identity (the same picture may arrive under two\nnames) but it is the only handle a caller has for saying which picture of\nits own input this memory is about."
       },
       "SearchMethod": {
         "type": "string",

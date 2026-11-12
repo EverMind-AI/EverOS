@@ -120,6 +120,61 @@ async def test_derived_copy_is_smaller_and_named_by_edge(tmp_path: Path) -> None
     assert (await store.read(image.image_id)) == data
 
 
+async def test_ensure_derived_names_the_copy_it_renders(tmp_path: Path) -> None:
+    """The answering model's copy is handed on by path: the file is there."""
+    store = await _store(tmp_path)
+    data = _png(size=2048)
+    image = await store.store(data, limits=_limits())
+
+    relative = await store.ensure_derived(image.image_id, edge=1024, quality=85)
+
+    assert relative == f"figures/.cache/{image.image_id}-1024.jpeg"
+    with Image.open(tmp_path / relative) as copy:
+        assert copy.format == "JPEG"
+        assert max(copy.size) == 1024
+    assert (await store.read(image.image_id)) == data
+
+
+async def test_ensure_derived_keeps_a_copy_already_on_disk(tmp_path: Path) -> None:
+    """A copy is a pure function of the original: one on disk is not redone."""
+    store = await _store(tmp_path)
+    image = await store.store(_png(size=256), limits=_limits())
+    first = await store.ensure_derived(image.image_id, edge=128, quality=85)
+    marker = b"the cached copy"
+    (tmp_path / first).write_bytes(marker)
+
+    again = await store.ensure_derived(image.image_id, edge=128, quality=85)
+
+    assert again == first
+    assert (tmp_path / first).read_bytes() == marker
+
+
+async def test_ensure_derived_names_a_greyscale_copy_png(tmp_path: Path) -> None:
+    """The renderer keeps a greyscale picture PNG; the path says what it is."""
+    store = await _store(tmp_path)
+    buffer = io.BytesIO()
+    Image.new("L", (300, 200), 128).save(buffer, format="PNG")
+    image = await store.store(buffer.getvalue(), limits=_limits())
+
+    relative = await store.ensure_derived(image.image_id, edge=100, quality=85)
+
+    assert relative == f"figures/.cache/{image.image_id}-100.png"
+    with Image.open(tmp_path / relative) as copy:
+        assert copy.format == "PNG"
+    # Asked again, the PNG on disk is found without a render.
+    assert await store.ensure_derived(image.image_id, edge=100, quality=85) == relative
+
+
+async def test_ensure_derived_of_an_unknown_picture_is_not_found(
+    tmp_path: Path,
+) -> None:
+    store = await _store(tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        await store.ensure_derived("c" * 64, edge=1024, quality=85)
+    assert not list((tmp_path / "figures").glob(".cache/c*"))
+
+
 async def test_release_counts_down_and_keeps_the_file(tmp_path: Path) -> None:
     """Forget is a status change; undo must not need the bytes restored."""
     store = await _store(tmp_path)

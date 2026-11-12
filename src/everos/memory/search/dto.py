@@ -349,10 +349,16 @@ class SearchImageItem(BaseModel):
     names the *file*, which is stored once however many records refer to it and
     is what ``forget`` takes.
 
-    ``original_path`` and ``thumbnail_path`` are memory-root-relative. The
-    caller resolves them against its own root to hand the answering model the
-    original — never the thumbnail, which exists so the decider can look at
-    many pictures cheaply.
+    The three paths are memory-root-relative; a caller resolves them against
+    its own root. ``model_path`` is the copy to hand an answering model: the
+    ``[images] model_edge`` copy (1024 px on the long side by default), the
+    same size the extraction model read the picture at.
+    ``GET /memory/images/{image_id}?variant=model`` serves the same bytes by
+    id. ``original_path`` is the picture byte for byte as it arrived, for a
+    caller that wants it (a download, an export); it can be many times the
+    copy's size and visual tokens. ``thumbnail_path`` is the decider's copy,
+    small so it can look at many pictures cheaply; it is not meant for an
+    answer.
 
     ``name`` is the file name the client sent with this occurrence, when it
     sent one. It is not an identity (the same picture may arrive under two
@@ -392,9 +398,20 @@ class SearchImageItem(BaseModel):
     name: str = ""
     original_path: str
     thumbnail_path: str
+    model_path: str = ""
+    """The answering model's copy: ``figures/.cache/<image_id>-<edge>.<jpeg|png>``.
+
+    ``<edge>`` is ``[images] model_edge``. Rendered into the cache on demand, so
+    the file is on disk when the response is returned. Empty only when no copy
+    could be made (the original is missing or unreadable); the description and
+    OCR are then what there is to show."""
     media_type: str = ""
+    """Format of the original (``model_path`` is JPEG, or PNG for a greyscale
+    picture)."""
     width: int = 0
+    """Pixel width of the original."""
     height: int = 0
+    """Pixel height of the original."""
     status: Literal["current", "superseded", "forgotten"] = "current"
     label: str = ""
     """``img-N`` the referring episode's body uses, when this item is attached

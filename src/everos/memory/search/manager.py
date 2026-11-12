@@ -28,8 +28,10 @@ recall for every sub-query; a deployment without an embedder runs BM25 alone
 (keyword recall), and the loop, the decider and the ranking are otherwise the
 same.
 
-The manager never writes to storage; it only reads the derived index and
-markdown.
+The manager never writes memory; it reads the derived index and markdown,
+and asks the picture store for scaled copies (a disposable cache under
+``figures/.cache/``): the decider's thumbnails, and the answering model's copy
+every returned picture names as ``model_path``.
 """
 
 from __future__ import annotations
@@ -108,6 +110,7 @@ if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
     from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvider
+    from everos.component.images import ImageLimits
     from everos.memory.ports.images import ImageStore
 
     from .recall import EpisodeRecaller, ImageMemoryRecaller, ProfileRecaller
@@ -177,6 +180,7 @@ class SearchManager:
         trace_path_source: Callable[[], str | None],
         image_recaller: ImageMemoryRecaller | None = None,
         image_store: ImageStore | None = None,
+        image_limits: ImageLimits | None = None,
         access: AccessPolicy,
         group_profile_index: GroupProfileIndex | None = None,
         episode_index: EpisodeIndex | None = None,
@@ -213,6 +217,9 @@ class SearchManager:
         self._decider_llm = decider_client
         self._images = image_recaller
         self._image_store = image_store
+        # ``[images]``: the size of the answering model's copy each returned
+        # picture names (``model_path``). Without it the field stays empty.
+        self._image_limits = image_limits
         # The picture-side embedder, when configured. Its query encoder puts the
         # user's question into the space the pictures' bytes live in; without
         # it the visual route is skipped and search is exactly as before.
@@ -278,6 +285,7 @@ class SearchManager:
                 images = await self._resolve_episode_pictures(
                     req, ranked.episodes, ranked.images, scope=scope
                 )
+                images = await self._with_answer_copies(ranked.episodes, images)
                 constraints = await self._constraints(req, scope, ranked, images)
                 data = SearchData(
                     episodes=with_audience(scope, ranked.episodes),
@@ -301,6 +309,7 @@ class SearchManager:
                 images = await self._resolve_episode_pictures(
                     req, ranked.episodes, ranked.images
                 )
+                images = await self._with_answer_copies(ranked.episodes, images)
                 data = SearchData(
                     episodes=ranked.episodes,
                     images=images,
@@ -522,6 +531,49 @@ class SearchManager:
             unresolved=len(wanted) - len(selected) - len(attached),
         )
         return images
+
+    async def _with_answer_copies(
+        self, episodes: Sequence[SearchEpisodeItem], images: list[SearchImageItem]
+    ) -> list[SearchImageItem]:
+        """Name every returned picture's answering-model copy, rendering it if missing.
+
+        Each picture of the response -- ranked, or attached to the episode that
+        refers to it -- gets ``model_path``: the ``[images] model_edge`` copy,
+        the one to show an answering model (the original can be many times its
+        size and visual tokens). The copy is usually on disk already, written
+        when extraction read the picture at the same size; a store that has
+        none renders it now, once. A picture the store cannot copy keeps an
+        empty ``model_path`` and is logged: its description still answers.
+
+        Args:
+            episodes: The selected episodes (mutated: their ``images`` named).
+            images: The ranked pictures.
+
+        Returns:
+            ``images`` with ``model_path`` set.
+        """
+        store, limits = self._image_store, self._image_limits
+        if store is None or limits is None:
+            return images
+        ids = list(
+            dict.fromkeys(
+                [image.image_id for image in images]
+                + [image.image_id for ep in episodes for image in ep.images]
+            )
+        )
+        if not ids:
+            return images
+        found = await asyncio.gather(
+            *(_answer_copy(store, limits, image_id) for image_id in ids)
+        )
+        paths = dict(zip(ids, found, strict=True))
+
+        def named(image: SearchImageItem) -> SearchImageItem:
+            return image.model_copy(update={"model_path": paths[image.image_id]})
+
+        for episode in episodes:
+            episode.images = [named(image) for image in episode.images]
+        return [named(image) for image in images]
 
     # ── Profile ─────────────────────────────────────────────────────
 
@@ -755,6 +807,21 @@ def _picture_by_image_id(
         if prior is None or (prior.item.superseded_by and not row.item.superseded_by):
             chosen[image_id] = row
     return chosen
+
+
+async def _answer_copy(store: ImageStore, limits: ImageLimits, image_id: str) -> str:
+    """One picture's answering-model copy, root-relative; "" when none can be made."""
+    try:
+        return await store.ensure_derived(
+            image_id, edge=limits.model_edge, quality=limits.cache_quality
+        )
+    except (FileNotFoundError, OSError, ValueError) as err:
+        logger.warning(
+            "search_answer_copy_unavailable",
+            image_id=image_id,
+            error=f"{type(err).__name__}: {err}"[:160],
+        )
+        return ""
 
 
 def _extract_top_level_session_id(filters: FilterNode | None) -> str | None:
