@@ -45,7 +45,10 @@ machinery that keeps a deleted memory from coming back.
     with its `forget_id`, which **`/memory/forget/undo`** takes: exactly what
     it marked comes back, except what another live forget still names.
   - **`everos memory history|update|forget|undo`**, the same service
-    functions in-process ([docs/cli.md](docs/cli.md#everos-memory)).
+    functions in-process ([docs/cli.md](docs/cli.md#everos-memory)). Each
+    prints one JSON document on standard output and its log lines on
+    standard error (`[logging] stream`, new, default `stdout`, which these
+    commands set to `stderr`).
   - Cost: no model call in any of them; an update embeds its new version
     once (the embedding provider), a held scene saves the call its next join
     would have made.

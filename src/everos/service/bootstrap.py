@@ -306,7 +306,7 @@ def configure_process(settings: Settings) -> None:
     application calls it, and so do commands that never build one. Calling
     it again replaces the previous configuration.
     """
-    configure_logging(settings.logging.level)
+    configure_logging(settings.logging.level, stream=settings.logging.stream)
     configure_tracing(settings.observability)
     configure_metrics()
 

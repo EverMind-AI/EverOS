@@ -1219,13 +1219,17 @@ class LoggingSettings(_Section):
 
     ``everos server start --log-level`` and ``EVEROS_LOG_LEVEL`` override
     ``level`` for the server; interactive commands log ``WARNING`` (``INFO``
-    with ``--verbose``) whatever it says.
+    with ``--verbose``) whatever it says. ``stream`` is where the lines go:
+    standard output by default; ``everos memory`` always uses standard error,
+    since its standard output is its JSON answer.
 
     Env binding:
         EVEROS_LOGGING__LEVEL
+        EVEROS_LOGGING__STREAM
     """
 
     level: str = "INFO"
+    stream: Literal["stdout", "stderr"] = "stdout"
 
 
 class ObservabilitySettings(_Section):

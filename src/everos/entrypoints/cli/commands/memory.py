@@ -13,7 +13,8 @@ A thin layer over the same service functions the HTTP API calls
 - ``memory undo FORGET_ID`` -- undo one forget by the id it answered.
 
 A user's memory is named by ``--user``; a group's by ``--group`` and
-``--asker``. Each command prints its answer as JSON. ``history`` only reads
+``--asker``. Each command prints its answer as JSON on standard output, and
+its log lines on standard error. ``history`` only reads
 and runs beside a server; the others write, and -- as ``cascade sync`` --
 need the memory root to themselves (exit 3 while a server holds it; use the
 HTTP API then).
@@ -43,6 +44,7 @@ from everos.core.errors import (
 from everos.entrypoints.cli._process import (
     configure_interactive,
     load_settings_or_exit,
+    with_log_stream,
 )
 from everos.service import (
     GroupForgetTarget,
@@ -329,9 +331,15 @@ def _check_owner(user: str | None, group: str | None) -> None:
 
 
 def _settings(root: str | None, verbose: bool) -> Settings:
+    """The command's settings: its root, its log level, and its logs on stderr.
+
+    Standard output carries the JSON answer alone, so a script can parse it;
+    every log line, a provider's warning at build included, goes to stderr.
+    """
     if root:
         os.environ["EVEROS_ROOT"] = root
-    return configure_interactive(verbose=verbose, settings=load_settings_or_exit())
+    settings = with_log_stream(load_settings_or_exit(), "stderr")
+    return configure_interactive(verbose=verbose, settings=settings)
 
 
 async def _run(settings: Settings, step: Any, *, exclusive: bool) -> object:

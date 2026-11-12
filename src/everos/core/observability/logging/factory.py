@@ -25,7 +25,7 @@ import logging
 import sys
 import traceback
 from contextlib import AbstractContextManager
-from typing import Any, TextIO
+from typing import Any, Literal, TextIO
 
 import structlog
 from structlog.typing import ExcInfo
@@ -62,7 +62,9 @@ def bound_log_context(**fields: Any) -> AbstractContextManager[None]:
     return structlog.contextvars.bound_contextvars(**fields)  # type: ignore[return-value]  # structlog types it as a Generator; @contextmanager wraps it at runtime
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(
+    level: str = "INFO", *, stream: Literal["stdout", "stderr"] = "stdout"
+) -> None:
     """Configure structlog and stdlib logging once at process startup.
 
     After this call:
@@ -71,9 +73,11 @@ def configure_logging(level: str = "INFO") -> None:
       message flows through the same ``ProcessorFormatter``, so output
       format is identical regardless of which logging API the caller used.
     * Root-logger handlers are replaced with a single ``StreamHandler``
-      pointing at ``sys.stdout``; any previously installed handler
-      (uvicorn's default ``LOGGING_CONFIG``, libraries that call
-      ``logging.basicConfig``, etc.) is removed.
+      pointing at ``sys.stdout`` (``sys.stderr`` with ``stream="stderr"``:
+      a command whose standard output is its answer, such as the JSON of
+      ``everos memory``, keeps its log lines out of it); any previously
+      installed handler (uvicorn's default ``LOGGING_CONFIG``, libraries
+      that call ``logging.basicConfig``, etc.) is removed.
 
     The ``uvicorn.run(..., log_config=None)`` flag is the matching half
     on the server entry point — without it, uvicorn re-installs its own
@@ -83,6 +87,7 @@ def configure_logging(level: str = "INFO") -> None:
         level: Log level name (``DEBUG`` / ``INFO`` / ``WARNING`` / ``ERROR``).
             Unknown names silently fall back to ``INFO`` via
             ``getattr(logging, ..., INFO)``.
+        stream: ``stdout`` (default) or ``stderr``: where the lines go.
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
 
@@ -127,7 +132,7 @@ def configure_logging(level: str = "INFO") -> None:
         ],
     )
 
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(sys.stderr if stream == "stderr" else sys.stdout)
     handler.setFormatter(formatter)
 
     # Drop any handler we installed on a previous ``configure_logging``

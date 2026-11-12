@@ -9,6 +9,8 @@ the configured level (INFO by default) and sets it itself.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import typer
 
 from everos.config import Settings, load_settings
@@ -34,6 +36,20 @@ def with_log_level(settings: Settings, level: str) -> Settings:
     """``settings`` with ``[logging] level`` replaced by ``level``."""
     return settings.model_copy(
         update={"logging": settings.logging.model_copy(update={"level": level})}
+    )
+
+
+def with_log_stream(
+    settings: Settings, stream: Literal["stdout", "stderr"]
+) -> Settings:
+    """``settings`` with ``[logging] stream`` replaced by ``stream``.
+
+    For a command whose standard output is a machine-readable answer: building
+    the application configures logging from these settings again, so the
+    stream has to travel in them, not be set once beforehand.
+    """
+    return settings.model_copy(
+        update={"logging": settings.logging.model_copy(update={"stream": stream})}
     )
 
 

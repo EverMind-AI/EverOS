@@ -442,7 +442,8 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4, 7.7 and
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `level` | str | `"INFO"` | Console log level (`DEBUG` / `INFO` / `WARNING` / `ERROR`). `everos server start --log-level` and `EVEROS_LOG_LEVEL` override it for the server; interactive commands (`cascade`, `init`, `config`, `demo`) log `WARNING`, or `INFO` with `--verbose`, whatever it says. Requires restart. |
+| `level` | str | `"INFO"` | Console log level (`DEBUG` / `INFO` / `WARNING` / `ERROR`). `everos server start --log-level` and `EVEROS_LOG_LEVEL` override it for the server; interactive commands (`cascade`, `init`, `config`, `demo`, `memory`) log `WARNING`, or `INFO` with `--verbose`, whatever it says. Requires restart. |
+| `stream` | str | `"stdout"` | Where log lines go: `stdout` or `stderr`. `everos memory` always logs to `stderr`, since its standard output is its JSON answer. Requires restart. |
 
 ## Troubleshooting
 

@@ -446,6 +446,9 @@ group_profile_cap = 20
 # --log-level` (or EVEROS_LOG_LEVEL) overrides it for the server; interactive
 # commands (cascade / init / config / demo) log WARNING, INFO with --verbose.
 level = "INFO"
+# Where the lines go: "stdout" or "stderr". `everos memory` always logs to
+# stderr: its standard output is its JSON answer.
+stream = "stdout"
 
 [observability]
 # OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral
