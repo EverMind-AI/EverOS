@@ -97,7 +97,10 @@ def heap_expand(
 
     # topn: {id: (Candidate, lr_score, item_type, source_episode_id)}
     topn: dict[str, tuple[Candidate | FactCandidate, float, str, str]] = {}
-    for doc in rrf_results[:top_k]:
+    lr_sorted_docs = sorted(
+        rrf_results, key=lambda d: episode_scores.get(d.id, 0.0), reverse=True
+    )
+    for doc in lr_sorted_docs[:top_k]:
         topn[doc.id] = (doc, episode_scores.get(doc.id, 0.0), "episode", doc.id)
 
     # Phase 3 — heap convergence loop

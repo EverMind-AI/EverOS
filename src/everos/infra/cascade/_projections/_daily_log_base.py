@@ -128,7 +128,7 @@ class BaseDailyLogHandler(Handler):
 
         existing = await self.index_repo.find_where(
             eq("md_path", md_path),
-            limit=10_000,
+            limit=200_000,
             skip_vectors=True,
         )
         owner_id, owner_type = resolve_owner(parsed.frontmatter, md_path)
@@ -167,18 +167,23 @@ class BaseDailyLogHandler(Handler):
             skipped=skipped,
         )
 
-    @staticmethod
     def _diff_entries(
+        self,
         new_entries: list[ParsedEntry],
         existing: list[Any],
     ) -> tuple[list[ParsedEntry], int]:
         """Compare new entries against existing rows, return changed + skip count."""
         existing_by_entry = {row.entry_id: row for row in existing}
+        embed_available = self._deps.embedding is not None
         to_build: list[ParsedEntry] = []
         skipped = 0
         for entry in new_entries:
             prior = existing_by_entry.get(entry.entry_id)
-            if prior is not None and prior.content_sha256 == entry.content_sha256:
+            if (
+                prior is not None
+                and prior.content_sha256 == entry.content_sha256
+                and (not embed_available or getattr(prior, "vector", True) is not None)
+            ):
                 skipped += 1
                 continue
             to_build.append(entry)

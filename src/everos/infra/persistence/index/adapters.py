@@ -46,6 +46,7 @@ from everos.memory.ports import (
     ScoredKnowledgeTopic,
     SearchHit,
     Stored,
+    eq,
     primary_key,
 )
 
@@ -267,9 +268,17 @@ class ProfileIndexAdapter:
         self._repo = repo
 
     async def get(self, scope: Scope) -> Stored[Profile] | None:
-        row = await self._repo.find_one_where(
-            primary_key(scope.app_id, scope.project_id, scope.owner_id)
-        )
+        if scope.app_id in ("*", "shared", "all"):
+            where = (
+                eq("owner_id", scope.owner_id)
+                if scope.project_id in ("*", "shared", "all", "default")
+                else primary_key("default", scope.project_id, scope.owner_id)
+            )
+            row = await self._repo.find_one_where(where)
+        else:
+            row = await self._repo.find_one_where(
+                primary_key(scope.app_id, scope.project_id, scope.owner_id)
+            )
         if row is None:
             return None
         fields = _fields(row)
@@ -356,8 +365,15 @@ def _scope(fields: Row) -> Scope:
 
 
 def _daily_ref(fields: Row) -> MemoryRef:
+    app_id = fields.get("app_id", "default")
+    raw_id = str(fields["id"])
+    row_id = (
+        raw_id
+        if app_id == "default" or raw_id.startswith(f"{app_id}_")
+        else f"{app_id}_{raw_id}"
+    )
     return MemoryRef(
-        id=fields["id"], entry_id=fields["entry_id"], md_path=fields["md_path"]
+        id=row_id, entry_id=fields["entry_id"], md_path=fields["md_path"]
     )
 
 

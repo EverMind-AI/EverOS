@@ -16,6 +16,7 @@ from __future__ import annotations
 from everalgo.user_memory import AtomicFactExtractor
 
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import from_timestamp, today_with_timezone
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import AtomicFactsExtracted, EpisodeExtracted
 from everos.memory.models import AtomicFact
@@ -66,8 +67,15 @@ async def extract_atomic_facts(
             return True
         return bool(await deps.stores.memcell.find_by_ids([event.memcell_id]))
 
+    ts_date = (
+        from_timestamp(event.episode_timestamp_ms).date()
+        if isinstance(event.episode_timestamp_ms, (int, float))
+        and event.episode_timestamp_ms > 0
+        else None
+    )
+    af_date = ts_date if ts_date is not None else today_with_timezone()
     refs = await deps.stores.atomic_fact.append_many(
-        scope, facts, only_if=sources_alive
+        scope, facts, only_if=sources_alive, date=af_date
     )
 
     logger.info(
