@@ -60,7 +60,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │
 ├── figures/                             picture originals, content-addressed
 │   ├── <first two hex>/<sha256>.<ext>    one file per distinct picture
-│   └── .cache/<sha256>-<edge>.jpeg       derived copies, rebuildable
+│   └── .cache/<sha256>-<edge>.<ext>      derived copies (jpeg; png when greyscale), rebuildable
 │
 ├── .index/                              system-managed, rebuildable (gitignore)
 │   ├── store_version                    the store's EverOS major (`2`); see below

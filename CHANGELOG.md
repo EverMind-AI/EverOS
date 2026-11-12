@@ -666,6 +666,17 @@ machinery that keeps a deleted memory from coming back.
 - **`GET /memory/images/{image_id}?variant=thumbnail` labels a greyscale
   picture's copy `image/png`.** The copy is PNG for a greyscale picture, and
   the route labelled every copy `image/jpeg`.
+- **A picture's copies show transparency as white.** The decider's thumbnail,
+  the extraction model's copy and the answering model's copy flattened a
+  transparent region onto white only when the original was a JPEG, which has
+  no transparency; a PNG, WEBP or GIF reached every model with whatever colour
+  lay under its transparent pixels, usually black. Every alpha channel,
+  transparent palette entry and colour key is now blended onto white. A
+  picture with nothing transparent renders as before, byte for byte, and a
+  copy's format still follows the picture alone (PNG when greyscale, JPEG
+  otherwise). `scaled_copy` no longer takes `format_name`. Copies already in
+  `figures/.cache/` keep their old pixels: delete that directory to have them
+  re-rendered on demand (it is always safe to drop).
 
 ### Removed
 

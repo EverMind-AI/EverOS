@@ -50,8 +50,8 @@ logger = get_logger(__name__)
 _FIGURES_DIR = "figures"
 _CACHE_DIR = ".cache"
 _DERIVED_EXTENSIONS = ("jpeg", "png")
-"""What :func:`~everos.component.images.scaled_copy` writes: JPEG, or PNG for a
-greyscale picture."""
+"""What :func:`~everos.component.images.scaled_copy` writes: PNG for a greyscale
+picture, JPEG for any other -- at every edge."""
 
 
 class FileImageStore:
@@ -259,12 +259,7 @@ class FileImageStore:
         path = await self.path_of(image_id)
         data = await anyio.Path(path).read_bytes()
         rendered, extension = await anyio.to_thread.run_sync(
-            lambda: scaled_copy(
-                data,
-                format_name=_format_of_path(path),
-                edge=edge,
-                quality=quality,
-            )
+            lambda: scaled_copy(data, edge=edge, quality=quality)
         )
         # The renderer answers PNG for a greyscale picture; the name has to say
         # what the bytes are or a browser will refuse to display it.
@@ -338,14 +333,3 @@ def _existing_original(figures_dir: Path, image_id: str) -> str | None:
     for candidate in bucket.glob(f"{image_id}.*"):
         return f"{_FIGURES_DIR}/{image_id[:2]}/{candidate.name}"
     return None
-
-
-def _format_of_path(path: Path) -> str:
-    """Pillow format name for an original, from its extension."""
-    return {
-        ".png": "PNG",
-        ".jpeg": "JPEG",
-        ".jpg": "JPEG",
-        ".webp": "WEBP",
-        ".gif": "GIF",
-    }.get(path.suffix.lower(), "JPEG")

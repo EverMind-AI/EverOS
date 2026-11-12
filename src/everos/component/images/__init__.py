@@ -250,9 +250,7 @@ def decode_image(data: bytes, *, limits: ImageLimits) -> StoredImage:
     )
 
 
-def scaled_copy(
-    data: bytes, *, format_name: str, edge: int, quality: int
-) -> tuple[bytes, str]:
+def scaled_copy(data: bytes, *, edge: int, quality: int) -> tuple[bytes, str]:
     """Render one derived copy whose long side is at most ``edge`` pixels.
 
     Never enlarges: a picture already inside the bound is re-encoded as it is,
@@ -260,23 +258,22 @@ def scaled_copy(
     frame — a decider or an extraction model reads one image per part, and
     keeping the animation would multiply payload for nothing.
 
-    Also flattens transparency onto white, because the wire formats a model
-    accepts do not all carry an alpha channel and a transparent region reaching
-    them as black is a silent misreading of the picture.
+    Also flattens transparency onto white -- an alpha channel (a PNG's or a
+    WEBP's), a palette's transparent entry (GIF, PNG) or a transparent colour
+    key -- because the wire formats a model accepts do not all carry an alpha
+    channel and a transparent region reaching them as black is a silent
+    misreading of the picture.
+
+    The copy's format follows the picture and never ``edge``: PNG for a
+    greyscale picture, JPEG for any other, so every copy of one picture has the
+    same extension.
 
     Returns:
         ``(bytes, extension)`` of the derived copy.
     """
     with Image.open(io.BytesIO(data)) as image:
         image.seek(0)
-        frame = image.copy()
-    if frame.mode in ("RGBA", "LA", "P") and format_name.upper() in ("JPEG", "JPG"):
-        background = Image.new("RGB", frame.size, (255, 255, 255))
-        converted = frame.convert("RGBA")
-        background.paste(converted, mask=converted.split()[-1])
-        frame = background
-    elif frame.mode not in ("RGB", "L"):
-        frame = frame.convert("RGB")
+        frame = _opaque(image.copy())
     width, height = frame.size
     longest = max(width, height)
     if longest > edge:
@@ -292,6 +289,25 @@ def scaled_copy(
     buffer = io.BytesIO()
     frame.save(buffer, format=out_format, quality=quality, optimize=True)
     return buffer.getvalue(), _EXTENSIONS[out_format]
+
+
+def _opaque(frame: Image.Image) -> Image.Image:
+    """``frame`` as a copy is written: ``L`` when it is greyscale, else ``RGB``.
+
+    A pixel that is not fully opaque is blended onto white by its alpha. A frame
+    with no such pixel takes the plain conversion, so its copy is exactly what it
+    was before transparency was handled; and the mode, hence the copy's format,
+    never depends on transparency.
+    """
+    target = "L" if frame.mode == "L" else "RGB"
+    if frame.has_transparency_data:
+        with_alpha = frame.convert("LA" if target == "L" else "RGBA")
+        alpha = with_alpha.getchannel("A")
+        if alpha.getextrema()[0] < 255:
+            background = Image.new(target, frame.size, "white")
+            background.paste(with_alpha.convert(target), mask=alpha)
+            return background
+    return frame if frame.mode == target else frame.convert(target)
 
 
 def dedupe(images: Iterable[StoredImage]) -> list[StoredImage]:
