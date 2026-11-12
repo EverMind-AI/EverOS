@@ -75,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config) flushes each dataset session apart; `"conversation"` sends a whole
   conversation as one EverOS session flushed once at its end, as the EverAlgo
   reference harness did. Refused for datasets whose sessions carry their own ids.
+- **`benchmarks/configs/locomo-step.toml`** (`DATASET=locomo-step`): LoCoMo with
+  step boundary detection and prompt-only replies on every EverOS call, the
+  configuration behind LoCoMo's published number. It is `locomo.toml` with
+  those two server settings changed, and a unit test keeps it so. The reply
+  format (`EVEROS_LLM__RESPONSE_FORMAT_MODE`) is now part of the ingest
+  identity, so a store built under one format is not reused under another.
 
 ### Changed
 
@@ -227,6 +233,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run as not comparable to published results, and `Decider model:` names the
   decider `run_spec.json` records (model, endpoint and the section the model came
   from), or that the run's methods use none.
+- **LoCoMo's published results are measured on this release and re-judged.**
+  `benchmarks/README.md` gives every LoCoMo figure graded against the gold
+  audit's corrected answers for the 99 questions it disputes (marked \*), best
+  of three full runs per config: 94.61% with `locomo-step` (step, prompt-only
+  replies) and 94.35% with the default `locomo` (batch, strict), both `agentic`.
+  `llm_multiround`, `hybrid`, `vector` and `keyword` are scored on those runs'
+  stores. A "Batch or step" section, and its counterpart under
+  `[boundary_detection]` in `docs/configuration.md`, set out what each strategy
+  costs: about ten times the boundary calls and five times the ingest time for
+  step, which handles chat messages only, for a score within LoCoMo's
+  run-to-run noise. EverOS keeps batch as its default. The guide also shows how
+  to score another retrieval method on stores a run already built. The previous
+  LoCoMo figure, 94.42%, is retired.
 - **Benchmark docs**: `benchmarks/README.md` (and its Chinese mirror) is a
   step-by-step guide with a quick start, a check per step, which keys each
   retrieval method needs, a troubleshooting table and the two scores;
@@ -248,7 +267,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ADD stage into the other run's stores while its own servers died at bind.
   `GET /health` now reports `pid`, the answering process's id, and `run.py`
   accepts an answer only when it comes from the server it started; otherwise it
-  moves to another port block, as for any lost port race.
+  moves to another port block, as for any lost port race. A start that lost a
+  block also kept the lost attempt's server logs and then crashed in its
+  capability check; each attempt now rebuilds its per-server lists.
+
+- **LoCoMo's `llm_multiround` decider no longer falls back.**
+  `deepseek-v4-flash-0731`, its decider on OpenRouter, thinks before it answers
+  and spent the decider's 512-token output cap doing so: about one question in
+  six fell back to a fixed core, which measures a different method, while the
+  startup probe's one short request passed. Both LoCoMo configs turn its
+  thinking off (`EVEROS_LLM__DECIDER__EXTRA`), and `run.py` now stops a
+  conversation right after SEARCH when any of its decider rounds fell back,
+  before paying for its answers, with the fix in the message. The configs'
+  decider comments, which had lost their first line and described the old
+  silent fallback, now say who uses the decider and where to serve it, and
+  `reproduce.sh` no longer names a pre-filled decider that has no endpoint.
 
 - Deleting a session also removes its episodes from their clusters' members,
   and a retry after a partial deletion finishes that cleanup (#591). The

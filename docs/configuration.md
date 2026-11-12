@@ -414,6 +414,25 @@ unaffected: nothing is probed, compared, or recorded.
 `step` keeps everalgo's own step limits; every other cutting parameter is
 everalgo's `BoundaryDetector` default.
 
+**Choosing a strategy.** Keep `batch` unless the extra cost of `step` is worth it
+for chat memory:
+
+| | `batch` (default) | `step` |
+|---|---|---|
+| Boundary calls | one per add (544 for all of LoCoMo) | one per message (about 5,250 for LoCoMo) |
+| LoCoMo ingest, 10 servers | about 4 minutes | about 17–22 minutes |
+| Episodes stored for LoCoMo | about 320 | about 550, each shorter |
+| Agent conversations (tool calls) | yes | no: chat messages only |
+| LoCoMo `agentic`, best of three runs | 94.35%\* | 94.61%\* |
+
+The two scores are within LoCoMo's run-to-run spread of about one point. The
+`step` runs also set `[llm] response_format_mode = "prompt_only"` for every call;
+the benchmark config `locomo-step` reproduces them
+([benchmarks/README.md](../benchmarks/README.md#batch-or-step)).
+
+\* Graded against the corrected answers of the LoCoMo gold audit for the 99
+questions it disputes.
+
 ### `[memorize]`
 
 | Field | Type | Default | Description |
