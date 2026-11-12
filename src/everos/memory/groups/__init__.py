@@ -2,8 +2,10 @@
 
 :class:`RosterManager` authorises and applies roster changes and admits a
 ``/memory/add`` batch into its group (session binding, inline roster events,
-implicit joins). The roster itself -- events folded into membership intervals
--- is :func:`everos.memory.models.fold_roster`; who may read what is
+implicit joins) -- or into the implicit group of a session's people
+(:func:`implicit_group_id`, section 7.9). The roster itself -- events
+folded into membership intervals -- is
+:func:`everos.memory.models.fold_roster`; who may read what is
 :mod:`everos.memory.access`. :func:`named_members` finds the members a text
 names by their roster names and aliases (attribution, and the members a query
 names); :func:`record_audience` who was there when a record's sources were
@@ -26,11 +28,15 @@ from .audience import RecordAudience as RecordAudience
 from .audience import record_audience as record_audience
 from .forgotten import readable_segments as readable_segments
 from .forgotten import without_forgotten as without_forgotten
+from .implicit import IMPLICIT_GROUP_PREFIX as IMPLICIT_GROUP_PREFIX
+from .implicit import implicit_group_id as implicit_group_id
+from .implicit import is_implicit_group as is_implicit_group
 from .manager import BatchAdmission as BatchAdmission
 from .manager import BatchMessage as BatchMessage
 from .manager import GroupMetaUpdate as GroupMetaUpdate
 from .manager import RosterChange as RosterChange
 from .manager import RosterManager as RosterManager
+from .manager import founding_joins as founding_joins
 from .manager import implicit_joins as implicit_joins
 from .names import NamedMember as NamedMember
 from .names import named_members as named_members
@@ -40,6 +46,7 @@ from .quotes import normalise_space as normalise_space
 from .quotes import verbatim_part as verbatim_part
 
 __all__ = [
+    "IMPLICIT_GROUP_PREFIX",
     "BatchAdmission",
     "BatchMessage",
     "GroupMetaUpdate",
@@ -47,7 +54,10 @@ __all__ = [
     "RecordAudience",
     "RosterChange",
     "RosterManager",
+    "founding_joins",
+    "implicit_group_id",
     "implicit_joins",
+    "is_implicit_group",
     "named_members",
     "names_of",
     "normalise_space",

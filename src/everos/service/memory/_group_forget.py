@@ -120,7 +120,7 @@ _EPISODE_TABLE = "episode"
 
 @runtime_checkable
 class GroupReextraction(Protocol):
-    """What a forget needs of the group pipeline: the episode call."""
+    """What a forget needs of the conversation pipeline: a group's episode call."""
 
     async def reextract(
         self, *, scope: Scope, session_id: str, memcell_id: str, cell: MemCell
@@ -136,7 +136,7 @@ class GroupForgetManager:
             picture); ``None`` keeps every picture file in circulation.
         eraser: Erases the index rows of what goes, and queues what an undo
             puts back for the cascade.
-        pipeline: The group pipeline: re-extraction.
+        pipeline: The conversation pipeline: re-extraction.
         scenes: Writes a changed scene again; ``None`` writes no new version
             (the scene's changed versions still go).
         extractions: The memorize extractions, which a forget waits for.

@@ -25,6 +25,11 @@ attached profiles, the session buffer and picture bytes. Zero leaks is the
 pass mark. Read paths of section 9.3 that do not exist yet are listed in
 :data:`NOT_YET` with the reason, so the table is accounted for row by row.
 
+Two people talking without a ``group_id`` are an implicit group (section
+7.9), read by its people only: a stranger reads nothing of it, and a third
+person who joins later -- refused in the pair's session, a group of their own
+with the pair in a session of the three -- reads nothing of the pair's.
+
 A personal search with ``include_groups`` reads the user's groups the way a
 group search by the user does, so it takes the same cases: a former member
 and a stranger get nothing of the group (their own memory still answers), a
@@ -45,7 +50,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.errors import ForbiddenError
+from everos.core.errors import ForbiddenError, RosterConflictError
 from everos.entrypoints.api.app import create_app
 from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.models import (
@@ -740,13 +745,11 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             session_id="s_group", request_id="f", app_id=APP, project_id=PROJECT
         )
         await world.run(*STRATEGY_SPECS)
-        kinds = {type(e).__name__ for e in world.bus.events}
-        assert "EpisodeExtracted" not in kinds
-        group_cells = {
-            e.memcell_id
-            for e in world.bus.events
-            if type(e).__name__ == "GroupEpisodeExtracted"
-        }
+        episodes = [
+            e for e in world.bus.events if type(e).__name__ == "EpisodeExtracted"
+        ]
+        assert {e.owner_type for e in episodes} == {"group"}  # no user's episode
+        group_cells = {e.memcell_id for e in episodes}
         for member in ("u_chen", "u_betty"):
             profile = await world.stores.profile.read(world.scope("trip"), member)
             assert profile is not None
@@ -1183,6 +1186,185 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
             # The buffer is read by the group's rules: what was not forgotten.
             shown = [m.content for m in in_buffer.data.unprocessed_messages]
             assert shown == ["We still need a BOATRIDE"], asker
+
+
+PAIR_SAID = "PAIRWALNUT31"
+"""Said by Ann and Bob, two people talking without a group_id."""
+LATER_PAIR_SAID = "PAIRHAZEL77"
+"""Said by Ann and Bob again, in a later session of their own."""
+TRIO_SAID = "TRIOPECAN52"
+"""Said by Ann, Bob and Cat together."""
+CAT_REFUSED = "CATALMOND09"
+"""Said by Cat into Ann and Bob's session: refused."""
+_SAID = (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID, CAT_REFUSED)
+
+
+class _PeopleModel:
+    """Episodes repeat the marker words they were shown; the decider keeps the
+    first ten candidates and records what it was shown."""
+
+    def __init__(self) -> None:
+        self.decider_prompts: list[str] = []
+
+    def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
+        name = response_format.__name__
+        prompt = "\n".join(str(getattr(m, "content", m)) for m in messages)
+        if name == "_BatchReply":
+            return json.dumps(
+                {"reasoning": "s", "boundaries": [], "tail_complete": False}
+            )
+        if name == "EpisodeReply":
+            said = ", ".join(w for w in _SAID if w in prompt) or "nothing"
+            return json.dumps(
+                {
+                    "title": "Cabin marker",
+                    "summary": f"Cabin marker: {said}.",
+                    "content": f"They planned the cabin marker {said}.",
+                }
+            )
+        if name == "_DecisionReply":
+            self.decider_prompts.append(prompt)
+            return json.dumps({"core": list(range(10)), "next_queries": []})
+        raise AssertionError(f"unexpected model call {name}")
+
+
+async def _talk(world: GroupWorld, session: str, *lines: tuple[str, str]) -> None:
+    """``lines`` of ``(sender, text)`` sent without a group_id, then flushed."""
+    await world.memory.add(
+        {"session_id": session, "app_id": APP, "project_id": PROJECT,
+         "messages": [
+             {"sender_id": who, "sender_name": who[2:].title(), "role": "user",
+              "timestamp": T0 + 1000 * n, "content": text}
+             for n, (who, text) in enumerate(lines, start=1)
+         ]},
+        request_id="r",
+        async_mode=False,
+        defer_extraction=True,
+    )  # fmt: skip
+    await world.memory.flush(
+        session_id=session, request_id="f", app_id=APP, project_id=PROJECT
+    )
+
+
+def _people(**fields: Any) -> SearchRequest:
+    values: dict[str, Any] = {
+        "app_id": APP,
+        "project_id": PROJECT,
+        "query": "cabin marker",
+        "top_k": 20,
+        **fields,
+    }
+    return SearchRequest(**values)
+
+
+async def test_an_implicit_group_is_read_by_its_people_only(tmp_path: Path) -> None:
+    """Two people talking without a group_id are a group (section 7.9): both
+    read it, a stranger reads nothing of it on any path, and neither person's
+    own memory holds it."""
+    model = _PeopleModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await _talk(
+            world,
+            "s_pair",
+            ("u_ann", f"Book the cabin, the code is {PAIR_SAID}"),
+            ("u_bob", "Done, cabin marker booked"),
+        )
+        pair = await world.stores.groups.binding(world.session("s_pair"))
+        assert pair is not None and pair.startswith("implicit_")
+        await world.project()
+
+        for person in ("u_ann", "u_bob"):
+            model.decider_prompts.clear()
+            group = await world.memory.search(_people(group_id=pair, asker_id=person))
+            mixed = await world.memory.search(_mixed(person, query="cabin marker"))
+            assert PAIR_SAID in _everything_text(group), person
+            assert PAIR_SAID in _everything_text(mixed), person
+            own = await world.memory.search(_people(user_id=person))
+            assert PAIR_SAID not in _everything_text(own), person
+
+        model.decider_prompts.clear()
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(_people(group_id=pair, asker_id="u_zoe"))
+        with pytest.raises(ForbiddenError):
+            await world.memory.get(
+                GetRequest(
+                    app_id=APP,
+                    project_id=PROJECT,
+                    group_id=pair,
+                    asker_id="u_zoe",
+                    memory_type="episode",
+                )
+            )
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(_people(user_id="u_ann", asker_id="u_zoe"))
+        stranger = await world.memory.search(_mixed("u_zoe", query="cabin marker"))
+        listed = await world.memory.get(_mixed_listing("u_zoe"))
+        blob = _everything_text(stranger) + json.dumps(listed.model_dump(mode="json"))
+        assert PAIR_SAID not in blob
+        assert PAIR_SAID not in "\n".join(model.decider_prompts)
+
+
+async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
+    tmp_path: Path,
+) -> None:
+    """Cat speaking into Ann and Bob's session is refused: an implicit group's
+    people never change. The three of them in a session of their own are a
+    group of their own, which Cat reads; the pair's group -- what they said
+    before and what they say later in a session of their own -- Cat never
+    reads, on any path."""
+    model = _PeopleModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await _talk(
+            world,
+            "s_pair",
+            ("u_ann", f"Cabin marker: the door code is {PAIR_SAID}"),
+            ("u_bob", "Noted, cabin marker"),
+        )
+        pair = await world.stores.groups.binding(world.session("s_pair"))
+        assert pair is not None
+        with pytest.raises(RosterConflictError):
+            await _talk(
+                world,
+                "s_pair",
+                ("u_ann", "Cat, meet Bob"),
+                ("u_cat", f"Hi both, cabin marker {CAT_REFUSED}"),
+            )
+        await _talk(
+            world,
+            "s_trio",
+            ("u_ann", f"Cabin marker for three: {TRIO_SAID}"),
+            ("u_cat", "Great, cabin marker"),
+            ("u_bob", "See you there"),
+        )
+        await _talk(
+            world,
+            "s_pair_later",
+            ("u_bob", f"Just us: cabin marker {LATER_PAIR_SAID}"),
+            ("u_ann", "Sure"),
+        )
+        assert await world.stores.groups.binding(world.session("s_pair_later")) == pair
+        trio = await world.stores.groups.binding(world.session("s_trio"))
+        assert trio is not None and trio != pair
+        await world.project()
+
+        model.decider_prompts.clear()
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(_people(group_id=pair, asker_id="u_cat"))
+        found = await world.memory.search(_mixed("u_cat", query="cabin marker"))
+        listed = await world.memory.get(_mixed_listing("u_cat"))
+        blob = _everything_text(found) + json.dumps(listed.model_dump(mode="json"))
+        seen = "\n".join(model.decider_prompts)
+        assert TRIO_SAID in blob
+        for secret in (PAIR_SAID, LATER_PAIR_SAID, CAT_REFUSED):
+            assert secret not in blob, secret
+            assert secret not in seen, secret
+        listed_ann = await world.memory.get(_mixed_listing("u_ann"))
+        everything = json.dumps(listed_ann.model_dump(mode="json"))
+        for said in (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID):
+            assert said in everything, said
+        assert CAT_REFUSED not in everything
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:

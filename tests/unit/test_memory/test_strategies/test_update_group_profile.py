@@ -41,7 +41,7 @@ from everos.component.llm import LLMCallError
 from everos.config import load_settings
 from everos.core.observability.metrics import get_metrics_registry
 from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
-from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
+from everos.memory.events import EpisodeExtracted, GroupFlushed
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.models import Group, RosterEvent
 from everos.memory.ports import IdleTick, PendingBatch, Scope
@@ -146,13 +146,14 @@ def _segment(deps: Any, memcell_id: str, at: int, *lines: tuple[str, str, str]) 
     )
 
 
-def _extracted(memcell_id: str) -> GroupEpisodeExtracted:
-    return GroupEpisodeExtracted(
+def _extracted(memcell_id: str) -> EpisodeExtracted:
+    return EpisodeExtracted(
         memcell_id=memcell_id,
         episode_entry_id=f"gep_{memcell_id}",
         episode_text="text",
         episode_timestamp_ms=1,
-        group_id="trip",
+        owner_id="trip",
+        owner_type="group",
         app_id="default",
         project_id="p",
         speaker_ids=["u_chen"],

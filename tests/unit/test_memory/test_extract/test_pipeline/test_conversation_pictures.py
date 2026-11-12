@@ -1,4 +1,4 @@
-"""Pictures in ``UserMemoryPipeline.run_cell``: one call, one prompt by rule.
+"""Pictures in ``ConversationPipeline.run_cell``: one call, one prompt by rule.
 
 What these pin — the contract that makes a picture a memory rather than an
 attachment:
@@ -7,9 +7,11 @@ attachment:
   The call returns the episode and that cell's picture records together,
   because both are readings of the same conversation and splitting them would
   let the two drift.
-- A picture memory is written for each user sender, before the episode, and
-  its ``image_id`` is the file hash from the conversation text — never the
-  per-cell label the reply used (``img-1``).
+- A picture memory is written once, in the cell's space, before the episode,
+  and its ``image_id`` is the file hash from the conversation text — never the
+  per-cell label the reply used (``img-1``). (A group's picture memory, dated
+  by its message and attributed to its poster, is pinned by
+  ``tests/unit/test_service/test_group_write_path.py``.)
 - A text-only cell makes the same call, sent everalgo's episode prompt byte
   for byte and the conversation alone; it writes no picture memory. A cell
   with pictures shares everalgo's rules as the prefix of its system prompt.
@@ -26,11 +28,12 @@ from everalgo.user_memory.prompts.en.episode import EPISODE_SYSTEM_PROMPT
 from everos.component.images import ImageLimits
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted
-from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
+from everos.memory.extract.pipeline import ConversationPipeline, PreparedCell
 from everos.memory.extract.pipeline.episode import EPISODE_RULES
 from everos.memory.ports import MemoryRef
 from tests.fakes import bundled_instructions, user_track_llm, user_track_script
 from tests.fakes.stores import (
+    InMemoryGroupStore,
     InMemoryImageMemoryStore,
     InMemoryImageStore,
     InMemoryMemcellStore,
@@ -118,7 +121,7 @@ def _pipeline(
     llm: object,
     *,
     with_images: bool = True,
-) -> tuple[UserMemoryPipeline, InMemoryImageMemoryStore, InMemoryImageStore]:
+) -> tuple[ConversationPipeline, InMemoryImageMemoryStore, InMemoryImageStore]:
     episodes = MagicMock()
     episodes.append = AsyncMock(return_value=_REF)
     episodes.append_many = AsyncMock(return_value=[_REF])
@@ -130,9 +133,10 @@ def _pipeline(
     memories = InMemoryImageMemoryStore()
     pictures.images[_IMAGE_ID] = (b"picture bytes", "png")
     pictures.refs[_IMAGE_ID] = 1
-    pipeline = UserMemoryPipeline(
+    pipeline = ConversationPipeline(
         episode_store=episodes,  # type: ignore[arg-type]
         memcell_store=memcells,
+        groups=InMemoryGroupStore(),
         instructions=bundled_instructions(),
         llm_client=llm,  # type: ignore[arg-type]
         image_store=pictures if with_images else None,
@@ -233,24 +237,6 @@ async def test_the_episode_body_refers_to_the_picture_by_id() -> None:
     # The label the model used stays (it reads naturally) and the picture's
     # durable id is attached: the label means nothing outside this cell.
     assert f"(img-1: {_IMAGE_ID})" in written.episode_text
-
-
-async def test_each_user_sender_gets_their_own_copy() -> None:
-    llm = _RecordingLLM(_image_reply())
-    pipeline, memories, _ = _pipeline(llm)
-    cell = MemCell(
-        items=[_text_message("u1"), _text_message("u2"), _picture_message("u1")],
-        timestamp=1_700_000_000_000,
-    )
-
-    await pipeline.run_cell(
-        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "u2"])
-    )
-
-    owners = [memory.owner_id for memory in memories.items_for("u1")]
-    assert owners == ["u1"]
-    assert len(memories.items_for("u2")) == 1
-    assert len(llm.calls) == 1
 
 
 async def test_the_memory_keeps_the_name_the_client_sent() -> None:

@@ -19,10 +19,10 @@ golden file produced at the commit *before* group memory:
   This section was added (2026-11-12) at the commit before ``include_groups``,
   without regenerating the others.
 
-The conversations are a LoCoMo excerpt (two human senders in one session: the
-per-sender fan-out), the tracked solo assistant chat (one user and an
-assistant: the LongMemEval shape) and a one-sender chat with a picture, which
-attaches it to the episode call. Since the profile's two-prompt change the
+The conversations are a LoCoMo excerpt (two human senders in one session),
+the tracked solo assistant chat (one user and an assistant: the LongMemEval
+shape) and a one-sender chat with a picture, which attaches it to the episode
+call. Since the profile's two-prompt change the
 episode call writes no profile item (the profile update reads the pictures
 itself, and this test runs the pipeline, not the profile strategy), so the
 picture chat writes no ``user.md``; that, and the picture prompt without its
@@ -32,11 +32,24 @@ regenerated once more for the episode prompt assembled by rule
 byte for byte, so only the picture chat's prompt digest changed, and with it
 what is derived from its text -- its fixed embedding -- and nothing else.
 
+The LoCoMo excerpt is pinned as what it became on 2026-11-12, when two people
+talking without a ``group_id`` became an implicit group (section 7.9): its
+sections were regenerated then, and only they -- every single-person section
+came out byte for byte the same. Before, each of the two speakers owned a copy
+of every episode (the per-sender fan-out); now the session is one group's,
+``groups/implicit_<hash>/``, with one episode per segment, the group's
+``group.md`` and its rows, and one event per segment. The two people read it
+from their personal searches with ``include_groups`` (``<owner>+groups``
+keys), which also read the session's buffer by the group's rules; the plain
+personal reads of the pair (``caroline:profile``) still find nothing of it.
+
 Fields added after the golden was recorded are allowed in the responses and
 rows only when they are listed in :data:`ADDED_FIELDS` and carry their empty
 default, so every addition to a one-to-one output is a reviewed line here.
 
-Regenerate (only on purpose, never to make a failure go away)::
+Regenerate (only on purpose, never to make a failure go away; a regeneration
+records the fields :data:`ADDED_FIELDS` allows into every section, so a change
+that is meant to touch some sections only takes those sections from it)::
 
     EVEROS_UPDATE_GOLDEN=1 .venv/bin/python -m pytest -q -p no:cacheprovider \
         tests/unit/test_service/test_one_to_one_golden.py
@@ -84,6 +97,9 @@ _LOCOMO = (
     _REPO / "tests" / "fixtures" / "long_conversation_locomo_caroline_melanie.json"
 )
 _SOLO = _REPO / "data" / "solo_chat_en.json"
+_PAIR = ("caroline", "melanie")
+"""The LoCoMo excerpt's two speakers: an implicit group, read with
+``include_groups`` from their personal searches."""
 _DIM = 8
 _CUT_EVERY = 6
 """The scripted boundary cuts after every sixth message of the window."""
@@ -525,6 +541,7 @@ async def _run(root: Path) -> dict[str, Any]:
             tokenizer=tokenizer,
             index=storage.repos,
             embedding=embedding,
+            group_roster=storage.sqlite.group_roster,
         )
         for path in markdown:
             rel = path.relative_to(root).as_posix()
@@ -543,22 +560,29 @@ async def _run(root: Path) -> dict[str, Any]:
         decider: dict[str, list[str]] = {}
         decider_input.taken()  # only the searches below ask the decider
         for owner in ("caroline", "melanie", "user_001", "u_pic"):
+            pair = owner in _PAIR
+            name = f"{owner}+groups" if pair else owner
             for query in ("support group", "travel to Beijing", "cat"):
                 response = await memory.search(
-                    SearchRequest(user_id=owner, query=query, top_k=5)
+                    SearchRequest(
+                        user_id=owner, query=query, top_k=5, include_groups=pair
+                    )
                 )
-                searches[f"{owner}:{query}"] = response.data.model_dump(mode="json")
-                decider[f"{owner}:{query}"] = decider_input.taken()
+                searches[f"{name}:{query}"] = response.data.model_dump(mode="json")
+                decider[f"{name}:{query}"] = decider_input.taken()
         buffered = await memory.search(
             SearchRequest(
                 user_id="caroline",
                 query="support group",
                 top_k=3,
                 filters={"session_id": "s_locomo"},
+                include_groups=True,
             )
         )
-        searches["caroline:session_buffer"] = buffered.data.model_dump(mode="json")
-        decider["caroline:session_buffer"] = decider_input.taken()
+        searches["caroline+groups:session_buffer"] = buffered.data.model_dump(
+            mode="json"
+        )
+        decider["caroline+groups:session_buffer"] = decider_input.taken()
         searches["u_pic:profile"] = (
             await memory.search(
                 SearchRequest(
@@ -574,10 +598,19 @@ async def _run(root: Path) -> dict[str, Any]:
         gets: dict[str, Any] = {}
         for owner in ("caroline", "user_001", "u_pic"):
             for memory_type in ("episode", "profile"):
+                # The pair's episodes are their group's; a profile listing is
+                # personal only.
+                pair = owner in _PAIR and memory_type == "episode"
                 response = await memory.get(
-                    GetRequest(user_id=owner, memory_type=memory_type, page_size=50)
+                    GetRequest(
+                        user_id=owner,
+                        memory_type=memory_type,
+                        page_size=50,
+                        include_groups=pair,
+                    )
                 )
-                gets[f"{owner}:{memory_type}"] = response.data.model_dump(mode="json")
+                name = f"{owner}+groups" if pair else owner
+                gets[f"{name}:{memory_type}"] = response.data.model_dump(mode="json")
     finally:
         await storage.aclose()
 
@@ -662,9 +695,19 @@ def test_the_golden_covers_every_one_to_one_shape() -> None:
     """The golden is only a gate if it holds what the design names."""
     golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     paths = list(golden["markdown"])
-    # Per-sender fan-out: both LoCoMo speakers own a copy of their episodes.
-    assert any("/users/caroline/episodes/" in p for p in paths)
-    assert any("/users/melanie/episodes/" in p for p in paths)
+    # Two people are their implicit group: one episode per segment, owned by
+    # the group, and no copy under either speaker.
+    assert any("/groups/implicit_" in p and "/episodes/" in p for p in paths)
+    assert any(p.endswith("/group.md") for p in paths)
+    assert not any("/users/caroline/" in p or "/users/melanie/" in p for p in paths)
+    pair_events = [
+        e
+        for e in golden["events"]
+        if e["session_id"] == "s_locomo" and e["type"] == "EpisodeExtracted"
+    ]
+    assert pair_events
+    assert {e["owner_id"][:9] for e in pair_events} == {"implicit_"}
+    assert len({e["memcell_id"] for e in pair_events}) == len(pair_events)
     # The assistant of the solo chat owns nothing on the user track.
     assert not any("/users/robot_001/" in p for p in paths)
     # The picture route: a picture memory, and no profile item -- the profile
@@ -672,7 +715,8 @@ def test_the_golden_covers_every_one_to_one_shape() -> None:
     assert any("/users/u_pic/images/" in p for p in paths)
     assert not any(p.endswith("/users/u_pic/user.md") for p in paths)
     assert golden["rows"]["image_memory"]
-    assert golden["search"]["caroline:session_buffer"]["unprocessed_messages"]
+    buffered = golden["search"]["caroline+groups:session_buffer"]
+    assert buffered["unprocessed_messages"]
     assert golden["search"]["u_pic:profile"]["profiles"] == []
     # Every search pinned its decider input, and each asked the decider.
     assert set(golden["decider"]) == set(golden["search"])

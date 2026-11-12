@@ -2,9 +2,9 @@
 
 docs/scenes.md. The scene core (:mod:`._scenes`) over the user's own
 episodes, ``users/<u>/scenes/``: this strategy names the owner and the
-switch. It runs on the pipeline's episodes only (a Reflection merge is not a
-new episode), with ``[scenes] users = true`` (off by default until its cost
-is accepted) and an embedding provider.
+switch. It runs on a user's own pipeline episodes only (a Reflection merge is
+not a new episode, a group's episode is the group's), with ``[scenes] users =
+true`` (off by default until its cost is accepted) and an embedding provider.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from ._scenes import update_scenes
 def _applies(event: EpisodeExtracted, deps: MemoryDeps) -> bool:
     return (
         event.source == "pipeline"
+        and event.owner_type == "user"
         and deps.embedding is not None
         and load_settings().scenes.users
     )

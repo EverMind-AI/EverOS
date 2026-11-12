@@ -114,8 +114,7 @@ from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import (
     AgentMemoryPipeline,
-    GroupMemoryPipeline,
-    UserMemoryPipeline,
+    ConversationPipeline,
 )
 from everos.memory.extract.scene import SceneNarrator
 from everos.memory.get import GetManager
@@ -706,19 +705,10 @@ def _build_memory_service(
         ),
         multimodal_llm=providers.multimodal_llm,
         stores=stores,
-        user_pipeline=UserMemoryPipeline(
-            episode_store=stores.episode,
-            memcell_store=stores.memcell,
-            instructions=deps.instructions,
-            llm_client=providers.llm,
-            image_store=stores.images,
-            image_memory_store=stores.image_memory,
-            image_limits=_image_limits(settings),
-        ),
-        agent_pipeline=AgentMemoryPipeline(),
-        # One group episode per segment of a group session (docs/group-memory.md,
-        # section 7): the one-to-one pipelines never see a group cell.
-        group_pipeline=GroupMemoryPipeline(
+        # One episode per segment, in its session's space: a group's
+        # (declared, or the implicit group of a session's people) or one
+        # person's own (docs/group-memory.md, sections 7 and 10).
+        conversation_pipeline=ConversationPipeline(
             episode_store=stores.episode,
             memcell_store=stores.memcell,
             groups=stores.groups,
@@ -729,6 +719,7 @@ def _build_memory_service(
             image_limits=_image_limits(settings),
             message_forget=stores.message_forget,
         ),
+        agent_pipeline=AgentMemoryPipeline(),
         # A forget inside a group writes a changed scene again with the scene
         # strategy's own capped call (docs/scenes.md).
         scene_narrator=SceneNarrator(providers.llm, settings.scenes, deps.instructions),

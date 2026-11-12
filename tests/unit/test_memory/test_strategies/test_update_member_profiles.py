@@ -43,7 +43,7 @@ from everalgo.user_memory import ProfileExtractor
 
 from everos.component.images import ImageLimits
 from everos.config import Settings
-from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
+from everos.memory.events import EpisodeExtracted, GroupFlushed
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import ExplicitInfoItem, Group, Profile, RosterEvent
 from everos.memory.ports import Scope
@@ -119,13 +119,14 @@ def _segment(deps: Any, memcell_id: str, at: int, *lines: tuple[str, str]) -> No
 
 def _event(
     memcell_id: str, *speakers: str, language: str | None = None
-) -> GroupEpisodeExtracted:
-    return GroupEpisodeExtracted(
+) -> EpisodeExtracted:
+    return EpisodeExtracted(
         memcell_id=memcell_id,
         episode_entry_id=f"gep_{memcell_id}",
         episode_text="text",
         episode_timestamp_ms=1,
-        group_id="trip",
+        owner_id="trip",
+        owner_type="group",
         app_id="default",
         project_id="p",
         speaker_ids=list(speakers),

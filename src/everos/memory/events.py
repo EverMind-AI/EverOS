@@ -87,15 +87,34 @@ class ReflectionContext(BaseModel):
 
 
 class EpisodeExtracted(Event):
-    """Fired once per Episode after :class:`UserMemoryPipeline` writes its md.
+    """Fired once per episode the conversation pipeline writes, and per merge.
+
+    A segment's episode lives in one space: a user's own (``owner_type``
+    ``user``: a one-to-one conversation, ``owner_id`` the user) or a group's
+    (``owner_type`` ``group``: a declared group, or the implicit group of a
+    session's people, ``owner_id`` the group). The personal strategies run
+    on a user's episodes only, the group strategies -- member-in-group
+    profiles, the group profile, the group's scenes -- on a group's only
+    (docs/group-memory.md, section 7.1 step 6): group content never feeds
+    personal memory.
 
     Carries ``episode_text`` so downstream clustering can embed it without
     racing the cascade (cascade also embeds, but at the LanceDB layer —
     keeping a copy on the event is cheaper than polling LanceDB until the
     row appears). ``episode_timestamp_ms`` rides along so the cluster
     strategy can stamp the algo-side ``Cluster.last_ts`` without a second
-    md read. One memcell can produce multiple episodes (one per user
-    sender), so this event fires per-episode, not per-memcell.
+    md read. Reflection's merged episodes announce themselves with the same
+    event (``source="reflection"``).
+
+    Attributes:
+        speaker_ids: A group episode's human members whose own (role
+            ``user``) messages are in the segment -- whose member-in-group
+            profiles it can change. Empty on a user's episode.
+        group_key: ``<app_id>/<project_id>/<group_id>`` on a group episode,
+            filled from the three: the bucket an idle trigger keys on, so the
+            tick it fires names the whole group (ids are path-safe, so the
+            separator cannot occur inside one). ``None`` on a user's episode,
+            which no idle trigger buckets.
     """
 
     memcell_id: str
@@ -114,40 +133,14 @@ class EpisodeExtracted(Event):
     """The episode's ``OutputLanguage`` value (see ``Episode.language``); the
     extractions this event drives write in it. ``None`` lets each extractor
     infer its own."""
-
-
-class GroupEpisodeExtracted(Event):
-    """Fired once per group episode, after the group pipeline writes its md.
-
-    The group strategies run on it (docs/group-memory.md, section 7.1 step
-    6): the member-in-group profiles of ``speaker_ids`` and the group's
-    scenes. The one-to-one strategies never see it: a group segment is the
-    group's memory, not any sender's.
-
-    Attributes:
-        speaker_ids: The human members whose own (role ``user``) messages are
-            in the segment -- whose member-in-group profiles it can change.
-    """
-
-    memcell_id: str
-    episode_entry_id: str
-    episode_text: str
-    episode_timestamp_ms: int
-    group_id: str
-    session_id: str | None = None
-    app_id: str = "default"
-    project_id: str = "default"
+    owner_type: Literal["user", "group"] = "user"
     speaker_ids: list[str] = Field(default_factory=list)
-    language: str | None = None
-    group_key: str = ""
-    """``<app_id>/<project_id>/<group_id>``, filled from the three: the bucket
-    an idle trigger keys on, so the tick it fires names the whole group (ids
-    are path-safe, so the separator cannot occur inside one)."""
+    group_key: str | None = None
 
     @model_validator(mode="after")
-    def _fill_group_key(self) -> GroupEpisodeExtracted:
-        if not self.group_key:
-            key = group_key(self.app_id, self.project_id, self.group_id)
+    def _fill_group_key(self) -> EpisodeExtracted:
+        if self.owner_type == "group" and self.group_key is None:
+            key = group_key(self.app_id, self.project_id, self.owner_id)
             object.__setattr__(self, "group_key", key)
         return self
 

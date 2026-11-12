@@ -14,8 +14,10 @@ scripted boundary model (``tests/helpers/groups.py``). What these pin
   messages buffered before it form their own segment (D18);
 - a roster change -- inline on ``/memory/add`` or through the roster route --
   cuts the open buffers of every session of the group before it applies, so
-  no segment spans it (task 4);
-- without ``group_id`` a multi-sender batch still runs today's path.
+  no segment spans it (task 4).
+
+A session of two or more people without ``group_id`` is their implicit group
+(section 7.9): ``test_implicit_groups.py``.
 """
 
 from __future__ import annotations
@@ -206,7 +208,7 @@ async def test_an_inline_roster_change_cuts_every_session_of_the_group(
         sessions = {
             e.session_id
             for e in world.bus.events
-            if type(e).__name__ == "GroupEpisodeExtracted"
+            if type(e).__name__ == "EpisodeExtracted" and e.owner_type == "group"
         }
         assert sessions == {"s1", "s2"}
 
@@ -235,20 +237,3 @@ async def test_the_roster_route_cuts_every_session_of_the_group(
         )
         for session in ("s1", "s2"):
             assert await world.stores.session_buffer.list(world.session(session)) == []
-
-
-async def test_a_multi_sender_batch_without_group_runs_todays_path(
-    tmp_path: Path,
-) -> None:
-    async with GroupWorld.open(tmp_path, llm=_boundary_model()) as world:
-        await _add(
-            world,
-            _batch(
-                "s9",
-                _message("u_ann", _T0 + 1, "hi"),
-                _message("u_bob", _T0 + 2, "hello"),
-            ),
-        )
-        assert await world.stores.groups.binding(world.session("s9")) is None
-        buffered = await world.stores.session_buffer.list(world.session("s9"))
-        assert [m.sender_id for m in buffered] == ["u_ann", "u_bob"]

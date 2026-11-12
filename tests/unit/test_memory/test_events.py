@@ -12,6 +12,7 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    EpisodeExtracted,
     SkillClusterUpdated,
 )
 
@@ -191,3 +192,32 @@ def test_skill_cluster_updated_carries_case_vector() -> None:
         SkillClusterUpdated.model_validate(payload).model_dump_json()
     )
     assert event.case_vector == [0.1, 0.2, 0.3]
+
+
+def test_an_episode_event_without_an_owner_type_reads_as_a_user_s() -> None:
+    """A payload persisted before the group fields replays as a user's episode."""
+    event = EpisodeExtracted.model_validate_json(
+        '{"memcell_id": "mc_1", "episode_entry_id": "ep_1", "episode_text": "t",'
+        ' "episode_timestamp_ms": 1, "owner_id": "u_ann"}'
+    )
+
+    assert (event.owner_type, event.speaker_ids, event.group_key) == ("user", [], None)
+
+
+def test_a_group_episode_event_round_trips_with_its_group_key() -> None:
+    event = EpisodeExtracted(
+        memcell_id="mc_1",
+        episode_entry_id="gep_1",
+        episode_text="t",
+        episode_timestamp_ms=1,
+        owner_id="trip",
+        owner_type="group",
+        app_id="a",
+        project_id="p",
+        speaker_ids=["u_ann", "u_bob"],
+    )
+
+    again = EpisodeExtracted.model_validate_json(event.model_dump_json())
+
+    assert again == event
+    assert again.group_key == "a/p/trip"

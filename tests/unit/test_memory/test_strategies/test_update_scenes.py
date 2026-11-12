@@ -37,7 +37,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.config import Settings
-from everos.memory.events import EpisodeExtracted, GroupEpisodeExtracted
+from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.scene import (
     SCENE_UPDATE,
     SceneCaps,
@@ -381,13 +381,14 @@ async def _group_episode(deps: Any, n: int, *, origin: str, sender: str) -> str:
 
 def _group_event(
     entry_id: str, n: int, *, language: str | None = None
-) -> GroupEpisodeExtracted:
-    return GroupEpisodeExtracted(
+) -> EpisodeExtracted:
+    return EpisodeExtracted(
         memcell_id=f"mc_{n}",
         episode_entry_id=entry_id,
         episode_text=f"Episode {n} about the offsite",
         episode_timestamp_ms=1_000 * n + 500,
-        group_id="trip",
+        owner_id="trip",
+        owner_type="group",
         app_id="default",
         project_id="p",
         language=language,

@@ -374,15 +374,15 @@ def make_memory_service(**overrides: Any) -> MemoryService:
     """A real :class:`MemoryService` over in-memory stores and unused ports.
 
     Keyword arguments replace single constructor arguments (``settings``,
-    ``boundary``, ``stores``, ``user_pipeline``, ``bus``, ...); anything not
-    replaced fails loudly if the code under test reaches it.
+    ``boundary``, ``stores``, ``conversation_pipeline``, ``bus``, ...); anything
+    not replaced fails loudly if the code under test reaches it.
     """
     fields: dict[str, Any] = {
         "settings": Settings(),
         "boundary": UnusedPort("boundary"),
         "multimodal_llm": None,
         "stores": make_stores(),
-        "user_pipeline": UnusedPort("user_pipeline"),
+        "conversation_pipeline": UnusedPort("conversation_pipeline"),
         "agent_pipeline": UnusedPort("agent_pipeline"),
         "bus": UnusedPort("bus"),
         "search_manager": UnusedPort("search_manager"),

@@ -4,7 +4,7 @@ The group profile is an append-only set of items -- topics, decisions,
 dissent, roles -- kept by one model call per batch of the group's segments
 (``chat.group_profile_update``, :mod:`everos.memory.extract.group_profile`).
 
-- **Batch.** Each :class:`GroupEpisodeExtracted` queues its segment on the
+- **Batch.** Each group's :class:`EpisodeExtracted` queues its segment on the
   group (``GroupProfileStore.pending``; a replay queues it once). The batch is
   read after ``[groups] group_profile_batch`` segments, on
   :class:`GroupFlushed`, and on the idle tick ``[groups]
@@ -49,11 +49,7 @@ from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory._partition_locks import group_profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import (
-    GroupEpisodeExtracted,
-    GroupFlushed,
-    parse_group_key,
-)
+from everos.memory.events import EpisodeExtracted, GroupFlushed, parse_group_key
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.group_profile import (
     MAX_TOPICS,
@@ -98,8 +94,14 @@ _failures = MetricCounter(
 )
 
 
+def _applies(event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps) -> bool:
+    """A group's episode, or a group's flush; never a user's own episode."""
+    del deps
+    return not isinstance(event, EpisodeExtracted) or event.owner_type == "group"
+
+
 async def update_group_profile(
-    event: GroupEpisodeExtracted | GroupFlushed | IdleTick, deps: MemoryDeps
+    event: EpisodeExtracted | GroupFlushed | IdleTick, deps: MemoryDeps
 ) -> list[Event]:
     """Queue a new segment on the group's batch, or read the batch when due."""
     groups = load_settings().groups
@@ -111,6 +113,8 @@ async def update_group_profile(
             logger.warning("group_profile_bad_idle_key", key=event.bucket_key)
             return []
         app_id, project_id, group_id = key
+    elif isinstance(event, EpisodeExtracted):
+        app_id, project_id, group_id = event.app_id, event.project_id, event.owner_id
     else:
         app_id, project_id, group_id = event.app_id, event.project_id, event.group_id
     scope = Scope(
@@ -120,7 +124,7 @@ async def update_group_profile(
         batch = await deps.stores.group_profile.pending_batch(scope)
         pending = list(batch.memcell_ids)
         waiting = batch.retry_at > _now_ms()
-        if isinstance(event, GroupEpisodeExtracted):
+        if isinstance(event, EpisodeExtracted):
             if event.memcell_id in pending:
                 return []
             pending = [*pending, event.memcell_id]
@@ -277,7 +281,8 @@ def _has_messages(cell: MemCell) -> bool:
 UPDATE_GROUP_PROFILE_SPEC = StrategySpec(
     name="update_group_profile",
     fn=update_group_profile,
-    trigger=Immediate(on=[GroupEpisodeExtracted, GroupFlushed]),
+    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed]),
+    applies_to=_applies,
     max_retries=2,
 )
 
@@ -285,7 +290,7 @@ UPDATE_GROUP_PROFILE_IDLE_SPEC = StrategySpec(
     name="update_group_profile_idle",
     fn=update_group_profile,
     trigger=Idle(
-        on=[GroupEpisodeExtracted],
+        on=[EpisodeExtracted],
         event_field="group_key",
         idle_seconds=600,
         scan_interval_seconds=60,
@@ -293,6 +298,7 @@ UPDATE_GROUP_PROFILE_IDLE_SPEC = StrategySpec(
     max_retries=2,
 )
 """The idle half: ``[groups] group_profile_idle_seconds`` after a group's last
-segment (the bootstrap sets the configured value). The scheduler keeps firing
-for a group that stays idle; with nothing queued, or while a failed batch
-waits out its back-off, a tick returns at once."""
+segment (the bootstrap sets the configured value). Only a group's episode
+carries a ``group_key``, so a user's episode starts no idle clock. The
+scheduler keeps firing for a group that stays idle; with nothing queued, or
+while a failed batch waits out its back-off, a tick returns at once."""

@@ -168,7 +168,9 @@ class MemoryService:
         multimodal_llm: Parses non-text content; ``None`` when
             ``[multimodal]`` is not configured.
         stores: Write-side stores (session buffer, memcells, memorize inbox).
-        user_pipeline: The user-memory track, run on every cell.
+        conversation_pipeline: The conversation track, run on every cell: one
+            episode per cell in its session's space; a forget inside a group
+            re-extracts with it.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
         search_manager: Answers :meth:`search`.
@@ -186,7 +188,7 @@ class MemoryService:
         boundary: BoundaryDetection,
         multimodal_llm: LLMClient | None,
         stores: Stores,
-        user_pipeline: Pipeline,
+        conversation_pipeline: Pipeline,
         agent_pipeline: Pipeline,
         bus: EventBus,
         search_manager: SearchManager,
@@ -196,7 +198,6 @@ class MemoryService:
         indexes: Indexes | None = None,
         image_limits: ImageLimits | None = None,
         rosters: RosterManager | None = None,
-        group_pipeline: Pipeline | None = None,
         access: AccessPolicy | None = None,
         scene_narrator: SceneNarrator | None = None,
     ) -> None:
@@ -242,14 +243,14 @@ class MemoryService:
         self._reviser = RevisionManager(stores=stores, updater=self._updater)
         self._history = HistoryReader(stores=stores, access=self._access)
         # Forget inside a group (docs/group-memory.md, 9.4): re-extraction
-        # runs the group pipeline's own episode call, and a changed scene the
-        # scene strategy's narrative call.
+        # runs the pipeline's own episode call of a group, and a changed scene
+        # the scene strategy's narrative call.
         self._group_forgetter = GroupForgetManager(
             stores=stores,
             indexes=indexes,
             eraser=index_eraser,
-            pipeline=group_pipeline
-            if isinstance(group_pipeline, GroupReextraction)
+            pipeline=conversation_pipeline
+            if isinstance(conversation_pipeline, GroupReextraction)
             else None,
             scenes=scene_narrator,
             extractions=self._extractions,
@@ -259,15 +260,15 @@ class MemoryService:
             settings=settings,
             boundary=boundary,
             multimodal_llm=multimodal_llm,
-            user_pipeline=user_pipeline,
+            conversation_pipeline=conversation_pipeline,
             agent_pipeline=agent_pipeline,
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            session_buffer=stores.session_buffer,
             image_store=stores.images,
             vision=settings.extraction.vision,
             rosters=rosters,
-            group_pipeline=group_pipeline,
         )
         self._groups = (
             GroupUseCases(rosters=rosters, memorizer=self._memorizer, clock=clock)

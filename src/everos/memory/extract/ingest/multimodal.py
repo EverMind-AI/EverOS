@@ -11,7 +11,7 @@ whole design:
   The item gains ``image_id`` (the SHA-256 of its bytes), ``original_path``,
   ``media_type``, ``width`` and ``height``, and renders as a reference
   ``[IMAGE: <image_id>]`` in the text. The model is handed the picture itself
-  alongside that text (see :mod:`everos.memory.extract.pipeline.user_memory`),
+  alongside that text (see :mod:`everos.memory.extract.pipeline.conversation`),
   so a description written from it can name what only the picture shows — the
   sign, the receipt, the price board — instead of whatever a lossy caption
   round-trip left behind.

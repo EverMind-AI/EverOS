@@ -191,6 +191,6 @@ TRIGGER_PROFILE_CLUSTERING_SPEC = StrategySpec(
     fn=trigger_profile_clustering,
     trigger=Immediate(on=[EpisodeExtracted]),
     emits=frozenset({ProfileClusterUpdated}),
-    applies_to=lambda e, _deps: e.source == "pipeline",
+    applies_to=lambda e, _deps: e.source == "pipeline" and e.owner_type == "user",
     max_retries=2,
 )

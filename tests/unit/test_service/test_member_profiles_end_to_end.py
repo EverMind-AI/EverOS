@@ -98,7 +98,7 @@ async def test_each_speaker_gets_a_member_profile_and_user_md_is_untouched(
         memcells = {
             e.memcell_id
             for e in world.bus.events
-            if type(e).__name__ == "GroupEpisodeExtracted"
+            if type(e).__name__ == "EpisodeExtracted" and e.owner_type == "group"
         }
         for member in ("u_chen", "u_betty"):
             profile = await world.stores.profile.read(world.scope("trip"), member)

@@ -1,8 +1,8 @@
 """A cell's pictures: read, labelled, and attributed to whoever posted them.
 
-Shared by the one-to-one and the group pipelines, which read a cell's pictures
-the same way and route what a picture says about a person the same way
-(docs/group-memory.md, section 7.3 and D17):
+Shared by the conversation pipeline in either space and by the profile
+updates, which read a cell's pictures the same way and route what a picture
+says about a person the same way (docs/group-memory.md, section 7.3 and D17):
 
 * every ``[IMAGE: <hash>]`` reference in the cell's text is one picture,
   labelled per cell (``img-1``, ``img-2``) in conversation order -- a local

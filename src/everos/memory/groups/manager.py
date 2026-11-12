@@ -20,6 +20,7 @@ __all__ = [
     "GroupMetaUpdate",
     "RosterChange",
     "RosterManager",
+    "founding_joins",
     "implicit_joins",
 ]
 
@@ -44,6 +45,8 @@ from everos.memory.models import (
     RosterSource,
 )
 from everos.memory.ports import GroupRecord, GroupStore, Scope, SessionKey
+
+from .implicit import is_implicit_group
 
 logger = get_logger(__name__)
 
@@ -127,6 +130,19 @@ def implicit_joins(
         )
         joined.add(sender)
     return events
+
+
+def founding_joins(messages: Sequence[BatchMessage], *, at: int) -> list[RosterEvent]:
+    """The members an implicit group is created with, all joined at ``at``.
+
+    One join per sender of ``messages`` (tool rows are not members): a person
+    as a ``member``, an assistant as the group's ``assistant``, named by their
+    first message (``sender_name``, else the id), ``source = implicit``.
+    """
+    return [
+        event.model_copy(update={"at": at})
+        for event in implicit_joins(Roster(), messages)
+    ]
 
 
 def _now_ms() -> int:
@@ -214,12 +230,13 @@ class RosterManager:
         An existing group's meta and roster are changed by an owner or admin.
 
         Raises:
-            InvalidInputError: No asker.
+            InvalidInputError: No asker, or an implicit group's id.
             ForbiddenError: The asker may not manage the existing group.
             RosterConflictError: The roster does not fold.
         """
         if asker_id is None:
             raise InvalidInputError("asker_id is required to create or update a group")
+        self.check_declared(scope)
         async with LOCKS.hold("group", _key(scope)):
             existing = await self._store.get(scope)
             if existing is None:
@@ -261,13 +278,14 @@ class RosterManager:
         """Append roster events (``POST /groups/{id}/roster``).
 
         Raises:
-            InvalidInputError: No asker.
+            InvalidInputError: No asker, or an implicit group's id.
             ForbiddenError: Not a current member (or no such group), or not
                 allowed to send one of the events.
             RosterConflictError: The events do not fold.
         """
         if asker_id is None:
             raise InvalidInputError("asker_id is required to change a roster")
+        self.check_declared(scope)
         async with LOCKS.hold("group", _key(scope)):
             existing = await self._store.get(scope)
             if existing is None:
@@ -277,6 +295,21 @@ class RosterManager:
                 scope, group=existing.group, events=list(events)
             )
         return RosterChange(record=record, applied=len(events))
+
+    @staticmethod
+    def check_declared(scope: Scope) -> None:
+        """Raise for an implicit group: its people are its id (section 7.9).
+
+        Only a declared group takes a roster or meta change through the API.
+
+        Raises:
+            InvalidInputError: ``scope`` names an implicit group.
+        """
+        if is_implicit_group(scope.owner_id):
+            raise InvalidInputError(
+                "an implicit group's members are the people of its conversations; "
+                "it takes no roster or meta change"
+            )
 
     async def check_binding(self, session: SessionKey, group_id: str) -> None:
         """Raise when ``session`` is bound to a different group (409, D18)."""
@@ -354,6 +387,78 @@ class RosterManager:
         if appended:
             logger.info(
                 "groups.batch_roster_applied",
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                group_id=scope.owner_id,
+                events=len(appended),
+                created=existing is None,
+            )
+        return BatchAdmission(
+            record=record, created=existing is None, appended=appended
+        )
+
+    async def admit_implicit(
+        self,
+        scope: Scope,
+        *,
+        session: SessionKey,
+        messages: Sequence[BatchMessage],
+    ) -> BatchAdmission:
+        """The implicit group's side of one batch of its session (section 7.9).
+
+        Under the group lock: refuse a session bound elsewhere; create the
+        group if it is new -- at its first message, with every sender of
+        ``messages`` as a member from then and its history visible from
+        creation, no owner; open an interval for an assistant first seen now;
+        bind the session. ``messages`` are the batch's, with the messages the
+        session's open buffer held when the session became the group's.
+
+        Raises:
+            RosterConflictError: The session belongs to another group, or a
+                person who is not a member speaks: an implicit group's people
+                are its identity and never change (409).
+            InvalidInputError: An assistant who is not a member, with
+                ``implicit_join`` off.
+        """
+        first = min((m.at for m in messages), default=None)
+        at = first if first is not None else self._clock()
+        async with LOCKS.hold("group", _key(scope)):
+            await self.check_binding(session, scope.owner_id)
+            existing = await self._store.get(scope)
+            if existing is None:
+                group = Group(
+                    group_id=scope.owner_id,
+                    created_at=at,
+                    history_visible_from="creation",
+                )
+                appended = founding_joins(messages, at=at)
+                record = await self._store.save(scope, group=group, events=appended)
+            else:
+                record, appended = existing, []
+                joins = implicit_joins(record.roster, messages)
+                people = sorted({e.member_id for e in joins if e.kind == "human"})
+                if people:
+                    raise RosterConflictError(
+                        f"session {session.session_id!r} is a conversation between "
+                        "fixed people; " + ", ".join(people) + " is not one of them: "
+                        "send the new conversation as a new session, or name a "
+                        "group_id"
+                    )
+                if joins:
+                    if not self._implicit_join:
+                        raise InvalidInputError(
+                            "assistants who are not members: "
+                            + ", ".join(sorted({e.member_id for e in joins}))
+                            + " ([groups] implicit_join is off)"
+                        )
+                    record = await self._store.save(
+                        scope, group=record.group, events=joins
+                    )
+                    appended = joins
+            await self._store.bind(session, scope.owner_id, at=at)
+        if appended:
+            logger.info(
+                "groups.implicit_roster_applied",
                 app_id=scope.app_id,
                 project_id=scope.project_id,
                 group_id=scope.owner_id,

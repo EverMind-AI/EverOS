@@ -240,9 +240,11 @@ class GroupUseCases:
     ) -> RosterChange:
         """Run ``apply`` with the group's session buffers cut first (D18).
 
-        ``precheck`` refuses an unauthorised change before any buffer is cut;
-        ``apply`` checks again under the group lock, which is authoritative.
+        ``precheck`` refuses an unauthorised change before any buffer is cut,
+        as does an implicit group, which takes no change at all; ``apply``
+        checks again under the group lock, which is authoritative.
         """
+        self._rosters.check_declared(scope)
         if not events:
             return await apply()
         record = await self._rosters.store.get(scope)

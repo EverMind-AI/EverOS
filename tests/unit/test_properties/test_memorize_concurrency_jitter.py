@@ -203,7 +203,7 @@ async def _jittered(
             attempt_timeout=lock_timeout,
         ),
         stores=stores,
-        user_pipeline=pipeline,
+        conversation_pipeline=pipeline,
         bus=_NullBus(),
     )
     next_ts = [0]

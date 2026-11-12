@@ -4,15 +4,16 @@ Real markdown, ``system.db`` and LanceDB, the bootstrap's memory service and a
 scripted model (``tests/helpers/groups.py``). What these pin:
 
 - a segment with three human senders writes one group episode, one index row
-  and two embeddings (body and subject); the one-to-one path writes three
-  entries and six embeddings for the same messages;
+  and two embeddings (body and subject); the same messages sent without a
+  ``group_id`` are the implicit group of their three people and write the
+  same -- never one copy per sender;
 - ``sender_ids`` / ``subject_ids`` / ``origin`` match fixtures: a mixed
   segment, an assistant-only segment, and a former member named in the text;
 - the extraction call sees the speakers by their roster names, the assistant
   as ``"<name> (assistant)"``, and the roster block where the operator's
   custom instructions go;
-- a group segment publishes ``GroupEpisodeExtracted`` (and its flush
-  ``GroupFlushed``) and no one-to-one event, and writes nothing under
+- a group segment publishes the group's ``EpisodeExtracted`` (and its
+  flush ``GroupFlushed``) and no user's, and writes nothing under
   ``users/``;
 - a picture writes one group picture memory with ``sender_ids = [poster]``,
   and only the poster's member-profile update reads it: the items read off it
@@ -36,7 +37,7 @@ from typing import Any
 from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence.index import eq
-from everos.memory.events import GroupEpisodeExtracted
+from everos.memory.events import EpisodeExtracted
 from everos.memory.models import Episode
 from everos.memory.strategies import UPDATE_MEMBER_PROFILES_SPEC
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, png
@@ -149,7 +150,7 @@ async def _group_episodes(world: GroupWorld) -> list[Episode]:
     entries = [
         e.episode_entry_id
         for e in world.bus.events
-        if isinstance(e, GroupEpisodeExtracted)
+        if isinstance(e, EpisodeExtracted) and e.owner_type == "group"
     ]
     stored = await world.stores.episode.read_many(world.scope("trip"), entries)
     return [s.item for s in sorted(stored, key=lambda s: s.item.timestamp)]
@@ -183,15 +184,18 @@ async def test_one_entry_one_row_two_embeddings_on_the_group_path(
         assert not (tmp_path / "group" / "default_app" / PROJECT / "users").exists()
 
     async with GroupWorld.open(
-        tmp_path / "solo", llm=FakeLLMClient(handler=_Model(content))
+        tmp_path / "implicit", llm=FakeLLMClient(handler=_Model(content))
     ) as world:
-        await _send(world, "s_solo", *_THREE, group=False)
+        await _send(world, "s_people", *_THREE, group=False)
         await world.project()
         rows = await world.storage.repos.episode.find_where(
-            eq("owner_type", "user"), limit=100
+            eq("app_id", APP), limit=100
         )
-        assert len(rows) == 3
-        assert len(world.embedding.calls) == 6
+        assert [(r.owner_type, r.owner_id[:9]) for r in rows] == [
+            ("group", "implicit_")
+        ]
+        assert len(world.embedding.calls) == 2
+        assert not (tmp_path / "implicit" / "default_app" / PROJECT / "users").exists()
 
 
 async def test_attribution_of_a_mixed_segment(tmp_path: Path) -> None:
@@ -229,7 +233,8 @@ async def test_attribution_of_a_mixed_segment(tmp_path: Path) -> None:
 
         # No one-to-one event: the segment and the flush are the group's.
         kinds = [type(e).__name__ for e in world.bus.events]
-        assert kinds == ["GroupEpisodeExtracted", "GroupFlushed"]
+        assert kinds == ["EpisodeExtracted", "GroupFlushed"]
+        assert world.bus.events[0].owner_type == "group"
         assert world.bus.events[0].speaker_ids == ["u_chen", "u_betty"]
 
 
@@ -335,7 +340,7 @@ async def test_a_picture_only_segment_is_told_the_group_s_language(
         episodes = await _group_episodes(world)
         assert [e.language for e in episodes] == ["English", "English"]
         languages = [
-            e.language for e in world.bus.events if isinstance(e, GroupEpisodeExtracted)
+            e.language for e in world.bus.events if isinstance(e, EpisodeExtracted)
         ]
         assert languages == ["English", "English"]
 
@@ -356,7 +361,7 @@ async def test_in_agent_mode_a_group_cell_reaches_the_agent_track_with_its_group
         kinds = [type(e).__name__ for e in world.bus.events]
         assert sorted(kinds) == [
             "AgentPipelineStarted",
-            "GroupEpisodeExtracted",
+            "EpisodeExtracted",
             "GroupFlushed",
         ]
         started = next(

@@ -1,5 +1,7 @@
-"""``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
+"""``ConversationPipeline.run_cell``: one episode per cell, in the cell's space.
 
+A one-to-one cell is the one person's own memory; a group's cell is the
+group's, announced with its human speakers. Nothing is copied per sender.
 The episode call is real (``pipeline.episode``, everalgo's rules); the model
 answers from the user-track canned scripts.
 """
@@ -16,7 +18,8 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
-from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
+from everos.memory.extract.pipeline import ConversationPipeline, PreparedCell
+from everos.memory.models import Group, RosterEvent
 from everos.memory.ports import MemoryRef
 from tests.fakes import (
     bundled_instructions,
@@ -24,7 +27,11 @@ from tests.fakes import (
     user_track_llm,
     user_track_script,
 )
-from tests.fakes.stores import InMemoryEpisodeStore, InMemoryMemcellStore
+from tests.fakes.stores import (
+    InMemoryEpisodeStore,
+    InMemoryGroupStore,
+    InMemoryMemcellStore,
+)
 
 _EPISODE = json.loads(user_track_script("episode"))
 
@@ -58,16 +65,29 @@ def _pipeline(
     episode_store: object | None = None,
     *,
     memcell_exists: bool = True,
-) -> UserMemoryPipeline:
+) -> ConversationPipeline:
     if episode_store is None:
         episode_store = MagicMock()
         episode_store.append = AsyncMock(return_value=_REF)
     memcells = InMemoryMemcellStore()
     if memcell_exists:
         memcells.seed("mc_a", _prepared().cell)
-    return UserMemoryPipeline(
+    groups = InMemoryGroupStore()
+    key = ("default", "default", "trip")
+    groups.groups[key] = Group(group_id="trip", created_at=0)
+    groups.events[key].extend(
+        [
+            RosterEvent(op="join", member_id="u1", at=0, display_name="Uma"),
+            RosterEvent(op="join", member_id="u2", at=0, display_name="Ugo"),
+            RosterEvent(
+                op="join", member_id="bot", at=0, kind="assistant", role="assistant"
+            ),
+        ]
+    )
+    return ConversationPipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
         memcell_store=memcells,
+        groups=groups,
         instructions=bundled_instructions(),
         llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
@@ -89,14 +109,14 @@ async def test_a_cell_without_a_user_sender_extracts_and_announces_nothing() -> 
     )
 
     assert outcome.message_count == 1
-    assert outcome.events == []
-    assert outcome.md_paths == []
+    assert not outcome.events
+    assert not outcome.md_paths
     assert llm.call_count == 0
     episode_store.append.assert_not_awaited()
 
 
 async def test_emit_episode_extracted_after_md_write() -> None:
-    """Each per-sender Episode write emits EpisodeExtracted with the md entry id."""
+    """The episode write emits EpisodeExtracted with the md entry id."""
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
@@ -112,6 +132,8 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert extracted.episode_text == _EPISODE["content"]
     assert extracted.episode_timestamp_ms == 1_700_000_000_000
     assert (extracted.owner_id, extracted.session_id) == ("u1", "s1")
+    assert (extracted.owner_type, extracted.speaker_ids) == ("user", [])
+    assert extracted.group_key is None
     assert extracted.source == "pipeline"
     (written,) = [call.args[1] for call in episode_store.append.await_args_list]
     assert written.summary == _EPISODE["summary"]
@@ -134,32 +156,66 @@ async def test_emit_episode_extracted_after_md_write() -> None:
 async def test_episode_and_event_carry_the_conversation_s_language(
     said: str, content: str, language: str | None
 ) -> None:
-    """The language is resolved once per cell and pinned on every copy."""
+    """The language is resolved once per cell and pinned on the episode."""
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
     outcome = await _pipeline(
         memorize_llm(episode_content=content), episode_store
-    ).run_cell(_INGESTED, _prepared("u1", "u2", said=said))
+    ).run_cell(_INGESTED, _prepared("u1", said=said))
 
     events = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
     written = [call.args[1] for call in episode_store.append.await_args_list]
-    assert [e.language for e in events] == [language, language]
-    assert [ep.language for ep in written] == [language, language]
+    assert [e.language for e in events] == [language]
+    assert [ep.language for ep in written] == [language]
 
 
-async def test_one_call_fans_out_to_every_user_sender() -> None:
+async def test_a_group_cell_is_one_episode_of_the_group() -> None:
+    """Two people in a group's cell: one call, one episode under the group,
+    its event naming the group and the people who spoke -- no copy per
+    sender."""
+    llm = user_track_llm()
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+    cell = MemCell(
+        items=[
+            _message("user", "u1"),
+            _message("user", "u2"),
+            _message("assistant", "bot"),
+        ],
+        timestamp=1_700_000_000_000,
+    )
+
+    outcome = await _pipeline(llm, episode_store).run_cell(
+        IngestResult(session_id="s1", messages=[], group_id="trip"),
+        PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "u2", "bot"]),
+    )
+
+    assert llm.call_count == 1
+    (scope, written) = episode_store.append.await_args.args
+    assert (scope.owner_type, scope.owner_id) == ("group", "trip")
+    assert written.sender_ids == ["u1", "u2", "bot"]
+    assert written.origin == "mixed"
+    (event,) = outcome.events
+    assert isinstance(event, EpisodeExtracted)
+    assert (event.owner_type, event.owner_id) == ("group", "trip")
+    assert event.speaker_ids == ["u1", "u2"]
+    assert event.group_key == "default/default/trip"
+
+
+async def test_several_people_outside_a_group_are_never_copied_per_sender() -> None:
+    """A session of two or more people is an implicit group's, decided before
+    its cells are cut; a cell of several people without a group is refused
+    rather than copied into each sender's memory."""
     llm = user_track_llm()
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
-    outcome = await _pipeline(llm, episode_store).run_cell(
-        _INGESTED, _prepared("u1", "u2")
-    )
+    with pytest.raises(ValueError, match="several human senders"):
+        await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1", "u2"))
 
-    owners = [e.owner_id for e in outcome.events if isinstance(e, EpisodeExtracted)]
-    assert owners == ["u1", "u2"]
-    assert llm.call_count == 1
+    assert llm.call_count == 0
+    episode_store.append.assert_not_awaited()
 
 
 async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:

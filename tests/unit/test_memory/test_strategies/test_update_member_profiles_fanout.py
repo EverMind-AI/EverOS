@@ -25,7 +25,7 @@ from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 
 from everos.config import load_settings
-from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
+from everos.memory.events import EpisodeExtracted, GroupFlushed
 from everos.memory.models import Group, RosterEvent
 from everos.memory.ports import Scope
 from everos.memory.strategies import update_member_profiles
@@ -113,12 +113,13 @@ async def _flush_everyone(monkeypatch: pytest.MonkeyPatch, pool_size: int) -> An
             )
             cells.seed(memcell_id, MemCell(items=[item], timestamp=at + 1))
             await update_member_profiles(
-                GroupEpisodeExtracted(
+                EpisodeExtracted(
                     memcell_id=memcell_id,
                     episode_entry_id=f"gep_{memcell_id}",
                     episode_text="text",
                     episode_timestamp_ms=at,
-                    group_id="trip",
+                    owner_id="trip",
+                    owner_type="group",
                     app_id="default",
                     project_id="p",
                     speaker_ids=[member],

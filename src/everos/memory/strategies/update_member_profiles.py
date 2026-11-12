@@ -14,8 +14,8 @@ group's segments are.
   pictures the member posted in them (D17: a picture says something about its
   poster only). Its prompt scopes extraction to the target speaker and keeps
   assistant suggestions out of the person's traits.
-- **Input.** Only this group's segments in which the member spoke:
-  :class:`GroupEpisodeExtracted` names the human speakers of each segment,
+- **Input.** Only this group's segments in which the member spoke: a group's
+  :class:`EpisodeExtracted` names the human speakers of each segment,
   and :func:`~everos.memory.extract.pipeline.member_profile.wrote_in`
   drops any segment without a message of the member's own (the source check).
   Each segment is read without its forgotten messages
@@ -51,7 +51,7 @@ group's segments are.
   item of its own (:func:`~everos.memory.extract.pipeline.profile_items.keep_held`).
 - **Language.** A stored ``primary_language`` wins, as for ``user.md``. Until
   one is stored, an update that a segment's event runs is told that event's
-  language -- the conversation's, resolved in code by the group pipeline --
+  language -- the conversation's, resolved in code by the pipeline --
   and an update on :class:`GroupFlushed`, which brings no language, resolves
   it the same way from the segments it reads. Never left to the model, unless
   no segment has a letter in it.
@@ -65,7 +65,7 @@ from everos.config import SqliteSettings, load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
+from everos.memory.events import EpisodeExtracted, GroupFlushed
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import wrote_in
@@ -79,20 +79,28 @@ from ._profiles import update_profile
 logger = get_logger(__name__)
 
 
+def _applies(event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps) -> bool:
+    """A group's episode, or a group's flush; never a user's own episode."""
+    del deps
+    return not isinstance(event, EpisodeExtracted) or event.owner_type == "group"
+
+
 async def update_member_profiles(
-    event: GroupEpisodeExtracted | GroupFlushed, deps: MemoryDeps
+    event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps
 ) -> list[Event]:
     """Queue a new segment on its speakers' profiles, or bring them up to date."""
     scope = Scope(
         app_id=event.app_id,
         project_id=event.project_id,
-        owner_id=event.group_id,
+        owner_id=event.owner_id
+        if isinstance(event, EpisodeExtracted)
+        else event.group_id,
         owner_type="group",
     )
     settings = load_settings()
     every = settings.groups.member_profile_every
     reads = asyncio.Semaphore(read_fanout(settings.sqlite))
-    if isinstance(event, GroupEpisodeExtracted):
+    if isinstance(event, EpisodeExtracted):
         await asyncio.gather(
             *(
                 _queue(deps, scope, member, event, every=every, reads=reads)
@@ -121,7 +129,7 @@ async def _queue(
     deps: MemoryDeps,
     scope: Scope,
     member_id: str,
-    event: GroupEpisodeExtracted,
+    event: EpisodeExtracted,
     *,
     every: int,
     reads: asyncio.Semaphore,
@@ -245,6 +253,7 @@ def _language_of(segments: list[tuple[str, MemCell]]) -> str | None:
 UPDATE_MEMBER_PROFILES_SPEC = StrategySpec(
     name="update_member_profiles",
     fn=update_member_profiles,
-    trigger=Immediate(on=[GroupEpisodeExtracted, GroupFlushed]),
+    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed]),
+    applies_to=_applies,
     max_retries=2,
 )

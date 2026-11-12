@@ -3,8 +3,9 @@
 Memorize, end to end::
 
     payload { session_id, messages[] }
+        -> the session's space: its group, or one person's own
         -> ingest -> BoundaryDetection (buffer / merge / boundary / tail)
-        -> for each cell: UserMemoryPipeline.run_cell
+        -> for each cell: ConversationPipeline.run_cell
                           (+ AgentMemoryPipeline.run_cell in agent mode)
                           -> publish that cell's events on the EventBus
         -> merge the pipelines' statuses -> MemorizeResult
@@ -15,17 +16,22 @@ pipelines and strategies return events, and each cell's are published as
 soon as the cell is done, so a failing cell never takes an earlier cell's
 events with it.
 
-A session bound to a group (or a batch naming ``group_id``) takes the group
-path (docs/group-memory.md, section 7.1): under the session lock the batch is
-admitted into its group (binding, inline roster, implicit joins; 409 / 403 /
-422 before anything is written), an inline roster change first cuts the open
-buffer of every session of the group -- their locks held with the batch's, in
-sorted order (D18) -- and the cells go to the group pipeline -- never
-to the one-to-one pipelines, which would file group content as each sender's
-personal memory. The bootstrap wires
-:class:`~everos.memory.extract.pipeline.GroupMemoryPipeline`; a build without
-one (``group_pipeline=None``) cuts group cells and keeps them as memcells,
-unextracted.
+A session is remembered in one space, decided under the session lock before
+anything is written (docs/group-memory.md, sections 7.1 and 7.9):
+
+* a session bound to a group, or a batch naming ``group_id``: the batch is
+  admitted into its group (binding, inline roster, implicit joins; 409 / 403
+  / 422 before anything is written), and an inline roster change first cuts
+  the open buffer of every session of the group -- their locks held with the
+  batch's, in sorted order (D18);
+* a session of two or more people (role ``user`` senders, in the batch and
+  the open buffer together) without a ``group_id``: it becomes the implicit
+  group of those people, created on first sight and bound like a declared
+  one; a person who joins its session later is refused (409);
+* otherwise one person's conversation with the assistant: their own memory.
+
+The conversation pipeline writes each cell's one episode in that space, so
+group content is never filed as a sender's personal memory.
 """
 
 from __future__ import annotations
@@ -48,7 +54,7 @@ from everos.memory.access import resolve_identity
 from everos.memory.events import GroupFlushed
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
-from everos.memory.groups import BatchMessage
+from everos.memory.groups import BatchMessage, implicit_group_id, is_implicit_group
 from everos.memory.ports import Scope, SessionKey
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._groups import to_events
@@ -63,7 +69,7 @@ if TYPE_CHECKING:
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
     from everos.memory.groups import RosterManager
-    from everos.memory.ports import EventBus
+    from everos.memory.ports import EventBus, SessionBufferStore
     from everos.memory.ports.images import ImageStore
 
 logger = get_logger("everos.service.memory")
@@ -83,15 +89,17 @@ class Memorizer:
         image_store: Where picture content items are stored, by content hash;
             ``None`` disables the picture path (pictures are reported as
             rejected rather than silently dropped).
-        user_pipeline: The user-memory track, run on every cell.
+        conversation_pipeline: The conversation track, run on every cell:
+            one episode per cell, in its session's space.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
         extractions: Keeps extractions alive past a cancelled request.
         raw_file_builder: Host file hydration capability for ingestion.
-        rosters: Admits a group batch into its group; ``None`` refuses
-            ``group_id`` (a build without group memory).
-        group_pipeline: Extracts group cells (the group episode); ``None``
-            keeps them as memcells until it is wired.
+        session_buffer: The sessions' open buffers: whose messages a session
+            without a group already holds.
+        rosters: Admits a batch into its group, declared or implicit; ``None``
+            refuses ``group_id`` and makes no implicit group (a build without
+            group memory).
     """
 
     def __init__(
@@ -100,26 +108,25 @@ class Memorizer:
         settings: Settings,
         boundary: BoundaryDetection,
         multimodal_llm: LLMClient | None,
-        user_pipeline: Pipeline,
+        conversation_pipeline: Pipeline,
         agent_pipeline: Pipeline,
         bus: EventBus,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
+        session_buffer: SessionBufferStore,
         image_store: ImageStore | None = None,
         vision: bool = True,
         rosters: RosterManager | None = None,
-        group_pipeline: Pipeline | None = None,
     ) -> None:
         self._rosters = rosters
-        self._group_pipeline = group_pipeline
-        self._multi_sender_warned: set[tuple[str, str, str]] = set()
+        self._session_buffer = session_buffer
         self._raw_file_builder = raw_file_builder
         self._image_store = image_store
         self._vision = vision
         self._settings = settings
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
-        self._user_pipeline = user_pipeline
+        self._conversation_pipeline = conversation_pipeline
         self._agent_pipeline = agent_pipeline
         self._bus = bus
         self._extractions = extractions
@@ -415,14 +422,20 @@ class Memorizer:
             session_id=payload["session_id"],
         )
         group_id = await self._group_of(payload, session)
+        buffered: list[BatchMessage] = []
+        if group_id is None:
+            group_id, buffered = await self._people_of(payload, session)
         cut_first: list[BoundaryOutcome] = []
         if group_id is not None:
             payload = {**payload, "group_id": group_id}
             cut_first = await self._admit_group_batch(
-                payload, session, group_id, mode=mode, is_final=is_final
+                payload,
+                session,
+                group_id,
+                buffered=buffered,
+                mode=mode,
+                is_final=is_final,
             )
-        else:
-            self._note_multi_sender(payload, session)
         ingested = await ingest_process(
             payload,
             multimodal_llm=self._multimodal_llm,
@@ -452,9 +465,16 @@ class Memorizer:
         Raises:
             RosterConflictError: The batch names another group than the one
                 the session is bound to (409, D18).
-            InvalidInputError: ``group_id`` on a build without group memory.
+            InvalidInputError: ``group_id`` on a build without group memory,
+                or an implicit group's id (reserved: a session of two or
+                more people becomes its group without naming it).
         """
         named = payload.get("group_id") or None
+        if named is not None and is_implicit_group(named):
+            raise InvalidInputError(
+                f"group_id {named!r} is an implicit group's: send the batch "
+                "without group_id"
+            )
         if self._rosters is None:
             if named is not None:
                 raise InvalidInputError("group memory is not available")
@@ -466,22 +486,69 @@ class Memorizer:
             )
         return named or bound
 
+    async def _people_of(
+        self, payload: dict[str, Any], session: SessionKey
+    ) -> tuple[str | None, list[BatchMessage]]:
+        """The implicit group of a session without one, when two or more people talk.
+
+        The people are the role ``user`` senders of the batch and of the
+        session's open buffer together (a buffer is never cut for it: what it
+        holds goes with the group). Cells already cut stay what they were.
+
+        Returns:
+            The implicit group's id and the buffer's messages (founders of a
+            group created now), or ``None`` and nothing for one person.
+        """
+        if self._rosters is None:
+            return None, []
+        buffered = [
+            BatchMessage(
+                sender_id=m.sender_id,
+                role=m.role,
+                at=to_timestamp_ms(m.timestamp),
+                sender_name=m.sender_name,
+            )
+            for m in await self._session_buffer.list(session)
+        ]
+        people = {
+            m.sender_id for m in [*buffered, *_batch_messages(payload)] if _person(m)
+        }
+        if len(people) < 2:
+            return None, []
+        return implicit_group_id(people), buffered
+
     async def _admit_group_batch(
         self,
         payload: dict[str, Any],
         session: SessionKey,
         group_id: str,
         *,
+        buffered: Sequence[BatchMessage],
         mode: Mode,
         is_final: bool,
     ) -> list[BoundaryOutcome]:
         """Admit a group batch; cut the open buffer first when it changes the roster.
 
         Runs under the session lock, before the batch's messages are buffered.
-        Returns the outcome of that cut (D18), or nothing.
+        Returns the outcome of that cut (D18), or nothing. An implicit group
+        takes no roster event and so never cuts: its batch -- with
+        ``buffered``, the open buffer's messages when the session becomes
+        the group's -- only creates, joins and binds.
         """
         assert self._rosters is not None
-        messages = payload.get("messages") or []
+        messages = _batch_messages(payload)
+        scope = Scope(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            owner_id=group_id,
+            owner_type="group",
+        )
+        if is_implicit_group(group_id):
+            if messages or buffered:
+                await self._rosters.admit_implicit(
+                    scope, session=session, messages=[*buffered, *messages]
+                )
+            return []
         raw_roster = payload.get("roster") or []
         if not messages and not raw_roster:
             return []  # a flush: the binding already names the group
@@ -489,7 +556,7 @@ class Memorizer:
         identity = resolve_identity(
             header=payload.get("asserted_asker"), body_asker=payload.get("asker_id")
         )
-        first = min((int(m["timestamp"]) for m in messages), default=None)
+        first = min((m.at for m in messages), default=None)
         events = to_events(
             raw_roster,
             source="inline",
@@ -511,51 +578,13 @@ class Memorizer:
             if closed.cells:
                 cut.append(closed)
         await self._rosters.admit_batch(
-            Scope(
-                app_id=session.app_id,
-                project_id=session.project_id,
-                owner_id=group_id,
-                owner_type="group",
-            ),
+            scope,
             session=session,
             asker_id=identity.asker_id,
             roster=events,
-            messages=[
-                BatchMessage(
-                    sender_id=m["sender_id"],
-                    role=m["role"],
-                    at=int(m["timestamp"]),
-                    sender_name=m.get("sender_name"),
-                )
-                for m in messages
-            ],
+            messages=messages,
         )
         return cut
-
-    def _note_multi_sender(self, payload: dict[str, Any], session: SessionKey) -> None:
-        """Log once per session a one-to-one batch with several human senders.
-
-        Such a batch keeps the per-sender behaviour (section 10); a group chat
-        must send ``group_id`` to become group memory.
-        """
-        senders = {
-            m.get("sender_id")
-            for m in payload.get("messages") or []
-            if m.get("role") == "user"
-        }
-        key = (session.app_id, session.project_id, session.session_id)
-        if len(senders) < 2 or key in self._multi_sender_warned:
-            return
-        if len(self._multi_sender_warned) > 10_000:
-            self._multi_sender_warned.clear()
-        self._multi_sender_warned.add(key)
-        logger.info(
-            "memorize.multi_sender_without_group",
-            app_id=session.app_id,
-            project_id=session.project_id,
-            session_id=session.session_id,
-            senders=len(senders),
-        )
 
     async def with_buffers_closed[T](
         self,
@@ -600,6 +629,12 @@ class Memorizer:
     ) -> MemorizeResult:
         """Run the pipelines over the cells the boundary stage wrote, cell by cell.
 
+        The conversation pipeline writes each cell's episode in its session's
+        space (``ingested.group_id``: a group's, else the person's own). In
+        agent mode the agent pipeline runs on the cell too, its event naming
+        the group, so a case the agent learns from a group carries
+        ``source_group_id`` (section 9.1).
+
         Each pipeline's events for a cell are published as soon as that cell
         is done. A pipeline that fails on a cell is logged and the loop goes
         on, so the cells (and the other pipeline) that did succeed still
@@ -609,9 +644,7 @@ class Memorizer:
         Raises:
             Exception: The first pipeline failure, after all cells ran.
         """
-        if ingested.group_id is not None:
-            return await self._extract_group(payload, ingested, boundaries, mode=mode)
-        pipelines: dict[str, Pipeline] = {"user_memory": self._user_pipeline}
+        pipelines: dict[str, Pipeline] = {"conversation": self._conversation_pipeline}
         if mode == "agent":
             pipelines["agent_memory"] = self._agent_pipeline
         outcomes: dict[str, list[CellOutcome]] = {track: [] for track in pipelines}
@@ -632,63 +665,17 @@ class Memorizer:
         if first_error is not None:
             raise first_error
 
-        user = PipelineOutcome.from_cells("user_memory", outcomes["user_memory"])
+        conversation = PipelineOutcome.from_cells(
+            "conversation", outcomes["conversation"]
+        )
         agent_status: TrackStatus = (
             PipelineOutcome.from_cells("agent_memory", outcomes["agent_memory"]).status
             if mode == "agent"
             else "skipped"
         )
-        return _result(payload, ingested, _merge_status(user.status, agent_status))
-
-    async def _extract_group(
-        self,
-        payload: dict[str, Any],
-        ingested: IngestResult,
-        boundaries: Sequence[BoundaryOutcome],
-        *,
-        mode: Mode,
-    ) -> MemorizeResult:
-        """Group cells go to the group pipeline -- never the one-to-one one.
-
-        The group write path (section 7): the group pipeline writes one group
-        episode per cell under ``groups/<g>/``. In agent mode the agent
-        pipeline runs on the cell too, its event naming the group, so a case
-        the agent learns from it carries ``source_group_id`` (section 9.1).
-        Without a group pipeline the cells stay memcells, unextracted, and the
-        batch reads as accumulated -- never as the one-to-one copies.
-        """
-        cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
-        if self._group_pipeline is None:
-            logger.info(
-                "memorize.group_extraction_pending",
-                session_id=ingested.session_id,
-                group_id=ingested.group_id,
-                memcell_ids=[c.memcell_id for c in cells],
-            )
-            return _result(payload, ingested, "accumulated")
-        pipelines: dict[str, Pipeline] = {"group_memory": self._group_pipeline}
-        if mode == "agent":
-            pipelines["agent_memory"] = self._agent_pipeline
-        done: list[CellOutcome] = []
-        first_error: BaseException | None = None
-        for prepared in cells:
-            results = await asyncio.gather(
-                *(p.run_cell(ingested, prepared) for p in pipelines.values()),
-                return_exceptions=True,
-            )
-            for track, result in zip(pipelines, results, strict=True):
-                if isinstance(result, BaseException):
-                    # One cell's failure; the next cell (and track) still runs.
-                    _log_cell_failure(ingested, prepared, track, result)
-                    first_error = first_error or result
-                    continue
-                if track == "group_memory":
-                    done.append(result)
-                await self._bus.publish(result.events)
-        if first_error is not None:
-            raise first_error
-        outcome = PipelineOutcome.from_cells("group_memory", done)
-        return _result(payload, ingested, _merge_status(outcome.status, "skipped"))
+        return _result(
+            payload, ingested, _merge_status(conversation.status, agent_status)
+        )
 
 
 def _result(
@@ -703,6 +690,24 @@ def _result(
         rejected=ingested.rejected_count,
         failed=ingested.failed_count,
     )
+
+
+def _batch_messages(payload: dict[str, Any]) -> list[BatchMessage]:
+    """The part of the batch's messages the roster cares about."""
+    return [
+        BatchMessage(
+            sender_id=m["sender_id"],
+            role=m["role"],
+            at=int(m["timestamp"]),
+            sender_name=m.get("sender_name"),
+        )
+        for m in payload.get("messages") or []
+    ]
+
+
+def _person(message: BatchMessage) -> bool:
+    """Whether the message is a person's: a role ``user`` sender."""
+    return message.role == "user" and bool(message.sender_id)
 
 
 def _own_cuts(
@@ -746,10 +751,10 @@ def _log_cell_failure(
 
 
 def _merge_status(
-    user: TrackStatus, agent: TrackStatus
+    conversation: TrackStatus, agent: TrackStatus
 ) -> Literal["accumulated", "extracted"]:
     """Either ``extracted`` wins; otherwise ``accumulated``."""
-    if user == "extracted" or agent == "extracted":
+    if conversation == "extracted" or agent == "extracted":
         return "extracted"
     return "accumulated"
 

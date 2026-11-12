@@ -25,7 +25,7 @@ from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 
 from everos.config import Settings, load_settings
-from everos.memory.events import GroupEpisodeExtracted
+from everos.memory.events import EpisodeExtracted
 from everos.memory.models import MemcellRecord
 from everos.memory.ports import Idle
 from everos.memory.strategies import (
@@ -113,12 +113,13 @@ async def _segment(
         ],
     )
     await update_group_profile(
-        GroupEpisodeExtracted(
+        EpisodeExtracted(
             memcell_id=memcell_id,
             episode_entry_id=f"gep_{memcell_id}",
             episode_text="text",
             episode_timestamp_ms=cell.timestamp,
-            group_id="trip",
+            owner_id="trip",
+            owner_type="group",
             app_id=APP,
             project_id=PROJECT,
             speaker_ids=["u_chen"],
