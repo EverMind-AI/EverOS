@@ -228,6 +228,9 @@ def without_items(
                     "explicit_info": [i for i in profile.explicit_info if keep(i)],
                     "implicit_traits": [i for i in profile.implicit_traits if keep(i)],
                     # Written over every item: it may say what was forgotten.
+                    # The next update writes it again from the items left, as
+                    # on user.md (profile_items.SUMMARY); the undo puts it
+                    # back while none has.
                     "summary": "" if cleared else profile.summary,
                 }
             ),

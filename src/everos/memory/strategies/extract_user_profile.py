@@ -32,7 +32,10 @@ reading them again only re-adds it.
   ``since``), and every item the update took out moves to ``user.md``'s
   history with what replaced it: nothing is lost in place. Forgetting a
   conversation takes out the items every segment of which is forgotten; the
-  forget does that, under the same lock, not this strategy.
+  forget does that, under the same lock, not this strategy. A forget that
+  takes an item out also drops the summary (it may repeat the item); every
+  update writes the summary again from the items, so the next one restores
+  it.
 - **Held items.** An item a person changed through ``POST /memory/update`` is
   held unless they released it: the update reads it, and whatever the reply
   did to it is undone (:func:`~everos.memory.extract.pipeline.profile_items.keep_held`);

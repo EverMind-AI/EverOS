@@ -235,6 +235,29 @@ async def test_a_segment_already_read_is_not_queued_again(every: Any) -> None:
     assert len(model.prompts) == 1
 
 
+async def test_the_next_update_writes_a_summary_a_forget_dropped(every: Any) -> None:
+    every(1)
+    model = _ProfileModel()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "I'll book flights"))
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.profile.summary == "Fact 1 about Chen"
+    # A group forget took an item out and the summary with it.
+    await deps.stores.member_profile.write(
+        _SCOPE,
+        chen.model_copy(
+            update={"profile": chen.profile.model_copy(update={"summary": ""})}
+        ),
+    )
+
+    _segment(deps, "mc_2", 2_000, ("u_chen", "Bring passports"))
+    await update_member_profiles(_event("mc_2", "u_chen"), deps)
+
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.profile.summary == "Fact 1 about Chen"
+
+
 async def test_two_concurrent_updates_of_one_member_lose_no_item(every: Any) -> None:
     every(1)
     deps = _deps(_ProfileModel())

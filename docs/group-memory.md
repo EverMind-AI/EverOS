@@ -1099,10 +1099,13 @@ was forgotten to everything derived from it (Step 2):
 group-profile items): forgotten when all of their sources are forgotten;
 otherwise marked `stale` and rewritten from the remaining sources by the next
 update, which appends a new version. Re-extraction and quotes skip forgotten
-messages; the memcell payload keeps them so undo can restore them.
+messages; the memcell payload keeps them so undo can restore them. A member's
+profile that loses an item loses its summary too (it is written over every
+item): the next update writes it again from the items left, as on `user.md`.
 
-Undo restores the marks and makes the previous versions current again. Delete
-(owner/admin) runs the same propagation and removes instead of marking.
+Undo restores the marks and makes the previous versions current again, and a
+dropped summary while no update has written a new one. Delete (owner/admin)
+runs the same propagation: it is a forget, soft and reversible.
 
 ---
 

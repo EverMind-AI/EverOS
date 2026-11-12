@@ -36,6 +36,7 @@ from everalgo.user_memory.profile import ItemOrigin, ProfileUpdate, RetiredItem
 from everos.memory.extract.pipeline.profile_items import (
     HISTORY_LIMIT,
     SOURCE_IMAGE_KEYS,
+    SUMMARY,
     bounded_history,
     edit_item,
     forget_images,
@@ -533,6 +534,34 @@ def test_a_forgotten_conversation_takes_what_no_remembered_segment_supports() ->
     assert [entry["description"] for entry in after.history] == ["Lived in Rome"]
     assert forget_segments(None, ["mc_1"]) == (None, [], 0)
     assert forget_segments(after, ["mc_7"]) == (after, [], 0)
+
+
+def test_a_forget_that_takes_an_item_drops_the_summary_an_undo_brings_it() -> None:
+    """The summary is written over every item: a forget of one drops it."""
+    profile = _profile(
+        _sourced("Lives in Paris", "mc_1"), _sourced("Works in Python", "mc_2")
+    )
+    profile.summary = "Lives in Paris"
+    profile.history = [_replaced("Lived in Lyon", 30, source_memcell_ids=["mc_3"])]
+
+    kept, removed, _ = forget_segments(profile, ["mc_3"])  # a replaced value
+    assert kept is not None and kept.summary == "Lives in Paris"
+    assert [bucket for bucket, _ in removed] == ["history"]
+
+    after, removed, count = forget_segments(profile, ["mc_1"])
+    assert after is not None and after.summary == "" and count == 1
+    assert removed[-1] == (SUMMARY, {"summary": "Lives in Paris"})
+    by_id, _, _ = forget_items(
+        _profile(_stored("Has a cat", "pi_cat")).model_copy(update={"summary": "x"}),
+        ["pi_cat"],
+    )
+    assert by_id is not None and by_id.summary == ""
+
+    back, items, _ = restore_items(after, removed, owner_id="u1", timestamp=1)
+    assert (back.summary, items) == ("Lives in Paris", 1)
+    rewritten = after.model_copy(update={"summary": "Works in Python"})
+    back, _, _ = restore_items(rewritten, removed, owner_id="u1", timestamp=1)
+    assert back.summary == "Works in Python"  # an update wrote one since
 
 
 def test_rests_on_names_a_removed_entry_by_its_segments() -> None:

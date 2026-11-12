@@ -1436,9 +1436,12 @@ A forget **follows the sources**: a scene none of whose episodes is alive any
 more is forgotten; a picture file no live memory of the user refers to is
 taken out of circulation (the bytes stay); a profile item, or a replaced
 value, goes once every segment it rests on is forgotten (or every picture it
-was read off). It marks and erases the index rows at once: nothing leaves
-markdown, and the forgotten versions stay readable through
-`/memory/history`. Every forget is recorded in the forget log (`system.db`)
+was read off). A profile that loses an item loses its summary too, which is
+written over every item and may repeat it: the next profile update writes it
+again from the items left, and the undo puts it back while none has (a
+member's profile in a group does the same). A forget marks and erases the
+index rows at once: nothing leaves markdown, and the forgotten versions stay
+readable through `/memory/history`. Every forget is recorded in the forget log (`system.db`)
 with what it marked, who asked and why. A conversation sent again after its
 forget (or continued) is new material: its new memories are not forgotten,
 and the profile reads them.

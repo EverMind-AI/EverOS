@@ -289,6 +289,22 @@ async def test_a_forgotten_conversation_takes_the_items_resting_on_it_alone() ->
     assert (bucket, item["description"]) == ("explicit_info", "Lives in Paris")
 
 
+async def test_the_summary_goes_with_an_item_and_comes_back_with_the_undo() -> None:
+    """Written over every item, it may repeat the forgotten one."""
+    forget, undo, stores, _ = _manager(_episode("ep_1"))
+    _segments(stores, "s1", "mc_1")
+    _segments(stores, "s2", "mc_2")
+    _with_profile(stores, _fact("Lives in Paris", "mc_1"), _fact("Likes tea", "mc_2"))
+    stores.profile.profiles[_scope()].summary = "Lives in Paris"
+
+    await forget.forget_session(scope=_scope(), session_id="s1")
+    assert stores.profile.profiles[_scope()].summary == ""
+
+    result = await undo.undo_session(scope=_scope(), session_id="s1")
+    assert result.profiles == 1
+    assert stores.profile.profiles[_scope()].summary == "Lives in Paris"
+
+
 async def test_an_item_goes_with_the_last_conversation_it_rests_on() -> None:
     forget, _, stores, _ = _manager(_episode("ep_1"))
     _segments(stores, "s1", "mc_1")

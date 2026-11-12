@@ -175,7 +175,9 @@ class SessionForgetManager:
                 episode_ids=tuple((entry_id, "") for _, entry_id in episodes),
                 removed_profile_items=profile_removed,
             )
-        profiles = sum(1 for bucket, _ in profile_removed if bucket != "history")
+        profiles = sum(
+            1 for bucket, _ in profile_removed if bucket in profile_items.BUCKETS
+        )
         logger.info(
             "memory.session.forgotten",
             session_id=session_id,
@@ -234,7 +236,7 @@ class SessionForgetManager:
             project_id=scope.project_id,
             owner_id=scope.owner_id,
             removed=count,
-            history=len(removed) - count,
+            history=sum(1 for bucket, _ in removed if bucket == "history"),
         )
         return tuple(removed)
 

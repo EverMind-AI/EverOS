@@ -368,6 +368,7 @@ async def test_a_record_forget_dry_run_then_real_then_undo(tmp_path: Path) -> No
         profile = await world.stores.profile.read(_amy(world))
         assert profile is not None
         assert [i.description for i in profile.explicit_info] == ["Likes jazz."]
+        assert profile.summary == ""  # written over every item, the next update's
         history = await _history(world, gone)
         assert [v.state for v in history.versions] == ["forgotten"]
 
@@ -376,6 +377,9 @@ async def test_a_record_forget_dry_run_then_real_then_undo(tmp_path: Path) -> No
         )
         assert undone.applied and undone.episodes == (gone,)
         assert undone.profile_items == 1
+        profile = await world.stores.profile.read(_amy(world))
+        assert profile is not None
+        assert profile.summary == "Amy lives in Lyon and has a cat."
         assert gone in await _search_ids(world, "password hint Biscuit")
         again = await world.memory.undo_forget(
             app_id=APP, project_id=PROJECT, user_id="amy", forget_id=done.forget_id

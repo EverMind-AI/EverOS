@@ -29,7 +29,11 @@ that into what EverOS keeps on the items:
 A forgotten picture reaches the items, and the replaced values, read off it
 alone (:func:`forget_images`); a forgotten conversation reaches those every
 segment of which is forgotten (:func:`forget_segments`); an undo puts them back
-(:func:`restore_items`).
+(:func:`restore_items`). A forget that takes an item out drops the summary too:
+it is written over every item, so it may repeat the forgotten one. The next
+update writes it again from the items that remain (everalgo derives it on
+every update), and an undo puts it back while no update has -- as on a
+member's profile in a group.
 
 A person changes an item through ``POST /memory/update`` (:func:`edit_item`):
 a new value is a new item linked to the old one, as a model's is, and carries
@@ -46,6 +50,7 @@ __all__ = [
     "BUCKETS",
     "HISTORY_LIMIT",
     "SOURCE_IMAGE_KEYS",
+    "SUMMARY",
     "already_read",
     "bounded_history",
     "edit_item",
@@ -107,6 +112,11 @@ never inherits a person's edit marks from the item it came from."""
 
 BUCKETS: tuple[str, str] = ("explicit_info", "implicit_traits")
 """The two lists of profile items."""
+
+SUMMARY = "summary"
+"""The part a forget's removed list names the dropped summary by:
+``("summary", {"summary": <text>})``, beside the ``(bucket, item)`` and
+``("history", entry)`` pairs, so the undo can put it back."""
 
 _NOT_WORDS = re.compile(r"[\W_]+")
 """What a rewrite that only re-punctuates a description changes."""
@@ -405,10 +415,14 @@ def forget_images(
 def _without(
     existing: Profile, survives: Callable[[BaseModel | Mapping[str, Any]], bool]
 ) -> tuple[Profile, list[tuple[str, dict[str, Any]]], int]:
-    """``existing`` without the items and replaced values ``survives`` refuses."""
+    """``existing`` without the items and replaced values ``survives`` refuses.
+
+    Taking an item out drops the summary as well, named in ``removed`` under
+    :data:`SUMMARY` for the undo: the summary is written over every item.
+    """
     removed: list[tuple[str, dict[str, Any]]] = []
-    kept: dict[str, list[Any]] = {}
-    for bucket in ("explicit_info", "implicit_traits"):
+    kept: dict[str, Any] = {}
+    for bucket in BUCKETS:
         items: list[_Item] = getattr(existing, bucket)
         kept[bucket] = [item for item in items if survives(item)]
         removed += [
@@ -422,8 +436,11 @@ def _without(
     ]
     if not removed:
         return existing, [], 0
-    history = [entry for entry in existing.history if survives(entry)]
-    return existing.model_copy(update={**kept, "history": history}), removed, count
+    kept["history"] = [entry for entry in existing.history if survives(entry)]
+    if count and existing.summary:
+        kept["summary"] = ""
+        removed.append((SUMMARY, {"summary": existing.summary}))
+    return existing.model_copy(update=kept), removed, count
 
 
 def forget_segments(
@@ -493,7 +510,9 @@ def restore_items(
     does not duplicate it. The item comes back as it was stored, with its
     ``observed_at`` and its provenance intact. A replaced value (bucket
     ``history``) goes back into the history in its place by ``replaced_at``,
-    newest first, unless the history still holds it.
+    newest first, unless the history still holds it. The summary the forget
+    dropped (:data:`SUMMARY`) comes back while the profile has none: an
+    update since has written one over the items it had.
 
     Returns:
         ``(profile, items, replaced)`` -- how many items and how many replaced
@@ -513,6 +532,10 @@ def restore_items(
     restored = replaced = 0
     for bucket, item in removed:
         data = dict(item) if isinstance(item, Mapping) else item.model_dump()
+        if bucket == SUMMARY:
+            if not profile.summary:
+                profile.summary = str(data.get("summary") or "")
+            continue
         if bucket == "history":
             if _history_key(data) not in held:
                 held.add(_history_key(data))

@@ -547,6 +547,15 @@ machinery that keeps a deleted memory from coming back.
   second time. The member path now skips a segment an item already rests on,
   as `user.md` did; a forget that needs a segment read again queues it
   itself, as before.
+- **A forget drops the profile summary on both profiles.** The summary is
+  written over every item, so it may repeat the one a forget took out. A
+  member's profile in a group already cleared it; a user's `user.md` kept it.
+  Now both clear it whenever a forget removes an item (a replaced value alone
+  leaves it): the next profile update writes it again from the items that
+  remain -- everalgo derives it on every update, so no flag is kept -- and an
+  undo puts it back while no update has. A user's forget records the dropped
+  summary beside the items it took (part `summary`), which also replaces the
+  `profile_summary` the owner forget kept in its undo record. Cost: none.
 - **No tzlocal warning from a crontab check.** Validating a strategy's
   `Cron` trigger or an `ome.toml` `cron` override asked APScheduler to build a
   trigger in the OS's timezone; in a container with none, tzlocal warned

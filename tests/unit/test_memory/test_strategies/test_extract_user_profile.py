@@ -191,6 +191,35 @@ async def test_an_update_reads_only_the_new_segment_against_the_stored_profile()
     assert "pi_1" not in user and "mc_1" not in user
 
 
+async def test_the_next_update_writes_a_summary_a_forget_dropped() -> None:
+    """A forget leaves the summary empty; the next update writes it again,
+    from the items -- even when its reply changes nothing."""
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_2", _memcell(("u_alice", "Nice weather.")))
+    await deps.stores.profile.write(
+        _scope(),
+        Profile(
+            owner_id="u_alice",
+            summary="",
+            timestamp=_TS,
+            explicit_info=[
+                ExplicitInfoItem(
+                    description="Works in Python.",
+                    category="Work",
+                    item_id="pi_1",
+                    source_memcell_ids=["mc_1"],
+                )
+            ],
+        ),
+    )
+
+    await extract_user_profile(_event("mc_2"), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.summary == "Works in Python."
+
+
 async def test_a_segment_already_read_is_not_read_again() -> None:
     model = _Model()
     deps = _deps(model)

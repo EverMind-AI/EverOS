@@ -718,9 +718,6 @@ class UserForgetManager:
                     "files": list(plan.files),
                     "segments": list(plan.segments),
                     "segment_items": by_segments,
-                    "profile_summary": existing.summary
-                    if plan.whole_profile and existing is not None
-                    else None,
                 },
             )
         plan.orphaned = list(orphaned)
@@ -963,8 +960,7 @@ class UserForgetManager:
             [str(s) for s in undo.get("segments") or []],
             except_id=entry.forget_id,
         )
-        summary = undo.get("profile_summary")
-        if not removed and not summary:
+        if not removed:
             return 0
         existing = await stores.profile.read(scope)
         profile, restored, replaced = profile_items.restore_items(
@@ -973,9 +969,7 @@ class UserForgetManager:
             owner_id=scope.owner_id,
             timestamp=_newest_observed(removed),
         )
-        if isinstance(summary, str) and summary and not profile.summary:
-            profile = profile.model_copy(update={"summary": summary})
-        elif not (restored or replaced):
+        if not (restored or replaced):
             return 0
         await stores.profile.write(scope, profile)
         return restored
@@ -1005,6 +999,8 @@ def _profile_removal(
             for bucket in profile_items.BUCKETS
             for item in getattr(existing, bucket)
         ] + [("history", dict(entry)) for entry in existing.history]
+        if existing.summary:
+            removed.append((profile_items.SUMMARY, {"summary": existing.summary}))
         emptied = existing.model_copy(
             update={
                 "explicit_info": [],

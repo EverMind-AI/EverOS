@@ -210,7 +210,9 @@ class ForgetManager:
                 ),
                 removed_profile_items=profile_removed,
             )
-        profiles = sum(1 for bucket, _ in profile_removed if bucket != "history")
+        profiles = sum(
+            1 for bucket, _ in profile_removed if bucket in profile_items.BUCKETS
+        )
 
         logger.info(
             "memory.images.forgotten",
@@ -301,7 +303,7 @@ class ForgetManager:
             owner_id=scope.owner_id,
             image_id=image_id,
             removed=count,
-            history=len(removed) - count,
+            history=sum(1 for bucket, _ in removed if bucket == "history"),
             buckets=[bucket for bucket, _ in removed],
         )
         return tuple(removed)
