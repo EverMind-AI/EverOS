@@ -667,7 +667,7 @@ async def test_everalgos_lists_round_trip_through_user_md(
         c for c in llm.calls if c.response_format.__name__ == "_UpdateOutput"
     ]
     request = update_call.messages[-1].content
-    assert f"<matter>{matter['topic']}</matter>" in request
+    assert f">{matter['topic']}</matter>" in request
     (held,) = after_init["pending"]
     assert '<entry index="0"' in request
     assert held["description"] in request

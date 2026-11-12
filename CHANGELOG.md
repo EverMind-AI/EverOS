@@ -51,12 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **everalgo moves to the 2026-11-11 release candidates**:
   `everalgo-core 0.7.0rc1`, `everalgo-boundary 0.5.0rc1`,
-  `everalgo-user-memory 0.9.0rc6`, `everalgo-agent-memory 0.6.0rc4` and
+  `everalgo-user-memory 0.9.0rc7`, `everalgo-agent-memory 0.6.0rc4` and
   `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
   `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
-  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc6`, which checks every
+  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc7`, which checks every
   profile item against the episode narratives and keeps a do-not-record list
-  (the next two entries).
+  (the next two entries). `0.9.0rc6` is skipped: its profile reply schemas
+  were refused by OpenAI under the default strict reply format, so every
+  episode-based profile update failed.
 - **Profile items must be grounded in what was said, and new profiles add no
   `implicit_traits`.** Every item the model writes carries a quote that has to
   be found in that batch's episode narratives, or the item is dropped. An
@@ -67,7 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `explicit_info` item -- while traits already stored are kept and can still
   be updated or removed. A matter the user asks not to be recorded stays out
   of the profile from then on, and an item carrying an identification or
-  account number (12 or more digits) is dropped.
+  account number (12 or more digits) is dropped. A do-not-record request is
+  kept only with a quote found in the narratives, and the user can withdraw
+  it, whole or in part.
 - **`user.md` keeps the extractor's `do_not_record` and `pending` lists** in
   its frontmatter: the matters the user asked not to be recorded, and the
   patterns waiting for a second occurrence. They are the extractor's own

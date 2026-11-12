@@ -172,7 +172,7 @@ the body repeats `summary` for human readers.
 | `implicit_traits` | inferred patterns, each `{description, trait, basis, observed_at}`; new profiles add none, stored ones are kept | yes |
 | `profile_timestamp_ms` | the newest observation folded into the profile (ms epoch) | yes |
 | `primary_language` | the language the profile is frozen to; absent while unknown | no |
-| `do_not_record` | the matters the user asked not to be recorded, each `{topic, evidence, observed_at}`, oldest first | no |
+| `do_not_record` | the matters the user asked not to be recorded, each `{topic, observed_at}` plus an optional `except` list of parts allowed again | no |
 | `pending` | pattern items waiting for a later conversation to repeat them: the item's fields plus `bucket` and `observed_at` | no |
 
 `do_not_record` and `pending` are the extractor's own state
