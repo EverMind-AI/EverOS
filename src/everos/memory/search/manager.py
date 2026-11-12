@@ -421,6 +421,10 @@ class SearchManager:
                     )
                 else:
                     recalled = await self._maxsim_atomic_recall(req, where, top_k)
+                    if not recalled.candidates:
+                        recalled = await self._ep.sparse_recall(
+                            req.query, where, limit=self._recall_limit(req.top_k)
+                        )
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
@@ -627,6 +631,10 @@ class SearchManager:
                     req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
                 )
             vector = await self._embed_query(req.query)
+            if not vector:
+                return await recaller.sparse_recall(
+                    req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
+                )
             recalled = await recaller.dense_recall(
                 vector, where, limit=self._recall_limit(req.top_k, cap=cap)
             )
@@ -687,7 +695,15 @@ class SearchManager:
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
-        vector = await self._embedding.embed_query(query)
+        try:
+            async with asyncio.timeout(1.5):
+                vector = await self._embedding.embed_query(query)
+        except (TimeoutError, Exception) as exc:
+            logger.warning(
+                "embed_query_fallback_to_keyword",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return []
         expected = getattr(self._embedding, "dim", None)
         if expected and len(vector) != expected:
             # Fail here, not inside LanceDB. A mismatched query vector reaches

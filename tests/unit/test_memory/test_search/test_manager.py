@@ -1126,3 +1126,20 @@ async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert "langfuse.observation.input" not in attrs
+
+
+async def test_embed_query_timeout_or_error_falls_back_to_sparse() -> None:
+    """When query embedding fails or times out, VECTOR search falls back to sparse BM25 recall."""
+
+    class _FailingEmbedding:
+        dim = 4
+
+        async def embed_query(self, query: str) -> list[float]:
+            raise TimeoutError("embedding endpoint timed out")
+
+    mgr = _build_manager(
+        embedding=_FailingEmbedding(),  # type: ignore[arg-type]
+        episode_sparse=[_episode_row("ep_sparse_fallback", score=0.9)],
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert [e.id for e in resp.data.episodes] == ["ep_sparse_fallback"]

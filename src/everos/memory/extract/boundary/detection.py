@@ -33,6 +33,8 @@ from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
 from everos.memory.ports import SessionBufferStore, SessionKey
 
+_AUTO_FLUSH_BUFFER_THRESHOLD = 12
+
 from .messages import (
     Mode,
     close_complete_tail,
@@ -221,9 +223,12 @@ class BoundaryDetection:
         llm = self._llm
         items = [to_conversation_item(m) for m in merged]
         custom_instructions = self._instructions.load("boundary_detection")
+        effective_timeout = (
+            min(self._attempt_timeout, 25.0) if self._attempt_timeout else 25.0
+        )
 
         async def attempt() -> DetectionResult:
-            async with asyncio.timeout(self._attempt_timeout):
+            async with asyncio.timeout(effective_timeout):
                 return await adetect_boundaries(
                     items,
                     llm=llm,
@@ -235,8 +240,21 @@ class BoundaryDetection:
 
         # A generation span, so the call's token usage is costed (a span-typed
         # observation's usage is dropped).
-        with memory_span("everos.memcell.boundary", observation_type="generation"):
-            return await retry_llm_output(attempt, operator="boundary", mode=mode)
+        try:
+            with memory_span("everos.memcell.boundary", observation_type="generation"):
+                return await retry_llm_output(attempt, operator="boundary", mode=mode)
+        except TimeoutError as err:
+            if not is_final:
+                raise
+            logger.warning(
+                "boundary_detect_timeout_fallback",
+                mode=mode,
+                error=f"{type(err).__name__}: {err}",
+            )
+            if not items:
+                return DetectionResult(cells=[], tail=[], tail_complete=False)
+            cell = MemCell(items=items, timestamp=items[-1].timestamp)
+            return DetectionResult(cells=[cell], tail=[], tail_complete=True)
 
     async def _commit_cells(
         self,

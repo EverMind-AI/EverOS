@@ -232,3 +232,14 @@ async def test_an_orphan_tool_row_counts_without_reaching_the_model() -> None:
             "m_s1_1700000000003_000",
             "m_s1_1700000000003_001",
         ]
+
+
+async def test_final_flush_timeout_falls_back_to_single_memcell() -> None:
+    """A final flush whose boundary LLM call times out falls back to a single cell
+    containing all buffered messages rather than leaving the session unextracted."""
+    async with _Stage() as stage:
+        stage.replies = [TimeoutError("boundary LLM timed out")]
+        outcome = await stage.add("s1", 1, final=True)
+        assert outcome.status == "extracted"
+        assert len(outcome.cells) == 1
+        assert outcome.per_cell_message_ids == [["m_s1_1700000000001_000"]]
