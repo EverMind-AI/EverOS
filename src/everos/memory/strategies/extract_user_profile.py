@@ -50,7 +50,7 @@ from __future__ import annotations
 from everalgo.user_memory import ProfileExtractor
 
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import user_profile_lock
+from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline.pictures import profile_pictures
@@ -114,7 +114,7 @@ async def extract_user_profile(
     # Serialise on the owner: user.md is a single per-user file and the
     # body is a read → LLM update → overwrite sequence; a forget and its undo
     # hold the same lock. Different users run fully in parallel.
-    async with user_profile_lock(event.app_id, event.project_id, event.owner_id):
+    async with profile_lock(scope):
         if await _forgotten_segment(deps, scope, event):
             logger.info(
                 "profile_segment_forgotten",

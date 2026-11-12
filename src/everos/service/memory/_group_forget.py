@@ -56,10 +56,10 @@ from everos.core.errors import (
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.memory import (
-    group_forget_lock,
+    forget_lock,
     group_profile_lock,
-    group_scenes_lock,
-    member_profile_lock,
+    profile_lock,
+    scenes_lock,
 )
 from everos.memory.access import Identity, authorize_forget
 from everos.memory.extract.pipeline.group_scene import scene_version
@@ -187,7 +187,7 @@ class GroupForgetManager:
         if identity.asker_id is None:
             raise InvalidInputError("asker_id is required for a group forget")
         asker = identity.asker_id
-        async with group_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             record = await self._member_record(scope, asker)
             plan = await self._planner.plan(scope, target, record)
             authorize_forget(record.roster, asker, sources=plan.sources)
@@ -395,7 +395,7 @@ class GroupForgetManager:
             return
         scope = plan.scope
         assert self._pipeline is not None or all(not e.members for e in plan.scenes)
-        async with group_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with scenes_lock(scope):
             for edit in plan.scenes:
                 ids = [
                     replaced[m].entry_id if m in replaced else m for m in edit.members
@@ -476,9 +476,7 @@ class GroupForgetManager:
         """Whole profiles of a member target; the source rule on the others."""
         scope = plan.scope
         for member_id in plan.members_removed:
-            async with member_profile_lock(
-                scope.app_id, scope.project_id, scope.owner_id, member_id
-            ):
+            async with profile_lock(scope, member_id):
                 removed = await self._stores.member_profile.remove(scope, member_id)
             if removed is None:
                 continue
@@ -491,9 +489,7 @@ class GroupForgetManager:
             )
         for planned in plan.members:
             member_id = planned.member_id
-            async with member_profile_lock(
-                scope.app_id, scope.project_id, scope.owner_id, member_id
-            ):
+            async with profile_lock(scope, member_id):
                 held = await self._stores.member_profile.read(scope, member_id)
                 if held is None:
                     continue
@@ -542,7 +538,7 @@ class GroupForgetManager:
         if identity.asker_id is None:
             raise InvalidInputError("asker_id is required for a group undo")
         asker = identity.asker_id
-        async with group_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             record = await self._member_record(scope, asker)
             entry = await self._stores.forget_log.get(forget_id)
             if (
@@ -660,9 +656,7 @@ class GroupForgetManager:
         for removed in undo.get("members_removed") or []:
             member_id = str(removed["member_id"])
             profile = MemberProfile.model_validate(removed["profile"])
-            async with member_profile_lock(
-                scope.app_id, scope.project_id, scope.owner_id, member_id
-            ):
+            async with profile_lock(scope, member_id):
                 if await self._stores.member_profile.read(scope, member_id) is None:
                     await self._stores.member_profile.write(scope, profile)
                     back.append(member_id)
@@ -674,9 +668,7 @@ class GroupForgetManager:
         back: list[str] = []
         for change in undo.get("member_items") or []:
             member_id = str(change["member_id"])
-            async with member_profile_lock(
-                scope.app_id, scope.project_id, scope.owner_id, member_id
-            ):
+            async with profile_lock(scope, member_id):
                 held = await self._stores.member_profile.read(scope, member_id)
                 if held is None:
                     continue
@@ -699,7 +691,7 @@ class GroupForgetManager:
         changes = undo.get("clusters") or []
         if not changes:
             return
-        async with group_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with scenes_lock(scope):
             for change in reversed(changes):
                 cluster = Cluster.model_validate(change["cluster"])
                 if cluster.id is None:

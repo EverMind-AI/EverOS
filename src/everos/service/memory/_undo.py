@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory import user_profile_lock
+from everos.memory import profile_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import restore_revived_scenes
 from everos.memory.models import Episode, ImageMemory
@@ -182,7 +182,7 @@ class UndoManager:
         restored_images = await self._restore_images(
             scope, entry, occurrences, keep=(keep or Named()).image_memories
         )
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             restored_profile = await self._restore_profile(scope, entry)
         await self._images.restore(image_id)
 
@@ -297,7 +297,7 @@ class UndoManager:
         if scenes:
             await self._eraser.requeue("scene", {s.ref.md_path for s in scenes})
         # Under the profile lock until the log says "remembered", as the forget.
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             profiles = await self._restore_session_profile(scope, session_id, entry)
             await self._stores.forget_log.mark_undone(entry.forget_id)
 

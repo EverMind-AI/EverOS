@@ -28,7 +28,7 @@ __all__ = [
 
 from collections.abc import Collection
 
-from everos.memory._partition_locks import user_scenes_lock
+from everos.memory._partition_locks import scenes_lock
 from everos.memory.models import FORGOTTEN_MARK, Scene
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
@@ -63,7 +63,7 @@ async def forget_orphaned_scenes(
     episodes: EpisodeStore, scenes: SceneStore, scope: Scope
 ) -> list[Stored[Scene]]:
     """Mark forgotten each current scene version none of whose episodes is alive."""
-    async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+    async with scenes_lock(scope):
         orphaned = [
             version
             for version, mark in await newest_versions(scenes, scope)
@@ -95,7 +95,7 @@ async def restore_revived_scenes(
     forgotten.
     """
     kept = set(keep)
-    async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+    async with scenes_lock(scope):
         revived = [
             version
             for version, mark in await newest_versions(scenes, scope)
@@ -114,5 +114,5 @@ async def remove_scenes_naming(
     """Remove every scene version that names one of ``episode_ids``."""
     if not episode_ids:
         return []
-    async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+    async with scenes_lock(scope):
         return await scenes.remove_naming(scope, episode_ids)

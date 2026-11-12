@@ -64,7 +64,7 @@ from everalgo.user_memory import ProfileExtractor
 
 from everos.config import SqliteSettings, load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import member_profile_lock
+from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.extract.conversation_language import conversation_language
@@ -132,9 +132,7 @@ async def _queue(
     every: int,
     reads: asyncio.Semaphore,
 ) -> None:
-    async with member_profile_lock(
-        scope.app_id, scope.project_id, scope.owner_id, member_id
-    ):
+    async with profile_lock(scope, member_id):
         stored = await deps.stores.member_profile.read(scope, member_id)
         profile = stored or MemberProfile(
             group_id=scope.owner_id,
@@ -166,9 +164,7 @@ async def _queue(
 async def _update_pending(
     deps: MemoryDeps, scope: Scope, member_id: str, *, reads: asyncio.Semaphore
 ) -> None:
-    async with member_profile_lock(
-        scope.app_id, scope.project_id, scope.owner_id, member_id
-    ):
+    async with profile_lock(scope, member_id):
         stored = await deps.stores.member_profile.read(scope, member_id)
         if stored is None or not stored.pending_memcell_ids:
             return

@@ -40,7 +40,7 @@ import numpy as np
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import group_scenes_lock
+from everos.memory._partition_locks import scenes_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import GroupEpisodeExtracted
 from everos.memory.extract.pipeline.group_scene import narrate_scene, scene_version
@@ -78,7 +78,7 @@ async def update_group_scenes(
     # Before the lock: a model call under it would hold every other writer.
     vector = np.asarray(await deps.embedding.embed(event.episode_text), np.float32)
     clustering = load_settings().clustering
-    async with group_scenes_lock(event.app_id, event.project_id, event.group_id):
+    async with scenes_lock(scope):
         if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
             return []
         # A replay (or a retry after the narrative call failed) finds the

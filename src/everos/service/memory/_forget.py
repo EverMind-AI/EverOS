@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory import user_profile_lock, user_scenes_lock
+from everos.memory import profile_lock, scenes_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import newest_versions
 from everos.memory.models import Episode, Scene
@@ -192,7 +192,7 @@ class ForgetManager:
         # The profile lock is held until the log says "forgotten": an update
         # waiting on it then leaves the picture out, and none in flight writes
         # back what this takes out.
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             profile_removed = await self._forget_profile(scope, image_id)
             entry = await self._stores.forget_log.record(
                 target="image",
@@ -386,7 +386,7 @@ class ForgetManager:
         if scope.owner_type != "user":
             return []
         written: list[tuple[Stored[Scene], MemoryRef]] = []
-        async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with scenes_lock(scope):
             for version, mark in await newest_versions(self._stores.scene, scope):
                 scene = version.item
                 if mark is not None or (

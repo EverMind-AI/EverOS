@@ -28,7 +28,7 @@ segment it rests on is forgotten (or every picture it was read off).
 run returns its ``forget_id``, the undo token: ``/memory/forget/undo`` takes it
 and brings back exactly what that forget marked -- except an entry another
 live forget names too, which stays forgotten. One forget, undo or update of
-one user at a time (:func:`~everos.memory.user_forget_lock`).
+one user at a time (:func:`~everos.memory.forget_lock`).
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from everos.core.errors import InvalidInputError, NotFoundError, SessionBusyError
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
-from everos.memory import user_forget_lock, user_profile_lock, user_scenes_lock
+from everos.memory import forget_lock, profile_lock, scenes_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import (
     alive_members,
@@ -318,7 +318,7 @@ class UserForgetManager:
                     requested_by=requested_by,
                 ),
             )
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             plan = await self._plan(scope, target, strict=strict)
             await self._derive(scope, plan, already=await self._already(scope))
             if dry_run:
@@ -336,7 +336,7 @@ class UserForgetManager:
         """A picture's forget, under the user's lock (``/memory/forget`` alias)."""
         if self._pictures is None:
             raise RuntimeError("forget needs the read-side indexes")
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             return await self._pictures.forget_image(
                 scope=scope,
                 image_id=image_id,
@@ -362,7 +362,7 @@ class UserForgetManager:
             SessionBusyError: The conversation stays busy.
         """
         await self._settle(scope, session_id)
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             return await self._sessions.forget_session(
                 scope=scope,
                 session_id=session_id,
@@ -564,7 +564,7 @@ class UserForgetManager:
         """A conversation's forget as a plan: what it would mark."""
         assert target.session_id is not None
         stores = self._stores
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             plan = _Plan()
             episodes = await current_episodes_of(stores, scope, target.session_id)
             plan.episodes = await stores.episode.read_many(
@@ -593,7 +593,7 @@ class UserForgetManager:
         image_id = target.image_id
         assert image_id is not None
         stores = self._stores
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             occurrences = [
                 row
                 for row in await stores.image_memory.read_by_image(scope, image_id)
@@ -651,7 +651,7 @@ class UserForgetManager:
             )
         clusters: list[dict[str, Any]] = []
         if plan.scenes:
-            async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+            async with scenes_lock(scope):
                 await stores.scene.deprecate(
                     scope,
                     entries=[(s.ref.md_path, s.ref.entry_id) for s in plan.scenes],
@@ -684,7 +684,7 @@ class UserForgetManager:
             await self._eraser.erase(scope, erased)
         # Under the profile lock until the log says "forgotten": an update
         # waiting on it reads none of this, and none in flight writes it back.
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             existing = await stores.profile.read(scope)
             written, removed, by_segments = _profile_removal(
                 existing, plan, already=await self._already(scope)
@@ -749,7 +749,7 @@ class UserForgetManager:
         Raises:
             NotFoundError: The user has no forget of that id.
         """
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             entry = await self._stores.forget_log.get(forget_id)
             if (
                 entry is None
@@ -796,7 +796,7 @@ class UserForgetManager:
 
     async def undo_picture(self, *, scope: Scope, image_id: str) -> UndoResult:
         """Undo the newest live forget of one picture (the legacy undo body)."""
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             entry = await self._stores.forget_log.latest_live(
                 target="image",
                 target_id=image_id,
@@ -818,7 +818,7 @@ class UserForgetManager:
         self, *, scope: Scope, session_id: str
     ) -> SessionUndoResult:
         """Undo the newest live forget of one conversation (the legacy undo)."""
-        async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with forget_lock(scope):
             entry = await self._stores.forget_log.latest_live(
                 target="session",
                 target_id=session_id,
@@ -863,7 +863,7 @@ class UserForgetManager:
                 if row[1] not in keep.image_memories
             ],
         )
-        async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with scenes_lock(scope):
             scenes = await _clear(
                 stores.scene,
                 scope,
@@ -889,7 +889,7 @@ class UserForgetManager:
         await self._requeue(
             "scene", {md for md, _ in scenes} | {s.ref.md_path for s in revived}
         )
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             restored = await self._restore_profile(scope, entry, undo)
             await stores.forget_log.mark_undone(entry.forget_id)
         logger.info(

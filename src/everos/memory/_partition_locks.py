@@ -33,8 +33,12 @@ layers a distributed coordinator on top.
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
+from typing import TYPE_CHECKING
 
 from everos.core.locks import LOCKS
+
+if TYPE_CHECKING:
+    from everos.memory.ports import Scope
 
 
 def get_partition_lock(
@@ -58,33 +62,48 @@ def user_cluster_lock(
     )
 
 
-def user_profile_lock(
-    app_id: str, project_id: str, owner_id: str
+def profile_lock(
+    scope: Scope, person_id: str | None = None
 ) -> AbstractAsyncContextManager[None]:
-    """The lock every writer of one user's ``user.md`` holds.
+    """The lock every writer of one person's profile in one space holds.
 
-    The profile update (a read, a model call, a write), and a forget and its
-    undo taking items out and putting them back: none of them writes back a
-    profile another changed meanwhile.
+    The space is ``scope``: a user's own (``users/<u>/user.md``, the person
+    is the user) or a group (``groups/<g>/members/<m>.md``, the person is the
+    member ``person_id`` -- docs/group-memory.md, section 7.4). The profile
+    update (a read, a model call, a write), the picture route's poster-only
+    items, and a forget, its undo or a person's edit taking items out and
+    putting them back all hold it: none of them writes back a profile another
+    changed meanwhile. Different people, and the members of one segment,
+    update in parallel.
+
+    Raises:
+        ValueError: A group scope without the member.
     """
-    return get_partition_lock(
-        "extract_user_profile", f"{app_id}:{project_id}:{owner_id}"
-    )
+    if scope.owner_type == "group" and person_id is None:
+        raise ValueError("a profile in a group belongs to one member")
+    return get_partition_lock("profile", _key(scope, person_id or scope.owner_id))
 
 
-def member_profile_lock(
-    app_id: str, project_id: str, group_id: str, member_id: str
-) -> AbstractAsyncContextManager[None]:
-    """The lock every writer of one member's profile in one group holds.
+def scenes_lock(scope: Scope) -> AbstractAsyncContextManager[None]:
+    """The lock every writer of one owner's scenes holds (docs/scenes.md).
 
-    One per ``(group, member)`` (docs/group-memory.md, section 7.4): two
-    updates of one member's profile never lose each other's items, and
-    updates of different members run in parallel. The picture route's
-    poster-only items and the ``update_member_profiles`` strategy share it.
+    A user's or a group's: the scene strategy places an episode and writes a
+    version under it; a forget, its undo or an update that reaches the
+    owner's scenes changes them under it.
     """
-    return get_partition_lock(
-        "update_member_profiles", f"{app_id}:{project_id}:{group_id}:{member_id}"
-    )
+    return get_partition_lock("scenes", _key(scope))
+
+
+def forget_lock(scope: Scope) -> AbstractAsyncContextManager[None]:
+    """One forget, undo or update of one owner's memory at a time.
+
+    A user's or a group's (docs/group-memory.md, section 9.4): a forget plans
+    from what the owner holds and changes it, and an update checks the
+    version it replaces is current; two at once could each act on what the
+    other is changing. Taken before any other lock they hold (the scene,
+    profile and owner locks).
+    """
+    return get_partition_lock("forget", _key(scope))
 
 
 def group_profile_lock(
@@ -101,56 +120,12 @@ def group_profile_lock(
     )
 
 
-def group_scenes_lock(
-    app_id: str, project_id: str, group_id: str
-) -> AbstractAsyncContextManager[None]:
-    """The lock every writer of one group's scenes holds (section 7.7).
-
-    The scene strategy places an episode and writes a version under it; a
-    forget inside the group rewrites the scenes of the episodes it changed
-    under it (section 9.4).
-    """
-    return get_partition_lock(
-        "update_group_scenes", f"{app_id}:{project_id}:{group_id}"
+def _key(scope: Scope, *parts: str) -> str:
+    """One owner's partition key: its type first, as user and group ids share
+    one id space (docs/group-memory.md, section 4.1)."""
+    return ":".join(
+        (scope.owner_type, scope.app_id, scope.project_id, scope.owner_id, *parts)
     )
-
-
-def user_scenes_lock(
-    app_id: str, project_id: str, owner_id: str
-) -> AbstractAsyncContextManager[None]:
-    """The lock every writer of one user's scenes holds (docs/scenes.md).
-
-    The scene strategy places an episode and writes a version under it; a
-    forget (or its undo) that reaches the user's scenes, and a deletion that
-    removes episodes, change them under it.
-    """
-    return get_partition_lock("update_user_scenes", f"{app_id}:{project_id}:{owner_id}")
-
-
-def group_forget_lock(
-    app_id: str, project_id: str, group_id: str
-) -> AbstractAsyncContextManager[None]:
-    """One forget (or undo) of one group at a time (section 9.4).
-
-    A forget plans from what the group holds and changes it; two at once
-    would each plan over what the other is taking out. Taken before any
-    other lock a forget holds.
-    """
-    return get_partition_lock("group_forget", f"{app_id}:{project_id}:{group_id}")
-
-
-def user_forget_lock(
-    app_id: str, project_id: str, owner_id: str
-) -> AbstractAsyncContextManager[None]:
-    """One forget, undo or update of one user's memory at a time.
-
-    The user's counterpart of :func:`group_forget_lock`: a forget plans from
-    the marks it reads and writes its own, and an update checks the version it
-    replaces is current; two at once could each act on what the other is
-    changing. Taken before any other lock they hold (the scene, profile and
-    owner locks).
-    """
-    return get_partition_lock("user_forget", f"{app_id}:{project_id}:{owner_id}")
 
 
 def _reset_for_tests() -> None:

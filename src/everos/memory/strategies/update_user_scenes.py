@@ -45,7 +45,7 @@ from everalgo.types import Episode as AlgoEpisode
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory._partition_locks import user_scenes_lock
+from everos.memory._partition_locks import scenes_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline.group_scene import scene_version
@@ -93,7 +93,7 @@ async def update_user_scenes(event: EpisodeExtracted, deps: MemoryDeps) -> list[
     )
     # Before the lock: a model call under it would hold every other writer.
     vector = np.asarray(await deps.embedding.embed(event.episode_text), np.float32)
-    async with user_scenes_lock(event.app_id, event.project_id, event.owner_id):
+    async with scenes_lock(scope):
         if not await deps.stores.episode.exists(scope, [event.episode_entry_id]):
             return []
         cluster = await place_in_scenes(

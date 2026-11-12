@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
-from everos.memory import user_profile_lock
+from everos.memory import profile_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import forget_orphaned_scenes
 from everos.memory.ports import MemoryRef, Scope
@@ -160,7 +160,7 @@ class SessionForgetManager:
         # The profile lock is held until the log says "forgotten": an update
         # waiting on it then reads none of the conversation, and none in
         # flight writes back what this takes out.
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             profile_removed = await self._forget_profile(scope, session_id)
             entry = await self._stores.forget_log.record(
                 target="session",

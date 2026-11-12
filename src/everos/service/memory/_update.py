@@ -52,14 +52,7 @@ from everos.core.errors import (
     VersionConflictError,
 )
 from everos.core.observability.logging import get_logger
-from everos.memory import (
-    group_forget_lock,
-    group_scenes_lock,
-    member_profile_lock,
-    user_forget_lock,
-    user_profile_lock,
-    user_scenes_lock,
-)
+from everos.memory import forget_lock, profile_lock, scenes_lock
 from everos.memory.access import authorize_edit
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import (
@@ -206,14 +199,12 @@ class UpdateManager:
             at=self._clock(),
         )
         if scope.owner_type != "group":
-            async with user_forget_lock(scope.app_id, scope.project_id, scope.owner_id):
+            async with forget_lock(scope):
                 result = await self._apply(kind, step, roster=None)
         else:
             if identity.asker_id is None:
                 raise InvalidInputError("asker_id is required to change a group record")
-            async with group_forget_lock(
-                scope.app_id, scope.project_id, scope.owner_id
-            ):
+            async with forget_lock(scope):
                 record = await self._stores.groups.get(scope)
                 if record is None or not record.roster.is_current_member(
                     identity.asker_id
@@ -244,14 +235,7 @@ class UpdateManager:
         if kind == "image_memory":
             return await self._picture(step, roster)
         if kind == "scene":
-            lock = (
-                group_scenes_lock
-                if step.scope.owner_type == "group"
-                else user_scenes_lock
-            )
-            async with lock(
-                step.scope.app_id, step.scope.project_id, step.scope.owner_id
-            ):
+            async with scenes_lock(step.scope):
                 return await self._scene(step, roster)
         if step.scope.owner_type == "group":
             return await self._member_item(step, roster)
@@ -377,7 +361,7 @@ class UpdateManager:
         id, its next narrative would read the version the person replaced.
         """
         clusters = self._stores.cluster
-        async with group_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with scenes_lock(scope):
             cluster_id = await clusters.find_cluster_for_member(
                 scope, "episode", old_id, kind="group_scene"
             )
@@ -397,7 +381,7 @@ class UpdateManager:
 
     async def _profile_item(self, step: _Step) -> UpdateResult:
         scope = step.scope
-        async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+        async with profile_lock(scope):
             profile = await self._stores.profile.read(scope)
             history = profile.history if profile is not None else []
             current_id = await self._current_item(step, profile, history)
@@ -420,9 +404,7 @@ class UpdateManager:
             raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
         if roster is not None:
             authorize_edit(roster, step.editor, sources=[member_id])
-        async with member_profile_lock(
-            scope.app_id, scope.project_id, scope.owner_id, member_id
-        ):
+        async with profile_lock(scope, member_id):
             held = await self._stores.member_profile.read(scope, member_id)
             if held is None:
                 raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
