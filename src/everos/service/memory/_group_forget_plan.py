@@ -61,8 +61,8 @@ from everos.memory.models import (
     Episode,
     GroupProfileItem,
     ImageMemory,
-    MemberProfile,
     MemCell,
+    Profile,
     Scene,
 )
 from everos.memory.ports import (
@@ -374,7 +374,7 @@ class ForgetPlanner:
         await self._propagate_messages(plan, found)
         if target.kind == "member":
             assert target.member_id is not None
-            held = await self._stores.member_profile.read(scope, target.member_id)
+            held = await self._stores.profile.read(scope, target.member_id)
             if held is not None:
                 plan.members_removed.append(target.member_id)
 
@@ -607,8 +607,8 @@ class ForgetPlanner:
         it (section 7.4), so it is forgotten by its id like a current item.
         """
         owners: dict[str, str] = {}
-        for member_id in await self._stores.member_profile.members(scope):
-            held = await self._stores.member_profile.read(scope, member_id)
+        for member_id in await self._stores.profile.people(scope):
+            held = await self._stores.profile.read(scope, member_id)
             if held is None:
                 continue
             for extra in (*(i.model_extra or {} for i in _items(held)), *held.history):
@@ -710,12 +710,12 @@ class ForgetPlanner:
         """
         scope = plan.scope
         pictures = set(plan.pictures)
-        for member_id in await self._stores.member_profile.members(scope):
+        for member_id in await self._stores.profile.people(scope):
             if member_id in plan.members_removed:
                 continue
             if plan.target.kind == "member" and plan.target.member_id == member_id:
                 continue
-            held = await self._stores.member_profile.read(scope, member_id)
+            held = await self._stores.profile.read(scope, member_id)
             if held is None:
                 continue
             edit = member_edit(held, readable, pictures, record_items)
@@ -763,7 +763,7 @@ class ForgetPlanner:
 
 
 def member_edit(
-    held: MemberProfile,
+    held: Profile,
     readable: Mapping[str, MemCell],
     pictures: set[str],
     record_items: set[str],
@@ -773,7 +773,7 @@ def member_edit(
     Applied twice: by the plan, and again under the member's lock by the run,
     over the document as it is then (an update may have written it since).
     """
-    member_id = held.member_id
+    member_id = held.owner_id
     edit = MemberEdit(member_id=member_id)
     queue: list[str] = []
     for item in _items(held):
@@ -782,9 +782,8 @@ def member_edit(
         if item_id and item_id in record_items:
             edit.forgotten.append(item_id)
             continue
-        images = [str(i) for i in extra.get(profile_items.SOURCE_IMAGE_KEYS) or []]
-        if images:
-            if pictures and set(images) <= pictures:
+        if profile_items.item_source_images(item):
+            if profile_items.rests_on_pictures(item, pictures):
                 edit.forgotten.append(item_id)
             continue
         sources = [str(s) for s in extra.get("source_memcell_ids") or []]
@@ -800,9 +799,9 @@ def member_edit(
             edit.forgotten.append(item_id)
     for position, old in enumerate(held.history):
         sources = {str(s) for s in old.get("source_memcell_ids") or []}
-        images = {str(i) for i in old.get(profile_items.SOURCE_IMAGE_KEYS) or []}
         named = bool(old.get("item_id")) and old.get("item_id") in record_items
-        if sources & set(readable) or (images and images <= pictures) or named:
+        gone = profile_items.rests_on_pictures(old, pictures)
+        if sources & set(readable) or gone or named:
             edit.history.append(position)
         if named:  # a replaced value a read listed, forgotten by its id
             edit.forgotten.append(str(old["item_id"]))
@@ -810,8 +809,8 @@ def member_edit(
     return edit
 
 
-def _items(held: MemberProfile) -> list[Any]:
-    return [*held.profile.explicit_info, *held.profile.implicit_traits]
+def _items(held: Profile) -> list[Any]:
+    return [*held.explicit_info, *held.implicit_traits]
 
 
 def _segment_of(

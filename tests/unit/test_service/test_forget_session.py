@@ -257,7 +257,7 @@ def _fact(description: str, *sources: str) -> ExplicitInfoItem:
 
 
 def _with_profile(stores, *items: ExplicitInfoItem, history=()) -> None:
-    stores.profile.profiles[_scope()] = Profile(
+    stores.profile.profiles[(_scope(), "u1")] = Profile(
         owner_id="u1",
         summary="",
         timestamp=_TS,
@@ -267,7 +267,9 @@ def _with_profile(stores, *items: ExplicitInfoItem, history=()) -> None:
 
 
 def _facts(stores) -> list[str]:
-    return [i.description for i in stores.profile.profiles[_scope()].explicit_info]
+    return [
+        i.description for i in stores.profile.profiles[(_scope(), "u1")].explicit_info
+    ]
 
 
 async def test_a_forgotten_conversation_takes_the_items_resting_on_it_alone() -> None:
@@ -295,14 +297,14 @@ async def test_the_summary_goes_with_an_item_and_comes_back_with_the_undo() -> N
     _segments(stores, "s1", "mc_1")
     _segments(stores, "s2", "mc_2")
     _with_profile(stores, _fact("Lives in Paris", "mc_1"), _fact("Likes tea", "mc_2"))
-    stores.profile.profiles[_scope()].summary = "Lives in Paris"
+    stores.profile.profiles[(_scope(), "u1")].summary = "Lives in Paris"
 
     await forget.forget_session(scope=_scope(), session_id="s1")
-    assert stores.profile.profiles[_scope()].summary == ""
+    assert stores.profile.profiles[(_scope(), "u1")].summary == ""
 
     result = await undo.undo_session(scope=_scope(), session_id="s1")
     assert result.profiles == 1
-    assert stores.profile.profiles[_scope()].summary == "Lives in Paris"
+    assert stores.profile.profiles[(_scope(), "u1")].summary == "Lives in Paris"
 
 
 async def test_an_item_goes_with_the_last_conversation_it_rests_on() -> None:
@@ -343,7 +345,7 @@ async def test_undo_brings_back_the_items_and_what_a_later_forget_took() -> None
     # "Works in Python" went with s2's forget, but rests on s1 too.
     assert result.profiles == 2
     assert sorted(_facts(stores)) == ["Lives in Paris", "Works in Python"]
-    history = stores.profile.profiles[_scope()].history
+    history = stores.profile.profiles[(_scope(), "u1")].history
     assert [entry["description"] for entry in history] == ["Lived in Lyon"]
 
     again = await undo.undo_session(scope=_scope(), session_id="s2")

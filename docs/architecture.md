@@ -434,7 +434,8 @@ index backend:
   scene (a user's scene versions, into the episode table), agent_case,
   agent_skill, knowledge_document, knowledge_topic, and the group kinds -- group_episode, group_scene and
   group_image_memory into the episode and picture tables, group_member_profile
-  into ``user_profile``, group_profile into its own ``group_profile_item``
+  into ``user_profile`` (one profile handler for ``user.md`` and a member's
+  file), group_profile into its own ``group_profile_item``
   table (no vector), group_roster (``group.md``) into the SQLite roster
   mirror
 
@@ -470,8 +471,10 @@ function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
-- `extract_user_profile` — user pipeline: the owner's profile, one new
-  segment per update (everalgo's two profile prompts)
+- `extract_user_profile` / `update_member_profiles` — a person's profile in
+  a space, one update core (`strategies/_profiles.py`, everalgo's two profile
+  prompts): the owner's `user.md` on each new segment, a member's profile in a
+  group every `[groups] member_profile_every` segments and on `GroupFlushed`
 - `extract_agent_case` / `extract_agent_skill` — agent pipeline
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation on the merged episode's event)
@@ -480,8 +483,6 @@ them.
   scenes ([scenes.md](scenes.md)), one core (`strategies/_scenes.py`): on
   each episode, placed among the owner's scene clusters, one capped narrative
   call when it joins a scene (`[scenes] users` / `groups`, off by default)
-- `update_member_profiles` — group memory: the member-in-group profiles (on
-  each group episode, throttled, and on `GroupFlushed`)
 
 Who publishes: the domain never does. The memorize service publishes each
 pipeline cell's events on the `EventBus` (`OmeEventBus` over the engine), and

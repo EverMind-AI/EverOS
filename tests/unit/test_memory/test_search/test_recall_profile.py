@@ -3,7 +3,8 @@
 Profile recall has no query / no ranking: ``fetch(owner_id)`` returns
 the at-most-one row keyed by ``id = owner_id``. These tests exercise
 the LanceDB path (no stubs) and the JSON unpacking that turns the
-``*_json`` columns back into the DTO's ``profile_data`` mapping.
+``*_json`` columns back into the DTO's ``profile_data`` mapping. The fetch
+is the one ``/memory/get`` makes too: both items carry the same fields.
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ from everos.infra.persistence.index.adapters import ProfileIndexAdapter
 from everos.infra.persistence.lancedb import (
     UserProfile,
 )
-from everos.memory.search.recall.profile import ProfileRecaller
+from everos.memory.get.dto import GetProfileItem
+from everos.memory.models import Profile
+from everos.memory.search.recall.profile import ProfileRecaller, ProfileView
 from tests.fakes.storage import Storage
 
 
@@ -169,3 +172,31 @@ async def test_fetch_isolates_by_project(storage: Storage) -> None:
         )
         == []
     )
+
+
+def test_search_and_get_items_carry_the_same_fields() -> None:
+    """A user's item names no group; a member's names its group and member."""
+    profile = Profile(owner_id="u_betty", summary="s", timestamp=1)
+    own = ProfileView(id="u_betty", app_id="a", project_id="p", profile=profile)
+    member = ProfileView(
+        id="trip:u_betty",
+        app_id="a",
+        project_id="p",
+        profile=profile,
+        group_id="trip",
+        member_id="u_betty",
+    )
+    assert list(own.fields()) == [
+        "id",
+        "user_id",
+        "app_id",
+        "project_id",
+        "profile_data",
+    ]
+    assert (member.fields()["user_id"], member.fields()["owner_type"]) == (
+        None,
+        "group",
+    )
+    for view in (own, member):
+        got = GetProfileItem(**view.fields()).model_dump(exclude_unset=True)
+        assert got == view.fields()

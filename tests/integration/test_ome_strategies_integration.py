@@ -342,7 +342,7 @@ async def test_profile_chain_e2e(
 
     with (
         patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
+            "everos.memory.strategies._profiles.ProfileExtractor"
         ) as mock_extractor_cls,
         capture_logs() as logs,
     ):

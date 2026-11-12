@@ -1,11 +1,12 @@
-"""Tests for :class:`UserProfileHandler` — single-file profile reconcile.
+"""Tests for :class:`ProfileHandler` — single-file profile reconcile.
 
-UserProfile is the second single-file kind (after AgentSkill) — one
-``users/<user_id>/user.md`` per user, replaced wholesale on edit. The
-handler upserts one row per profile and skips when the
-content-bearing digest (summary + JSON buckets) is unchanged. These
-tests verify the upsert / skip path, the JSON encoding of
-``explicit_info`` / ``implicit_traits``, and the missing-user_id guard.
+A profile is the second single-file kind (after AgentSkill) — one document
+per person and space, ``users/<user_id>/user.md`` or
+``groups/<g>/members/<m>.md``, replaced wholesale on edit. One handler
+upserts one row per document and skips when the content-bearing digest
+(summary + JSON buckets) is unchanged. These tests verify the upsert / skip
+path, the JSON encoding of ``explicit_info`` / ``implicit_traits``, the
+owner columns of a member's row, and the missing-owner guards.
 """
 
 from __future__ import annotations
@@ -17,10 +18,14 @@ from typing import Any
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade._projections import UserProfileHandler
+from everos.infra.cascade._projections import ProfileHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import UserProfile
-from everos.infra.persistence.markdown import ProfileWriter, UserProfileFrontmatter
+from everos.infra.persistence.markdown import (
+    GroupMemberProfileFrontmatter,
+    MarkdownWriter,
+    UserProfileFrontmatter,
+)
 from tests.fakes import handler_deps, index_repositories
 
 
@@ -84,7 +89,6 @@ async def _write_profile(
     profile_timestamp_ms: int = 1_700_000_000_000,
     history: list | None = None,
 ) -> str:
-    writer = ProfileWriter(memory_root)
     fm = UserProfileFrontmatter(
         id=f"user_profile_{user_id}",
         user_id=user_id,
@@ -94,12 +98,28 @@ async def _write_profile(
         profile_timestamp_ms=profile_timestamp_ms,
         history=history or [],
     )
-    await writer.write(user_id, frontmatter=fm, body="display text")
-    return f"default_app/default_project/users/{user_id}/user.md"
+    return await _write(memory_root, fm, project_id="default")
 
 
-def _handler(memory_root: MemoryRoot, repo: _FakeProfileRepo) -> UserProfileHandler:
-    return UserProfileHandler(
+async def _write(
+    memory_root: MemoryRoot,
+    fm: UserProfileFrontmatter | GroupMemberProfileFrontmatter,
+    *,
+    project_id: str,
+) -> str:
+    if isinstance(fm, GroupMemberProfileFrontmatter):
+        folder = memory_root.groups_dir("default", project_id) / fm.group_id
+        path = folder / "members" / f"{fm.member_id}.md"
+    else:
+        path = memory_root.users_dir("default", project_id) / fm.user_id / "user.md"
+    await MarkdownWriter(memory_root).write_markdown(
+        path, frontmatter=fm.model_dump(), body="display text\n"
+    )
+    return path.relative_to(memory_root.root).as_posix()
+
+
+def _handler(memory_root: MemoryRoot, repo: _FakeProfileRepo) -> ProfileHandler:
+    return ProfileHandler(
         handler_deps(
             memory_root=memory_root,
             tokenizer=_StubTokenizer(),
@@ -273,16 +293,14 @@ async def test_second_project_same_owner_is_a_new_row(
         await _handler(memory_root, fake_repo).handle_added_or_modified(first)
     ).upserted == 1
 
-    writer = ProfileWriter(memory_root)
     fm = UserProfileFrontmatter(
         id="user_profile_u_same",
         user_id="u_same",
         profile_timestamp_ms=1_700_000_000_000,
         **kwargs,
     )
-    await writer.write("u_same", frontmatter=fm, body="display text", project_id="beta")
-    second = "default_app/beta/users/u_same/user.md"
-    assert (memory_root.root / second).exists()
+    second = await _write(memory_root, fm, project_id="beta")
+    assert second == "default_app/beta/users/u_same/user.md"
 
     outcome = await _handler(memory_root, fake_repo).handle_added_or_modified(second)
     assert (outcome.upserted, outcome.skipped) == (1, 0)
@@ -328,3 +346,45 @@ async def test_an_item_shows_the_value_it_replaced_and_the_history_is_not_projec
         }
     ]
     assert "Sold the car" not in row.explicit_info_json + row.implicit_traits_json
+
+
+async def test_a_members_file_is_a_row_under_the_group_about_the_member(
+    memory_root: MemoryRoot, fake_repo: _FakeProfileRepo
+) -> None:
+    fm = GroupMemberProfileFrontmatter(
+        id="member_profile_trip_u_betty",
+        group_id="trip",
+        member_id="u_betty",
+        summary="Betty books the hotel.",
+        explicit_info=[{"description": "Books the hotel", "item_id": "pi_1"}],
+        pending_memcell_ids=["mc_2"],
+    )
+    md_path = await _write(memory_root, fm, project_id="default")
+    handler = _handler(memory_root, fake_repo)
+    outcome = await handler.handle_added_or_modified(md_path)
+
+    assert outcome.upserted == 1
+    row = fake_repo.rows["trip:u_betty"]
+    assert (row.owner_type, row.owner_id, row.subject_id) == (
+        "group",
+        "trip",
+        "u_betty",
+    )
+    assert json.loads(row.explicit_info_json)[0]["item_id"] == "pi_1"
+    # The queue is the cadence's bookkeeping: no part of what a read returns.
+    assert (await handler.handle_added_or_modified(md_path)).skipped == 1
+
+
+async def test_a_members_file_without_its_member_raises(
+    memory_root: MemoryRoot, fake_repo: _FakeProfileRepo
+) -> None:
+    folder = memory_root.groups_dir() / "trip" / "members"
+    folder.mkdir(parents=True)
+    (folder / "u_x.md").write_text(
+        "---\nid: m\ntype: group_member_profile\ngroup_id: trip\n---\nbody\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="member_id"):
+        await _handler(memory_root, fake_repo).handle_added_or_modified(
+            "default_app/default_project/groups/trip/members/u_x.md"
+        )

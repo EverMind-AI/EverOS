@@ -124,7 +124,7 @@ def _manager(images=(), episodes=(), *, profile: Profile | None = None):
     for row in episodes:
         stores.episode.records.append(row)
     if profile is not None:
-        stores.profile.profiles[_scope()] = profile
+        stores.profile.profiles[(_scope(), "u1")] = profile
     indexes = make_indexes(
         image_memory=_ImageIndex(*images), episode=_EpisodeIndex(*episodes)
     )
@@ -207,12 +207,12 @@ async def test_a_profile_item_the_picture_established_comes_back() -> None:
 
     forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
     assert forgotten.profiles == 1
-    assert stores.profile.profiles[_scope()].explicit_info == []
+    assert stores.profile.profiles[(_scope(), "u1")].explicit_info == []
 
     result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
 
     assert result.profiles == 1
-    kept = stores.profile.profiles[_scope()].explicit_info
+    kept = stores.profile.profiles[(_scope(), "u1")].explicit_info
     assert [item.description for item in kept] == ["Has a cat named Biscuit"]
     assert kept[0].observed_at == _TS
 
@@ -236,14 +236,14 @@ async def test_a_replaced_value_the_picture_established_goes_and_comes_back() ->
 
     forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
     assert forgotten.profiles == 0  # no item went; a replaced value did
-    after = stores.profile.profiles[_scope()]
+    after = stores.profile.profiles[(_scope(), "u1")]
     assert after.history == []
     assert [item.description for item in after.explicit_info] == ["Has a dog named Rex"]
 
     result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
 
     assert result.profiles == 0
-    back = stores.profile.profiles[_scope()]
+    back = stores.profile.profiles[(_scope(), "u1")]
     assert [entry["description"] for entry in back.history] == [
         "Has a cat named Biscuit"
     ]

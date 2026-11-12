@@ -101,11 +101,9 @@ async def test_each_speaker_gets_a_member_profile_and_user_md_is_untouched(
             if type(e).__name__ == "GroupEpisodeExtracted"
         }
         for member in ("u_chen", "u_betty"):
-            profile = await world.stores.member_profile.read(
-                world.scope("trip"), member
-            )
+            profile = await world.stores.profile.read(world.scope("trip"), member)
             assert profile is not None and profile.pending_memcell_ids == []
-            (item,) = profile.profile.explicit_info
+            (item,) = profile.explicit_info
             assert set((item.model_extra or {})["source_memcell_ids"]) <= memcells
         assert user_md.read_bytes() == before
 

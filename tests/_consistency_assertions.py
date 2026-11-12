@@ -28,7 +28,7 @@ The per-kind digest construction here mirrors the handler implementation
   so the mirror is one short loop that's robust against handler
   refactors (re-ordering, renaming keys) as long as the ClassVar drives
   truth.
-- ``UserProfileHandler`` / ``AgentSkillHandler`` build their digest
+- ``ProfileHandler`` / ``AgentSkillHandler`` build their digest
   inline in ``handle_added_or_modified``; the field set is duplicated
   here with a comment pointing at the source location. If a handler
   changes its digest formula, the consistency check will fail loudly —
@@ -49,11 +49,13 @@ import anyio
 from everos.infra.cascade._projections._common import content_sha256, resolve_scope
 from everos.infra.cascade._projections._daily_log_base import BaseDailyLogHandler
 from everos.infra.cascade._projections.agent_skill import AgentSkillHandler
-from everos.infra.cascade._projections.user_profile import UserProfileHandler
+from everos.infra.cascade._projections.profile import ProfileHandler
 from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec
 from everos.infra.persistence.index import IndexRepositories, eq, primary_key
 from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader
 from everos.infra.persistence.markdown._base.entries import StructuredEntry
+from everos.infra.persistence.records import member_profile_row_id
+from everos.memory.models import with_previous_values
 
 # stdlib logging (not structlog) so pytest --log-cli-level=INFO picks
 # this up live without -s. Project rule 18 (use get_logger) covers src/
@@ -119,8 +121,8 @@ async def assert_md_lance_strict_consistent(
             p.relative_to(root).as_posix() for p in root.glob(spec.path_glob())
         )
         repo = index.for_schema(spec.index_schema) if spec.index_schema else None
-        if spec.handler_factory is UserProfileHandler:
-            check = _check_user_profile
+        if spec.handler_factory is ProfileHandler:
+            check = _check_profile
         elif spec.handler_factory is AgentSkillHandler:
             check = _check_agent_skill
         else:
@@ -219,32 +221,39 @@ async def _check_daily_log(
     return md_entry_total, lance_row_total
 
 
-# ── user_profile (single-md = single-row, PK = owner_id) ───────────────
+# ── profiles (single-md = single-row; PK = user, or <group>:<member>) ──
 
 
-async def _check_user_profile(
+async def _check_profile(
     spec: KindSpec, repo: Any, root: Path, md_paths: list[str]
 ) -> tuple[int, int]:
-    """Mirror :meth:`UserProfileHandler.handle_added_or_modified` digest."""
+    """Mirror :meth:`ProfileHandler.handle_added_or_modified` digest."""
     seen_ids: set[str] = set()
     for md_path in md_paths:
         absolute = root / md_path
         parsed = await MarkdownReader.read(absolute)
         fm = parsed.frontmatter
-        owner_id = str(fm.get("user_id", ""))
+        if "group_id" in fm:
+            owner_id = member_profile_row_id(
+                str(fm["group_id"]), str(fm.get("member_id", ""))
+            )
+        else:
+            owner_id = str(fm.get("user_id", ""))
         if not owner_id:
             raise AssertionError(
                 f"user_profile md missing required frontmatter user_id: {md_path}"
             )
-        # Mirror of UserProfileHandler.handle_added_or_modified.
+        # Mirror of ProfileHandler.handle_added_or_modified.
+        history = fm.get("history")
+        replaced = history if isinstance(history, list) else []
         md_sha = content_sha256(
             {
                 "frontmatter:summary": str(fm.get("summary", "")),
                 "frontmatter:explicit_info_json": _dump_json(
-                    fm.get("explicit_info", [])
+                    _shown(fm.get("explicit_info", []), replaced)
                 ),
                 "frontmatter:implicit_traits_json": _dump_json(
-                    fm.get("implicit_traits", [])
+                    _shown(fm.get("implicit_traits", []), replaced)
                 ),
             }
         )
@@ -350,8 +359,13 @@ async def _concat_references(references_dir: Path) -> str:
 
 
 def _dump_json(value: Any) -> str:
-    """Canonical JSON shape used by UserProfileHandler's digest input."""
+    """Canonical JSON shape used by ProfileHandler's digest input."""
     return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def _shown(items: Any, history: list[Any]) -> Any:
+    """A bucket as ProfileHandler projects it: each item with what it replaced."""
+    return with_previous_values(items, history) if isinstance(items, list) else items
 
 
 def _diff_dicts(a: dict[str, str], b: dict[str, str]) -> str:

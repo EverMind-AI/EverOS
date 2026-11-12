@@ -6,13 +6,14 @@ commitments, expertise. It is a document of its own (D6): the member's
 personal ``users/<m>/user.md`` is never read or written here, and no other
 group's segments are.
 
-- **Operator.** everalgo's ``ProfileExtractor.aupdate`` -- the same two
-  prompts as the one-to-one profile (update, then a consolidation only for a
-  part over its cap that has grown) -- called with ``sender_id = member_id``
-  over the member's new segments in this group, speakers labelled by their
-  roster names, and the pictures the member posted in them (D17: a picture
-  says something about its poster only). Its prompt scopes extraction to the
-  target speaker and keeps assistant suggestions out of the person's traits.
+- **Operator.** The update ``user.md`` runs (:mod:`._profiles`): everalgo's
+  ``ProfileExtractor.aupdate`` -- the same two prompts as the one-to-one
+  profile (update, then a consolidation only for a part over its cap that has
+  grown) -- called with ``sender_id = member_id`` over the member's new
+  segments in this group, speakers labelled by their roster names, and the
+  pictures the member posted in them (D17: a picture says something about its
+  poster only). Its prompt scopes extraction to the target speaker and keeps
+  assistant suggestions out of the person's traits.
 - **Input.** Only this group's segments in which the member spoke:
   :class:`GroupEpisodeExtracted` names the human speakers of each segment,
   and :func:`~everos.memory.extract.pipeline.member_profile.wrote_in`
@@ -60,8 +61,6 @@ from __future__ import annotations
 
 import asyncio
 
-from everalgo.user_memory import ProfileExtractor
-
 from everos.config import SqliteSettings, load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
@@ -70,17 +69,12 @@ from everos.memory.events import GroupEpisodeExtracted, GroupFlushed
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import wrote_in
-from everos.memory.extract.pipeline.pictures import profile_pictures
-from everos.memory.extract.pipeline.profile_items import (
-    already_read,
-    bounded_history,
-    keep_held,
-    stamp_update,
-)
+from everos.memory.extract.pipeline.profile_items import already_read
 from everos.memory.groups import readable_segments
-from everos.memory.mappers import profile as profile_mapper
-from everos.memory.models import MemberProfile, MemCell, Profile, Roster
+from everos.memory.models import MemCell, Profile, Roster
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+
+from ._profiles import update_profile
 
 logger = get_logger(__name__)
 
@@ -106,7 +100,7 @@ async def update_member_profiles(
             )
         )
     else:
-        members = await deps.stores.member_profile.members(scope)
+        members = await deps.stores.profile.people(scope)
         await asyncio.gather(
             *(_update_pending(deps, scope, m, reads=reads) for m in members)
         )
@@ -133,15 +127,11 @@ async def _queue(
     reads: asyncio.Semaphore,
 ) -> None:
     async with profile_lock(scope, member_id):
-        stored = await deps.stores.member_profile.read(scope, member_id)
-        profile = stored or MemberProfile(
-            group_id=scope.owner_id,
-            member_id=member_id,
-            profile=Profile(owner_id=member_id, summary="", timestamp=0),
-        )
+        stored = await deps.stores.profile.read(scope, member_id)
+        profile = stored or Profile(owner_id=member_id, summary="", timestamp=0)
         if event.memcell_id in profile.pending_memcell_ids:
             return
-        if already_read(profile.profile, event.memcell_id):
+        if already_read(profile, event.memcell_id):
             logger.info(
                 "member_profile_segment_already_read",
                 group_id=scope.owner_id,
@@ -158,17 +148,17 @@ async def _queue(
             profile = await _update(
                 deps, scope, profile, language=event.language, reads=reads
             )
-        await deps.stores.member_profile.write(scope, profile)
+        await deps.stores.profile.write(scope, profile)
 
 
 async def _update_pending(
     deps: MemoryDeps, scope: Scope, member_id: str, *, reads: asyncio.Semaphore
 ) -> None:
     async with profile_lock(scope, member_id):
-        stored = await deps.stores.member_profile.read(scope, member_id)
+        stored = await deps.stores.profile.read(scope, member_id)
         if stored is None or not stored.pending_memcell_ids:
             return
-        await deps.stores.member_profile.write(
+        await deps.stores.profile.write(
             scope, await _update(deps, scope, stored, language=None, reads=reads)
         )
 
@@ -176,13 +166,13 @@ async def _update_pending(
 async def _update(
     deps: MemoryDeps,
     scope: Scope,
-    profile: MemberProfile,
+    profile: Profile,
     *,
     language: str | None,
     reads: asyncio.Semaphore,
-) -> MemberProfile:
+) -> Profile:
     """Read the pending segments into the profile; the caller holds the lock."""
-    member_id = profile.member_id
+    member_id = profile.owner_id
     pending = profile.pending_memcell_ids
     async with reads:
         # Forgotten messages are not read (section 9.4): the payload keeps
@@ -211,64 +201,39 @@ async def _update(
         )
         return done
     roster = record.roster if record is not None else Roster()
-    existing = profile.profile
-    old = existing if existing.explicit_info or existing.implicit_traits else None
-    output_language = existing.primary_language or language or _language_of(segments)
-    async with reads:
-        cells, pictures = await profile_pictures(
-            [label_cell(cell, roster) for _, cell in segments],
-            member_id,
-            images=deps.stores.images,
-            limits=deps.picture_limits,
-            forgotten=await deps.stores.forget_log.live_targets(
-                target="image",
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                owner_id=scope.owner_id,
-                owner_type=scope.owner_type,
-            ),
-        )
-    update = await ProfileExtractor(llm=deps.llm).aupdate(
-        cells,
-        sender_id=member_id,
-        old_profile=profile_mapper.to_algo(old) if old is not None else None,
-        segment_ids=[memcell_id for memcell_id, _ in segments],
-        pictures=pictures,
-        custom_instructions=deps.instructions.load("profile_extract"),
-        output_language=output_language,
+    # A profile with no item yet (only its queue) is written for the first time.
+    old = done if done.explicit_info or done.implicit_traits else None
+    output_language = profile.primary_language or language or _language_of(segments)
+    updated = await update_profile(
+        deps,
+        scope,
+        person_id=member_id,
+        old=old,
+        history=profile.history,
+        segments=segments,
+        shown=[label_cell(cell, roster) for _, cell in segments],
+        language=output_language,
+        reads=reads,
     )
-    stamped, replaced = stamp_update(
-        old,
-        update,
-        cells=dict(segments),
-        replaced_at=segments[-1][1].timestamp,
-        primary_language=output_language,
-    )
-    stamped, replaced, held = keep_held(old, stamped, replaced)
-    if held:
+    if updated.held:
         logger.info(
             "member_profile_held_items_kept",
             group_id=scope.owner_id,
             member_id=member_id,
-            item_ids=held,
+            item_ids=updated.held,
         )
     logger.info(
         "member_profile_updated",
         group_id=scope.owner_id,
         member_id=member_id,
         segments=len(segments),
-        pictures=len(pictures),
+        pictures=updated.pictures,
         mode="UPDATE" if old is not None else "FIRST",
-        replaced=len(replaced),
-        superseded=sum(1 for entry in replaced if "superseded_by" in entry),
-        consolidated=len(update.consolidated),
+        replaced=updated.replaced,
+        superseded=updated.superseded,
+        consolidated=updated.consolidated,
     )
-    return done.model_copy(
-        update={
-            "profile": stamped,
-            "history": bounded_history(replaced, profile.history, stamped),
-        }
-    )
+    return updated.profile
 
 
 def _language_of(segments: list[tuple[str, MemCell]]) -> str | None:

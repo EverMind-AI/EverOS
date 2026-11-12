@@ -8,11 +8,10 @@ here:
     * :class:`AgentSkillWriter` — directory + progressive disclosure
       (``skills/skill_<name>/{SKILL.md, references/, scripts/}``).
       Single class, no subclassing.
-    * :class:`ProfileWriter` — single-file rewrite at a fixed name
-      (``user.md`` / ``behaviors.md`` / ``agent.md`` / ``soul.md`` /
-      ``tools.md``). Single class, no subclassing — caller hands in a
-      frontmatter instance whose ``PROFILE_FILENAME`` ClassVar pins
-      the filename.
+
+A person's profile (``user.md`` or a member's ``members/<m>.md``) is one
+whole-file rewrite, done by its store
+(:class:`~everos.infra.persistence.markdown.stores.MarkdownProfileStore`).
 
 External usage::
 
@@ -20,7 +19,6 @@ External usage::
         BaseDailyWriter,
         EpisodeWriter,
         AgentSkillWriter,
-        ProfileWriter,
     )
 """
 
@@ -35,7 +33,6 @@ from .group_writer import GroupSceneWriter as GroupSceneWriter
 from .group_writer import GroupWriter as GroupWriter
 from .image_memory_writer import ImageMemoryWriter as ImageMemoryWriter
 from .knowledge_writer import KnowledgeWriter as KnowledgeWriter
-from .profile_writer import ProfileWriter as ProfileWriter
 from .scene_writer import SceneWriter as SceneWriter
 
 __all__ = [
@@ -50,6 +47,5 @@ __all__ = [
     "GroupWriter",
     "ImageMemoryWriter",
     "KnowledgeWriter",
-    "ProfileWriter",
     "SceneWriter",
 ]

@@ -148,9 +148,9 @@ async def _search(world: GroupWorld, asker: str, part: str | None = None) -> str
 async def test_the_new_value_names_the_old_one_and_reads_show_both(
     world: GroupWorld,
 ) -> None:
-    held = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
+    held = await world.stores.profile.read(world.scope("trip"), "u_betty")
     assert held is not None
-    (berlin,) = held.profile.explicit_info
+    (berlin,) = held.explicit_info
     (paris,) = held.history
     extra = berlin.model_extra or {}
     assert berlin.description == "Lives in Berlin"
@@ -225,5 +225,5 @@ async def test_a_forgotten_value_is_never_shown_as_previous(
     assert "previous" not in await _betty(world, "u_chen")
     assert "Paris" not in await _search(world, "u_chen", "profiles")
     assert "I live in Paris" in await _search(world, "u_chen")
-    held = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
+    held = await world.stores.profile.read(world.scope("trip"), "u_betty")
     assert held is not None and held.history == []

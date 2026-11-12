@@ -163,13 +163,11 @@ async def test_the_bound_changes_nothing_that_is_written(
     wide, _ = await _flush_everyone(monkeypatch, pool_size=100)
 
     for member in _MEMBERS:
-        one = await narrow.stores.member_profile.read(_SCOPE, member)
-        other = await wide.stores.member_profile.read(_SCOPE, member)
+        one = await narrow.stores.profile.read(_SCOPE, member)
+        other = await wide.stores.profile.read(_SCOPE, member)
         assert one is not None and other is not None
         assert one.pending_memcell_ids == other.pending_memcell_ids == []
-        assert _without_ids(one.profile.model_dump()) == _without_ids(
-            other.profile.model_dump()
-        )
-        sources = (one.profile.explicit_info[0].model_extra or {})["source_memcell_ids"]
+        assert _without_ids(one.model_dump()) == _without_ids(other.model_dump())
+        sources = (one.explicit_info[0].model_extra or {})["source_memcell_ids"]
         n = _MEMBERS.index(member)
         assert sources == [f"mc_{n}_{k}" for k in range(_PENDING)]

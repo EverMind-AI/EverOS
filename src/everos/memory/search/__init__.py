@@ -72,6 +72,9 @@ from .group_profile import item_versions as item_versions
 from .group_profile import shape_profile_item as shape_profile_item
 from .group_profile import visible_profile as visible_profile
 from .group_profile import visible_profile_items as visible_profile_items
+from .recall import ProfileView as ProfileView
+from .recall import fetch_member_profile as fetch_member_profile
+from .recall import fetch_user_profile as fetch_user_profile
 from .shaper import group_source as group_source
 
 __all__ = [
@@ -84,6 +87,7 @@ __all__ = [
     "FilterNode",
     "GroupProfileEntry",
     "ProfileSourceItem",
+    "ProfileView",
     "SearchData",
     "SearchEpisodeItem",
     "SearchGroupProfile",
@@ -97,6 +101,8 @@ __all__ = [
     "compile_filters",
     "compile_predicate",
     "compile_scoped",
+    "fetch_member_profile",
+    "fetch_user_profile",
     "group_source",
     "item_versions",
     "shape_profile_item",

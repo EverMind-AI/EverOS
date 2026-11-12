@@ -12,9 +12,6 @@ locator** layer:
     * :class:`AgentSkillReader` — reads ``SKILL.md`` and parses the
       frontmatter into the caller-supplied ``AgentSkillFrontmatter``
       subclass; also reads individual reference / script files.
-    * :class:`ProfileReader` — reads a fixed-name profile file
-      (``user.md`` / ``agent.md`` / ``soul.md`` / …) and parses its
-      frontmatter into the caller-supplied schema.
 
 By design, no batch / list APIs live here: bulk enumeration for
 prompt-budget or cross-record queries goes through sqlite/lancedb
@@ -26,7 +23,6 @@ External usage::
         BaseDailyReader,
         EpisodeReader,
         AgentSkillReader,
-        ProfileReader,
     )
 """
 
@@ -34,7 +30,6 @@ from .agent_case_reader import AgentCaseReader as AgentCaseReader
 from .agent_skill_reader import AgentSkillReader as AgentSkillReader
 from .base import BaseDailyReader as BaseDailyReader
 from .episode_reader import EpisodeReader as EpisodeReader
-from .profile_reader import ProfileReader as ProfileReader
 from .taxonomy_reader import ensure_taxonomy as ensure_taxonomy
 from .taxonomy_reader import parse_taxonomy as parse_taxonomy
 
@@ -43,7 +38,6 @@ __all__ = [
     "AgentSkillReader",
     "BaseDailyReader",
     "EpisodeReader",
-    "ProfileReader",
     "ensure_taxonomy",
     "parse_taxonomy",
 ]

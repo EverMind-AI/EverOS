@@ -5,11 +5,9 @@ parse + frontmatter chassis) and provides:
 
     * concrete frontmatter schemas under :mod:`._mds`
     * concrete business writers under :mod:`._writers`
-      (``BaseDailyWriter`` + subclasses, ``AgentSkillWriter``,
-      ``ProfileWriter``)
+      (``BaseDailyWriter`` + subclasses, ``AgentSkillWriter``)
     * concrete business readers under :mod:`._readers`
-      (``BaseDailyReader`` + subclasses, ``AgentSkillReader``,
-      ``ProfileReader``)
+      (``BaseDailyReader`` + subclasses, ``AgentSkillReader``)
 
 External usage::
 
@@ -18,7 +16,6 @@ External usage::
         EpisodeWriter, EpisodeReader, EpisodeDailyFrontmatter,
         AgentCaseDailyFrontmatter,
         AgentSkillFrontmatter, AgentSkillWriter, AgentSkillReader,
-        ProfileWriter, ProfileReader,
     )
 
 Outer layers MUST go through this top-level package because
@@ -76,7 +73,6 @@ from ._readers import AgentCaseReader as AgentCaseReader
 from ._readers import AgentSkillReader as AgentSkillReader
 from ._readers import BaseDailyReader as BaseDailyReader
 from ._readers import EpisodeReader as EpisodeReader
-from ._readers import ProfileReader as ProfileReader
 from ._readers import ensure_taxonomy as ensure_taxonomy
 from ._readers import parse_taxonomy as parse_taxonomy
 from ._writers import AgentCaseWriter as AgentCaseWriter
@@ -90,7 +86,6 @@ from ._writers import GroupSceneWriter as GroupSceneWriter
 from ._writers import GroupWriter as GroupWriter
 from ._writers import ImageMemoryWriter as ImageMemoryWriter
 from ._writers import KnowledgeWriter as KnowledgeWriter
-from ._writers import ProfileWriter as ProfileWriter
 from ._writers import SceneWriter as SceneWriter
 from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
 from .owner_dir import MarkdownOwnerDirStore as MarkdownOwnerDirStore
@@ -99,7 +94,6 @@ from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
 from .stores import MarkdownGroupProfileStore as MarkdownGroupProfileStore
 from .stores import MarkdownImageMemoryStore as MarkdownImageMemoryStore
-from .stores import MarkdownMemberProfileStore as MarkdownMemberProfileStore
 from .stores import MarkdownProfileStore as MarkdownProfileStore
 from .stores import MarkdownSceneStore as MarkdownSceneStore
 
@@ -147,7 +141,6 @@ __all__ = [
     "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
     "MarkdownKnowledgeStore",
-    "MarkdownMemberProfileStore",
     "MarkdownOwnerDirStore",
     "MarkdownProfileStore",
     "MarkdownReader",
@@ -155,8 +148,6 @@ __all__ = [
     "MarkdownWriter",
     "ParsedMarkdown",
     "ProfilePathMixin",
-    "ProfileReader",
-    "ProfileWriter",
     "SceneDailyFrontmatter",
     "SceneWriter",
     "SkillPathMixin",

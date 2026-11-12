@@ -14,7 +14,6 @@ __all__ = [
     "MarkdownEpisodeStore",
     "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
-    "MarkdownMemberProfileStore",
     "MarkdownProfileStore",
     "MarkdownSceneStore",
 ]
@@ -44,7 +43,6 @@ from everos.memory.models import (
     Episode,
     GroupProfileItem,
     ImageMemory,
-    MemberProfile,
     Profile,
     Scene,
 )
@@ -65,11 +63,12 @@ from ._mds import (
     GroupMemberProfileFrontmatter,
     GroupProfileDailyFrontmatter,
     GroupProfilePendingFrontmatter,
+    ProfileFrontmatter,
     UserProfileFrontmatter,
     group_profile_item_from_entry,
     render_group_profile_entry,
 )
-from ._readers import AgentSkillReader, ProfileReader
+from ._readers import AgentSkillReader
 from ._writers import (
     AgentCaseWriter,
     AgentSkillWriter,
@@ -80,7 +79,6 @@ from ._writers import (
     GroupProfileWriter,
     GroupSceneWriter,
     ImageMemoryWriter,
-    ProfileWriter,
     SceneWriter,
 )
 
@@ -877,7 +875,15 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
 
 
 class MarkdownProfileStore:
-    """The single ``users/<id>/user.md`` profile document.
+    """A person's profile in a space, one document per person and space.
+
+    The space is the scope: a user's own, ``users/<u>/user.md`` (the person
+    is the user), or a group, ``groups/<g>/members/<m>.md`` (the person is a
+    member, docs/group-memory.md 7.4). One schema
+    (:class:`ProfileFrontmatter`), rewritten whole on every update under the
+    owner lock like every other markdown write of the space. Reads go to the
+    file (the truth); the search side reads the index row the cascade
+    projects from it.
 
     Args:
         root: Memory root the files live under.
@@ -885,53 +891,110 @@ class MarkdownProfileStore:
 
     def __init__(self, root: MemoryRoot) -> None:
         self._root = root
-        self._reader = ProfileReader(root)
-        self._writer = ProfileWriter(root)
+        self._writer = MarkdownWriter(root)
 
-    async def read(self, scope: Scope) -> Profile | None:
-        found = await self._reader.read(
-            scope.owner_id,
-            schema=UserProfileFrontmatter,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-        if found is None:
+    async def read(self, scope: Scope, person_id: str | None = None) -> Profile | None:
+        person = _person(scope, person_id)
+        path = self._path(scope, person)
+        if not await anyio.Path(path).is_file():
             return None
-        frontmatter, _body = found
+        parsed = await MarkdownReader.read(path)
+        fm = _profile_schema(scope).model_validate(parsed.frontmatter)
+        # user.md names its user; a member's file is the member asked for.
+        owner_id = fm.user_id if isinstance(fm, UserProfileFrontmatter) else person
         return Profile.from_stored(
-            owner_id=frontmatter.user_id,
-            summary=frontmatter.summary,
-            timestamp=frontmatter.profile_timestamp_ms,
-            explicit_info=list(frontmatter.explicit_info),
-            implicit_traits=list(frontmatter.implicit_traits),
-            primary_language=_known_language(
-                frontmatter.primary_language, owner_id=frontmatter.user_id
-            ),
-            history=list(frontmatter.history),
+            owner_id=owner_id,
+            summary=fm.summary,
+            timestamp=fm.profile_timestamp_ms,
+            explicit_info=list(fm.explicit_info),
+            implicit_traits=list(fm.implicit_traits),
+            primary_language=_known_language(fm.primary_language, owner_id=owner_id),
+            history=list(fm.history),
+            pending_memcell_ids=list(fm.pending_memcell_ids),
         )
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
-        frontmatter = UserProfileFrontmatter(
-            id=f"profile_{scope.owner_id}",
-            user_id=scope.owner_id,
-            summary=profile.summary,
-            explicit_info=[i.model_dump() for i in profile.explicit_info],
-            implicit_traits=[i.model_dump() for i in profile.implicit_traits],
-            profile_timestamp_ms=profile.timestamp,
-            primary_language=profile.primary_language,
-            history=list(profile.history),
-        )
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            path = await self._writer.write(
-                scope.owner_id,
-                frontmatter=frontmatter,
-                body=profile.summary,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
+        # A group's file is the member's the profile is about; a user's space
+        # holds the user's own.
+        person = profile.owner_id if scope.owner_type == "group" else scope.owner_id
+        path = self._path(scope, person)
+        fields = {
+            "summary": profile.summary,
+            "explicit_info": [i.model_dump() for i in profile.explicit_info],
+            "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
+            "profile_timestamp_ms": profile.timestamp,
+            "primary_language": profile.primary_language,
+            "pending_memcell_ids": list(profile.pending_memcell_ids),
+            "history": list(profile.history),
+        }
+        body = _ensure_trailing_newline(profile.summary)
+        if scope.owner_type == "group":
+            frontmatter: ProfileFrontmatter = GroupMemberProfileFrontmatter(
+                id=_profile_entry_id(scope, person),
+                group_id=scope.owner_id,
+                member_id=person,
+                **fields,
             )
+            body = body or "\n"  # a member's file has always ended on a newline
+        else:
+            frontmatter = UserProfileFrontmatter(
+                id=_profile_entry_id(scope, person), user_id=person, **fields
+            )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            await self._writer.write_markdown(
+                path, frontmatter=frontmatter.model_dump(), body=body
+            )
+        return self._ref(scope, person, path)
+
+    async def people(self, scope: Scope) -> list[str]:
+        if scope.owner_type != "group":
+            path = self._path(scope, scope.owner_id)
+            return [scope.owner_id] if await anyio.Path(path).is_file() else []
+        folder = anyio.Path(self._folder(scope))
+        if not await folder.is_dir():
+            return []
+        return sorted([Path(str(f)).stem async for f in folder.glob("*.md")])
+
+    async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
+        """Delete the person's document; what it held and its row, or ``None``.
+
+        A forget of a member takes the member's whole document in the group
+        (section 9.4); its undo writes the returned profile back.
+        """
+        path = self._path(scope, _person(scope, person_id))
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            if not await anyio.Path(path).is_file():
+                return None
+            held = await self.read(scope, person_id)
+            await anyio.Path(path).unlink(missing_ok=True)
+        if held is None:
+            return None
+        return Stored(ref=self._ref(scope, person_id, path), scope=scope, item=held)
+
+    def _folder(self, scope: Scope) -> Path:
+        """Where the space keeps its profile documents."""
+        if scope.owner_type == "group":
+            return (
+                self._root.groups_dir(scope.app_id, scope.project_id)
+                / scope.owner_id
+                / GroupMemberProfileFrontmatter.MEMBERS_DIR
+            )
+        if scope.owner_type != "user":
+            raise ValueError(f"a {scope.owner_type} keeps no profile")
+        return self._root.users_dir(scope.app_id, scope.project_id) / scope.owner_id
+
+    def _path(self, scope: Scope, person: str) -> Path:
+        if scope.owner_type == "group":
+            return self._folder(scope) / f"{person}.md"
+        return self._folder(scope) / UserProfileFrontmatter.PROFILE_FILENAME
+
+    def _ref(self, scope: Scope, person: str, path: Path) -> MemoryRef:
+        """The document's index row: the user's id, or the member's in the group."""
         return MemoryRef(
-            id=scope.owner_id,
-            entry_id=frontmatter.id,
+            id=member_profile_row_id(scope.owner_id, person)
+            if scope.owner_type == "group"
+            else person,
+            entry_id=_profile_entry_id(scope, person),
             md_path=_relative(self._root, path),
         )
 
@@ -1296,120 +1359,6 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
         )
 
 
-class MarkdownMemberProfileStore:
-    """``groups/<g>/members/<member_id>.md``: a member's profile in one group.
-
-    One file per member, rewritten whole on every update, under the group's
-    owner lock like every other markdown write of the group. Reads go to the
-    file (the truth): the strategy that updates a profile reads it there, and
-    the search side reads the index row the cascade projects from it.
-
-    Args:
-        root: Memory root the groups live under.
-    """
-
-    def __init__(self, root: MemoryRoot) -> None:
-        self._root = root
-        self._writer = MarkdownWriter(root)
-
-    async def read(self, scope: Scope, member_id: str) -> MemberProfile | None:
-        path = self._path(scope, member_id)
-        if not await anyio.Path(path).is_file():
-            return None
-        parsed = await MarkdownReader.read(path)
-        fm = GroupMemberProfileFrontmatter.model_validate(parsed.frontmatter)
-        return MemberProfile(
-            group_id=scope.owner_id,
-            member_id=member_id,
-            profile=Profile.from_stored(
-                owner_id=member_id,
-                summary=fm.summary,
-                timestamp=fm.profile_timestamp_ms,
-                explicit_info=list(fm.explicit_info),
-                implicit_traits=list(fm.implicit_traits),
-                primary_language=_known_language(
-                    fm.primary_language, owner_id=member_id
-                ),
-            ),
-            pending_memcell_ids=list(fm.pending_memcell_ids),
-            history=[dict(item) for item in fm.history if isinstance(item, dict)],
-        )
-
-    async def write(self, scope: Scope, profile: MemberProfile) -> MemoryRef:
-        path = self._path(scope, profile.member_id)
-        document = profile.profile
-        frontmatter = GroupMemberProfileFrontmatter(
-            id=f"member_profile_{scope.owner_id}_{profile.member_id}",
-            group_id=scope.owner_id,
-            member_id=profile.member_id,
-            summary=document.summary,
-            explicit_info=[i.model_dump() for i in document.explicit_info],
-            implicit_traits=[i.model_dump() for i in document.implicit_traits],
-            profile_timestamp_ms=document.timestamp,
-            primary_language=document.primary_language,
-            pending_memcell_ids=list(profile.pending_memcell_ids),
-            history=list(profile.history),
-        )
-        body = (
-            document.summary
-            if document.summary.endswith("\n")
-            else (f"{document.summary}\n")
-        )
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            await self._writer.write_markdown(
-                path, frontmatter=frontmatter.model_dump(), body=body
-            )
-        return MemoryRef(
-            id=member_profile_row_id(scope.owner_id, profile.member_id),
-            entry_id=frontmatter.id,
-            md_path=_relative(self._root, path),
-        )
-
-    async def remove(
-        self, scope: Scope, member_id: str
-    ) -> Stored[MemberProfile] | None:
-        """Delete the member's profile file; what it held and its row, or ``None``.
-
-        A forget of a member takes the whole document (section 9.4); its undo
-        writes the returned profile back.
-        """
-        path = self._path(scope, member_id)
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            if not await anyio.Path(path).is_file():
-                return None
-            held = await self.read(scope, member_id)
-            await anyio.Path(path).unlink(missing_ok=True)
-        if held is None:
-            return None
-        return Stored(
-            ref=MemoryRef(
-                id=member_profile_row_id(scope.owner_id, member_id),
-                entry_id=f"member_profile_{scope.owner_id}_{member_id}",
-                md_path=_relative(self._root, path),
-            ),
-            scope=scope,
-            item=held,
-        )
-
-    async def members(self, scope: Scope) -> list[str]:
-        folder = anyio.Path(self._folder(scope))
-        if not await folder.is_dir():
-            return []
-        return sorted([Path(str(f)).stem async for f in folder.glob("*.md")])
-
-    def _folder(self, scope: Scope) -> Path:
-        if scope.owner_type != "group":
-            raise ValueError("a member profile belongs to a group scope")
-        return (
-            self._root.groups_dir(scope.app_id, scope.project_id)
-            / scope.owner_id
-            / GroupMemberProfileFrontmatter.MEMBERS_DIR
-        )
-
-    def _path(self, scope: Scope, member_id: str) -> Path:
-        return self._folder(scope) / f"{member_id}.md"
-
-
 class MarkdownAgentSkillStore:
     """``agents/<id>/skills/skill_<name>/SKILL.md`` documents.
 
@@ -1657,6 +1606,36 @@ def _image_memory_entry(image: ImageMemory) -> EntryBody:
 # ── Markdown -> domain ───────────────────────────────────────────────────
 
 _OUTPUT_LANGUAGES = frozenset(language.value for language in OutputLanguage)
+
+
+def _person(scope: Scope, person_id: str | None) -> str:
+    """Whose profile in ``scope``: a member of a group, or the user themself."""
+    if scope.owner_type == "group":
+        if person_id is None:
+            raise ValueError("a profile in a group belongs to one member")
+        return person_id
+    if person_id not in (None, scope.owner_id):
+        raise ValueError("a user's space holds only the user's own profile")
+    return scope.owner_id
+
+
+def _profile_schema(scope: Scope) -> type[ProfileFrontmatter]:
+    if scope.owner_type == "group":
+        return GroupMemberProfileFrontmatter
+    return UserProfileFrontmatter
+
+
+def _profile_entry_id(scope: Scope, person: str) -> str:
+    if scope.owner_type == "group":
+        return f"member_profile_{scope.owner_id}_{person}"
+    return f"profile_{person}"
+
+
+def _ensure_trailing_newline(text: str) -> str:
+    """End the body with exactly one newline (POSIX text-file convention)."""
+    if not text:
+        return ""
+    return text if text.endswith("\n") else text + "\n"
 
 
 def _known_language(value: str | None, *, owner_id: str) -> str | None:

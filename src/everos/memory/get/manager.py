@@ -40,9 +40,8 @@ from everos.memory.access import (
     ReadScope,
     ScopeRequest,
     resolve_identity,
-    visible_profile,
 )
-from everos.memory.models import AgentCase, AgentSkill, Episode, ImageMemory, Profile
+from everos.memory.models import AgentCase, AgentSkill, Episode, ImageMemory
 from everos.memory.ports import (
     AgentCaseIndex,
     AgentSkillIndex,
@@ -59,6 +58,8 @@ from everos.memory.ports import (
     ne,
 )
 from everos.memory.search import (
+    fetch_member_profile,
+    fetch_user_profile,
     group_source,
     item_versions,
     shape_profile_item,
@@ -328,79 +329,42 @@ class GetManager:
         """The member's profile in each group of ``scope``, cut to its windows."""
         items: list[GetProfileItem] = []
         for view in scope.groups:
-            stored = await self._profile.member(
-                scope.scope_of(view.group_id), member_id
+            found = await fetch_member_profile(
+                self._profile, scope, view.group_id, member_id
             )
-            shown = (
-                visible_profile(scope, view.group_id, stored.item)
-                if stored is not None
-                else None
-            )
-            if stored is None or shown is None:
-                continue
-            items.append(
-                GetProfileItem(
-                    id=stored.ref.id,
-                    user_id=None,
-                    owner_type="group",
-                    group_id=view.group_id,
-                    member_id=member_id,
-                    app_id=stored.scope.app_id,
-                    project_id=stored.scope.project_id,
-                    profile_data=_profile_data(shown),
-                )
-            )
+            if found is not None:
+                items.append(GetProfileItem(**found.fields()))
         return items
 
     async def _fetch_profile(self, req: GetRequest) -> list[GetProfileItem]:
-        """Fetch the owner's single profile from the profile index (kept in
-        sync with ``users/<id>/user.md`` by cascade).
+        """The owner's single profile, as ``/search`` fetches it.
 
         Profile is one-row-per-owner KV — there is no pagination / sort /
-        filter surface, so at most one item is returned. Mirrors the
-        ``/search`` ``ProfileRecaller`` minus the (unused) ``score`` field.
-        Empty list (not 404) keeps the response valid during the cold-start
-        window before a profile has been synthesised.
+        filter surface, so at most one item is returned. Empty list (not 404)
+        keeps the response valid during the cold-start window before a
+        profile has been synthesised.
         """
         if not req.owner_id:
             return []
-        stored = await self._profile.get(
+        found = await fetch_user_profile(
+            self._profile,
             Scope(
                 app_id=req.app_id,
                 project_id=req.project_id,
                 owner_id=req.owner_id,
                 owner_type="user",
-            )
+            ),
         )
-        if stored is None:
+        if found is None:
             logger.debug("get_profile_miss", owner_id=req.owner_id)
             return []
-        profile = stored.item
-        return [
-            GetProfileItem(
-                id=stored.ref.id,
-                user_id=profile.owner_id,
-                app_id=stored.scope.app_id,
-                project_id=stored.scope.project_id,
-                profile_data=_profile_data(profile),
-            )
-        ]
+        return [GetProfileItem(**found.fields())]
 
 
 def _owned(item: GetEpisodeItem) -> GetEpisodeItem:
     """A listed record naming its owner (``include_groups``)."""
     owner = "group" if item.group_id is not None else "user"
     return item.model_copy(update={"owner_type": owner})
-
-
-def _profile_data(profile: Profile) -> dict[str, object]:
-    """The ``profile_data`` mapping a profile listing item carries."""
-    return {
-        "summary": profile.summary,
-        "explicit_info": [i.model_dump() for i in profile.explicit_info],
-        "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
-        "profile_timestamp_ms": profile.timestamp,
-    }
 
 
 def _shape_image(stored: Stored[ImageMemory]) -> GetImageItem:

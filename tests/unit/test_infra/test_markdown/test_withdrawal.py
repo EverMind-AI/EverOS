@@ -29,14 +29,13 @@ from everos.infra.persistence.markdown import (
     MarkdownEpisodeStore,
     MarkdownGroupProfileStore,
     MarkdownImageMemoryStore,
-    MarkdownMemberProfileStore,
+    MarkdownProfileStore,
     MarkdownReader,
 )
 from everos.memory.models import (
     Episode,
     GroupProfileItem,
     ImageMemory,
-    MemberProfile,
     Profile,
     ProfileSource,
 )
@@ -205,18 +204,14 @@ async def test_segment_reads_find_current_episodes(tmp_path: Path) -> None:
 
 
 async def test_a_member_profile_is_removed_with_its_row(tmp_path: Path) -> None:
-    store = MarkdownMemberProfileStore(MemoryRoot(tmp_path))
-    profile = MemberProfile(
-        group_id="trip",
-        member_id="u_chen",
-        profile=Profile(owner_id="u_chen", summary="likes trains", timestamp=_T0),
-    )
+    store = MarkdownProfileStore(MemoryRoot(tmp_path))
+    profile = Profile(owner_id="u_chen", summary="likes trains", timestamp=_T0)
     await store.write(_GROUP, profile)
 
     removed = await store.remove(_GROUP, "u_chen")
 
     assert removed is not None
-    assert removed.item.profile.summary == "likes trains"
+    assert removed.item.summary == "likes trains"
     assert removed.ref.id == "trip:u_chen"
     assert await store.read(_GROUP, "u_chen") is None
     assert await store.remove(_GROUP, "u_chen") is None

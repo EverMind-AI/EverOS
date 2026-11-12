@@ -4,7 +4,9 @@ The 2.0 design's profile update: every new segment of a one-to-one
 conversation updates the profile of each user who spoke in it, and the update
 reads that segment only -- with the pictures the owner posted in it -- against
 the stored profile. What older segments said is already in the profile, so
-reading them again only re-adds it.
+reading them again only re-adds it. The update is the one a member's profile
+in a group runs (:mod:`._profiles`); a one-to-one space's cadence is every
+segment, at once.
 
 - **Trigger.** :class:`EpisodeExtracted` from the pipeline (one per segment
   and user sender), with or without an embedding provider. Reflection's
@@ -47,22 +49,15 @@ reading them again only re-adds it.
 
 from __future__ import annotations
 
-from everalgo.user_memory import ProfileExtractor
-
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
-from everos.memory.extract.pipeline.pictures import profile_pictures
-from everos.memory.extract.pipeline.profile_items import (
-    already_read,
-    bounded_history,
-    keep_held,
-    stamp_update,
-)
-from everos.memory.mappers import profile as profile_mapper
+from everos.memory.extract.pipeline.profile_items import already_read
 from everos.memory.models import FORGOTTEN_MARK, Profile
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+
+from ._profiles import update_profile
 
 logger = get_logger(__name__)
 
@@ -133,53 +128,31 @@ async def extract_user_profile(
         found = await deps.stores.memcell.find_by_ids([event.memcell_id])
         if not found:  # the session was deleted since
             return []
-        cells, pictures = await profile_pictures(
-            found,
-            event.owner_id,
-            images=deps.stores.images,
-            limits=deps.picture_limits,
-            forgotten=await deps.stores.forget_log.live_targets(
-                target="image",
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                owner_id=scope.owner_id,
-                owner_type=scope.owner_type,
-            ),
+        updated = await update_profile(
+            deps,
+            scope,
+            person_id=event.owner_id,
+            old=existing,
+            history=existing.history if existing else [],
+            segments=[(event.memcell_id, found[0])],
+            shown=found,
+            language=_profile_language(existing, event),
         )
-        language = _profile_language(existing, event)
-        update = await ProfileExtractor(llm=deps.llm).aupdate(
-            cells,
-            sender_id=event.owner_id,
-            old_profile=profile_mapper.to_algo(existing) if existing else None,
-            segment_ids=[event.memcell_id],
-            pictures=pictures,
-            custom_instructions=deps.instructions.load("profile_extract"),
-            output_language=language,
-        )
-        profile, replaced = stamp_update(
-            existing,
-            update,
-            cells={event.memcell_id: found[0]},
-            replaced_at=found[0].timestamp,
-            primary_language=language,
-        )
-        profile, replaced, held = keep_held(existing, profile, replaced)
-        if held:
+        if updated.held:
             logger.info(
-                "profile_held_items_kept", owner_id=event.owner_id, item_ids=held
+                "profile_held_items_kept",
+                owner_id=event.owner_id,
+                item_ids=updated.held,
             )
-        profile.history = bounded_history(
-            replaced, existing.history if existing else [], profile
-        )
-        await deps.stores.profile.write(scope, profile)
+        await deps.stores.profile.write(scope, updated.profile)
     logger.info(
         "user_profile_extracted",
         owner_id=event.owner_id,
         memcell_id=event.memcell_id,
-        pictures=len(pictures),
+        pictures=updated.pictures,
         mode="UPDATE" if existing is not None else "FIRST",
-        retired=len(update.retired),
-        consolidated=len(update.consolidated),
+        retired=updated.retired,
+        consolidated=updated.consolidated,
     )
     return []
 

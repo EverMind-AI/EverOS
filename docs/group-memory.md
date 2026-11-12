@@ -712,7 +712,10 @@ say about one member: preferences, constraints, commitments, expertise.
   memory, never another group.
 - **Throttle.** A member's profile is updated after `[groups] member_profile_every`
   new segments in which they spoke (default 5), and when the group's buffer is
-  flushed. Episodes are searchable immediately; only the profile lags.
+  flushed. Episodes are searchable immediately; only the profile lags. The
+  update itself is the one `user.md` runs (`memory/strategies/_profiles.py`:
+  pictures, the update call, stamping, held items, the bounded history); a
+  one-to-one space's cadence is every segment.
 - **Lock.** One lock per `(group_id, member_id)`, so updates for different members
   run in parallel and two updates for one member never lose each other's items.
 - **Sources.** Every item records its source memcells (the 2.0 profile format):
@@ -1561,9 +1564,12 @@ The second half of Step 1 differs from the text above in these places:
   `text` and a `pictures` variant) -- with a
   fingerprint the tests pin; `memory/prompt_manifest.py` lists them, and a
   test fails when one is left out.
-- **Member-in-group profile format.** There is no 2.0 profile format on this
-  line. A member's profile uses `user.md`'s fields, `history` included, plus
-  `group_id`, `member_id` and `pending_memcell_ids` (the throttle). Each item
+- **Member-in-group profile format.** A member's profile and `user.md` are
+  one "person in a space" profile: one schema (`ProfileFrontmatter`), one
+  store (`MarkdownProfileStore`, the scope naming the space), one domain
+  model (`Profile`) and one cascade handler (`ProfileHandler`). A member's
+  file adds `group_id`, `member_id` and `pending_memcell_ids` (the throttle),
+  and writes `history` and the queue even while empty. Each item
   carries `item_id`, `source_memcell_ids` and the span `source_start` /
   `source_end`; its sources are the segments its own operation named. The
   index row id is `<group_id>:<member_id>`. A new value of an item carries

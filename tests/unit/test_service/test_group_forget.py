@@ -366,8 +366,8 @@ async def test_a_message_forgotten_by_its_sender_is_nowhere_afterwards(
         assert SECRET not in await _gets(world, asker), asker
     # What was not forgotten is still remembered, rewritten.
     assert "LISBONVENUE" in await _search_text(world, "u_dan")
-    betty = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
-    assert betty is not None and betty.profile.explicit_info  # rewritten
+    betty = await world.stores.profile.read(world.scope("trip"), "u_betty")
+    assert betty is not None and betty.explicit_info  # rewritten
     items = await world.stores.group_profile.items(world.scope("trip"))
     assert any("LISBONVENUE" in i.item.statement for i in items)
     # The segment itself keeps the message, for an undo.
@@ -380,7 +380,7 @@ async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
     before = _markdown(world)
     episodes_before = {p: t for p, t in before.items() if "/episodes/" in p}
     profiles_before = {
-        m: await world.stores.member_profile.read(world.scope("trip"), m)
+        m: await world.stores.profile.read(world.scope("trip"), m)
         for m in ("u_betty", "u_chen", "u_dan")
     }
     result = await _forget(world, "u_betty", _message("m-1"))
@@ -407,7 +407,7 @@ async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
         assert set(_entries(text).items()) <= set(_entries(after[path]).items())
     assert SECRET in await _search_text(world, "u_chen")
     for member_id, held in profiles_before.items():  # no update ran meanwhile
-        back = await world.stores.member_profile.read(world.scope("trip"), member_id)
+        back = await world.stores.profile.read(world.scope("trip"), member_id)
         assert back == held, member_id
     # The message reads again: nothing forgets it any more.
     assert await world.stores.message_forget.forgotten(world.session("s_trip")) == set()
@@ -515,9 +515,7 @@ async def test_a_member_forgets_all_their_messages_and_their_profile(
     assert _plan_view(real) == _plan_view(dry)
     assert set(real.messages) == {("s_trip", "m-1"), ("s_trip", "m-3")}
     assert real.member_profiles == ("u_betty",)
-    assert (
-        await world.stores.member_profile.read(world.scope("trip"), "u_betty") is None
-    )
+    assert await world.stores.profile.read(world.scope("trip"), "u_betty") is None
     for asker in ("u_chen", "u_dan"):
         blob = await _search_text(world, asker) + await _gets(world, asker)
         assert SECRET not in blob and "FRIDAYOK" not in blob

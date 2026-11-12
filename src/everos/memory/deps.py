@@ -42,7 +42,6 @@ from everos.memory.ports import (
     ImageMemoryStore,
     ImageStore,
     KnowledgeTopicIndex,
-    MemberProfileStore,
     MemcellStore,
     MemorizeInboxStore,
     MessageForgetStore,
@@ -78,7 +77,6 @@ class Stores:
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
     groups: GroupStore
-    member_profile: MemberProfileStore
     scene: SceneStore
     group_profile: GroupProfileStore
     message_forget: MessageForgetStore

@@ -101,7 +101,7 @@ Each business memory kind picks one of three on-disk patterns:
 |---|---|---|---|
 | **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / agent_case / image_memory / scene versions (user and group) / group-profile items |
 | **Skill-named dir** | `skills/skill_<name>/SKILL.md` (+ `references/` `scripts/`) | overwrite the file | agent skills (procedural memory) |
-| **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced); `groups/<g>/members/<member_id>.md` | overwrite the file | user profile; member-in-group profile |
+| **Single-file rewrite** | `user.md`; `groups/<g>/members/<member_id>.md` | overwrite the file | a person's profile in a space: one schema (`ProfileFrontmatter`), one store and one cascade handler for the user's own profile and a member's in a group |
 
 Markdown IO primitives live in
 [`infra/persistence/markdown/_base/`](../src/everos/infra/persistence/markdown/_base/);

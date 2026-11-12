@@ -341,6 +341,25 @@ machinery that keeps a deleted memory from coming back.
     user side), where the reflector's UPDATE read the whole narrative and
     every new episode unclipped; read side unchanged (the same rows).
     Nothing billed was run for this change.
+- **One profile for a person in a space (EverOS 2.0).** `users/<u>/user.md`
+  and `groups/<g>/members/<m>.md` keep their paths and their bytes, and are
+  one implementation: one model (`Profile`, which now carries
+  `pending_memcell_ids`; `MemberProfile` is gone), one frontmatter schema
+  (`ProfileFrontmatter`), one store (`MarkdownProfileStore`, the scope naming
+  the space; `MarkdownMemberProfileStore`, `ProfileReader` and
+  `ProfileWriter` are gone), one cascade handler (`ProfileHandler`, for both
+  kinds), one update core (`memory/strategies/_profiles.py`: pictures,
+  `aupdate`, stamping, held items, the bounded history) whose cadence is the
+  space's (one-to-one: every segment; a group: `[groups]
+  member_profile_every` and each flush), one fetch for search and get
+  (`fetch_user_profile` / `fetch_member_profile`), and one remover and
+  put-back for the items a forget takes (`take_out` / `put_back`, one
+  picture rule). The forget logs keep their formats. Nothing changes for
+  either space, nor its cost.
+- **One lock family per owner.** `profile_lock(scope, person)`,
+  `scenes_lock(scope)` and `forget_lock(scope)` replace the user/group pairs
+  (`user_profile_lock` / `member_profile_lock`, `user_scenes_lock` /
+  `group_scenes_lock`, `user_forget_lock` / `group_forget_lock`).
 
 - **No hard delete (EverOS 2.0, breaking).** `POST /api/v2/memory/delete` and
   `/delete_by_ids` keep their requests and answer with a forget of the same

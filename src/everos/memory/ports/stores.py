@@ -19,7 +19,6 @@ __all__ = [
     "ImageMemoryStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
-    "MemberProfileStore",
     "MemcellStore",
     "MemorizeInboxStore",
     "NoSourceCheck",
@@ -55,7 +54,6 @@ from everos.memory.models import (
     KnowledgeDocument,
     KnowledgeMemory,
     KnowledgeTopic,
-    MemberProfile,
     MemCell,
     MemcellRecord,
     MemorizeTask,
@@ -392,11 +390,34 @@ class ImageMemoryStore(Protocol):
 
 @runtime_checkable
 class ProfileStore(Protocol):
-    """The single profile document of one user."""
+    """A person's profile in a space: one document per person and space.
 
-    async def read(self, scope: Scope) -> Profile | None: ...
+    ``scope`` is the space: a user's own (``users/<u>/user.md``, the person is
+    the user) or a group's (``groups/<g>/members/<m>.md``, the person is a
+    member). A member's profile in a group is a document of its own: never
+    the member's personal profile, never another group's
+    (docs/group-memory.md, D6).
+    """
 
-    async def write(self, scope: Scope, profile: Profile) -> MemoryRef: ...
+    async def read(self, scope: Scope, person_id: str | None = None) -> Profile | None:
+        """The person's profile, or ``None``; ``person_id`` is required in a
+        group and is the user in their own space."""
+        ...
+
+    async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
+        """Write the whole document of ``profile.owner_id`` in ``scope``."""
+        ...
+
+    async def people(self, scope: Scope) -> list[str]:
+        """The people of the space that have a profile document, sorted."""
+        ...
+
+    async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
+        """Delete the person's document; what it held, or ``None``.
+
+        The ref is the document's index row, which the caller erases.
+        """
+        ...
 
 
 @runtime_checkable
@@ -467,33 +488,6 @@ class SceneStore(Protocol):
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
         """Put a withdrawal's entries back under their ids, marks included."""
-        ...
-
-
-@runtime_checkable
-class MemberProfileStore(Protocol):
-    """The member-in-group profiles of a group (``groups/<g>/members/<m>.md``).
-
-    ``scope`` is the group's (``owner_type = group``). A member's profile in a
-    group is a document of its own: it is never the member's personal profile
-    and never another group's (docs/group-memory.md, D6).
-    """
-
-    async def read(self, scope: Scope, member_id: str) -> MemberProfile | None: ...
-
-    async def write(self, scope: Scope, profile: MemberProfile) -> MemoryRef: ...
-
-    async def members(self, scope: Scope) -> list[str]:
-        """The members of the group that have a profile document, sorted."""
-        ...
-
-    async def remove(
-        self, scope: Scope, member_id: str
-    ) -> Stored[MemberProfile] | None:
-        """Delete the member's profile document; what it held, or ``None``.
-
-        The ref is the document's index row, which the caller erases.
-        """
         ...
 
 

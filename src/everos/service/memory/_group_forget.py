@@ -72,7 +72,6 @@ from everos.memory.extract.scene import (
 from everos.memory.models import (
     Cluster,
     Episode,
-    MemberProfile,
 )
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
@@ -92,6 +91,8 @@ from ._group_forget_records import (
     GroupForgetResult,
     GroupUndoResult,
     forget_result,
+    member_from_record,
+    member_record,
     merge_withdrawals,
     row_ids,
     undo_record,
@@ -475,20 +476,17 @@ class GroupForgetManager:
         scope = plan.scope
         for member_id in plan.members_removed:
             async with profile_lock(scope, member_id):
-                removed = await self._stores.member_profile.remove(scope, member_id)
+                removed = await self._stores.profile.remove(scope, member_id)
             if removed is None:
                 continue
             await self._eraser.erase(scope, {"user_profile": [removed.ref]})
             applied.members_removed.append(
-                {
-                    "member_id": member_id,
-                    "profile": removed.item.model_dump(mode="json"),
-                }
+                {"member_id": member_id, "profile": member_record(scope, removed.item)}
             )
         for planned in plan.members:
             member_id = planned.member_id
             async with profile_lock(scope, member_id):
-                held = await self._stores.member_profile.read(scope, member_id)
+                held = await self._stores.profile.read(scope, member_id)
                 if held is None:
                     continue
                 edit = member_edit(
@@ -497,7 +495,7 @@ class GroupForgetManager:
                 if not edit.changes:
                     continue
                 kept, record = without_items(held, edit)
-                await self._stores.member_profile.write(scope, kept)
+                await self._stores.profile.write(scope, kept)
             applied.member_items.append(record)
 
     async def _group_profile(self, plan: ForgetPlan, applied: Applied) -> None:
@@ -653,10 +651,10 @@ class GroupForgetManager:
         back: list[str] = []
         for removed in undo.get("members_removed") or []:
             member_id = str(removed["member_id"])
-            profile = MemberProfile.model_validate(removed["profile"])
+            profile = member_from_record(removed["profile"])
             async with profile_lock(scope, member_id):
-                if await self._stores.member_profile.read(scope, member_id) is None:
-                    await self._stores.member_profile.write(scope, profile)
+                if await self._stores.profile.read(scope, member_id) is None:
+                    await self._stores.profile.write(scope, profile)
                     back.append(member_id)
         return back
 
@@ -667,11 +665,11 @@ class GroupForgetManager:
         for change in undo.get("member_items") or []:
             member_id = str(change["member_id"])
             async with profile_lock(scope, member_id):
-                held = await self._stores.member_profile.read(scope, member_id)
+                held = await self._stores.profile.read(scope, member_id)
                 if held is None:
                     continue
                 restored, ids = with_items(held, change)
-                await self._stores.member_profile.write(scope, restored)
+                await self._stores.profile.write(scope, restored)
             back += ids
         return back
 

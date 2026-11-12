@@ -21,6 +21,9 @@ from .knowledge_topic import KnowledgeTopicRecaller as KnowledgeTopicRecaller
 from .knowledge_topic import TopicRecall as TopicRecall
 from .knowledge_topic import TopicRetriever as TopicRetriever
 from .profile import ProfileRecaller as ProfileRecaller
+from .profile import ProfileView as ProfileView
+from .profile import fetch_member_profile as fetch_member_profile
+from .profile import fetch_user_profile as fetch_user_profile
 
 __all__ = [
     "EpisodeRecaller",
@@ -28,8 +31,11 @@ __all__ = [
     "KnowledgeMethod",
     "KnowledgeTopicRecaller",
     "ProfileRecaller",
+    "ProfileView",
     "RecallResult",
     "RecallerDeps",
     "TopicRecall",
     "TopicRetriever",
+    "fetch_member_profile",
+    "fetch_user_profile",
 ]

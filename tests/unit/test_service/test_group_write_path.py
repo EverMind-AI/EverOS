@@ -299,16 +299,16 @@ async def test_a_picture_is_one_group_memory_and_reaches_only_its_poster(
         assert rows[0].origin == "member"
 
         await world.run(UPDATE_MEMBER_PROFILES_SPEC)
-        betty = await world.stores.member_profile.read(world.scope("trip"), "u_betty")
+        betty = await world.stores.profile.read(world.scope("trip"), "u_betty")
         assert betty is not None
-        (item,) = betty.profile.explicit_info
+        (item,) = betty.explicit_info
         assert item.description == "Has a tabby cat"
         extra = item.model_extra or {}
         assert extra["source_memcell_ids"]
         assert extra["source_image_ids"] == [rows[0].image_id]
         # Nobody else's profile reads it, in the group or outside it.
-        chen = await world.stores.member_profile.read(world.scope("trip"), "u_chen")
-        assert chen is not None and chen.profile.explicit_info == []
+        chen = await world.stores.profile.read(world.scope("trip"), "u_chen")
+        assert chen is not None and chen.explicit_info == []
         assert not (tmp_path / "default_app" / PROJECT / "users").exists()
 
 

@@ -25,7 +25,6 @@ from everos.core.errors import ForbiddenError, NotFoundError
 from everos.memory.models import (
     Cluster,
     ExplicitInfoItem,
-    MemberProfile,
     Profile,
     Scene,
 )
@@ -156,26 +155,22 @@ async def test_a_member_profile_item_update_and_its_history(tmp_path: Path) -> N
     async with GroupWorld.open(tmp_path) as world:
         await _trip(world)
         scope = world.scope("trip")
-        await world.stores.member_profile.write(
+        await world.stores.profile.write(
             scope,
-            MemberProfile(
-                group_id="trip",
-                member_id="u_betty",
-                profile=Profile(
-                    owner_id="u_betty",
-                    summary="",
-                    timestamp=T0,
-                    explicit_info=[
-                        ExplicitInfoItem(
-                            description="Lives in Paris",
-                            category="home",
-                            item_id="pi_000000000009",
-                            source_memcell_ids=["mc_trip_1"],
-                            source_start=T0 + 1,
-                            source_end=T0 + 2,
-                        )
-                    ],
-                ),
+            Profile(
+                owner_id="u_betty",
+                summary="",
+                timestamp=T0,
+                explicit_info=[
+                    ExplicitInfoItem(
+                        description="Lives in Paris",
+                        category="home",
+                        item_id="pi_000000000009",
+                        source_memcell_ids=["mc_trip_1"],
+                        source_start=T0 + 1,
+                        source_end=T0 + 2,
+                    )
+                ],
             ),
         )
         with pytest.raises(ForbiddenError):
@@ -196,11 +191,9 @@ async def test_a_member_profile_item_update_and_its_history(tmp_path: Path) -> N
             changes=MemoryChanges(description="Lives in Berlin"),
         )
         assert result.member_id == "u_betty" and result.supersedes == "pi_000000000009"
-        held = await world.stores.member_profile.read(scope, "u_betty")
+        held = await world.stores.profile.read(scope, "u_betty")
         assert held is not None
-        assert [i.description for i in held.profile.explicit_info] == [
-            "Lives in Berlin"
-        ]
+        assert [i.description for i in held.explicit_info] == ["Lives in Berlin"]
         assert held.history[0]["superseded_by"] == result.id
 
         history = await world.memory.memory_history(

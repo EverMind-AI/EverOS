@@ -48,7 +48,6 @@ from ._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
     EpisodeHandler,
-    GroupMemberProfileHandler,
     GroupProfileHandler,
     GroupRosterHandler,
     Handler,
@@ -56,7 +55,7 @@ from ._projections import (
     ImageMemoryHandler,
     KnowledgeDocumentHandler,
     KnowledgeTopicHandler,
-    UserProfileHandler,
+    ProfileHandler,
 )
 
 
@@ -131,7 +130,7 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         name="user_profile",
         frontmatter_schema=UserProfileFrontmatter,
         index_schema=UserProfile,
-        handler_factory=UserProfileHandler,
+        handler_factory=ProfileHandler,
     ),
     # A user's scene versions are rows of the episode table (parent_type =
     # scene): they compete with the user's episodes in every recall, rendered
@@ -166,11 +165,13 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         index_schema=Episode,
         handler_factory=EpisodeHandler,
     ),
+    # A member's profile in a group: the one profile schema and handler, a
+    # row of the same table under the group (owner_type = group, subject_id).
     KindSpec(
         name="group_member_profile",
         frontmatter_schema=GroupMemberProfileFrontmatter,
         index_schema=UserProfile,
-        handler_factory=GroupMemberProfileHandler,
+        handler_factory=ProfileHandler,
     ),
     # A group's profile items (Step 2): their own table, no vector; the
     # pending batch beside the logs (``profile/pending.md``) matches no glob.

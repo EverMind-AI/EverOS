@@ -181,9 +181,9 @@ The three strategies:
 | **Skill-named dir** | one directory per skill | a skill is a richer unit (body + optional `references/` `scripts/`) |
 
 !!! note
-    The single-file writer also supports `agent.md` / `soul.md` /
-    `tools.md` / `behaviors.md`, but no shipped OME strategy produces those
-    yet — today only `user.md` is written. Detailed frontmatter and
+    The single-file rewrite holds a person's profile in a space: the user's
+    own `user.md` and a member's `groups/<g>/members/<m>.md` share one
+    schema, one store and one cascade handler. Detailed frontmatter and
     entry-id encoding live in [storage_layout.md](storage_layout.md).
 
 ## The cascade daemon

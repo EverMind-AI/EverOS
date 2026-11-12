@@ -16,12 +16,12 @@ model. What these pin:
 - the operator is told a language, never left to choose one: the event's
   (the group pipeline's resolved language), a flush's resolved from the
   segments it reads, a stored ``primary_language`` over either;
-- through everalgo's lineage: a ``modify`` that gives a fact a new value
-  makes the new item name the old one (``supersedes``, ``since``) and the old
-  one's history entry name it back; a deprecation with an add links nothing; a
-  consolidation keeps the link of an item it leaves as it is and links none of
-  the items it merges (their history entries name what they merged into); the
-  version keys never reach the model;
+- through everalgo's lineage, on the update ``user.md`` runs too (a new
+  value linking the old one, and a summary a forget dropped written again,
+  are pinned with the one-to-one strategy): a deprecation with an add links
+  nothing; a consolidation keeps the link of an item it leaves as it is and
+  links none of the items it merges (their history entries name what they
+  merged into); the version keys never reach the model;
 - the member's pictures in the segments are read with them, nobody else's,
   and never one the group forgot.
 """
@@ -168,18 +168,18 @@ async def test_each_speaker_gets_a_profile_from_their_own_segments(every: Any) -
     await update_member_profiles(_event("mc_1", "u_chen", "u_betty"), deps)
     await update_member_profiles(_event("mc_2", "u_chen"), deps)
 
-    store = deps.stores.member_profile
-    assert await store.members(_SCOPE) == ["u_betty", "u_chen"]
+    store = deps.stores.profile
+    assert await store.people(_SCOPE) == ["u_betty", "u_chen"]
     chen = await store.read(_SCOPE, "u_chen")
     betty = await store.read(_SCOPE, "u_betty")
     assert chen is not None and betty is not None
-    assert [i.description for i in chen.profile.explicit_info] == [
+    assert [i.description for i in chen.explicit_info] == [
         "Fact 1 about Chen",
         "Fact 3 about Chen",
     ]
     spoke = {"u_chen": {"mc_1", "mc_2"}, "u_betty": {"mc_1"}}
     for member, profile in (("u_chen", chen), ("u_betty", betty)):
-        for item in profile.profile.explicit_info:
+        for item in profile.explicit_info:
             sources = set((item.model_extra or {})["source_memcell_ids"])
             assert sources and sources <= spoke[member]
     # The operator read roster names, and Betty's update never saw mc_2.
@@ -201,14 +201,14 @@ async def test_updates_wait_for_member_profile_every_and_run_at_flush(
     # A replay of the same segment counts once.
     await update_member_profiles(_event("mc_2", "u_chen"), deps)
 
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
     assert chen is not None and chen.pending_memcell_ids == ["mc_1", "mc_2"]
-    assert chen.profile.explicit_info == [] and model.prompts == []
+    assert chen.explicit_info == [] and model.prompts == []
 
     await update_member_profiles(_FLUSHED, deps)
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
     assert chen is not None and chen.pending_memcell_ids == []
-    assert len(chen.profile.explicit_info) == 1
+    assert len(chen.explicit_info) == 1
     assert len(model.prompts) == 1
 
     for n in (3, 4, 5):
@@ -229,33 +229,10 @@ async def test_a_segment_already_read_is_not_queued_again(every: Any) -> None:
     every(3)
     await update_member_profiles(_event("mc_1", "u_chen"), deps)
 
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
     assert chen is not None and chen.pending_memcell_ids == []
-    assert [i.description for i in chen.profile.explicit_info] == ["Fact 1 about Chen"]
+    assert [i.description for i in chen.explicit_info] == ["Fact 1 about Chen"]
     assert len(model.prompts) == 1
-
-
-async def test_the_next_update_writes_a_summary_a_forget_dropped(every: Any) -> None:
-    every(1)
-    model = _ProfileModel()
-    deps = _deps(model)
-    _segment(deps, "mc_1", 1_000, ("u_chen", "I'll book flights"))
-    await update_member_profiles(_event("mc_1", "u_chen"), deps)
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
-    assert chen is not None and chen.profile.summary == "Fact 1 about Chen"
-    # A group forget took an item out and the summary with it.
-    await deps.stores.member_profile.write(
-        _SCOPE,
-        chen.model_copy(
-            update={"profile": chen.profile.model_copy(update={"summary": ""})}
-        ),
-    )
-
-    _segment(deps, "mc_2", 2_000, ("u_chen", "Bring passports"))
-    await update_member_profiles(_event("mc_2", "u_chen"), deps)
-
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
-    assert chen is not None and chen.profile.summary == "Fact 1 about Chen"
 
 
 async def test_two_concurrent_updates_of_one_member_lose_no_item(every: Any) -> None:
@@ -268,9 +245,9 @@ async def test_two_concurrent_updates_of_one_member_lose_no_item(every: Any) -> 
         update_member_profiles(_event("mc_1", "u_chen"), deps),
         update_member_profiles(_event("mc_2", "u_chen"), deps),
     )
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
     assert chen is not None
-    assert len(chen.profile.explicit_info) == 2  # the second read the first
+    assert len(chen.explicit_info) == 2  # the second read the first
 
 
 async def test_updates_of_two_members_run_in_parallel(every: Any) -> None:
@@ -302,8 +279,8 @@ async def test_an_update_is_told_the_event_s_language(every: Any) -> None:
 
     (prompt,) = model.prompts
     assert "Write every output field in English" in prompt
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
-    assert chen is not None and chen.profile.primary_language == "English"
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.primary_language == "English"
 
 
 async def test_a_flush_update_resolves_the_language_from_its_segments(
@@ -321,8 +298,8 @@ async def test_a_flush_update_resolves_the_language_from_its_segments(
 
     (prompt,) = model.prompts
     assert "Write every output field in Chinese" in prompt
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
-    assert chen is not None and chen.profile.primary_language == "Chinese"
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.primary_language == "Chinese"
 
 
 async def test_a_stored_language_wins(every: Any) -> None:
@@ -375,30 +352,9 @@ async def _two_updates(model: _ScriptedModel) -> Any:
     await update_member_profiles(_event("mc_1", "u_chen"), deps)
     _segment(deps, "mc_2", 2_000, ("u_chen", "We moved to Berlin last week"))
     await update_member_profiles(_event("mc_2", "u_chen"), deps)
-    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    chen = await deps.stores.profile.read(_SCOPE, "u_chen")
     assert chen is not None
     return chen
-
-
-async def test_an_update_op_rewriting_a_fact_links_the_new_value(every: Any) -> None:
-    every(1)
-    rewrite = {"action": "modify", "ref": "e1", "data": _fact("Lives in Berlin")}
-    model = _ScriptedModel(
-        [_fact("Lives in Paris"), _fact("Cycles to work", "habits")], [rewrite]
-    )
-
-    chen = await _two_updates(model)
-
-    berlin, bike = chen.profile.explicit_info
-    (paris,) = chen.history
-    new = berlin.model_extra or {}
-    assert berlin.description == "Lives in Berlin"
-    # since = the end of the update's span: mc_2's one message, at 2_000 + 1.
-    assert (new["supersedes"], new["since"]) == (paris["item_id"], 2_001)
-    assert new["source_memcell_ids"] == ["mc_2"]
-    assert paris["description"] == "Lives in Paris"
-    assert (paris["superseded_by"], paris["replaced_at"]) == (new["item_id"], 2_001)
-    assert not {"supersedes", "since"} & set(bike.model_extra or {})
 
 
 async def test_a_deprecation_with_an_add_links_nothing(every: Any) -> None:
@@ -408,8 +364,8 @@ async def test_a_deprecation_with_an_add_links_nothing(every: Any) -> None:
         {"action": "add", "type": "explicit_info", "data": _fact("Lives in Berlin")},
     ]
     chen = await _two_updates(_ScriptedModel([_fact("Lives in Paris")], replace))
-    assert [i.description for i in chen.profile.explicit_info] == ["Lives in Berlin"]
-    assert "supersedes" not in (chen.profile.explicit_info[0].model_extra or {})
+    assert [i.description for i in chen.explicit_info] == ["Lives in Berlin"]
+    assert "supersedes" not in (chen.explicit_info[0].model_extra or {})
     (paris,) = chen.history
     assert "superseded_by" not in paris
     assert (paris["reason"], paris["deprecated_by"]) == ("moved", ["mc_2"])
@@ -435,7 +391,7 @@ async def test_a_consolidation_keeps_a_link_and_merges_without_one(every: Any) -
     model = _ScriptedModel(plans, rewrite_and_add, consolidation=consolidation)
     chen = await _two_updates(model)
     assert "_ConsolidateReply" in model.calls
-    may, merged = chen.profile.explicit_info
+    may, merged = chen.explicit_info
     assert [may.description, merged.description] == [
         "Plan 0, moved to May",
         "Plans 1-8",

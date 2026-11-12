@@ -1,7 +1,8 @@
 """Profile items: provenance on every item, versions linked, replaced items kept.
 
-The one writer of both profiles -- the one-to-one ``user.md`` and a member's
-profile in a group (docs/group-memory.md, section 7.4) -- is everalgo's
+The one writer of a person's profile in either space -- the one-to-one
+``user.md`` and a member's profile in a group (docs/group-memory.md, section
+7.4) -- is everalgo's
 ``ProfileExtractor.aupdate``. Its result says how every item came to be and
 which stored items it took out (the lineage), and :func:`stamp_update` turns
 that into what EverOS keeps on the items:
@@ -26,14 +27,20 @@ that into what EverOS keeps on the items:
   ``reason`` alone (a consolidation dropped it). :func:`bounded_history` keeps
   :data:`HISTORY_LIMIT` entries.
 
-A forgotten picture reaches the items, and the replaced values, read off it
-alone (:func:`forget_images`); a forgotten conversation reaches those every
-segment of which is forgotten (:func:`forget_segments`); an undo puts them back
-(:func:`restore_items`). A forget that takes an item out drops the summary too:
-it is written over every item, so it may repeat the forgotten one. The next
-update writes it again from the items that remain (everalgo derives it on
-every update), and an undo puts it back while no update has -- as on a
-member's profile in a group.
+A forget takes items and replaced values out of either profile one way
+(:func:`take_out`): what it takes keeps its place, and taking an item out
+drops the summary too -- it is written over every item, so it may repeat the
+forgotten one. The next update writes it again from the items that remain
+(everalgo derives it on every update), and an undo puts it back while no
+update has. A picture forget takes what rests on forgotten pictures alone in
+either space (:func:`rests_on_pictures`). Which segments a forget reaches
+differs by space: a one-to-one forget takes what every segment of which is
+forgotten (:func:`forget_segments`), a forget inside a group what no segment
+of the member's own words supports any more (the group forget's plan). The
+undo follows what each kept: a one-to-one forget logged its items without
+their places, so they come back by description, at the end
+(:func:`restore_items`); a group's logged their places, so they come back by
+id, where they were (:func:`put_back`).
 
 A person changes an item through ``POST /memory/update`` (:func:`edit_item`):
 a new value is a new item linked to the old one, as a model's is, and carries
@@ -51,6 +58,7 @@ __all__ = [
     "HISTORY_LIMIT",
     "SOURCE_IMAGE_KEYS",
     "SUMMARY",
+    "Taken",
     "already_read",
     "bounded_history",
     "edit_item",
@@ -62,14 +70,18 @@ __all__ = [
     "keep_held",
     "mint_item_id",
     "normalised",
+    "put_back",
     "restore_items",
     "rests_on",
+    "rests_on_pictures",
     "stamp_update",
+    "take_out",
 ]
 
 import re
 import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -404,12 +416,120 @@ def forget_images(
     if existing is None:
         return None, [], 0
     gone = set(image_ids)
+    return _without(existing, lambda entry: not rests_on_pictures(entry, gone))
 
-    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
-        sources = item_source_images(entry)
-        return not sources or bool(set(sources) - gone)
 
-    return _without(existing, survives)
+def rests_on_pictures(
+    entry: BaseModel | Mapping[str, Any], pictures: Collection[str]
+) -> bool:
+    """Whether every picture an item or replaced value was read off is gone.
+
+    A fact two photos established between them survives forgetting either
+    one, and an entry with no picture source (a text-derived one) is never a
+    picture forget's.
+    """
+    sources = item_source_images(entry)
+    return bool(sources) and set(sources) <= set(pictures)
+
+
+@dataclass(frozen=True)
+class Taken:
+    """What a forget took out of a profile, each part with its place.
+
+    Attributes:
+        items: ``(bucket, position, item)`` per item taken out, bucket by
+            bucket in list order; ``item`` as stored, JSON-ready.
+        history: ``(position, entry)`` per replaced value taken out.
+        summary: The summary taken out with the items; ``None`` when no item
+            went.
+    """
+
+    items: tuple[tuple[str, int, dict[str, Any]], ...] = ()
+    history: tuple[tuple[int, dict[str, Any]], ...] = ()
+    summary: str | None = None
+
+
+def take_out(
+    profile: Profile,
+    *,
+    item: Callable[[_Item], bool],
+    entry: Callable[[int, Mapping[str, Any]], bool],
+) -> tuple[Profile, Taken]:
+    """``profile`` without the items ``item`` names and the history ``entry`` names.
+
+    ``entry`` is given each replaced value with its position. Taking an item
+    out drops the summary as well (:data:`SUMMARY`). Nothing taken returns
+    ``profile`` itself.
+    """
+    items: list[tuple[str, int, dict[str, Any]]] = []
+    kept: dict[str, Any] = {}
+    for bucket in BUCKETS:
+        current: list[_Item] = getattr(profile, bucket)
+        kept[bucket] = [i for i in current if not item(i)]
+        items += [
+            (bucket, n, i.model_dump(mode="json"))
+            for n, i in enumerate(current)
+            if item(i)
+        ]
+    history = [(n, dict(e)) for n, e in enumerate(profile.history) if entry(n, e)]
+    if not items and not history:
+        return profile, Taken()
+    kept["history"] = [e for n, e in enumerate(profile.history) if not entry(n, e)]
+    if items:
+        kept["summary"] = ""
+    return profile.model_copy(update=kept), Taken(
+        items=tuple(items),
+        history=tuple(history),
+        summary=profile.summary if items else None,
+    )
+
+
+def put_back(profile: Profile, taken: Taken) -> tuple[Profile, list[str]]:
+    """What :func:`take_out` took, back in its place; and the items' ids.
+
+    An item comes back where it was unless the profile holds its id again; a
+    replaced value comes back at its position in the history; the summary
+    comes back while the profile has none (an update since has written one
+    over the items it had).
+    """
+    present = {
+        (i.model_extra or {}).get("item_id")
+        for i in (*profile.explicit_info, *profile.implicit_traits)
+    }
+    back: dict[str, list[tuple[int, _Item]]] = {bucket: [] for bucket in BUCKETS}
+    for bucket, n, data in taken.items:
+        if data.get("item_id") in present:
+            continue
+        model = ImplicitTraitItem if bucket == "implicit_traits" else ExplicitInfoItem
+        back[bucket].append((n, model.model_validate(data)))
+    restored = profile.model_copy(
+        update={
+            **{
+                bucket: _in_place(getattr(profile, bucket), back[bucket])
+                for bucket in BUCKETS
+            },
+            "summary": taken.summary
+            if taken.summary is not None and not profile.summary
+            else profile.summary,
+            "history": _in_place(
+                profile.history, [(n, dict(e)) for n, e in taken.history]
+            ),
+        }
+    )
+    ids = [
+        str((i.model_extra or {}).get("item_id") or "")
+        for bucket in BUCKETS
+        for _, i in back[bucket]
+    ]
+    return restored, ids
+
+
+def _in_place[T](items: Sequence[T], placed: Sequence[tuple[int, T]]) -> list[T]:
+    """``items`` with each ``(place, item)`` inserted where it was, in order."""
+    out = list(items)
+    for n, item in sorted(placed, key=lambda pair: pair[0]):
+        out.insert(min(n, len(out)), item)
+    return out
 
 
 def _without(
@@ -417,30 +537,22 @@ def _without(
 ) -> tuple[Profile, list[tuple[str, dict[str, Any]]], int]:
     """``existing`` without the items and replaced values ``survives`` refuses.
 
-    Taking an item out drops the summary as well, named in ``removed`` under
-    :data:`SUMMARY` for the undo: the summary is written over every item.
+    :func:`take_out`, in the one-to-one forget log's form: ``(bucket, item)``
+    pairs, then ``("history", entry)``, then the dropped summary under
+    :data:`SUMMARY`, all without their places.
     """
-    removed: list[tuple[str, dict[str, Any]]] = []
-    kept: dict[str, Any] = {}
-    for bucket in BUCKETS:
-        items: list[_Item] = getattr(existing, bucket)
-        kept[bucket] = [item for item in items if survives(item)]
-        removed += [
-            (bucket, item.model_dump(mode="json"))
-            for item in items
-            if not survives(item)
-        ]
-    count = len(removed)
-    removed += [
-        ("history", dict(entry)) for entry in existing.history if not survives(entry)
+    kept, taken = take_out(
+        existing,
+        item=lambda i: not survives(i),
+        entry=lambda _n, e: not survives(e),
+    )
+    removed: list[tuple[str, dict[str, Any]]] = [
+        (bucket, item) for bucket, _n, item in taken.items
     ]
-    if not removed:
-        return existing, [], 0
-    kept["history"] = [entry for entry in existing.history if survives(entry)]
-    if count and existing.summary:
-        kept["summary"] = ""
-        removed.append((SUMMARY, {"summary": existing.summary}))
-    return existing.model_copy(update=kept), removed, count
+    removed += [("history", entry) for _n, entry in taken.history]
+    if taken.summary:
+        removed.append((SUMMARY, {"summary": taken.summary}))
+    return kept, removed, len(taken.items)
 
 
 def forget_segments(

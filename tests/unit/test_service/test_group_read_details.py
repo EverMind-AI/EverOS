@@ -28,7 +28,7 @@ from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
-from everos.memory.models import ExplicitInfoItem, MemberProfile, Profile
+from everos.memory.models import ExplicitInfoItem, Profile
 from everos.service import GetRequest, SearchRequest
 from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join
@@ -82,17 +82,13 @@ async def _world(tmp_path: Path, decider: Any = None) -> Any:
             ],
         ),
     ):
-        await world.stores.member_profile.write(
+        await world.stores.profile.write(
             world.scope("trip"),
-            MemberProfile(
-                group_id="trip",
-                member_id=member,
-                profile=Profile(
-                    owner_id=member,
-                    summary=f"{member} in the trip group",
-                    timestamp=T0 + 7_000,
-                    explicit_info=items,
-                ),
+            Profile(
+                owner_id=member,
+                summary=f"{member} in the trip group",
+                timestamp=T0 + 7_000,
+                explicit_info=items,
             ),
         )
     await world.project()
@@ -292,17 +288,13 @@ async def test_named_members_are_counted_once_across_a_pool(tmp_path: Path) -> N
             ("trip", "u_dan"),
             ("trip", "u_evan"),
         ):
-            await world.stores.member_profile.write(
+            await world.stores.profile.write(
                 world.scope(group),
-                MemberProfile(
-                    group_id=group,
-                    member_id=member,
-                    profile=Profile(
-                        owner_id=member,
-                        summary="",
-                        timestamp=T0 + 9_000,
-                        explicit_info=[_item(f"{member} in {group}", 6_000, 7_000)],
-                    ),
+                Profile(
+                    owner_id=member,
+                    summary="",
+                    timestamp=T0 + 9_000,
+                    explicit_info=[_item(f"{member} in {group}", 6_000, 7_000)],
                 ),
             )
         await world.project()

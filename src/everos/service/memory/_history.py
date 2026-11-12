@@ -202,15 +202,13 @@ class HistoryReader:
     async def _member_item(
         self, scope: Scope, reads: ReadScope, item_id: str
     ) -> MemoryHistory:
-        for member_id in await self._stores.member_profile.members(scope):
-            held = await self._stores.member_profile.read(scope, member_id)
-            if held is None or not profile_items.find_item(
-                held.profile, held.history, item_id
-            ):
+        for member_id in await self._stores.profile.people(scope):
+            held = await self._stores.profile.read(scope, member_id)
+            if held is None or not profile_items.find_item(held, held.history, item_id):
                 continue
             versions = [
                 v
-                for v in _item_versions(held.profile, held.history, item_id, {})
+                for v in _item_versions(held, held.history, item_id, {})
                 if _visible(reads, scope, v)
             ]
             if not versions:

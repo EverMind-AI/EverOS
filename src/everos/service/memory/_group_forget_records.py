@@ -17,6 +17,8 @@ __all__ = [
     "GroupForgetResult",
     "GroupUndoResult",
     "forget_result",
+    "member_from_record",
+    "member_record",
     "merge_withdrawals",
     "row_ids",
     "undo_record",
@@ -31,7 +33,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from everos.memory.models import ExplicitInfoItem, ImplicitTraitItem, MemberProfile
+from everos.memory.extract.pipeline.profile_items import (
+    BUCKETS,
+    Taken,
+    put_back,
+    take_out,
+)
+from everos.memory.models import Profile
 from everos.memory.ports import MemoryRef, Scope, Stored, Withdrawal, WithdrawnEntry
 
 from ._group_forget_plan import ForgetPlan, GroupForgetTarget, MemberEdit
@@ -207,106 +215,82 @@ def undo_record(plan: ForgetPlan, applied: Applied) -> dict[str, Any]:
     }
 
 
-def without_items(
-    held: MemberProfile, edit: MemberEdit
-) -> tuple[MemberProfile, dict[str, Any]]:
-    """The profile without the edit's items; and what an undo puts back."""
-    gone = set(edit.forgotten) | set(edit.stale)
-    profile = held.profile
+def member_record(scope: Scope, profile: Profile) -> dict[str, Any]:
+    """A member's whole profile in the group, as the forget log keeps it.
 
-    def keep(item: Any) -> bool:
-        return (item.model_extra or {}).get("item_id") not in gone
+    The member, their document and its queue and history apart: the form the
+    log has always kept, so an undo reads a forget logged before profiles
+    were one document as well as one logged after.
+    """
+    document = profile.model_dump(mode="json", exclude={"pending_memcell_ids"})
+    return {
+        "group_id": scope.owner_id,
+        "member_id": profile.owner_id,
+        "profile": {**document, "history": []},
+        "pending_memcell_ids": list(profile.pending_memcell_ids),
+        "history": list(profile.history),
+    }
 
-    explicit = [(n, i) for n, i in enumerate(profile.explicit_info) if not keep(i)]
-    implicit = [(n, i) for n, i in enumerate(profile.implicit_traits) if not keep(i)]
-    history_gone = set(edit.history)
-    cleared = bool(explicit or implicit)
-    kept = held.model_copy(
-        update={
-            "profile": profile.model_copy(
-                update={
-                    "explicit_info": [i for i in profile.explicit_info if keep(i)],
-                    "implicit_traits": [i for i in profile.implicit_traits if keep(i)],
-                    # Written over every item: it may say what was forgotten.
-                    # The next update writes it again from the items left, as
-                    # on user.md (profile_items.SUMMARY); the undo puts it
-                    # back while none has.
-                    "summary": "" if cleared else profile.summary,
-                }
-            ),
-            "history": [h for n, h in enumerate(held.history) if n not in history_gone],
-            "pending_memcell_ids": [*held.pending_memcell_ids, *edit.queue],
+
+def member_from_record(record: Mapping[str, Any]) -> Profile:
+    """The profile :func:`member_record` kept."""
+    return Profile.model_validate(
+        {
+            **record["profile"],
+            "history": list(record.get("history") or []),
+            "pending_memcell_ids": list(record.get("pending_memcell_ids") or []),
         }
     )
-    # Each removed item with its place, so an undo puts it back where it was.
+
+
+def without_items(held: Profile, edit: MemberEdit) -> tuple[Profile, dict[str, Any]]:
+    """The profile without the edit's items, the stale ones' segments queued;
+    and what an undo puts back, each item with its place."""
+    gone = set(edit.forgotten) | set(edit.stale)
+    positions = set(edit.history)
+    kept, taken = take_out(
+        held,
+        item=lambda i: (i.model_extra or {}).get("item_id") in gone,
+        entry=lambda n, _entry: n in positions,
+    )
+    kept = kept.model_copy(
+        update={"pending_memcell_ids": [*held.pending_memcell_ids, *edit.queue]}
+    )
     record = {
-        "member_id": held.member_id,
-        "explicit_info": [[n, i.model_dump(mode="json")] for n, i in explicit],
-        "implicit_traits": [[n, i.model_dump(mode="json")] for n, i in implicit],
-        "history": [[n, held.history[n]] for n in sorted(history_gone)],
-        "summary": profile.summary if cleared else None,
+        "member_id": held.owner_id,
+        **{
+            bucket: [[n, item] for b, n, item in taken.items if b == bucket]
+            for bucket in BUCKETS
+        },
+        "history": [[n, entry] for n, entry in taken.history],
+        "summary": taken.summary,
         "queued": list(edit.queue),
     }
     return kept, record
 
 
-def with_items(
-    held: MemberProfile, change: Mapping[str, Any]
-) -> tuple[MemberProfile, list[str]]:
-    """The profile with an undo's items back, and their ids."""
-    profile = held.profile
-    present = {
-        (i.model_extra or {}).get("item_id")
-        for i in (*profile.explicit_info, *profile.implicit_traits)
-    }
-    explicit = _placed(ExplicitInfoItem, change.get("explicit_info"), present)
-    implicit = _placed(ImplicitTraitItem, change.get("implicit_traits"), present)
-    queued = set(change.get("queued") or [])
-    summary = change.get("summary")
-    restored = held.model_copy(
-        update={
-            "profile": profile.model_copy(
-                update={
-                    "explicit_info": _put_back(profile.explicit_info, explicit),
-                    "implicit_traits": _put_back(profile.implicit_traits, implicit),
-                    "summary": summary
-                    if summary is not None and not profile.summary
-                    else profile.summary,
-                }
+def with_items(held: Profile, change: Mapping[str, Any]) -> tuple[Profile, list[str]]:
+    """The profile with an undo's items back in their places, and their ids."""
+    restored, ids = put_back(
+        held,
+        Taken(
+            items=tuple(
+                (bucket, int(n), dict(item))
+                for bucket in BUCKETS
+                for n, item in change.get(bucket) or []
             ),
-            "history": _put_back(
-                held.history,
-                [(int(n), dict(h)) for n, h in change.get("history") or []],
-            ),
-            "pending_memcell_ids": [
-                m for m in held.pending_memcell_ids if m not in queued
-            ],
-        }
+            history=tuple((int(n), dict(h)) for n, h in change.get("history") or []),
+            summary=change.get("summary"),
+        ),
     )
-    ids = [
-        str((i.model_extra or {}).get("item_id") or "")
-        for _, i in (*explicit, *implicit)
-    ]
-    return restored, ids
-
-
-def _placed[ItemT: (ExplicitInfoItem, ImplicitTraitItem)](
-    model: type[ItemT], recorded: Any, present: set[Any]
-) -> list[tuple[int, ItemT]]:
-    """An undo's removed items with their places, but those the profile has."""
-    return [
-        (int(n), model.model_validate(i))
-        for n, i in recorded or []
-        if i.get("item_id") not in present
-    ]
-
-
-def _put_back[T](items: list[T], placed: list[tuple[int, T]]) -> list[T]:
-    """``items`` with each ``(place, item)`` inserted where it was, in order."""
-    out = list(items)
-    for n, item in sorted(placed, key=lambda pair: pair[0]):
-        out.insert(min(n, len(out)), item)
-    return out
+    queued = set(change.get("queued") or [])
+    return restored.model_copy(
+        update={
+            "pending_memcell_ids": [
+                m for m in restored.pending_memcell_ids if m not in queued
+            ]
+        }
+    ), ids
 
 
 def forget_result(

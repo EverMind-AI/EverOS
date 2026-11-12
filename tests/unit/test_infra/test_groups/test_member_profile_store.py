@@ -1,10 +1,14 @@
 """Member-in-group profiles at the storage level (docs/group-memory.md, 6.1, 6.3).
 
-Real markdown under a temporary root and a real LanceDB. What these pin:
+The one profile store and handler, in a group's space. Real markdown under a
+temporary root and a real LanceDB. What these pin:
 
 - a member's profile is ``groups/<g>/members/<member_id>.md`` and round-trips
-  with its items' provenance keys, the pending segments and the history;
-- ``members`` lists the members that have a profile document;
+  with its items' provenance keys, the pending segments and the history, in
+  the file's own key order;
+- ``people`` lists the members that have a profile document;
+- the scope is the space: a group's needs the member, a user's space holds
+  only the user's own profile (``users/<u>/user.md``);
 - the cascade projects it into ``user_profile`` as ``owner_type = group``,
   ``owner_id = <g>``, ``subject_id = <m>``, under a row id no user id can
   equal; the index reads it back as the member's profile, and a personal read
@@ -23,8 +27,8 @@ from everos.infra.cascade.registry import match_kind
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import primary_key
 from everos.infra.persistence.index.adapters import ProfileIndexAdapter
-from everos.infra.persistence.markdown import MarkdownMemberProfileStore
-from everos.memory.models import ExplicitInfoItem, MemberProfile, Profile
+from everos.infra.persistence.markdown import MarkdownProfileStore, MarkdownReader
+from everos.memory.models import ExplicitInfoItem, Profile
 from everos.memory.ports import Scope
 from tests.fakes import handler_deps
 from tests.fakes.storage import make_storage
@@ -35,7 +39,7 @@ _PERSONAL = Scope(
 )
 
 
-def _profile() -> MemberProfile:
+def _profile() -> Profile:
     item = ExplicitInfoItem(
         description="Books the hotel for the team",
         category="commitments",
@@ -46,16 +50,12 @@ def _profile() -> MemberProfile:
         source_start=1_772_442_120_000,
         source_end=1_772_442_480_000,
     )
-    return MemberProfile(
-        group_id="trip",
-        member_id="u_betty",
-        profile=Profile(
-            owner_id="u_betty",
-            summary="Betty handles the hotel.",
-            timestamp=1_772_442_480_000,
-            explicit_info=[item],
-            primary_language="English",
-        ),
+    return Profile(
+        owner_id="u_betty",
+        summary="Betty handles the hotel.",
+        timestamp=1_772_442_480_000,
+        explicit_info=[item],
+        primary_language="English",
         pending_memcell_ids=["mc_2"],
         history=[{"description": "Undecided on dates", "replaced_at": 1}],
     )
@@ -63,23 +63,47 @@ def _profile() -> MemberProfile:
 
 async def test_a_member_profile_round_trips_under_members(tmp_path: Path) -> None:
     root = MemoryRoot(tmp_path)
-    store = MarkdownMemberProfileStore(root)
+    store = MarkdownProfileStore(root)
     ref = await store.write(_GROUP, _profile())
 
     assert ref.md_path == "default_app/p/groups/trip/members/u_betty.md"
     assert ref.id == "trip:u_betty"
     back = await store.read(_GROUP, "u_betty")
     assert back == _profile()
-    assert await store.members(_GROUP) == ["u_betty"]
+    assert await store.people(_GROUP) == ["u_betty"]
     assert await store.read(_GROUP, "u_chen") is None
     # Nothing reached the member's personal tree.
     assert not (tmp_path / "default_app" / "p" / "users").exists()
+    parsed = await MarkdownReader.read(tmp_path / ref.md_path)
+    assert list(parsed.frontmatter) == [
+        "id",
+        "type",
+        "schema_version",
+        "group_id",
+        "track",
+        "member_id",
+        "summary",
+        "explicit_info",
+        "implicit_traits",
+        "profile_timestamp_ms",
+        "primary_language",
+        "pending_memcell_ids",
+        "history",
+    ]
 
 
-async def test_a_member_profile_needs_a_group_scope(tmp_path: Path) -> None:
-    store = MarkdownMemberProfileStore(MemoryRoot(tmp_path))
-    with pytest.raises(ValueError):
-        await store.write(_PERSONAL, _profile())
+async def test_the_scope_names_the_space(tmp_path: Path) -> None:
+    store = MarkdownProfileStore(MemoryRoot(tmp_path))
+    with pytest.raises(ValueError, match="one member"):
+        await store.read(_GROUP)
+    with pytest.raises(ValueError, match="own profile"):
+        await store.read(_PERSONAL, "u_chen")
+    # The user's space: their own user.md, never a file under a group.
+    ref = await store.write(_PERSONAL, _profile().model_copy(update={"history": []}))
+    assert ref.md_path == "default_app/p/users/u_betty/user.md"
+    assert ref.id == "u_betty"
+    assert await store.people(_PERSONAL) == ["u_betty"]
+    assert await store.people(_GROUP) == []
 
 
 async def test_the_cascade_indexes_it_as_the_members_profile_in_the_group(
@@ -87,7 +111,7 @@ async def test_the_cascade_indexes_it_as_the_members_profile_in_the_group(
 ) -> None:
     root = MemoryRoot(tmp_path)
     root.ensure()
-    ref = await MarkdownMemberProfileStore(root).write(_GROUP, _profile())
+    ref = await MarkdownProfileStore(root).write(_GROUP, _profile())
     storage = make_storage(root)
     await storage.create_schema()
     try:

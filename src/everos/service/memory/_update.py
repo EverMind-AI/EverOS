@@ -60,7 +60,6 @@ from everos.memory.models import (
     FORGOTTEN_MARK,
     Episode,
     ImageMemory,
-    MemberProfile,
     Profile,
     Roster,
     Scene,
@@ -238,9 +237,7 @@ class UpdateManager:
         if kind == "scene":
             async with scenes_lock(step.scope):
                 return await self._scene(step, roster)
-        if step.scope.owner_type == "group":
-            return await self._member_item(step, roster)
-        return await self._profile_item(step)
+        return await self._profile_item(step, roster)
 
     # ── daily-log records ────────────────────────────────────────────────
 
@@ -383,14 +380,25 @@ class UpdateManager:
 
     # ── profile items ────────────────────────────────────────────────────
 
-    async def _profile_item(self, step: _Step) -> UpdateResult:
+    async def _profile_item(self, step: _Step, roster: Roster | None) -> UpdateResult:
+        """A person's change of an item of a profile: ``user.md``, or the
+        profile in the group of the member whose item it is."""
         scope = step.scope
-        async with profile_lock(scope):
-            profile = await self._stores.profile.read(scope)
+        member_id: str | None = None
+        if scope.owner_type == "group":
+            member_id = await self._member_holding(scope, step.entry_id)
+            if member_id is None:
+                raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
+            if roster is not None:
+                authorize_edit(roster, step.editor, sources=[member_id])
+        async with profile_lock(scope, member_id):
+            profile = await self._stores.profile.read(scope, member_id)
+            if profile is None and member_id is not None:
+                raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
             history = profile.history if profile is not None else []
             current_id = await self._current_item(step, profile, history)
             assert profile is not None  # a current item has a profile
-            same = _same_item(step, profile, current_id)
+            same = _same_item(step, profile, current_id, member_id=member_id)
             if same is not None:
                 return same
             written, new_history, held_id = self._edit_item(
@@ -398,38 +406,7 @@ class UpdateManager:
             )
             written.history = new_history
             ref = await self._stores.profile.write(scope, written)
-        await self._eraser.requeue("user_profile", {ref.md_path})
-        return _item_result(step, current_id, held_id, written, member_id=None)
-
-    async def _member_item(self, step: _Step, roster: Roster | None) -> UpdateResult:
-        scope = step.scope
-        member_id = await self._member_holding(scope, step.entry_id)
-        if member_id is None:
-            raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
-        if roster is not None:
-            authorize_edit(roster, step.editor, sources=[member_id])
-        async with profile_lock(scope, member_id):
-            held = await self._stores.member_profile.read(scope, member_id)
-            if held is None:
-                raise NotFoundError(f"no profile item {step.entry_id!r} in the group")
-            current_id = await self._current_item(step, held.profile, held.history)
-            same = _same_item(step, held.profile, current_id, member_id=member_id)
-            if same is not None:
-                return same
-            written, new_history, held_id = self._edit_item(
-                step, held.profile, held.history, current_id
-            )
-            ref = await self._stores.member_profile.write(
-                scope,
-                MemberProfile(
-                    group_id=held.group_id,
-                    member_id=member_id,
-                    profile=written,
-                    pending_memcell_ids=held.pending_memcell_ids,
-                    history=new_history,
-                ),
-            )
-        await self._eraser.requeue("group_member_profile", {ref.md_path})
+        await self._eraser.requeue(_PROFILE_KINDS[scope.owner_type], {ref.md_path})
         return _item_result(step, current_id, held_id, written, member_id=member_id)
 
     def _edit_item(
@@ -518,16 +495,23 @@ class UpdateManager:
 
     async def _member_holding(self, scope: Scope, item_id: str) -> str | None:
         """The member whose profile in the group holds ``item_id`` (or held it)."""
-        for member_id in await self._stores.member_profile.members(scope):
-            held = await self._stores.member_profile.read(scope, member_id)
+        for member_id in await self._stores.profile.people(scope):
+            held = await self._stores.profile.read(scope, member_id)
             if held is not None and profile_items.find_item(
-                held.profile, held.history, item_id
+                held, held.history, item_id
             ):
                 return member_id
         return None
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+
+_PROFILE_KINDS: dict[str, str] = {
+    "user": "user_profile",
+    "group": "group_member_profile",
+}
+"""The cascade kind of a profile document, by the space it is in."""
 
 
 @dataclass(frozen=True)

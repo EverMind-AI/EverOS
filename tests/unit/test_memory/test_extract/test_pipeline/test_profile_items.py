@@ -43,9 +43,12 @@ from everos.memory.extract.pipeline.profile_items import (
     forget_items,
     forget_segments,
     keep_held,
+    put_back,
     restore_items,
     rests_on,
+    rests_on_pictures,
     stamp_update,
+    take_out,
 )
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import (
@@ -677,3 +680,61 @@ def test_a_forget_by_id_takes_the_item_or_the_replaced_value() -> None:
     ]
     kept, removed, count = forget_items(profile, ["pi_berlin"])
     assert kept is not None and kept.explicit_info == [] and count == 1
+
+
+def test_take_out_keeps_each_part_s_place_and_put_back_restores_it() -> None:
+    """The one remover, and the put-back a group forget's undo makes."""
+    profile = _profile(
+        _stored("Lives in Paris", "pi_1"),
+        _stored("Has a cat", "pi_2"),
+        _stored("Works in Python", "pi_3"),
+    )
+    profile.summary = "Lives in Paris with a cat"
+    profile.history = [_replaced("Lived in Lyon", 30), _replaced("Had a dog", 20)]
+
+    kept, taken = take_out(
+        profile,
+        item=lambda i: _extra(i).get("item_id") == "pi_2",
+        entry=lambda n, _e: n == 1,
+    )
+    assert [i.description for i in kept.explicit_info] == [
+        "Lives in Paris",
+        "Works in Python",
+    ]
+    assert [e["description"] for e in kept.history] == ["Lived in Lyon"]
+    assert kept.summary == ""  # written over every item: it may repeat one
+    assert [(b, n, i["item_id"]) for b, n, i in taken.items] == [
+        ("explicit_info", 1, "pi_2")
+    ]
+    assert [(n, e["description"]) for n, e in taken.history] == [(1, "Had a dog")]
+    assert taken.summary == "Lives in Paris with a cat"
+
+    back, ids = put_back(kept, taken)
+    assert ids == ["pi_2"]
+    assert back.explicit_info == profile.explicit_info  # in its place
+    assert back.history == profile.history
+    assert back.summary == profile.summary
+    again, ids = put_back(back, taken)  # the item is there: once only
+    assert ids == [] and again.explicit_info == profile.explicit_info
+    rewritten = kept.model_copy(update={"summary": "Works in Python"})
+    assert put_back(rewritten, taken)[0].summary == "Works in Python"
+
+
+def test_take_out_of_nothing_returns_the_profile_and_keeps_the_summary() -> None:
+    profile = _profile(_stored("Lives in Paris", "pi_1"))
+    profile.summary = "Lives in Paris"
+    profile.history = [_replaced("Lived in Lyon", 30)]
+    same, taken = take_out(profile, item=lambda _i: False, entry=lambda _n, _e: False)
+    assert same is profile and taken.items == () and taken.summary is None
+    kept, taken = take_out(profile, item=lambda _i: False, entry=lambda n, _e: n == 0)
+    assert kept.summary == "Lives in Paris" and taken.summary is None
+
+
+def test_the_picture_rule_takes_only_what_every_gone_picture_established() -> None:
+    both = {SOURCE_IMAGE_KEYS: [_CAT, _CITY]}
+    assert rests_on_pictures(both, [_CAT, _CITY])
+    assert not rests_on_pictures(both, [_CAT])  # the other photo still shows it
+    assert not rests_on_pictures({"source_memcell_ids": ["mc_1"]}, [_CAT])
+    assert rests_on_pictures(
+        _item("A tabby cat", **{SOURCE_IMAGE_KEYS: [_CAT]}), [_CAT]
+    )

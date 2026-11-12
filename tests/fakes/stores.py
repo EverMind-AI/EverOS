@@ -16,7 +16,6 @@ __all__ = [
     "InMemoryGroupStore",
     "InMemoryImageMemoryStore",
     "InMemoryImageStore",
-    "InMemoryMemberProfileStore",
     "InMemoryMemcellStore",
     "InMemoryMessageForgetStore",
     "InMemoryProfileStore",
@@ -42,7 +41,6 @@ from everos.memory.models import (
     Group,
     GroupProfileItem,
     ImageMemory,
-    MemberProfile,
     MemCell,
     MemcellRecord,
     Profile,
@@ -333,23 +331,55 @@ class InMemoryAgentCaseStore(_DailyLog[AgentCase]):
 
 
 class InMemoryProfileStore:
-    """One profile per scope; ``writes`` records every write in order."""
+    """One profile per person and space, by ``(scope, person)``.
+
+    A user's own profile is keyed by their scope and their id, a member's by
+    the group's scope and the member. ``writes`` records every write in order.
+    """
 
     def __init__(self) -> None:
-        self.profiles: dict[Scope, Profile] = {}
+        self.profiles: dict[tuple[Scope, str], Profile] = {}
         self.writes: list[tuple[Scope, Profile]] = []
 
-    async def read(self, scope: Scope) -> Profile | None:
-        return self.profiles.get(scope)
+    async def read(self, scope: Scope, person_id: str | None = None) -> Profile | None:
+        return self.profiles.get((scope, _person(scope, person_id)))
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
-        self.profiles[scope] = profile
-        self.writes.append((scope, profile))
-        return MemoryRef(
-            id=scope.owner_id,
-            entry_id=f"profile_{scope.owner_id}",
-            md_path=f"users/{scope.owner_id}/user.md",
+        person = _person(
+            scope, profile.owner_id if scope.owner_type == "group" else None
         )
+        self.profiles[(scope, person)] = profile
+        self.writes.append((scope, profile))
+        return _profile_ref(scope, person)
+
+    async def people(self, scope: Scope) -> list[str]:
+        return sorted(person for (s, person) in self.profiles if s == scope)
+
+    async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
+        held = self.profiles.pop((scope, person_id), None)
+        if held is None:
+            return None
+        return Stored(ref=_profile_ref(scope, person_id), scope=scope, item=held)
+
+
+def _person(scope: Scope, person_id: str | None) -> str:
+    if scope.owner_type == "group":
+        if person_id is None:
+            raise ValueError("a profile in a group belongs to one member")
+        return person_id
+    return scope.owner_id
+
+
+def _profile_ref(scope: Scope, person: str) -> MemoryRef:
+    if scope.owner_type == "group":
+        return MemoryRef(
+            id=f"{scope.owner_id}:{person}",
+            entry_id=f"member_profile_{scope.owner_id}_{person}",
+            md_path=f"groups/{scope.owner_id}/members/{person}.md",
+        )
+    return MemoryRef(
+        id=person, entry_id=f"profile_{person}", md_path=f"users/{person}/user.md"
+    )
 
 
 class InMemorySceneStore:
@@ -543,29 +573,6 @@ class InMemoryGroupProfileStore:
         self.queued[scope] = PendingBatch(
             memcell_ids=tuple(memcell_ids), failures=failures, retry_at=retry_at
         )
-
-
-class InMemoryMemberProfileStore:
-    """Member-in-group profiles by ``(group scope, member)``; ``writes`` in order."""
-
-    def __init__(self) -> None:
-        self.profiles: dict[tuple[Scope, str], MemberProfile] = {}
-        self.writes: list[MemberProfile] = []
-
-    async def read(self, scope: Scope, member_id: str) -> MemberProfile | None:
-        return self.profiles.get((scope, member_id))
-
-    async def write(self, scope: Scope, profile: MemberProfile) -> MemoryRef:
-        self.profiles[(scope, profile.member_id)] = profile
-        self.writes.append(profile)
-        return MemoryRef(
-            id=f"{scope.owner_id}:{profile.member_id}",
-            entry_id=f"member_profile_{scope.owner_id}_{profile.member_id}",
-            md_path=f"groups/{scope.owner_id}/members/{profile.member_id}.md",
-        )
-
-    async def members(self, scope: Scope) -> list[str]:
-        return sorted(member for (s, member) in self.profiles if s == scope)
 
 
 class InMemoryAgentSkillStore:

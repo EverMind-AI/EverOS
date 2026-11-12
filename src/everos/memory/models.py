@@ -376,7 +376,14 @@ class ImplicitTraitItem(BaseModel):
 
 
 class Profile(BaseModel):
-    """Domain user profile — one per owner, rewritten on every synthesis.
+    """One person's profile in one space, rewritten on every update.
+
+    The space is a user's own one-to-one memory (``users/<u>/user.md``, the
+    person is the user) or a group (``groups/<g>/members/<m>.md``, the person
+    is a member, read only from that group's segments -- docs/group-memory.md,
+    7.4, D6): one document either way, written by the one profile operator.
+    Its items carry :data:`MEMBER_ITEM_KEYS` as extra keys, and
+    :data:`MEMBER_VERSION_KEYS` when they replaced an item.
 
     An item given as a bare sentence (how early profiles were stored) is the
     item with only its ``description``. Constructing a profile is strict;
@@ -384,6 +391,7 @@ class Profile(BaseModel):
     """
 
     owner_id: str
+    """The person the profile is about: the user, or the member in a group."""
     summary: str
     timestamp: int
     explicit_info: list[ExplicitInfoItem] = Field(default_factory=list)
@@ -392,11 +400,13 @@ class Profile(BaseModel):
     """The ``OutputLanguage`` value the profile is written in, frozen by the
     first extraction that knew it and never changed automatically after."""
     history: list[dict[str, Any]] = Field(default_factory=list)
-    """The one-to-one profile's history part (``user.md``): items an update
-    replaced or retired, newest first, each with ``replaced_at`` and what
-    replaced it (``superseded_by``, ``deprecated_by`` and ``reason``,
-    ``merged_into``, or ``reason``). A member-in-group profile keeps its own on
-    :attr:`MemberProfile.history` and leaves this empty."""
+    """Items an update replaced or retired, newest first, each with
+    ``replaced_at`` and what replaced it (``superseded_by``, ``deprecated_by``
+    and ``reason``, ``merged_into``, or ``reason``)."""
+    pending_memcell_ids: list[str] = Field(default_factory=list)
+    """Segments the person spoke in that no update has read yet: a group's
+    profile is updated every ``[groups] member_profile_every`` of them. Always
+    empty in a one-to-one space, which reads every segment at once."""
 
     @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod
@@ -416,6 +426,7 @@ class Profile(BaseModel):
         implicit_traits: Sequence[object],
         primary_language: str | None = None,
         history: Sequence[object] = (),
+        pending_memcell_ids: Sequence[str] = (),
     ) -> Profile:
         """A stored profile, without the items that are no longer items.
 
@@ -434,6 +445,7 @@ class Profile(BaseModel):
             ),
             primary_language=primary_language,
             history=[dict(entry) for entry in history if isinstance(entry, dict)],
+            pending_memcell_ids=list(pending_memcell_ids),
         )
 
 
@@ -508,11 +520,11 @@ MEMBER_ITEM_KEYS: tuple[str, ...] = (
     "source_start",
     "source_end",
 )
-"""The provenance keys every item of a :class:`MemberProfile` carries.
+"""The provenance keys every profile item carries, in either space.
 
 ``item_id`` stays while the item's description does; ``source_memcell_ids``
-are the group segments it was read from and ``source_start`` /
-``source_end`` (epoch ms) their span, which a read compares with the asker's
+are the segments it was read from and ``source_start`` / ``source_end``
+(epoch ms) their span, which a group read compares with the asker's
 membership windows (docs/group-memory.md, section 9.1)."""
 
 MEMBER_VERSION_KEYS: tuple[str, ...] = ("supersedes", "since")
@@ -531,33 +543,6 @@ and the old item's ``source_start`` / ``source_end`` each."""
 
 MEMBER_PREVIOUS_LIMIT = 2
 """Replaced values a read shows per profile item."""
-
-
-class MemberProfile(BaseModel):
-    """One member's profile inside one group (docs/group-memory.md, 7.4, D6).
-
-    ``profile`` is the profile operator's document about ``member_id``, read
-    only from this group's segments in which the member spoke; it never holds
-    the member's personal profile (``users/<m>/user.md``) or another group's.
-    Its items carry :data:`MEMBER_ITEM_KEYS` as extra keys, and
-    :data:`MEMBER_VERSION_KEYS` when they replaced an item.
-
-    Attributes:
-        group_id: The group.
-        member_id: Whom the profile is about.
-        profile: The document; ``profile.owner_id`` is ``member_id``.
-        pending_memcell_ids: Segments the member spoke in that no update has
-            read yet (the ``[groups] member_profile_every`` throttle).
-        history: Items a later update replaced or dropped, newest first, each
-            with the ``replaced_at`` epoch ms of that update and, when a new
-            value replaced it, that item's id in ``superseded_by``.
-    """
-
-    group_id: str
-    member_id: str
-    profile: Profile
-    pending_memcell_ids: list[str] = Field(default_factory=list)
-    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def replaced_chains(
@@ -1265,7 +1250,6 @@ __all__ = [
     "IngestResult",
     "MemCell",
     "MemberKind",
-    "MemberProfile",
     "MembershipInterval",
     "MemcellRecord",
     "MemorizeTask",

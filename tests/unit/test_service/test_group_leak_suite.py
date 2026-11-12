@@ -51,7 +51,6 @@ from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.models import (
     AgentCase,
     ExplicitInfoItem,
-    MemberProfile,
     Profile,
     ProfileSource,
     Scene,
@@ -530,26 +529,22 @@ async def test_a_forgotten_record_is_absent_for_every_asker(
         assert picture.status_code == 404, asker
 
 
-def _member_profile(member: str, *items: tuple[str, int, int]) -> MemberProfile:
-    return MemberProfile(
-        group_id="trip",
-        member_id=member,
-        profile=Profile(
-            owner_id=member,
-            summary=f"summary marker of {member}",
-            timestamp=T0 + 9_000,
-            explicit_info=[
-                ExplicitInfoItem(
-                    description=text,
-                    category="plans",
-                    item_id=f"pi_{start}",
-                    source_memcell_ids=[f"mc_{start}"],
-                    source_start=T0 + start,
-                    source_end=T0 + end,
-                )
-                for text, start, end in items
-            ],
-        ),
+def _member_profile(member: str, *items: tuple[str, int, int]) -> Profile:
+    return Profile(
+        owner_id=member,
+        summary=f"summary marker of {member}",
+        timestamp=T0 + 9_000,
+        explicit_info=[
+            ExplicitInfoItem(
+                description=text,
+                category="plans",
+                item_id=f"pi_{start}",
+                source_memcell_ids=[f"mc_{start}"],
+                source_start=T0 + start,
+                source_end=T0 + end,
+            )
+            for text, start, end in items
+        ],
     )
 
 
@@ -560,7 +555,7 @@ async def test_profile_items_outside_the_window_never_attach(
     """Row 4 and section 13.5: a profile item whose source is invisible."""
     world = fixture.world
     early, late = "early profile marker Lisbon", "late profile marker Lisbon"
-    await world.stores.member_profile.write(
+    await world.stores.profile.write(
         world.scope("trip"),
         _member_profile("u_chen", (early, 1000, 2000), (late, 8000, 9000)),
     )
@@ -753,11 +748,9 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             if type(e).__name__ == "GroupEpisodeExtracted"
         }
         for member in ("u_chen", "u_betty"):
-            profile = await world.stores.member_profile.read(
-                world.scope("trip"), member
-            )
+            profile = await world.stores.profile.read(world.scope("trip"), member)
             assert profile is not None
-            for item in profile.profile.explicit_info:
+            for item in profile.explicit_info:
                 assert (
                     set((item.model_extra or {})["source_memcell_ids"]) <= group_cells
                 )
@@ -957,7 +950,7 @@ async def _seed_own_memory(world: GroupWorld) -> None:
         if user != "u_chen":
             await world.personal_episode(user, text, at=T0 + 1000)
     for member in ("u_chen", "u_evan", "u_dan"):
-        await world.stores.member_profile.write(
+        await world.stores.profile.write(
             world.scope("trip"),
             _member_profile(
                 member,

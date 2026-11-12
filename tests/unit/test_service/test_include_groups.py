@@ -36,7 +36,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.config import Settings, load_settings
-from everos.memory.models import ExplicitInfoItem, MemberProfile, Profile, Scene
+from everos.memory.models import ExplicitInfoItem, Profile, Scene
 from everos.memory.ports import NoSourceCheck
 from everos.memory.search.llm_multiround import RoundDecision
 from everos.service import GetRequest, SearchRequest
@@ -74,26 +74,22 @@ class _World:
     decider: _Decider
 
 
-def _member_profile(member: str, *items: tuple[str, int, int]) -> MemberProfile:
-    return MemberProfile(
-        group_id="trip",
-        member_id=member,
-        profile=Profile(
-            owner_id=member,
-            summary=f"member summary of {member}",
-            timestamp=T0 + 9_000,
-            explicit_info=[
-                ExplicitInfoItem(
-                    description=text,
-                    category="plans",
-                    item_id=f"pi_{member}_{start}",
-                    source_memcell_ids=[f"mc_{start}"],
-                    source_start=T0 + start,
-                    source_end=T0 + end,
-                )
-                for text, start, end in items
-            ],
-        ),
+def _member_profile(member: str, *items: tuple[str, int, int]) -> Profile:
+    return Profile(
+        owner_id=member,
+        summary=f"member summary of {member}",
+        timestamp=T0 + 9_000,
+        explicit_info=[
+            ExplicitInfoItem(
+                description=text,
+                category="plans",
+                item_id=f"pi_{member}_{start}",
+                source_memcell_ids=[f"mc_{start}"],
+                source_start=T0 + start,
+                source_end=T0 + end,
+            )
+            for text, start, end in items
+        ],
     )
 
 
@@ -121,7 +117,7 @@ async def seeded(tmp_path: Path) -> AsyncIterator[_World]:
         await world.personal_episode("u_chen", CHEN, at=T0 + 500)
         await world.personal_episode("u_evan", EVAN, at=T0 + 500)
         await world.profile("u_chen", "personal profile marker Chen lives in Porto")
-        await world.stores.member_profile.write(
+        await world.stores.profile.write(
             world.scope("trip"),
             _member_profile(
                 "u_chen",
@@ -129,7 +125,7 @@ async def seeded(tmp_path: Path) -> AsyncIterator[_World]:
                 ("chen late profile marker", 8_000, 9_000),
             ),
         )
-        await world.stores.member_profile.write(
+        await world.stores.profile.write(
             world.scope("trip"),
             _member_profile("u_evan", ("evan profile marker", 8_000, 9_000)),
         )

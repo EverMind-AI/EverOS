@@ -19,8 +19,9 @@ its own conventions:
   layout via five ``SKILL_*`` ClassVars (container / dir prefix /
   main filename / references / scripts).
 - **Profile** schemas declare ``PROFILE_FILENAME`` (``"user.md"`` /
-  ``"agent.md"`` / …) and inherit ``SCOPE_DIR`` from a scope mixin; no
-  profile base class — the writer/reader pair is duck-typed.
+  ``"group.md"``) and inherit ``SCOPE_DIR`` from a scope mixin; the
+  writer/reader pair is duck-typed. A person's profile -- ``user.md`` or a
+  member's ``members/<m>.md`` -- is one schema, :class:`ProfileFrontmatter`.
 
 The group profile's module (:mod:`.group_profile`) also owns the format of
 its entries: :func:`render_group_profile_entry` and
@@ -36,7 +37,6 @@ from .group import GroupFrontmatter as GroupFrontmatter
 from .group import (
     GroupImageMemoryDailyFrontmatter as GroupImageMemoryDailyFrontmatter,
 )
-from .group import GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter
 from .group import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from .group_profile import (
     GroupProfileDailyFrontmatter as GroupProfileDailyFrontmatter,
@@ -55,6 +55,8 @@ from .knowledge_document import (
     KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
 )
 from .knowledge_topic import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
+from .profile import GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter
+from .profile import ProfileFrontmatter as ProfileFrontmatter
 from .profile import UserProfileFrontmatter as UserProfileFrontmatter
 from .scene import SceneDailyFrontmatter as SceneDailyFrontmatter
 
@@ -72,6 +74,7 @@ __all__ = [
     "ImageMemoryDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
+    "ProfileFrontmatter",
     "SceneDailyFrontmatter",
     "UserProfileFrontmatter",
     "group_profile_item_from_entry",
