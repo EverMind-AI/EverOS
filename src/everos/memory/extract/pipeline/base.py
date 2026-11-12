@@ -19,7 +19,8 @@ from typing import Literal, Protocol
 from everos.memory.models import IngestResult, MemCell
 from everos.memory.ports import Event
 
-type Track = Literal["user_memory", "agent_memory"]
+type Track = Literal["user_memory", "agent_memory", "group_memory"]
+"""Which pipeline a :class:`PipelineOutcome` sums up."""
 
 
 @dataclass(frozen=True)
