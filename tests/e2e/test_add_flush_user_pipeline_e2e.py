@@ -7,8 +7,10 @@ The rest is the long real-conversation smoke:
 
 Goal: prove the user-side add/flush chain is end-to-end live. Feeds
 **419 real LoCoMo messages** through ``POST /api/v1/memory/add`` (in 19
-batches sharing one session_id) then a final ``POST /flush``, and
-verifies:
+batches sharing one session_id) then a final ``POST /flush``. Two people
+talk in it without a group_id, so the session is their implicit group
+(docs/group-memory.md, section 7.9): its episodes and the members' profiles
+live under ``groups/implicit_<hash>/``. Verifies:
 
 1. Each /add returns a sane status and the unprocessed_buffer delta
    matches what the service claims (accumulated → grew by batch size;
@@ -16,7 +18,7 @@ verifies:
 2. After /flush the buffer is empty and the memcell table has rows.
 3. After cascade drains, episode md files exist and LanceDB rows
    reflect them with valid content_sha256 + vector.
-4. OME-driven async strategies have produced the profile md file.
+4. OME-driven async strategies have produced the members' profile md files.
 
 Real LLM + real embedder (creds via ``.env``). Marked ``slow`` —
 ``pytest -m slow tests/integration/test_add_flush_core_pipeline_smoke.py``.
@@ -60,14 +62,12 @@ def _to_add_messages(batch: dict) -> list[dict]:
 
 
 def _list_md_files(memory_root: Path, subpath: str) -> list[Path]:
-    """List .md files under
-    ``<memory_root>/default_app/default_project/users/<user>/<subpath>/``."""
-    user_dir = memory_root / "default_app" / "default_project" / "users"
-    if not user_dir.exists():
-        return []
+    """List .md files under ``<subpath>/`` of every user and group owner
+    (``<memory_root>/default_app/default_project/{users,groups}/<owner>/``)."""
+    space = memory_root / "default_app" / "default_project"
     out: list[Path] = []
-    for user_dir_child in user_dir.iterdir():
-        target = user_dir_child / subpath
+    for owner_dir in [*space.glob("users/*"), *space.glob("groups/*")]:
+        target = owner_dir / subpath
         if target.is_dir():
             out.extend(target.rglob("*.md"))
         elif target.with_suffix(".md").exists():
@@ -116,8 +116,8 @@ def _maybe_snapshot_memory_root(memory_root: Path) -> None:
 
 @pytest.mark.slow
 @pytest.mark.live_llm
-# Retries cover transient real-LLM flakes: OME profile clustering
-# occasionally fails to emit user.md within the cascade-drain deadline
+# Retries cover transient real-LLM flakes: OME profile updates
+# occasionally fail to emit their md within the cascade-drain deadline
 # (LLM timeout, empty response, or async race), but is reliably stable
 # on retry. reruns_delay leaves the cascade workers idle between
 # attempts so we don't pile state on top of a prior run.
@@ -236,8 +236,8 @@ async def test_long_conversation_produces_all_memory_types(
     episode_files = _list_md_files(memory_root, _EPISODE_DIR)
     assert episode_files, "no episode md files written"
     episode_entries = _count_episode_entries(episode_files)
-    # 19 memcells × 2 owners (caroline + melanie) ≈ 36 episode rows seen
-    # in practice; threshold 15 leaves variance room.
+    # 19 memcells, one episode each in the speakers' implicit group (the
+    # per-speaker copies are gone); threshold 15 leaves variance room.
     assert episode_entries >= 15, (
         f"expected ≥ 15 episode entries across {len(episode_files)} files, "
         f"got {episode_entries}"
@@ -250,22 +250,14 @@ async def test_long_conversation_produces_all_memory_types(
         f"LanceDB episode rows ({lance_episode_count}) < md entries ({episode_entries})"
     )
 
-    # 5.3 profile (md only — profile retrieval path is stub; we only assert
-    # the writer wrote something). Profile lives as a single file
-    # ``users/<user_id>/user.md`` (schema: ``UserProfileFrontmatter.PROFILE_FILENAME``).
-    from everos.infra.persistence.markdown import UserProfileFrontmatter
-
-    profile_filename = UserProfileFrontmatter.PROFILE_FILENAME
-    profile_files: list[Path] = []
-    users_root = memory_root / "default_app" / "default_project" / "users"
-    if users_root.is_dir():
-        for ud in users_root.iterdir():
-            candidate = ud / profile_filename
-            if candidate.exists():
-                profile_files.append(candidate)
+    # 5.3 profile (md only — we only assert the writer wrote something). A
+    # speaker's profile in their implicit group is one file,
+    # ``groups/<group_id>/members/<member_id>.md``, brought up to date by the
+    # flush (update_member_profiles).
+    space = memory_root / "default_app" / "default_project"
+    profile_files = sorted(space.glob("groups/*/members/*.md"))
     assert profile_files, (
-        f"no {profile_filename} written — extract_user_profile / "
-        "trigger_profile_clustering did not emit"
+        "no members/<m>.md written — update_member_profiles did not emit"
     )
     # At least one profile file has non-trivial content.
     assert any(f.read_text().strip() for f in profile_files), (
@@ -287,8 +279,8 @@ async def test_long_conversation_produces_all_memory_types(
         memory_root,
         storage_view.repos,
         expect_at_least={
-            "episode": 1,
-            "user_profile": 1,
+            "group_episode": 1,
+            "group_member_profile": 1,
         },
     )
 
