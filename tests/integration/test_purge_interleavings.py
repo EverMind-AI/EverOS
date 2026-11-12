@@ -162,12 +162,24 @@ class PurgeMachine(RuleBasedStateMachine):
         await self.purge.service.restore()
         self.runner.start()
 
-    def _spawn(self, event: ScopedEvent, run_id: str) -> None:
+    def _spawn(self, event: ScopedEvent, run_id: str) -> asyncio.Task[Any]:
         task = self.loop.create_task(
             self.ome_runner.run(_product, event, run_id=run_id, max_retries_snapshot=0)
         )
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        return task
+
+    async def _started(self, task: asyncio.Task[Any], run_id: str) -> None:
+        """Until the run's RUNNING row is written (or the run ended): from
+        then on a restart replays it, as crash recovery does. A run killed
+        before that row exists is lost (as in the engine), so the machine
+        waits for it rather than guessing how long it takes."""
+        async with asyncio.timeout(10):
+            while True:
+                if task.done() or await self.records.get(run_id) is not None:
+                    return
+                await asyncio.sleep(0.005)
 
     async def _settle(self) -> None:
         """Run until no purge is active, nothing queued, nothing in flight.
@@ -216,8 +228,8 @@ class PurgeMachine(RuleBasedStateMachine):
         born = get_utc_now() - (timedelta(hours=1) if stale else timedelta(0))
         event = ScopedEvent(app_id=where[0], project_id=where[1], ts=born)
         self.items.append(Item(f"ev_{event.event_id}", *where, born))
-        self._spawn(event, self._key("run"))
-        self.run(asyncio.sleep(0.05))  # let it reach the gate (or finish)
+        run_id = self._key("run")
+        self.run(self._started(self._spawn(event, run_id), run_id))
 
     @rule(where=st.sampled_from(SCOPES))
     def crash_mid_event(self, where: tuple[str, str]) -> None:
@@ -312,10 +324,8 @@ class PurgeMachine(RuleBasedStateMachine):
                     run_id=record.run_id, finished_at=get_utc_now(), error="crash"
                 )
                 event = ScopedEvent.model_validate_json(record.event_payload)
-                self._spawn(event, self._key("run"))
-            # A replay not yet started is lost on a second crash (as in the
-            # engine: an APS job that never ran); let it record its start.
-            await asyncio.sleep(0.05)
+                run_id = self._key("run")
+                await self._started(self._spawn(event, run_id), run_id)
             self.crashed = False
 
         self.run(go())
@@ -371,7 +381,14 @@ class PurgeMachine(RuleBasedStateMachine):
                 _event("not checked: an item born while a purge of its scope ran")
             else:
                 _event("I1 checked: an item newer than every purge of its scope")
-                assert item.key in products, f"I1: {item} lost"
+                assert item.key in products, f"I1: {item} lost; {self._trace(item)}"
+
+    def _trace(self, item: Item) -> str:
+        """What the run records say about a lost event (failure message only)."""
+        if not item.key.startswith("ev_"):
+            return "not an OME event"
+        runs = self.run(self.records.list_by_event_id(item.key[3:]))
+        return "runs: " + repr([(r.run_id, r.status, r.error) for r in runs])
 
     def teardown(self) -> None:
         async def go() -> None:
