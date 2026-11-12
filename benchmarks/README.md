@@ -50,6 +50,13 @@ cp benchmarks/.env.example benchmarks/.env
 Models, `top_k`, retrieval settings and concurrency are set in
 `benchmarks/configs/<dataset>.toml`. `reproduce.sh` passes no model overrides.
 
+The decider reaches the servers a run starts as `EVEROS_LLM__DECIDER__MODEL` /
+`__BASE_URL` / `__API_KEY` -- EverOS's `[llm.decider]`. Before the first question of
+an `llm_multiround` run, `run.py` resolves the decider the way those servers do
+(`[llm.decider]`, then the deprecated `[decider]`, then the decider's own defaults,
+then `[llm]`) and sends it one request through the same client; a decider that does
+not answer stops the run.
+
 ## 4. Run
 
 ```bash
@@ -94,8 +101,9 @@ benchmarks/results/<Dataset>/<run>/
 └── traces/               per-round retrieval traces
 ```
 
-`run_spec.json` records the models actually served and the `everalgo` package
-versions, which determine what a store contains.
+`run_spec.json` records the models actually served -- the decider as EverOS
+resolves it, with the section each of its settings came from -- and the `everalgo`
+package versions, which determine what a store contains.
 
 ## 6. Results
 

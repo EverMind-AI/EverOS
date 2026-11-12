@@ -135,6 +135,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `profile_episode_skipped` warning. `ProfileClusterUpdated` is removed:
   `trigger_profile_clustering` still clusters episodes for agentic search and
   Reflection, and no longer emits an event.
+- **The benchmark's decider probe and run record follow `[llm.decider]`.**
+  `benchmarks/run.py` starts its servers with `EVEROS_LLM__DECIDER__MODEL` /
+  `__BASE_URL` / `__API_KEY` instead of the deprecated `EVEROS_DECIDER__*`, and
+  `evermembench.toml` sets `EVEROS_LLM__DECIDER__TIMEOUT_SECONDS`. Before the
+  first question of an `llm_multiround` run, the decider is resolved by EverOS's
+  own `resolve_llm_task`, in a child process under the servers' environment,
+  and asked once through the provider built from it -- the decider's own model,
+  endpoint, `extra`, output cap, temperature, timeout and SDK retries, with a
+  strict `json_schema` reply format -- where the harness used to rebuild the
+  precedence itself and send a request of its own. `run_spec.json` records the
+  decider that resolution names, with the section each field came from, and
+  the backbone entry no longer picks up `EVEROS_LLM__<TASK>__*` variables.
 
 ### Removed
 
