@@ -590,13 +590,14 @@ INGEST_SERVER_SETTINGS: dict[str, str] = {
     "memorize_mode": "EVEROS_MEMORIZE__MODE",
     "llm_temperature": "EVEROS_LLM__TEMPERATURE",
     "llm_max_tokens": "EVEROS_LLM__MAX_TOKENS",
+    "llm_response_format_mode": "EVEROS_LLM__RESPONSE_FORMAT_MODE",
 }
 """Server settings that change what ingestion stores: identity key -> EVEROS_* variable.
 
 The boundary strategy decides where memcells are cut, the memorize mode which pipelines
-run, the extraction model's temperature and output cap what each memory says,
-clustering which cluster every episode joins, and the embedding settings every stored
-vector, so a store built under other values cannot serve this run."""
+run, the extraction model's temperature, output cap and reply format what each memory
+says, clustering which cluster every episode joins, and the embedding settings every
+stored vector, so a store built under other values cannot serve this run."""
 
 
 def _server_setting(config: BenchmarkConfig, variable: str) -> str:

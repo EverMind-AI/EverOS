@@ -1,0 +1,92 @@
+# LoCoMo with step boundary detection and prompt-only replies: locomo.toml with the two
+# [retrieval_env] lines marked "step" below and nothing else changed (a unit test keeps
+# it so). Boundary detection asks once per message instead of once per add, and every
+# EverOS model call asks for its reply in the prompt alone, with no response_format.
+# Category 5 is adversarial and ungradable by a contains-judge; the adapter drops it,
+# leaving 1540 of the 2432 questions.
+
+adapter = "locomo"
+data_path = "${BENCH_DATA_LOCOMO:-benchmarks/data/locomo10.json}"
+# The gold audit (dial481/locomo-audit errors.json): JUDGE re-judges the questions it
+# disputes against its corrected answers, and the report adds that Re-judged score.
+gold_audit_path = "${BENCH_DATA_LOCOMO_AUDIT:-benchmarks/data/locomo-audit-errors.json}"
+results_root = "${BENCH_EVAL_ROOT:-benchmarks/results}/LoCoMo"
+conversations = 10
+app_id = "default"                      # partition key stored in the index, not a directory name
+project_id = "default"
+
+# --- ADD -------------------------------------------------------------------
+servers = 10                            # EverOS processes, each with its own store; clamped to the conversation count
+conversations_concurrency = 10          # conversations ingested at once
+batch_size = 50                         # messages per /memory/add call
+cascade_timeout = 7200                  # seconds to wait for extraction to drain before a conversation counts as done
+backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
+backbone_base_url = ""                  # empty = OpenRouter
+decider_model = "${BENCH_DECIDER_MODEL:-deepseek/deepseek-v4-flash-0731}"
+                                        # model, which is the single-model setup that
+                                        # works with no extra configuration. Our
+                                        # published numbers used qwen3.6-27B here; set
+                                        # BENCH_DECIDER_MODEL + BENCH_DECIDER_BASE_URL
+                                        # together to reproduce them -- a model name
+                                        # without its endpoint 404s on every call and
+                                        # the loop falls back silently.
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
+decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
+message_owner = "eval_owner"            # every message under the queried speaker, one pool per
+                                        # conversation as the EverAlgo reference keeps it; per
+                                        # sender, a memcell only the other speaker talks in
+                                        # never reaches the partition the questions search
+# --- SEARCH ----------------------------------------------------------------
+methods = "agentic"                     # the method EverAlgo's LoCoMo reference reports
+top_k = 10                              # episodes returned per question, as that reference
+search_concurrency = 2                  # questions retrieved in parallel within one conversation
+include_profile = false                 # OFF. The reference harness for this
+                                        # benchmark never sent the flag, so ON is a
+                                        # deviation from the published prompt, not a
+                                        # setting. Turn it on only for a declared
+                                        # ablation, and expect to beat the measured
+                                        # run-to-run noise floor first: 0.91 pp on
+                                        # LoCoMo, 1.20 pp on LongMemEval.
+trace = true                            # export the retrieval trace
+
+[providers]                                # OpenRouter provider pin per model vendor
+openai = "openai"
+anthropic = "anthropic"
+google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitted
+
+[retrieval_env]                         # exported to the EverOS servers this harness starts
+EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
+EVEROS_CASCADE__WATCHER_ENABLED = "false"  # inotify is exhausted by the IDE on this host;
+                                            # the 30s scanner covers the same ground
+EVEROS_TOKENIZER__NAME = "nltk"         # keyword tokenizer of the EverAlgo LoCoMo harness;
+                                        # needs NLTK's punkt_tab + stopwords data. The
+                                        # index is built with it, so it is part of the
+                                        # ingest identity: a jieba store is not reused.
+EVEROS_MEMORIZE__MODE = "chat"          # a chat log: no agent-memory pipeline
+EVEROS_BOUNDARY_DETECTION__STRATEGY = "step"      # step: one boundary call per message
+EVEROS_LLM__RESPONSE_FORMAT_MODE = "prompt_only"  # step: every call, no response_format
+# The EverAlgo LoCoMo reference's extraction and index settings:
+EVEROS_LLM__TEMPERATURE = "0.3"
+EVEROS_LLM__MAX_TOKENS = "16384"
+EVEROS_EMBEDDING__DIMENSIONS = "1024"
+EVEROS_CLUSTERING__THRESHOLD = "0.7"
+[ome_strategies.extract_user_profile]   # written to each server root's ome.toml
+enabled = false                         # answers never read the profile (include_profile
+                                        # = false); off, it costs no calls and no failed runs
+
+# --- ANSWER ----------------------------------------------------------------
+[answer]
+model = "openai/gpt-4.1-mini"
+temperature = 0.0
+max_tokens = 32768
+timeout = 300.0
+max_retries = 5
+concurrency = 20                        # questions answered in parallel within one conversation
+
+# --- JUDGE -----------------------------------------------------------------
+[judge]
+model = "openai/gpt-4o-mini"
+temperature = 0.0
+runs = 3                                # independent judgements per question, majority vote
+timeout = 300.0
+max_retries = 5
