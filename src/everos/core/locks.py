@@ -154,15 +154,6 @@ class NamedLocks:
         task = task or asyncio.current_task()
         return frozenset(self._held.get(task, ())) if task else frozenset()
 
-    def held_keys(self, kind: str) -> frozenset[str]:
-        """The keys of every ``kind`` lock some task holds right now."""
-        return frozenset(
-            key
-            for held in self._held.values()
-            for lock_kind, key in held
-            if lock_kind == kind
-        )
-
     def set_acquire_hook(self, hook: AcquireHook | None) -> None:
         """Test hook, called before every acquire: ``(task, wanted, held)``."""
         self._hook = hook

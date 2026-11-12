@@ -1,43 +1,45 @@
-"""Which scope of which memory root is being purged, and since when.
+"""Which scopes of which memory root were purged, and what is still in flight.
 
-A purge raises a *mark* on its root for as long as it runs: every write to
-the purged scope is refused (:func:`ensure_writable`) and background work
-for it waits. It also leaves a *tombstone* -- the scope and the time ``T``
-the purge was confirmed -- that outlives it: an event stamped before ``T``
-that reaches the scope afterwards (an OME backlog, a replayed queue row) is
-stale and must not write it back.
+A purge leaves a *tombstone* -- the scope and the time ``T`` it was
+confirmed. Background work whose input the system took in before ``T`` (an
+OME backlog, a replayed queue row) is stale for that scope and is dropped
+before it runs; nothing else is held or refused.
 
-The table is per root and in memory; the purge service rebuilds it from
-``system.db`` at startup. Use the module-level :data:`MARKS`.
+"Took in" is the *origin* of a piece of work: the arrival of the write
+request, the ``created_at`` of a queued row, the ``ts`` of the event an OME
+run handles. :data:`ORIGIN` carries it through the task doing the work, and
+``Event.ts`` defaults to it, so an event emitted while handling an older
+input carries that input's time.
+
+The purge waits for the work in flight that predates ``T`` before it clears
+the scope a second time; :meth:`PurgeMarks.track` registers such work.
+
+The tables are per root and in memory; the purge service rebuilds the
+tombstones from ``system.db`` at startup. Use the module-level :data:`MARKS`.
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "CURRENT_EVENT",
     "MARKS",
-    "PURGING",
-    "EventStamp",
+    "ORIGIN",
     "PurgeMarkRegistry",
     "PurgeMarks",
     "PurgeScope",
     "Tombstone",
-    "ensure_writable",
 ]
 
-import asyncio
-from collections.abc import Iterable
+import itertools
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from everos.core.errors import PurgeInProgressError
-
-_SYSTEM_DIRS = frozenset({".index", ".tmp"})
-"""Root-level directories that are not an app (an app may still start with
-a dot: ``AppScopeId`` allows ``.foo``)."""
+ORIGIN: ContextVar[datetime | None] = ContextVar("everos_origin", default=None)
+"""When the system took in the input the current task is working on."""
 
 
 @dataclass(frozen=True)
@@ -63,14 +65,6 @@ class PurgeScope:
             return app_id == self.app_id
         return app_id == self.app_id and project_id == self.project_id
 
-    def covers_dirs(self, app_dir: str, project_dir: str) -> bool:
-        """:meth:`covers`, by directory names."""
-        if self.kind == "space":
-            return True
-        if self.kind == "app":
-            return app_dir == self.app_dir
-        return app_dir == self.app_dir and project_dir == self.project_dir
-
 
 @dataclass(frozen=True)
 class Tombstone:
@@ -80,35 +74,19 @@ class Tombstone:
     at: datetime
 
 
-@dataclass(frozen=True)
-class EventStamp:
-    """The event the current task is running for: its scope and time."""
-
-    app_id: str
-    project_id: str
-    ts: datetime
-
-
-PURGING: ContextVar[bool] = ContextVar("everos_purging", default=False)
-"""Set by the purge itself: its own writes pass :func:`ensure_writable`."""
-
-CURRENT_EVENT: ContextVar[EventStamp | None] = ContextVar(
-    "everos_current_event", default=None
-)
-"""Set while a background run handles a scoped event (see the OME gate)."""
-
-
 class PurgeMarks:
-    """The mark and tombstones of one memory root."""
+    """The tombstones, the active job and the tracked work of one root.
+
+    The active job only serves the one-purge-at-a-time rule and the trash
+    sweep at startup; it blocks nothing.
+    """
 
     def __init__(self) -> None:
         self._job_id: str | None = None
         self._scope: PurgeScope | None = None
         self._tombstones: list[Tombstone] = []
-        self._waiters: list[asyncio.Future[None]] = []
-        self.waiting_runs: set[str] = set()
-        """Ids of OME runs held at the gate until the mark lifts. Per run, not
-        per event: the other strategies of the same event may be running."""
+        self._tracked: dict[int, tuple[datetime, tuple[str, str] | None]] = {}
+        self._seq = itertools.count()
 
     @property
     def active_job_id(self) -> str | None:
@@ -123,10 +101,6 @@ class PurgeMarks:
 
     def lift_mark(self) -> None:
         self._job_id = self._scope = None
-        waiters, self._waiters = self._waiters, []
-        for waiter in waiters:
-            if not waiter.done():
-                waiter.set_result(None)
 
     def set_tombstones(self, items: Iterable[Tombstone]) -> None:
         self._tombstones = list(items)
@@ -145,23 +119,28 @@ class PurgeMarks:
             default=None,
         )
 
-    def tombstone_at_dirs(self, app_dir: str, project_dir: str) -> datetime | None:
-        """:meth:`tombstone_at`, by directory names."""
-        return max(
-            (
-                t.at
-                for t in self._tombstones
-                if t.scope.covers_dirs(app_dir, project_dir)
-            ),
-            default=None,
-        )
+    @contextmanager
+    def track(
+        self, origin: datetime, where: tuple[str, str] | None = None
+    ) -> Iterator[None]:
+        """Register work on an input taken in at ``origin`` while it runs.
 
-    async def wait_lifted(self) -> None:
-        """Return once no mark is up (at once if none is)."""
-        while self._job_id is not None:
-            waiter = asyncio.get_running_loop().create_future()
-            self._waiters.append(waiter)
-            await waiter
+        ``where`` is the ``(app_id, project_id)`` it writes, when known.
+        """
+        token = next(self._seq)
+        self._tracked[token] = (origin, where)
+        try:
+            yield
+        finally:
+            self._tracked.pop(token, None)
+
+    def tracked_before(self, at: datetime, scope: PurgeScope) -> int:
+        """Tracked work on input older than ``at`` that may write ``scope``."""
+        return sum(
+            1
+            for origin, where in self._tracked.values()
+            if origin < at and (where is None or scope.covers(*where))
+        )
 
 
 class PurgeMarkRegistry:
@@ -186,40 +165,3 @@ class PurgeMarkRegistry:
 
 
 MARKS = PurgeMarkRegistry()
-
-
-def ensure_writable(target: Path) -> None:
-    """Refuse a write to ``target`` that a purge has taken off limits.
-
-    Passes the purge's own writes (:data:`PURGING`), paths outside every
-    known root, and root-level files and system directories. Otherwise
-    raises when the target's scope is being purged, or when the current
-    background event is older than the latest purge of that scope.
-
-    Raises:
-        PurgeInProgressError: The write must not happen.
-    """
-    if PURGING.get():
-        return
-    for root, marks in MARKS.roots():
-        try:
-            parts = target.relative_to(root).parts
-        except ValueError:
-            continue
-        if len(parts) < 2 or parts[0] in _SYSTEM_DIRS:
-            return
-        app_dir, project_dir = parts[0], parts[1]
-        scope, job_id = marks.active_scope, marks.active_job_id
-        if scope is not None and scope.covers_dirs(app_dir, project_dir):
-            raise PurgeInProgressError(
-                f"purge {job_id} in progress; poll GET /api/v2/memory/purge/{job_id}"
-            )
-        stamp = CURRENT_EVENT.get()
-        if stamp is not None:
-            purged_at = marks.tombstone_at_dirs(app_dir, project_dir)
-            if purged_at is not None and purged_at > stamp.ts:
-                raise PurgeInProgressError(
-                    f"this event ({stamp.ts.isoformat()}) predates a purge of its"
-                    f" scope at {purged_at.isoformat()}; it is not applied"
-                )
-        return

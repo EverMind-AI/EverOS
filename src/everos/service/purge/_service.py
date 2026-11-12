@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-__all__ = ["InFlight", "PurgeService"]
+__all__ = ["PurgeService"]
 
 import asyncio
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from everos.core.errors import NotFoundError, PurgeNonceInvalidError, StorageError
 from everos.core.failpoints import afailpoint
-from everos.core.locks import NamedLocks
 from everos.core.observability.logging import get_logger
 from everos.core.purge_marks import MARKS, PurgeMarks, PurgeScope, Tombstone
 from everos.core.utils.datetime import get_utc_now
 
-from ._runner import PurgeRunner, count_index, payload_in_scope
+from ._runner import PurgeRunner, count_index
 from ._views import (
     PurgeJobView,
     PurgeRequestResult,
@@ -49,15 +49,6 @@ logger = get_logger(__name__)
 ScopeOf = Callable[[str, str | None, str | None], PurgeScope]
 
 
-@dataclass(frozen=True)
-class InFlight:
-    """Work in flight at confirm time that a purge waits for (step 7)."""
-
-    session_keys: frozenset[str] = frozenset()
-    tasks: frozenset[asyncio.Task[Any]] = frozenset()
-    run_ids: frozenset[str] = frozenset()
-
-
 @dataclass
 class _Nonce:
     scope: PurgeScope
@@ -81,14 +72,11 @@ class PurgeService:
     index_store: str
     engine: OfflineEngine
     fence: DeleteFence
-    locks: NamedLocks
-    extraction_snapshot: Callable[[], frozenset[asyncio.Task[Any]]]
-    wake_queue: Callable[[], None]
+    extractions_before: Callable[[datetime, PurgeScope], int]
     _nonces: dict[str, _Nonce] = field(default_factory=dict, init=False)
     _reserved: set[str] = field(default_factory=set, init=False)
     _recording: asyncio.Event | None = field(default=None, init=False)
-    """Set while a confirm writes its job row (the mark is up, the row not yet)."""
-    _inflight: InFlight | None = field(default=None, init=False)
+    """Set while a confirm writes its job row (active already, the row not yet)."""
     _runner: PurgeRunner | None = field(default=None, init=False)
 
     @property
@@ -179,7 +167,7 @@ class PurgeService:
                 break
             if self._recording is not None:
                 # That job's confirm is still writing its row: wait, then
-                # decide again (it may also give up and lift the mark).
+                # decide again (it may also give up).
                 await self._recording.wait()
                 continue
             view = await self.get(active)
@@ -195,13 +183,6 @@ class PurgeService:
         tombstone = Tombstone(scope, at)
         marks.raise_mark(job_id, scope)
         marks.add_tombstone(tombstone)
-        self.fence.block_scope(*_fence_scope(scope))
-        session_keys = frozenset(
-            key
-            for key in self.locks.held_keys("session")
-            if scope.covers(*key.split("\x1f")[:2])
-        )
-        tasks = self.extraction_snapshot()
         recording = self._recording = asyncio.Event()
         try:
             try:
@@ -233,17 +214,6 @@ class PurgeService:
             recording.set()
         self._nonces.pop(nonce, None)
         self._reserved.discard(nonce)
-        runs = await self.engine.running_runs()
-        self._inflight = InFlight(
-            session_keys=session_keys,
-            tasks=tasks,
-            run_ids=frozenset(
-                r.run_id
-                for r in runs
-                if r.started_at < at
-                and payload_in_scope(scope, r.event_payload) is not False
-            ),
-        )
         logger.info("purge_confirmed", job_id=job_id, scope=scope.kind)
         if not await afailpoint("purge.confirm_wake") and self._runner is not None:
             self._runner.wake()
@@ -253,7 +223,6 @@ class PurgeService:
         marks = self.marks
         marks.lift_mark()
         marks.remove_tombstone(tombstone)
-        self.fence.unblock_scope(*_fence_scope(scope))
         self._reserved.discard(nonce)
 
     # ── reads ────────────────────────────────────────────────────────────
@@ -269,8 +238,9 @@ class PurgeService:
             raise NotFoundError(f"purge job {job_id!r} not found")
         return self._view(row)
 
-    def active_job_id(self) -> str | None:
-        return self.marks.active_job_id
+    def track(self, origin: datetime) -> AbstractContextManager[None]:
+        """Register a write request taken in at ``origin`` while it runs."""
+        return self.marks.track(origin)
 
     def covers_trash(self, scope: Scope) -> bool:
         """Whether a ``/delete`` trash folder belongs to the running purge."""
@@ -294,7 +264,8 @@ class PurgeService:
     # ── lifecycle ────────────────────────────────────────────────────────
 
     async def restore(self) -> None:
-        """Rebuild the marks from ``system.db`` (startup, before writes)."""
+        """Rebuild the tombstones from ``system.db`` (startup, before any
+        background work replays)."""
         marks = self.marks
         rows = await self.jobs.all_rows()
         marks.set_tombstones(
@@ -305,10 +276,8 @@ class PurgeService:
         if active is not None:
             scope = self.scope_of(active.scope, active.app_id, active.project_id)
             marks.raise_mark(active.job_id, scope)
-            self.fence.block_scope(*_fence_scope(scope))
             logger.info("purge_resumed", job_id=active.job_id)
         await self.markdown.sweep_inactive(active.job_id if active else None)
-        self._inflight = None  # what was in flight ended with the old process
 
     def start(self) -> None:
         self._runner = PurgeRunner(
@@ -321,22 +290,14 @@ class PurgeService:
             index_store=self.index_store,
             engine=self.engine,
             fence=self.fence,
-            locks=self.locks,
             scope_of=self.scope_of,
-            inflight=lambda: self._inflight,
-            wake_queue=self.wake_queue,
+            extractions_before=self.extractions_before,
         )
         self._runner.start()
 
     async def stop(self) -> None:
         if self._runner is not None:
             await self._runner.stop()
-
-
-def _fence_scope(scope: PurgeScope) -> tuple[str, str | None]:
-    if scope.kind == "space":
-        return "*", None
-    return str(scope.app_id), scope.project_id
 
 
 def _total(counts: dict[str, int] | None) -> int | None:

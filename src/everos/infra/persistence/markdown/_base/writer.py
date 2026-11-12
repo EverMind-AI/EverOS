@@ -52,7 +52,6 @@ import anyio
 from everos.core.errors import PathTraversalError
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
-from everos.core.purge_marks import ensure_writable
 from everos.infra.persistence.memory_root import MemoryRoot
 
 from .entries import EntryId
@@ -166,7 +165,6 @@ class MarkdownWriter:
         """
         target = Path(path)
         self._ensure_within_root(target)
-        ensure_writable(target)
         await anyio.Path(target.parent).mkdir(parents=True, exist_ok=True)
         tmp = target.parent / f".{target.name}.tmp.{uuid.uuid4().hex}"
         try:

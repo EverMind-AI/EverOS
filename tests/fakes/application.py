@@ -14,6 +14,8 @@ test drives the HTTP layer without storage, providers or background loops::
 
 from __future__ import annotations
 
+import contextlib
+
 __all__ = [
     "FakeOmeLock",
     "StubAdmin",
@@ -307,17 +309,18 @@ def StubKnowledgeService() -> Any:  # noqa: N802 - reads as the class it doubles
 
 
 class StubPurgeService:
-    """Purge double: ``active`` is the running job id the gate sees."""
+    """Purge double: ``tracked`` lists the origin of each write request seen."""
 
     def __init__(self, lifecycle: list[str] | None = None) -> None:
         self.lifecycle = lifecycle if lifecycle is not None else []
-        self.active: str | None = None
+        self.tracked: list[Any] = []
         self.request = AsyncMock()
         self.confirm = AsyncMock()
         self.get = AsyncMock()
 
-    def active_job_id(self) -> str | None:
-        return self.active
+    def track(self, origin: Any) -> contextlib.AbstractContextManager[None]:
+        self.tracked.append(origin)
+        return contextlib.nullcontext()
 
     def covers_trash(self, scope: Any) -> bool:
         return False

@@ -24,11 +24,10 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def test_purge_defaults_from_shipped_toml() -> None:
     purge = load_settings().purge
     assert (
-        purge.settle_wait_seconds,
         purge.run_budget_seconds,
         purge.nonce_ttl_seconds,
         purge.count_timeout_seconds,
-    ) == (60.0, 7200.0, 300.0, 30.0)
+    ) == (7200.0, 300.0, 30.0)
 
 
 def test_purge_env_binding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,7 +38,6 @@ def test_purge_env_binding(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     "field",
     [
-        "settle_wait_seconds",
         "run_budget_seconds",
         "nonce_ttl_seconds",
         "count_timeout_seconds",

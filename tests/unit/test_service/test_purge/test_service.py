@@ -15,7 +15,7 @@ from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import purge_scope
 from tests.fakes.storage import Storage
 
-from ._harness import FakeRun, arm, disarm, make_purge, payload, release, seed_scope
+from ._harness import arm, disarm, make_purge, release, seed_scope
 
 
 @pytest.fixture(autouse=True)
@@ -94,9 +94,6 @@ async def test_insert_failure_keeps_nonce_and_no_mark(
         await p.service.confirm(req.nonce)
     assert p.marks.active_job_id is None
     assert p.marks.tombstone_at("a1", "p1") is None
-    assert not p.fence.blocks(
-        type("R", (), {"app_id": "a1", "project_id": "p1", "id": "x"})()
-    )
     job = await p.service.confirm(req.nonce)  # the same nonce works now
     assert p.marks.active_job_id == job.job_id
 
@@ -161,20 +158,6 @@ async def test_confirm_starts_its_own_job_when_the_pending_one_gives_up(
     job = await asyncio.wait_for(other, 2)
     assert (job.scope, job.app_id) == ("app", "a2")
     assert p.marks.active_job_id == job.job_id
-
-
-async def test_snapshot_excludes_runs_started_after_t(storage: Storage) -> None:
-    p = await _ready(storage)
-    now = get_utc_now()
-    p.engine.running = [
-        FakeRun("old_s", "e1", now - timedelta(seconds=5), payload("a1", "p1")),
-        FakeRun("old_tick", "e2", now - timedelta(seconds=5), '{"x": 1}'),
-        FakeRun("old_other", "e3", now - timedelta(seconds=5), payload("a2", "p1")),
-        FakeRun("new_s", "e4", now + timedelta(hours=1), payload("a1", "p1")),
-    ]
-    await p.service.confirm((await p.service.request("project", "a1", "p1")).nonce)
-    assert p.service._inflight is not None
-    assert p.service._inflight.run_ids == {"old_s", "old_tick"}
 
 
 async def test_count_item_timeout(

@@ -291,7 +291,6 @@ class MemorizeQueueWorker:
                     await self._reap_lost()  # before the next claim, not after
                 while (
                     not self._stopping
-                    and not self._purging()
                     and len(self._in_flight) < self._cfg.max_concurrency
                 ):
                     row = await self._inbox.claim_next(
@@ -363,22 +362,20 @@ class MemorizeQueueWorker:
                 logger.exception("memorize_queue_loop_error")
 
     async def _process(self, row: MemorizeTask) -> None:
-        status = await deliver_row(
-            row,
-            deliver=self._deliver,
-            mark=self._mark,
-            cfg=self._cfg,
-            should_discard=self._discarding,
+        # Tracked so a purge confirmed meanwhile waits for this delivery.
+        tracked = (
+            self._marks.track(row.created_at, (row.app_id, row.project_id))
+            if self._marks
+            else contextlib.nullcontext()
         )
-        scope = self._marks.active_scope if self._marks is not None else None
-        if status == "failed" and scope and scope.covers(row.app_id, row.project_id):
-            # Refused mid-delivery by a purge of its scope: the failed row
-            # must not keep the request body the purge is clearing.
-            await self._mark(row.id, status="failed", payload_json="")
-
-    def _purging(self) -> bool:
-        """A purge of the root runs: claim nothing until it ends."""
-        return self._marks is not None and self._marks.active_job_id is not None
+        with tracked:
+            await deliver_row(
+                row,
+                deliver=self._deliver,
+                mark=self._mark,
+                cfg=self._cfg,
+                should_discard=self._discarding,
+            )
 
     def _discarding(self, row: MemorizeTask) -> bool:
         """The row was accepted before the latest purge of its scope."""
@@ -386,10 +383,6 @@ class MemorizeQueueWorker:
             return False
         purged_at = self._marks.tombstone_at(row.app_id, row.project_id)
         return purged_at is not None and purged_at > row.created_at
-
-    def wake(self) -> None:
-        """Claim now (a purge ended); the scan interval is the fallback."""
-        self._wake.set()
 
     async def _mark(self, row_id: int, **values: Any) -> None:
         """Write a row's status; retry a failing write a few times.

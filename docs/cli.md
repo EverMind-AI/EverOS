@@ -153,10 +153,13 @@ HTTP API is the **process-friendly** surface for clients (web UIs,
 agents, automation).
 
 A purge ([`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)) is
-an API-only operation and holds the server's writes, not the CLI's: with
-a purge interrupted and the server stopped, CLI commands run as usual.
-When the server starts again the purge resumes from the start, so
-anything written into the purged range in the meantime is deleted too.
+an API-only operation and blocks nothing: with a purge interrupted and the
+server stopped, CLI commands run as usual. When the server starts again the
+purge resumes from the start, so anything written into the purged range in
+the meantime is deleted too. Do not run `everos cascade backfill` while a
+purge is unfinished: it re-emits work from rows of the range not deleted yet,
+which can land after the purge ends; if you did, purge the range again once
+the first purge has finished.
 
 ## See also
 

@@ -27,8 +27,8 @@ from everos.entrypoints.api.middleware import (
     DEFAULT_CORS_ORIGINS,
     ProfileMiddleware,
     PrometheusMiddleware,
-    PurgeGateMiddleware,
     RequestIdMiddleware,
+    WriteTrackingMiddleware,
 )
 from everos.service import Application, build_application
 
@@ -111,9 +111,8 @@ def create_app(
     register_handlers(app)
 
     # Middleware order: earlier `add_middleware` calls become inner, later ones outer.
-    # The purge gate innermost: CORS wraps it, so its 409 carries CORS headers,
-    # and the request id is already set when it answers.
-    app.add_middleware(PurgeGateMiddleware)
+    # Write tracking innermost: it stamps the request the handler runs in.
+    app.add_middleware(WriteTrackingMiddleware)
     # CORS next (matches base_app.py legacy pattern).
     app.add_middleware(
         CORSMiddleware,

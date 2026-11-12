@@ -1,13 +1,13 @@
 """The async memorize queue during and after a purge of its root.
 
-While a purge runs nothing is claimed; a row accepted before the latest
-purge of its scope is failed without being delivered, checked before every
-attempt, its body dropped.
+Claiming never pauses. A row accepted before the latest purge of its scope
+is failed without being delivered, checked before every attempt, its body
+dropped; a delivery runs with the row's acceptance time as its origin and is
+tracked while it runs.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -18,7 +18,7 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.config.settings import AsyncQueueSettings
-from everos.core.purge_marks import MARKS, PurgeMarks, PurgeScope, Tombstone
+from everos.core.purge_marks import MARKS, ORIGIN, PurgeMarks, PurgeScope, Tombstone
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
@@ -105,18 +105,37 @@ async def _row(inbox: SqliteMemorizeInboxStore, session: str) -> MemorizeTask:
     return task
 
 
-async def test_no_claim_while_marked(
+async def test_claims_while_a_purge_runs(
     inbox: SqliteMemorizeInboxStore, marks: PurgeMarks
 ) -> None:
     deliver = _Deliver()
     worker = _worker(inbox, deliver, marks)
     await _enqueue(worker, "s-other", app="a2")
+    await _enqueue(worker, "s-new")  # S itself, accepted with no tombstone
     marks.raise_mark("j1", S)
-    assert await worker.drain_once() == 0
-    assert deliver.calls == []
-    marks.lift_mark()
-    assert await worker.drain_once() == 1
-    assert deliver.calls == ["s-other"]
+    assert await worker.drain_once() == 2
+    assert sorted(deliver.calls) == ["s-new", "s-other"]
+
+
+async def test_delivery_carries_the_row_origin_and_is_tracked(
+    inbox: SqliteMemorizeInboxStore, marks: PurgeMarks
+) -> None:
+    seen: list[tuple[Any, int]] = []
+    deliver = _Deliver()
+    worker = _worker(inbox, deliver, marks)
+    await _enqueue(worker, "s1")
+    accepted = (await _row(inbox, "s1")).created_at
+    later = accepted + timedelta(seconds=1)
+    deliver.on_call = lambda: seen.append(
+        (ORIGIN.get(), marks.tracked_before(later, S))
+    )
+    stale = ORIGIN.set(accepted - timedelta(days=1))  # e.g. inherited by the loop
+    try:
+        await worker.drain_once()
+    finally:
+        ORIGIN.reset(stale)
+    assert seen == [(accepted, 1)]
+    assert marks.tracked_before(later, S) == 0
 
 
 async def test_replayed_row_older_than_tombstone_is_discarded(
@@ -163,47 +182,3 @@ async def test_discard_checked_before_each_attempt(
     assert (row.status, row.payload_json, row.attempt) == ("failed", "", 1)
     assert row.last_error is not None
     assert row.last_error.startswith("purge_in_progress: ")
-
-
-async def test_refused_mid_delivery_drops_the_body(
-    inbox: SqliteMemorizeInboxStore, marks: PurgeMarks
-) -> None:
-    from everos.core.errors import PurgeInProgressError
-
-    async def refused(payload: dict[str, Any], **_: Any) -> MemorizeResult:
-        marks.raise_mark("j1", S)  # the purge was confirmed mid-delivery
-        raise PurgeInProgressError("purge j1 in progress")
-
-    worker = mq.MemorizeQueueWorker(
-        AsyncQueueSettings(retry_backoff_seconds=0.0, scan_interval_seconds=60.0),
-        inbox=inbox,
-        deliver=refused,
-        marks=marks,
-    )
-    await _enqueue(worker, "s1")
-    await worker.drain_once()
-    row = await _row(inbox, "s1")
-    assert (row.status, row.payload_json) == ("failed", "")
-    assert to_task_item(row).error_code == "purge_in_progress"
-
-
-async def test_wake_lets_a_parked_loop_claim(
-    inbox: SqliteMemorizeInboxStore, marks: PurgeMarks
-) -> None:
-    deliver = _Deliver()
-    worker = _worker(inbox, deliver, marks)
-    marks.raise_mark("j1", S)
-    await worker.start()
-    try:
-        await _enqueue(worker, "s-other", app="a2")
-        await asyncio.sleep(0.2)
-        assert deliver.calls == []
-        marks.lift_mark()
-        worker.wake()
-        for _ in range(50):
-            if deliver.calls:
-                break
-            await asyncio.sleep(0.05)
-        assert deliver.calls == ["s-other"]
-    finally:
-        await worker.stop()

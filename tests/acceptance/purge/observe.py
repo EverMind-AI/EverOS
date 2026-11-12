@@ -222,3 +222,82 @@ def release(fp_dir: Path, name: str) -> None:
     """Let a ``name=pause`` failpoint go on."""
     fp_dir.mkdir(parents=True, exist_ok=True)
     (fp_dir / f"{name}.release").write_text("go", encoding="utf-8")
+
+
+def _counter_shell(path: Path) -> bool:
+    """A daily-log file a purge put back with only its id counter."""
+    if not path.is_file():
+        return False
+    try:
+        return MarkdownReader.parse(path.read_text(encoding="utf-8")).entries == []
+    except (OSError, ValueError):
+        return False
+
+
+def ome_s_payloads(
+    root: Path, app: str, project: str, before: Any | None = None
+) -> list[tuple[str, str]]:
+    """``(strategy, status)`` of ``run_record`` rows still carrying the
+    content of an event of ``(app, project)`` (older than ``before``)."""
+    import json
+
+    from everos.core.utils.datetime import from_iso_format
+
+    db = root / ".index" / "sqlite" / "ome.db"
+    out = []
+    for strategy, status, payload in _safe_rows(
+        db, "SELECT strategy_name, status, event_payload FROM run_record"
+    ):
+        try:
+            data = json.loads(payload)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict) or (
+            data.get("app_id"),
+            data.get("project_id"),
+        ) != (
+            app,
+            project,
+        ):
+            continue
+        if (
+            before is not None
+            and "ts" in data
+            and from_iso_format(data["ts"]) >= before
+        ):
+            continue
+        out.append((strategy, status))
+    return out
+
+
+def s_leftovers(
+    root: Path, app: str, project: str, before: Any | None = None
+) -> dict[str, Any]:
+    """What of ``(app, project)`` survived a purge, by the A37 yardstick.
+
+    Markdown entries, the system.db tables a purge clears, the index tables,
+    ``md_change_state`` (rows of today's counter-only files excepted) and
+    ``ome.db`` rows still carrying an event's content (older than
+    ``before``, when given). Empty means the scope is cleared.
+    """
+    counts = scope_counts(root, app, project)
+    left: dict[str, Any] = {
+        k: n
+        for k, n in counts.items()
+        if n
+        and (
+            k.startswith(("md.", "index."))
+            or k.removeprefix("sqlite.") in SQLITE_TABLES
+        )
+    }
+    ledger = [
+        row[2]
+        for row in scope_dump(root, app, project)["sqlite.md_change_state"]
+        if not _counter_shell(root / row[2])
+    ]
+    if ledger:
+        left["sqlite.md_change_state"] = ledger
+    payloads = ome_s_payloads(root, app, project, before)
+    if payloads:
+        left["ome.run_record_payload"] = payloads
+    return left

@@ -1,10 +1,10 @@
-"""The Runner consults its gate after recording the attempt, before the body."""
+"""The Runner consults its gate after recording the attempt, before the body,
+and runs the body under the gate's binding (the event's time as the origin)."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -35,29 +35,6 @@ async def _no_emit(_event: Event) -> None:
     return None
 
 
-class _Gate:
-    """Waits the events tagged ``hold`` until :meth:`open`; runs the rest."""
-
-    def __init__(self) -> None:
-        self.opened = asyncio.Event()
-
-    def open(self) -> None:
-        self.opened.set()
-
-    def verdict(self, event: object) -> str:
-        held = getattr(event, "tag", "") == "hold" and not self.opened.is_set()
-        return "wait" if held else "run"
-
-    @asynccontextmanager
-    async def lifted(self, event: object, run_id: str) -> AsyncIterator[None]:
-        await self.opened.wait()
-        yield
-
-    @contextmanager
-    def bind(self, event: object) -> Iterator[None]:
-        yield
-
-
 @pytest.fixture
 async def store(tmp_path: Path) -> RunRecordStore:
     storage = OMEStorage(db_path=tmp_path / "ome.db")
@@ -73,13 +50,13 @@ def _marks() -> Iterator[None]:
 
 
 def _runner(
-    store: RunRecordStore, gate: object, *, slots: int = 20, timeout: float = 1800
+    store: RunRecordStore, gate: object, *, emit_hook: object = _no_emit
 ) -> Runner:
     return Runner(
         run_record_store=store,
-        engine_sem=asyncio.Semaphore(slots),
-        emit_hook=_no_emit,
-        config=OMEConfig(jobstore_path=Path("unused"), run_timeout_seconds=timeout),
+        engine_sem=asyncio.Semaphore(20),
+        emit_hook=emit_hook,  # type: ignore[arg-type]
+        config=OMEConfig(jobstore_path=Path("unused")),
         gate=gate,  # type: ignore[arg-type]
     )
 
@@ -110,71 +87,49 @@ async def test_discard_marks_success_and_clears_payload(
     assert (record.status, record.event_payload) == (RunStatus.SUCCESS, "")
 
 
-async def test_wait_releases_slot(store: RunRecordStore) -> None:
-    gate = _Gate()
-    calls: list[str] = []
-    runner = _runner(store, gate, slots=1)
-    held = asyncio.create_task(
-        runner.run(
-            _body(calls), _Scoped(tag="hold"), run_id="r1", max_retries_snapshot=0
-        )
-    )
-    await asyncio.sleep(0.05)
-    await asyncio.wait_for(
-        runner.run(
-            _body(calls), _Scoped(tag="free"), run_id="r2", max_retries_snapshot=0
-        ),
-        timeout=2,
-    )
-    assert calls == ["free"]
-    gate.open()
-    await asyncio.wait_for(held, timeout=2)
-    assert calls == ["free", "hold"]
-
-
-async def test_wait_not_counted_in_run_timeout(store: RunRecordStore) -> None:
-    gate = _Gate()
-    calls: list[str] = []
-    runner = _runner(store, gate, timeout=0.2)
-    held = asyncio.create_task(
-        runner.run(
-            _body(calls), _Scoped(tag="hold"), run_id="r1", max_retries_snapshot=0
-        )
-    )
-    await asyncio.sleep(0.6)
-    gate.open()
-    await asyncio.wait_for(held, timeout=2)
-    record = await store.get("r1")
-    assert record is not None and record.status is RunStatus.SUCCESS
-    assert calls == ["hold"]
-
-
-async def test_cancel_while_waiting_keeps_running_row(store: RunRecordStore) -> None:
-    runner = _runner(store, _Gate())
-    held = asyncio.create_task(
-        runner.run(_body([]), _Scoped(tag="hold"), run_id="r1", max_retries_snapshot=0)
-    )
-    await asyncio.sleep(0.05)
-    held.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await held
-    record = await store.get("r1")
-    assert record is not None and record.status is RunStatus.RUNNING
-
-
-async def test_purge_gate_holds_until_the_mark_lifts(
+async def test_events_a_run_makes_carry_the_trigger_time(
     store: RunRecordStore, tmp_path: Path
 ) -> None:
-    marks = MARKS.for_root(tmp_path)
-    marks.raise_mark("j1", S)
-    calls: list[str] = []
-    runner = _runner(store, PurgeRunGate(marks))
-    event = _Scoped(app_id="a2", tag="other")  # another scope waits too
-    held = asyncio.create_task(
-        runner.run(_body(calls), event, run_id="r1", max_retries_snapshot=0)
-    )
-    await asyncio.sleep(0.1)
-    assert calls == [] and marks.waiting_runs == {"r1"}
-    marks.lift_mark()
-    await asyncio.wait_for(held, timeout=2)
-    assert calls == ["other"] and marks.waiting_runs == set()
+    """A follow-up event inherits its trigger's time, so a purge confirmed
+    after the trigger arrived drops the whole chain, not just its head."""
+    emitted: list[Event] = []
+
+    async def capture(event: Event) -> None:
+        emitted.append(event)
+
+    @ome_strategy(name="parent", trigger=Immediate(on=[_Scoped]), emits=[_Scoped])
+    async def parent(event: _Scoped, deps: MemoryDeps) -> list[Event]:
+        return [_Scoped(tag="child")]
+
+    runner = _runner(store, PurgeRunGate(MARKS.for_root(tmp_path)), emit_hook=capture)
+    trigger = _Scoped(ts=T, tag="parent")
+    await runner.run(parent, trigger, run_id="r1", max_retries_snapshot=0)
+    assert [(e.tag, e.ts) for e in emitted] == [("child", T)]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("entry", ["cron", "idle"])
+async def test_a_tick_is_new_input_whatever_context_fires_it(entry: str) -> None:
+    """APScheduler may fire a tick in a strategy task's context: the tick
+    must not inherit that run's origin (its work on new data would be
+    dropped by a purge confirmed in between)."""
+    from everos.core.purge_marks import ORIGIN
+    from everos.infra.ome._dispatch import scheduling
+
+    made: list[Event] = []
+
+    class _Engine:
+        async def emit(self, event: Event) -> None:
+            made.append(event)
+
+        async def run_idle_scan(self, strategy_name: str) -> None:
+            made.append(Event())
+
+    scheduling.ENGINES["e1"] = _Engine()  # type: ignore[assignment]
+    token = ORIGIN.set(T)
+    try:
+        fire = scheduling.cron_entry if entry == "cron" else scheduling.idle_entry
+        await fire("e1", "s")
+    finally:
+        ORIGIN.reset(token)
+        scheduling.ENGINES.pop("e1", None)
+    assert len(made) == 1 and made[0].ts > T

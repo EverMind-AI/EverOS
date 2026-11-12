@@ -39,7 +39,6 @@ from everos.core.errors import (
     PathTraversalError,
 )
 from everos.core.observability.logging import get_logger
-from everos.core.purge_marks import ensure_writable
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import KnowledgeCategory, KnowledgeDocument, KnowledgeMemory
 from everos.memory.ports import WrittenDocument
@@ -273,8 +272,6 @@ async def _back_up(doc_dirs: Sequence[Path]) -> _Backup:
     backup: _Backup = []
     for original in doc_dirs:
         hidden = original.with_name(f".{original.name}.backup")
-        ensure_writable(original)
-        ensure_writable(hidden)
         await anyio.to_thread.run_sync(shutil.move, str(original), str(hidden))
         backup.append((hidden, original))
     return backup
@@ -283,7 +280,6 @@ async def _back_up(doc_dirs: Sequence[Path]) -> _Backup:
 async def _restore(backup: _Backup, doc_id: str) -> None:
     for hidden, original in backup:
         if await anyio.Path(hidden).is_dir():
-            ensure_writable(original)
             await anyio.to_thread.run_sync(shutil.move, str(hidden), str(original))
             logger.info("document_backup_restored", doc_id=doc_id)
 
@@ -301,7 +297,6 @@ async def _rewrite_frontmatter(
     path: Path, updates: dict[str, str]
 ) -> dict[str, object]:
     """Apply ``updates`` to one file's frontmatter; returns the previous one."""
-    ensure_writable(path)
     apath = anyio.Path(path)
     fm, body = parse_frontmatter(await MarkdownReader.read_text(apath))
     previous = dict(fm)
@@ -328,8 +323,6 @@ async def _move_to_category(
     )
     if _escapes(target, knowledge_dir):
         raise PathTraversalError(f"category move target escapes knowledge/: {target}")
-    ensure_writable(doc_dir)
-    ensure_writable(target)
     await anyio.Path(target.parent).mkdir(parents=True, exist_ok=True)
     await anyio.to_thread.run_sync(shutil.move, str(doc_dir), str(target))
     return target / _INDEX_FILE
@@ -404,7 +397,6 @@ async def _write_original(doc_dir: Path, safe_name: str, content: bytes) -> Path
         raise PathTraversalError(
             f"original file target escapes {_ORIGINAL_DIR_NAME}/: {target}"
         )
-    ensure_writable(target)
     await anyio.Path(original_dir).mkdir(parents=True, exist_ok=True)
     await anyio.Path(target).write_bytes(content)
     return target

@@ -7,8 +7,6 @@ files back empty at their id counters (entries are only appended to today's
 file; a later one must not reuse a purged id), then removes the folder. The
 extra ``<app_dir>/<project_dir>`` level keeps the trash out of the cascade's
 ``<app>/<project>/...`` globs, which also match dot-named directories.
-
-Every write here runs as the purge itself (the caller sets ``PURGING``).
 """
 
 from __future__ import annotations

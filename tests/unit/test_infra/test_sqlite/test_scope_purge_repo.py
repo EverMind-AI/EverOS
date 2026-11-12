@@ -170,8 +170,12 @@ async def test_cluster_member_follows_cluster(storage: Storage) -> None:
     assert await _count(storage, ClusterMember, cluster_id="cl_a1_p2") == 1
 
 
+LATER = datetime(2999, 1, 1, tzinfo=UTC)
+"""A purge confirmed after every row in these tests."""
+
+
 def _inbox(
-    request_id: str, app: str, project: str, status: str, **kw: str
+    request_id: str, app: str, project: str, status: str, **kw: object
 ) -> MemorizeInbox:
     return MemorizeInbox(
         request_id=request_id,
@@ -207,7 +211,7 @@ async def test_discard_queued_inbox(storage: Storage) -> None:
         ],
     )
     n = await storage.sqlite.scope_purge.discard_queued_inbox(
-        _project("a1", "p1"), job_id="j1"
+        _project("a1", "p1"), job_id="j1", before=LATER
     )
     rows = await _inbox_rows(storage)
     assert n == 1
@@ -227,12 +231,46 @@ async def test_inbox_history_keeps_own_job_rows(storage: Storage) -> None:
             _inbox("bad_s", "a1", "p1", "failed", last_error="LLMCallError: x"),
             _inbox("q_s", "a1", "p1", "queued"),
             _inbox("ok_o", "a1", "p2", "success"),
+            # Dropped at delivery by an earlier purge: /tasks must still say so.
+            _inbox(
+                "dropped",
+                "a1",
+                "p1",
+                "failed",
+                last_error="purge_in_progress: discarded by purge; do not resend",
+            ),
         ],
     )
     repo = storage.sqlite.scope_purge
-    await repo.discard_queued_inbox(_project("a1", "p1"), job_id="j1")
-    assert await repo.delete_inbox_history(_project("a1", "p1"), job_id="j1") == 2
-    assert set(await _inbox_rows(storage)) == {"q_s", "ok_o"}
+    await repo.discard_queued_inbox(_project("a1", "p1"), job_id="j1", before=LATER)
+    assert await repo.delete_inbox_history(_project("a1", "p1"), before=LATER) == 2
+    assert set(await _inbox_rows(storage)) == {"q_s", "ok_o", "dropped"}
+
+
+async def test_inbox_rows_taken_in_after_the_purge_are_left_alone(
+    storage: Storage,
+) -> None:
+    """Accepted after ``T``: new writes, delivered and kept as usual."""
+    t = datetime(2026, 11, 12, 10, 0, tzinfo=UTC)
+    after = datetime(2026, 11, 12, 10, 0, 1, tzinfo=UTC)
+    await _seed_inbox(
+        storage,
+        [
+            _inbox("q_old", "a1", "p1", "queued", created_at=t.replace(hour=9)),
+            _inbox("q_new", "a1", "p1", "queued", created_at=after),
+            _inbox("ok_new", "a1", "p1", "success", created_at=after),
+        ],
+    )
+    repo = storage.sqlite.scope_purge
+    assert (
+        await repo.discard_queued_inbox(_project("a1", "p1"), job_id="j1", before=t)
+        == 1
+    )
+    assert await repo.delete_inbox_history(_project("a1", "p1"), before=t) == 0
+    rows = await _inbox_rows(storage)
+    assert rows["q_old"][0] == "failed"
+    assert rows["q_new"] == ("queued", '{"m": 1}', None)
+    assert rows["ok_new"][0] == "success"
 
 
 def _state(path: str) -> MdChangeState:

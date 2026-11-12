@@ -2,30 +2,25 @@
 
 The engine does not know what a purge is; the service layer hands it a
 :class:`RunGate` (``OfflineEngine.set_run_gate``) that, per event, says to
-run it, to drop it (it is stale), or to wait until the gate opens. Waiting
-gives up the attempt's execution slot and does not count toward the run
-timeout.
+run it or to drop it (it is stale), and that is held around the strategy
+body of an event allowed to run.
 """
 
 from __future__ import annotations
 
 __all__ = ["RunGate", "Verdict"]
 
-from contextlib import AbstractAsyncContextManager, AbstractContextManager
+from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
-type Verdict = Literal["run", "discard", "wait"]
+type Verdict = Literal["run", "discard"]
 
 
 class RunGate(Protocol):
-    """Decides, per event, whether a strategy attempt may run now."""
+    """Decides, per event, whether a strategy attempt runs."""
 
     def verdict(self, event: object) -> Verdict:
-        """``run`` it, ``discard`` it (recorded as done), or ``wait``."""
-        ...
-
-    def lifted(self, event: object, run_id: str) -> AbstractAsyncContextManager[None]:
-        """Entered once ``event`` may be looked at again (``run_id`` waits)."""
+        """``run`` it, or ``discard`` it (recorded as done)."""
         ...
 
     def bind(self, event: object) -> AbstractContextManager[None]:

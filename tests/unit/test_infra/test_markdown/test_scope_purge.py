@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.purge_marks import MARKS, PURGING, PurgeScope
+from everos.core.purge_marks import MARKS, PurgeScope
 from everos.core.utils.datetime import today_with_timezone
 from everos.infra.cascade.registry import KIND_REGISTRY
 from everos.infra.persistence import MemoryRoot
@@ -23,11 +23,9 @@ S = PurgeScope("project", "a1", "p1", "a1", "p1")
 
 
 @pytest.fixture(autouse=True)
-def _purging() -> Iterator[None]:
+def _clean() -> Iterator[None]:
     MARKS.reset()
-    token = PURGING.set(True)
     yield
-    PURGING.reset(token)
     MARKS.reset()
 
 

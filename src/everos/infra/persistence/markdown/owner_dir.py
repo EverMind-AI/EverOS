@@ -111,14 +111,22 @@ class MarkdownOwnerDirStore:
         )
         await anyio.Path(owner_dir).rename(trash / MOVED_DIR)
         await afailpoint("delete_owner.after_rename")
-        await self._keep_today_counters(scope, trash / MOVED_DIR)
+        try:
+            await self._keep_today_counters(scope, trash / MOVED_DIR)
+        except FileNotFoundError:
+            if await anyio.Path(trash).exists():
+                raise
+            return  # a purge of the scope took the trash, counters restored
         await afailpoint("delete_owner.after_restore")
 
     async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
         """Inventory the trash folders, then remove them."""
+        # A purge of the scope may have taken a folder meanwhile: nothing
+        # of it is left to count or remove.
+        left = [t for t in moved if (t / MOVED_DIR).is_dir()]
         try:
-            parts = [await self._inventory(scope, t / MOVED_DIR) for t in moved]
-            for trash in moved:
+            parts = [await self._inventory(scope, t / MOVED_DIR) for t in left]
+            for trash in left:
                 await anyio.to_thread.run_sync(shutil.rmtree, trash)
         finally:
             self._emptying.difference_update(moved)

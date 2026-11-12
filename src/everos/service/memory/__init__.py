@@ -53,11 +53,13 @@ from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from everalgo.llm import LLMClient
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
-    from everos.core.purge_marks import PurgeMarks
+    from everos.core.purge_marks import PurgeMarks, PurgeScope
     from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
@@ -88,9 +90,9 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
-        purge_marks: The root's purge marks: the async queue claims nothing
-            while a purge runs and drops rows a purge superseded. ``None``
-            ignores purges.
+        purge_marks: The root's purge marks: the async queue drops rows a
+            purge superseded and registers each delivery while it runs.
+            ``None`` ignores purges.
     """
 
     def __init__(
@@ -228,13 +230,10 @@ class MemoryService:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
 
-    def extraction_snapshot(self) -> frozenset[asyncio.Task[Any]]:
-        """The extractions running right now (a purge waits for them)."""
-        return self._extractions.snapshot()
-
-    def wake_queue(self) -> None:
-        """Let the async queue claim again at once (a purge ended)."""
-        self._queue.wake()
+    def extractions_before(self, at: datetime, scope: PurgeScope) -> int:
+        """Running extractions of input taken in before ``at`` that may write
+        ``scope`` (a purge of it waits for them)."""
+        return self._extractions.started_before(at, scope.covers)
 
     async def finish_interrupted_deletions(
         self, *, skip: Callable[[Scope], bool] | None = None

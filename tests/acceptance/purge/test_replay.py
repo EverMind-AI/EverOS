@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.acceptance
 def test_t28_2_row_killed_mid_delivery_is_dropped_on_replay(
     make_world: Any, purge_proxy: Any
 ) -> None:
-    world = make_world("T28.2", seed=False, EVEROS_PURGE__SETTLE_WAIT_SECONDS="5")
+    world = make_world("T28.2", seed=False)
     srv, root = world.srv, world.srv.root
     word = f"{scope_token('a1', 'p1')}replay"
     purge_proxy.add(Rule(target="llm", pattern=word, mode="hold"))
@@ -42,10 +43,17 @@ def test_t28_2_row_killed_mid_delivery_is_dropped_on_replay(
     )
     assert status == [("processing",)]
     job_id, _ = purge(srv, scope="project", app_id="a1", project_id="p1")
-    assert finish(srv, job_id, timeout=60)["status"] == "succeeded"
-    srv.kill()
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:  # first pass done; waiting for the row
+        data = srv.job(job_id).json()["data"]
+        if all(s["state"] == "done" for s in data["steps"]):
+            break
+        time.sleep(0.2)
+    assert data["status"] == "running", data
+    srv.kill()  # the row dies in delivery; the purge with it
     purge_proxy.clear()
     srv.start()
+    assert finish(srv, job_id, timeout=120)["status"] == "succeeded"
     wait_idle(srv.base, root, timeout=120)
     task = srv.call("GET", f"/tasks/{request_id}").json()["data"]
     row = rows(

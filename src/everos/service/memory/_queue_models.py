@@ -121,8 +121,6 @@ def to_task_item(row: MemorizeTask) -> TaskItem:
         error_code = "status_write_lost"
     elif row.last_error and row.last_error.startswith(REPLAYS_EXHAUSTED_PREFIX):
         error_code = "replays_exhausted"
-    elif row.last_error and row.last_error.startswith("PurgeInProgressError: "):
-        error_code = "purge_in_progress"  # refused mid-delivery by a purge
     elif row.last_error and ": " in row.last_error:
         error_code = row.last_error.split(": ", 1)[0]  # the exception type
     return TaskItem(

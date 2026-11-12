@@ -1,8 +1,9 @@
-"""The purge runner: ten steps, retries, budget, terminal state, self-healing."""
+"""The purge runner: nine steps, the wait, retries, budget, terminal state."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -99,7 +100,6 @@ async def test_happy_path_steps_and_order(
         "before_step8",
         *first,
         "before_step9",
-        "before_step10",
     ]
     assert log.index("finish") < log.index("lift")
     view = await p.service.get(job_id)
@@ -119,7 +119,7 @@ async def test_happy_path_steps_and_order(
     assert (s_left.markdown_total, s_left.sqlite_total, s_left.index_total) == (0, 0, 0)
     other = (await p.service.request("project", "a1", "p2")).summary
     assert (other.markdown_total, other.sqlite_total, other.index_total) == (2, 2, 2)
-    assert p.woken == ["queue"] and p.marks.active_job_id is None
+    assert p.marks.active_job_id is None
 
 
 async def test_retryable_error_reruns_from_step1(
@@ -188,7 +188,7 @@ async def test_non_retryable_fails_and_lifts(
     view = await p.service.get(job_id)
     assert {s.store: s.state for s in view.steps}["sqlite"] == "pending"
     row_s = type("R", (), {"app_id": "a1", "project_id": "p1", "id": "x"})()
-    assert not p.fence.blocks(row_s) and p.woken == ["queue"]
+    assert not p.fence.blocks(row_s) and p.marks.active_job_id is None
 
 
 async def test_budget_timeout_fails_hung_step(
@@ -268,71 +268,156 @@ async def test_poll_picks_up_without_wake(
         await runner.stop()
 
 
-async def test_settle_wait_only_snapshot(storage: Storage) -> None:
-    await storage.create_schema()
-    p = make_purge(storage, settle_wait_seconds=5)
-    future = get_utc_now() + timedelta(hours=1)
-    p.engine.running = [FakeRun("late", "e1", future, payload("a1", "p1"))]
+async def _confirm(p: Purge, *scope: Any) -> str:
     job = await p.service.confirm(
-        (await p.service.request("project", "a1", "p1")).nonce
+        (await p.service.request(*(scope or ("project", "a1", "p1")))).nonce
     )
-    started = asyncio.get_running_loop().time()
-    assert await p.run_to_end(job.job_id) == "succeeded"
-    assert asyncio.get_running_loop().time() - started < 2  # never waited on it
+    return job.job_id
 
 
-async def test_settle_wait_waits_for_snapshot_run(storage: Storage) -> None:
-    await storage.create_schema()
-    p = make_purge(storage, settle_wait_seconds=5)
-    old = FakeRun(
-        "old", "e1", get_utc_now() - timedelta(seconds=1), payload("a1", "p1")
-    )
-    p.engine.running = [old]
-    job = await p.service.confirm(
-        (await p.service.request("project", "a1", "p1")).nonce
-    )
+async def _waited(p: Purge, job_id: str, release_after: float, undo: Any) -> float:
+    """Seconds the job took to end, ``undo`` run after ``release_after``."""
     loop = asyncio.get_running_loop()
-    loop.call_later(0.5, p.engine.running.clear)
+    loop.call_later(release_after, undo)
     started = loop.time()
-    assert await p.run_to_end(job.job_id) == "succeeded"
-    assert 0.5 <= loop.time() - started < 3
+    assert await p.run_to_end(job_id) == "succeeded"
+    return loop.time() - started
 
 
-async def test_settle_wait_skips_gated_runs(storage: Storage) -> None:
+async def _until_succeeded(p: Purge, job_id: str) -> None:
+    async with asyncio.timeout(5):
+        while True:
+            if (await _row(p, job_id)).status == "succeeded":
+                return
+            await asyncio.sleep(0.05)
+
+
+def _old() -> Any:
+    return get_utc_now() - timedelta(seconds=1)
+
+
+async def test_drain_ignores_runs_on_newer_input(storage: Storage) -> None:
     await storage.create_schema()
-    p = make_purge(storage, settle_wait_seconds=5)
-    old = FakeRun(
-        "old", "e1", get_utc_now() - timedelta(seconds=1), payload("a1", "p1")
-    )
-    p.engine.running = [old]
-    job = await p.service.confirm(
-        (await p.service.request("project", "a1", "p1")).nonce
-    )
-    p.marks.waiting_runs.add("old")  # it waits at the gate for this purge
-    started = asyncio.get_running_loop().time()
-    assert await p.run_to_end(job.job_id) == "succeeded"
-    assert asyncio.get_running_loop().time() - started < 2
+    p = make_purge(storage)
+    future = get_utc_now() + timedelta(hours=1)
+    p.engine.running = [FakeRun("new", "e1", future, payload("a1", "p1", future))]
+    job_id = await _confirm(p)
+    assert await _waited(p, job_id, 30, lambda: None) < 2
 
 
-async def test_settle_wait_still_waits_when_a_sibling_run_is_gated(
+async def test_drain_waits_for_an_older_run_of_the_scope(storage: Storage) -> None:
+    await storage.create_schema()
+    p = make_purge(storage)
+    p.engine.running = [FakeRun("old", "e1", _old(), payload("a1", "p1", _old()))]
+    job_id = await _confirm(p)
+    assert 0.5 <= await _waited(p, job_id, 0.5, p.engine.running.clear) < 3
+
+
+async def test_drain_waits_for_an_older_unscoped_run(storage: Storage) -> None:
+    """A tick (no scope) may write any scope: waited for like the scope's own."""
+    await storage.create_schema()
+    p = make_purge(storage)
+    tick = json.dumps({"strategy_name": "reflect", "ts": _old().isoformat()})
+    p.engine.running = [FakeRun("tick", "e1", _old(), tick)]
+    job_id = await _confirm(p)
+    assert 0.5 <= await _waited(p, job_id, 0.5, p.engine.running.clear) < 3
+
+
+async def test_drain_ignores_a_tick_that_started_after_the_confirm(
     storage: Storage,
 ) -> None:
+    """Fired before the confirm, started after it: it reads what is there
+    then and is not old work, whatever its event time says."""
     await storage.create_schema()
-    p = make_purge(storage, settle_wait_seconds=5)
-    old = FakeRun(
-        "old", "e1", get_utc_now() - timedelta(seconds=1), payload("a1", "p1")
+    p = make_purge(storage)
+    later = get_utc_now() + timedelta(hours=1)
+    tick = json.dumps({"strategy_name": "reflect", "ts": _old().isoformat()})
+    p.engine.running = [FakeRun("tick", "e1", later, tick)]
+    job_id = await _confirm(p)
+    assert await _waited(p, job_id, 30, lambda: None) < 2
+
+
+async def test_drain_ignores_older_runs_of_other_scopes(storage: Storage) -> None:
+    await storage.create_schema()
+    p = make_purge(storage)
+    p.engine.running = [FakeRun("o", "e1", _old(), payload("a2", "p1", _old()))]
+    job_id = await _confirm(p)
+    assert await _waited(p, job_id, 30, lambda: None) < 2
+
+
+async def test_drain_waits_for_a_tracked_request(storage: Storage) -> None:
+    await storage.create_schema()
+    p = make_purge(storage)
+    tracked = p.marks.track(_old())
+    tracked.__enter__()
+    job_id = await _confirm(p)
+    with p.marks.track(get_utc_now() + timedelta(hours=1)):  # newer: not waited
+        waited = await _waited(
+            p, job_id, 0.5, lambda: tracked.__exit__(None, None, None)
+        )
+    assert 0.5 <= waited < 3
+
+
+async def test_drain_waits_for_an_extraction_started_after_pass_one(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A request in flight at T may hand off its extraction only later."""
+    await storage.create_schema()
+    p = make_purge(storage)
+    job_id = await _confirm(p)
+    arm(monkeypatch, tmp_path, "purge.before_step7=pause")
+    runner = p.runner()
+    runner.start()
+    try:
+        await asyncio.sleep(0.3)  # pass one done, held before the wait
+        p.extractions.append(_old())
+        release(tmp_path, "purge.before_step7")
+        await asyncio.sleep(0.5)
+        assert (await _row(p, job_id)).status == "running"
+        p.extractions.clear()
+        await _until_succeeded(p, job_id)
+    finally:
+        await runner.stop()
+
+
+async def test_drain_time_counts_toward_the_budget(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persisted while it waits, so a restart does not reset it; at the
+    budget the job fails and says why on the store the second pass missed."""
+    monkeypatch.setattr(_runner, "_DRAIN_SAVE_S", 0.05)
+    p, job_id = await _confirmed(storage, run_budget_seconds=1)
+    p.extractions.append(_old())  # never ends
+    assert await p.run_to_end(job_id) == "failed"
+    row = await _row(p, job_id)
+    assert "budget" in (row.last_error or "")
+    assert row.run_seconds >= 0.8
+    steps = {s.store: s for s in (await p.service.get(job_id)).steps}
+    assert (steps["inbox"].state, "budget" in (steps["inbox"].error or "")) == (
+        "failed",
+        True,
     )
-    p.engine.running = [old]
-    job = await p.service.confirm(
-        (await p.service.request("project", "a1", "p1")).nonce
-    )
-    # Another strategy of the same event waits at the gate; "old" runs on.
-    p.marks.waiting_runs.add("sibling")
-    loop = asyncio.get_running_loop()
-    loop.call_later(0.5, p.engine.running.clear)
-    started = loop.time()
-    assert await p.run_to_end(job.job_id) == "succeeded"
-    assert 0.5 <= loop.time() - started < 3
+
+
+async def test_second_pass_waits_for_projections_reading_the_scope(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await storage.create_schema()
+    p = make_purge(storage)
+    job_id = await _confirm(p)
+    arm(monkeypatch, tmp_path, "purge.before_step8=pause")
+    runner = p.runner()
+    runner.start()
+    try:
+        await asyncio.sleep(0.3)  # waiting for in-flight work is over
+        token = p.fence.register_run()  # a projection started meanwhile
+        release(tmp_path, "purge.before_step8")
+        await asyncio.sleep(0.5)
+        assert (await _row(p, job_id)).status == "running"
+        p.fence.end_run(token)
+        await _until_succeeded(p, job_id)
+    finally:
+        await runner.stop()
 
 
 async def test_rows_the_cascade_drops_after_step2_count_as_deleted(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import threading
 import time
@@ -20,7 +21,7 @@ from .observe import (
     index_ids,
     release,
     rows,
-    scope_counts,
+    s_leftovers,
     system_db,
     wait_converged,
     wait_idle,
@@ -95,12 +96,11 @@ def test_t21_1_trash_is_never_indexed(make_world: Any) -> None:
 
 
 def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) -> None:
-    """A synchronous add of S that entered before T and writes SQLite after it:
-    its boundary call is held while it holds the session lock, so step 7
-    waits for that lock and step 8 deletes what it wrote. Whether the add
-    then answers 409 (its markdown write refused) or 200 (its source was
-    already gone) depends on timing; either way S ends empty."""
-    world = make_world("T22.1", EVEROS_PURGE__SETTLE_WAIT_SECONDS="60")
+    """A22: a synchronous add of S that entered before T and writes after it:
+    the purge waits for the request (tracked from its arrival), then the
+    second pass deletes what it wrote; what it emitted carries its arrival
+    time and is dropped. S ends empty; the add itself answers 200."""
+    world = make_world("T22.1")
     srv, root = world.srv, world.srv.root
     word = f"{scope_token('a1', 'p1')}late"
     hold = purge_proxy.add(
@@ -124,6 +124,8 @@ def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) 
     job_id, _ = purge(srv, **S)
     first = _until_step6_done(srv, job_id)
     first_sqlite = {s["store"]: s["deleted"] for s in first["steps"]}["sqlite"]
+    time.sleep(2)
+    waited = srv.job(job_id).json()["data"]["status"]
     hold.release.set()
     client.join(timeout=120)
     job = finish(srv, job_id, timeout=180)
@@ -131,21 +133,62 @@ def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) 
         "responses", {k: (r.status_code, r.text[:400]) for k, r in responses.items()}
     )
     world.ev.json("job", job)
+    assert waited == "running"  # it waited for the request
     assert job["status"] == "succeeded", job
-    counts = scope_counts(root, "a1", "p1")
-    for key in (
-        "sqlite.memcell",
-        "sqlite.unprocessed_buffer",
-        "sqlite.conversation_status",
-        "md.episode",
-    ):
-        assert counts[key] == 0, (key, counts)
+    wait_idle(srv.base, root, timeout=300)
+    left = s_leftovers(root, "a1", "p1")
+    world.ev.json("s_left", left)
+    assert left == {}, left
     final_sqlite = {s["store"]: s["deleted"] for s in job["steps"]}["sqlite"]
     world.ev.json(
         "sqlite_deleted", {"first_round": first_sqlite, "final": final_sqlite}
     )
     assert final_sqlite > first_sqlite  # step 8 deleted what the add wrote
-    assert responses["add"].status_code in (200, 409), responses["add"].text
+    assert responses["add"].status_code == 200, responses["add"].text
+
+
+def test_t22_2_extraction_handed_off_after_a_disconnect_is_waited_for(
+    make_world: Any, purge_proxy: Any
+) -> None:
+    """A22 variant (T2): the request's client goes away after it handed its
+    extraction off; the extraction carries on and the purge waits for it."""
+    world = make_world("T22.2")
+    srv, root = world.srv, world.srv.root
+    word = f"{scope_token('a1', 'p1')}gone"
+    hold = purge_proxy.add(
+        Rule(target="llm", pattern=f'(?=.*"_EpisodeReply")(?=.*{word})', mode="hold")
+    )
+
+    def add() -> None:
+        # The client gives up after 3 s; the extraction does not.
+        with contextlib.suppress(httpx.TimeoutException):
+            httpx.post(
+                f"{srv.base}/api/v2/memory/add",
+                json={
+                    "session_id": "gone",
+                    **WHERE,
+                    "messages": chat("u1", word, assistant=AGENT),
+                },
+                timeout=3,
+            )
+
+    client = threading.Thread(target=add)
+    client.start()
+    assert purge_proxy.wait_held("llm", timeout=60)
+    job_id, _ = purge(srv, **S)
+    _until_step6_done(srv, job_id)
+    client.join(timeout=30)
+    time.sleep(2)
+    waited = srv.job(job_id).json()["data"]["status"]
+    hold.release.set()
+    job = finish(srv, job_id, timeout=180)
+    world.ev.json("job", {**job, "while_held": waited})
+    assert waited == "running", waited
+    assert job["status"] == "succeeded", job
+    wait_idle(srv.base, root, timeout=300)
+    left = s_leftovers(root, "a1", "p1")
+    world.ev.json("s_left", left)
+    assert left == {}, left
 
 
 def test_t23_1_projection_in_flight_is_cleared(
@@ -167,6 +210,44 @@ def test_t23_1_projection_in_flight_is_cleared(
     _until_step6_done(srv, job_id)
     hold.release.set()
     assert finish(srv, job_id, timeout=180)["status"] == "succeeded"
+    wait_converged(srv.base, timeout=240)
+    left = index_ids(root, "agent_skill", "a1", "p1")
+    world.ev.json("agent_skill_rows", sorted(left))
+    assert left == set()
+
+
+def test_t23_2_second_pass_waits_for_a_projection_of_a_new_write(
+    make_world: Any, purge_proxy: Any
+) -> None:
+    """A23 (a): a skill written into S while the purge runs is being
+    projected when the second pass moves it out; the purge waits for that
+    projection before it clears the index, so no orphan row is left."""
+    world = make_world(
+        "T23.2",
+        EVEROS_TEST_FAILPOINTS="purge.before_step8=pause,purge.pass2.before_index=pause",
+    )
+    srv, root = world.srv, world.srv.root
+    (skill_md,) = sorted((root / "a1" / "p1" / "agents").rglob("SKILL.md"))
+    rel = skill_md.relative_to(root)
+    text = skill_md.read_text(encoding="utf-8")
+    job_id, _ = purge(srv, **S)
+    _until_step6_done(srv, job_id)
+    hold = purge_proxy.add(Rule(target="emb", pattern="zqskillpasstwo", mode="hold"))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(text.replace("naive", "naive zqskillpasstwo"), "utf-8")
+    assert purge_proxy.wait_held("emb", timeout=120)
+    release(srv.fp_dir, "purge.before_step8")
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and (root / rel).exists():
+        time.sleep(0.2)  # the second pass moved it out
+    release(srv.fp_dir, "purge.pass2.before_index")
+    time.sleep(2)
+    waited = srv.job(job_id).json()["data"]["status"]
+    hold.release.set()
+    job = finish(srv, job_id, timeout=180)
+    world.ev.json("job", {**job, "while_projecting": waited})
+    assert waited == "running", waited
+    assert job["status"] == "succeeded", job
     wait_converged(srv.base, timeout=240)
     left = index_ids(root, "agent_skill", "a1", "p1")
     world.ev.json("agent_skill_rows", sorted(left))

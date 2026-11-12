@@ -1,24 +1,15 @@
-"""The purge mark and tombstones: which writes a purge refuses, and when."""
+"""Purge tombstones, the active job, and the work tracked while a purge waits."""
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from everos.core.errors import PurgeInProgressError
-from everos.core.purge_marks import (
-    CURRENT_EVENT,
-    MARKS,
-    PURGING,
-    EventStamp,
-    PurgeScope,
-    Tombstone,
-    ensure_writable,
-)
+from everos.core.purge_marks import MARKS, ORIGIN, PurgeScope, Tombstone
+from everos.memory.ports import Event
 
 T10 = datetime(2026, 11, 11, 10, 0, tzinfo=UTC)
 SPACE = PurgeScope("space")
@@ -59,66 +50,6 @@ def test_covers_matrix(
     scope: PurgeScope, where: tuple[str, str], expected: bool
 ) -> None:
     assert scope.covers(*where) is expected
-    assert scope.covers_dirs(*where) is expected
-
-
-def test_ensure_writable_blocks_target_scope_only(root: Path) -> None:
-    MARKS.for_root(root).raise_mark("j1", PROJ_A1P1)
-    with pytest.raises(PurgeInProgressError, match="j1"):
-        ensure_writable(root / "a1" / "p1" / "users" / "u1" / "user.md")
-    ensure_writable(root / "a1" / "p2" / "users" / "u1" / "user.md")
-    ensure_writable(root / "a2" / "p1" / "users" / "u1" / "user.md")
-    ensure_writable(root.parent / "elsewhere" / "a1" / "p1" / "x.md")
-
-
-def test_purging_task_passes(root: Path) -> None:
-    MARKS.for_root(root).raise_mark("j1", SPACE)
-    token = PURGING.set(True)
-    try:
-        ensure_writable(root / "a1" / "p1" / "x.md")
-    finally:
-        PURGING.reset(token)
-    with pytest.raises(PurgeInProgressError):
-        ensure_writable(root / "a1" / "p1" / "x.md")
-
-
-@pytest.mark.parametrize(
-    ("event_at", "rejected"),
-    [
-        (datetime(2026, 11, 11, 9, 59, tzinfo=UTC), True),
-        (datetime(2026, 11, 11, 10, 1, tzinfo=UTC), False),
-    ],
-)
-def test_stale_event_rejected_after_lift(
-    root: Path, event_at: datetime, rejected: bool
-) -> None:
-    marks = MARKS.for_root(root)
-    marks.add_tombstone(Tombstone(PROJ_A1P1, T10))  # the mark is already down
-    token = CURRENT_EVENT.set(EventStamp("a1", "p1", event_at))
-    try:
-        if rejected:
-            with pytest.raises(PurgeInProgressError):
-                ensure_writable(root / "a1" / "p1" / "x.md")
-        else:
-            ensure_writable(root / "a1" / "p1" / "x.md")
-        ensure_writable(root / "a1" / "p2" / "x.md")  # other scope: never stale
-    finally:
-        CURRENT_EVENT.reset(token)
-    ensure_writable(root / "a1" / "p1" / "x.md")  # not a background event
-
-
-@pytest.mark.parametrize(
-    "rel", [".tmp/purge-j1/a1/p1/x.md", ".index/sqlite/system.db", "ome.toml"]
-)
-def test_system_dirs_are_not_scopes(root: Path, rel: str) -> None:
-    MARKS.for_root(root).raise_mark("j1", SPACE)
-    ensure_writable(root / rel)
-
-
-def test_dot_named_app_is_a_scope(root: Path) -> None:
-    MARKS.for_root(root).raise_mark("j1", PurgeScope("app", ".foo", None, ".foo"))
-    with pytest.raises(PurgeInProgressError):
-        ensure_writable(root / ".foo" / "p1" / "x.md")
 
 
 def test_max_tombstone_wins(root: Path) -> None:
@@ -128,18 +59,48 @@ def test_max_tombstone_wins(root: Path) -> None:
     assert marks.tombstone_at("a1", "p1") == later
     assert marks.tombstone_at("a1", "p2") == T10
     assert marks.tombstone_at("a2", "p1") is None
-    assert marks.tombstone_at_dirs("a1", "p1") == later
     marks.remove_tombstone(Tombstone(PROJ_A1P1, later))
     assert marks.tombstone_at("a1", "p1") == T10
 
 
-def test_roots_do_not_share_marks(tmp_path: Path) -> None:
+def test_track_counts_only_older_work_while_it_runs(root: Path) -> None:
+    marks = MARKS.for_root(root)
+    early, late = T10 - timedelta(seconds=1), T10 + timedelta(seconds=1)
+    with marks.track(early):
+        with marks.track(late):
+            assert marks.tracked_before(T10, PROJ_A1P1) == 1
+        with marks.track(early):
+            assert marks.tracked_before(T10, PROJ_A1P1) == 2
+        assert marks.tracked_before(T10, PROJ_A1P1) == 1
+    assert marks.tracked_before(T10, PROJ_A1P1) == 0
+
+
+def test_tracked_work_of_another_scope_is_not_counted(root: Path) -> None:
+    """Work that names its scope counts only for a purge covering it; work
+    that does not (an HTTP request) counts for every purge."""
+    marks = MARKS.for_root(root)
+    early = T10 - timedelta(seconds=1)
+    with marks.track(early, ("a2", "p1")), marks.track(early, ("a1", "p1")):
+        assert marks.tracked_before(T10, PROJ_A1P1) == 1
+        assert marks.tracked_before(T10, APP_A1) == 1
+        assert marks.tracked_before(T10, SPACE) == 2
+    with marks.track(early):
+        assert marks.tracked_before(T10, PROJ_A1P1) == 1
+
+
+def test_track_ends_when_the_work_fails(root: Path) -> None:
+    marks = MARKS.for_root(root)
+    with pytest.raises(RuntimeError), marks.track(T10):
+        raise RuntimeError("boom")
+    assert marks.tracked_before(T10 + timedelta(1), SPACE) == 0
+
+
+def test_roots_do_not_share_state(tmp_path: Path) -> None:
     one, two = (tmp_path / "one").resolve(), (tmp_path / "two").resolve()
     MARKS.for_root(one).raise_mark("j1", SPACE)
+    MARKS.for_root(one).add_tombstone(Tombstone(SPACE, T10))
     assert MARKS.for_root(two).active_job_id is None
-    ensure_writable(two / "a1" / "p1" / "x.md")
-    with pytest.raises(PurgeInProgressError):
-        ensure_writable(one / "a1" / "p1" / "x.md")
+    assert MARKS.for_root(two).tombstone_at("a1", "p1") is None
 
 
 def test_reset_clears_all_roots(root: Path) -> None:
@@ -148,13 +109,11 @@ def test_reset_clears_all_roots(root: Path) -> None:
     assert MARKS.for_root(root).active_job_id is None
 
 
-async def test_wait_lifted_returns_when_mark_lifts(root: Path) -> None:
-    marks = MARKS.for_root(root)
-    await asyncio.wait_for(marks.wait_lifted(), 1)  # no mark: at once
-    marks.raise_mark("j1", SPACE)
-    waiter = asyncio.create_task(marks.wait_lifted())
-    await asyncio.sleep(0.05)
-    assert not waiter.done()
-    marks.lift_mark()
-    await asyncio.wait_for(waiter, 1)
-    assert marks.active_job_id is None and marks.active_scope is None
+def test_event_ts_is_the_origin_inside_tracked_work() -> None:
+    """An event made while handling an input carries that input's time."""
+    token = ORIGIN.set(T10)
+    try:
+        assert Event().ts == T10
+    finally:
+        ORIGIN.reset(token)
+    assert Event().ts > T10  # outside: when it is made

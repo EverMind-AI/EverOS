@@ -5,12 +5,15 @@ from __future__ import annotations
 __all__ = ["ExtractionSupervisor"]
 
 import asyncio
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from everos.core.observability.logging import get_logger
+from everos.core.purge_marks import ORIGIN
+from everos.core.utils.datetime import get_utc_now
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
 
 logger = get_logger("everos.service.memory")
 
@@ -32,7 +35,10 @@ class ExtractionSupervisor:
     """
 
     def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[Any]] = set()
+        self._tasks: dict[
+            asyncio.Task[Any], tuple[datetime, tuple[str, str] | None]
+        ] = {}
+        """Each running task: the origin of its input, the scope it writes."""
 
     def supervise[T](
         self,
@@ -42,17 +48,20 @@ class ExtractionSupervisor:
         memcell_ids: list[str],
         label: str = "memorize_extraction",
         expected: tuple[type[BaseException], ...] = (),
+        where: tuple[str, str] | None = None,
     ) -> asyncio.Task[T]:
         """Run ``coro`` as a task that outlives its caller.
 
         A failure is logged as ``<label>_failed`` unless it is one of
-        ``expected`` (an answer the caller reports itself).
+        ``expected`` (an answer the caller reports itself). ``where`` is the
+        ``(app_id, project_id)`` the task writes, when known (a purge of
+        another scope does not wait for it).
         """
         task: asyncio.Task[T] = asyncio.ensure_future(coro)
-        self._tasks.add(task)
+        self._tasks[task] = (ORIGIN.get() or get_utc_now(), where)
 
         def _done(t: asyncio.Task[T]) -> None:
-            self._tasks.discard(t)
+            self._tasks.pop(t, None)
             if t.cancelled():
                 logger.error(
                     f"{label}_cancelled",
@@ -76,9 +85,14 @@ class ExtractionSupervisor:
     def in_flight(self) -> int:
         return len(self._tasks)
 
-    def snapshot(self) -> frozenset[asyncio.Task[Any]]:
-        """The extractions running right now."""
-        return frozenset(self._tasks)
+    def started_before(self, at: datetime, covers: Callable[[str, str], bool]) -> int:
+        """Running extractions of input taken in before ``at`` that may write
+        where ``covers`` says (unknown scope: may write anywhere)."""
+        return sum(
+            1
+            for origin, where in self._tasks.values()
+            if origin < at and (where is None or covers(*where))
+        )
 
     async def drain(self, wait_seconds: float) -> int:
         """Wait up to ``wait_seconds`` for running extractions; return what is left."""

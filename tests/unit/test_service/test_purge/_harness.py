@@ -12,7 +12,6 @@ from typing import Any
 
 from everos.config import PurgeSettings
 from everos.core import failpoints
-from everos.core.locks import LOCKS
 from everos.core.purge_marks import MARKS, PurgeMarks
 from everos.core.utils.datetime import get_utc_now, today_with_timezone
 from everos.infra.cascade import DeleteFence
@@ -79,7 +78,8 @@ class Purge:
     storage: Storage
     engine: FakeEngine
     fence: DeleteFence
-    woken: list[str]
+    extractions: list[datetime]
+    """Origins of the extractions the service reports running."""
 
     @property
     def marks(self) -> PurgeMarks:
@@ -98,10 +98,8 @@ class Purge:
             index_store=svc.index_store,
             engine=svc.engine,
             fence=svc.fence,
-            locks=svc.locks,
             scope_of=svc.scope_of,
-            inflight=lambda: svc._inflight,
-            wake_queue=svc.wake_queue,
+            extractions_before=svc.extractions_before,
             **({"backoff": lambda n: 0.01, "poll_seconds": 0.05} | kw),
         )
         svc._runner = runner
@@ -122,13 +120,11 @@ class Purge:
             await runner.stop()
 
 
-def make_purge(
-    storage: Storage, *, extraction: frozenset[Any] = frozenset(), **settings: Any
-) -> Purge:
+def make_purge(storage: Storage, **settings: Any) -> Purge:
     root = storage.root
     engine = FakeEngine()
     fence = DeleteFence()
-    woken: list[str] = []
+    extractions: list[datetime] = []
     service = PurgeService(
         settings=PurgeSettings(**settings),
         root=root.root,
@@ -140,11 +136,9 @@ def make_purge(
         index_store="lancedb",
         engine=engine,  # type: ignore[arg-type]
         fence=fence,
-        locks=LOCKS,
-        extraction_snapshot=lambda: extraction,
-        wake_queue=lambda: woken.append("queue"),
+        extractions_before=lambda at, scope: sum(1 for o in extractions if o < at),
     )
-    return Purge(service, storage, engine, fence, woken)
+    return Purge(service, storage, engine, fence, extractions)
 
 
 async def seed_scope(storage: Storage, app: str, project: str, n: int = 2) -> None:
@@ -200,5 +194,8 @@ async def seed_scope(storage: Storage, app: str, project: str, n: int = 2) -> No
         await s.commit()
 
 
-def payload(app: str, project: str) -> str:
-    return json.dumps({"app_id": app, "project_id": project})
+def payload(app: str, project: str, ts: datetime | None = None) -> str:
+    data = {"app_id": app, "project_id": project}
+    if ts is not None:
+        data["ts"] = ts.isoformat()
+    return json.dumps(data)

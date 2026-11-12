@@ -62,7 +62,6 @@ from everos.component.rerank import RerankProvider, build_rerank_provider
 from everos.component.tokenizer import Tokenizer, build_tokenizer
 from everos.config import OmeSettings, Settings, load_settings, resolve_root
 from everos.config.search_runtime import SearchConfigSource
-from everos.core.locks import LOCKS
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
 from everos.core.observability.tracing import (
@@ -162,8 +161,8 @@ class Application:
     """What an entry point holds: four facades plus the provider snapshot.
 
     ``start`` brings up what a long-running server needs -- system DB (and
-    an unfinished purge's mark, before anything writes), index, cascade,
-    OME, the ``async_mode`` queue, the purge runner -- in that order.
+    the purge tombstones, before anything replays), index, cascade, OME, the
+    ``async_mode`` queue, the purge runner -- in that order.
     ``aclose`` stops whatever was started in reverse, closes the storage
     connections whether or not ``start`` ran (a CLI command opens them
     without starting), and shuts tracing down; it is idempotent and safe
@@ -224,8 +223,8 @@ class Application:
         self._root.ensure()
         tables = await self._admin.create_schema()
         logger.info("sqlite_schema_ready", tables=tables)
-        # Before anything writes: a purge that was running is running again
-        # (its mark is up), and earlier purges' tombstones are known.
+        # Before anything replays: every purge's tombstone is known before
+        # OME crash recovery and the async queue re-run what they hold.
         await self.purge.restore()
         # Before anything writes: a whole-owner deletion a crash cut short
         # still has today's id counters to put back; one inside a running
@@ -385,9 +384,7 @@ def build_application(
         index_store=settings.index.backend,
         engine=engine,
         fence=fence,
-        locks=LOCKS,
-        extraction_snapshot=memory.extraction_snapshot,
-        wake_queue=memory.wake_queue,
+        extractions_before=memory.extractions_before,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(

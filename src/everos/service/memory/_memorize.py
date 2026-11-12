@@ -168,6 +168,10 @@ class Memorizer:
                 self._extract(payload, ingested, boundary, mode=mode),
                 session_id=session_id,
                 memcell_ids=boundary.memcell_ids,
+                where=(
+                    payload.get("app_id", "default"),
+                    payload.get("project_id", "default"),
+                ),
             )
             try:
                 return await asyncio.shield(extraction)

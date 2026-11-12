@@ -1,4 +1,4 @@
-"""T18.1, T19.1, T25.1, T29.1, T30.1: failures, budget, finalize, self-healing."""
+"""T18.1, T19.1-T19.3, T25.1, T29.1, T30.1: failures, budget, finalize, healing."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ from typing import Any
 
 import pytest
 
+from everos.core.utils.datetime import from_iso_format
 from tests.acceptance.memory_delete.conftest import chat
+from tests.acceptance.memory_delete.proxy import Rule
 
 from .journey import finish, purge
-from .observe import rows, system_db
+from .observe import rows, s_leftovers, system_db, wait_idle
 from .seed import scope_token, talk
 
 pytestmark = pytest.mark.acceptance
@@ -68,10 +70,35 @@ def test_t18_1_delete_failures(
     if status == "failed":
         index_step = next(s for s in job["steps"] if s["store"] == "lancedb")
         assert index_step["state"] == "failed" and index_step["error"], job
-        assert _write(srv) == 200  # the mark is down
+        assert _write(srv) == 200
 
 
-def test_t19_1_budget_ends_a_stuck_purge(make_world: Any) -> None:
+def _writes_until_terminal(srv: Any, job_id: str, limit: float) -> list[Any]:
+    """Write outside S every 0.5 s while the job runs; ``(t, code, status)``."""
+    timeline = []
+    started = time.monotonic()
+    while time.monotonic() - started < limit:
+        status = srv.job(job_id).json()["data"]["status"]
+        timeline.append((round(time.monotonic() - started, 2), _write(srv), status))
+        if status in ("succeeded", "failed"):
+            break
+        time.sleep(0.5)
+    return timeline
+
+
+def _assert_budget_failure(world: Any, job_id: str, timeline: list[Any]) -> Any:
+    srv = world.srv
+    world.ev.json("write_timeline", timeline)
+    job = finish(srv, job_id)
+    world.ev.json("job", job)
+    assert job["status"] == "failed", job
+    row = rows(system_db(srv.root), "SELECT last_error FROM purge_job")[0][0]
+    assert "budget" in (row or ""), row
+    assert {code for _, code, _ in timeline} == {200}, timeline  # never blocked
+    return job
+
+
+def test_t19_1_budget_ends_a_stuck_step(make_world: Any) -> None:
     world = make_world(
         "T19.1",
         seed=False,
@@ -81,23 +108,58 @@ def test_t19_1_budget_ends_a_stuck_purge(make_world: Any) -> None:
     srv = world.srv
     _one_session(srv)
     job_id, _ = purge(srv, **S)
-    confirmed = time.monotonic()
-    timeline = []
-    while time.monotonic() - confirmed < 30:
-        code = _write(srv)
-        timeline.append((round(time.monotonic() - confirmed, 2), code))
-        if code == 200:
-            break
-        time.sleep(0.5)
-    world.ev.json("write_timeline", timeline)
-    held_for = timeline[-1][0]
-    assert timeline[-1][1] == 200 and timeline[0][1] == 409
-    assert held_for <= 5 + 2 + 1, held_for  # budget + finalize + one poll
-    job = finish(srv, job_id)
-    assert job["status"] == "failed", job
+    job = _assert_budget_failure(world, job_id, _writes_until_terminal(srv, job_id, 30))
+    index_step = next(s for s in job["steps"] if s["store"] == "lancedb")
+    assert index_step["state"] == "failed" and "budget" in index_step["error"], job
 
 
-def test_t25_1_mark_stays_until_the_terminal_state_is_written(
+def _held_s_run(world: Any, proxy: Any) -> None:
+    """A run of S on input taken in before the purge, that never ends."""
+    token = scope_token("a1", "p1")
+    proxy.add(
+        Rule(
+            target="llm", pattern=f'(?=.*"_AtomicFactsReply")(?=.*{token})', mode="hold"
+        )
+    )
+    _one_session(world.srv)
+    assert proxy.wait_held("llm", timeout=60)
+
+
+def test_t19_2_budget_ends_a_wait_that_never_ends(
+    make_world: Any, purge_proxy: Any
+) -> None:
+    world = make_world("T19.2", seed=False, EVEROS_PURGE__RUN_BUDGET_SECONDS="10")
+    srv = world.srv
+    _held_s_run(world, purge_proxy)
+    job_id, _ = purge(srv, **S)
+    job = _assert_budget_failure(world, job_id, _writes_until_terminal(srv, job_id, 60))
+    inbox = next(s for s in job["steps"] if s["store"] == "inbox")
+    assert inbox["state"] == "failed" and "budget" in inbox["error"], job
+
+
+def test_t19_3_purging_again_after_a_restart_succeeds(
+    make_world: Any, purge_proxy: Any
+) -> None:
+    """The documented way out of T19.2: restart the server, purge again."""
+    world = make_world("T19.3", seed=False, EVEROS_PURGE__RUN_BUDGET_SECONDS="10")
+    srv, root = world.srv, world.srv.root
+    _held_s_run(world, purge_proxy)
+    job_id, _ = purge(srv, **S)
+    assert finish(srv, job_id, timeout=60)["status"] == "failed"
+    srv.stop()
+    purge_proxy.clear()
+    srv.start()
+    again, _ = purge(srv, **S)
+    job = finish(srv, again, timeout=120)
+    world.ev.json("second_job", job)
+    assert job["status"] == "succeeded", job
+    wait_idle(srv.base, root, timeout=300)
+    left = s_leftovers(root, "a1", "p1", before=from_iso_format(job["created_at"]))
+    world.ev.json("s_left", left)
+    assert left == {}, left
+
+
+def test_t25_1_job_stays_running_until_the_terminal_state_is_written(
     make_world: Any,
 ) -> None:
     world = make_world(
@@ -105,44 +167,30 @@ def test_t25_1_mark_stays_until_the_terminal_state_is_written(
         seed=False,
         EVEROS_TEST_FAILPOINTS="purge.finalize=raise:sqlite_locked:2",
     )
-    srv, root = world.srv, world.srv.root
+    srv = world.srv
     _one_session(srv)
     job_id, _ = purge(srv, **S)
     timeline = []
     started = time.monotonic()
     while time.monotonic() - started < 60:
         data = srv.job(job_id).json()["data"]
-        code = _write(srv)
         timeline.append(
             {
                 "t": round(time.monotonic() - started, 2),
                 "status": data["status"],
                 "steps_done": all(s["state"] == "done" for s in data["steps"]),
-                "write": code,
+                "write": _write(srv),
             }
         )
-        if code == 200:
+        if data["status"] in ("succeeded", "failed"):
             break
         time.sleep(0.5)
     world.ev.json("timeline", timeline)
-    for point in timeline:
-        if point["write"] == 409:
-            assert point["status"] in ("queued", "running"), point
-    assert any(p["steps_done"] and p["write"] == 409 for p in timeline), timeline
+    assert {p["write"] for p in timeline} == {200}, timeline  # never blocked
+    # The finalize retries took a few seconds with every step done: the job
+    # read running all along, then succeeded.
+    assert any(p["steps_done"] and p["status"] == "running" for p in timeline)
     assert finish(srv, job_id)["status"] == "succeeded"
-    talk(
-        srv,
-        "u1",
-        "after",
-        scope_token("a1", "p1"),
-        {"app_id": "a1", "project_id": "p1"},
-    )
-    time.sleep(10)
-    memcells = rows(
-        system_db(root),
-        "SELECT COUNT(*) FROM memcell WHERE app_id='a1' AND project_id='p1'",
-    )[0][0]
-    assert memcells == 1  # the write after the lift was not purged again
 
 
 def test_t29_1_runner_heals_itself(make_world: Any) -> None:
@@ -201,7 +249,7 @@ def test_t30_1_failed_job_write_leaves_nothing(make_world: Any) -> None:
     nonce = srv.purge(**S).json()["data"]["nonce"]
     first = srv.confirm(nonce)
     assert first.status_code == 503, first.text
-    assert _write(srv, "a1", "p1") == 200  # no mark was raised
+    assert _write(srv, "a1", "p1") == 200  # nothing started
     second = srv.confirm(nonce)
     assert second.status_code == 202, second.text
     world.ev.json("responses", {"first": first.json(), "second": second.json()})

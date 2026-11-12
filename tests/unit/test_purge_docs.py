@@ -21,9 +21,11 @@ KEYWORDS = {
         "/purge/{job_id}",
         "irreversible",
         "entire memory root",
-        "409",
-        "PURGE_IN_PROGRESS",
         "PURGE_NONCE_INVALID",
+        "purge_in_progress",
+        "does not block",
+        "may be deleted",
+        "restart the server, then purge again",
         "only once",
         "If the `202` is lost",
         '"default"',
@@ -44,13 +46,16 @@ KEYWORDS = {
     ],
     "configuration.md": [
         "### `[purge]`",
-        "settle_wait_seconds",
         "run_budget_seconds",
         "nonce_ttl_seconds",
         "count_timeout_seconds",
         "Give every memory root its own prefix",
     ],
-    "cli.md": ["CLI commands run as usual", "resumes"],
+    "cli.md": [
+        "CLI commands run as usual",
+        "resumes",
+        "Do not run `everos cascade backfill`",
+    ],
 }
 
 
@@ -73,3 +78,11 @@ def test_curl_example_has_only_the_three_placeholders() -> None:
     found = set(re.findall(r"<[^<>\s]+>", blocks[0]))
     assert found == {"<NONCE>", "<JOB_ID>"}
     assert "$PORT" in blocks[0]
+
+
+def test_purge_docs_no_longer_promise_refused_writes() -> None:
+    """Writes are never refused while a purge runs (spec v3 D3)."""
+    assert "PURGE_IN_PROGRESS" not in (DOCS / "api.md").read_text(encoding="utf-8")
+    assert "settle_wait_seconds" not in (DOCS / "configuration.md").read_text(
+        encoding="utf-8"
+    )

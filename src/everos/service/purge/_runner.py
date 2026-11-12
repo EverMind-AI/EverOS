@@ -1,10 +1,11 @@
 """The purge runner: one in-process loop carrying the active job to its end.
 
-One attempt runs steps 1-10 (spec §5.6): clear the scope from the inbox,
+One attempt runs steps 1-9 (spec §5.6): clear the scope from the inbox,
 markdown, the index, SQLite, the OME run history and the md change ledger;
-wait for the work in flight at confirm time; clear again; persist the
-terminal state; only then lift the mark. Every step is idempotent, so an
-attempt that stops anywhere (an error, a restart) is simply run again.
+wait until no work on input taken in before the purge is in flight; clear
+again; persist the terminal state. Nothing is blocked meanwhile. Every step
+is idempotent, so an attempt that stops anywhere (an error, a restart) is
+simply run again.
 """
 
 from __future__ import annotations
@@ -28,15 +29,16 @@ from everos.core.errors import (
     VectorStoreError,
 )
 from everos.core.failpoints import afailpoint
-from everos.core.locks import NamedLocks
 from everos.core.observability.logging import get_logger
-from everos.core.purge_marks import PURGING, PurgeMarks, PurgeScope
-from everos.core.utils.datetime import get_utc_now
+from everos.core.purge_marks import PurgeMarks, PurgeScope
+from everos.core.utils.datetime import from_iso_format, get_utc_now
 from everos.memory.ports import Filter, all_of, eq
 
 from ._views import PurgeStep, step_stores, steps_from_json, steps_to_json
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from everos.config import PurgeSettings
     from everos.infra.cascade import DeleteFence
     from everos.infra.ome import OfflineEngine
@@ -44,13 +46,16 @@ if TYPE_CHECKING:
     from everos.infra.persistence.markdown import MarkdownScopePurger
     from everos.infra.persistence.sqlite import PurgeJob, PurgeJobRepo, ScopePurgeRepo
 
-    from ._service import InFlight
-
 logger = get_logger(__name__)
 
 MAX_RETRIES = 5
 """Retryable failures a job survives; the next one ends it ``failed``."""
-_SETTLE_POLL_S = 0.1
+MAX_ATTEMPTS = 20
+"""Attempts a job may start (a crash mid-step counts no failure, so a job
+that keeps killing the server would otherwise rerun forever)."""
+_DRAIN_POLL_S = 0.1
+_DRAIN_SAVE_S = 5.0
+"""How often the wait persists its running time (and so the heartbeat)."""
 
 
 def _backoff(n: int) -> float:
@@ -95,6 +100,15 @@ def scope_filter(scope: PurgeScope) -> Filter | None:
     return all_of(eq("app_id", scope.app_id), eq("project_id", scope.project_id))
 
 
+def _event_ts(payload: str, fallback: datetime) -> datetime:
+    """A stored OME event's ``ts`` (its input's origin); ``fallback`` if absent."""
+    try:
+        data = json.loads(payload)
+        return from_iso_format(data["ts"])
+    except (ValueError, TypeError, KeyError):
+        return fallback
+
+
 def payload_in_scope(scope: PurgeScope, payload: str) -> bool | None:
     """Whether a stored OME event belongs to ``scope``; ``None``: unscoped."""
     try:
@@ -115,6 +129,8 @@ class _Run:
 
     job_id: str
     scope: PurgeScope
+    at: datetime
+    """``T``: when the purge was confirmed."""
     steps: dict[str, PurgeStep]
     run_seconds: float
     retries: int
@@ -140,10 +156,8 @@ class PurgeRunner:
         index_store: str,
         engine: OfflineEngine,
         fence: DeleteFence,
-        locks: NamedLocks,
         scope_of: Callable[[str, str | None, str | None], PurgeScope],
-        inflight: Callable[[], InFlight | None],
-        wake_queue: Callable[[], None],
+        extractions_before: Callable[[datetime, PurgeScope], int],
         backoff: Callable[[int], float] = _backoff,
         poll_seconds: float = 5.0,
     ) -> None:
@@ -156,10 +170,8 @@ class PurgeRunner:
         self._index_store = index_store
         self._engine = engine
         self._fence = fence
-        self._locks = locks
         self._scope_of = scope_of
-        self._inflight = inflight
-        self._wake_queue = wake_queue
+        self._extractions_before = extractions_before
         self._backoff = backoff
         self._poll = poll_seconds
         self._task: asyncio.Task[None] | None = None
@@ -175,7 +187,7 @@ class PurgeRunner:
         self._spawn()
 
     async def stop(self) -> None:
-        """Cancel the loop: a job mid-attempt keeps ``running`` and its mark."""
+        """Cancel the loop: a job mid-attempt keeps ``running``."""
         self._stopping = True
         task, self._task = self._task, None
         if task is not None:
@@ -229,6 +241,7 @@ class PurgeRunner:
         run = _Run(
             job_id=job.job_id,
             scope=self._scope_of(job.scope, job.app_id, job.project_id),
+            at=job.created_at,
             steps={s: known.get(s, PurgeStep(s, "pending")) for s in stores},
             run_seconds=job.run_seconds,
             retries=job.retries,
@@ -237,17 +250,18 @@ class PurgeRunner:
         if left <= 0:
             await self._end(run, "failed", "purge run budget exhausted")
             return
+        if job.attempts >= MAX_ATTEMPTS:
+            await self._end(
+                run, "failed", f"purge stopped after {job.attempts} attempts"
+            )
+            return
         await self._jobs.update_progress(
             job.job_id,
             status="running",
             attempts=job.attempts + 1,
             started_at=job.started_at or get_utc_now(),
         )
-        token = PURGING.set(True)
-        try:
-            outcome, error = await self._try_steps(run, left)
-        finally:
-            PURGING.reset(token)
+        outcome, error = await self._try_steps(run, left)
         if outcome == "retry":
             run.retries += 1
             if run.retries > MAX_RETRIES:
@@ -273,7 +287,15 @@ class PurgeRunner:
                 await self._steps(run)
         except TimeoutError as exc:
             if deadline.expired():
-                return "failed", "purge run budget exhausted"
+                error = "purge run budget exhausted"
+                if all(s.state != "failed" for s in run.steps.values()):
+                    # Ran out while waiting for in-flight work: the second
+                    # pass never started; its first store did not get done.
+                    first = next(iter(run.steps.values()))
+                    run.steps[first.store] = PurgeStep(
+                        first.store, "failed", first.deleted, error
+                    )
+                return "failed", error
             return "retry", repr(exc)[:500]
         except Exception as exc:
             return ("retry" if _retryable(exc) else "failed"), repr(exc)[:500]
@@ -282,7 +304,7 @@ class PurgeRunner:
     async def _steps(self, run: _Run) -> None:
         await self._clear(run)
         await afailpoint("purge.before_step7")
-        await self._settle(run)
+        await self._drain(run)
         await afailpoint("purge.before_step8")
         await self._clear(run)
 
@@ -353,12 +375,14 @@ class PurgeRunner:
     # ── steps 1-6 ────────────────────────────────────────────────────────
 
     async def _step_inbox(self, run: _Run) -> int:
+        """Rows accepted before ``T`` only: later ones are new writes."""
         discarded = await self._scope_repo.discard_queued_inbox(
-            run.scope, job_id=run.job_id
+            run.scope, job_id=run.job_id, before=run.at
         )
-        removed = await self._scope_repo.delete_inbox_history(
-            run.scope, job_id=run.job_id
-        )
+        removed = await self._scope_repo.delete_inbox_history(run.scope, before=run.at)
+        # The unprocessed messages go now, not at step 4: a flush meanwhile
+        # would cut them into a memcell whose work counts as new input.
+        await self._scope_repo.delete_buffer(run.scope)
         return discarded + removed
 
     async def _step_markdown(self, run: _Run) -> int:
@@ -368,10 +392,14 @@ class PurgeRunner:
         # scope is moved there again (a rename onto it would fail).
         await self._markdown.empty(run.scope, run.job_id)
         moved = await self._markdown.move_out(run.scope, run.job_id)
-        if run.fence_tokens is None:  # projections that may have read S's files
-            run.fence_tokens = self._fence.in_flight()
+        reading = self._fence.in_flight()  # projections that may have read S's files
         await self._markdown.restore_counters(run.scope, run.job_id)
         await self._markdown.empty(run.scope, run.job_id)
+        if run.fence_tokens is None:  # first pass: step 7 waits for them
+            run.fence_tokens = reading
+        else:  # second pass: they end before the index is cleared
+            await afailpoint("purge.pass2.before_index")
+            await self._wait_for(lambda: not reading & self._fence.in_flight())
         return moved
 
     async def _step_index(self, run: _Run) -> int:
@@ -403,40 +431,56 @@ class PurgeRunner:
 
     # ── step 7 ───────────────────────────────────────────────────────────
 
-    async def _settle(self, run: _Run) -> None:
-        """Wait (bounded) for what was in flight at confirm time to end."""
-        inflight = self._inflight()
-        deadline = time.monotonic() + self._settings.settle_wait_seconds
-        while time.monotonic() < deadline:
-            if await self._settled(inflight, run.fence_tokens or frozenset()):
-                return
-            await asyncio.sleep(_SETTLE_POLL_S)
-        logger.warning("purge_settle_wait_expired", job_id=run.job_id)
+    async def _drain(self, run: _Run) -> None:
+        """Wait until no work on input taken in before ``T`` is in flight.
 
-    async def _settled(self, inflight: Any, tokens: frozenset[int]) -> bool:
-        if tokens & self._fence.in_flight():
+        Asked again every poll, so work such input starts late (an
+        extraction created after the first pass) is waited for too. No limit
+        of its own: the attempt's budget bounds it, and the time spent is
+        added to ``run_seconds`` (persisted every few seconds) so a restart
+        does not reset it.
+        """
+        saved = time.monotonic()
+        while not await self._drained(run):
+            await asyncio.sleep(_DRAIN_POLL_S)
+            if time.monotonic() - saved >= _DRAIN_SAVE_S:
+                await self._save(run, saved)
+                saved = time.monotonic()
+        await self._save(run, saved)
+
+    async def _drained(self, run: _Run) -> bool:
+        if (run.fence_tokens or frozenset()) & self._fence.in_flight():
             return False
-        if inflight is None:
-            return True
-        if any(not task.done() for task in inflight.tasks):
+        if self._marks.tracked_before(run.at, run.scope):
             return False
-        if inflight.session_keys & self._locks.held_keys("session"):
+        if self._extractions_before(run.at, run.scope):
             return False
-        if inflight.run_ids:
-            waiting = self._marks.waiting_runs
-            running = {
-                r.run_id
-                for r in await self._engine.running_runs()
-                if r.run_id not in waiting  # held at the gate: would wait on us
-            }
-            if inflight.run_ids & running:
+        for r in await self._engine.running_runs():
+            in_scope = payload_in_scope(run.scope, r.event_payload)
+            if in_scope is False:
+                continue
+            # A tick has no input of its own: it reads what is there when it
+            # starts, so its start is what counts.
+            began = (
+                r.started_at
+                if in_scope is None
+                else _event_ts(r.event_payload, r.started_at)
+            )
+            if began < run.at:
                 return False
         return True
 
-    # ── steps 9-10 ───────────────────────────────────────────────────────
+    async def _wait_for(self, done: Callable[[], bool]) -> None:
+        """Poll ``done`` (other components' state; nothing to wait on)."""
+        while True:
+            if done():
+                return
+            await asyncio.sleep(_DRAIN_POLL_S)
+
+    # ── step 9 ───────────────────────────────────────────────────────
 
     async def _end(self, run: _Run, status: str, error: str | None) -> None:
-        """Persist the terminal state (retrying the write), then lift the mark."""
+        """Persist the terminal state (retrying the write); the job is done."""
         await afailpoint("purge.before_step9")
         attempt = 0
         while True:
@@ -462,12 +506,5 @@ class PurgeRunner:
                     error=repr(exc)[:200],
                 )
                 await asyncio.sleep(self._backoff(attempt))
-        await afailpoint("purge.before_step10")
         self._marks.lift_mark()
-        scope = run.scope
-        if scope.kind == "space":
-            self._fence.unblock_scope("*", None)
-        else:
-            self._fence.unblock_scope(str(scope.app_id), scope.project_id)
-        self._wake_queue()
         logger.info("purge_finished", job_id=run.job_id, status=status, error=error)

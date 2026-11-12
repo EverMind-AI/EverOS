@@ -932,18 +932,15 @@ class ObservabilitySettings(BaseModel):
 class PurgeSettings(BaseModel):
     """``[purge]`` — online clearing of a project, an app or the whole root.
 
-    While a purge runs every write to the root is refused (HTTP 409), so these
-    bound how long that can last.
+    Nothing is blocked while a purge runs; the budget bounds how long one can
+    take, its wait for in-flight work included.
 
     Env binding:
-        EVEROS_PURGE__SETTLE_WAIT_SECONDS
         EVEROS_PURGE__RUN_BUDGET_SECONDS
         EVEROS_PURGE__NONCE_TTL_SECONDS
         EVEROS_PURGE__COUNT_TIMEOUT_SECONDS
     """
 
-    settle_wait_seconds: float = Field(default=60.0, gt=0)
-    """How long a purge waits for work already in flight when it started."""
     run_budget_seconds: float = Field(default=7200.0, gt=0)
     """Total running time across attempts before the job ends ``failed``."""
     nonce_ttl_seconds: float = Field(default=300.0, gt=0)

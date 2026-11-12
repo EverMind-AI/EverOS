@@ -1,16 +1,21 @@
 """Random interleavings of purges, background events, queued requests and
-restarts never break the two purge invariants (A28, spec §5.8):
+restarts never break the purge invariants (A28, spec §5.8):
 
-* I1 -- what lies outside a purge's range, or arrived after it, is kept:
-  every item born after the latest purge covering its scope has its product.
+* I1 / I6 -- what lies outside a purge's range, or arrived after it ended, is
+  kept: every item born after every purge covering its scope ended has its
+  product.
 * I2 -- nothing born before a purge of its scope survives it: no item born
   before the latest purge covering its scope has its product.
 
-Products are ``memcell`` rows -- SQLite-only writes, which the markdown
-write check cannot see; what keeps a stale one out is the OME gate and the
-queue's tombstone check. Items: OME events (the real Runner, gate and
-run-record store) and async memorize rows (the real queue and inbox). A
-restart drops everything in memory, keeps the stores, rebuilds the marks
+An item born while a purge of its scope runs may or may not keep its product
+(writes during a purge may be partly deleted, spec D28): not checked.
+
+Products are ``memcell`` rows -- SQLite-only writes; what keeps a stale one
+out is the OME gate and the queue's tombstone check, and the purge waiting
+for older work in flight before it deletes a second time. Items: OME events
+(the real Runner, gate and run-record store) and async memorize rows (the
+real queue and inbox). A restart drops everything in memory, keeps the
+stores, rebuilds the marks
 from ``system.db`` and replays what was in flight, as crash recovery does.
 Invariants are checked at stable points: no purge running, nothing queued
 or in flight.
@@ -116,6 +121,8 @@ class PurgeMachine(RuleBasedStateMachine):
         self.items: list[Item] = []
         self.purges: list[tuple[tuple[str, str | None, str | None], datetime]] = []
         self.tasks: set[asyncio.Task[Any]] = set()
+        self.crashed = False
+        """A run died in flight (its RUNNING row is left) and no restart yet."""
         self.seq = 0
         self.run(self._boot(first=True))
 
@@ -131,7 +138,7 @@ class PurgeMachine(RuleBasedStateMachine):
             await self.ome.init()
             _STATE["factory"] = self.storage.database.session_factory
         self.records = RunRecordStore(storage=self.ome, max_records_per_strategy=10_000)
-        self.purge: Purge = make_purge(self.storage, settle_wait_seconds=0.2)
+        self.purge: Purge = make_purge(self.storage)
         self.purge.service.engine = _Engine(self.records)  # type: ignore[assignment]
         self.runner = self.purge.runner()
         self.ome_runner = Runner(
@@ -149,7 +156,6 @@ class PurgeMachine(RuleBasedStateMachine):
             deliver=_deliver,
             marks=self.purge.marks,
         )
-        self.purge.service.wake_queue = lambda: None
         await self.purge.service.restore()
         self.runner.start()
 
@@ -161,7 +167,13 @@ class PurgeMachine(RuleBasedStateMachine):
         task.add_done_callback(self.tasks.discard)
 
     async def _settle(self) -> None:
-        """Run until no purge is active, nothing queued, nothing in flight."""
+        """Run until no purge is active, nothing queued, nothing in flight.
+
+        Not while a crashed run's row is left: a purge waits for it, and only
+        a restart (crash recovery) ends it.
+        """
+        if self.crashed:
+            return
         async with asyncio.timeout(20):
             while True:
                 await self.queue.drain_once()
@@ -212,6 +224,7 @@ class PurgeMachine(RuleBasedStateMachine):
             app_id=where[0], project_id=where[1], ts=get_utc_now() - timedelta(hours=1)
         )
         self.items.append(Item(f"ev_{event.event_id}", *where, event.ts))
+        self.crashed = True
         self.run(
             self.records.mark_running(
                 run_id=self._key("run"),
@@ -226,8 +239,6 @@ class PurgeMachine(RuleBasedStateMachine):
 
     @rule(where=st.sampled_from(SCOPES))
     def submit_inbox_row(self, where: tuple[str, str]) -> None:
-        if self.purge.marks.active_job_id is not None:
-            return  # an async /add is an HTTP write: 409 while a purge runs
         session = self._key("s")
 
         async def go() -> None:
@@ -277,6 +288,7 @@ class PurgeMachine(RuleBasedStateMachine):
             # A replay not yet started is lost on a second crash (as in the
             # engine: an APS job that never ran); let it record its start.
             await asyncio.sleep(0.05)
+            self.crashed = False
 
         self.run(go())
 
@@ -289,15 +301,18 @@ class PurgeMachine(RuleBasedStateMachine):
     def _stable(self) -> bool:
         return self.purge.marks.active_job_id is None and not self.tasks
 
-    def _latest_purge(self, item: Item) -> datetime | None:
-        covering = [
-            at
-            for (kind, app, project), at in self.purges
-            if kind == "space"
-            or (kind == "app" and app == item.app)
-            or (kind == "project" and (app, project) == (item.app, item.project))
+    async def _covering_jobs(self, item: Item) -> list[tuple[datetime, Any]]:
+        """``(confirmed_at, finished_at)`` of every purge covering ``item``."""
+        return [
+            (row.created_at, row.finished_at)
+            for row in await self.purge.service.jobs.all_rows()
+            if row.scope == "space"
+            or (row.scope == "app" and row.app_id == item.app)
+            or (
+                row.scope == "project"
+                and (row.app_id, row.project_id) == (item.app, item.project)
+            )
         ]
-        return max(covering, default=None)
 
     async def _unsettled(self) -> bool:
         """Queued work, or work that died and waits for a restart."""
@@ -319,10 +334,13 @@ class PurgeMachine(RuleBasedStateMachine):
             return  # checked at stable points only; it never drives the system
         products = self.run(self._products())
         for item in self.items:
-            purged_at = self._latest_purge(item)
-            if purged_at is not None and purged_at > item.born:
+            jobs = self.run(self._covering_jobs(item))
+            older = [at for at, _ in jobs if at > item.born]
+            if older:
                 _event("I2 checked: an item older than a purge of its scope")
-                assert item.key not in products, f"I2: {item} survived {purged_at}"
+                assert item.key not in products, f"I2: {item} survived {max(older)}"
+            elif any(at <= item.born <= (end or item.born) for at, end in jobs):
+                _event("not checked: an item born while a purge of its scope ran")
             else:
                 _event("I1 checked: an item newer than every purge of its scope")
                 assert item.key in products, f"I1: {item} lost"
@@ -426,9 +444,9 @@ def test_queued_row_claimed_at_crash_stays_out() -> None:
     )
 
 
-def test_other_scope_event_during_purge_runs_after() -> None:
+def test_other_scope_event_during_purge_lands() -> None:
     """I1, fixed: an event of another scope that arrives during a purge
-    waits and then lands."""
+    runs and lands; nothing outside the scope waits for the purge."""
     _sequence(
         [
             ("confirm", {"which": ("project", "a1", "p1")}),

@@ -317,13 +317,13 @@ strategies and is hot-reloaded; these require a restart.
 ### `[purge]`
 
 Online clearing ([`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)).
-While a purge runs, every write to the memory root answers `409
-PURGE_IN_PROGRESS`; these bound how long that lasts.
+A purge blocks nothing; it waits for the work that was in flight when it
+was confirmed before it deletes a second time, and these bound how long a
+job can take.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `settle_wait_seconds` | float | `60.0` | Wait limit for work already in flight when the purge was confirmed (a memorize, an extraction, an index projection) before the purge deletes again. |
-| `run_budget_seconds` | float | `7200.0` | Total running time of one purge across retries; past it the job ends `failed` and writes resume. Time the server is stopped or the machine sleeps is not counted. |
+| `run_budget_seconds` | float | `7200.0` | Total running time of one purge across retries, its wait for in-flight work included; past it the job ends `failed`. Time the server is stopped or the machine sleeps is not counted. |
 | `nonce_ttl_seconds` | float | `300.0` | How long the nonce from `POST /memory/purge` can be confirmed. |
 | `count_timeout_seconds` | float | `30.0` | Per-store limit on counting the summary; a slower store reads `null` and the summary says `complete: false`. |
 

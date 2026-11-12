@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`POST /api/v2/memory/purge`**, **`/purge/confirm`** and
   **`GET /api/v2/memory/purge/{job_id}`**: clear the whole memory root, one
   app or one project while the server keeps serving, aligned with the Cloud
-  API. Writes answer `409 PURGE_IN_PROGRESS` until the purge ends; new
-  `[purge]` settings bound how long. See `docs/api.md`.
+  API. Nothing is blocked while a purge runs -- reads, other apps and
+  projects, background work all proceed; background work on input taken in
+  before the purge is dropped, and the purge waits for work in flight before
+  it deletes a second time. New `[purge]` settings bound a job's running
+  time. See `docs/api.md`.
 
 ### Fixed
 

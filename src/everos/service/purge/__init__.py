@@ -5,7 +5,6 @@ Public API:
 """
 
 from ._gate import PurgeRunGate as PurgeRunGate
-from ._service import InFlight as InFlight
 from ._service import PurgeService as PurgeService
 from ._views import PurgeJobView as PurgeJobView
 from ._views import PurgeRequestResult as PurgeRequestResult
@@ -13,7 +12,6 @@ from ._views import PurgeStep as PurgeStep
 from ._views import PurgeSummary as PurgeSummary
 
 __all__ = [
-    "InFlight",
     "PurgeJobView",
     "PurgeRequestResult",
     "PurgeRunGate",

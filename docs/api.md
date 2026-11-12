@@ -245,7 +245,6 @@ parsing the human-readable `message` field.
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
-| `PURGE_IN_PROGRESS` | `409` | Yes, after the purge ends | A write while a purge of the memory root runs; the message names the job to poll (`GET /api/v2/memory/purge/{job_id}`) |
 | `PURGE_NONCE_INVALID` | `404` | No | `/purge/confirm` with an unknown, expired or used nonce; request a new one |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
@@ -1553,28 +1552,33 @@ expires after `[purge] nonce_ttl_seconds` (5 minutes by default).
 - **Only one purge runs at a time per root.** While one runs, confirming
   any nonce returns `202` with the **running** job: compare its `scope`,
   `app_id` and `project_id` with what you asked for, and request again
-  after it ends.
+  after it ends. A purge waits for work that was in flight when it was
+  confirmed (see below), so it can run for a while.
 - **If the `202` is lost** (a timeout, a dropped connection), the job may
   be running: request a new nonce and confirm it. You get the running
   job's `job_id`; the spent nonce answers `404`.
 
 #### While a purge runs
 
-Every write to the root is refused -- in every app and project, not only
-the purged range -- with `409` `PURGE_IN_PROGRESS`; the message names
-the job: `"purge <job_id> in progress; poll GET /api/v2/memory/purge/<job_id>"`.
-Reads (`/search`, `/get`, `/knowledge/search`, every `GET`, the three
-purge endpoints) keep working. Wait for the job to end, then send the
-write again; do not retry it in a tight loop. Background work that would
-start meanwhile (memory extraction, Reflection, queued `async_mode`
-requests) waits and runs after the purge; the range's own queued requests are dropped and show
-`purge_in_progress` in `GET /api/v2/tasks/{task_id}` -- do not resend
-them.
+A purge **does not block** anything: reads, writes to other apps and
+projects, background work, even writes to the purged range itself, all
+proceed. A purge deletes the range, waits until the work that was in
+flight when it was confirmed has ended (a slow `/add`, an extraction, a
+knowledge upload, an index projection -- work on input taken in before the
+confirm), then deletes again. Background work on input taken in before the
+confirm (memory extraction queued behind other work, a replayed run) is
+dropped when it would start, so it cannot write the range back. The
+range's own `async_mode` requests accepted before the confirm and still
+queued are dropped and show `purge_in_progress` in
+`GET /api/v2/tasks/{task_id}` -- do not resend them.
 
-A purge normally holds writes for as long as it takes to delete, plus up
-to `[purge] settle_wait_seconds` (60 s) for work already in flight. A
-purge stuck on a failing store ends `failed` after
-`[purge] run_budget_seconds` (2 h of running time) and writes resume.
+Data written into the purged range while the purge runs may be deleted,
+partly or entirely; write to a range after its purge `succeeded`.
+
+The wait has no limit of its own: a purge ends `failed` once it has run
+for `[purge] run_budget_seconds` (2 h of running time, the wait included,
+counted across restarts). If purging again still ends `failed`, something
+in flight never finishes: restart the server, then purge again.
 
 #### Job (`GET /purge/{job_id}`)
 
@@ -1595,20 +1599,25 @@ mid-purge resumes the job when it starts again.
 | `404` | `PURGE_NONCE_INVALID` | The nonce is unknown, expired or already used; request a new one |
 | `503` | `EXTERNAL_SERVICE_UNAVAILABLE` | The job could not be recorded; nothing started and the nonce is still valid |
 | `404` | `NOT_FOUND` | `GET` of an unknown `job_id` |
-| `409` | `PURGE_IN_PROGRESS` | Any write while a purge runs (see above) |
 
-The Cloud API spells the same conditions in lower case
-(`purge_in_progress`, `purge_nonce_invalid`); a client that matches on
-`error.code` and talks to both should accept either spelling.
+The Cloud API spells the same condition in lower case
+(`purge_nonce_invalid`); a client that matches on `error.code` and talks
+to both should accept either spelling. Unlike the Cloud API, writes are
+never refused while a purge runs, so `purge_in_progress` appears only in
+`GET /api/v2/tasks/{task_id}`.
 
 #### Known gaps
 
-- Work that was already running when the purge was confirmed can write a
-  little into the range after the purge ends: a slow `/add` or extraction
-  that outlasts `settle_wait_seconds`, an `/add` that took its session lock
-  only after the confirm, and a knowledge upload still running when the
-  purge ends (uploads are not waited for). Requesting the range again shows
-  it (a non-zero summary); purge again to clear it.
+- Data written into the range while the purge runs may be deleted in some
+  stores and kept in others (for example the markdown kept, its index row
+  gone until the next scan); a memory written for the same owner on the
+  same day can reuse the id of a purged one, and a write landing exactly
+  while the range's folder is moved away can fail.
+- Work that starts while the purge runs and is not waited for (a request to
+  the range, the work it triggers, or a Reflection run over every owner) can
+  read data of the range that is not deleted yet, or that older work wrote
+  back meanwhile, and leave some of it once the purge ends. Requesting the
+  range again shows it (a non-zero summary); purge again to clear it.
 - The OME run history keeps its rows; the stored event of a failed or
   dead-lettered run of the range is replaced by a `{"purged_by": …}`
   marker. Older LanceDB table versions and SQLite free pages keep deleted

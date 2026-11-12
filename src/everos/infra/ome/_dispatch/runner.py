@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from uuid import uuid4
 
-from everos.core.concurrency import ConcurrencySlot, acquire_without_slot
+from everos.core.concurrency import ConcurrencySlot
 from everos.core.observability.logging import bound_log_context, get_logger
 from everos.core.observability.tracing import memory_span, use_traceparent
 from everos.core.utils.datetime import get_utc_now
@@ -234,20 +234,10 @@ class Runner:
                 return True
 
     async def _pass_gate(self, event: Event, run_id: str) -> bool:
-        """Wait while the gate says so; ``False`` once it drops the event.
-
-        The wait gives the execution slot back and sits outside the run
-        timeout; a cancellation during it leaves the row RUNNING, so crash
-        recovery runs the event again after a restart.
-        """
+        """``False`` once the gate drops the event (recorded as done)."""
         if self._gate is None:
             return True
-        verdict = self._gate.verdict(event)
-        while verdict == "wait":
-            async with acquire_without_slot(self._gate.lifted(event, run_id)):
-                pass
-            verdict = self._gate.verdict(event)
-        if verdict == "discard":
+        if self._gate.verdict(event) == "discard":
             await self._rec.mark_success(run_id=run_id, finished_at=get_utc_now())
             logger.info("ome_run_discarded_by_gate", event_id=event.event_id)
             return False

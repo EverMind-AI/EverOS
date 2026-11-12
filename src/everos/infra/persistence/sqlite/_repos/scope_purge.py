@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -103,13 +104,17 @@ class ScopePurgeRepo(RepoBase[Memcell]):
             await s.commit()
         return deleted
 
-    async def discard_queued_inbox(self, scope: PurgeScope, *, job_id: str) -> int:
-        """Fail the scope's queued async requests, request bodies dropped."""
+    async def discard_queued_inbox(
+        self, scope: PurgeScope, *, job_id: str, before: datetime
+    ) -> int:
+        """Fail the scope's async requests queued before ``before``, bodies dropped."""
         async with session_scope(self._factory) as s:
             result = await s.execute(
                 update(MemorizeInbox)
                 .where(
-                    MemorizeInbox.status == "queued", *_in_scope(MemorizeInbox, scope)
+                    MemorizeInbox.status == "queued",
+                    MemorizeInbox.created_at < before,
+                    *_in_scope(MemorizeInbox, scope),
                 )
                 .values(
                     status="failed",
@@ -123,15 +128,30 @@ class ScopePurgeRepo(RepoBase[Memcell]):
             await s.commit()
             return result.rowcount
 
-    async def delete_inbox_history(self, scope: PurgeScope, *, job_id: str) -> int:
-        """Delete the scope's finished requests, except the ones this job failed."""
+    async def delete_inbox_history(self, scope: PurgeScope, *, before: datetime) -> int:
+        """Delete the scope's requests finished from before ``before``, except
+        the ones a purge discarded (``/tasks`` must still say why)."""
+        prefix = INBOX_DISCARD_PREFIX
         async with session_scope(self._factory) as s:
             result = await s.execute(
                 delete(MemorizeInbox).where(
                     MemorizeInbox.status.in_(("success", "failed")),
-                    func.coalesce(func.instr(MemorizeInbox.last_error, job_id), 0) == 0,
+                    MemorizeInbox.created_at < before,
+                    func.coalesce(
+                        func.substr(MemorizeInbox.last_error, 1, len(prefix)), ""
+                    )
+                    != prefix,
                     *_in_scope(MemorizeInbox, scope),
                 )
+            )
+            await s.commit()
+            return result.rowcount
+
+    async def delete_buffer(self, scope: PurgeScope) -> int:
+        """Delete the scope's unprocessed messages (before anything flushes them)."""
+        async with session_scope(self._factory) as s:
+            result = await s.execute(
+                delete(UnprocessedBuffer).where(*_in_scope(UnprocessedBuffer, scope))
             )
             await s.commit()
             return result.rowcount

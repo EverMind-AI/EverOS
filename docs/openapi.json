@@ -3535,7 +3535,6 @@
           "PAYLOAD_TOO_LARGE",
           "QUEUE_SATURATED",
           "SESSION_BUSY",
-          "PURGE_IN_PROGRESS",
           "PURGE_NONCE_INVALID"
         ],
         "title": "ErrorCode",

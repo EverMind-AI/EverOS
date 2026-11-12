@@ -167,22 +167,3 @@ def test_lock_table_starts_empty_in_every_test() -> None:
         "a previous test's locks survived into this one -- the table is not "
         "reset between tests"
     )
-
-
-async def test_held_keys_lists_session_locks() -> None:
-    entered = asyncio.Event()
-    release = asyncio.Event()
-
-    async def holder(key: str) -> None:
-        async with LOCKS.hold("session", key):
-            entered.set()
-            await release.wait()
-
-    task = asyncio.create_task(holder("a1\x1fp1\x1fs1"))
-    await entered.wait()
-    async with LOCKS.hold("owner", "o1"):
-        assert LOCKS.held_keys("session") == {"a1\x1fp1\x1fs1"}
-        assert LOCKS.held_keys("owner") == {"o1"}
-    release.set()
-    await task
-    assert LOCKS.held_keys("session") == frozenset()
