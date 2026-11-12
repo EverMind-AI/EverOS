@@ -65,8 +65,10 @@ class Cron(_TriggerBase):
     @classmethod
     def _validate_crontab(cls, v: str) -> str:
         # Delegates to APS's own parser so the trigger object cannot
-        # represent any crontab that APS would later refuse.
-        CronTrigger.from_crontab(v)
+        # represent any crontab that APS would later refuse. The timezone is
+        # named only so APS does not ask the OS for one (tzlocal warns in a
+        # container that has none): a syntax check does not depend on it.
+        CronTrigger.from_crontab(v, timezone="UTC")
         return v
 
 

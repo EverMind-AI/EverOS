@@ -534,6 +534,12 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **No tzlocal warning from a crontab check.** Validating a strategy's
+  `Cron` trigger or an `ome.toml` `cron` override asked APScheduler to build a
+  trigger in the OS's timezone; in a container with none, tzlocal warned
+  ("Can not find any timezone configuration") on every CLI command and at
+  every import of the strategies. The check names UTC now: a syntax check does
+  not depend on the timezone, and the running scheduler is unchanged.
 - **Undoing a forgotten conversation re-indexes its episodes at once.** The
   undo handed the cascade the restored episodes' entry ids where it expects
   their files, so nothing was projected again and the episodes stayed out of

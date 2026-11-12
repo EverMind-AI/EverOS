@@ -39,7 +39,9 @@ class StrategyOverride(BaseModel):
     @classmethod
     def _validate_crontab(cls, v: str | None) -> str | None:
         if v is not None:
-            CronTrigger.from_crontab(v)
+            # A syntax check: the timezone is named only so APS does not ask
+            # the OS for one (tzlocal warns in a container that has none).
+            CronTrigger.from_crontab(v, timezone="UTC")
         return v
 
     @model_validator(mode="after")

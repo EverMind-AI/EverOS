@@ -147,3 +147,28 @@ def test_idle_accepts_scan_interval_at_half_idle() -> None:
         scan_interval_seconds=30,
     )
     assert t.scan_interval_seconds == 30
+
+
+class _AskedTheOSError(RuntimeError):
+    """Raised by a stand-in for tzlocal: the OS timezone was looked up."""
+
+
+def _no_os_timezone() -> None:
+    raise _AskedTheOSError("a crontab syntax check asked the OS for its timezone")
+
+
+def test_a_crontab_check_never_asks_the_os_for_a_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In a container with no timezone configured, tzlocal warns on every
+    lookup; the import of the strategies made one through this check, and
+    every CLI command printed the warning."""
+    import apscheduler.triggers.cron
+
+    from everos.infra.ome.config import StrategyOverride
+
+    monkeypatch.setattr(apscheduler.triggers.cron, "get_localzone", _no_os_timezone)
+    assert Cron(expr="0 2 * * 1").expr == "0 2 * * 1"
+    assert StrategyOverride(cron="*/5 * * * *").cron == "*/5 * * * *"
+    with pytest.raises(ValidationError):
+        Cron(expr="not a crontab")
