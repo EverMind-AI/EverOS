@@ -174,6 +174,7 @@ def test_the_everalgo_version_is_not_part_of_the_identity(tmp_path: Path) -> Non
         "keyword_tokenizer",
         "message_owner",
         "ome_strategies",
+        "message_format",
     }
 
 

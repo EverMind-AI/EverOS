@@ -163,7 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity). It also turns off the user-profile strategy its answers never read:
   the new `[ome_strategies]` table is written as each started server's
   `ome.toml`, the one place EverOS reads strategy switches from (also part of
-  the ingest identity). `benchmarks/.env.example` no longer points embedding at a local
+  the ingest identity). A LoCoMo turn that shares an image now reaches the
+  extractor with the image's caption in front of its text, worded as the
+  EverAlgo loader writes it (910 of 5,882 turns; the text alone was sent
+  before), and the ingest identity carries a `message_format` version so a
+  store built from the old text is not reused. `benchmarks/.env.example` no longer points embedding at a local
   server and asks for the reranker key agentic search cannot run without; the
   README lists both keys and gives a one-line LoCoMo download.
 

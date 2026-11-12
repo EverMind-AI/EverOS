@@ -1254,6 +1254,21 @@ def load_conversation_via_adapter(
     return sessions, qa_list, speaker_a, speaker_b, owner
 
 
+def _message_text(msg: dict) -> str:
+    """A LoCoMo turn as text, with a shared image described in front of what was said.
+
+    910 of LoCoMo's 5,882 turns share an image, and only its ``blip_caption`` says what
+    is in it; dropping the caption drops facts some questions ask about. The wording is
+    the everalgo benchmark loader's (``datasets/locomo/loader.py``), so both harnesses
+    feed the extractor the same text.
+    """
+    text = msg.get("text", "")
+    if msg.get("img_url"):
+        caption = msg.get("blip_caption", "an image")
+        text = f"[{msg['speaker']} shared an image: {caption}] {text}"
+    return text
+
+
 def load_conversation(
     data_path: str, conv_index: int
 ) -> tuple[list[dict], list[dict], str, str]:
@@ -1292,13 +1307,14 @@ def load_conversation(
             if isinstance(session_msgs, list):
                 msgs: list[dict] = []
                 for i, msg in enumerate(session_msgs):
-                    if not msg.get("text"):
-                        continue  # skip image-only messages
+                    text = _message_text(msg)
+                    if not text:
+                        continue
                     msgs.append(
                         {
                             "dia_id": msg["dia_id"],
                             "speaker": msg["speaker"],
-                            "text": msg["text"],
+                            "text": text,
                             "timestamp_ms": base_ts_ms + i * 30000,
                         }
                     )

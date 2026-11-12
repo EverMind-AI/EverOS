@@ -33,6 +33,11 @@ def unresolved(value: str) -> bool:
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _TOKENIZER_ENV = "EVEROS_TOKENIZER__NAME"
+
+MESSAGE_FORMAT = "2"
+"""Version of the text the harness sends for a dataset turn; part of the ingest
+identity. Bump it whenever that text changes. 2: a LoCoMo turn sharing an image
+carries the image's caption in front of what was said."""
 """The server variable naming the keyword tokenizer; see :func:`ingest_identity`."""
 
 
@@ -591,6 +596,7 @@ def ingest_identity(
         "keyword_tokenizer": tokenizer or "default",
         "message_owner": config.message_owner,
         "ome_strategies": json.dumps(config.ome_strategies, sort_keys=True),
+        "message_format": MESSAGE_FORMAT,
     }
 
 
