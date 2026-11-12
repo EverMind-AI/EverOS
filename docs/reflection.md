@@ -7,6 +7,11 @@ similarity cluster into one, resolves stale information by keeping the
 latest state, and soft-archives the originals it replaces — so memory gets
 more accurate and more compact with use, instead of piling up into noise.
 
+> **EverOS 2.0:** a user's scenes ([scenes.md](scenes.md)) are the planned
+> replacement. A scene is written right after each episode joins it, links
+> to its episodes instead of retiring them, and competes with them in
+> search. Both are off by default; turn on one or the other, not both.
+
 ## Prerequisites
 
 Reflection's merge step calls an LLM, and re-clustering the merged narrative

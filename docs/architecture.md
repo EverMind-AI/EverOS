@@ -431,8 +431,8 @@ index backend:
 - Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
 - Handlers for the business kinds: episode, image_memory, user_profile,
-  agent_case, agent_skill, knowledge_document,
-  knowledge_topic, and the group kinds -- group_episode, group_scene and
+  scene (a user's scene versions, into the episode table), agent_case,
+  agent_skill, knowledge_document, knowledge_topic, and the group kinds -- group_episode, group_scene and
   group_image_memory into the episode and picture tables, group_member_profile
   into ``user_profile``, group_profile into its own ``group_profile_item``
   table (no vector), group_roster (``group.md``) into the SQLite roster
@@ -476,6 +476,9 @@ them.
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation on the merged episode's event)
 - `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
+- `update_user_scenes` — a user's scenes ([scenes.md](scenes.md)): on each
+  pipeline episode, placed among the user's scene clusters, one capped
+  narrative call when it joins a scene (`[scenes] enabled`, off by default)
 - `update_member_profiles` / `update_group_scenes` — group memory: the
   member-in-group profiles (on each group episode, throttled, and on
   `GroupFlushed`) and the group's scenes
@@ -516,7 +519,8 @@ sound dependency structure.
     ├── users/<user_id>/
     │   ├── user.md                                     # profile (single-file rewrite)
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # daily-log append
-    │   └── images/image-<YYYY-MM-DD>.md                # one entry per picture
+    │   ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
+    │   └── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
     ├── agents/<agent_id>/
     │   ├── .cases/agent_case-<YYYY-MM-DD>.md           # hidden, framework-derived
     │   └── skills/skill_<name>/SKILL.md                # named-dir

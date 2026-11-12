@@ -29,8 +29,10 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │       ├── user.md                          single-file rewrite (profile)
 │       │       ├── episodes/                         daily-log append
 │       │       │   └── episode-<YYYY-MM-DD>.md
-│       │       └── images/                           daily-log append
-│       │           └── image-<YYYY-MM-DD>.md
+│       │       ├── images/                           daily-log append
+│       │       │   └── image-<YYYY-MM-DD>.md
+│       │       └── scenes/                           daily-log append (sc_ ids)
+│       │           └── scene-<YYYY-MM-DD>.md         one entry per scene version (scenes.md)
 │       ├── agents/
 │       │   └── <agent_id>/
 │       │       ├── .cases/                           daily-log append (hidden)
@@ -97,7 +99,7 @@ Each business memory kind picks one of three on-disk patterns:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / agent_case / image_memory / group scene versions / group-profile items |
+| **Daily-log append** | `<FILE_PREFIX>-<YYYY-MM-DD>.md` under `<DIR_NAME>/` | append entries | episode / agent_case / image_memory / scene versions (user and group) / group-profile items |
 | **Skill-named dir** | `skills/skill_<name>/SKILL.md` (+ `references/` `scripts/`) | overwrite the file | agent skills (procedural memory) |
 | **Single-file rewrite** | `user.md` (writer also supports `agent.md` / `soul.md` / `tools.md` / `behaviors.md`, not yet produced); `groups/<g>/members/<member_id>.md` | overwrite the file | user profile; member-in-group profile |
 

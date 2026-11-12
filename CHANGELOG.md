@@ -196,6 +196,39 @@ machinery that keeps a deleted memory from coming back.
   `data.failed` the non-text items the parser could not read; the rest of
   their messages is kept. Both are `0` on a clean batch. A queued batch
   (`202`) logs them as `memorize.ingest_dropped`.
+- **A user's scenes** ([docs/scenes.md](docs/scenes.md)), off by default:
+  `[scenes] enabled = false`. A scene is a user's episodes about one matter
+  (placed with the `[clustering]` geometry) with one narrative over them,
+  ending on where things stand, written to `users/<u>/scenes/` (`sc_` ids)
+  and indexed as rows of the episode table (`parent_type = scene`), so it
+  competes with the episodes in the same multi-round pool, rendered and fused
+  like them; a search result marks it `type: "Scene"` and `get` lists it under
+  `memory_type: "scene"` (never under `"episode"`).
+  - Strategy `update_user_scenes`: one `chat.scene_update` call (prompt in
+    EverOS, registered, v2) each time an episode joins a scene of
+    `[scenes] min_members` (`2`) episodes or more; an episode that joins no
+    scene costs no call. The narrative is capped (`narrative_max_words`,
+    `300`): the prompt asks for it as a total, a longer reply loses its
+    oldest part at a sentence start, the reply is held to a token cap with
+    one retry, and one call reads at most `max_new_episodes` (`4`) episodes
+    of at most `episode_max_chars` (`4000`), so its price does not grow with
+    the scene.
+  - Forgetting follows the sources: a session forget marks a scene forgotten
+    once none of its episodes is alive (and erases its row), the undo brings
+    it back, and a later version is written from the live episodes only. A
+    picture forget rewrites a scene that names the picture without the
+    reference (no model call). Deleting a session or episodes removes every
+    scene version that names one of them.
+  - Group scenes keep `[groups] scenes = false` and their reflector; they now
+    share the placement and the scene store with a user's.
+  - Measured cost (2026-11-12, DeepSeek V4.1 Flash, thinking off, product
+    defaults, off-peak; everalgo-user-memory 0.9.0rc4): $0.026 per 1,000
+    messages on LoCoMo conversations 0-1 (46 calls, +13% of the $0.200 text
+    write cost) and $0.039 on MemEye's 8 conversations (151 calls, +21% of
+    $0.186); peak prices double both. About $0.00044 a call; the prompt
+    stays near 1,100-1,200 tokens over a run (largest 1,890).
+  - `ClusterStore.find_cluster_for_member` takes a `kind`: an episode now
+    sits in its profile cluster and its scene's.
 
 
 ### Changed

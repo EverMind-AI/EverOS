@@ -534,12 +534,12 @@ value, is refused with `422 INVALID_INPUT` and a message that says only
 | `"profile"` | user | `data.profiles` — [GetProfileItem](#getprofileitem) |
 | `"agent_case"` | agent | `data.agent_cases` — [GetAgentCaseItem](#getagentcaseitem) |
 | `"agent_skill"` | agent | `data.agent_skills` — [GetAgentSkillItem](#getagentskillitem) |
-| `"scene"` | group | `data.scenes` — group scene versions, in the [GetEpisodeItem](#getepisodeitem) shape with `type: "Scene"` |
+| `"scene"` | user, group | `data.scenes` — the owner's current scene versions ([scenes.md](scenes.md)), in the [GetEpisodeItem](#getepisodeitem) shape with `type: "Scene"`; `"episode"` never lists a scene |
 | `"image_memory"` | group | `data.images` — the group's picture memories |
 | `"member_profile"` | group | `data.profiles` — one member's profile in each group of the scope; needs `member_id` |
 
 `memory_type` must match the requested owner kind: `"episode"` /
-`"profile"` require `user_id`; `"agent_case"` / `"agent_skill"`
+`"profile"` / `"scene"` take `user_id`; `"agent_case"` / `"agent_skill"`
 require `agent_id`; a group scope (`group_id` / `group_ids`) takes
 `"episode"`, `"scene"`, `"image_memory"` and `"member_profile"`. The
 mismatching combinations are rejected with `422`.
@@ -1008,7 +1008,7 @@ the episode reached across the sub-queries that recalled it.
 | `summary` | `string` | Short summary (~200 chars), suitable for list-view rendering |
 | `subject` | `string` | One-line subject / title |
 | `episode` | `string` | Full extracted narrative |
-| `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
+| `type` | `"Conversation" \| "Scene"` | `"Scene"` for a scene version ([scenes.md](scenes.md)): a narrative over several of the owner's episodes, ranked with them (`session_id` is `null`) |
 | `score` | `number` | Fusion score for this episode |
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
@@ -1186,7 +1186,7 @@ Same shape as [SearchEpisodeItem](#searchepisodeitem) **minus**
 | `summary` | `string` | Short summary |
 | `subject` | `string` | One-line subject |
 | `episode` | `string` | Full extracted narrative |
-| `type` | `"Conversation"` | — |
+| `type` | `"Conversation" \| "Scene"` | `"Scene"` only under `memory_type: "scene"` |
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
 > under two projects (each project keeps its own daily files and sequence);

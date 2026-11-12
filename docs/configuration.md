@@ -360,6 +360,21 @@ joins it only behind its session's backlog)
 | `threshold` | float | `0.65` | Cosine similarity threshold for clustering (0–1). |
 | `time_window_days` | float | `7.0` | Max age gap between cluster members. |
 
+### `[scenes]`
+
+A user's scenes ([scenes.md](scenes.md)): their episodes about one matter,
+placed with the `[clustering]` geometry, with one narrative over them. Scene
+versions are rows of the episode table and compete with the episodes in
+search.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Build scenes: one capped narrative call (`chat.scene_update`) each time an episode joins a scene; an episode that joins no scene costs no call. Off by default until its cost is accepted; with it off no scene is written and no call is made. |
+| `min_members` | int | `2` | A cluster becomes a scene at this many live episodes. |
+| `narrative_max_words` | int | `300` | The narrative's cap. The prompt asks for at most this many words; a reply longer than 8 characters a word loses its oldest part, so neither the narrative nor the next call's prompt grows with the scene. |
+| `max_new_episodes` | int | `4` | Joining episodes one call reads (the newest). |
+| `episode_max_chars` | int | `4000` | Each episode's clip in the prompt. |
+
 ### `[cascade]`
 
 The cascade projects the markdown truth into the search index (see
@@ -414,7 +429,7 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4, 7.7 and
 | `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
 | `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
-| `scenes` | bool | `false` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. Off by default: the design builds group scenes on 2.0's per-owner scenes, which do not exist yet. Until they do, group scenes are an opt-in, so a group gets no record type users do not have, and ingestion makes no extra reflector calls. `true` opts in. |
+| `scenes` | bool | `false` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. Off by default; a group's scenes share the placement and the version store with a user's (`[scenes]`, [scenes.md](scenes.md)), whose capped prompt they do not use yet. `true` opts in. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
 
 ### `[access]`

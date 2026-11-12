@@ -821,7 +821,11 @@ members established:
 ### 7.7 Scenes and vector state
 
 2.0 scenes run per owner, so a group gets its own scenes under
-`groups/<group_id>/scenes/`, built from its episodes exactly as for a user. The
+`groups/<group_id>/scenes/`, built from its episodes exactly as for a user. A
+user's scenes ([scenes.md](scenes.md)) and a group's share the placement (one
+geometry, `strategies/_scene_clusters.py`) and the version store; the group
+strategy still narrates with the uncapped reflector and can move to the capped
+`chat.scene_update` call once group scenes are measured. The
 group also gets its own state for the query encoder, updated from its episodes.
 A group-scoped query is encoded with the group's state, never with the asker's
 personal state. The state only affects ranking; it never returns content.

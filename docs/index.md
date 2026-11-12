@@ -23,6 +23,7 @@ already know what you want to do and need to know exactly how.
 | [api.md](api.md) | HTTP API v1 reference — endpoints, request / response, error contracts |
 | [knowledge.md](knowledge.md) | Knowledge base module — upload, search, taxonomy, storage layout |
 | [reflection.md](reflection.md) | Reflection — offline memory consolidation: enable, schedule, storage, triggering |
+| [scenes.md](scenes.md) | A user's scenes — narratives over their episodes about one matter: writing, caps, search, forgetting, cost |
 | [cli.md](cli.md) | `everos` CLI subcommands + env var conventions |
 | [mcp.md](mcp.md) | Connect MCP clients (Claude Code, Codex, Cursor, Claude Desktop) through the official `everos-mcp` server |
 | [storage_layout.md](storage_layout.md) | Memory-root tree + frontmatter chassis + EntryId encoding |
