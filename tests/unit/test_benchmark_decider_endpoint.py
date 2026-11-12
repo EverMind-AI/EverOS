@@ -657,3 +657,29 @@ def test_the_record_names_the_decider_the_servers_resolve(
 def test_a_run_without_a_decider_records_none() -> None:
     roles = {s.role for s in run._serving_from_env(_cfg(methods="hybrid"), None)}
     assert "decider" not in roles
+
+
+@pytest.mark.parametrize(
+    ("methods", "noticed"), [([], False), (["--methods", "llm_multiround"], True)]
+)
+def test_the_no_decider_notice_is_given_only_where_a_decider_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    methods: list[str],
+    noticed: bool,
+) -> None:
+    """LoCoMo searches agentic, which calls no decider; warning it was "not comparable"
+    there was false. The decider is cleared either way."""
+    for name in ("BENCH_DECIDER_MODEL", "BENCH_DECIDER_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            *("run.py", "locomo", "--run-name", "x", "--stages", "search"),
+            *("--everos-root", "/nonexistent", *methods),
+        ],
+    )
+    _args, config = run.parse_args()
+    assert ("falling back to the [llm] model" in capsys.readouterr().out) is noticed
+    assert config.decider_model == ""

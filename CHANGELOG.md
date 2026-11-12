@@ -150,12 +150,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the section each came from, and the backbone entry no longer picks up
   `EVEROS_LLM__<TASK>__*` variables.
 
+- **The LoCoMo benchmark runs the EverAlgo reference setup, and its docs work
+  as written.** `benchmarks/configs/locomo.toml` searches with `agentic` at
+  `top_k = 10`, judges every answer 3 times (majority vote), ingests in `chat`
+  mode, extracts at temperature 0.3 / `max_tokens` 16384 with 1024-dimensional
+  embeddings and a 0.7 clustering threshold, and files every message under the
+  queried speaker (`message_owner = "eval_owner"`, new, part of the ingest
+  identity). `benchmarks/.env.example` no longer points embedding at a local
+  server and asks for the reranker key agentic search cannot run without; the
+  README lists both keys and gives a one-line LoCoMo download.
+
 ### Removed
 
 - **`EpisodeIndex.count`** and the repositories' `count_by_owner` (LanceDB
   and Milvus): only the old profile throttle used it.
 
 ### Fixed
+
+- **A benchmark ADD no longer dies waiting for extraction.** OME empties a
+  succeeded run's `event_payload` (since #555), and `run.py`'s readiness check
+  raised `malformed JSON` on it, failing every conversation once one
+  extraction had finished. Emptied rows now skip the payload filter and still
+  count as finished. The "no decider endpoint" notice, which called an agentic
+  run "not comparable", is printed only for runs that use `llm_multiround`.
 
 - The language an episode is detected in, which its atomic facts and a new
   user's profile are then written in, is Chinese, Japanese or English. Every

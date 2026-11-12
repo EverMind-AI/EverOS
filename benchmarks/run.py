@@ -960,6 +960,21 @@ def _poll_cascade(db_path: Path, conv_pattern: str) -> tuple[int, int]:
     return total or 0, pending or 0
 
 
+def _counting_emptied_payloads(ome_filter: str) -> str:
+    """``ome_filter`` on the rows whose payload is JSON; an emptied row matches.
+
+    OME empties ``event_payload`` once a run succeeds, and ``json_extract`` raises
+    ``malformed JSON`` on the empty string, so every ADD died in this readiness wait
+    once a run had succeeded. An emptied row can only be a success; with one store per
+    conversation, as the shipped configs run, it is this conversation's, so it still
+    counts toward the total the failure share is taken of.
+    """
+    return (
+        f"CASE WHEN json_valid(event_payload) THEN ({ome_filter}) "
+        "ELSE event_payload = '' END"
+    )
+
+
 def _poll_ome(
     ome_db_path: Path,
     since: str,
@@ -1068,6 +1083,7 @@ def _wait_ready(
             f"AND json_extract(event_payload, '$.session_id') IN ({placeholders})"
         )
         ome_params = (app_id, project_id, *session_ids)
+    ome_filter = _counting_emptied_payloads(ome_filter)
 
     deadline = time.time() + timeout_s
     stable_count = 0
@@ -1433,6 +1449,15 @@ def _post_with_retry(
     raise AssertionError(
         f"{what} failed after {attempts} attempts: status={last[0]} resp={last[1]}"
     )
+
+
+def _sender_id_rule(
+    config: BenchmarkConfig, adapter: object
+) -> Callable[[int, str], str] | None:
+    """The ``sender_id_of`` ADD files messages by; ``None`` files all under owner."""
+    if config.message_owner == "eval_owner":
+        return None
+    return getattr(adapter, "sender_id_of", None)
 
 
 def run_add_phase(
@@ -3640,7 +3665,7 @@ def run_conversation(
             app_id=app_id,
             project_id=project_id,
             pbar=pbar,
-            sender_id_of=getattr(_adapter, "sender_id_of", None),
+            sender_id_of=_sender_id_rule(config, _adapter),
         )
         pbar.reset(total=0)
         pbar.set_description_str(
@@ -4106,16 +4131,20 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     # the wrong endpoint 404s on every call and the retrieval loop falls back to a fixed
     # core while still reporting a complete result -- plausible numbers for an
     # experiment that never ran.
+    _methods = {m.strip() for m in (args.methods or config.methods).split(",")}
     if unresolved(config.decider_model) or unresolved(config.decider_base_url):
         _named = config.decider_model if not unresolved(config.decider_model) else ""
-        print(
-            "decider  no endpoint for "
-            + (f"{_named}" if _named else "the configured decider")
-            + " (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.\n"
-            "         ⚠ This is NOT the published configuration -- the published "
-            "numbers were\n         produced with a separate decider, so this run "
-            "is not comparable to them."
-        )
+        # Said only where a decider runs: an agentic run calls none, and the warning
+        # that its numbers are "not comparable" was false there.
+        if _MULTIROUND_METHOD in _methods:
+            print(
+                "decider  no endpoint for "
+                + (f"{_named}" if _named else "the configured decider")
+                + " (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.\n"
+                "         ⚠ This is NOT the published configuration -- the published "
+                "numbers were\n         produced with a separate decider, so this run "
+                "is not comparable to them."
+            )
         config = config.model_copy(
             update={"decider_model": "", "decider_base_url": "", "decider_api_key": ""}
         )

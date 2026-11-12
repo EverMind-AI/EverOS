@@ -25,6 +25,13 @@ LoCoMo 的建索引和检索都用 EverAlgo 评测框架的 NLTK 分词器（`co
 | EverMemBench | `benchmarks/data/evermembench.json` | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
 | SubtleMemory | `benchmarks/data/subtlememory/` | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
 
+LoCoMo 一条命令即可：
+
+```bash
+curl -L -o benchmarks/data/locomo10.json \
+  https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json
+```
+
 > **EverMemBench** —— 将快照下载到 `benchmarks/data/raw/EverMemBench-Dynamic/`,
 > 然后执行一次 `python -m benchmarks.adapters.evermembench`。
 >
@@ -39,7 +46,8 @@ cp benchmarks/.env.example benchmarks/.env
 | 角色 | 键 | 说明 |
 |---|---|---|
 | 抽取模型 | `EVEROS_LLM__MODEL` / `__API_KEY` / `__BASE_URL` | ADD 阶段使用 |
-| 检索模型 | `BENCH_DECIDER_MODEL` / `BENCH_DECIDER_BASE_URL` | 多轮 decider;默认 `qwen3.6-27B`,未设端点时改用抽取模型 |
+| 向量 / 重排 | `EVEROS_EMBEDDING__API_KEY` / `EVEROS_RERANK__API_KEY` | 默认是 DeepInfra 上的 Qwen3-Embedding-4B 和 Qwen3-Reranker-4B；agentic 检索没有重排时每道题都会失败 |
+| 检索模型 | `BENCH_DECIDER_MODEL` / `BENCH_DECIDER_BASE_URL` | 多轮 decider；模型名由配置文件给出（`qwen3.6-27B`，LoCoMo 为 `deepseek/deepseek-v4-flash-0731`），只在设了端点时生效，未设端点时 decider 改用抽取模型 |
 | 答题模型 | `ANSWER_API_KEY` / `ANSWER_BASE_URL` | 模型名在配置文件中 |
 | 判分模型 | `JUDGE_API_KEY` / `JUDGE_BASE_URL` | 模型名在配置文件中 |
 

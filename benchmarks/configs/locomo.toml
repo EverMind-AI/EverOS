@@ -25,9 +25,13 @@ decider_model = "${BENCH_DECIDER_MODEL:-deepseek/deepseek-v4-flash-0731}"
                                         # the loop falls back silently.
 decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
 decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
+message_owner = "eval_owner"            # every message under the queried speaker, one pool per
+                                        # conversation as the EverAlgo reference keeps it; per
+                                        # sender, a memcell only the other speaker talks in
+                                        # never reaches the partition the questions search
 # --- SEARCH ----------------------------------------------------------------
-methods = "llm_multiround"
-top_k = 20                              # episodes returned per question
+methods = "agentic"                     # the method EverAlgo's LoCoMo reference reports
+top_k = 10                              # episodes returned per question, as that reference
 search_concurrency = 2                  # questions retrieved in parallel within one conversation
 include_profile = false                 # OFF. The reference harness for this
                                         # benchmark never sent the flag, so ON is a
@@ -51,6 +55,12 @@ EVEROS_TOKENIZER__NAME = "nltk"         # keyword tokenizer of the EverAlgo LoCo
                                         # needs NLTK's punkt_tab + stopwords data. The
                                         # index is built with it, so it is part of the
                                         # ingest identity: a jieba store is not reused.
+EVEROS_MEMORIZE__MODE = "chat"          # a chat log: no agent-memory pipeline
+# The EverAlgo LoCoMo reference's extraction and index settings:
+EVEROS_LLM__TEMPERATURE = "0.3"
+EVEROS_LLM__MAX_TOKENS = "16384"
+EVEROS_EMBEDDING__DIMENSIONS = "1024"
+EVEROS_CLUSTERING__THRESHOLD = "0.7"
 # --- ANSWER ----------------------------------------------------------------
 [answer]
 model = "openai/gpt-4.1-mini"
@@ -64,6 +74,6 @@ concurrency = 20                        # questions answered in parallel within 
 [judge]
 model = "openai/gpt-4o-mini"
 temperature = 0.0
-runs = 1                                # independent judgements per question, majority vote
+runs = 3                                # independent judgements per question, majority vote
 timeout = 300.0
 max_retries = 5

@@ -95,6 +95,13 @@ class BenchmarkConfig(BaseModel):
     methods: str = "agentic"
     top_k: int = 10
     eval_owner: Literal["speaker_a", "speaker_b"] = "speaker_a"
+    message_owner: Literal["sender", "eval_owner"] = "sender"
+    """Who each ADD message is filed under: its sender, by the adapter's
+    ``sender_id_of`` (LoCoMo: each speaker's own partition), or the queried owner for
+    every message, one pool per conversation as the EverAlgo reference kept it. Under
+    ``"sender"`` a memcell where only the other speaker talks never reaches the queried
+    partition. Changes what that partition holds, so it is part of the ingest identity.
+    Adapters without ``sender_id_of`` file under the queried owner either way."""
     adapter: str = "locomo"
     """Which dataset adapter drives the run: locomo | longmemeval | evermembench |
     subtlememory. The adapter owns everything that differs between benchmarks -- how
@@ -571,6 +578,7 @@ def ingest_identity(
         "adapter": f"{benchmark}/{config.adapter}",
         "extraction_backbone": backbone,
         "keyword_tokenizer": tokenizer or "default",
+        "message_owner": config.message_owner,
     }
 
 

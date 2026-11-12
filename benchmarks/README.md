@@ -29,6 +29,13 @@ same setting.
 | EverMemBench | `benchmarks/data/evermembench.json` | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
 | SubtleMemory | `benchmarks/data/subtlememory/` | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
 
+LoCoMo in one command:
+
+```bash
+curl -L -o benchmarks/data/locomo10.json \
+  https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json
+```
+
 > **EverMemBench** — download the snapshot to `benchmarks/data/raw/EverMemBench-Dynamic/`,
 > then run `python -m benchmarks.adapters.evermembench` once.
 >
@@ -43,7 +50,8 @@ cp benchmarks/.env.example benchmarks/.env
 | Role | Keys | Notes |
 |---|---|---|
 | Extraction model | `EVEROS_LLM__MODEL` / `__API_KEY` / `__BASE_URL` | used by ADD |
-| Retrieval model | `BENCH_DECIDER_MODEL` / `BENCH_DECIDER_BASE_URL` | the multi-round decider; defaults to `qwen3.6-27B`, and falls back to the extraction model when no endpoint is set |
+| Embedding / rerank | `EVEROS_EMBEDDING__API_KEY` / `EVEROS_RERANK__API_KEY` | Qwen3-Embedding-4B and Qwen3-Reranker-4B on DeepInfra by default; agentic search fails every question without the reranker |
+| Retrieval model | `BENCH_DECIDER_MODEL` / `BENCH_DECIDER_BASE_URL` | the multi-round decider; the config names the model (`qwen3.6-27B`; LoCoMo `deepseek/deepseek-v4-flash-0731`), used only with an endpoint set: without one the decider runs the extraction model |
 | Answer model | `ANSWER_API_KEY` / `ANSWER_BASE_URL` | model name in the config |
 | Judge model | `JUDGE_API_KEY` / `JUDGE_BASE_URL` | model name in the config |
 
