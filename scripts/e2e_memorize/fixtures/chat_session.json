@@ -1,5 +1,5 @@
 {
-  "_doc": "Chat-mode end-to-end fixture. 22 messages across 3 topics + a multi-user handoff. Run with EVEROS_MEMORIZE__MODE=chat. Expected boundary detector cuts ~3-4 cells (Python bug → weekend plans → cross-team meeting).",
+  "_doc": "Chat end-to-end fixture. 22 messages across 3 topics + a multi-user handoff. Expected boundary detector cuts ~3-4 cells (Python bug → weekend plans → cross-team meeting).",
   "session_id_hint": "e2e_chat",
   "messages": [
     {"sender_id": "u_alice", "sender_name": "Alice",     "role": "user",      "timestamp": 1747396800000, "content": "I'm getting a weird KeyError on a dict comprehension when the source list has None entries. The traceback points at the dict literal, not the comprehension itself."},

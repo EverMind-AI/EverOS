@@ -11,9 +11,9 @@ from ``langfuse_host``: spans go to ``<host>/api/public/otel/v1/traces`` and
 scores to ``<host>/api/public/scores``.
 
 Usage:
-    1. Point EverOS at this sink in ``everos.toml``. Keep the LLM, embedding and
-       rerank sections filled in — a recording with real generations is the
-       point, since that is what gives Langfuse the token usage to cost out.
+    1. Point EverOS at this sink in ``everos.toml``. Keep the LLM and embedding
+       sections filled in — a recording with real generations is the point,
+       since that is what gives Langfuse the token usage to cost out.
 
            [observability]
            enabled             = true

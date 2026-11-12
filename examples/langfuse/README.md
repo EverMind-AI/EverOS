@@ -1,9 +1,9 @@
 # EverOS × Langfuse (native OpenTelemetry)
 
 EverOS emits OpenTelemetry spans for its own memory operations — write, memcell
-boundary + episode extraction (LLM), search with recall-quality scores, and OME
-reflection — and exports them over OTLP to any backend, including
-[Langfuse](https://langfuse.com). There is **no wrapper and no extra
+boundary + episode extraction (LLM), search with recall-quality scores, and the
+OME strategies (profiles, scenes) — and exports them over OTLP to any backend,
+including [Langfuse](https://langfuse.com). There is **no wrapper and no extra
 instrumentation code**: enable it in config and the traces appear.
 
 Two ways to look at it:
@@ -18,8 +18,11 @@ Two ways to look at it:
 `recorded_trace.json` is a capture of one real `demo.py` run against EverOS
 1.2.1: 237 spans over 60 traces. Eleven conversations are ingested and flushed,
 each with its LLM extraction and OME strategies nested underneath; reflection
-then consolidates two of them and deprecates what they superseded; and five
-questions are asked of the resulting memory, with their recall scores.
+then consolidates two of them and deprecates what they superseded (a 1.x
+step: EverOS 2.0 has no Reflection, and the recording's atomic-fact,
+foresight, agent-case and profile-clustering spans are 1.x strategies 2.0 no
+longer runs); and five questions are asked of the resulting memory, with their
+recall scores.
 `replay.py` pushes it into your own Langfuse project, so you can see what the
 integration looks like before deploying anything.
 
@@ -40,8 +43,8 @@ shifted so the trace lands at the current time, and root spans carry a `replay`
 tag so a recording is never mistaken for live traffic.
 
 Two things in the trace list are not self-explanatory. The OME spans outlast
-the `flush` span they hang under, because reflection continues after the
-request returns and re-attaches to the originating trace through its
+the `flush` span they hang under, because the strategies continue after the
+request returns and re-attach to the originating trace through its
 `traceparent`. And `recorded_trace.json` was captured on EverOS 1.x: its short
 keyword searches were the demo waiting for each conversation to become
 searchable, and its HYBRID / AGENTIC searches were methods EverOS 2.0 no longer
@@ -80,10 +83,9 @@ multi-round retrieval (`llm_multiround`), whose top score is reported as
    ```
 
    `demo.py` uses only the standard library and contains no instrumentation
-   code; the spans come from the server. It ingests eleven conversations, nudges
-   reflection (a weekly cron otherwise), then asks five questions, so the
-   traces show recall choosing between memories rather than returning the only
-   one there is.
+   code; the spans come from the server. It ingests eleven conversations, then
+   asks five questions, so the traces show recall choosing between memories
+   rather than returning the only one there is.
 
 Off by default — with `enabled = false` (or the `otel` extra absent) there is
 zero tracing overhead.
@@ -103,7 +105,6 @@ just a shortcut that fills in the endpoint and auth header for you.
 | `POST /api/v2/memory/search` | retriever `everos.memory.search` → `recall` / `rank` |
 | query / recall embedding | embedding `everos.embedding` |
 | OME extraction strategies | agent `everos.ome.<strategy>` (linked to the triggering request's trace) |
-| reflection consolidating a cluster | span `everos.reflect.consolidate` under `everos.ome.reflect_episodes` |
 
 `langfuse.session.id` / `langfuse.user.id` group the traces. Recall quality is
 pushed as Langfuse scores, split by whether the method's score is calibrated:

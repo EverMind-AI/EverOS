@@ -7,8 +7,7 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
 
 | File | Purpose |
 |---|---|
-| `fixtures/chat_session.json` | 22 messages · 3 topic shifts · multi-user (Alice → Bob) — chat-mode fixture |
-| `fixtures/agent_session.json` | 21 items · 2 task threads · interleaved `tool_calls` / `tool` results — agent-mode fixture |
+| `fixtures/chat_session.json` | 22 messages · 3 topic shifts · multi-user (Alice → Bob) |
 | `run.py` | In-process runner (no HTTP) |
 
 ## Prereqs
@@ -19,21 +18,13 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
    - `EVEROS_LLM__MODEL=...` (defaults to `gpt-4.1-mini`)
    - Without these, the boundary stage logs `memorize_no_llm_client` and skips the run.
 2. **Memory root**: defaults to `~/.everos`; override with `EVEROS_ROOT=...`.
-3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `add()` call.
 
 ## Run
 
 ```bash
-# Chat mode — boundary uses everalgo.boundary.adetect_boundaries
-EVEROS_MEMORIZE__MODE=chat uv run python scripts/e2e_memorize/run.py \
-    --fixture scripts/e2e_memorize/fixtures/chat_session.json \
-    --expected-mode chat
-
-# Agent mode — the same operator over the full item list (tool rows kept)
-# (filter→detect→remap; tool items preserved in cells)
-EVEROS_MEMORIZE__MODE=agent uv run python scripts/e2e_memorize/run.py \
-    --fixture scripts/e2e_memorize/fixtures/agent_session.json \
-    --expected-mode agent
+# Boundary uses everalgo.boundary.adetect_boundaries
+uv run python scripts/e2e_memorize/run.py \
+    --fixture scripts/e2e_memorize/fixtures/chat_session.json
 
 # Dry run (print batch plan, no LLM calls)
 uv run python scripts/e2e_memorize/run.py \
@@ -58,8 +49,6 @@ in the last 10 minutes.
 - Chat fixture: 2 owners (`u_alice`, `u_bob`) — expect Episodes split into
   ~3-4 cells aligned with topic shifts (Python bug → weekend ramen → Q3
   review → SRE handoff/ramen wrap).
-- Agent fixture: 1 user (`u_alice`) — expect ~2 Episodes aligned with the
-  two task threads (latency rollback → DB index fix).
 
 ### 3. SQLite memcell rows
 
@@ -69,9 +58,7 @@ sqlite3 ~/.everos/.index/sqlite/system.db \
      from memcell order by timestamp"
 ```
 
-- Chat run: rows with `track=user_memory`, `owner_type=user`.
-- Agent run: parallel rows for both tracks (`user_memory` **and**
-  `agent_memory`) since agent mode dispatches both pipelines.
+- One row per cut cell (`raw_type` `Conversation`).
 
 ### 4. Unprocessed buffer
 
@@ -85,11 +72,8 @@ After `flush` the buffer should be empty for the test session.
 
 ### 5. OME async output
 
-- `users/<owner>/user.md` — the profile (`extract_user_profile`; with an
-  embedding provider it runs after `trigger_profile_clustering`)
-- Agent mode: `agents/<agent>/.cases/agent_case-YYYY-MM-DD.md`
-  (`extract_agent_case`) and, once a case cluster forms,
-  `agents/<agent>/skills/skill_<name>/SKILL.md` (`extract_agent_skill`)
+- `users/<owner>/user.md` — the profile (`extract_user_profile`, run on each
+  new episode)
 
 ### 6. Reset between runs
 
@@ -97,7 +81,7 @@ The fixture's session_id is randomised per invocation, so previous runs
 don't pollute the new one. To wipe everything:
 
 ```bash
-rm -rf ~/.everos/users ~/.everos/agents ~/.everos/.index/sqlite/system.db
+rm -rf ~/.everos/users ~/.everos/.index/sqlite/system.db
 ```
 
 ## Boundary expectations cheat sheet
@@ -112,14 +96,3 @@ rm -rf ~/.everos/users ~/.everos/agents ~/.everos/.index/sqlite/system.db
 | msgs 17-22 (`1747411200–1747411410`) | Bob joins, SRE handoff + ramen + Q3 deck deadline |
 
 Boundary detector should cut on topic gaps; 3 cuts → 4 cells is the most likely outcome.
-
-### Agent fixture task threads
-
-| Range | Task |
-|---|---|
-| items 1-13 (`1747396800–1747397140`) | API latency spike → identify keepalive pool regression → rollback |
-| items 14-21 (`1747400400–1747400720`) | DB connection pool exhaustion → find unindexed query → CREATE INDEX CONCURRENTLY |
-
-Boundary detector should cut between item 13 and item 14 (timestamp jump
-~55 minutes, topic flip). Tool items inside each cell stay attached to
-their initiating chat turn.

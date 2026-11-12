@@ -5,22 +5,13 @@ Builds and starts the application, then calls
 without ``everos server start``. Drives a fixture through ``/add`` in
 N-sized batches, then triggers ``/flush`` to drain the tail.
 
-Reads ``settings.memorize.mode`` from current env / toml — set the mode via
-``EVEROS_MEMORIZE__MODE=chat|agent`` *before* invoking this script (the
-config is cached after the first ``load_settings()`` call).
-
 Usage:
-    EVEROS_MEMORIZE__MODE=chat  uv run python scripts/e2e_memorize/run.py \\
+    uv run python scripts/e2e_memorize/run.py \\
         --fixture scripts/e2e_memorize/fixtures/chat_session.json
-
-    EVEROS_MEMORIZE__MODE=agent uv run python scripts/e2e_memorize/run.py \\
-        --fixture scripts/e2e_memorize/fixtures/agent_session.json --batch-size 5
 
 After it finishes, check:
     ~/.everos/users/<owner>/episodes/<date>.md      (written sync by 4A)
     ~/.everos/.index/sqlite/system.db memcell rows  (written by boundary)
-    ~/.everos/agents/<agent>/agent_cases/<date>.md  (written async by OME
-        - only if a consumer of AgentMemCellWritten is registered)
 """
 
 from __future__ import annotations
@@ -43,22 +34,22 @@ def _chunks(items: list[dict], n: int) -> list[list[dict]]:
     return [items[i : i + n] for i in range(0, len(items), n)]
 
 
-def _print_header(mode: str, fixture_path: Path, session_id: str) -> None:
+def _print_header(fixture_path: Path, session_id: str) -> None:
     print("=" * 72)
-    print(f"  everos e2e memorize  ·  mode={mode}")
+    print("  everos e2e memorize")
     print(f"  fixture     : {fixture_path.name}")
     print(f"  session_id  : {session_id}")
     print(f"  memory root : {MemoryRoot.resolve().root}")
     print("=" * 72)
 
 
-def _list_written_files(session_id: str, mode: str) -> None:
+def _list_written_files(session_id: str) -> None:
     """Walk memory root and print files touched in this run."""
     root = MemoryRoot.resolve().root
     cutoff = time.time() - 600  # files modified in the last 10 min
     print()
     print("─── files modified within the last 10 minutes under memory root ───")
-    interesting = ("users", "agents", "knowledge", ".index")
+    interesting = ("users", ".index")
     for sub in interesting:
         base = Path(root) / sub
         if not base.is_dir():
@@ -74,14 +65,6 @@ def _list_written_files(session_id: str, mode: str) -> None:
 
 async def _run(args: argparse.Namespace) -> None:
     settings = load_settings()
-    mode = settings.memorize.mode
-    if args.expected_mode and args.expected_mode != mode:
-        print(
-            f"!! expected mode={args.expected_mode!r} but "
-            f"settings.memorize.mode={mode!r}. "
-            "Set EVEROS_MEMORIZE__MODE before launching."
-        )
-        sys.exit(2)
 
     fixture_path = Path(args.fixture).resolve()  # noqa: ASYNC240
     fixture = json.loads(fixture_path.read_text())
@@ -94,7 +77,7 @@ async def _run(args: argparse.Namespace) -> None:
         print(f"!! {exc}")
         sys.exit(2)
 
-    _print_header(mode, fixture_path, session_id)
+    _print_header(fixture_path, session_id)
 
     if args.dry_run:
         for i, batch in enumerate(_chunks(messages, args.batch_size), start=1):
@@ -128,13 +111,12 @@ async def _run(args: argparse.Namespace) -> None:
         print(f"flush  →  status={flush_result.status}")
 
         # OME strategies are fire-and-forget; each cell fires the profile
-        # strategies (and, in agent mode, the case and skill ones), each
-        # ~5-10s on a real LLM. Sleep long enough for ~8-10 invocations to
-        # finish before engine.stop() drains the scheduler — otherwise APS
-        # cancels in-flight LLM calls.
+        # strategies, each ~5-10s on a real LLM. Sleep long enough for ~8-10
+        # invocations to finish before engine.stop() drains the scheduler —
+        # otherwise APS cancels in-flight LLM calls.
         await asyncio.sleep(30)
 
-        _list_written_files(session_id, mode)
+        _list_written_files(session_id)
     finally:
         await application.aclose()
 
@@ -151,11 +133,6 @@ def main() -> None:
         type=int,
         default=6,
         help="how many messages per /add call (default 6 — 20 msgs across ~4 batches)",
-    )
-    parser.add_argument(
-        "--expected-mode",
-        choices=["chat", "agent"],
-        help="sanity check: fail fast if settings.memorize.mode mismatches",
     )
     parser.add_argument(
         "--dry-run",

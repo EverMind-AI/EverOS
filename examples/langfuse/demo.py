@@ -7,9 +7,9 @@ running server through a memory lifecycle worth looking at in Langfuse.
 Eleven short conversations spread over ten weeks, each on its own topic, so
 recall has to pick the right memory out of a populated store rather than
 returning the only thing in it. Two revisit the same subject days apart (an
-October trip moves from Lisbon to Porto), close enough that geometry
-clustering groups them, which gives reflection something to consolidate. One
-query asks about something never discussed, so a miss looks like a miss.
+October trip moves from Lisbon to Porto), so recall has to bring back the
+plan and its revision together. One query asks about something never
+discussed, so a miss looks like a miss.
 
 Prereqs (see README.md):
   1. pip install "everos[otel]"
@@ -36,7 +36,6 @@ INDEX_TIMEOUT_SECONDS = 300.0
 # Deliberately slack: every probe is itself a traced search, and polling hard
 # would bury the five real questions under a wall of readiness checks.
 INDEX_POLL_SECONDS = 10.0
-CONSOLIDATION_TIMEOUT_SECONDS = 180.0
 
 # ── the conversations ────────────────────────────────────────────────────
 # ``days_ago`` only spaces the timestamps out; every session is ingested now.
@@ -282,7 +281,7 @@ QUERIES: list[dict] = [
             "what happened with the October trip we booked, did the destination "
             "change after the wedding moved"
         ),
-        "note": "the plan, its revision, and whatever reflection made of them",
+        "note": "the plan and its revision",
     },
     {
         "label": "constraint",
@@ -418,46 +417,6 @@ def _wait_for_index() -> list[str]:
     return laggards
 
 
-def _reflect() -> str:
-    """Run episode reflection now instead of waiting for its weekly cron.
-
-    Consolidation is what merges a cluster of related memories and deprecates
-    what they superseded, so a demo that never triggers it never shows the
-    part of EverOS that improves memory over time. ``reflect_episodes`` is
-    scheduled ``0 2 * * 1``, hence the manual nudge.
-    """
-    body = {"name": "reflect_episodes", "force": True, "timeout": 300.0}
-    return str(_post("/api/v2/ome/trigger", body)["status"])
-
-
-def _wait_for_consolidation() -> bool:
-    """Poll until the consolidated memory has replaced what it superseded.
-
-    ``/ome/trigger`` returns once the OME engine is idle, but the merge reaches
-    LanceDB through the cascade, and deprecating the old episodes is a separate
-    write from indexing the merged one. Querying in between sees neither, and
-    scores lower than the memory deserves. So wait for both edges: the first
-    trip session going unsearchable, then the merged memory answering for it.
-    """
-    superseded = SESSIONS[0]
-    deadline = time.monotonic() + CONSOLIDATION_TIMEOUT_SECONDS
-
-    while time.monotonic() < deadline:
-        if not _session_is_searchable(superseded):
-            break
-        time.sleep(INDEX_POLL_SECONDS)
-    else:
-        return False
-
-    # The originals are gone; wait for the merged episode to take their place.
-    # A merge is its own entry and belongs to no session.
-    while time.monotonic() < deadline:
-        if any(ep.get("session_id") is None for ep in _episodes()):
-            return True
-        time.sleep(INDEX_POLL_SECONDS)
-    return False
-
-
 def _describe(data: dict) -> str:
     """What a search returned per memory kind, plus its best score.
 
@@ -497,13 +456,6 @@ def main() -> None:
         )
     else:
         print(f"  all {len(SESSIONS)} sessions searchable")
-
-    print("\nrunning reflection (normally a weekly cron) ...")
-    print(f"  reflect_episodes -> {_reflect()}")
-    if _wait_for_consolidation():
-        print(f"  {SESSIONS[0]['id']} superseded and no longer searchable")
-    else:
-        print("  nothing was consolidated; the originals are both still live")
 
     print()
     for spec in QUERIES:

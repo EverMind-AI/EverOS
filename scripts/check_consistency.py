@@ -83,11 +83,11 @@ async def _scan_monotonicity(corpus: Path) -> list[MonotonicityReport]:
     """Walk all daily-log md files; report id-counter monotonicity per file."""
     from everos.infra.persistence.markdown import MarkdownReader
 
-    daily_dirs = ("/episodes/", "/.agent_cases/")
+    daily_dirs = ("/episodes/",)
     reports: list[MonotonicityReport] = []
     for md in sorted(corpus.rglob("*.md")):
         rel = md.relative_to(corpus).as_posix()
-        if not (rel.startswith("users/") or rel.startswith("agents/")):
+        if not rel.startswith("users/"):
             continue
         if not any(d in "/" + rel for d in daily_dirs):
             continue
@@ -207,9 +207,8 @@ async def run_lifespan_mode(corpus: Path) -> int:
 async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> int:
     """Direct LanceDB read + md read; no lifespan / cascade / ome started.
 
-    Covers the episode kind; agent_case + user_profile + agent_skill are NOT
-    checked in this mode (use --mode lifespan on an idle corpus snapshot for
-    full coverage).
+    Covers the episode kind; user_profile is NOT checked in this mode (use
+    --mode lifespan on an idle corpus snapshot for full coverage).
     """
     import lancedb
 
