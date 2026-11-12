@@ -25,6 +25,7 @@ __all__ = [
     "UnusedPort",
 ]
 
+import dataclasses
 import json
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
@@ -298,6 +299,13 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             and (image_id in s.item.episode or image_id in s.item.image_ids)
         ]
 
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Episode], str | None]]:
+        return [
+            (s, self.deprecated.get(s.ref.md_path, {}).get(s.ref.entry_id))
+            for s in self.records
+            if s.scope == scope
+        ]
+
     def seed(self, scope: Scope, entry_id: str, episode: Episode) -> None:
         """Put an episode under a chosen entry id (as if read from md)."""
         ref = MemoryRef(
@@ -375,6 +383,13 @@ class InMemorySceneStore:
 
     async def versions(self, scope: Scope) -> list[Stored[Scene]]:
         return [v for v in self.written if v.scope == scope]
+
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Scene], str | None]]:
+        return [
+            (v, self.superseded.get(v.ref.entry_id))
+            for v in self.written
+            if v.scope == scope
+        ]
 
     async def append(
         self,
@@ -831,6 +846,9 @@ class InMemoryForgetLogStore:
             owner_type=owner_type,
             requested_by=requested_by,
             undo=undo,
+            app_id=app_id,
+            project_id=project_id,
+            created_at=len(self.entries) + 1,
         )
         self.entries.append(entry)
         return entry
@@ -838,8 +856,20 @@ class InMemoryForgetLogStore:
     async def get(self, forget_id: str) -> ForgetEntry | None:
         for entry in self.entries:
             if entry.forget_id == forget_id:
-                return entry
+                return dataclasses.replace(entry, undone=forget_id in self.undone)
         return None
+
+    async def live_entries(
+        self, *, app_id: str, project_id: str, owner_id: str
+    ) -> list[ForgetEntry]:
+        return [
+            entry
+            for entry in reversed(self.entries)
+            if entry.owner_id == owner_id
+            and entry.app_id == app_id
+            and entry.project_id == project_id
+            and entry.forget_id not in self.undone
+        ]
 
     async def live_targets(
         self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
@@ -1011,6 +1041,32 @@ class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
             )
             if len(found) >= limit:
                 break
+        return found
+
+    async def read_many(
+        self, scope: Scope, entry_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        wanted = set(entry_ids)
+        return [s for s in await self.read_all(scope) if s.ref.entry_id in wanted]
+
+    async def read_all(self, scope: Scope) -> list[Stored[ImageMemory]]:
+        found: list[Stored[ImageMemory]] = []
+        for stored in self.records:
+            if stored.scope != scope:
+                continue
+            mark = self.deprecated[stored.ref.md_path].get(stored.ref.entry_id)
+            status = (
+                "forgotten" if mark == "forgotten" else "superseded" if mark else None
+            )
+            found.append(
+                Stored(
+                    ref=stored.ref,
+                    scope=stored.scope,
+                    item=stored.item.model_copy(
+                        update={"superseded_by": mark, "status": status or "current"}
+                    ),
+                )
+            )
         return found
 
 

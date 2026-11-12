@@ -95,6 +95,23 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
             )
             return list(dict.fromkeys((await s.execute(stmt)).scalars().all()))
 
+    async def live_rows(
+        self, *, app_id: str, project_id: str, owner_id: str
+    ) -> list[ForgetLog]:
+        """The owner's forgets no undo reversed, newest first."""
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(ForgetLog)
+                .where(
+                    ForgetLog.app_id == app_id,  # type: ignore[arg-type]
+                    ForgetLog.project_id == project_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                )
+                .order_by(ForgetLog.created_at.desc())
+            )
+            return list((await s.execute(stmt)).scalars().all())
+
     async def holds_picture(self, image_id: str) -> bool:
         """Whether a live group forget's undo record took out a memory of the hash.
 

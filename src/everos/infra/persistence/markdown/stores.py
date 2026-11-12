@@ -518,6 +518,21 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             if not mark
         ]
 
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Episode], str | None]]:
+        """Every entry of the owner's episode files, with its mark, in file order.
+
+        An entry that no longer parses (a hand edit) is skipped.
+        """
+        found: list[tuple[Stored[Episode], str | None]] = []
+        for md_path, entry, mark in await self._entries_where(
+            scope, [""], lambda e: True
+        ):
+            try:
+                found.append((self._stored(scope, md_path, entry), mark))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return found
+
     def _stored(self, scope: Scope, md_path: str, entry: Entry) -> Stored[Episode]:
         return Stored(
             ref=MemoryRef(
@@ -822,6 +837,40 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                 )
         return found
 
+    async def read_all(self, scope: Scope) -> list[Stored[ImageMemory]]:
+        """Every picture memory of the owner, in file order, marks included.
+
+        An entry that no longer parses (a hand edit) is skipped.
+        """
+        found: list[Stored[ImageMemory]] = []
+        for md_path, entry, mark in await self._entries_where(
+            scope, [""], lambda e: True
+        ):
+            try:
+                item = _image_memory_from(entry, owner_id=scope.owner_id)
+            except (KeyError, TypeError, ValueError):
+                continue
+            item.superseded_by = mark
+            item.status = (
+                "forgotten"
+                if mark == FORGOTTEN_MARK
+                else "superseded"
+                if mark
+                else "current"
+            )
+            found.append(
+                Stored(
+                    ref=MemoryRef(
+                        id=f"{scope.owner_id}_{entry.id}",
+                        entry_id=entry.id,
+                        md_path=md_path,
+                    ),
+                    scope=scope,
+                    item=item,
+                )
+            )
+        return found
+
     async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
         """Drop the owner's picture memories of one session from markdown."""
         return await super().remove_session(scope, session_id)
@@ -950,6 +999,25 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
             )
             for md_path, entry, _mark in found
         ]
+
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Scene], str | None]]:
+        """Every version of every scene of the owner with its mark, in file order.
+
+        An entry that no longer parses (a hand edit) is skipped.
+        """
+        found: list[tuple[Stored[Scene], str | None]] = []
+        for md_path, entry, mark in await self._entries_where(
+            scope, ["**scene_id**: "], lambda e: bool(e.as_structured().inline)
+        ):
+            try:
+                scene = _scene_from_entry(entry, owner_id=scope.owner_id)
+            except (KeyError, TypeError, ValueError):
+                continue
+            ref = MemoryRef(
+                id=f"{scope.owner_id}_{entry.id}", entry_id=entry.id, md_path=md_path
+            )
+            found.append((Stored(ref=ref, scope=scope, item=scene), mark))
+        return found
 
     async def append(
         self,
@@ -1489,7 +1557,45 @@ def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
         sender_ids=_list_field(inline.get("sender_ids")),
         subject_ids=_list_field(inline.get("subject_ids")),
         origin=inline.get("origin") or None,  # type: ignore[arg-type]
+        **_edit_fields(inline),
     )
+
+
+def _edit_inline(record: Episode | ImageMemory | Scene) -> dict[str, object]:
+    """The inline lines of a version a person wrote (``EDIT_FIELDS``); none else.
+
+    A model-written entry gets none of them, so every entry written before
+    edits existed reads exactly as before.
+    """
+    inline: dict[str, object] = {}
+    if record.supersedes:
+        inline["supersedes"] = record.supersedes
+    if record.edited_by:
+        inline["edited_by"] = record.edited_by
+    if record.edited_at is not None:
+        inline["edited_at"] = _iso(record.edited_at)
+    if record.held:
+        inline["held"] = "true"
+    return inline
+
+
+def _edit_fields(inline: Mapping[str, str]) -> dict[str, object]:
+    """``EDIT_FIELDS`` read back from an entry's inline lines.
+
+    A hand-broken ``edited_at`` reads as unknown rather than failing the entry.
+    """
+    edited_at: int | None = None
+    if inline.get("edited_at"):
+        try:
+            edited_at = to_timestamp_ms(from_iso_format(inline["edited_at"]))
+        except (TypeError, ValueError):
+            edited_at = None
+    return {
+        "supersedes": inline.get("supersedes") or None,
+        "edited_by": inline.get("edited_by") or None,
+        "edited_at": edited_at,
+        "held": (inline.get("held") or "").strip().lower() == "true",
+    }
 
 
 def _list_field(raw: object) -> list[str]:
@@ -1541,6 +1647,7 @@ def _image_memory_entry(image: ImageMemory) -> EntryBody:
         inline["subject_ids"] = list(image.subject_ids)
     if image.origin is not None:
         inline["origin"] = image.origin
+    inline |= _edit_inline(image)
     sections = {"Description": image.description}
     if image.ocr:
         sections["OCR"] = image.ocr
@@ -1600,6 +1707,7 @@ def _episode_entry(episode: Episode) -> EntryBody:
         inline["subject_ids"] = list(episode.subject_ids)
     if episode.origin is not None:
         inline["origin"] = episode.origin
+    inline |= _edit_inline(episode)
     sections: dict[str, str] = {}
     if episode.subject:
         sections["Subject"] = episode.subject
@@ -1634,6 +1742,7 @@ def _scene_entry(scene: Scene) -> EntryBody:
         inline["origin"] = scene.origin
     if scene.language:
         inline["language"] = scene.language
+    inline |= _edit_inline(scene)
     sections: dict[str, str] = {}
     if scene.subject:
         sections["Subject"] = scene.subject
@@ -1666,6 +1775,7 @@ def _scene_from_entry(entry: Entry, *, owner_id: str) -> Scene:
         subject_ids=_list_field(inline.get("subject_ids")),
         origin=inline.get("origin") or None,  # type: ignore[arg-type]
         language=inline.get("language") or None,
+        **_edit_fields(inline),
     )
 
 
@@ -1730,6 +1840,7 @@ def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:
             if inline.get("source_start")
             else None
         ),
+        **_edit_fields(inline),
     )
 
 

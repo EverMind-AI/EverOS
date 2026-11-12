@@ -39,8 +39,11 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from .query import SessionKey
 
-type ForgetTarget = Literal["image", "session", "message", "member", "record"]
-"""What a forget was addressed by: one picture's hash or one conversation, and
+type ForgetTarget = Literal[
+    "image", "session", "message", "member", "record", "owner", "condition"
+]
+"""What a forget was addressed by: one picture's hash or one conversation; a
+user's records by id, everything of the user, or a kind and a time range; and
 inside a group also messages, a member, or records by id."""
 
 
@@ -65,7 +68,10 @@ class ForgetEntry:
         requested_by: Who asked for a group forget; ``None`` elsewhere.
         undo: What a group forget's undo restores (the material it took out
             of markdown, what it wrote, what it queued), as the forget
-            recorded it; ``None`` outside groups.
+            recorded it. A user's forget by records, owner or condition
+            keeps the exact entries it marked here. ``None`` otherwise.
+        app_id / project_id: The space of ``owner_id``.
+        created_at: Epoch ms the forget was recorded; ``None`` when unknown.
     """
 
     forget_id: str
@@ -80,6 +86,9 @@ class ForgetEntry:
     owner_type: str = "user"
     requested_by: str | None = None
     undo: Mapping[str, Any] | None = None
+    app_id: str = "default"
+    project_id: str = "default"
+    created_at: int | None = None
 
 
 @runtime_checkable
@@ -134,6 +143,16 @@ class ForgetLogStore(Protocol):
 
         A group's live picture forgets, for instance: every later
         re-extraction of a segment that showed the picture leaves it out.
+        """
+        ...
+
+    async def live_entries(
+        self, *, app_id: str, project_id: str, owner_id: str
+    ) -> list[ForgetEntry]:
+        """The owner's forgets no undo reversed, newest first.
+
+        What an undo of one forget asks before it brings an entry back: an
+        entry another live forget also names stays forgotten.
         """
         ...
 

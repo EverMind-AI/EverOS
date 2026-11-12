@@ -170,6 +170,12 @@ class Episode(BaseModel):
     (the segment's last message): a membership window must contain the whole
     segment for a member to see it."""
 
+    # A version a person wrote through ``POST /memory/update`` (EDIT_FIELDS).
+    supersedes: str | None = None
+    edited_by: str | None = None
+    edited_at: int | None = None
+    held: bool = False
+
     model_config = ConfigDict(extra="allow")
 
     @classmethod
@@ -319,6 +325,12 @@ class ImageMemory(BaseModel):
     subject_ids: list[str] = Field(default_factory=list)
     origin: Origin | None = None
 
+    # A version a person wrote through ``POST /memory/update`` (EDIT_FIELDS).
+    supersedes: str | None = None
+    edited_by: str | None = None
+    edited_at: int | None = None
+    held: bool = False
+
     model_config = ConfigDict(extra="allow")
 
 
@@ -453,6 +465,41 @@ class Scene(BaseModel):
     subject_ids: list[str] = Field(default_factory=list)
     origin: Origin | None = None
     language: str | None = None
+    # A version a person wrote through ``POST /memory/update`` (EDIT_FIELDS).
+    supersedes: str | None = None
+    edited_by: str | None = None
+    edited_at: int | None = None
+    held: bool = False
+
+
+EDIT_FIELDS: tuple[str, ...] = ("supersedes", "edited_by", "edited_at", "held")
+"""What a version a person wrote through ``POST /memory/update`` carries.
+
+On an episode, a picture memory or a scene version they are fields; on a
+profile item (``user.md``, a member's profile) the last three are extra keys
+next to the item's own ``supersedes`` / ``since``. ``supersedes`` is the id of
+the version the edit replaced, ``edited_by`` who wrote it, ``edited_at`` when
+(epoch ms). ``held`` is the plan's "a person's edit is not changed by the model
+again": a profile update keeps a held item as it is, and a scene update leaves
+a held scene version alone, until a caller releases it (an update with
+``hold = false``). A model-written version carries none of them."""
+
+EDIT_KEYS: tuple[str, ...] = ("edited_by", "edited_at", "held")
+"""The :data:`EDIT_FIELDS` a profile item carries as extra keys; its
+``supersedes`` is the profile's own version link (:data:`MEMBER_VERSION_KEYS`)."""
+
+
+def is_held(item: object) -> bool:
+    """Whether a person's version holds ``item`` against the model's updates.
+
+    ``item`` is a daily-log record (an attribute), a profile item (an extra
+    key) or an item's dict.
+    """
+    if isinstance(item, Mapping):
+        return item.get("held") is True
+    if isinstance(item, BaseModel) and "held" not in type(item).model_fields:
+        return (item.model_extra or {}).get("held") is True
+    return getattr(item, "held", False) is True
 
 
 MEMBER_ITEM_KEYS: tuple[str, ...] = (
@@ -1187,6 +1234,8 @@ class Roster(BaseModel):
 
 
 __all__ = [
+    "EDIT_FIELDS",
+    "EDIT_KEYS",
     "FORGOTTEN_MARK",
     "MANAGER_ROLES",
     "MEMBER_ITEM_KEYS",
@@ -1233,6 +1282,7 @@ __all__ = [
     "ToolCall",
     "TopicStatus",
     "fold_roster",
+    "is_held",
     "mint_cluster_id",
     "replaced_chains",
     "with_previous_values",

@@ -249,6 +249,15 @@ class EpisodeStore(Protocol):
         """The owner's current episodes that refer to the picture ``image_id``."""
         ...
 
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Episode], str | None]]:
+        """Every entry of the owner's episode files with its mark (``None`` while
+        current: a successor's entry id, or the forget marker otherwise).
+
+        What a forget by condition or by owner, and a version history, read:
+        markdown, not the index, so the answer does not wait for the cascade.
+        """
+        ...
+
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
@@ -360,6 +369,11 @@ class ImageMemoryStore(Protocol):
         """The picture memories of ``entry_ids`` still in md, marks included."""
         ...
 
+    async def read_all(self, scope: Scope) -> list[Stored[ImageMemory]]:
+        """Every picture memory of the owner, marks included (``superseded_by``,
+        and ``status`` ``forgotten`` for the forget marker)."""
+        ...
+
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
@@ -407,6 +421,11 @@ class SceneStore(Protocol):
 
     async def versions(self, scope: Scope) -> list[Stored[Scene]]:
         """Every version of every scene of the owner."""
+        ...
+
+    async def read_all(self, scope: Scope) -> list[tuple[Stored[Scene], str | None]]:
+        """Every version of every scene of the owner with its mark (``None``
+        while current)."""
         ...
 
     async def deprecate(

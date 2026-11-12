@@ -27,7 +27,7 @@ from typing import Any, cast
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.core.utils.datetime import from_timestamp_ms, get_utc_now
+from everos.core.utils.datetime import from_timestamp_ms, get_utc_now, to_timestamp_ms
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,
@@ -684,6 +684,14 @@ class SqliteForgetLogStore:
             target_kind=target, app_id=app_id, project_id=project_id, owner_id=owner_id
         )
 
+    async def live_entries(
+        self, *, app_id: str, project_id: str, owner_id: str
+    ) -> list[ForgetEntry]:
+        rows = await self._repo.live_rows(
+            app_id=app_id, project_id=project_id, owner_id=owner_id
+        )
+        return [_forget_entry(row) for row in rows]
+
     async def holds_picture(self, image_id: str) -> bool:
         return await self._repo.holds_picture(image_id)
 
@@ -777,4 +785,7 @@ def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
         owner_type=row.owner_type,
         requested_by=row.requested_by,
         undo=json.loads(row.undo_json) if row.undo_json else None,
+        app_id=row.app_id,
+        project_id=row.project_id,
+        created_at=to_timestamp_ms(row.created_at) if row.created_at else None,
     )
