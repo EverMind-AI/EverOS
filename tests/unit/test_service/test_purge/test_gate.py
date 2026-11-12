@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -70,5 +71,11 @@ def test_a_tick_run_stamps_what_it_emits_with_its_start(tmp_path: Path) -> None:
     it emits must not look older than the purge."""
     gate = PurgeRunGate(MARKS.for_root(tmp_path))
     with gate.bind(CronTick(strategy_name="s", ts=BEFORE)):
-        assert ORIGIN.get() is None
-        assert _Scoped().ts > BEFORE
+        started = ORIGIN.get()
+        first = _Scoped()
+        time.sleep(0.01)
+        later = _Scoped()
+    # Both stamped with the run's start, not when each is made (D34): a tick
+    # that starts before a purge and emits after it is old work.
+    assert started is not None and started > BEFORE
+    assert first.ts == later.ts == started

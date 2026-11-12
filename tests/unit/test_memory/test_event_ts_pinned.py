@@ -18,7 +18,7 @@ import everos
 SRC = Path(everos.__file__).parent
 
 ALLOWED: dict[str, int] = {
-    "service/purge/_gate.py": 2,  # getattr(event, "ts"): the verdict, the bind
+    "service/purge/_gate.py": 1,  # getattr(event, "ts"): verdict and bind
     "service/purge/_runner.py": 1,  # a stored event's "ts": the wait
     "memory/search/filters.py": 3,  # a filter field kind named "ts", not Event.ts
 }
