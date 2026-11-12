@@ -6382,7 +6382,10 @@
             "anyOf": [
               {
                 "type": "string",
-                "const": "group"
+                "enum": [
+                  "user",
+                  "group"
+                ]
               },
               {
                 "type": "null"
@@ -6819,6 +6822,27 @@
             "type": "boolean",
             "title": "Include Superseded",
             "default": false
+          },
+          "include_groups": {
+            "type": "boolean",
+            "title": "Include Groups",
+            "default": false
+          },
+          "include_group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 16,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Group Ids"
           },
           "app_id": {
             "type": "string",
@@ -9341,7 +9365,10 @@
             "anyOf": [
               {
                 "type": "string",
-                "const": "group"
+                "enum": [
+                  "user",
+                  "group"
+                ]
               },
               {
                 "type": "null"
@@ -9628,6 +9655,21 @@
             ],
             "title": "User Id"
           },
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "group"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
           "group_id": {
             "anyOf": [
               {
@@ -9822,7 +9864,10 @@
             "anyOf": [
               {
                 "type": "string",
-                "const": "group"
+                "enum": [
+                  "user",
+                  "group"
+                ]
               },
               {
                 "type": "null"
@@ -9887,7 +9932,7 @@
           "profile_data"
         ],
         "title": "SearchProfileItem",
-        "description": "A profile attached with ``include_profile``.\n\nOn a user scope, the owner's profile (at most one). On a group scope, the\nmember-in-group profiles of the asker and of the members the query names\n(``owner_type = group``, ``group_id``, ``member_id``), holding only the\nitems the asker's windows allow -- never a personal profile.\n\n``score`` is ``None`` for direct fetches (``include_profile=true``\non its own does no ranking); a future query-aware lookup may fill\nit in."
+        "description": "A profile attached with ``include_profile``.\n\nOn a user scope, the owner's profile (at most one). On a group scope, the\nmember-in-group profiles of the asker and of the members the query names\n(``owner_type = group``, ``group_id``, ``member_id``), holding only the\nitems the asker's windows allow -- never a personal profile. A user scope\nwith ``include_groups`` returns the owner's profile (``owner_type =\nuser``) and the owner's own profile in each group searched, cut the same\nway; never another member's.\n\n``score`` is ``None`` for direct fetches (``include_profile=true``\non its own does no ranking); a future query-aware lookup may fill\nit in."
       },
       "SearchRequest": {
         "properties": {
@@ -10008,6 +10053,27 @@
             "title": "Project Scope",
             "default": false
           },
+          "include_groups": {
+            "type": "boolean",
+            "title": "Include Groups",
+            "default": false
+          },
+          "include_group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 16,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Group Ids"
+          },
           "images": {
             "items": {
               "$ref": "#/components/schemas/QuestionPicture"
@@ -10059,7 +10125,10 @@
         "properties": {
           "owner_type": {
             "type": "string",
-            "const": "group",
+            "enum": [
+              "user",
+              "group"
+            ],
             "title": "Owner Type",
             "default": "group"
           },
@@ -10098,7 +10167,7 @@
           "asker_id"
         ],
         "title": "SearchScope",
-        "description": "The scope a group search was answered in (docs/group-memory.md, 5.3)."
+        "description": "The scope a group search was answered in (docs/group-memory.md, 5.3).\n\nA user search with ``include_groups`` returns one too: ``owner_type``\n``user``, the user as the asker, and the groups searched alongside the\npersonal memory with the user's windows in each (``group_ids`` empty when\nthe user belongs to none)."
       },
       "SearchSource": {
         "properties": {

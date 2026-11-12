@@ -7,6 +7,9 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
   and the predicate every recall puts into its ``where``. Visibility is part of
   the index query, never a filter applied to results afterwards, so a ranking
   (the multi-round decider above all) never sees a candidate the asker cannot.
+* :meth:`AccessPolicy.member_groups` compiles the groups a personal read also
+  covers when it asks to (``include_groups``): the owner's current groups,
+  each read exactly as a group search by the owner reads it.
 * :func:`visible` answers the same question for one record that does not come
   through the index (a markdown read); :meth:`AccessPolicy.picture_visible`
   for a picture's bytes, served by content hash.
@@ -74,6 +77,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import (
     Filter,
+    GroupRecord,
     GroupStore,
     MessageForgetStore,
     OwnerType,
@@ -293,6 +297,66 @@ def _member_windows(group: Group, roster: Roster, member_id: str) -> tuple[Windo
     if group.history_visible_from == "creation" and roster.is_current_member(member_id):
         return (Window(start=None, end=None),)
     return tuple(Window(start, end) for start, end in roster.windows_of(member_id))
+
+
+def _view_of(record: GroupRecord, asker: str, audience: Audience) -> GroupView:
+    """One group of a read scope: the asker's windows in it, cut by ``audience``.
+
+    ``audience = group`` keeps only the time every current member can see.
+    """
+    windows = _member_windows(record.group, record.roster, asker)
+    if audience == "group":
+        for member in record.roster.current_members():
+            windows = intersect_windows(
+                windows,
+                _member_windows(record.group, record.roster, member.member_id),
+            )
+    return GroupView(group=record.group, roster=record.roster, windows=windows)
+
+
+def _group_read_scope(
+    app_id: str,
+    project_id: str,
+    asker: str,
+    audience: Audience,
+    views: Sequence[GroupView],
+) -> ReadScope:
+    """The read scope of ``views``: one predicate, a disjunction over the groups.
+
+    Each group contributes its own windows; a group whose windows are empty
+    contributes nothing, and a scope left with no group sees nothing at all.
+    """
+    per_group = [p for p in (view.predicate() for view in views) if p is not None]
+    space = (
+        eq("owner_type", "group"),
+        eq("app_id", app_id),
+        eq("project_id", project_id),
+    )
+    predicate = (
+        all_of(*space, is_null("deprecated_by"), any_of(*per_group))
+        if per_group
+        else _NOTHING
+    )
+    versions = (
+        all_of(
+            *space,
+            any_of(is_null("deprecated_by"), ne("deprecated_by", FORGOTTEN_MARK)),
+            any_of(*per_group),
+        )
+        if per_group
+        else _NOTHING
+    )
+    return ReadScope(
+        app_id=app_id,
+        project_id=project_id,
+        owner_type="group",
+        owner_ids=tuple(view.group_id for view in views),
+        asker_id=asker,
+        predicate=predicate,
+        audience=audience,
+        groups=tuple(views),
+        versions_predicate=versions,
+    )
 
 
 def visible(
@@ -648,6 +712,56 @@ class AccessPolicy:
             )
         return any_of(outside, eq("source_group_id", group_id))
 
+    async def member_groups(
+        self, personal: ReadScope, *, only: Collection[str] | None = None
+    ) -> ReadScope | None:
+        """The groups a personal read also covers when it asks to (``include_groups``).
+
+        Every group of the read's space whose roster has its owner as a
+        current member -- of those in ``only``, when given -- compiled
+        exactly as a group search by the owner compiles it: the same
+        windows (``history_visible_from`` honoured), the same status rules
+        (superseded and forgotten records left out), the owner as the asker
+        and the asker's own audience. A group the owner left, or never
+        joined, adds nothing; an id in ``only`` that is not such a group is
+        ignored, never refused, so the answer says nothing about it.
+
+        Args:
+            personal: The personal read scope :meth:`read_scope` compiled,
+                which already checked that the asker is its owner.
+            only: The groups to consider; ``None`` considers every group of
+                the space.
+
+        Returns:
+            The groups' read scope, or ``None`` when the owner currently
+            belongs to none of them.
+        """
+        if personal.owner_type != "user":
+            raise ValueError("only a personal read covers its owner's groups")
+        owner = personal.owner_id
+        wanted = None if only is None else set(only)
+        views: list[GroupView] = []
+        for group_id in await self._groups.group_ids(
+            personal.app_id, personal.project_id
+        ):
+            if wanted is not None and group_id not in wanted:
+                continue
+            record = await self._groups.get(
+                Scope(
+                    app_id=personal.app_id,
+                    project_id=personal.project_id,
+                    owner_id=group_id,
+                    owner_type="group",
+                )
+            )
+            if record is not None and record.roster.is_current_member(owner):
+                views.append(_view_of(record, owner, "asker"))
+        if not views:
+            return None
+        return _group_read_scope(
+            personal.app_id, personal.project_id, owner, "asker", views
+        )
+
     async def _group_scope(
         self, identity: Identity, request: ScopeRequest
     ) -> ReadScope:
@@ -668,46 +782,9 @@ class AccessPolicy:
                 raise ForbiddenError(
                     f"the asker is not a current member of group {group_id!r}"
                 )
-            windows = _member_windows(record.group, record.roster, asker)
-            if request.audience == "group":
-                for member in record.roster.current_members():
-                    windows = intersect_windows(
-                        windows,
-                        _member_windows(record.group, record.roster, member.member_id),
-                    )
-            views.append(
-                GroupView(group=record.group, roster=record.roster, windows=windows)
-            )
-        per_group = [p for p in (view.predicate() for view in views) if p is not None]
-        space = (
-            eq("owner_type", "group"),
-            eq("app_id", request.app_id),
-            eq("project_id", request.project_id),
-        )
-        predicate = (
-            all_of(*space, is_null("deprecated_by"), any_of(*per_group))
-            if per_group
-            else _NOTHING
-        )
-        versions = (
-            all_of(
-                *space,
-                any_of(is_null("deprecated_by"), ne("deprecated_by", FORGOTTEN_MARK)),
-                any_of(*per_group),
-            )
-            if per_group
-            else _NOTHING
-        )
-        return ReadScope(
-            app_id=request.app_id,
-            project_id=request.project_id,
-            owner_type="group",
-            owner_ids=tuple(view.group_id for view in views),
-            asker_id=asker,
-            predicate=predicate,
-            audience=request.audience,
-            groups=tuple(views),
-            versions_predicate=versions,
+            views.append(_view_of(record, asker, request.audience))
+        return _group_read_scope(
+            request.app_id, request.project_id, asker, request.audience, views
         )
 
     async def picture_visible(

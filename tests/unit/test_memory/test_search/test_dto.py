@@ -144,3 +144,60 @@ def test_response_default_arrays_present() -> None:
     assert resp.data.profiles == []
     assert resp.data.unprocessed_messages == []
     assert "agent_cases" not in resp.data.model_dump()
+
+
+# ── include_groups (a personal search over the user's groups too) ──────
+
+
+def test_include_groups_is_off_by_default() -> None:
+    req = SearchRequest(**_minimal_request_kwargs())
+    assert req.include_groups is False and req.include_group_ids is None
+
+
+def test_include_groups_with_a_list_of_groups_is_accepted() -> None:
+    req = SearchRequest(
+        **_minimal_request_kwargs(),
+        include_groups=True,
+        include_group_ids=["trip", "ops"],
+    )
+    assert req.include_groups and req.include_group_ids == ["trip", "ops"]
+    assert req.owner_type == "user" and req.owner_id == "alice"
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"group_id": "trip", "asker_id": "alice"},
+        {"group_ids": ["trip"], "asker_id": "alice"},
+        {"project_scope": True, "asker_id": "alice"},
+    ],
+)
+def test_include_groups_extends_a_user_scope_only(scope: dict) -> None:
+    with pytest.raises(ValidationError, match="include_groups extends a user_id"):
+        SearchRequest(query="hello", include_groups=True, **scope)
+
+
+def test_include_group_ids_needs_include_groups() -> None:
+    with pytest.raises(ValidationError, match="include_group_ids goes with"):
+        SearchRequest(**_minimal_request_kwargs(), include_group_ids=["trip"])
+
+
+def test_include_groups_refuses_a_group_audience() -> None:
+    """A reply posted into a group is a group search: personal memory and
+    several groups' content are not "what every member can see"."""
+    with pytest.raises(ValidationError, match="audience 'group'"):
+        SearchRequest(
+            **_minimal_request_kwargs(), include_groups=True, audience="group"
+        )
+    # Off, the field is ignored on a user scope as before.
+    assert SearchRequest(**_minimal_request_kwargs(), audience="group").audience == (
+        "group"
+    )
+
+
+@pytest.mark.parametrize("ids", [[], [f"g{n}" for n in range(17)]])
+def test_include_group_ids_is_bounded(ids: list[str]) -> None:
+    with pytest.raises(ValidationError):
+        SearchRequest(
+            **_minimal_request_kwargs(), include_groups=True, include_group_ids=ids
+        )

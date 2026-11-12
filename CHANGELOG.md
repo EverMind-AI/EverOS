@@ -12,6 +12,28 @@ machinery that keeps a deleted memory from coming back.
 
 ### Added
 
+- **A personal search can cover the user's groups (`include_groups`, off by
+  default).** `/memory/search` with `user_id` and `include_groups: true`
+  searches the user's memory and every group of the space the user currently
+  belongs to as one candidate pool, each group read exactly as a group search
+  by the user reads it: inside the user's membership windows, superseded and
+  forgotten records left out, nothing from a group the user left
+  (`AccessPolicy.member_groups` compiles the groups with the same code as a
+  group scope). `include_group_ids` narrows the groups. The decider sees both
+  kinds in its usual rendering, under a question that names the user; every
+  returned record names its owner (`owner_type` `user`, or `group` with
+  `group_id`), group records carry their `audience`, and `scope` lists the
+  groups searched. Attached besides the personal profile, and only these: the
+  user's own profile in each group (`include_profile`) and the groups' current
+  decisions, capped at `[search] group_profile_cap`. No link expansion,
+  constraint block or `coverage`. `/memory/get` takes the same fields for
+  `episode` and `scene` listings, paged as one list. Cost: no model call;
+  reads are one roster read per group of the space, the personal search's
+  recall queries with a wider `where`, and one index read each for the
+  decisions and per group for the profiles. Without the field a request, its
+  response and the decider's input are unchanged; the one-to-one golden now
+  pins the decider's input prompt by prompt
+  ([docs/group-memory.md](docs/group-memory.md#88-a-personal-search-over-the-users-groups)).
 - **Change, forget and the history of a memory, as endpoints (EverOS 2.0).**
   Nothing is edited or deleted in place; every change is a new version linked
   to the old one, and every forget a mark its undo takes away

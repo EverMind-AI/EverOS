@@ -925,6 +925,8 @@ memories, ranked together, plus optional profiles.
 | `method` | [SearchMethod](#searchmethod) | no | `"llm_multiround"` | only `"llm_multiround"` |
 | `top_k` | `integer` | no | `-1` | `-1` or `1..100` |
 | `include_profile` | `boolean` | no | `false` | — |
+| `include_groups` | `boolean` | no | `false` | with `user_id` only; see below |
+| `include_group_ids` | `array<string> \| null` | no | `null` | with `include_groups`; `1..16` ids |
 | `images` | `array` | no | `[]` | at most 4 pictures that are part of the question |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
 
@@ -933,6 +935,27 @@ memories, ranked together, plus optional profiles.
 (with or without `context_group_id`) is refused with `422` and a message
 pointing at [`/memory/get`](#post-apiv2memoryget), which lists an agent's
 cases and skills.
+
+**`include_groups`** — Off by default; a request without it is answered
+exactly as before. With `user_id`, also search the user's groups: every
+group of `app_id` / `project_id` the user currently belongs to joins the
+personal memory in one candidate pool, read exactly as a group search by the
+user reads it (inside the user's membership windows; superseded and
+forgotten records left out; a group the user left adds nothing).
+`include_group_ids` narrows it to those of the user's groups it names; an id
+that is not one of them adds nothing. Every returned episode and picture
+memory then names its owner: `owner_type` `"user"`, or `"group"` with
+`group_id` (group records carry `source` and `audience`, as in a group
+search). `scope` lists the groups searched with the user's windows
+(`owner_type: "user"`; `group_ids: []` when the user belongs to none). The
+question names the user (`"<display name>: <question>"`) once a group is
+included. Attached besides the personal profile: with `include_profile`, the
+user's own profile in each group (never another member's), and the groups'
+current decisions in `group_profile.decisions` (at most `[search]
+group_profile_cap`, newest first; `include_group_profile: false` leaves them
+out). No constraint block, `coverage` or link expansion. With a group scope,
+or with `audience: "group"`, it is `422`. See
+[group-memory.md](group-memory.md#88-a-personal-search-over-the-users-groups).
 
 **`app_id` / `project_id`** — Scope identifiers; results never cross
 scopes.
@@ -974,7 +997,7 @@ owner scope; arrays that do not apply stay `[]`.
 | `images` | `array<SearchImageItem>` | Picture memories ranked in the same pool as the episodes. Show an answering model `model_path`: the `[images] model_edge` copy (1024 px), on disk when the response returns (`GET /api/v2/memory/images/{image_id}?variant=model` serves it by id). `original_path` is the picture as sent; `thumbnail_path` the decider's copy |
 | `profiles` | `array<SearchProfileItem>` | Populated **only** when `include_profile=true` |
 | `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Buffer rows have no owner attribution — boundary detection runs before owner inference |
-| `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows |
+| `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows; for `include_groups`, the groups searched alongside the user |
 | `degraded` | `array<SearchDegradation>` | What did not run as configured; `[]` when the search did. See below |
 
 #### SearchDegradation
@@ -1127,11 +1150,21 @@ for UI browsing, exports, or filtered scans.
 | `sort_by` | `"timestamp" \| "updated_at"` | no | `"timestamp"` | — |
 | `sort_order` | `"asc" \| "desc"` | no | `"desc"` | — |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
+| `include_groups` | `boolean` | no | `false` | with `user_id` and `memory_type` `"episode"` or `"scene"` |
+| `include_group_ids` | `array<string> \| null` | no | `null` | with `include_groups`; `1..16` ids |
 
 **`user_id` / `agent_id`** — **Exactly one** must be set, and it must
 match the track implied by `memory_type` (`"episode"` / `"profile"`
 require `user_id`; `"agent_case"` / `"agent_skill"` require
 `agent_id`).
+
+**`include_groups`** — Off by default. With `user_id` and `memory_type`
+`"episode"` or `"scene"`, also list the records of the user's groups (every
+group of the space the user currently belongs to, inside the user's
+membership windows; `include_group_ids` narrows them) in the same list:
+one index query sorts, counts and pages both, and every item names its owner
+(`owner_type` `"user"`, or `"group"` with `group_id` and `source`). Other
+kinds, a group scope and `audience: "group"` answer `422`.
 
 **`app_id` / `project_id`** — Scope identifiers.
 
@@ -1642,7 +1675,10 @@ memory.
 with `asker_id` and `audience` (`asker`, default; `group`: only what every
 current member can see). The asker must be a current member of each group, and
 sees only records whose sources lie inside one of their membership windows;
-the search response carries a `scope` block with those windows. A group's
+the search response carries a `scope` block with those windows. A user's own
+search can cover the user's groups too (`include_groups`, off by default; see
+[`/memory/search`](#post-apiv2memorysearch)); `/memory/get` takes it for
+`episode` and `scene` listings, paged as one list. A group's
 records are changed with `/memory/update`, read with `/memory/history` and
 forgotten with `/memory/forget` and a group body
 ([Changing and forgetting a memory](#changing-and-forgetting-a-memory)); a

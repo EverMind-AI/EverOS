@@ -24,6 +24,13 @@ retrieval's results and its decider's very input), get, attached pictures,
 attached profiles, the session buffer and picture bytes. Zero leaks is the
 pass mark. Read paths of section 9.3 that do not exist yet are listed in
 :data:`NOT_YET` with the reason, so the table is accounted for row by row.
+
+A personal search with ``include_groups`` reads the user's groups the way a
+group search by the user does, so it takes the same cases: a former member
+and a stranger get nothing of the group (their own memory still answers), a
+later joiner and a member who was away get nothing said outside their
+windows, a forgotten record or message is absent, and another member's
+records -- personal memory, a profile in the group -- never come along.
 """
 
 from __future__ import annotations
@@ -51,7 +58,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import NoSourceCheck, Scope, SessionKey, all_of, eq
 from everos.memory.strategies import STRATEGY_SPECS
-from everos.service import GetRequest, SearchRequest
+from everos.service import GetRequest, GroupForgetTarget, SearchRequest
 from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
@@ -193,6 +200,35 @@ def _search(**scope: Any) -> SearchRequest:
         include_profile=True,
         **scope,
     )
+
+
+def _mixed(user: str, **fields: Any) -> SearchRequest:
+    """A personal search of ``user`` that also covers the user's groups."""
+    values: dict[str, Any] = {
+        "app_id": APP,
+        "project_id": PROJECT,
+        "user_id": user,
+        "query": "marker plan Lisbon offsite",
+        "top_k": 20,
+        "include_groups": True,
+        "include_profile": True,
+        **fields,
+    }
+    return SearchRequest(**values)
+
+
+def _mixed_listing(user: str, **fields: Any) -> GetRequest:
+    """A listing of ``user``'s episodes that also covers the user's groups."""
+    values: dict[str, Any] = {
+        "app_id": APP,
+        "project_id": PROJECT,
+        "user_id": user,
+        "memory_type": "episode",
+        "page_size": 100,
+        "include_groups": True,
+        **fields,
+    }
+    return GetRequest(**values)
 
 
 def _everything_text(response: Any) -> str:
@@ -420,7 +456,14 @@ async def _everything_read_by(fixture: _Fixture, asker: str) -> str:
     response = await world.memory.search(
         _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None})
     )
-    blobs = [_everything_text(response), "\n".join(fixture.decider.prompts)]
+    mixed = await world.memory.search(_mixed(asker))
+    mixed_listing = await world.memory.get(_mixed_listing(asker))
+    blobs = [
+        _everything_text(response),
+        _everything_text(mixed),
+        json.dumps(mixed_listing.model_dump(mode="json")),
+        "\n".join(fixture.decider.prompts),
+    ]
     for memory_type, extra in (
         ("episode", {}),
         ("image_memory", {}),
@@ -895,6 +938,258 @@ async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -
         await world.memory.project_profile(
             app_id=APP, project_id=PROJECT, asker_id="u_betty", asserted_asker=None
         )
+
+
+# ── include_groups: a personal search over the user's groups ─────────────
+
+OWN = {
+    "u_chen": PERSONAL,
+    "u_evan": "personal marker plan Lisbon offsite of Evan",
+    "u_dan": "personal marker plan Lisbon offsite of Dan",
+    "u_betty": "personal marker plan Lisbon offsite of Betty",
+    "u_zoe": "personal marker plan Lisbon offsite of Zoe",
+}
+"""Each user's own personal record (Chen's is the fixture's)."""
+
+
+async def _seed_own_memory(world: GroupWorld) -> None:
+    for user, text in OWN.items():
+        if user != "u_chen":
+            await world.personal_episode(user, text, at=T0 + 1000)
+    for member in ("u_chen", "u_evan", "u_dan"):
+        await world.stores.member_profile.write(
+            world.scope("trip"),
+            _member_profile(
+                member,
+                (f"{member} early profile marker", 1000, 2000),
+                (f"{member} late profile marker", 8000, 9000),
+            ),
+        )
+    await _seed_profile_items(world)
+
+
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+async def test_include_groups_reads_the_group_as_the_members_group_search(
+    fixture: _Fixture, asker: str
+) -> None:
+    """A later joiner (Evan) and a member who was away (Dan) get nothing said
+    outside their windows -- Bravo and Straddle were said while Dan was
+    away, so their audience leaves him out -- in the results, the decider's
+    input, attached pictures, profiles and decisions, and the buffer."""
+    world = fixture.world
+    await _seed_own_memory(world)
+    fixture.decider.prompts.clear()
+    response = await world.memory.search(
+        _mixed(asker, query=f"What does u_chen plan? {OWN[asker]}")
+    )
+    buffered = await world.memory.search(
+        _mixed(asker, filters={"session_id": "s_group"})
+    )
+    group = await world.memory.search(
+        _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None})
+    )
+    listed = await world.memory.get(_mixed_listing(asker))
+    blob = (
+        _everything_text(response)
+        + _everything_text(buffered)
+        + json.dumps(listed.model_dump(mode="json"))
+    )
+    seen_by_decider = "\n".join(fixture.decider.prompts)
+
+    # The listing holds exactly their own record and what their windows hold.
+    expected = {t for t, (s, e) in GROUP_RECORDS.items() if _visible(asker, s, e)}
+    assert {e.episode for e in listed.data.episodes} == expected | {OWN[asker]}
+    visible = [t for t, (s, e) in GROUP_RECORDS.items() if _visible(asker, s, e)]
+    assert any(text in seen_by_decider for text in visible), asker
+    assert any(text in blob for text in visible), asker
+    for text, (start, end) in GROUP_RECORDS.items():
+        if not _visible(asker, start, end):
+            assert text not in blob, (asker, text)
+            assert text not in seen_by_decider, (asker, text)
+    if not _visible(asker, T0 + 1500, T0 + 1500):
+        assert PICTURE not in blob and PICTURE not in seen_by_decider
+        assert fixture.picture not in json.dumps(
+            [i.image_id for i in response.data.images]
+            + [i.image_id for e in response.data.episodes for i in e.images]
+        )
+    assert ("buffered marker early" in blob) == _visible(asker, T0 + 1000, T0 + 1000)
+    assert "buffered marker late" in blob
+    # Their own memory answers; nobody else's personal memory comes along.
+    assert OWN[asker] in blob
+    for user, text in OWN.items():
+        if user != asker:
+            assert text not in blob and text not in seen_by_decider, (asker, user)
+    assert ("personal marker Chen lives in Porto" in blob) == (asker == "u_chen")
+    # Their own profile in the group, cut to their windows; never another
+    # member's, although the question names Chen.
+    for member in ("u_chen", "u_evan", "u_dan"):
+        for when, (start, end) in (("early", (1000, 2000)), ("late", (8000, 9000))):
+            shown = f"{member} {when} profile marker" in blob
+            mine = member == asker and _visible(asker, T0 + start, T0 + end)
+            assert shown == mine, (asker, member, when)
+    for text, (start, end) in PROFILE_ITEMS.items():
+        assert (text in blob) == _visible(asker, T0 + start, T0 + end), (asker, text)
+    assert "replaced decision marker" not in blob
+    # Each group record carries the audience a group search gives it.
+    audience = {e.id: e.audience for e in group.data.episodes}
+    audience |= {i.id: i.audience for i in group.data.images}
+    for record in (*response.data.episodes, *response.data.images):
+        if record.owner_type == "group":
+            assert record.audience == audience[record.id], (asker, record.id)
+        else:
+            assert record.owner_type == "user" and record.audience is None
+
+
+@pytest.mark.parametrize("asker", ["u_betty", "u_zoe"])
+@pytest.mark.parametrize("named", [False, True])
+async def test_include_groups_gives_former_and_non_members_nothing_of_the_group(
+    fixture: _Fixture, asker: str, named: bool
+) -> None:
+    """Betty left the group, Zoe never joined: their own memory answers, and
+    nothing of the group does -- not even when they name it."""
+    world = fixture.world
+    await _seed_own_memory(world)
+    fixture.decider.prompts.clear()
+    extra: dict[str, Any] = {"include_group_ids": ["trip"]} if named else {}
+    response = await world.memory.search(_mixed(asker, **extra))
+    buffered = await world.memory.search(
+        _mixed(asker, filters={"session_id": "s_group"}, **extra)
+    )
+    listed = await world.memory.get(_mixed_listing(asker, **extra))
+    blob = (
+        _everything_text(response)
+        + _everything_text(buffered)
+        + json.dumps(listed.model_dump(mode="json"))
+    )
+    seen_by_decider = "\n".join(fixture.decider.prompts)
+
+    assert OWN[asker] in blob
+    assert [e.episode for e in listed.data.episodes] == [OWN[asker]]
+    for text in (*GROUP_RECORDS, PICTURE, *PROFILE_ITEMS, "buffered marker"):
+        assert text not in blob, (asker, text)
+        assert text not in seen_by_decider, (asker, text)
+    assert "profile marker" not in blob
+    assert {e.owner_type for e in response.data.episodes} == {"user"}
+    for answer in (response, buffered):
+        assert answer.data.scope is not None
+        assert answer.data.scope.group_ids == [] and answer.data.scope.windows == []
+        assert answer.data.group_profile is None
+        assert answer.data.unprocessed_messages == []
+
+
+SECRET_SAID = "ZEBRA4417"
+"""Said in a message its sender then forgot."""
+SECRET_BUFFERED = "QUOKKA88"
+"""Said in a message forgotten while still in the buffer."""
+KEPT_SAID = "LISBONVENUE"
+
+
+class _ChatModel:
+    """Episodes repeat the marker words they were shown; the decider keeps the
+    first ten candidates and records what it was shown."""
+
+    def __init__(self) -> None:
+        self.decider_prompts: list[str] = []
+
+    def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
+        name = response_format.__name__
+        prompt = "\n".join(str(getattr(m, "content", m)) for m in messages)
+        if name == "_BatchReply":
+            return json.dumps(
+                {"reasoning": "s", "boundaries": [], "tail_complete": False}
+            )
+        if name == "EpisodeReply":
+            words = (SECRET_SAID, SECRET_BUFFERED, KEPT_SAID)
+            said = ", ".join(w for w in words if w in prompt) or "nothing"
+            return json.dumps(
+                {
+                    "title": "Trip plans marker",
+                    "summary": f"Plans marker: {said}.",
+                    "content": f"The group talked about the plan marker {said}.",
+                }
+            )
+        if name == "_DecisionReply":
+            self.decider_prompts.append(prompt)
+            return json.dumps({"core": list(range(10)), "next_queries": []})
+        raise AssertionError(f"unexpected model call {name}")
+
+
+async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) -> None:
+    """A message its sender forgot: its segment is re-extracted without it,
+    and a buffered one is left out of the buffer -- for every member's
+    personal search over the group as for their group search."""
+    model = _ChatModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await world.roster(
+            "trip",
+            [
+                join("u_chen", T0, role="owner", display_name="Chen"),
+                join("u_dan", T0, display_name="Dan"),
+                join("u_evan", T0, display_name="Evan"),
+            ],
+        )
+
+        async def add(*lines: tuple[str, str, str, int]) -> None:
+            await world.memory.add(
+                {"session_id": "s_trip", "app_id": APP, "project_id": PROJECT,
+                 "group_id": "trip",
+                 "messages": [
+                     {"message_id": mid, "sender_id": who, "role": "user",
+                      "timestamp": T0 + at, "content": text}
+                     for mid, who, text, at in lines
+                 ]},
+                request_id="r",
+                async_mode=False,
+                defer_extraction=True,
+            )  # fmt: skip
+
+        async def forget(message_id: str) -> Any:
+            return await world.memory.forget_in_group(
+                app_id=APP,
+                project_id=PROJECT,
+                group_id="trip",
+                asker_id="u_dan",
+                target=GroupForgetTarget(
+                    kind="message", session_id="s_trip", message_ids=(message_id,)
+                ),
+            )
+
+        await add(
+            ("m-1", "u_dan", f"My locker code is {SECRET_SAID}, keep it", 1000),
+            ("m-2", "u_chen", f"We meet at the {KEPT_SAID} on Friday", 2000),
+        )
+        await world.memory.flush(
+            session_id="s_trip", request_id="f", app_id=APP, project_id=PROJECT
+        )
+        await world.project()
+        before = await world.memory.search(_mixed("u_evan"))
+        assert SECRET_SAID in _everything_text(before)  # the group content flows
+
+        await forget("m-1")
+        await add(
+            ("m-3", "u_dan", f"The alarm code is {SECRET_BUFFERED}", 3000),
+            ("m-4", "u_chen", "We still need a BOATRIDE", 4000),
+        )
+        buffered = await forget("m-3")
+        assert buffered.episodes == ()  # still in the buffer: nothing extracted
+        await world.project()
+
+        for asker in ("u_chen", "u_dan", "u_evan"):
+            model.decider_prompts.clear()
+            found = await world.memory.search(_mixed(asker))
+            in_buffer = await world.memory.search(
+                _mixed(asker, filters={"session_id": "s_trip"})
+            )
+            blob = _everything_text(found) + _everything_text(in_buffer)
+            seen = "\n".join(model.decider_prompts)
+            assert KEPT_SAID in blob, asker  # the rest is still remembered
+            for secret in (SECRET_SAID, SECRET_BUFFERED):
+                assert secret not in blob, (asker, secret)
+                assert secret not in seen, (asker, secret)
+            # The buffer is read by the group's rules: what was not forgotten.
+            shown = [m.content for m in in_buffer.data.unprocessed_messages]
+            assert shown == ["We still need a BOATRIDE"], asker
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:

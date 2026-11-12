@@ -11,6 +11,9 @@ ranked retrieval):
   - ``group`` → ``episode`` | ``scene`` | ``image_memory`` | ``member_profile``
     (the last with ``member_id``)
 
+  ``include_groups`` (off by default) widens a ``user`` listing of
+  ``episode`` or ``scene`` by the user's current groups, paged as one list.
+
 * ``GetData`` always contains four kind arrays for symmetry with
   ``/search``; only the requested kind is populated. ``total_count``
   is the predicate's true match count; ``count`` is the page size
@@ -97,6 +100,19 @@ class GetRequest(BaseModel):
     include_superseded: bool = False
     """With ``memory_type = group_profile`` only: list the versions later items
     replaced too, each marked ``superseded``. Forgotten items never return."""
+    include_groups: bool = False
+    """With ``user_id`` and ``memory_type`` ``episode`` or ``scene`` (off by
+    default): list the user's groups' records too -- every group of
+    ``app_id`` / ``project_id`` the user currently belongs to, as a group
+    listing by the user lists it (inside the user's windows) -- in one listing
+    with the personal ones, sorted and paged together. Every item then names
+    its owner (``owner_type`` ``user``, or ``group`` with ``group_id``).
+    Without it a request is answered exactly as before."""
+    include_group_ids: list[str] | None = Field(
+        default=None, min_length=1, max_length=16
+    )
+    """With ``include_groups``: only these of the user's groups. An id that is
+    not a group the user currently belongs to adds nothing."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the query
@@ -180,6 +196,26 @@ class GetRequest(BaseModel):
             raise ValueError("filters are not supported for memory_type group_profile")
         return self
 
+    @model_validator(mode="after")
+    def _validate_include_groups(self) -> Self:
+        if self.include_group_ids is not None and not self.include_groups:
+            raise ValueError("include_group_ids goes with include_groups")
+        if not self.include_groups:
+            return self
+        if self.owner_type != "user":
+            raise ValueError("include_groups extends a user_id listing")
+        if self.memory_type not in {GetMemoryType.EPISODE, GetMemoryType.SCENE}:
+            raise ValueError(
+                "include_groups lists episodes and scenes; a member's profile in "
+                "a group is listed with group_id and memory_type member_profile"
+            )
+        if self.audience == "group":
+            raise ValueError(
+                "audience 'group' is for a reply posted into one group: list "
+                "that group with group_id"
+            )
+        return self
+
     @property
     def scope_group_ids(self) -> tuple[str, ...]:
         """The groups of a group scope, in request order; ``()`` otherwise."""
@@ -213,8 +249,9 @@ class GetEpisodeItem(BaseModel):
 
     id: str
     user_id: str | None
-    owner_type: Literal["group"] | None = None
-    """``group`` on a group record; unset on one-to-one memory."""
+    owner_type: Literal["user", "group"] | None = None
+    """``group`` on a group record; ``user`` on a personal one when the listing
+    had ``include_groups``; unset on one-to-one memory otherwise."""
     group_id: str | None = None
     """Owning group, for a group episode (``user_id`` is then ``None``)."""
     source: SearchSource | None = None

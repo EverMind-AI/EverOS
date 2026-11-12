@@ -11,6 +11,11 @@ partition by ``owner_type``:
   ``include_profile=true``), with the visible current group profile, the
   constraint block, the ``coverage`` of the loop and an ``audience`` on every
   record (docs/group-memory.md, sections 8.3-8.7)
+* ``user`` with ``include_groups`` (off by default) → the personal pool and
+  the user's current groups, read as a group search by the user reads them,
+  ranked as one pool; every record names its owner, and the user's own
+  member-in-group profiles and the groups' current decisions are the only
+  group attachments (:meth:`SearchManager._search_with_groups`)
 
 An agent's memory is not searched: the request DTO refuses ``agent_id``.
 
@@ -38,7 +43,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from everos.config import GroupSearchSettings, load_settings
 from everos.config.settings import DeciderSettings
@@ -74,6 +79,7 @@ from everos.memory.ports import (
     SessionKey,
     Stored,
     all_of,
+    any_of,
     eq,
 )
 
@@ -298,6 +304,10 @@ class SearchManager:
                     coverage=ranked.coverage,
                     degraded=_degraded(ranked.failures),
                 )
+            elif req.include_groups:
+                data = await self._search_with_groups(
+                    req, scope, question_image_ids=question_image_ids
+                )
             else:
                 ranked, profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(
@@ -340,6 +350,139 @@ class SearchManager:
 
             return SearchResponse(request_id=request_id, data=data)
 
+    # ── A personal search over the user's groups (``include_groups``) ──
+
+    async def _search_with_groups(
+        self,
+        req: SearchRequest,
+        scope: ReadScope,
+        *,
+        question_image_ids: Sequence[str],
+    ) -> SearchData:
+        """The personal search, with the user's current groups in the same pool.
+
+        The groups come from the access policy (:meth:`AccessPolicy.member_groups`):
+        each read exactly as a group search by the user reads it. Their
+        predicate is ORed onto the personal one, so every recall of the loop
+        ranks personal and group records together, the decider sees them in
+        one rendering, and nothing outside the user's windows is ever a
+        candidate. What a group search adds is cut to what this needs and
+        stays bounded:
+
+        * the question names the user, as in a group search (section 8.2),
+          because group records name people by their display names;
+        * no link expansion: each round shows the decider exactly as many
+          candidates as a personal search does;
+        * attached, besides the personal profile: the user's own profile in
+          each group (``include_profile``) and the groups' current decisions,
+          capped like a group search's (``[search] group_profile_cap``) --
+          both read from the index, no model call;
+        * no constraint block and no ``coverage``.
+        """
+        groups = await self._member_groups(req, scope)
+        where = compile_scoped(req.filters, _pooled(scope, groups))
+        ranked, profiles, unprocessed, decisions = await asyncio.gather(
+            self._search_episodes(
+                req,
+                where,
+                question_image_ids=question_image_ids,
+                scope=scope,
+                groups=groups,
+            ),
+            self._profiles_with_groups(req, groups),
+            self._load_unprocessed(req, scope, groups=groups),
+            self._group_decisions(req, groups),
+        )
+        # A picture an episode names resolves in that episode's own scope.
+        await self._resolve_episode_pictures(
+            req, [e for e in ranked.episodes if e.group_id is None], ranked.images
+        )
+        if groups is not None:
+            await self._resolve_episode_pictures(
+                req,
+                [e for e in ranked.episodes if e.group_id is not None],
+                ranked.images,
+                scope=groups,
+            )
+        images = await self._name_copies(ranked.episodes, ranked.images)
+        episodes = ranked.episodes
+        if groups is not None:
+            episodes = with_audience(groups, episodes)
+            images = with_audience(groups, images)
+        logger.debug(
+            "search_include_groups",
+            groups=0 if groups is None else len(groups.owner_ids),
+            episodes=len(episodes),
+            images=len(images),
+            group_records=sum(1 for r in (*episodes, *images) if r.group_id),
+        )
+        return SearchData(
+            episodes=[_owned_episode(e) for e in episodes],
+            images=[_owned_image(i) for i in images],
+            profiles=profiles,
+            unprocessed_messages=unprocessed,
+            scope=_scope_with_groups(scope, groups),
+            group_profile=decisions,
+            degraded=_degraded(ranked.failures),
+        )
+
+    async def _member_groups(
+        self, req: SearchRequest, scope: ReadScope
+    ) -> ReadScope | None:
+        """The groups a personal request also searches; ``None`` without any."""
+        if not req.include_groups or scope.is_group:
+            return None
+        return await self._access.member_groups(scope, only=req.include_group_ids)
+
+    async def _profiles_with_groups(
+        self, req: SearchRequest, groups: ReadScope | None
+    ) -> list[SearchProfileItem]:
+        """The personal profile, then the user's own profile in each group.
+
+        At most one profile per group searched, cut to the user's windows
+        there; never another member's (a group search's named members are not
+        looked up).
+        """
+        if not req.include_profile:
+            return []
+        own = [
+            item.model_copy(update={"owner_type": "user"})
+            for item in await self._fetch_profile(req)
+        ]
+        if groups is None or groups.asker_id is None:
+            return own
+        member = groups.asker_id
+        fetched = await asyncio.gather(
+            *(
+                self._profile.fetch_member(groups, view.group_id, member)
+                for view in groups.groups
+            )
+        )
+        return [*own, *(item for item in fetched if item is not None)]
+
+    async def _group_decisions(
+        self, req: SearchRequest, groups: ReadScope | None
+    ) -> SearchGroupProfile | None:
+        """The current decisions of the groups searched, newest first, capped.
+
+        One index read of the decision items inside the user's windows; the
+        cap is a group search's per-kind cap, across all the groups.
+        ``include_group_profile = false`` leaves them out.
+        """
+        if (
+            req.include_group_profile is False
+            or groups is None
+            or self._group_profile is None
+        ):
+            return None
+        stored = await visible_profile_items(
+            self._group_profile, groups, where=eq("kind", "decision")
+        )
+        attached, _view = visible_profile(
+            stored, cap=self._group_search.group_profile_cap
+        )
+        return SearchGroupProfile(decisions=with_audience(groups, attached.decisions))
+
     # ── Unprocessed buffer ──────────────────────────────────────────
 
     async def _read_scope(
@@ -358,7 +501,11 @@ class SearchManager:
         )
 
     async def _load_unprocessed(
-        self, req: SearchRequest, scope: ReadScope
+        self,
+        req: SearchRequest,
+        scope: ReadScope,
+        *,
+        groups: ReadScope | None = None,
     ) -> list[UnprocessedMessageDTO]:
         """Load in-flight buffer rows for ``filters.session_id`` (if present).
 
@@ -370,7 +517,10 @@ class SearchManager:
         Which of them a read sees is the access policy's (section 9.3, row 3):
         a group scope sees a bound session's messages inside the asker's
         windows; a personal scope sees a session's buffer only when its owner
-        is a sender of that session, and never a group session's.
+        is a sender of that session, and never a group session's. A personal
+        scope with ``groups`` (``include_groups``) sees a session of one of
+        those groups as a group search by its owner would: inside the owner's
+        windows, without the forgotten messages.
         """
         session_id = _extract_top_level_session_id(req.filters)
         if session_id is None:
@@ -389,6 +539,12 @@ class SearchManager:
         visible = await self._access.buffered_messages(
             scope, session, messages, owner_has_memory=owner_has_memory
         )
+        if groups is not None and not visible:
+            # A personal read never sees a bound session; the session of a
+            # group searched alongside is read by that group's rules.
+            visible = await self._access.buffered_messages(
+                groups, session, messages, owner_has_memory=owner_has_memory
+            )
         return [_unprocessed_message_to_dto(m, session) for m in visible]
 
     # ── Episodes ────────────────────────────────────────────────────
@@ -408,9 +564,14 @@ class SearchManager:
         ``llm_multiround``'s per-sub-query ``rrf(sparse, dense)[:topk]``.
         """
         scope = await self._read_scope(req, None)
-        where = compile_scoped(req.filters, scope.predicate)
-        ranked = await self._search_episodes(req, where, decider=decider, scope=scope)
-        return ranked.episodes
+        groups = await self._member_groups(req, scope)
+        where = compile_scoped(req.filters, _pooled(scope, groups))
+        ranked = await self._search_episodes(
+            req, where, decider=decider, scope=scope, groups=groups
+        )
+        if not req.include_groups:
+            return ranked.episodes
+        return [_owned_episode(e) for e in ranked.episodes]
 
     async def _search_episodes(
         self,
@@ -420,15 +581,18 @@ class SearchManager:
         decider: RoundDecider | None = None,
         question_image_ids: Sequence[str] = (),
         scope: ReadScope | None = None,
+        groups: ReadScope | None = None,
     ) -> _Ranked:
         """The episodes and the pictures ranked with them, by multi-round.
 
         A group scope's loop also follows the core's stored links (section
-        8.3) when ``[search] expansion`` is on.
+        8.3) when ``[search] expansion`` is on. ``groups`` are the groups a
+        personal search also covers (``include_groups``): their roster names
+        the asker in the question; ``where`` already holds them.
         """
         expander = self._expander(scope, where)
         result = await run_llm_multiround(
-            _question(req, scope),
+            _question(req, scope if groups is None else groups),
             # A project scope names no owner of its own: the scope's first group.
             owner_id=scope.owner_id if scope is not None else req.owner_id,
             where=where,
@@ -736,6 +900,46 @@ def _scope_view(scope: ReadScope) -> SearchScope:
             for view in scope.groups
             for w in view.windows
         ],
+    )
+
+
+def _pooled(scope: ReadScope, groups: ReadScope | None) -> Filter:
+    """The owner part of every recall's ``where``: the personal scope, ORed
+    with the groups it also covers (``include_groups``) when there are any."""
+    if groups is None:
+        return scope.predicate
+    return any_of(scope.predicate, groups.predicate)
+
+
+def _scope_with_groups(scope: ReadScope, groups: ReadScope | None) -> SearchScope:
+    """The scope block of a personal search with ``include_groups``.
+
+    The user (``owner_type = user``, the asker) and the groups searched with
+    the user's windows in each; no group when the user belongs to none.
+    """
+    if groups is None:
+        return SearchScope(
+            owner_type="user", group_ids=[], asker_id=scope.asker_id or ""
+        )
+    return _scope_view(groups).model_copy(update={"owner_type": "user"})
+
+
+def _owner_of(record: SearchEpisodeItem | SearchImageItem) -> Literal["user", "group"]:
+    return "group" if record.group_id is not None else "user"
+
+
+def _owned_image(image: SearchImageItem) -> SearchImageItem:
+    """A picture memory naming its owner (``include_groups``)."""
+    return image.model_copy(update={"owner_type": _owner_of(image)})
+
+
+def _owned_episode(episode: SearchEpisodeItem) -> SearchEpisodeItem:
+    """An episode naming its owner, and so do the pictures attached to it."""
+    return episode.model_copy(
+        update={
+            "owner_type": _owner_of(episode),
+            "images": [_owned_image(image) for image in episode.images],
+        }
     )
 
 

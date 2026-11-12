@@ -323,6 +323,7 @@ gives the group.
 | Scope | Fields |
 |---|---|
 | one-to-one user | `user_id` (unchanged); `asker_id` optional and, if given, must equal `user_id` |
+| user and their groups (optional, off by default) | `user_id` + `include_groups: true`, optionally `include_group_ids`: the user's memory and every group of the space the user currently belongs to, as one pool ([Section 8.8](#88-a-personal-search-over-the-users-groups)) |
 | agent | `agent_id` (unchanged) |
 | one group | `group_id` + `asker_id` |
 | several groups | `group_ids` + `asker_id` |
@@ -1015,6 +1016,63 @@ answered from `joined_after` on the current decision.
 - The project's knowledge base is readable by project members. A project without
   groups keeps today's knowledge behaviour.
 
+### 8.8 A personal search over the user's groups
+
+An optional mode, off by default (approved 2026-11-12): `user_id` with
+`include_groups: true` searches the user's own memory and the user's groups
+together. `include_group_ids` narrows the groups; an id that is not a group
+the user currently belongs to adds nothing and is not reported.
+
+**Scope.** The access policy compiles the groups
+(`AccessPolicy.member_groups`): every group of the `(app_id, project_id)`
+whose roster has the user as a current member, each with exactly the windows,
+status rules and roster a group search by the user would get -- the same code
+builds both. A group the user left, or never joined, contributes nothing; a
+record outside the user's windows in a group is not a candidate; superseded
+and forgotten records are excluded by the same predicate. The personal
+predicate and the groups' are ORed into the `where` of every recall, so
+visibility stays in the index query and the decider never sees a record the
+user may not.
+
+**One pool.** Personal and group records compete in every recall and are
+fused with RRF as one list per sub-query; the decider sees them in the
+rendering it always uses, with no scope tag. The question names the user
+(`"<display name>: <question>"`, Section 8.2) as soon as a group is included,
+because group records name people by their display names; the display name is
+the one in the first group searched. Every returned record names its owner:
+`owner_type` `user`, or `group` with `group_id` (and `source`); group records
+carry their `audience` as in a group search. `scope` lists the groups searched
+with the user's windows in each (`owner_type: user`).
+
+**Attachments, bounded.** Besides the personal profile, at most what a group
+search by the user attaches about the user:
+
+| Attached | When | Bound |
+|---|---|---|
+| the user's own member-in-group profile, cut to the user's windows | `include_profile` | one per group searched; another member's profile is never attached, even when the question names them |
+| the groups' current decisions inside the user's windows, newest first | unless `include_group_profile: false` | `[search] group_profile_cap` (20) in all; topics, dissent and roles are not attached |
+
+There is no link expansion (each round shows the decider as many candidates
+as a personal search: `[decider] seed_topk` / `subq_topk` bound a block, and
+the groups only change what competes for it), no constraint block and no
+`coverage`. The session buffer of a group searched is read by that group's
+rules (windows, forgotten messages left out).
+
+**Not allowed.** `include_groups` with a group scope, and with `audience:
+group` (a reply posted into one group is a group search), answer `422`.
+
+**Cost.** No model call is added and the write side is unchanged. Reads: one
+roster read per group of the space to find the user's groups (one per listed
+group with `include_group_ids`), the same recall queries as a personal search
+with a wider `where`, one profile-index read per group with `include_profile`,
+and one group-profile read for the decisions. The decider's tokens per round
+change only through what the candidates say.
+
+`POST /api/v2/memory/get` takes the same two fields for `memory_type`
+`episode` and `scene`: one listing of the user's records and their groups',
+sorted, counted and paged by one index query, each item naming its owner.
+Other kinds answer `422`.
+
 ---
 
 ## 9. Visibility
@@ -1118,7 +1176,10 @@ runs the same propagation: it is a forget, soft and reversible.
   per-sender behaviour and logs `memorize.multi_sender_without_group` once per
   session. Group chats must send `group_id`.
 - Search, get and forget with `user_id` behave as today; `asker_id` is optional
-  and defaults to the owner.
+  and defaults to the owner. `include_groups` ([Section 8.8](#88-a-personal-search-over-the-users-groups))
+  is off unless a request sets it; without it the request, the response and
+  the decider's input are what they were, which the golden test checks prompt
+  by prompt.
 - Two changes reach this path, both visibility fixes. D17: profile items read
   from a picture go to its poster; with a single human sender this is the same
   sender, so the output is identical. And a session-filtered search returns

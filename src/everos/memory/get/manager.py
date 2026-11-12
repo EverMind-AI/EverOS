@@ -19,6 +19,9 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 * ``group`` + ``group_profile`` → ``data.group_profile``: the items whose
   sources lie in the asker's windows, current ones only, or every version but
   the forgotten with ``include_superseded``
+* ``user`` + ``episode`` / ``scene`` with ``include_groups`` → the user's
+  records and those of the user's current groups inside the user's windows,
+  one list sorted and paged together, each item naming its owner
 
 Reads only — never writes. The owner part of every ``where`` is the access
 policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
@@ -51,6 +54,7 @@ from everos.memory.ports import (
     Scope,
     Stored,
     all_of,
+    any_of,
     eq,
     ne,
 )
@@ -142,6 +146,9 @@ class GetManager:
             size=req.page_size,
             descending=descending,
         )
+        if req.include_groups:
+            data = await self._list_with_groups(req, scope, page)
+            return GetResponse(request_id=request_id, data=data)
 
         match req.memory_type:
             case GetMemoryType.EPISODE:
@@ -228,6 +235,32 @@ class GetManager:
                 )
 
         return GetResponse(request_id=request_id, data=data)
+
+    async def _list_with_groups(
+        self, req: GetRequest, scope: ReadScope, page: Page
+    ) -> GetData:
+        """The user's episodes or scenes and their groups', as one list.
+
+        ``include_groups``: the groups come from the access policy
+        (:meth:`AccessPolicy.member_groups`), each read as a group listing by
+        the user reads it. Their predicate is ORed onto the personal one, so
+        one index query sorts, counts and pages both; every item names its
+        owner.
+        """
+        groups = await self._access.member_groups(scope, only=req.include_group_ids)
+        pooled = (
+            scope.predicate
+            if groups is None
+            else any_of(scope.predicate, groups.predicate)
+        )
+        where = compile_scoped_for_get(req.filters, pooled)
+        scenes = req.memory_type == GetMemoryType.SCENE
+        kind = eq("parent_type", "scene") if scenes else ne("parent_type", "scene")
+        found = await self._ep.paginate(all_of(where, kind), page)
+        items = [_owned(self._shape_episode(e)) for e in found.items]
+        if scenes:
+            return GetData(scenes=items, total_count=found.total, count=len(items))
+        return GetData(episodes=items, total_count=found.total, count=len(items))
 
     # ── Shapers ──────────────────────────────────────────────────────
 
@@ -352,6 +385,12 @@ class GetManager:
                 profile_data=_profile_data(profile),
             )
         ]
+
+
+def _owned(item: GetEpisodeItem) -> GetEpisodeItem:
+    """A listed record naming its owner (``include_groups``)."""
+    owner = "group" if item.group_id is not None else "user"
+    return item.model_copy(update={"owner_type": owner})
 
 
 def _profile_data(profile: Profile) -> dict[str, object]:

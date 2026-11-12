@@ -12,6 +12,10 @@ Contract per the final design:
   pictures (and the member-in-group ``profiles``), with its group profile,
   constraint block and ``coverage``. Every ``data.*`` array always exists;
   routes not applicable to the current scope stay ``[]``.
+* ``include_groups`` (off by default) widens a ``user`` scope by the user's
+  current groups: one candidate pool, each record naming its owner, the
+  user's own member-in-group profiles and the groups' current decisions as
+  the only group attachments.
 * Item-side ``owner_type`` / ``type`` fields are intentionally narrowed
   to the currently-emitted Literal so callers get a tight schema.
 
@@ -174,6 +178,27 @@ class SearchRequest(BaseModel):
     project_scope: bool = False
     """Search every group of ``project_id`` the asker currently belongs to, as
     one pool (section 8.7); needs ``asker_id`` and no other owner field."""
+    include_groups: bool = False
+    """With ``user_id`` only (off by default): search the user's groups too.
+
+    Every group of ``app_id`` / ``project_id`` the user currently belongs to
+    joins the personal memory in one candidate pool, read exactly as a group
+    search by the user reads it -- inside the user's membership windows, with
+    superseded and forgotten records left out; a group the user left adds
+    nothing. Every returned record names its owner (``owner_type`` ``user``,
+    or ``group`` with ``group_id``), group records carry their ``audience``,
+    and ``scope`` lists the groups searched with the user's windows. Besides
+    the personal profile, ``include_profile`` attaches the user's own profile
+    in each group, and the groups' current decisions are attached unless
+    ``include_group_profile`` is ``false``. The question names the user, as
+    in a group search, once a group is included; there is no link expansion,
+    constraint block or ``coverage``. Without it a request is answered exactly
+    as before."""
+    include_group_ids: list[str] | None = Field(
+        default=None, min_length=1, max_length=16
+    )
+    """With ``include_groups``: only these of the user's groups. An id that is
+    not a group the user currently belongs to adds nothing."""
     images: list[QuestionPicture] = Field(
         default_factory=list,
         max_length=4,
@@ -213,6 +238,24 @@ class SearchRequest(BaseModel):
             raise ValueError(
                 "exactly one of user_id / group_id / group_ids / project_scope "
                 "must be provided"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_include_groups(self) -> SearchRequest:
+        if self.include_group_ids is not None and not self.include_groups:
+            raise ValueError("include_group_ids goes with include_groups")
+        if not self.include_groups:
+            return self
+        if self.user_id is None:
+            raise ValueError(
+                "include_groups extends a user_id search; a group scope "
+                "already searches its groups"
+            )
+        if self.audience == "group":
+            raise ValueError(
+                "audience 'group' is for a reply posted into one group: search "
+                "that group with group_id"
             )
         return self
 
@@ -297,8 +340,9 @@ class SearchEpisodeItem(BaseModel):
     id: str
     user_id: str | None
     """Owning user; ``None`` for a group episode (and on malformed rows)."""
-    owner_type: Literal["group"] | None = None
-    """``group`` on a group episode; unset on one-to-one memory."""
+    owner_type: Literal["user", "group"] | None = None
+    """``group`` on a group episode; ``user`` on a personal one when the search
+    had ``include_groups``; unset on one-to-one memory otherwise."""
     group_id: str | None = None
     """Owning group, for a group episode; ``None`` on one-to-one memory."""
     source: SearchSource | None = None
@@ -372,6 +416,12 @@ class SearchImageItem(BaseModel):
     entry_id: str
     image_id: str
     user_id: str | None
+    owner_type: Literal["user", "group"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Whose picture memory it is, in a search with ``include_groups``:
+    ``user`` (the user's own) or ``group`` (with ``group_id``). Absent from
+    every other response, which stays byte for byte as it was."""
     group_id: str | None = None
     """Owning group, for a group picture memory."""
     app_id: str = "default"
@@ -426,7 +476,10 @@ class SearchProfileItem(BaseModel):
     On a user scope, the owner's profile (at most one). On a group scope, the
     member-in-group profiles of the asker and of the members the query names
     (``owner_type = group``, ``group_id``, ``member_id``), holding only the
-    items the asker's windows allow -- never a personal profile.
+    items the asker's windows allow -- never a personal profile. A user scope
+    with ``include_groups`` returns the owner's profile (``owner_type =
+    user``) and the owner's own profile in each group searched, cut the same
+    way; never another member's.
 
     ``score`` is ``None`` for direct fetches (``include_profile=true``
     on its own does no ranking); a future query-aware lookup may fill
@@ -437,7 +490,7 @@ class SearchProfileItem(BaseModel):
 
     id: str
     user_id: str | None
-    owner_type: Literal["group"] | None = None
+    owner_type: Literal["user", "group"] | None = None
     group_id: str | None = None
     member_id: str | None = None
     """The member a group profile is about."""
@@ -628,11 +681,17 @@ class SearchWindow(BaseModel):
 
 
 class SearchScope(BaseModel):
-    """The scope a group search was answered in (docs/group-memory.md, 5.3)."""
+    """The scope a group search was answered in (docs/group-memory.md, 5.3).
+
+    A user search with ``include_groups`` returns one too: ``owner_type``
+    ``user``, the user as the asker, and the groups searched alongside the
+    personal memory with the user's windows in each (``group_ids`` empty when
+    the user belongs to none).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    owner_type: Literal["group"] = "group"
+    owner_type: Literal["user", "group"] = "group"
     group_ids: list[str]
     asker_id: str
     audience: Literal["asker", "group"] = "asker"
@@ -688,10 +747,13 @@ class SearchData(BaseModel):
     otherwise stays empty."""
     scope: SearchScope | None = None
     """The group scope and the asker's windows; ``None`` for a user search,
-    whose scope is the owner the request named."""
+    whose scope is the owner the request named, unless it had
+    ``include_groups``: then the groups it searched too."""
     group_profile: SearchGroupProfile | None = None
     """The visible current group-profile items of a group scope
-    (``include_group_profile``); ``None`` otherwise."""
+    (``include_group_profile``); for a user search with ``include_groups``,
+    the current decisions of the groups it searched (other kinds empty);
+    ``None`` otherwise."""
     constraints: list[ConstraintItem] = Field(default_factory=list)
     """What an answer must respect (``constraints``, group scopes)."""
     coverage: Literal["complete", "partial", "none"] | None = None

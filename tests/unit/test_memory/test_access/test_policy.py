@@ -307,6 +307,81 @@ async def test_several_groups_form_one_pool_each_with_its_windows() -> None:
     assert matches(scope.predicate, _row("g", 150, 160))
 
 
+# ── a personal read that covers its owner's groups (include_groups) ─────
+
+
+def _personal(user: str) -> ScopeRequest:
+    return ScopeRequest(app_id=_APP, project_id=_PROJECT, user_id=user)
+
+
+@settings(max_examples=100, deadline=None)
+@given(events=_rosters(), owner=st.sampled_from(_MEMBERS))
+async def test_member_groups_compiles_each_group_as_the_owners_group_read(
+    events: list[RosterEvent], owner: str
+) -> None:
+    """The same scope, predicate for predicate, as a group read by the owner;
+    nothing for a group the owner is not a current member of."""
+    policy = AccessPolicy(await _store(events))
+    personal = await policy.read_scope(Identity(), _personal(owner))
+    covered = await policy.member_groups(personal)
+    try:
+        group = await policy.read_scope(Identity(asker_id=owner), _request("g"))
+    except ForbiddenError:
+        assert covered is None
+        return
+    assert covered is not None
+    assert covered.predicate == group.predicate
+    assert covered.history_predicate == group.history_predicate
+    assert covered.groups == group.groups
+    assert (covered.asker_id, covered.audience) == (owner, "asker")
+
+
+async def test_member_groups_takes_the_current_groups_of_the_space_only() -> None:
+    store = await _store([RosterEvent(op="join", member_id="u_chen", at=100)])
+    for group_id, events in (
+        ("h", [RosterEvent(op="join", member_id="u_chen", at=0)]),
+        (
+            "left",
+            [
+                RosterEvent(op="join", member_id="u_chen", at=0),
+                RosterEvent(op="leave", member_id="u_chen", at=50),
+            ],
+        ),
+        ("theirs", [RosterEvent(op="join", member_id="u_zoe", at=0)]),
+    ):
+        await store.save(
+            _scope(group_id),
+            group=Group(group_id=group_id, created_at=0),
+            events=events,
+        )
+    await store.save(
+        Scope(app_id=_APP, project_id="other", owner_id="far", owner_type="group"),
+        group=Group(group_id="far", created_at=0),
+        events=[RosterEvent(op="join", member_id="u_chen", at=0)],
+    )
+    policy = AccessPolicy(store)
+    personal = await policy.read_scope(Identity(asker_id="u_chen"), _personal("u_chen"))
+
+    every = await policy.member_groups(personal)
+    listed = await policy.member_groups(personal, only=["h", "left", "nowhere"])
+    none = await policy.member_groups(personal, only=["left", "theirs", "far"])
+
+    assert every is not None and every.owner_ids == ("g", "h")
+    assert listed is not None and listed.owner_ids == ("h",)
+    assert none is None
+    assert not matches(every.predicate, _row("left", 10, 20))
+    assert not matches(every.predicate, _row("theirs", 10, 20))
+    assert matches(every.predicate, _row("h", 10, 20))
+    assert not matches(every.predicate, _row("g", 10, 20))  # before joining g
+
+
+async def test_only_a_personal_read_covers_its_owners_groups() -> None:
+    policy = AccessPolicy(await _store([RosterEvent(op="join", member_id="a", at=1)]))
+    group = await policy.read_scope(Identity(asker_id="a"), _request("g"))
+    with pytest.raises(ValueError, match="personal read"):
+        await policy.member_groups(group)
+
+
 # ── buffered messages (row 3) ────────────────────────────────────────────
 
 
