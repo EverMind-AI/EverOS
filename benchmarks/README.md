@@ -57,6 +57,8 @@ cp benchmarks/.env.example benchmarks/.env
 
 Models, `top_k`, retrieval settings and concurrency are set in
 `benchmarks/configs/<dataset>.toml`. `reproduce.sh` passes no model overrides.
+Strategy switches (`[ome_strategies]`, e.g. LoCoMo's profile off) are written as
+each started server's `ome.toml`, where EverOS reads them.
 
 The decider reaches the servers a run starts as `EVEROS_LLM__DECIDER__MODEL` /
 `__BASE_URL` / `__API_KEY` -- EverOS's `[llm.decider]`. Before the first question of

@@ -173,6 +173,7 @@ def test_the_everalgo_version_is_not_part_of_the_identity(tmp_path: Path) -> Non
         "extraction_backbone",
         "keyword_tokenizer",
         "message_owner",
+        "ome_strategies",
     }
 
 

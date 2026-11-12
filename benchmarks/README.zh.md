@@ -51,7 +51,7 @@ cp benchmarks/.env.example benchmarks/.env
 | 答题模型 | `ANSWER_API_KEY` / `ANSWER_BASE_URL` | 模型名在配置文件中 |
 | 判分模型 | `JUDGE_API_KEY` / `JUDGE_BASE_URL` | 模型名在配置文件中 |
 
-模型、`top_k`、检索设置和并发在 `benchmarks/configs/<dataset>.toml` 中设置。
+模型、`top_k`、检索设置和并发在 `benchmarks/configs/<dataset>.toml` 中设置。后台策略开关（`[ome_strategies]`，如 LoCoMo 关掉画像）会写进每个启动的服务的 `ome.toml`，EverOS 从那里读取。
 `reproduce.sh` 不传任何模型覆盖参数。
 
 decider 以 `EVEROS_LLM__DECIDER__MODEL` / `__BASE_URL` / `__API_KEY`（即 EverOS 的

@@ -160,7 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode, extracts at temperature 0.3 / `max_tokens` 16384 with 1024-dimensional
   embeddings and a 0.7 clustering threshold, and files every message under the
   queried speaker (`message_owner = "eval_owner"`, new, part of the ingest
-  identity). `benchmarks/.env.example` no longer points embedding at a local
+  identity). It also turns off the user-profile strategy its answers never read:
+  the new `[ome_strategies]` table is written as each started server's
+  `ome.toml`, the one place EverOS reads strategy switches from (also part of
+  the ingest identity). `benchmarks/.env.example` no longer points embedding at a local
   server and asks for the reranker key agentic search cannot run without; the
   README lists both keys and gives a one-line LoCoMo download.
 

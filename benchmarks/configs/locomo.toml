@@ -61,6 +61,10 @@ EVEROS_LLM__TEMPERATURE = "0.3"
 EVEROS_LLM__MAX_TOKENS = "16384"
 EVEROS_EMBEDDING__DIMENSIONS = "1024"
 EVEROS_CLUSTERING__THRESHOLD = "0.7"
+[ome_strategies.extract_user_profile]   # written to each server root's ome.toml
+enabled = false                         # answers never read the profile (include_profile
+                                        # = false); off, it costs no calls and no failed runs
+
 # --- ANSWER ----------------------------------------------------------------
 [answer]
 model = "openai/gpt-4.1-mini"

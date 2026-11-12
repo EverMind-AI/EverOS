@@ -499,6 +499,41 @@ def server_launch_env(
     return env
 
 
+def write_ome_strategies(
+    root: Path, strategies: Mapping[str, Mapping[str, Any]]
+) -> None:
+    """Write ``strategies`` as ``<root>/ome.toml``, the file OME reads overrides from.
+
+    The whole file is replaced, so a rerun on the same root never carries an older
+    run's switches. Values are TOML scalars; a mapping value (a ``gate``) becomes a
+    ``[strategies.<name>.<key>]`` sub-table.
+    """
+    lines = ["# Written by benchmarks/run.py from the config's [ome_strategies]."]
+    for name, fields in strategies.items():
+        lines.append(f"\n[strategies.{name}]")
+        tables = {k: v for k, v in fields.items() if isinstance(v, Mapping)}
+        lines += [
+            f"{key} = {_toml_scalar(value)}"
+            for key, value in fields.items()
+            if key not in tables
+        ]
+        for key, table in tables.items():
+            lines.append(f"\n[strategies.{name}.{key}]")
+            lines += [f"{k} = {_toml_scalar(v)}" for k, v in table.items()]
+    (root / "ome.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _toml_scalar(value: object) -> str:
+    """``value`` as a TOML scalar: a JSON string literal is a TOML basic string."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise TypeError(f"ome.toml takes scalars and gate tables, got {value!r}")
+
+
 def _first_root(roots: Sequence[str] | str) -> Path:
     """The first ``--everos-root`` path, with ``~`` expanded."""
     return Path(roots if isinstance(roots, str) else roots[0]).expanduser()
@@ -565,6 +600,8 @@ class _ServerFleet:
         models: The LLMs every server is pointed at; ``None`` adds none.
         extra_env: Applied over everything else in each server's environment.
         trace_dir: Where each server writes its retrieval trace; ``None`` for none.
+        ome_strategies: Strategy overrides written as each root's ``ome.toml``
+            (:func:`write_ome_strategies`); empty leaves the file as ``init`` wrote it.
     """
 
     def __init__(
@@ -575,9 +612,11 @@ class _ServerFleet:
         models: ServerModels | None = None,
         extra_env: Mapping[str, str] | None = None,
         trace_dir: Path | None = None,
+        ome_strategies: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self.models = models or ServerModels()
         self.extra_env = dict(extra_env or {})
+        self.ome_strategies = dict(ome_strategies or {})
         self.trace_dir = trace_dir
         self.procs: list[subprocess.Popen] = []
         self.urls: list[str] = []
@@ -667,6 +706,8 @@ class _ServerFleet:
                     check=True,
                     capture_output=True,
                 )
+            if self.ome_strategies:
+                write_ome_strategies(root, self.ome_strategies)
             port, _held = self._free_port(port)
             # Released immediately before the child binds it. Every other run's probe
             # has seen it occupied up to this point.
@@ -4416,6 +4457,7 @@ def main() -> None:
             first_port=args.first_port,
             models=models,
             extra_env=server_extra_env,
+            ome_strategies=config.ome_strategies,
             # None disables retrieval tracing inside the fleet; see
             # BenchmarkConfig.trace.
             trace_dir=(

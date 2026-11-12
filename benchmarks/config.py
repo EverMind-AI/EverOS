@@ -8,6 +8,7 @@ reference so that numbers are directly comparable.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tomllib
@@ -198,6 +199,16 @@ class BenchmarkConfig(BaseModel):
 
     Ignored when attaching with --base-url: those servers read their environment at
     startup, so their values are already fixed."""
+
+    ome_strategies: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Per-strategy OME overrides, ``{name: {"enabled": False, ...}}``, written as each
+    started server's ``<root>/ome.toml`` -- EverOS reads strategy switches from that
+    file only, so an environment variable cannot turn one off.
+
+    For strategies whose output the benchmark never reads, such as the user profile on
+    a run that answers without it: what they cost is time, LLM calls and failed runs
+    that stop a conversation. Part of the ingest identity, since a strategy that does
+    write what is searched changes the store. Ignored with --base-url."""
 
     backbone_base_url: str = ""
     """Endpoint for the backbone. Empty keeps whatever the environment already has.
@@ -579,6 +590,7 @@ def ingest_identity(
         "extraction_backbone": backbone,
         "keyword_tokenizer": tokenizer or "default",
         "message_owner": config.message_owner,
+        "ome_strategies": json.dumps(config.ome_strategies, sort_keys=True),
     }
 
 
