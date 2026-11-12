@@ -154,6 +154,7 @@ def _probe(**over: Any) -> Any:
         "model": "policy",
         "base_url": "http://127.0.0.1:9360/v1",
         "host": "127.0.0.1",
+        "settings": {"max_tokens": 512, "extra": {}},
         "sources": {"model": "llm.decider", "base_url": "llm.decider"},
         "outcome": "answered",
         "reason": "",
@@ -334,6 +335,56 @@ def test_what_llm_decider_leaves_unset_comes_from_its_defaults_and_llm(
     assert fake.requests[0]["max_tokens"] == 512, "the decider's own default"
     assert report["sources"]["base_url"] == "llm"
     assert report["sources"]["max_tokens"] == "default"
+
+
+def test_the_report_carries_each_effective_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The record says what the decider ran with, not only where each value came from.
+
+    The harness used to record the raw ``EVEROS_DECIDER__EXTRA`` and nothing for a
+    value inherited from ``[llm]`` or left at the decider's default, so a run's
+    output cap or timeout could not be read back from its record.
+    """
+    _set_decider(monkeypatch, _UNREACHABLE, extra=_NO_THINK, max_tokens="64")
+
+    report = decider_probe.probe(send=False)
+
+    settings = report["settings"]
+    assert settings["extra"] == json.loads(_NO_THINK)
+    assert settings["max_tokens"] == 64
+    assert (settings["timeout_seconds"], report["sources"]["timeout_seconds"]) == (
+        60.0,
+        "default",
+    )
+    assert set(settings) == set(report["sources"]) - {"model", "base_url", "api_key"}
+
+
+def test_extra_s_headers_and_query_are_masked_and_its_body_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Headers and query parameters carry credentials; the body carries the knobs.
+
+    A thinking switch or a reasoning effort is what a reproduction needs to read, so
+    ``extra_body`` and top-level fields stay as configured.
+    """
+    extra = {
+        "extra_headers": {"Authorization": f"Bearer {_KEY}", "HTTP-Referer": "bench"},
+        "extra_query": {"api-key": _KEY},
+        "extra_body": {"reasoning": {"effort": "low"}},
+        "reasoning_effort": "low",
+    }
+    _set_decider(monkeypatch, _UNREACHABLE, extra=json.dumps(extra))
+
+    settings = decider_probe.probe(send=False)["settings"]
+
+    assert settings["extra"] == {
+        "extra_headers": {"Authorization": "***", "HTTP-Referer": "***"},
+        "extra_query": {"api-key": "***"},
+        "extra_body": {"reasoning": {"effort": "low"}},
+        "reasoning_effort": "low",
+    }
+    assert _KEY not in json.dumps(settings)
 
 
 def test_a_configured_temperature_is_sent(
@@ -596,6 +647,7 @@ def test_the_record_names_the_decider_the_servers_resolve(
 
     decider = specs["decider"]
     assert (decider.model, decider.endpoint) == ("policy", probe.base_url)
+    assert decider.extra["settings"] == probe.settings
     assert decider.extra["sources"] == probe.sources
     backbone = specs["backbone"]
     assert backbone.model == "backbone"

@@ -94,8 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint, `extra`, output cap, temperature, timeout and SDK retries, with a
   strict `json_schema` reply format -- where the harness used to rebuild the
   precedence itself and send a request of its own. `run_spec.json` records the
-  decider that resolution names, with the section each field came from, and
-  the backbone entry no longer picks up `EVEROS_LLM__<TASK>__*` variables.
+  decider that resolution names, with every effective field (output cap,
+  timeout, `extra` and the rest; `extra`'s header and query values masked) and
+  the section each came from, and the backbone entry no longer picks up
+  `EVEROS_LLM__<TASK>__*` variables.
 
 ### Fixed
 

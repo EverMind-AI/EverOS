@@ -162,6 +162,7 @@ def test_the_serving_specs_describe_every_configured_role() -> None:
         model="qwen3.6-27B",
         base_url="http://127.0.0.1:9360/v1",
         host="127.0.0.1",
+        settings={"max_tokens": 512},
         sources={"model": "llm.decider"},
         outcome="resolved",
         reason="",

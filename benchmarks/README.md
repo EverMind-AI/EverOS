@@ -102,8 +102,9 @@ benchmarks/results/<Dataset>/<run>/
 ```
 
 `run_spec.json` records the models actually served -- the decider as EverOS
-resolves it, with the section each of its settings came from -- and the `everalgo`
-package versions, which determine what a store contains.
+resolves it, with each setting's effective value and the section it came from
+(`extra`'s header and query values masked) -- and the `everalgo` package
+versions, which determine what a store contains.
 
 ## 6. Results
 
