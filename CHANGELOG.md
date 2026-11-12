@@ -562,6 +562,13 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **`everos memory` keeps a settings warning off its JSON.** A key the
+  settings ignore is named while they load (`config_key_ignored`; benchmark
+  launchers still export `EVEROS_LLM__SEARCH_TIMEOUT_SECONDS`), before the
+  settings that send the command's logs to standard error exist, so that
+  warning was printed on standard output in front of the answer and a script
+  could not parse it. The command points its logs at standard error before it
+  loads the settings.
 - **A user and a group with the same id no longer share forgets.** Users and
   groups share one id space, but the forget log was read by owner id alone:
   a personal undo of a picture or a conversation could reverse the group's

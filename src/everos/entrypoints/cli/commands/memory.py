@@ -334,10 +334,18 @@ def _settings(root: str | None, verbose: bool) -> Settings:
     """The command's settings: its root, its log level, and its logs on stderr.
 
     Standard output carries the JSON answer alone, so a script can parse it;
-    every log line, a provider's warning at build included, goes to stderr.
+    every log line goes to stderr: a provider's warning at build, and one the
+    settings log while they load (``config_key_ignored`` for a key they
+    ignore, which launchers still export). That one comes before the settings
+    that name the stream exist, so the logs are sent to stderr first, on the
+    defaults, and again on the settings loaded.
     """
     if root:
         os.environ["EVEROS_ROOT"] = root
+    configure_interactive(
+        verbose=verbose,
+        settings=with_log_stream(Settings.model_construct(), "stderr"),
+    )
     settings = with_log_stream(load_settings_or_exit(), "stderr")
     return configure_interactive(verbose=verbose, settings=settings)
 

@@ -8,6 +8,10 @@ provider, as it does on a real host. What these pin:
   ``undo`` each print exactly one JSON document on standard output, which a
   script parses as is; every log line goes to standard error. (The smoke
   parsing ``history``'s output found a provider warning in front of it.)
+- That holds for a warning the settings log while they load, too: a key they
+  ignore (the benchmark launchers export one) is named before the settings
+  that send the logs to standard error exist. (The second smoke found
+  ``config_key_ignored`` in front of the JSON.)
 - No command asks the OS for a timezone, so a container with none prints no
   tzlocal warning.
 - The round trip itself: the update supersedes the version it names, the
@@ -64,8 +68,13 @@ def _seed(root: Path) -> str:
     return asyncio.run(write())
 
 
-def _memory(root: Path, *args: str) -> tuple[dict[str, Any], str]:
-    """Run ``everos memory <args>``: its parsed stdout, and its stderr."""
+def _memory(
+    root: Path, *args: str, env: dict[str, str] | None = None
+) -> tuple[dict[str, Any], str]:
+    """Run ``everos memory <args>``: its parsed stdout, and its stderr.
+
+    ``env`` adds variables to the hermetic environment.
+    """
     result = subprocess.run(
         [
             sys.executable,
@@ -79,7 +88,7 @@ def _memory(root: Path, *args: str) -> tuple[dict[str, Any], str]:
         capture_output=True,
         text=True,
         check=False,
-        env=hermetic_env(plain_output=True),
+        env={**hermetic_env(plain_output=True), **(env or {})},
         timeout=300,
     )
     assert result.returncode == 0, result.stderr[-2000:]
@@ -101,6 +110,22 @@ def test_history_prints_its_json_alone_and_logs_on_stderr(tmp_path: Path) -> Non
     assert history["versions"][0]["state"] == "current"
     assert "rerank_capability_build_failed" in stderr  # the logs went here
     assert _TZ_WARNING not in stderr
+
+
+def test_a_warning_while_the_settings_load_goes_to_stderr(tmp_path: Path) -> None:
+    episode = _seed(tmp_path)
+
+    history, stderr = _memory(
+        tmp_path,
+        "history",
+        episode,
+        "--user",
+        "amy",
+        env={"EVEROS_LLM__SEARCH_TIMEOUT_SECONDS": "60"},  # an ignored key
+    )
+
+    assert [v["id"] for v in history["versions"]] == [episode]
+    assert "config_key_ignored" in stderr
 
 
 def test_update_forget_and_undo_print_json_a_script_can_read(tmp_path: Path) -> None:

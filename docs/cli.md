@@ -100,9 +100,10 @@ A thin layer over the service functions behind `POST /memory/update`,
 `GET /memory/history`, `POST /memory/forget` and `/memory/forget/undo`
 ([api.md](api.md#changing-and-forgetting-a-memory)), run in-process. Each
 command names a user's memory with `--user` or a group's with `--group` and
-`--asker`, takes `--root`, `--app-id` and `--project-id`, and prints its
-answer as one JSON document on standard output -- its log lines go to standard
-error, so `| jq` reads the answer as is.
+`--asker`, takes `--root`, `--app-id` and `--project-id` (both `default`
+unless given, as in the API), and prints its answer as one JSON document on
+standard output -- its log lines go to standard error, a warning while the
+settings load included, so `| jq` reads the answer as is.
 
 ```bash
 everos memory history amy_ep_20261112_00000003 --user amy
