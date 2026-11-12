@@ -255,3 +255,39 @@ async def test_flat_scores_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     p = DeepInfraRerankProvider(model="m", api_key="k", base_url="https://api/v1")
     results = await p.rerank("q", ["a", "b"])
     assert [r.score for r in results] == [0.6, 0.3]
+
+
+async def test_http_client_is_reused_across_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One pooled client serves every batch and call (local patch 2026-09-19).
+
+    A client per request re-did the TLS handshake each time; from
+    ap-southeast-1 to DeepInfra that is ~0.4 s of a ~0.64 s rerank call.
+    """
+    created = 0
+    seen_limits: list[object] = []
+    transport = httpx.MockTransport(lambda _req: _ok_response([0.5, 0.5]))
+    import everos.component.rerank.deepinfra_provider as mod
+
+    real_cls = httpx.AsyncClient
+
+    def factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        nonlocal created
+        created += 1
+        seen_limits.append(kwargs.get("limits"))
+        kwargs["transport"] = transport
+        return real_cls(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(mod.httpx, "AsyncClient", factory)
+    p = DeepInfraRerankProvider(
+        model="m", api_key="k", base_url="https://api/v1", batch_size=2
+    )
+    await p.rerank("q", ["a", "b", "c", "d"])
+    await p.rerank("q", ["e", "f"])
+    assert created == 1
+    # Searches arrive seconds-to-minutes apart; httpx's 5 s idle default would
+    # drop the pooled connection before the next one.
+    limits = seen_limits[0]
+    assert isinstance(limits, httpx.Limits)
+    assert limits.keepalive_expiry is not None and limits.keepalive_expiry >= 60
