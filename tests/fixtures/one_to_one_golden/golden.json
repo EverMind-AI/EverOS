@@ -29,6 +29,50 @@
    "status": "accumulated"
   }
  ],
+ "decider": {
+  "caroline:cat": [
+   "62250d625d2bae97"
+  ],
+  "caroline:session_buffer": [
+   "e7d27f4851a8bf3d"
+  ],
+  "caroline:support group": [
+   "e7d27f4851a8bf3d"
+  ],
+  "caroline:travel to Beijing": [
+   "e0db7b60a8051224"
+  ],
+  "melanie:cat": [
+   "62250d625d2bae97"
+  ],
+  "melanie:support group": [
+   "e7d27f4851a8bf3d"
+  ],
+  "melanie:travel to Beijing": [
+   "e0db7b60a8051224"
+  ],
+  "u_pic:cat": [
+   "a00f70d668d9985c"
+  ],
+  "u_pic:profile": [
+   "a00f70d668d9985c"
+  ],
+  "u_pic:support group": [
+   "4a7dff4e09b2da2b"
+  ],
+  "u_pic:travel to Beijing": [
+   "3627079a20285262"
+  ],
+  "user_001:cat": [
+   "87a061576750985b"
+  ],
+  "user_001:support group": [
+   "c360fd9ccf3973a7"
+  ],
+  "user_001:travel to Beijing": [
+   "6145ae20445efbfd"
+  ]
+ },
  "events": [
   {
    "app_id": "default",

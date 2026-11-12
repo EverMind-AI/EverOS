@@ -13,7 +13,11 @@ golden file produced at the commit *before* group memory:
 * every index row the cascade projects from that markdown (vectors as a hash);
 * the events the pipeline published;
 * search and get responses for the owners, over multi-round retrieval (the
-  only search method) with a scripted decider.
+  only search method) with a scripted decider;
+* what that decider was shown: a digest of every prompt each search sent it,
+  so a one-to-one search's decider input is pinned as well as its answer.
+  This section was added (2026-11-12) at the commit before ``include_groups``,
+  without regenerating the others.
 
 The conversations are a LoCoMo excerpt (two human senders in one session: the
 per-sender fan-out), the tracked solo assistant chat (one user and an
@@ -372,6 +376,35 @@ def _vector_digest(vector: Sequence[float] | None) -> str | None:
     return hashlib.sha256(rounded.encode("ascii")).hexdigest()[:16]
 
 
+def _prompt_digest(prompt: str) -> str:
+    """One decider prompt, as a digest of its normalised text.
+
+    The run's own dates and the random memcell ids are normalised first, as
+    in every other section, so the digest depends on the content only.
+    """
+    text = _normalise(prompt, _clock_patterns())
+    text = _MEMCELL_ID.sub("mc_<id>", text)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+class _DeciderInput:
+    """The scripted model, keeping every prompt the multi-round decider sent."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def __call__(self, messages: Any, *, response_format: type, **kwargs: Any) -> str:
+        if response_format.__name__ == "_DecisionReply":
+            self.prompts.append(_text_of(messages))
+        return _answer(messages, response_format=response_format, **kwargs)
+
+    def taken(self) -> list[str]:
+        """The digests of the prompts sent since the last call."""
+        digests = [_prompt_digest(p) for p in self.prompts]
+        self.prompts.clear()
+        return digests
+
+
 # ── the run ──────────────────────────────────────────────────────────────
 
 
@@ -445,7 +478,8 @@ async def _run(root: Path) -> dict[str, Any]:
     storage = make_storage(memory_root, settings)
     await storage.create_schema()
     embedding = FakeEmbeddingProvider(dim=_DIM)
-    llm = FakeLLMClient(handler=_answer)
+    decider_input = _DeciderInput()
+    llm = FakeLLMClient(handler=decider_input)
     providers = make_providers(llm=llm, embedding=embedding, rerank=None)
     stores = build_stores(memory_root, storage.sqlite)
     deps = MemoryDeps(
@@ -506,12 +540,15 @@ async def _run(root: Path) -> dict[str, Any]:
             rows[table] = sorted((_row_view(r) for r in found), key=lambda r: r["id"])
 
         searches: dict[str, Any] = {}
+        decider: dict[str, list[str]] = {}
+        decider_input.taken()  # only the searches below ask the decider
         for owner in ("caroline", "melanie", "user_001", "u_pic"):
             for query in ("support group", "travel to Beijing", "cat"):
                 response = await memory.search(
                     SearchRequest(user_id=owner, query=query, top_k=5)
                 )
                 searches[f"{owner}:{query}"] = response.data.model_dump(mode="json")
+                decider[f"{owner}:{query}"] = decider_input.taken()
         buffered = await memory.search(
             SearchRequest(
                 user_id="caroline",
@@ -521,6 +558,7 @@ async def _run(root: Path) -> dict[str, Any]:
             )
         )
         searches["caroline:session_buffer"] = buffered.data.model_dump(mode="json")
+        decider["caroline:session_buffer"] = decider_input.taken()
         searches["u_pic:profile"] = (
             await memory.search(
                 SearchRequest(
@@ -531,6 +569,7 @@ async def _run(root: Path) -> dict[str, Any]:
                 )
             )
         ).data.model_dump(mode="json")
+        decider["u_pic:profile"] = decider_input.taken()
 
         gets: dict[str, Any] = {}
         for owner in ("caroline", "user_001", "u_pic"):
@@ -548,6 +587,7 @@ async def _run(root: Path) -> dict[str, Any]:
         "rows": rows,
         "events": [_event_view(e) for e in bus.events],
         "search": searches,
+        "decider": decider,
         "get": gets,
     }
     return _stable_ids(_normalise(raw, _clock_patterns()))
@@ -605,6 +645,8 @@ async def test_one_to_one_outputs_match_the_golden(tmp_path: Path) -> None:
     assert actual["markdown"] == expected["markdown"]
     assert actual["adds"] == expected["adds"]
     assert actual["events"] == expected["events"]
+    # What the decider was shown, prompt by prompt: no field may be added.
+    assert actual["decider"] == expected["decider"]
     problems: list[str] = []
     for top in ("rows", "search", "get"):
         for sub, value in expected[top].items():
@@ -632,3 +674,6 @@ def test_the_golden_covers_every_one_to_one_shape() -> None:
     assert golden["rows"]["image_memory"]
     assert golden["search"]["caroline:session_buffer"]["unprocessed_messages"]
     assert golden["search"]["u_pic:profile"]["profiles"] == []
+    # Every search pinned its decider input, and each asked the decider.
+    assert set(golden["decider"]) == set(golden["search"])
+    assert all(golden["decider"].values())
