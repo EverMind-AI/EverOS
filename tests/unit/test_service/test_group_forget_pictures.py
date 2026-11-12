@@ -62,9 +62,9 @@ class _Model:
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
         if name == "EpisodeReply":
+            return json.dumps({"title": "Pets", "summary": said, "content": said})
+        if name == "ImageEpisodeReply":
             labels = sorted(set(re.findall(r"label: (img-\d+)", prompt)))
-            if not labels:
-                return json.dumps({"title": "Pets", "summary": said, "content": said})
             return json.dumps(
                 {
                     "title": "Pets",

@@ -23,10 +23,10 @@ episode call writes no profile item (the profile update reads the pictures
 itself, and this test runs the pipeline, not the profile strategy), so the
 picture chat writes no ``user.md``; that, and the picture prompt without its
 profile block, are what the golden was regenerated for then. It was
-regenerated once more for the one episode prompt every cell sends
-(``chat.episode``, 2026-11-12): the prompt digests in the episodes' text
-changed, and with them what is derived from that text -- the fixed
-embeddings, so the search order -- and nothing else.
+regenerated once more for the episode prompt assembled by rule
+(``chat.episode``, 2026-11-12): a text cell is still sent everalgo's prompt
+byte for byte, so only the picture chat's prompt digest changed, and with it
+what is derived from its text -- its fixed embedding -- and nothing else.
 
 Fields added after the golden was recorded are allowed in the responses and
 rows only when they are listed in :data:`ADDED_FIELDS` and carry their empty
@@ -223,9 +223,8 @@ def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:
             {"reasoning": "scripted", "boundaries": cuts, "tail_complete": False}
         )
     if name == "EpisodeReply":
-        # One reply model for every cell; a cell with pictures attaches them.
-        if isinstance(messages[-1].content, str):
-            return json.dumps(_episode_from(prompt))
+        return json.dumps(_episode_from(prompt))
+    if name == "ImageEpisodeReply":
         return _picture_reply(prompt)
     if name == "_DecisionReply":
         # The multi-round decider: keep the first three candidates, stop.

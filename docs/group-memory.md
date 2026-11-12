@@ -1136,9 +1136,10 @@ runs the same propagation: it is a forget, soft and reversible.
 The architecture places algorithm assets in everalgo, which EverOS consumes as
 the `everalgo-*` packages. Two 2.0 prompts already live in EverOS: the episode
 prompt every chat cell is extracted with (`chat.episode`,
-`src/everos/memory/extract/pipeline/episode.py`: everalgo's episode rules,
-imported verbatim, plus the picture rules, because everalgo's message type is
-text-only), and the multi-round decider prompt
+`src/everos/memory/extract/pipeline/episode.py`, assembled by rule: a text cell
+is sent everalgo's episode prompt byte for byte, a cell with pictures the same
+rules plus the picture rules, because everalgo's message type is text-only),
+and the multi-round decider prompt
 (`src/everos/memory/search/llm_multiround.py`), because the decider is a
 pluggable hook of the EverOS retrieval loop. A new everalgo operator also needs an
 everalgo release before EverOS can depend on it. Group memory therefore follows
@@ -1495,7 +1496,8 @@ The second half of Step 1 differs from the text above in these places:
   either. Each prompt is a versioned constant next to its renderer -- the
   roster block in `memory/extract/pipeline/group_render.py` (id
   `chat.group_roster_block`, version 1), the episode prompt in
-  `memory/extract/pipeline/episode.py` (`chat.episode`, version 1) -- with a
+  `memory/extract/pipeline/episode.py` (`chat.episode`, version 2, with a
+  `text` and a `pictures` variant) -- with a
   fingerprint the tests pin; `memory/prompt_manifest.py` lists them, and a
   test fails when one is left out.
 - **Member-in-group profile format.** There is no 2.0 profile format on this

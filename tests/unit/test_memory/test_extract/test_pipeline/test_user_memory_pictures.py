@@ -1,4 +1,4 @@
-"""Pictures in ``UserMemoryPipeline.run_cell``: one call, one prompt, every cell.
+"""Pictures in ``UserMemoryPipeline.run_cell``: one call, one prompt by rule.
 
 What these pin — the contract that makes a picture a memory rather than an
 attachment:
@@ -10,9 +10,9 @@ attachment:
 - A picture memory is written for each user sender, before the episode, and
   its ``image_id`` is the file hash from the conversation text — never the
   per-cell label the reply used (``img-1``).
-- A text-only cell makes the same call with the same system prompt; it
-  attaches no picture, sends the conversation alone, and writes no picture
-  memory.
+- A text-only cell makes the same call, sent everalgo's episode prompt byte
+  for byte and the conversation alone; it writes no picture memory. A cell
+  with pictures shares everalgo's rules as the prefix of its system prompt.
 """
 
 from __future__ import annotations
@@ -21,11 +21,13 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 from everalgo.types import ChatMessage, MemCell
+from everalgo.user_memory.prompts.en.episode import EPISODE_SYSTEM_PROMPT
 
 from everos.component.images import ImageLimits
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
+from everos.memory.extract.pipeline.episode import EPISODE_RULES
 from everos.memory.ports import MemoryRef
 from tests.fakes import bundled_instructions, user_track_llm, user_track_script
 from tests.fakes.stores import (
@@ -175,8 +177,8 @@ async def test_a_picture_cell_writes_one_memory_per_picture() -> None:
     assert memory.parent_id == "mc_a"
 
 
-async def test_a_text_cell_sends_the_picture_cell_s_system_prompt() -> None:
-    """One prompt for every cell: only the user message tells them apart."""
+async def test_a_text_cell_is_sent_everalgo_s_prompt_and_shares_its_rules() -> None:
+    """One prompt by rule: the picture block only where pictures are attached."""
     text_llm, picture_llm = _RecordingLLM(_EPISODE_REPLY), _RecordingLLM(_image_reply())
     for llm, items in (
         (text_llm, [_text_message()]),
@@ -189,7 +191,10 @@ async def test_a_text_cell_sends_the_picture_cell_s_system_prompt() -> None:
         )
 
     (text_call,), (picture_call,) = text_llm.calls, picture_llm.calls
-    assert text_call[0].content == picture_call[0].content
+    text_system, picture_system = text_call[0].content, picture_call[0].content
+    assert text_system.startswith(EPISODE_SYSTEM_PROMPT + "\n\n<output_language>\n")
+    assert "<pictures>" not in text_system
+    assert picture_system.startswith(EPISODE_RULES + "\n\n<pictures>\n")
     assert isinstance(text_call[1].content, str)
     assert text_call[1].content.startswith('<conversation count="1">')
     assert not isinstance(picture_call[1].content, str)

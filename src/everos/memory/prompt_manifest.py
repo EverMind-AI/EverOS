@@ -78,8 +78,9 @@ everalgo ``ProfileExtractor.aupdate``'s."""
 def prompt_manifest() -> dict[str, Any]:
     """Every prompt above by id: owner, when it is sent, version, fingerprint.
 
-    An everalgo prompt carries its package and the version installed in place
-    of an EverOS version.
+    A prompt assembled by rule also lists each variant's fingerprint
+    (``chat.episode``: ``text`` and ``pictures``). An everalgo prompt carries
+    its package and the version installed in place of an EverOS version.
     """
     prompts: dict[str, dict[str, Any]] = {}
     for template, used in EVEROS_PROMPTS:
@@ -89,6 +90,11 @@ def prompt_manifest() -> dict[str, Any]:
             "version": template.version,
             "fingerprint": template.fingerprint,
         }
+        if template.variants:
+            prompts[template.id]["variants"] = {
+                name: template.variant_fingerprint(name)
+                for name, _ in template.variants
+            }
     for prompt in ALGO_PROMPTS:
         prompts[prompt.id] = {
             "owner": "everalgo",

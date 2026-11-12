@@ -6,12 +6,13 @@ sqlite row per cell). This pipeline only handles the user-perspective output of
 one cell: the Episode md, one image-memory md per picture the cell carried, and
 the ``EpisodeExtracted`` events that announce the episodes.
 
-Every cell is extracted by one call (:mod:`.episode`), with one prompt: the
-episode and, when the cell carries pictures, one record per picture, in a
-single reply. A cell without pictures sends the conversation alone and gets
-no picture records; nothing else about the call differs. The picture
-memories are written before the episode so that an episode body's ``img-N``
-references name records that exist.
+Every cell is extracted by one call (:mod:`.episode`) and one prompt,
+assembled by rule: the episode and, when the cell carries pictures, one record
+per picture, in a single reply. A cell without pictures is sent everalgo's
+episode prompt byte for byte and the conversation alone, and gets no picture
+records; a cell with pictures is sent the same rules plus the picture rules.
+The picture memories are written before the episode so that an episode body's
+``img-N`` references name records that exist.
 
 The call is told the language to write in. It is resolved before the call
 from the session's human messages

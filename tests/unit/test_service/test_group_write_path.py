@@ -61,15 +61,11 @@ class _Model:
         texts = [_text(m.content) for m in messages]
         self.episode_prompts.append("\n".join(texts))
         if name == "EpisodeReply":
+            return json.dumps(
+                {"title": self.title, "summary": self.content, "content": self.content}
+            )
+        if name == "ImageEpisodeReply":
             labels = sorted(set(re.findall(r"label: (img-\d+)", texts[-1])))
-            if not labels:
-                return json.dumps(
-                    {
-                        "title": self.title,
-                        "summary": self.content,
-                        "content": self.content,
-                    }
-                )
             return json.dumps(
                 {
                     "title": self.title,

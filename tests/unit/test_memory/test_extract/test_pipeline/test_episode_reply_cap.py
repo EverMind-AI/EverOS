@@ -143,7 +143,7 @@ _CAP = reply_token_cap(
 )
 
 
-async def _extract(llm: OpenAIProvider) -> episode.EpisodeReply:
+async def _extract(llm: OpenAIProvider) -> episode.ImageEpisodeReply:
     return await episode.extract(
         llm,
         _cell(),

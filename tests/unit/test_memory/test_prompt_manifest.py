@@ -11,7 +11,8 @@ What these pin:
   of ``ProfileExtractor.aupdate``. An everalgo change to any of them fails
   here, on purpose, before it reaches a store;
 - each entry says when its prompt is sent: while a store is written, or while
-  it is searched.
+  it is searched; a prompt assembled by rule lists each variant's fingerprint
+  (``chat.episode``: ``text`` and ``pictures``).
 """
 
 from __future__ import annotations
@@ -78,9 +79,18 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
     }
 
 
-def test_the_episode_prompt_is_recorded_with_when_each_prompt_is_sent() -> None:
+def test_the_episode_prompt_is_recorded_with_its_two_variants() -> None:
+    episode = prompt_manifest()["prompts"]["chat.episode"]
+
+    assert (episode["version"], episode["used"]) == (2, "write")
+    assert episode["variants"] == {
+        "text": "2117ea4fa75e421a",
+        "pictures": "bae4c0c544622565",
+    }
+
+
+def test_each_entry_says_when_its_prompt_is_sent() -> None:
     prompts = prompt_manifest()["prompts"]
 
-    assert prompts["chat.episode"]["version"] == 1
-    assert prompts["chat.episode"]["used"] == "write"
+    assert prompts["chat.scene_update"]["used"] == "write"
     assert prompts["search.constraint_bind"]["used"] == "search"

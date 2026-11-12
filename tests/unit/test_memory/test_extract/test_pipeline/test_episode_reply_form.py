@@ -14,8 +14,8 @@ pin:
   before validation -- in the provider's check and in the operator's parse
   alike, so the call is answered by its first reply;
 - ``null`` reads as empty (``ocr``) or as no entries (``images``), and one
-  entry given bare as a list of it; a cell without pictures may leave
-  ``images`` out, as everalgo's episode reply does;
+  entry given bare as a list of it; a text cell's reply (``EpisodeReply``)
+  keeps no ``images`` at all, whatever it wrote, and is mended the same way;
 - a reply that leaves ``content``, ``summary`` or ``title`` blank is unusable
   (``LLMOutputError``, which the pipeline retries), as it is for everalgo;
 - what is not a slip of form still fails: an unknown key that carries
@@ -38,7 +38,7 @@ from pydantic import ValidationError
 
 from everos.component.llm import OpenAIProvider
 from everos.memory.extract.pipeline import episode
-from everos.memory.extract.pipeline.episode import EpisodeReply
+from everos.memory.extract.pipeline.episode import EpisodeReply, ImageEpisodeReply
 
 _HEAD = (
     '"content": "Wang Lei sent her latte (img-1).", '
@@ -74,7 +74,7 @@ def _reply(images: str = f"[{_IMAGE}]") -> str:
     ],
 )
 def test_an_empty_unknown_key_in_a_pictures_entry_reads_as_absent(image: str) -> None:
-    reply = EpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
+    reply = ImageEpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
 
     assert [(f.ref, f.description, f.ocr) for f in reply.images] == [
         ("img-1", "a latte with heart foam", "")
@@ -83,7 +83,7 @@ def test_an_empty_unknown_key_in_a_pictures_entry_reads_as_absent(image: str) ->
 
 @pytest.mark.parametrize("extra", [', "notes": null', ', "profile": []'])
 def test_an_empty_unknown_key_at_the_top_reads_as_absent(extra: str) -> None:
-    reply = EpisodeReply.model_validate_json(_reply()[:-1] + extra + "}")
+    reply = ImageEpisodeReply.model_validate_json(_reply()[:-1] + extra + "}")
 
     assert (reply.title, [f.ref for f in reply.images]) == ("Latte", ["img-1"])
 
@@ -101,7 +101,7 @@ def test_a_pictures_entry_left_open_is_closed(images: str) -> None:
     with pytest.raises(json.JSONDecodeError):
         json.loads(text)
 
-    reply = EpisodeReply.model_validate_json(text)
+    reply = ImageEpisodeReply.model_validate_json(text)
 
     assert [f.ref for f in reply.images] == ["img-1", "img-2"]
 
@@ -109,7 +109,7 @@ def test_a_pictures_entry_left_open_is_closed(images: str) -> None:
 def test_a_reply_split_in_two_objects_is_read_as_one() -> None:
     text = f'{{{_HEAD}}}\n{{"images": [{_IMAGE}]}}'
 
-    reply = EpisodeReply.model_validate_json(text)
+    reply = ImageEpisodeReply.model_validate_json(text)
 
     assert reply.title == "Latte"
     assert [f.ref for f in reply.images] == ["img-1"]
@@ -123,25 +123,34 @@ def test_a_reply_split_in_two_objects_is_read_as_one() -> None:
 def test_null_reads_as_empty_or_as_no_entries() -> None:
     image = '{"ref": "img-1", "description": "a latte", "ocr": null}'
 
-    reply = EpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
-    bare = EpisodeReply.model_validate_json(_reply(images="null"))
+    reply = ImageEpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
+    bare = ImageEpisodeReply.model_validate_json(_reply(images="null"))
 
     assert reply.images[0].ocr == ""
     assert bare.images == []
 
 
 def test_one_entry_given_bare_reads_as_a_list_of_it() -> None:
-    reply = EpisodeReply.model_validate_json(_reply(images=_IMAGE))
+    reply = ImageEpisodeReply.model_validate_json(_reply(images=_IMAGE))
 
     assert [f.ref for f in reply.images] == ["img-1"]
 
 
-@pytest.mark.parametrize("text", [f"{{{_HEAD}}}", _reply(images="[]")])
-def test_a_cell_without_pictures_answers_with_no_entries(text: str) -> None:
-    """everalgo's episode reply, ``images`` left out, reads like ``[]``."""
+@pytest.mark.parametrize(
+    "text", [f"{{{_HEAD}}}", _reply(images="[]"), _reply(), _reply(images=_IMAGE)]
+)
+def test_a_text_cell_s_reply_keeps_no_picture_entry(text: str) -> None:
+    """A text cell attached no picture: whatever ``images`` it wrote is dropped."""
     reply = EpisodeReply.model_validate_json(text)
 
-    assert (reply.title, reply.images) == ("Latte", [])
+    assert reply.title == "Latte"
+    assert "images" not in reply.model_dump()
+
+
+def test_a_text_cell_s_reply_is_mended_like_a_picture_cell_s() -> None:
+    reply = EpisodeReply.model_validate_json(f"{{{_HEAD}}}" + '\n{"extra": ""}')
+
+    assert reply.content == "Wang Lei sent her latte (img-1)."
 
 
 # ---------------------------------------------------------------------------
@@ -168,22 +177,27 @@ def test_a_cell_without_pictures_answers_with_no_entries(text: str) -> None:
 )
 def test_what_is_not_a_form_slip_still_fails(text: str) -> None:
     with pytest.raises(ValidationError):
-        EpisodeReply.model_validate_json(text)
+        ImageEpisodeReply.model_validate_json(text)
 
 
 def test_the_schema_sent_is_pinned() -> None:
     """sha256 of the json_schema request format: the reply without the profile.
 
     The reply models' names and docstrings are part of it; a change here is a
-    change to what every json_schema-mode episode call sends, text cells
-    included (``ImageEpisodeReply`` until 2026-11-12: ``2e848a4bc74cae48``).
+    change to what every json_schema-mode picture call sends. Unchanged by the
+    rule-assembled prompt (2026-11-12); a text cell's ``EpisodeReply`` is
+    pinned beside it.
     """
-    sent = to_openai_response_format(EpisodeReply, "json_schema")
+    sent = to_openai_response_format(ImageEpisodeReply, "json_schema")
     text = json.dumps(sent, sort_keys=True)
+    text_cell = json.dumps(
+        to_openai_response_format(EpisodeReply, "json_schema"), sort_keys=True
+    )
 
-    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "fa6a897c993c106d"
+    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "2e848a4bc74cae48"
+    assert hashlib.sha256(text_cell.encode()).hexdigest()[:16] == "069791f7e1c15613"
     assert "profile" not in json.dumps(sent)
-    assert to_openai_response_format(EpisodeReply, "json_object") == {
+    assert to_openai_response_format(ImageEpisodeReply, "json_object") == {
         "type": "json_object"
     }
 

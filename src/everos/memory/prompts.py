@@ -42,16 +42,29 @@ class PromptTemplate:
     """A registered prompt: id, version and the text parts it renders.
 
     ``fingerprint`` changes whenever a part's text does, so data built from
-    one version can be told apart from data built from another.
+    one version can be told apart from data built from another. A prompt
+    assembled by rule from some of its parts names each rendering in
+    ``variants`` -- ``(name, part indices)`` -- and each has a fingerprint of
+    its own (:meth:`variant_fingerprint`), so a record can say which one built
+    it.
     """
 
     id: str
     version: int
     parts: tuple[str, ...]
+    variants: tuple[tuple[str, tuple[int, ...]], ...] = ()
 
     @property
     def fingerprint(self) -> str:
         return _fingerprint(self.parts)
+
+    def variant_fingerprint(self, name: str) -> str:
+        """Fingerprint of the parts the ``name`` variant renders.
+
+        Raises:
+            KeyError: The template has no variant of that name.
+        """
+        return _fingerprint(tuple(self.parts[i] for i in dict(self.variants)[name]))
 
 
 @dataclass(frozen=True)
