@@ -476,12 +476,12 @@ them.
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation on the merged episode's event)
 - `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
-- `update_user_scenes` — a user's scenes ([scenes.md](scenes.md)): on each
-  pipeline episode, placed among the user's scene clusters, one capped
-  narrative call when it joins a scene (`[scenes] enabled`, off by default)
-- `update_member_profiles` / `update_group_scenes` — group memory: the
-  member-in-group profiles (on each group episode, throttled, and on
-  `GroupFlushed`) and the group's scenes
+- `update_user_scenes` / `update_group_scenes` — a user's and a group's
+  scenes ([scenes.md](scenes.md)), one core (`strategies/_scenes.py`): on
+  each episode, placed among the owner's scene clusters, one capped narrative
+  call when it joins a scene (`[scenes] users` / `groups`, off by default)
+- `update_member_profiles` — group memory: the member-in-group profiles (on
+  each group episode, throttled, and on `GroupFlushed`)
 
 Who publishes: the domain never does. The memorize service publishes each
 pipeline cell's events on the `EventBus` (`OmeEventBus` over the engine), and

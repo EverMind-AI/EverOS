@@ -30,6 +30,7 @@ from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
 from .settings import OmeSettings as OmeSettings
 from .settings import RerankSettings as RerankSettings
+from .settings import ScenesSettings as ScenesSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
 from .settings import VisionEmbeddingSettings as VisionEmbeddingSettings
@@ -53,6 +54,7 @@ __all__ = [
     "MultimodalSettings",
     "OmeSettings",
     "RerankSettings",
+    "ScenesSettings",
     "Settings",
     "SqliteSettings",
     "VisionEmbeddingSettings",

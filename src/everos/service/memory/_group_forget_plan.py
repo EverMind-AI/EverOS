@@ -283,11 +283,17 @@ class ForgetPlanner:
         indexes: The read side, for the one question markdown cannot answer
             cheaply: whether any other owner's memory refers to a picture.
             ``None`` keeps every picture file in circulation.
+        scene_members: The live episodes a scene needs (``[scenes]
+            min_members``) for a forget to write it again; ``None`` writes
+            no scene again.
     """
 
-    def __init__(self, *, stores: Stores, indexes: Indexes | None) -> None:
+    def __init__(
+        self, *, stores: Stores, indexes: Indexes | None, scene_members: int | None
+    ) -> None:
         self._stores = stores
         self._indexes = indexes
+        self._scene_members = scene_members
 
     async def plan(
         self,
@@ -671,11 +677,14 @@ class ForgetPlanner:
             members = tuple(
                 m for m in newest.item.member_ids if m not in dropped and m in present
             )
+            enough = (
+                self._scene_members is not None and len(members) >= self._scene_members
+            )
             plan.scenes.append(
                 SceneEdit(
                     scene_id=scene_id,
                     versions=hit,
-                    members=members if len(members) >= 2 else (),
+                    members=members if enough else (),
                     newest_kept=max(kept, key=lambda v: v.item.version)
                     if kept
                     else None,

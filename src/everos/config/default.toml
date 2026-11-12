@@ -330,14 +330,18 @@ threshold = 0.65
 time_window_days = 7.0
 
 [scenes]
-# A user's scenes (users/<u>/scenes/): their episodes about one matter --
-# close in vector and in time, the [clustering] geometry -- with one narrative
-# over them, ending on where things stand. Scenes compete with episodes in the
-# same search pool. One capped narrative call each time an episode joins a
-# scene of min_members episodes or more; an episode that joins no scene costs
-# none. Off by default until its cost is accepted. Override via
-# EVEROS_SCENES__ENABLED.
-enabled = false
+# An owner's scenes: its episodes about one matter -- close in vector and in
+# time, the [clustering] geometry -- with one narrative over them, ending on
+# where things stand. Scenes compete with episodes in the same search pool.
+# One capped narrative call each time an episode joins a scene of min_members
+# episodes or more; an episode that joins none costs none. Users and groups
+# build them the same way, each under its own switch, both off by default
+# until their cost is accepted. Override via EVEROS_SCENES__USERS,
+# EVEROS_SCENES__GROUPS.
+# Every user's scenes (users/<u>/scenes/).
+users = false
+# Every group's scenes (groups/<g>/scenes/, docs/group-memory.md section 7.7).
+groups = false
 min_members = 2
 # The narrative's cap: the prompt asks for at most this many words and a reply
 # past it is clipped, so the narrative and the next call's prompt stay bounded.
@@ -403,12 +407,6 @@ implicit_join = true
 # A member's profile in a group is updated after this many new segments in
 # which they spoke, and at every flush of the group (section 7.4).
 member_profile_every = 5
-# Build each group's scenes from its episodes (section 7.7): one narrative
-# call each time an episode joins a scene of two or more episodes. Off by
-# default: group scenes are designed on 2.0's per-owner scenes, which do not
-# exist yet, so until they do a group gets no record type a user does not
-# have, and ingestion makes no extra reflector calls. true opts in.
-scenes = false
 # A group search's multi-round question names the asker:
 # "<display name>: <question>" (section 8.2).
 asker_in_question = true

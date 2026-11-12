@@ -12,8 +12,9 @@ plan, and the real run carries out exactly that plan:
 2. Every model call is made before anything is written: each segment that
    lost messages is extracted again (the group episode call, labels and
    roster block included) over what is left of it, and each changed scene is
-   narrated again from its remaining members. A failure here undoes step 1
-   and leaves the group as it was.
+   narrated again from scratch over its remaining members (the scene
+   strategy's capped call, :class:`~everos.memory.extract.scene.SceneNarrator`).
+   A failure here undoes step 1 and leaves the group as it was.
 3. The new versions are appended; then the old ones -- every record that may
    say what was forgotten -- are **taken out of markdown**, not marked: the
    forgotten text must appear nowhere under the memory root, and no index
@@ -62,8 +63,12 @@ from everos.memory import (
     scenes_lock,
 )
 from everos.memory.access import Identity, authorize_forget
-from everos.memory.extract.pipeline.group_scene import scene_version
 from everos.memory.extract.pipeline.pictures import memcell_alive
+from everos.memory.extract.scene import (
+    SceneNarrator,
+    alive_members,
+    scene_cluster_kind,
+)
 from everos.memory.models import (
     Cluster,
     Episode,
@@ -74,7 +79,6 @@ from everos.memory.ports import (
     MemoryRef,
     Scope,
     SessionKey,
-    Stored,
 )
 
 from ._group_forget_plan import (
@@ -98,8 +102,6 @@ from ._group_forget_records import (
 )
 
 if TYPE_CHECKING:
-    from everalgo.types import Episode as AlgoEpisode
-
     from everos.memory.deps import Indexes, Stores
     from everos.memory.models import MemCell
     from everos.memory.ports import IndexEraser
@@ -117,19 +119,11 @@ _EPISODE_TABLE = "episode"
 
 @runtime_checkable
 class GroupReextraction(Protocol):
-    """What a forget needs of the group pipeline: the episode call, and scenes'."""
+    """What a forget needs of the group pipeline: the episode call."""
 
     async def reextract(
         self, *, scope: Scope, session_id: str, memcell_id: str, cell: MemCell
     ) -> Episode | None: ...
-
-    async def scene_narrative(
-        self,
-        *,
-        owner_id: str,
-        members: Sequence[Stored[Episode]],
-        language: str | None,
-    ) -> AlgoEpisode: ...
 
 
 class GroupForgetManager:
@@ -141,7 +135,9 @@ class GroupForgetManager:
             picture); ``None`` keeps every picture file in circulation.
         eraser: Erases the index rows of what goes, and queues what an undo
             puts back for the cascade.
-        pipeline: The group pipeline: re-extraction and scene narratives.
+        pipeline: The group pipeline: re-extraction.
+        scenes: Writes a changed scene again; ``None`` writes no new version
+            (the scene's changed versions still go).
         extractions: The memorize extractions, which a forget waits for.
         session_wait_seconds: How long a forget waits for a busy session's
             lock before answering 503.
@@ -154,15 +150,21 @@ class GroupForgetManager:
         indexes: Indexes | None,
         eraser: IndexEraser,
         pipeline: GroupReextraction | None,
+        scenes: SceneNarrator | None,
         extractions: ExtractionSupervisor,
         session_wait_seconds: float,
     ) -> None:
         self._stores = stores
         self._eraser = eraser
         self._pipeline = pipeline
+        self._scenes_narrator = scenes
         self._extractions = extractions
         self._wait = session_wait_seconds
-        self._planner = ForgetPlanner(stores=stores, indexes=indexes)
+        self._planner = ForgetPlanner(
+            stores=stores,
+            indexes=indexes,
+            scene_members=scenes.min_members if scenes is not None else None,
+        )
 
     # ── forget ───────────────────────────────────────────────────────────
 
@@ -390,33 +392,29 @@ class GroupForgetManager:
     async def _scenes(
         self, plan: ForgetPlan, replaced: Mapping[str, MemoryRef], applied: Applied
     ) -> None:
-        """Each changed scene: its versions go, a new one is narrated afresh."""
+        """Each changed scene: its versions go, a new one is narrated afresh.
+
+        From scratch over the members it has left, read through their marks:
+        the previous narrative may say what was forgotten, so none of it is
+        carried over.
+        """
         if not plan.scenes:
             return
         scope = plan.scope
-        assert self._pipeline is not None or all(not e.members for e in plan.scenes)
+        narrator = self._scenes_narrator
         async with scenes_lock(scope):
             for edit in plan.scenes:
                 ids = [
                     replaced[m].entry_id if m in replaced else m for m in edit.members
                 ]
-                members = sorted(
-                    await self._stores.episode.read_many(scope, ids),
-                    key=lambda s: s.item.timestamp,
-                )
-                if len(members) >= 2 and self._pipeline is not None:
+                members = await alive_members(self._stores.episode, scope, ids)
+                if narrator is not None and len(members) >= narrator.min_members:
                     newest = max(edit.versions, key=lambda v: v.item.version)
-                    narrative = await self._pipeline.scene_narrative(
-                        owner_id=scope.owner_id,
-                        members=members,
-                        language=newest.item.language,
-                    )
-                    scene = scene_version(
+                    scene, _ = await narrator.version(
                         scope,
                         scene_id=edit.scene_id,
                         version=newest.item.version + 1,
                         members=members,
-                        narrative=narrative,
                         language=newest.item.language,
                     )
                     ref = await self._stores.scene.append(
@@ -465,7 +463,7 @@ class GroupForgetManager:
         if members:
             await self._stores.cluster.upsert(
                 scope,
-                "group_scene",
+                scene_cluster_kind(scope),
                 cluster.model_copy(
                     update={"members": members, "count": len(members), "preview": []}
                 ),
@@ -698,7 +696,7 @@ class GroupForgetManager:
                     continue
                 await self._stores.cluster.delete(cluster.id)
                 await self._stores.cluster.upsert(
-                    scope, "group_scene", cluster, member_type="episode"
+                    scope, scene_cluster_kind(scope), cluster, member_type="episode"
                 )
 
 

@@ -141,14 +141,11 @@ machinery that keeps a deleted memory from coming back.
     `[groups] member_profile_every` new segments (default `5`) and on every
     flush of the group. Every item records the segments it was read from.
   - **Group scenes** in `groups/<group_id>/scenes/` (strategy
-    `update_group_scenes`), an opt-in: `[groups] scenes`, default `false`.
-    Episodes that are close in vector and time get one narrative over them,
-    written by everalgo's episode reflector. Each change is a new version.
+    `update_group_scenes`), an opt-in: `[scenes] groups`, default `false`.
+    A user's scenes, built the same way over the group's episodes (see "A
+    user's scenes" below and Changed). Each change is a new version.
     Scenes compete with episodes in search. A scene is shown only to an
-    asker who can see all of its episodes. They are off by default because
-    the design builds group scenes on 2.0's per-owner scenes, which do not
-    exist yet: until they do, a group gets no record type users do not have,
-    and ingestion makes no extra reflector calls.
+    asker who can see all of its episodes.
   - **Agent cases learned in a group** carry `source_group_id`. They are
     returned only to an agent read in that group's context:
     `context_group_id`, asked by a current member.
@@ -260,7 +257,7 @@ machinery that keeps a deleted memory from coming back.
   their messages is kept. Both are `0` on a clean batch. A queued batch
   (`202`) logs them as `memorize.ingest_dropped`.
 - **A user's scenes** ([docs/scenes.md](docs/scenes.md)), off by default:
-  `[scenes] enabled = false`. A scene is a user's episodes about one matter
+  `[scenes] users = false`. A scene is a user's episodes about one matter
   (placed with the `[clustering]` geometry) with one narrative over them,
   ending on where things stand, written to `users/<u>/scenes/` (`sc_` ids)
   and indexed as rows of the episode table (`parent_type = scene`), so it
@@ -282,8 +279,8 @@ machinery that keeps a deleted memory from coming back.
     picture forget rewrites a scene that names the picture without the
     reference (no model call). Deleting a session or episodes removes every
     scene version that names one of them.
-  - Group scenes keep `[groups] scenes = false` and their reflector; they now
-    share the placement and the scene store with a user's.
+  - A group's scenes are the same implementation (`[scenes] groups = false`;
+    see Changed).
   - Measured cost (2026-11-12, DeepSeek V4.1 Flash, thinking off, product
     defaults, off-peak; everalgo-user-memory 0.9.0rc4): $0.026 per 1,000
     messages on LoCoMo conversations 0-1 (46 calls, +13% of the $0.200 text
@@ -316,6 +313,33 @@ machinery that keeps a deleted memory from coming back.
 
 
 ### Changed
+
+- **One scene implementation for users and groups (EverOS 2.0, breaking
+  config).** `update_user_scenes` and `update_group_scenes` run one core
+  (`memory/strategies/_scenes.py`), and a forget inside a group writes a
+  changed scene again through the same narrator: one placement, one capped
+  `chat.scene_update` call, one `min_members`, members read through their
+  marks. The switches are one section, one per owner: `[scenes] users`
+  (was `[scenes] enabled`) and `[scenes] groups` (was `[groups] scenes`),
+  both still `false`; a config naming the old keys is refused at startup.
+  For users nothing changes. Group scenes change, deliberately:
+  - the narrative is the capped call a user's scenes make
+    (`narrative_max_words`, `max_new_episodes`, `episode_max_chars`, the
+    reply's token cap), not everalgo's uncapped `EpisodeReflector`; a forget
+    inside the group writes the scene from scratch with it as well;
+  - a cluster becomes a scene at `[scenes] min_members` live episodes, not
+    a hard-coded two (the forget's rewrite too);
+  - members are read through their marks, as a user's are: an episode a
+    person replaced (`/memory/update`) is read as its new version, and a
+    version written from a member that is gone since is not carried
+    forward;
+  - log lines `scene_written` / `scene_held` with `owner_type` replace
+    `user_scene_*` / `group_scene_*`.
+  - Cost: none for users. A group scene call is now bounded like a user's
+    (about $0.00044 a call, prompt near 1,100-1,200 tokens, measured on the
+    user side), where the reflector's UPDATE read the whole narrative and
+    every new episode unclipped; read side unchanged (the same rows).
+    Nothing billed was run for this change.
 
 - **No hard delete (EverOS 2.0, breaking).** `POST /api/v2/memory/delete` and
   `/delete_by_ids` keep their requests and answer with a forget of the same

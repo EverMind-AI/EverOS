@@ -1,14 +1,17 @@
 # Scenes
 
-A scene is the layer of chat memory above the episodes: a user's episodes
+A scene is the layer of chat memory above the episodes: an owner's episodes
 about one matter (a plan, a trip, a project, a relationship) with one
-narrative written over them, in time order, ending on where things stand.
+narrative written over them, in time order, ending on where things stand. A
+user's scenes and a group's are one implementation; this page describes a
+user's, and a group's differ only where
+[group-memory.md](group-memory.md) 7.7 says so.
 Detail questions are answered by episodes; "how did it go, where does it
 stand" questions by scenes. Both sit in the same search pool, and the
 multi-round decider picks between them.
 
-Scenes are **off by default** (`[scenes] enabled = false`) until their cost
-is accepted; see [Cost](#cost).
+Scenes are **off by default** (`[scenes] users = false`, `[scenes] groups =
+false`) until their cost is accepted; see [Cost](#cost).
 
 ## What is stored
 
@@ -23,14 +26,19 @@ it was written from), `timestamp` (its newest member's), `source_start` (its
 oldest member's), and the sections `Subject` (title), `Summary` and
 `Content` (the narrative). Episodes are never changed by a scene.
 
-A group's scenes (`[groups] scenes`, [group-memory.md](group-memory.md) 7.7)
-use the same store, the same version rules and the same placement.
+A group's scenes (`[scenes] groups`, [group-memory.md](group-memory.md) 7.7)
+are written by the same core (`memory/strategies/_scenes.py`): the same
+placement (kind `group_scene`), the same capped call and caps, the same
+version rules and forget-aware member reads, under `groups/<g>/scenes/`
+(`gsc_` ids). A group's version also spans its members, so a read shows it
+only to an asker who can see every one of them.
 
 ## How a scene is written
 
 The `update_user_scenes` strategy runs on every `EpisodeExtracted` the
-one-to-one pipeline publishes (not on a Reflection merge), under the user's
-scene lock:
+one-to-one pipeline publishes (not on a Reflection merge), and
+`update_group_scenes` on every `GroupEpisodeExtracted`; both run the scene
+core under the owner's scene lock:
 
 1. **Place.** The episode is embedded and folded into the user's scene
    clusters with everalgo's `cluster_by_geometry` (`[clustering] threshold`
@@ -107,7 +115,7 @@ Forgetting follows the sources (EverOS 2.0 has no hard delete):
 ## Cost
 
 Measured on 2026-11-12 with DeepSeek V4.1 Flash (thinking off), product
-defaults plus `[scenes] enabled = true`, prompt `chat.scene_update` v2,
+defaults plus `[scenes] users = true`, prompt `chat.scene_update` v2,
 everalgo-user-memory 0.9.0rc4, off-peak prices (peak doubles them):
 
 | | LoCoMo conv 0-1 (788 messages) | MemEye, 8 conversations (1,696 messages) |

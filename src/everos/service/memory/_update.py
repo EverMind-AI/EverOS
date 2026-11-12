@@ -55,6 +55,7 @@ from everos.core.observability.logging import get_logger
 from everos.memory import forget_lock, profile_lock, scenes_lock
 from everos.memory.access import authorize_edit
 from everos.memory.extract.pipeline import profile_items
+from everos.memory.extract.scene import scene_cluster_kind
 from everos.memory.models import (
     FORGOTTEN_MARK,
     Episode,
@@ -357,13 +358,16 @@ class UpdateManager:
     ) -> None:
         """A group scene's cluster names the new version of its episode.
 
-        A group scene reads its members by id (section 7.7); left on the old
-        id, its next narrative would read the version the person replaced.
+        A scene reads its members through their marks, so its narrative
+        follows the new version either way; the cluster names it as well, so
+        a forget inside the group that takes the new version out takes it out
+        of the cluster too (section 9.4).
         """
         clusters = self._stores.cluster
+        kind = scene_cluster_kind(scope)
         async with scenes_lock(scope):
             cluster_id = await clusters.find_cluster_for_member(
-                scope, "episode", old_id, kind="group_scene"
+                scope, "episode", old_id, kind=kind
             )
             cluster = await clusters.get(cluster_id) if cluster_id else None
             if cluster is None or cluster.id is None:
@@ -372,7 +376,7 @@ class UpdateManager:
             await clusters.delete(cluster.id)
             await clusters.upsert(
                 scope,
-                "group_scene",
+                kind,
                 cluster.model_copy(update={"members": members}),
                 member_type="episode",
             )

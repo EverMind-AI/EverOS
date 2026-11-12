@@ -107,10 +107,10 @@ class _Model:
             )
         if name == "GroupProfileReply":
             return json.dumps({"operations": _profile_operations(prompt)})
-        if name == "_EpisodeReflectReply" or "Reflect" in name:
+        if name == "SceneReply":
             said = ", ".join(_markers(prompt)) or "nothing"
             return json.dumps(
-                {"title": "Scene", "summary": said, "content": f"Scene of {said}."}
+                {"narrative": f"Scene of {said}.", "summary": said, "title": "Scene"}
             )
         raise AssertionError(f"unexpected model call {name}")
 
@@ -641,7 +641,7 @@ async def test_a_forget_failing_part_way_is_rolled_back(chat: _Chat) -> None:
     world = chat.world
     await _seed_scene(world)
     before = {p: _entries(t) for p, t in _markdown(world).items()}
-    chat.model.failing = {"_ReflectOutput"}
+    chat.model.failing = {"SceneReply"}
     with pytest.raises(RuntimeError, match="model down"):
         await _forget(world, "u_betty", _message("m-1"))
 

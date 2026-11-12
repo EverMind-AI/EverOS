@@ -1691,8 +1691,8 @@ group-scoped `/memory/delete` is an owner's or admin's forget.
 `sender_ids = [poster]`. In the background, each member who spoke gets a
 profile in the group, `groups/<group_id>/members/<member_id>.md`. It is
 updated after `[groups] member_profile_every` segments and on every flush.
-With `[groups] scenes = true` (off by default), the group's scenes are
-written to `groups/<group_id>/scenes/`.
+With `[scenes] groups = true` (off by default), the group's scenes are
+written to `groups/<group_id>/scenes/`, as a user's are with `[scenes] users`.
 
 **Group results.** A group episode carries `owner_type: "group"`, `group_id`
 and `source: {memcell_id, from, to}`: its memcell and the epoch ms of the

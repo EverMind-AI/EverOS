@@ -136,6 +136,7 @@ if TYPE_CHECKING:
     from everos.memory.deps import Indexes, Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
+    from everos.memory.extract.scene import SceneNarrator
     from everos.memory.get import GetManager, GetRequest, GetResponse
     from everos.memory.groups import RosterManager
     from everos.memory.ports import EventBus, IndexEraser
@@ -174,6 +175,8 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
+        scene_narrator: Writes a group's scene again when a forget changed
+            its episodes; ``None`` writes none.
     """
 
     def __init__(
@@ -195,6 +198,7 @@ class MemoryService:
         rosters: RosterManager | None = None,
         group_pipeline: Pipeline | None = None,
         access: AccessPolicy | None = None,
+        scene_narrator: SceneNarrator | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._indexes = indexes
@@ -238,7 +242,8 @@ class MemoryService:
         self._reviser = RevisionManager(stores=stores, updater=self._updater)
         self._history = HistoryReader(stores=stores, access=self._access)
         # Forget inside a group (docs/group-memory.md, 9.4): re-extraction
-        # runs the group pipeline's own episode call.
+        # runs the group pipeline's own episode call, and a changed scene the
+        # scene strategy's narrative call.
         self._group_forgetter = GroupForgetManager(
             stores=stores,
             indexes=indexes,
@@ -246,6 +251,7 @@ class MemoryService:
             pipeline=group_pipeline
             if isinstance(group_pipeline, GroupReextraction)
             else None,
+            scenes=scene_narrator,
             extractions=self._extractions,
             session_wait_seconds=settings.memorize.delete_wait_seconds,
         )

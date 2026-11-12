@@ -11,10 +11,11 @@ cascade projects the markdown into a real LanceDB. What these pin:
   a member who left and rejoined between them -- while each episode still
   returns on its own; an asker who sees them all sees the scene;
 - get lists scenes under ``memory_type = scene``, and ``episode`` lists no
-  scene;
-- scenes are an opt-in: with the default ``[groups] scenes = false`` no
-  scene is written and no narrative call is made. The tests of what a scene
-  does switch them on.
+  scene.
+
+Scenes are an opt-in (``[scenes] groups``, off by default; the switch is
+pinned with the scene core, test_update_scenes.py): these tests switch them
+on.
 """
 
 from __future__ import annotations
@@ -38,10 +39,10 @@ _TEXT = "Chen and Dan planned the Lisbon offsite venue"
 
 @pytest.fixture
 def scenes_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``[groups] scenes = true`` for the strategy under test (default off)."""
+    """``[scenes] groups = true`` for the strategy under test (default off)."""
     base = Settings()
     settings = base.model_copy(
-        update={"groups": base.groups.model_copy(update={"scenes": True})}
+        update={"scenes": base.scenes.model_copy(update={"groups": True})}
     )
     # The package re-exports the function under the module's name.
     module = importlib.import_module("everos.memory.strategies.update_group_scenes")
@@ -55,12 +56,12 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
     if name == "EpisodeReply":
         # One text for every segment: equal embeddings, so one scene.
         return json.dumps({"title": "Offsite", "summary": _TEXT, "content": _TEXT})
-    if name == "_ReflectOutput":
+    if name == "SceneReply":
         return json.dumps(
             {
-                "title": "Lisbon offsite scene",
+                "narrative": "Scene narrative: the Lisbon offsite took shape.",
                 "summary": "How the Lisbon offsite took shape.",
-                "content": "Scene narrative: the Lisbon offsite took shape.",
+                "title": "Lisbon offsite scene",
             }
         )
     raise AssertionError(f"unexpected model call {name}")
@@ -189,21 +190,3 @@ async def test_a_new_member_episode_supersedes_the_scene_version(
         text = files[0].read_text()
         assert "**version**: 1" in text and "**version**: 2" in text
         assert "deprecated_entries:" in text
-
-
-async def test_the_default_writes_no_scene(tmp_path: Path) -> None:
-    """Off by default: two episodes of one scene, and neither a scene nor a call."""
-    assert Settings().groups.scenes is False
-    llm = FakeLLMClient(handler=_model)
-    async with GroupWorld.open(tmp_path, llm=llm) as world:
-        await _setup(world)
-        await _segment(world, 1_000)
-        await _segment(world, 2_000)
-        scenes = tmp_path / "default_app" / PROJECT / "groups" / "trip" / "scenes"
-        assert not scenes.exists()
-        episodes = [
-            e for e in world.bus.events if type(e).__name__ == "GroupEpisodeExtracted"
-        ]
-        assert len(episodes) == 2  # the strategy had its events, and skipped them
-    called = [call.response_format.__name__ for call in llm.calls]
-    assert "_ReflectOutput" not in called

@@ -54,6 +54,7 @@ from everos.memory.extract.scene import (
     forget_orphaned_scenes,
     newest_versions,
     restore_revived_scenes,
+    scene_cluster_kind,
 )
 from everos.memory.models import (
     FORGOTTEN_MARK,
@@ -944,7 +945,7 @@ class UserForgetManager:
             if cluster.id is None or await self._stores.cluster.get(cluster.id):
                 continue
             await self._stores.cluster.upsert(
-                scope, "user_scene", cluster, member_type="episode"
+                scope, scene_cluster_kind(scope), cluster, member_type="episode"
             )
 
     async def _restore_profile(

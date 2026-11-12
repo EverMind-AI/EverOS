@@ -1,8 +1,13 @@
-"""One scene-update call: the narrative written again over the joining episodes."""
+"""One scene-update call: the narrative written again over the joining episodes.
+
+Every writer of a scene version makes it -- the scene strategy for a user's
+and a group's scenes, and a forget inside a group that writes a scene again
+from the episodes it has left -- through :class:`SceneNarrator`.
+"""
 
 from __future__ import annotations
 
-__all__ = ["SceneCaps", "SceneText", "write_narrative"]
+__all__ = ["SceneCaps", "SceneNarrator", "SceneText", "write_narrative"]
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -23,9 +28,15 @@ from .prompt import (
     narrative_char_cap,
     reply_token_cap,
 )
+from .version import scene_version
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
+
+    from everos.config import ScenesSettings
+    from everos.memory.custom_instructions import CustomInstructions
+    from everos.memory.models import Episode, Scene
+    from everos.memory.ports import Scope, Stored
 
 logger = get_logger(__name__)
 
@@ -62,6 +73,67 @@ class SceneText:
     title: str
     clipped: bool
     episodes: int
+
+
+@dataclass(frozen=True)
+class SceneNarrator:
+    """The scene-update call as every writer of a scene version makes it.
+
+    Attributes:
+        llm: The extraction model.
+        settings: ``[scenes]``: the call's caps, and the members a scene needs.
+        instructions: Custom instructions; ``reflect`` is read at each call.
+    """
+
+    llm: LLMClient
+    settings: ScenesSettings
+    instructions: CustomInstructions
+
+    @property
+    def min_members(self) -> int:
+        """A cluster of this many live episodes or more is a scene."""
+        return self.settings.min_members
+
+    async def version(
+        self,
+        scope: Scope,
+        *,
+        scene_id: str,
+        version: int,
+        members: Sequence[Stored[Episode]],
+        language: str | None,
+        previous: str = "",
+        joining: Sequence[Stored[Episode]] | None = None,
+    ) -> tuple[Scene, SceneText]:
+        """Version ``version`` of ``scene_id`` over ``members``, and the reply.
+
+        The narrative is written over ``previous`` (``""`` writes it from
+        scratch) and the ``joining`` episodes, every member when ``None``;
+        ``members`` are the live episodes the version names, oldest first.
+        """
+        caps = self.settings
+        read = members if joining is None else joining
+        text = await write_narrative(
+            self.llm,
+            previous=previous,
+            episodes=[m.item.episode for m in read],
+            caps=SceneCaps(
+                narrative_max_words=caps.narrative_max_words,
+                max_new_episodes=caps.max_new_episodes,
+                episode_max_chars=caps.episode_max_chars,
+            ),
+            language=language,
+            custom_instructions=self.instructions.load("reflect"),
+        )
+        scene = scene_version(
+            scope,
+            scene_id=scene_id,
+            version=version,
+            members=members,
+            text=text,
+            language=language,
+        )
+        return scene, text
 
 
 async def write_narrative(

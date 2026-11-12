@@ -834,28 +834,34 @@ class ClusteringSettings(_Section):
 
 
 class ScenesSettings(_Section):
-    """``[scenes]`` -- a user's scenes, built from their episodes.
+    """``[scenes]`` -- an owner's scenes, built from its episodes.
 
-    A scene is the user's episodes about one matter (close in vector and in
-    time, the ``[clustering]`` geometry) with one narrative written over them.
-    ``enabled``: build them; one capped narrative call each time an episode
-    joins a scene, none for an episode that joins none. Off by default until
-    its cost is accepted. ``min_members``: a cluster becomes a scene at this
-    many episodes. ``narrative_max_words``: the narrative's length cap -- the
-    prompt asks for it and code clips a reply past it, so neither the
-    narrative nor the next call's prompt grows with the scene.
-    ``max_new_episodes`` / ``episode_max_chars``: the episodes one call reads
-    (the newest ones) and each one's clip.
+    A scene is an owner's episodes about one matter (close in vector and in
+    time, the ``[clustering]`` geometry) with one narrative written over them
+    (docs/scenes.md). Users and groups build them the same way; each has its
+    own switch. ``users``: build every user's scenes (``users/<u>/scenes/``);
+    ``groups``: build every group's (``groups/<g>/scenes/``,
+    docs/group-memory.md, section 7.7). Either costs one capped narrative
+    call each time an episode joins a scene and none for an episode that
+    joins none; both are off by default until their cost is accepted.
+    ``min_members``: a cluster becomes a scene at this many episodes.
+    ``narrative_max_words``: the narrative's length cap -- the prompt asks for
+    it and code clips a reply past it, so neither the narrative nor the next
+    call's prompt grows with the scene. ``max_new_episodes`` /
+    ``episode_max_chars``: the episodes one call reads (the newest ones) and
+    each one's clip.
 
     Env binding:
-        EVEROS_SCENES__ENABLED
+        EVEROS_SCENES__USERS
+        EVEROS_SCENES__GROUPS
         EVEROS_SCENES__MIN_MEMBERS
         EVEROS_SCENES__NARRATIVE_MAX_WORDS
         EVEROS_SCENES__MAX_NEW_EPISODES
         EVEROS_SCENES__EPISODE_MAX_CHARS
     """
 
-    enabled: bool = False
+    users: bool = False
+    groups: bool = False
     min_members: int = Field(default=2, ge=2)
     narrative_max_words: int = Field(default=300, ge=50)
     max_new_episodes: int = Field(default=4, ge=1)
@@ -1151,12 +1157,6 @@ class GroupsSettings(_Section):
     ``member_profile_every``: a member's profile in a group is updated after
     this many new segments in which they spoke, and at every flush of the
     group; episodes are searchable at once, only the profile lags.
-    ``scenes``: build the group's scenes from its episodes (section 7.7) --
-    one narrative call each time an episode joins a scene of two or more.
-    Off by default: the design builds group scenes on 2.0's per-owner
-    scenes, which do not exist yet, so until they do group scenes are an
-    opt-in (a group gets no record type users do not have, and ingestion
-    makes no extra reflector calls).
     ``asker_in_question``: a group scope's multi-round question names the
     asker, ``"<display name>: <question>"`` (section 8.2).
     ``group_profile``: keep the group profile (section 7.5) -- topics,
@@ -1169,7 +1169,6 @@ class GroupsSettings(_Section):
     implicit_create: bool = True
     implicit_join: bool = True
     member_profile_every: int = Field(default=5, ge=1)
-    scenes: bool = False
     asker_in_question: bool = True
     group_profile: bool = True
     group_profile_batch: int = Field(default=5, ge=1)

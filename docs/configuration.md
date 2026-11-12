@@ -362,14 +362,15 @@ joins it only behind its session's backlog)
 
 ### `[scenes]`
 
-A user's scenes ([scenes.md](scenes.md)): their episodes about one matter,
+An owner's scenes ([scenes.md](scenes.md)): its episodes about one matter,
 placed with the `[clustering]` geometry, with one narrative over them. Scene
 versions are rows of the episode table and compete with the episodes in
-search.
+search. Users and groups build them the same way, each under its own switch.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | Build scenes: one capped narrative call (`chat.scene_update`) each time an episode joins a scene; an episode that joins no scene costs no call. Off by default until its cost is accepted; with it off no scene is written and no call is made. |
+| `users` | bool | `false` | Build every user's scenes (`users/<u>/scenes/`): one capped narrative call (`chat.scene_update`) each time an episode joins a scene; an episode that joins no scene costs no call. Off by default until its cost is accepted; with it off no user scene is written and no call is made. |
+| `groups` | bool | `false` | Build every group's scenes (`groups/<g>/scenes/`, [group-memory.md](group-memory.md) 7.7) the same way, with the same call and caps. Off by default. |
 | `min_members` | int | `2` | A cluster becomes a scene at this many live episodes. |
 | `narrative_max_words` | int | `300` | The narrative's cap. The prompt asks for at most this many words; a reply longer than 8 characters a word loses its oldest part, so neither the narrative nor the next call's prompt grows with the scene. |
 | `max_new_episodes` | int | `4` | Joining episodes one call reads (the newest). |
@@ -421,15 +422,14 @@ strategies and is hot-reloaded; these require a restart.
 
 ### `[groups]`
 
-Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4, 7.7 and
-8.2).
+Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and
+8.2). A group's scenes are switched with `[scenes] groups`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
 | `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
-| `scenes` | bool | `false` | Build each group's scenes from its episodes. Each time an episode joins a scene of two or more, one narrative call (the reflect operator) writes the scene's next version. Off by default; a group's scenes share the placement and the version store with a user's (`[scenes]`, [scenes.md](scenes.md)), whose capped prompt they do not use yet. `true` opts in. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
 
 ### `[access]`

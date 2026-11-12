@@ -831,10 +831,12 @@ members established:
 
 2.0 scenes run per owner, so a group gets its own scenes under
 `groups/<group_id>/scenes/`, built from its episodes exactly as for a user. A
-user's scenes ([scenes.md](scenes.md)) and a group's share the placement (one
-geometry, `strategies/_scene_clusters.py`) and the version store; the group
-strategy still narrates with the uncapped reflector and can move to the capped
-`chat.scene_update` call once group scenes are measured. The
+user's scenes ([scenes.md](scenes.md)) and a group's are one implementation
+(`strategies/_scenes.py`): one placement, one capped `chat.scene_update`
+call with the `[scenes]` caps and `min_members`, members read through their
+marks, one version store; `[scenes] groups` switches a group's on. A forget
+inside the group writes a changed scene again with the same call, from
+scratch over the members it has left (section 9.4). The
 group also gets its own state for the query encoder, updated from its episodes.
 A group-scoped query is encoded with the group's state, never with the asker's
 personal state. The state only affects ranking; it never returns content.
@@ -1528,17 +1530,15 @@ The first half of Step 1 differs from the text above in these places:
 
 The second half of Step 1 differs from the text above in these places:
 
-- **No 2.0 scenes or query-encoder state on this line.** Task 6 builds on
-  both, and neither exists here, nor yet on any other branch. Group scenes
-  are therefore **off by default** (`[groups] scenes = false`) and are an
-  opt-in until 2.0's per-owner scenes exist: until then a group would get a
-  record type users do not have, and every group episode that joins a scene
-  would cost ingestion one more reflector call. Switched on, group scenes
-  are built from operators that do exist, with no new prompt text. Each new
-  group episode is placed by everalgo's `cluster_by_geometry`, with the
-  `[clustering]` threshold and time window that users' episode clusters use.
-  The narrative comes from everalgo's `EpisodeReflector`: INIT over the
-  members when the scene is new, then UPDATE with each new episode. The
+- **Scenes and query-encoder state.** Group scenes are the per-owner
+  scenes a user's are (section 7.7, [scenes.md](scenes.md)): the same
+  placement by everalgo's `cluster_by_geometry` (`[clustering]` threshold
+  and time window), the same capped `chat.scene_update` call, `[scenes]
+  min_members`, forget-aware member reads. They are **off by default**
+  (`[scenes] groups = false`) until their cost is accepted, as a user's are
+  (`[scenes] users = false`). Until 2026-11-12 a group's narrative came from
+  everalgo's uncapped `EpisodeReflector` (INIT, then UPDATE) over members
+  read by id, and a cluster became a scene at a hard-coded two episodes. The
   group's state for the query encoder is not built: no encoder on this line
   takes a state. So "group queries use the group's state" holds only in the
   weak sense that no query is encoded with a personal state.
@@ -1551,7 +1551,7 @@ The second half of Step 1 differs from the text above in these places:
   scenes compete with episodes in every recall, under the same window
   predicate. Search and get mark them `type = "Scene"`, and their
   `source.memcell_id` is null. A session-filtered search finds no scene,
-  because a scene belongs to no session. `[groups] scenes = true` switches
+  because a scene belongs to no session. `[scenes] groups = true` switches
   scenes on; they are off by default (see the note above).
 - **Prompt registry.** There is no central prompt registry on this line
   either. Each prompt is a versioned constant next to its renderer -- the

@@ -62,7 +62,6 @@ from everos.memory.extract.pipeline.group_render import (
     roster_block,
     with_roster_block,
 )
-from everos.memory.extract.pipeline.group_scene import narrate_scene
 from everos.memory.extract.pipeline.pictures import (
     Picture,
     memcell_alive,
@@ -87,7 +86,6 @@ from everos.memory.ports import (
     MessageForgetStore,
     Scope,
     SessionKey,
-    Stored,
 )
 from everos.memory.ports.images import ImageStore
 
@@ -230,28 +228,6 @@ class GroupMemoryPipeline:
         session = SessionKey(scope.app_id, scope.project_id, session_id)
         found = await self._extract_segment(scope, session, memcell_id, cell)
         return found.episode
-
-    async def scene_narrative(
-        self,
-        *,
-        owner_id: str,
-        members: Sequence[Stored[Episode]],
-        language: str | None,
-    ) -> AlgoEpisode:
-        """A scene's narrative written from scratch over ``members``.
-
-        What a forget writes when an episode of a scene changed: the INIT of
-        the scene strategy's reflector, never an UPDATE -- the previous
-        narrative may say what was forgotten.
-        """
-        return await narrate_scene(
-            self._llm,
-            owner_id=owner_id,
-            members=members,
-            previous=None,
-            custom_instructions=self._instructions.load("reflect"),
-            language=language,
-        )
 
     async def _readable(self, memcell_id: str, cell: MemCell) -> MemCell:
         """``cell`` without the messages a live forget names."""

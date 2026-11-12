@@ -2,7 +2,7 @@
 
 What these pin:
 
-- **Search competition.** With ``[scenes] enabled``, two conversations about
+- **Search competition.** With ``[scenes] users``, two conversations about
   one matter make a scene under ``users/<u>/scenes/``; the cascade projects
   it into the episode table, and a search returns it next to the episodes,
   as ``type = Scene``, from the same ranking. ``get`` lists it under
@@ -51,10 +51,10 @@ _TEXT = "Amy planned the Lisbon trip and booked a flat in Alfama"
 
 @pytest.fixture
 def scenes_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``[scenes] enabled = true`` for the strategy under test (default off)."""
+    """``[scenes] users = true`` for the strategy under test (default off)."""
     base = Settings()
     settings = base.model_copy(
-        update={"scenes": base.scenes.model_copy(update={"enabled": True})}
+        update={"scenes": base.scenes.model_copy(update={"users": True})}
     )
     module = importlib.import_module("everos.memory.strategies.update_user_scenes")
     monkeypatch.setattr(module, "load_settings", lambda: settings)
@@ -152,7 +152,7 @@ async def test_a_scene_competes_with_the_episodes_in_search(tmp_path: Path) -> N
 
 
 async def test_the_default_writes_no_scene_and_makes_no_call(tmp_path: Path) -> None:
-    assert Settings().scenes.enabled is False
+    assert Settings().scenes.users is False
     llm = FakeLLMClient(handler=_model())
     async with GroupWorld.open(tmp_path, llm=llm) as world:
         await _conversation(world, "s1", 1_000)

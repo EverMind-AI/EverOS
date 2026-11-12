@@ -117,6 +117,7 @@ from everos.memory.extract.pipeline import (
     GroupMemoryPipeline,
     UserMemoryPipeline,
 )
+from everos.memory.extract.scene import SceneNarrator
 from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
 from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
@@ -728,6 +729,9 @@ def _build_memory_service(
             image_limits=_image_limits(settings),
             message_forget=stores.message_forget,
         ),
+        # A forget inside a group writes a changed scene again with the scene
+        # strategy's own capped call (docs/scenes.md).
+        scene_narrator=SceneNarrator(providers.llm, settings.scenes, deps.instructions),
         bus=bus,
         search_manager=SearchManager(
             episode_recaller=EpisodeRecaller(recaller_deps, indexes.episode),

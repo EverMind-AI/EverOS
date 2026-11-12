@@ -1,12 +1,16 @@
-"""update_user_scenes: a user's scene versions (docs/scenes.md).
+"""The scene core and its two owners (docs/scenes.md; docs/group-memory.md, 7.7).
 
-In-memory stores, a fixed-vector embedder and a scripted scene model. What
-these pin:
+``update_user_scenes`` and ``update_group_scenes`` run one core
+(``memory/strategies/_scenes.py``): the core is pinned once, through the
+user's strategy, and what the group adds -- a version's span, attribution
+and origin, its own switch -- through the group's. In-memory stores, a
+fixed-vector embedder and a scripted scene model. What these pin:
 
 - an episode that joins no scene costs no call; the second episode of a
   cluster writes version 1 over both (empty current narrative); a third
   writes version 2 from version 1's narrative and the new episode only,
-  superseding version 1; a replay writes nothing;
+  superseding version 1; a replay writes nothing, and a retry after a failed
+  narrative call still writes the version;
 - the call is capped: the system prompt asks for ``narrative_max_words``,
   the request carries the token cap with ``retry_cut``, a reply past the cap
   is clipped at a sentence end, so the next prompt stays bounded, and at most
@@ -15,7 +19,12 @@ these pin:
 - forgetting follows the sources: a forgotten member is no member, a version
   written from an episode forgotten since is not carried forward, and a
   forgotten version keeps its mark when the scene goes on;
-- the switch: off by default, and then the strategy does not apply.
+- a group's versions: the same capped call, a span over the members, their
+  senders and subjects united, one origin kept or ``mixed``; a member a
+  person replaced is read as its new version; the narrative in the event's
+  language;
+- the switches: one per owner, both off by default, and then the strategy
+  does not apply.
 """
 
 from __future__ import annotations
@@ -28,7 +37,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.config import Settings
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtracted, GroupEpisodeExtracted
 from everos.memory.extract.scene import (
     SCENE_UPDATE,
     SceneCaps,
@@ -38,10 +47,16 @@ from everos.memory.extract.scene import (
 )
 from everos.memory.models import FORGOTTEN_MARK, Episode
 from everos.memory.ports import NoSourceCheck, Scope
-from everos.memory.strategies import UPDATE_USER_SCENES_SPEC, update_user_scenes
+from everos.memory.strategies import (
+    UPDATE_GROUP_SCENES_SPEC,
+    UPDATE_USER_SCENES_SPEC,
+    update_group_scenes,
+    update_user_scenes,
+)
 from tests.fakes import make_deps
 
 _SCOPE = Scope(app_id="default", project_id="p", owner_id="amy", owner_type="user")
+_GROUP = Scope(app_id="default", project_id="p", owner_id="trip", owner_type="group")
 _EMPTY = '<current_narrative words="0">\n\n</current_narrative>'
 """A new scene's prompt: an empty current narrative."""
 
@@ -61,9 +76,12 @@ class _Same:
 class _SceneModel:
     """Answers the scene call; records each request's text and arguments."""
 
-    def __init__(self, narrative: str | None = None) -> None:
+    def __init__(
+        self, narrative: str | None = None, *, fail_first: bool = False
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.narrative = narrative
+        self.fail_first = fail_first
 
     def __call__(self, messages: Any, *, response_format: type, **kw: Any) -> str:
         assert response_format.__name__ == "SceneReply"
@@ -74,6 +92,8 @@ class _SceneModel:
                 **kw,
             }
         )
+        if self.fail_first and len(self.calls) == 1:
+            raise RuntimeError("narrative call failed")
         n = len(self.calls)
         return json.dumps(
             {
@@ -86,17 +106,23 @@ class _SceneModel:
 
 @pytest.fixture
 def scenes(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Turn ``[scenes]`` on for the strategy; returns a setter for its fields."""
-    module = importlib.import_module("everos.memory.strategies.update_user_scenes")
+    """Turn ``[scenes]`` on for both strategies; returns a setter for its fields."""
+    modules = [
+        importlib.import_module(f"everos.memory.strategies.update_{owner}_scenes")
+        for owner in ("user", "group")
+    ]
 
     def configure(**fields: Any) -> Settings:
         base = Settings()
         settings = base.model_copy(
             update={
-                "scenes": base.scenes.model_copy(update={"enabled": True, **fields})
+                "scenes": base.scenes.model_copy(
+                    update={"users": True, "groups": True, **fields}
+                )
             }
         )
-        monkeypatch.setattr(module, "load_settings", lambda: settings)
+        for module in modules:
+            monkeypatch.setattr(module, "load_settings", lambda: settings)
         return settings
 
     configure()
@@ -267,12 +293,27 @@ async def test_a_forgotten_version_keeps_its_mark_when_the_scene_goes_on() -> No
     assert "Narrative 1." not in model.calls[1]["user"]
 
 
-async def test_the_switch_is_off_by_default() -> None:
-    assert Settings().scenes.enabled is False
+async def test_the_switches_are_off_by_default() -> None:
+    assert (Settings().scenes.users, Settings().scenes.groups) == (False, False)
     deps = make_deps(llm=FakeLLMClient(handler=_SceneModel()), embedding=_Same())
-    event = _event("ep_20260101_0001", 1)
     assert UPDATE_USER_SCENES_SPEC.applies_to is not None
-    assert UPDATE_USER_SCENES_SPEC.applies_to(event, deps) is False
+    assert UPDATE_USER_SCENES_SPEC.applies_to(_event("ep_1", 1), deps) is False
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to is not None
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to(_group_event("gep_1", 1), deps) is False
+
+
+async def test_each_owner_has_its_own_switch(scenes: Any) -> None:
+    deps = make_deps(llm=FakeLLMClient(handler=_SceneModel()), embedding=_Same())
+    assert UPDATE_USER_SCENES_SPEC.applies_to is not None
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to is not None
+    scenes(groups=False)
+    assert UPDATE_USER_SCENES_SPEC.applies_to(_event("ep_1", 1), deps) is True
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to(_group_event("gep_1", 1), deps) is False
+    scenes(users=False)
+    assert UPDATE_USER_SCENES_SPEC.applies_to(_event("ep_1", 1), deps) is False
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to(_group_event("gep_1", 1), deps) is True
+    bare = make_deps(llm=FakeLLMClient(handler=_SceneModel()), embedding=None)
+    assert UPDATE_GROUP_SCENES_SPEC.applies_to(_group_event("gep_1", 1), bare) is False
 
 
 @pytest.mark.usefixtures("scenes")
@@ -290,3 +331,132 @@ def test_the_prompt_is_registered_and_pinned() -> None:
     assert SCENE_UPDATE.id == "chat.scene_update"
     assert SCENE_UPDATE.version == 2
     assert SCENE_UPDATE.fingerprint == "6ce8a6f4593bf434"
+
+
+@pytest.mark.usefixtures("scenes")
+async def test_a_retry_after_a_failed_narrative_writes_the_version() -> None:
+    deps = make_deps(
+        llm=FakeLLMClient(handler=_SceneModel(fail_first=True)), embedding=_Same()
+    )
+    first = await _add(deps, 1)
+    second = await _episode(deps, 2)
+    with pytest.raises(RuntimeError):
+        await update_user_scenes(_event(second, 2), deps)
+    assert deps.stores.scene.written == []
+    await update_user_scenes(_event(second, 2), deps)  # the engine's retry
+    (v1,) = deps.stores.scene.written
+    assert v1.item.member_ids == [first, second]
+
+
+async def test_without_an_embedder_nothing_happens() -> None:
+    deps = make_deps(embedding=None)
+    first = await _group_episode(deps, 1, origin="member", sender="u_chen")
+    assert await update_group_scenes(_group_event(first, 1), deps) == []
+    assert deps.stores.scene.written == []
+
+
+# ── a group's scenes ─────────────────────────────────────────────────────
+
+
+async def _group_episode(deps: Any, n: int, *, origin: str, sender: str) -> str:
+    ref = await deps.stores.episode.append(
+        _GROUP,
+        Episode(
+            owner_id="trip",
+            episode=f"Episode {n} about the offsite",
+            summary="s",
+            subject="Offsite",
+            timestamp=1_000 * n + 500,
+            source_start=1_000 * n,
+            session_id="s1",
+            sender_ids=[sender],
+            subject_ids=[sender],
+            origin=origin,  # type: ignore[arg-type]
+            parent_id=f"mc_{n}",
+        ),
+        only_if=NoSourceCheck(),
+    )
+    return ref.entry_id
+
+
+def _group_event(
+    entry_id: str, n: int, *, language: str | None = None
+) -> GroupEpisodeExtracted:
+    return GroupEpisodeExtracted(
+        memcell_id=f"mc_{n}",
+        episode_entry_id=entry_id,
+        episode_text=f"Episode {n} about the offsite",
+        episode_timestamp_ms=1_000 * n + 500,
+        group_id="trip",
+        app_id="default",
+        project_id="p",
+        language=language,
+    )
+
+
+@pytest.mark.usefixtures("scenes")
+async def test_a_group_version_spans_its_members_and_unites_them() -> None:
+    model = _SceneModel()
+    deps = make_deps(llm=FakeLLMClient(handler=model), embedding=_Same())
+    first = await _group_episode(deps, 1, origin="member", sender="u_chen")
+    await update_group_scenes(_group_event(first, 1), deps)
+    assert deps.stores.scene.written == [] and model.calls == []
+
+    second = await _group_episode(deps, 2, origin="assistant", sender="bot_ava")
+    await update_group_scenes(_group_event(second, 2), deps)
+    (v1,) = deps.stores.scene.written
+    assert v1.scope == _GROUP and v1.ref.entry_id.startswith("gsc_")
+    assert v1.item.member_ids == [first, second]
+    assert (v1.item.source_start, v1.item.timestamp) == (1_000, 2_500)
+    assert v1.item.sender_ids == ["u_chen", "bot_ava"]
+    assert v1.item.subject_ids == ["u_chen", "bot_ava"]
+    assert v1.item.origin == "mixed"
+    # The same capped call as a user's scenes, not an uncapped reflection.
+    assert "At most 300 words in all" in model.calls[0]["system"]
+    assert model.calls[0]["max_tokens"] == reply_token_cap(300)
+
+    third = await _group_episode(deps, 3, origin="member", sender="u_betty")
+    await update_group_scenes(_group_event(third, 3), deps)
+    v2 = deps.stores.scene.written[-1]
+    assert v2.item.version == 2 and v2.item.scene_id == v1.item.scene_id
+    assert deps.stores.scene.superseded == {v1.ref.entry_id: v2.ref.entry_id}
+
+
+@pytest.mark.usefixtures("scenes")
+async def test_a_group_member_a_person_replaced_is_read_as_its_new_version() -> None:
+    model = _SceneModel()
+    deps = make_deps(llm=FakeLLMClient(handler=model), embedding=_Same())
+    first = await _group_episode(deps, 1, origin="member", sender="u_chen")
+    await update_group_scenes(_group_event(first, 1), deps)
+    old = (await deps.stores.episode.read_many(_GROUP, [first]))[0]
+    new = await deps.stores.episode.append(
+        _GROUP,
+        old.item.model_copy(update={"episode": "Episode 1, as Chen corrected it"}),
+        only_if=NoSourceCheck(),
+    )
+    await deps.stores.episode.deprecate(
+        _GROUP,
+        entries=[(old.ref.md_path, first)],
+        replaced_by=new.entry_id,
+        only_if=NoSourceCheck(),
+    )
+    second = await _group_episode(deps, 2, origin="member", sender="u_chen")
+    await update_group_scenes(_group_event(second, 2), deps)
+    (v1,) = deps.stores.scene.written
+    assert v1.item.member_ids == [new.entry_id, second]
+    assert "as Chen corrected it" in model.calls[0]["user"]
+    assert "Episode 1 about" not in model.calls[0]["user"]
+
+
+@pytest.mark.usefixtures("scenes")
+async def test_a_group_narrative_is_written_in_the_event_s_language() -> None:
+    model = _SceneModel()
+    deps = make_deps(llm=FakeLLMClient(handler=model), embedding=_Same())
+    for n in (1, 2, 3):
+        entry = await _group_episode(deps, n, origin="member", sender="u_chen")
+        await update_group_scenes(_group_event(entry, n, language="English"), deps)
+
+    assert len(model.calls) == 2  # the scene's first version, then an update
+    for call in model.calls:
+        assert "Write every output field in English" in call["system"]
+    assert {v.item.language for v in deps.stores.scene.written} == {"English"}
