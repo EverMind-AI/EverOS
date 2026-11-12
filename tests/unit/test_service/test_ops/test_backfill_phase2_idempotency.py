@@ -87,6 +87,7 @@ async def test_emit_synthetic_events_skips_already_clustered_rows() -> None:
             app_id: str,
             project_id: str,
             owner_id: str,
+            kind: str | None = None,
         ) -> str | None:
             lookups.append((member_type, member_id))
             return clustered.get((member_type, member_id))
@@ -132,6 +133,7 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings() -> No
     strategies persist on the write path. A drift here would silently
     disable the dedup and re-open the double-cluster window."""
     seen_member_types: set[str] = set()
+    seen_kinds: set[str | None] = set()
 
     class _StubClusterRepo:
         async def find_cluster_id_for_member(
@@ -142,8 +144,10 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings() -> No
             app_id: str,
             project_id: str,
             owner_id: str,
+            kind: str | None = None,
         ) -> str | None:
             seen_member_types.add(member_type)
+            seen_kinds.add(kind)
             return None
 
     deps = backfill_deps(clusters=SqliteClusterStore(_StubClusterRepo()))
@@ -161,6 +165,9 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings() -> No
     # ``trigger_profile_clustering`` (member_type="episode") and
     # ``trigger_skill_clustering`` (member_type="case").
     assert seen_member_types == {"episode", "case"}
+    # An episode also sits in its scene's cluster (user_scene): the lookup names
+    # the profile cluster's kind, so a scene membership never reads as clustered.
+    assert seen_kinds == {"user_memory", "agent_case"}
 
 
 async def test_emit_synthetic_events_no_skip_when_no_prior_clusters() -> None:
@@ -176,6 +183,7 @@ async def test_emit_synthetic_events_no_skip_when_no_prior_clusters() -> None:
             app_id: str,
             project_id: str,
             owner_id: str,
+            kind: str | None = None,
         ) -> str | None:
             return None
 
