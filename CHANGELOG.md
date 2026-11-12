@@ -51,14 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **everalgo moves to the 2026-11-11 release candidates**:
   `everalgo-core 0.7.0rc1`, `everalgo-boundary 0.5.0rc1`,
-  `everalgo-user-memory 0.9.0rc7`, `everalgo-agent-memory 0.6.0rc4` and
+  `everalgo-user-memory 0.9.0rc8`, `everalgo-agent-memory 0.6.0rc4` and
   `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
   `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
-  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc7`, which checks every
+  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc8`, which checks every
   profile item against the episode narratives and keeps a do-not-record list
-  (the next two entries). `0.9.0rc6` is skipped: its profile reply schemas
-  were refused by OpenAI under the default strict reply format, so every
-  episode-based profile update failed.
+  (the next two entries). `0.9.0rc6` and `0.9.0rc7` are skipped: under the
+  default strict reply format, rc6's profile reply schemas were refused by
+  OpenAI, and rc7's profile calls now and then stalled until `max_tokens`.
 - **Profile items must be grounded in what was said, and new profiles add no
   `implicit_traits`.** Every item the model writes carries a quote that has to
   be found in that batch's episode narratives, or the item is dropped. An
