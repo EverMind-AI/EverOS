@@ -1,4 +1,4 @@
-.PHONY: acceptance help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime check-singletons openapi check-openapi format test integration package cov ci verify-parity clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime check-singletons openapi check-openapi format test integration package cov ci verify-parity clean
 
 help:
 	@echo "Targets:"
@@ -132,11 +132,6 @@ verify-parity:
 
 integration:
 	uv run pytest tests/integration -v
-
-# Real-server acceptance (not part of `ci`): real LLM / embedding through a
-# local proxy; needs OPENROUTER_API_KEY and DEEPINFRA_API_KEY in the shell.
-acceptance:
-	uv run pytest tests/acceptance -m acceptance -v
 
 package:
 	rm -rf dist .package-smoke

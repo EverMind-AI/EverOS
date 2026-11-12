@@ -206,7 +206,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-v --tb=short -m 'not slow and not live_llm and not acceptance'"
+addopts = "-v --tb=short -m 'not slow and not live_llm'"
 filterwarnings = [
     "error",
     # tzlocal (via APScheduler, imported by the OME engine): a container with no
@@ -233,7 +233,6 @@ filterwarnings = [
 markers = [
     "slow: runs that take >=10s (regardless of dependency); CI default excludes these. Run with `pytest -m slow`.",
     "live_llm: requires real LLM / embedder / reranker credentials from .env; burns tokens. CI default excludes. Run with `pytest -m live_llm`.",
-    "acceptance: starts real everos server processes with real providers (tests/acceptance); burns tokens, minutes per test. Run with `make acceptance`.",
 ]
 
 [tool.coverage.run]
