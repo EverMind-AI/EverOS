@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Profile extraction includes the triggering conversation before its episode
+  is indexed, while retaining indexed history. Queued cluster events check
+  that their triggering episode is still a member. Session deletion now
+  removes stale cluster members, including when retrying a partial deletion.
+
 ## [1.6.0] - 2026-11-11
 
 EverOS 1.6.0 adds memory deletion aligned with the Cloud API, including

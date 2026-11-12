@@ -178,6 +178,8 @@ class ProfileClusterUpdated(Event):
     memcell_id: str
     cluster_id: str
     owner_id: str
+    episode_entry_id: str | None = None
+    """Triggering member; absent on events queued before this field existed."""
     app_id: str = "default"
     project_id: str = "default"
     language: str | None = None

@@ -112,18 +112,23 @@ async def _select_via_cluster(
     if not target_clusters:
         return []
 
-    # Resolve cluster members (episode entry_ids) → memcell_ids.
-    # Cluster members store episode entry_ids. To reach the memcell
-    # payloads we look up each episode's parent_id (= memcell_id)
-    # in the episode index, skipping merged episodes (parent_type=cluster)
-    # whose source memcells were already processed before Reflection.
+    # Keep indexed history, including only current cluster members. Completed
+    # API deletions detach members before returning, even if index erasure lags.
     entry_ids = [m for c in target_clusters for m in c.members]
     episodes = await deps.indexes.episode.find_by_entry_ids(scope, entry_ids)
-    return [
+    memcell_ids = [
         ep.item.parent_id
         for ep in episodes
         if ep.item.parent_type == "memcell" and ep.item.parent_id
     ]
+    # The current event does not need to wait for cascade indexing. A queued
+    # event may outlive its episode: cluster existence alone is insufficient.
+    if event.episode_entry_id is not None and any(
+        c.id == event.cluster_id and event.episode_entry_id in c.members
+        for c in target_clusters
+    ):
+        memcell_ids.append(event.memcell_id)
+    return list(dict.fromkeys(memcell_ids))
 
 
 async def _select_via_timestamp(

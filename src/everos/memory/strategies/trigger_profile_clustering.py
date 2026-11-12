@@ -130,6 +130,7 @@ async def trigger_profile_clustering(
     return [
         ProfileClusterUpdated(
             memcell_id=event.memcell_id,
+            episode_entry_id=event.episode_entry_id,
             cluster_id=to_save.id,
             owner_id=event.owner_id,
             app_id=event.app_id,
