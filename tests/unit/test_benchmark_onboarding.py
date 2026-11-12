@@ -250,16 +250,26 @@ class _Resp:
         return None
 
 
+class _Child:
+    """The server process the fleet started, still running."""
+
+    pid = 4242
+
+    def poll(self) -> None:
+        return None
+
+
 def _fleet(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capabilities: dict[str, bool]
 ) -> Any:
     fleet = run_mod._ServerFleet(1, tmp_path / "store", first_port=19999)
     fleet.urls = ["http://127.0.0.1:19999"]
     fleet.logs = [tmp_path / "store" / "server.log"]
+    fleet.procs = [_Child()]
     monkeypatch.setattr(
         run_mod.urllib.request,
         "urlopen",
-        lambda url, timeout: _Resp({"capabilities": capabilities}),
+        lambda url, timeout: _Resp({"pid": _Child.pid, "capabilities": capabilities}),
     )
     return fleet
 

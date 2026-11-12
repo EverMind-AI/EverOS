@@ -3795,6 +3795,10 @@
             "type": "string",
             "title": "Version"
           },
+          "pid": {
+            "type": "integer",
+            "title": "Pid"
+          },
           "capabilities": {
             "$ref": "#/components/schemas/HealthCapabilities"
           },
@@ -3830,6 +3834,7 @@
         "required": [
           "status",
           "version",
+          "pid",
           "capabilities",
           "disabled_features"
         ],

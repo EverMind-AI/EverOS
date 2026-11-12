@@ -221,6 +221,9 @@ EverOS instance with its own store, and the conversations are sharded across the
 (conversation `c` goes to server `c mod N`). EverOS itself runs one process per store,
 so this is parallelism across separate stores, not one deployment scaled out.
 `--servers N` changes how fast a run goes, not its result.
+Several runs can go at once, on any mix of benchmarks: each picks free ports for its
+own servers and accepts an answer only from a server it started (`/health` reports the
+answering process's `pid`), so two runs never share a store.
 
 Without the wrapper, the same smoke test is:
 

@@ -241,6 +241,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Benchmark runs started together no longer share servers.** A run used to
+  take any answer on its port as its own server's, and EverOS binds its port
+  only after startup, so a run launched in the same seconds as another could
+  pick the same ports, read the other run's servers as ready and write its whole
+  ADD stage into the other run's stores while its own servers died at bind.
+  `GET /health` now reports `pid`, the answering process's id, and `run.py`
+  accepts an answer only when it comes from the server it started; otherwise it
+  moves to another port block, as for any lost port race.
+
 - Deleting a session also removes its episodes from their clusters' members,
   and a retry after a partial deletion finishes that cleanup (#591). The
   profile-source guards of #591 are superseded here: the profile is built

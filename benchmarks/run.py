@@ -611,6 +611,18 @@ def _looks_like_bind_failure(log_tail: str) -> bool:
     return any(m in tail for m in _BIND_FAILURE_MARKERS)
 
 
+def _read_health(url: str) -> dict[str, Any]:
+    """``url``'s ``/health`` payload.
+
+    Raises:
+        OSError: Nothing answered, or not with HTTP 2xx (``URLError``, its
+            ``HTTPError`` and timeouts are ``OSError`` subclasses).
+        ValueError: The answer was not JSON.
+    """
+    with urllib.request.urlopen(f"{url}/health", timeout=5) as resp:
+        return json.loads(resp.read())
+
+
 class _PortRaceLostError(RuntimeError):
     """A child exited before readiness, which on this path means it lost a bind race."""
 
@@ -787,15 +799,22 @@ class _ServerFleet:
             return "(no server log)"
 
     def _await_ready(self, timeout_s: float = 180.0) -> None:
-        import urllib.error
-        import urllib.request
+        """Wait until every server this run started answers ``/health`` itself.
 
+        An answer only counts when its ``pid`` is the child's: a launch that lost
+        the port to another one is answered by the other launch's server (its own
+        child dies at bind only after startup, seconds later), and taking that
+        answer as ready silently sent this run's writes into the other run's stores.
+
+        Raises:
+            _PortRaceLostError: Another process holds one of the ports, or a child
+                died failing to bind; ``start`` moves to another port block.
+            RuntimeError: A child exited for its own reason, or the fleet was not
+                ready within ``timeout_s``.
+        """
         deadline = time.time() + timeout_s
         pending = set(self.urls)
         while pending and time.time() < deadline:
-            # A child that has exited cannot be the thing answering, so its port now
-            # belongs to somebody else. `/health` carries no store identity, so this is
-            # the check that tells "my server is up" from "some server is up".
             dead = [
                 (u, pr.returncode)
                 for u, pr in zip(self.urls, self.procs, strict=False)
@@ -826,13 +845,19 @@ class _ServerFleet:
                 raise _PortRaceLostError(
                     f"server process(es) exited before becoming ready: {dead}"
                 )
-            for url in sorted(pending):
+            for url, proc in zip(self.urls, self.procs, strict=True):
+                if url not in pending:
+                    continue
                 try:
-                    with urllib.request.urlopen(f"{url}/health", timeout=5) as r:
-                        if r.status == 200:
-                            pending.discard(url)
-                except (urllib.error.URLError, OSError, TimeoutError):
-                    pass
+                    answered_by = _read_health(url).get("pid")
+                except (OSError, ValueError):
+                    continue
+                if answered_by != proc.pid:
+                    raise _PortRaceLostError(
+                        f"{url} is answered by process {answered_by}, not by the "
+                        f"server this run started (pid {proc.pid})"
+                    )
+                pending.discard(url)
             if pending:
                 time.sleep(2.0)
         if pending:
@@ -849,18 +874,25 @@ class _ServerFleet:
 
         Raises:
             SystemExit: When a server that passed the readiness check no longer
-                answers; the message names its log.
+                answers, or another process answers in its place; the message
+                names its log.
         """
         payloads: dict[str, dict[str, Any]] = {}
-        for url, log in zip(self.urls, self.logs, strict=True):
+        for url, log, proc in zip(self.urls, self.logs, self.procs, strict=True):
             try:
-                with urllib.request.urlopen(f"{url}/health", timeout=5) as resp:
-                    payloads[url] = json.loads(resp.read())
+                payload = _read_health(url)
             except (OSError, ValueError) as exc:
                 raise SystemExit(
                     f"Not started -- nothing has been spent yet. {url} stopped "
                     f"answering /health after it started ({exc}); its log: {log}"
                 ) from exc
+            if payload.get("pid") != proc.pid:
+                raise SystemExit(
+                    f"Not started -- nothing has been spent yet. {url} is answered "
+                    f"by process {payload.get('pid')}, not by the server this run "
+                    f"started (pid {proc.pid}); its log: {log}"
+                )
+            payloads[url] = payload
         return payloads
 
     def assert_capabilities(self, capabilities: Sequence[str]) -> None:

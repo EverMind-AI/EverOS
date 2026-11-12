@@ -486,6 +486,81 @@ def test_the_fleet_gives_up_after_enough_lost_races(
     assert len(set(tried)) == 3, f"blocks repeated: {tried}"
 
 
+class _Live:
+    """A child that is still running, as ``subprocess.Popen`` reports one."""
+
+    returncode = None
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def poll(self) -> None:
+        return None
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+def _fleet_answered_by(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    child_pid: int,
+    answering_pid: int,
+) -> run_mod._ServerFleet:
+    """A one-server fleet whose child is alive while ``answering_pid`` answers."""
+    root = tmp_path / "store"
+    root.mkdir()
+    fleet = run_mod._ServerFleet(1, root, first_port=0)
+    fleet.urls = ["http://127.0.0.1:9999"]
+    fleet.procs = [_Live(child_pid)]  # type: ignore[list-item]
+    fleet.logs = [root / "server.log"]
+    monkeypatch.setattr(
+        run_mod, "_read_health", lambda url: {"status": "ok", "pid": answering_pid}
+    )
+    return fleet
+
+
+def test_readiness_refuses_an_answer_from_a_server_this_run_did_not_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child is still alive, so only the answer's ``pid`` can tell.
+
+    Observed 2026-11-12: three LoCoMo runs launched together, two picked ports
+    9798-9807. The loser's children were still starting -- EverOS binds only after
+    startup -- while the winner's servers already answered, so the loser read them
+    as its own and sent its whole ADD stage into the winner's stores.
+    """
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=222)
+
+    with pytest.raises(
+        run_mod._PortRaceLostError, match="not by the server this run started"
+    ):
+        fleet._await_ready(timeout_s=1.0)
+
+
+def test_readiness_accepts_the_server_this_run_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=111)
+
+    fleet._await_ready(timeout_s=1.0)
+
+
+def test_a_server_replaced_after_startup_stops_the_run_before_it_spends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The capability check reads ``/health`` again; it refuses a foreign answer too."""
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=222)
+
+    with pytest.raises(SystemExit, match="not by the server this run started"):
+        fleet.health()
+
+
 # ---------------------------------------------------------------------------
 # The store owner is not the answer prompt's speaker
 # ---------------------------------------------------------------------------

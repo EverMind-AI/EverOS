@@ -116,6 +116,10 @@ class HealthResponse(BaseModel):
 
     status: str
     version: str
+    pid: int
+    """Id of the operating-system process that answered. A launcher that started
+    the server compares it with its child's id to know the answer came from that
+    server and not from another one on the same port."""
     capabilities: HealthCapabilities
     disabled_features: list[str]
     cascade: CascadeHealthBlock | None = None

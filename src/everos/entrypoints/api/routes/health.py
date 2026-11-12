@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 
 from fastapi import APIRouter
 
@@ -36,6 +37,7 @@ async def health(app: ApplicationDep) -> HealthResponse:
     return HealthResponse(
         status="ok",
         version=__version__,
+        pid=os.getpid(),
         capabilities=HealthCapabilities(**dataclasses.asdict(report.providers)),
         disabled_features=report.disabled_features,
         cascade=(
