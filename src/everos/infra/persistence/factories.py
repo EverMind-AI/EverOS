@@ -42,6 +42,7 @@ from .sqlite import (
     SqliteMemorizeInboxStore,
     SqliteReflectionReportStore,
     SqliteRepos,
+    SqliteSenderNameStore,
     SqliteSessionBufferStore,
     SqliteSessionPurgeStore,
 )
@@ -65,6 +66,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         reflection_report=SqliteReflectionReportStore(sqlite.reflection_report),
         owner_dir=MarkdownOwnerDirStore(root),
         session_purge=SqliteSessionPurgeStore(sqlite.session_purge),
+        sender_name=SqliteSenderNameStore(sqlite.sender_name),
     )
 
 

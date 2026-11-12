@@ -149,14 +149,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         return await self._paginate(where, page)
 
-    async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int:
-        return await self._episodes.count_by_owner(
-            scope.owner_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            parent_type=parent_type,
-        )
-
     async def list_after(
         self,
         scope: Scope,

@@ -50,7 +50,11 @@ from everos.memory.extract.boundary import (
     BoundaryOutcome,
 )
 from everos.memory.extract.ingest import service as ingest
-from tests.fakes import bundled_instructions, unused_raw_file_builder
+from tests.fakes import (
+    InMemorySenderNameStore,
+    bundled_instructions,
+    unused_raw_file_builder,
+)
 
 BASE_TS = 1_700_000_000_000
 
@@ -155,7 +159,10 @@ class _Stage:
             + (extra or []),
         }
         ingested = await ingest.process(
-            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+            payload,
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         return await self.boundary.detect(ingested, mode=mode, is_final=final)
 

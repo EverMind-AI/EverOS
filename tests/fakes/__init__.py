@@ -32,6 +32,7 @@ from .backfill import ScriptedReplayEngine as ScriptedReplayEngine
 from .backfill import backfill_deps as backfill_deps
 from .backfill import episode_row as episode_row
 from .deps import bundled_instructions as bundled_instructions
+from .deps import default_profile_batcher as default_profile_batcher
 from .deps import llm_clients as llm_clients
 from .deps import make_deps as make_deps
 from .deps import make_indexes as make_indexes
@@ -77,6 +78,7 @@ from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
+from .stores import InMemorySenderNameStore as InMemorySenderNameStore
 from .stores import UnusedPort as UnusedPort
 from .trajectories import TRAJECTORY_START_MS as TRAJECTORY_START_MS
 from .trajectories import agent_trajectory as agent_trajectory
@@ -105,6 +107,7 @@ __all__ = [
     "InMemoryProfileIndex",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
+    "InMemorySenderNameStore",
     "InMemorySkillFiles",
     "InMemoryVectorTable",
     "RecordingCascade",
@@ -123,6 +126,7 @@ __all__ = [
     "boundary_reply",
     "boundary_window",
     "bundled_instructions",
+    "default_profile_batcher",
     "episode_row",
     "handler_deps",
     "index_repositories",

@@ -5,9 +5,7 @@ Path: ``users/<user_id>/user.md``.
 Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
 two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
 (``explicit_info`` / ``implicit_traits``). ``profile_timestamp_ms``
-mirrors :attr:`everalgo.types.Profile.timestamp` so the
-``extract_user_profile`` strategy can compare per-user freshness against
-cluster ``last_ts`` without re-parsing the body.
+mirrors :attr:`everalgo.types.Profile.timestamp`.
 """
 
 from __future__ import annotations
@@ -39,10 +37,8 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     """Algo-side ``implicit_traits`` bucket (LLM-inferred preferences)."""
 
     profile_timestamp_ms: int = 0
-    """Algo-emitted profile timestamp (ms epoch); equals the timestamp of
-    the most recent MemCell that fed into the synthesis. Compared with
-    :attr:`everos.infra.persistence.sqlite.Cluster.last_ts_ms` to decide
-    whether a cluster is fresh enough to drive a profile re-extraction."""
+    """Algo-emitted profile timestamp (ms epoch): the timestamp of the
+    newest episode that fed into the synthesis."""
 
     primary_language: str | None = Field(
         default=None, exclude_if=lambda value: value is None

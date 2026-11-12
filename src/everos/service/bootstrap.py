@@ -114,6 +114,7 @@ from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
 from everos.memory.ports import EventBus, IndexEraser, StrategySpec
+from everos.memory.profile_batcher import ProfileBatcher
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
@@ -341,6 +342,7 @@ def build_application(
     indexes = build_indexes(index)
     deps = MemoryDeps(
         llms=providers.llms,
+        profile_batcher=ProfileBatcher(settings.profile.max_episodes_per_call),
         embedding=providers.embedding,
         stores=stores,
         indexes=indexes,

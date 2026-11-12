@@ -504,6 +504,23 @@ class DeciderSettings(BaseModel):
     nothing on purpose."""
 
 
+class ProfileSettings(BaseModel):
+    """User-profile extraction (the ``extract_user_profile`` strategy).
+
+    The LLM it runs on is ``[llm.profile]``, like every other task's.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_PROFILE__MAX_EPISODES_PER_CALL
+    """
+
+    max_episodes_per_call: int = Field(default=10, gt=0)
+    """Most episodes one extraction call folds, the triggering one included.
+    Episodes are folded one owner at a time; a run also folds that owner's newer
+    episodes still waiting, and their own runs then find nothing left to do, so a
+    backlog drains in about ``1 / max_episodes_per_call`` of the calls. Larger
+    means fewer, longer calls and a longer prompt; 1 folds each episode alone."""
+
+
 class MultimodalSettings(BaseModel):
     """Multimodal parsing LLM config (everalgo-parser).
 
@@ -1127,6 +1144,7 @@ class Settings(BaseSettings):
     milvus: MilvusSettings = MilvusSettings()
     llm: LLMSettings = LLMSettings()
     decider: DeciderSettings = DeciderSettings()
+    profile: ProfileSettings = ProfileSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()

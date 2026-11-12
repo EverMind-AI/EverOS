@@ -251,6 +251,18 @@ base_url = "https://openrouter.ai/api/v1"
 model = "openai/gpt-4.1-nano"
 ```
 
+A reasoning model for the profile (recommended). The everalgo profile
+evaluation ran `claude-haiku-5-5` with thinking on at its default effort, at
+about 28s median and 41s p90 per call, so give it a longer deadline than
+`[llm]`'s 60s; switch thinking on through `extra` as your gateway names it and
+leave the effort at the gateway's default:
+
+```toml
+[llm.profile]
+model = "<a reasoning model>"
+timeout_seconds = 240.0
+```
+
 Keep private extraction on a local endpoint (the section names its own
 endpoint and key; nothing else changes):
 
@@ -279,6 +291,16 @@ base_url = "https://api.openai.com/v1"
 api_key = "sk-..."
 extra = {}
 ```
+
+### `[profile]`
+
+User-profile extraction: how many episodes one call folds. Its LLM is `[llm.profile]` (see the recipes above).
+
+Episodes are folded one owner at a time. A run folds the episode that triggered it together with that owner's newer episodes still waiting (up to `max_episodes_per_call` in all), and the runs of those episodes then end without a call. A burst of episodes for one owner, such as a bulk import, therefore drains in about `1 / max_episodes_per_call` of the calls, and runs queued behind a slow model stay within `[ome] run_timeout_seconds`.
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. |
 
 ### `[multimodal]`
 

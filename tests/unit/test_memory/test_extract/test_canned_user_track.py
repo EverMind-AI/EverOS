@@ -52,6 +52,12 @@ _MESSAGES = [
     ),
 ]
 _CELL = MemCell(items=list(_MESSAGES), timestamp=_TS + 2)
+_EPISODE = AlgoEpisode(
+    owner_id="u_alice",
+    episode="Alice asked about Kyoto in April and wants a quiet ryokan.",
+    summary="Alice plans a quiet Kyoto stay.",
+    timestamp=_TS + 2,
+)
 
 
 @pytest.mark.parametrize(
@@ -98,9 +104,9 @@ async def test_atomic_fact_scripts(script: str, count: int) -> None:
     [("profile_init", 2, 1), ("profile_init_empty", 0, 0)],
 )
 async def test_profile_init_scripts(script: str, explicit: int, implicit: int) -> None:
-    profile = await ProfileExtractor(llm=user_track_llm(profile_init=script)).aextract(
-        [_CELL], sender_id="u_alice"
-    )
+    profile = await ProfileExtractor(
+        llm=user_track_llm(profile_init=script)
+    ).aextract_from_episodes([_EPISODE], owner_id="u_alice", owner_name="Alice")
     assert (len(profile.explicit_info), len(profile.implicit_traits)) == (
         explicit,
         implicit,
@@ -119,7 +125,9 @@ async def test_profile_update_scripts(script: str, explicit: int) -> None:
     )
     profile = await ProfileExtractor(
         llm=user_track_llm(profile_update=script)
-    ).aextract([_CELL], sender_id="u_alice", old_profile=old)
+    ).aextract_from_episodes(
+        [_EPISODE], owner_id="u_alice", owner_name="Alice", old_profile=old
+    )
     assert len(profile.explicit_info) == explicit
 
 

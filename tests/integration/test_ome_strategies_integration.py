@@ -26,11 +26,10 @@ from everos.memory.events import (
     UserPipelineStarted,
 )
 from everos.memory.models import Episode
-from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.ports import Scope
 from everos.service.bootstrap import _build_engine
 from tests.fakes import (
     InMemoryAgentSkillStore,
-    InMemoryEpisodeIndex,
     InMemoryEpisodeStore,
     InMemoryMemcellStore,
     InMemoryProfileStore,
@@ -38,6 +37,7 @@ from tests.fakes import (
     agent_track_script,
     agent_trajectory,
     bundled_instructions,
+    default_profile_batcher,
     llm_clients,
     make_indexes,
     unscripted_llm,
@@ -91,8 +91,10 @@ def _install_deps(
     switches to in-memory indexes (with the given replacements).
     """
     real = build_stores(storage.root, storage.sqlite)
+    llm = llm if llm is not None else unscripted_llm()
     deps = MemoryDeps(
-        llms=llm_clients(llm if llm is not None else unscripted_llm()),
+        llms=llm_clients(llm),
+        profile_batcher=default_profile_batcher(),
         embedding=embedding,
         stores=dataclasses.replace(real, **(stores or {})),
         indexes=(
@@ -417,18 +419,18 @@ async def test_skill_chain_e2e(
 
 
 @pytest.mark.asyncio
-async def test_profile_chain_e2e(
+async def test_episode_fans_out_to_clustering_and_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
-    """Chain: EpisodeExtracted → trigger_profile_clustering (sqlite) →
-    ProfileClusterUpdated → extract_user_profile → SUCCESS.
+    """One EpisodeExtracted → trigger_profile_clustering (sqlite) and
+    extract_user_profile, both SUCCESS.
 
     Real ``cluster_by_geometry`` (cosine + time-window) with a hash-based
     deterministic embedder so the geometry stage operates on well-spread
-    unit vectors. Real sqlite cluster store. The memcell store and the
-    episode index are in-memory and seeded (a real memcell row would require
-    the boundary stage to run first; out of scope for the chain test), the
-    profile store is in-memory and ``ProfileExtractor`` is patched.
+    unit vectors. Real sqlite cluster store. The memcell and episode stores
+    are in-memory and seeded (a real memcell row would require the boundary
+    stage to run first; out of scope here), the profile store is in-memory
+    and ``ProfileExtractor`` is patched.
     """
 
     from everalgo.types import Profile as AlgoProfile
@@ -480,19 +482,7 @@ async def test_profile_chain_e2e(
         timestamp=1_700_000_001_000,
         parent_id="mc_aaaaaaaaaaa1",
     )
-    episode_index = InMemoryEpisodeIndex()
-    episode_index.seed(
-        Stored(
-            ref=MemoryRef(
-                id="u_alice_ep_20260517_0001",
-                entry_id="ep_20260517_0001",
-                md_path="ep.md",
-            ),
-            scope=alice,
-            item=episode,
-        )
-    )
-    # The episode is in md too: clustering re-checks it is still there.
+    # Both strategies read the episode back from md.
     episodes = InMemoryEpisodeStore()
     episodes.seed(alice, "ep_20260517_0001", episode)
 
@@ -512,9 +502,11 @@ async def test_profile_chain_e2e(
                 "profile": InMemoryProfileStore(),
                 "episode": episodes,
             },
-            indexes={"episode": episode_index},
+            indexes={},
         )
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        mock_extractor_cls.return_value.aextract_from_episodes = AsyncMock(
+            return_value=new_profile
+        )
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")

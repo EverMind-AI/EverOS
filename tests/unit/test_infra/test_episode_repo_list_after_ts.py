@@ -1,9 +1,9 @@
 """Tests for :class:`_EpisodeRepo.list_by_owner_after_ts`.
 
-Exercises the new scalar-only query method that selects episodes by owner,
-timestamp, and parent_type (for direct-path profile extraction without
-vector/cluster dependencies). Confirms that rows with ``vector=None`` are
-included (Tier 1-safe).
+A scalar-only query that selects episodes by owner, timestamp and
+parent_type, with no vector or cluster dependency: the profile reads the
+owner's newer episodes through it. Rows with ``vector=None`` are included
+(Tier 1-safe).
 """
 
 from __future__ import annotations

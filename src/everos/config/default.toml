@@ -109,10 +109,13 @@ base_url = "https://openrouter.ai/api/v1"
 # [llm.boundary]
 # model = "openai/gpt-4.1-nano"
 #
-# [llm.profile]                  # a private task on a local endpoint
-# model = "qwen3-32b"
-# base_url = "http://localhost:8000/v1"
-# api_key = "local"
+# [llm.profile]                  # recommended: a reasoning model, thinking on
+# model = "<a reasoning model>"
+# timeout_seconds = 240.0
+# The everalgo profile evaluation ran claude-haiku-5-5 with thinking on at its
+# default effort: about 28s median and 41s p90 per call, against about 3s for a
+# flash-lite model, so it needs a longer deadline than [llm]'s 60s. How thinking
+# is switched on depends on the gateway; nest its field under extra_body in extra.
 #
 # The multi-round retrieval decider runs inside a search request, so the fields it
 # leaves unset among timeout_seconds (60), max_tokens (512), sdk_max_retries (0) and
@@ -147,6 +150,14 @@ retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 full_text = false              # true = decider reads full episode text, not summary
 fallback_core = 3              # core size when every decider attempt fails
+
+[profile]
+# User-profile extraction; its LLM is [llm.profile].
+# Most episodes one extraction call folds, the triggering one included. A run
+# also folds the owner's newer episodes still waiting, so a backlog drains in
+# about 1/N of the calls. 1 = one per call.
+# Override via EVEROS_PROFILE__MAX_EPISODES_PER_CALL.
+max_episodes_per_call = 10
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.core.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp_ms
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
@@ -23,24 +23,6 @@ from .repository import MilvusRepoBase
 class _EpisodeRepo(MilvusRepoBase[Episode]):
     schema = Episode
 
-    async def count_by_owner(
-        self,
-        owner_id: str,
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        parent_type: str | None = None,
-    ) -> int:
-        return await self._count_where(
-            all_of(
-                eq("owner_id", owner_id),
-                eq("app_id", app_id),
-                eq("project_id", project_id),
-                is_null("deprecated_by"),
-                eq("parent_type", parent_type) if parent_type is not None else None,
-            )
-        )
-
     async def list_by_owner_after_ts(
         self,
         *,
@@ -54,7 +36,7 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
     ) -> list[Episode] | list[dict[str, Any]]:
         predicate = all_of(
             eq("owner_id", owner_id),
-            gt("timestamp", from_timestamp(after_ts)),
+            gt("timestamp", from_timestamp_ms(after_ts)),
             eq("parent_type", parent_type),
             eq("app_id", app_id),
             eq("project_id", project_id),

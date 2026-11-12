@@ -17,6 +17,7 @@ __all__ = [
     "InMemoryMemcellStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
+    "InMemorySenderNameStore",
     "UnusedPort",
 ]
 
@@ -361,6 +362,31 @@ class InMemoryMemcellStore:
         skip_detail: Mapping[str, Any],
     ) -> None:
         self.case_marks[memcell_id] = (skip_reason, dict(skip_detail))
+
+
+class InMemorySenderNameStore:
+    """Latest name per ``(app_id, project_id, sender_id)``."""
+
+    def __init__(self) -> None:
+        self.names: dict[tuple[str, str, str], str] = {}
+
+    async def get_many(
+        self, app_id: str, project_id: str, sender_ids: Collection[str]
+    ) -> Mapping[str, str]:
+        return {
+            sender_id: self.names[(app_id, project_id, sender_id)]
+            for sender_id in sender_ids
+            if (app_id, project_id, sender_id) in self.names
+        }
+
+    async def upsert_many(
+        self, app_id: str, project_id: str, names: Mapping[str, str]
+    ) -> None:
+        for sender_id, name in names.items():
+            self.names[(app_id, project_id, sender_id)] = name
+
+    async def delete(self, app_id: str, project_id: str, sender_id: str) -> None:
+        self.names.pop((app_id, project_id, sender_id), None)
 
 
 class InMemoryClusterStore:

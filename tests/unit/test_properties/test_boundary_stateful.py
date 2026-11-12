@@ -96,6 +96,7 @@ from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from tests.fakes import (
     UNUSABLE_REPLY,
+    InMemorySenderNameStore,
     boundary_reply,
     bundled_instructions,
     unused_raw_file_builder,
@@ -280,7 +281,10 @@ class BoundaryMachine(RuleBasedStateMachine):
             ],
         }
         ingested = await ingest.process(
-            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+            payload,
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:

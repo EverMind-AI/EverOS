@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `temperature` and `max_tokens` are sent only when a call names none -- agentic
   search keeps its own temperatures -- and, unset, the request carries neither,
   as before.
+- **A sender keeps the name it was last given.** Ingestion records the latest
+  non-blank `sender_name` of every `(app_id, project_id, sender_id)` in a new
+  `sender_name` table of `system.db`, and gives it to that sender's later
+  messages that arrive without one (blank names count as absent; names are
+  stripped). One person is then labelled the same way in every memcell,
+  episode narrative and profile. Deleting a whole user or agent forgets its
+  name; deleting a session does not.
+- **`[profile] max_episodes_per_call`** (default 10): how many episodes one
+  profile extraction call folds; see the profile entry under Changed. The
+  profile's LLM is `[llm.profile]`; a reasoning model with thinking on, at its
+  default effort, and a longer `timeout_seconds` (240) are recommended there;
+  see `docs/configuration.md`.
 
 ### Changed
 
@@ -84,6 +96,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `everos.component.llm`, `resolve_llm_config`, `resolve_decider_config` and
   `DeciderClientConfig` gave way to `resolve_llm_task(s)`, `llm_client_config`
   and `build_llm_task_providers`.
+- **The user profile is built from episodes.** Every pipeline
+  `EpisodeExtracted` now folds its episode's narrative into its owner's
+  `user.md` through everalgo's `ProfileExtractor.aextract_from_episodes`,
+  instead of re-reading raw memcells selected through the owner's clusters
+  (with an embedding provider) or through the episode index (without one).
+  The same call folds that owner's newer episodes still waiting in the
+  episode index, up to `[profile] max_episodes_per_call`, and their own runs
+  then end without a call, so a burst for one owner (a bulk import) drains in
+  a fraction of the calls instead of queueing one slow call per episode past
+  the OME run timeout. The profile no longer depends on clustering, and an
+  episode is no longer sent to the profile again on a later run (a crash can
+  still repeat one). The event now carries
+  `owner_name` — the label the owner's chat lines had (`sender_name`, else
+  `sender_id`) — and the profile finds the owner in the narrative by it; an
+  episode whose narrative does not name them is skipped with a
+  `profile_episode_skipped` warning. `ProfileClusterUpdated` is removed:
+  `trigger_profile_clustering` still clusters episodes for agentic search and
+  Reflection, and no longer emits an event.
+
+### Removed
+
+- **`EpisodeIndex.count`** and the repositories' `count_by_owner` (LanceDB
+  and Milvus): only the old profile throttle used it.
 
 ### Fixed
 

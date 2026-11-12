@@ -5,9 +5,8 @@ Pins the ``find_by_ids`` contract:
 - **Chunking**: SQLite's ``SQLITE_MAX_VARIABLE_NUMBER`` caps a single
   ``IN (?, ?, ...)`` at 999 params on the shipped amalgamation. The repo
   transparently splits large id lists into ``_SQLITE_IN_CHUNK``-sized
-  SELECTs and merges the rows in-memory. The direct-path selector in
-  ``extract_user_profile`` can pull an owner's entire episode history
-  when ``last_profile_ts=0``, so N is unbounded from the caller side.
+  SELECTs and merges the rows in-memory, so N is unbounded from the
+  caller side.
 - **Order preservation**: rows come back in the caller's list order
   regardless of chunk boundaries — downstream code sorts by timestamp,
   but the pre-sort order is stable across runs.

@@ -9,20 +9,18 @@ from everalgo.testing import FakeLLMClient
 
 from everos.core.locks import LOCKS
 from everos.infra.ome import OfflineEngine, OMEConfig, RunStatus, to_ome_strategy
-from everos.memory.models import Cluster
+from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
+from everos.memory.ports import Scope
 from everos.memory.strategies import (
     EXTRACT_USER_PROFILE_SPEC,
     TRIGGER_PROFILE_CLUSTERING_SPEC,
 )
-from tests.fakes import make_deps, seed_sources
+from tests.fakes import InMemoryClusterStore, make_deps, make_stores
 from tests.fakes.llm import user_track_script
 from tests.unit.test_memory.test_strategies.test_extract_user_profile import (
     _event,
     _scope,
     _seed,
-)
-from tests.unit.test_memory.test_strategies.test_trigger_profile_clustering import (
-    _event as cluster_event,
 )
 
 
@@ -31,12 +29,35 @@ class LocalEmbedding:
         return [1.0] + [0.0] * 7
 
 
+class _SignallingClusterStore(InMemoryClusterStore):
+    """Sets ``stored`` once a cluster of ``owner_id`` is upserted."""
+
+    def __init__(self, owner_id: str) -> None:
+        super().__init__()
+        self.stored = asyncio.Event()
+        self._owner_id = owner_id
+
+    async def upsert(
+        self,
+        scope: Scope,
+        kind: ClusterKind,
+        cluster: Cluster,
+        *,
+        member_type: ClusterMemberType,
+    ) -> None:
+        await super().upsert(scope, kind, cluster, member_type=member_type)
+        if scope.owner_id == self._owner_id:
+            self.stored.set()
+
+
 async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
     tmp_path: Path,
 ) -> None:
-    """The model gate stays closed until Bob's cluster is stored and SUCCESS."""
+    """Twenty of Alice's profile runs queue on her partition with one in the
+    model; Bob's cluster is stored and his profile reaches the model meanwhile."""
     release_model = asyncio.Event()
     all_arrived = asyncio.Event()
+    second_call = asyncio.Event()
     calls = 0
     active = 0
     peak = 0
@@ -52,6 +73,8 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
     async def answer(messages, *, response_format, **kwargs):
         nonlocal calls, active, peak
         calls += 1
+        if calls == 2:
+            second_call.set()
         active += 1
         peak = max(peak, active)
         try:
@@ -59,40 +82,41 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
             return user_track_script(
                 {
                     "_ProfileItems": "profile_init_empty",
-                    "_MemCellUpdateOutput": "profile_update_empty",
+                    "_UpdateOutput": "profile_update_empty",
                 }[response_format.__name__]
             )
         finally:
             active -= 1
 
-    deps = make_deps(llm=FakeLLMClient(handler=answer), embedding=LocalEmbedding())
-    entries = [f"ep_20260101_{i + 1:04d}" for i in range(20)]
-    cells = [f"mc_{i + 1:012x}" for i in range(20)]
-    for i, (entry, cell) in enumerate(zip(entries, cells, strict=True)):
+    clusters = _SignallingClusterStore("u_bob")
+    deps = make_deps(
+        llm=FakeLLMClient(handler=answer),
+        embedding=LocalEmbedding(),
+        stores=make_stores(cluster=clusters),
+    )
+    alice = [
+        _event(episode_entry_id=f"ep_20260101_{i + 1:04d}", memcell_id=f"mc_{i:012x}")
+        for i in range(20)
+    ]
+    for event in alice:
         _seed(
             deps,
             _scope(),
-            cluster_id="cl_user00000001",
-            entry_id=entry,
-            memcell_id=cell,
-            last_ts=1_700_000_001_000 + i,
+            entry_id=event.episode_entry_id,
+            memcell_id=event.memcell_id,
         )
-    deps.stores.cluster.seed(
-        _scope(),
-        "user_memory",
-        Cluster(
-            id="cl_user00000001",
-            centroid=(0.0,) * 8,
-            count=20,
-            last_ts=1_700_000_001_019,
-            members=entries,
-        ),
-    )
-    seed_sources(
-        deps,
-        memcell_id="mc_bbbbbbbbbbb1",
-        episode_entry_id="ep_20260101_0002",
+    bob = _event(
         owner_id="u_bob",
+        episode_entry_id="ep_20260101_0099",
+        memcell_id="mc_bob",
+        owner_name="Bob",
+    )
+    _seed(
+        deps,
+        _scope("u_bob"),
+        entry_id=bob.episode_entry_id,
+        memcell_id=bob.memcell_id,
+        narrative="Bob plans a trip to Kyoto.",
     )
     config = OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
     assert config.max_concurrent_runs == 20
@@ -103,45 +127,36 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
     await engine.start()
     try:
         async with asyncio.timeout(15):
-            for cell in cells:
-                await engine.emit(_event(memcell_id=cell))
+            for event in alice:
+                await engine.emit(event)
             await all_arrived.wait()
             assert calls == 1
-            assert (
-                len(
-                    await engine.list_runs(
-                        "extract_user_profile",
-                        status=RunStatus.RUNNING,
-                    )
-                )
-                == 20
+            running = await engine.list_runs(
+                "extract_user_profile", status=RunStatus.RUNNING
             )
-            bob = cluster_event(
-                owner_id="u_bob",
-                memcell_id="mc_bbbbbbbbbbb1",
-                episode_entry_id="ep_20260101_0002",
-            )
+            assert len(running) == 20
+
             await engine.emit(bob)
-            # wait_for_event observes terminal run records, not just invocation.
-            await engine.wait_for_event(bob.event_id, timeout=2)
-            records = await engine.list_runs_by_event_id(bob.event_id)
-            assert len(records) == 1 and records[0].status == RunStatus.SUCCESS
-            clusters = await deps.stores.cluster.list_for_owner(
+            # Alice's model call still holds her partition; the second call
+            # can only be Bob's profile.
+            await clusters.stored.wait()
+            await second_call.wait()
+            (bob_cluster,) = await clusters.list_for_owner(
                 _scope("u_bob"), "user_memory"
             )
-            assert len(clusters) == 1
-            assert "ep_20260101_0002" in clusters[0].members
+            assert bob.episode_entry_id in bob_cluster.members
             assert not release_model.is_set()
-            assert calls == 1
+
             release_model.set()
             assert await engine.wait_idle(timeout=5)
-            records = await engine.list_runs(
-                "extract_user_profile"
-            ) + await engine.list_runs("trigger_profile_clustering")
-            assert len(records) == 22
-            assert all(r.status == RunStatus.SUCCESS for r in records)
-            assert calls == 20 and peak == 1
-            assert len(deps.stores.profile.writes) == 20
+            profile_runs = await engine.list_runs("extract_user_profile")
+            cluster_runs = await engine.list_runs("trigger_profile_clustering")
+            assert (len(profile_runs), len(cluster_runs)) == (21, 21)
+            assert all(
+                r.status == RunStatus.SUCCESS for r in profile_runs + cluster_runs
+            )
+            assert calls == 21 and peak == 2
+            assert len(deps.stores.profile.writes) == 21
             assert await deps.stores.profile.read(_scope()) is not None
     finally:
         release_model.set()

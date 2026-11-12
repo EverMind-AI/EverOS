@@ -368,3 +368,26 @@ def _alive_memcells() -> InMemoryMemcellStore:
     memcells = InMemoryMemcellStore()
     memcells.seed("mc_a", _prepared().cell)
     return memcells
+
+
+async def test_each_owner_event_carries_the_label_of_that_owners_lines() -> None:
+    """``sender_name`` (stripped) when a line carries one, else the sender id."""
+    cell = MemCell(
+        items=[
+            _message("user", "u1").model_copy(update={"sender_name": " Alice "}),
+            _message("user", "u2"),
+            _message("user", "u3").model_copy(update={"sender_name": "  "}),
+            _message("assistant", "bot").model_copy(update={"sender_name": "Kai"}),
+        ],
+        timestamp=1_700_000_000_000,
+    )
+    prepared = PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "u2"])
+
+    outcome = await _pipeline(user_track_llm()).run_cell(_INGESTED, prepared)
+
+    labels = {
+        e.owner_id: e.owner_name
+        for e in outcome.events
+        if isinstance(e, EpisodeExtracted)
+    }
+    assert labels == {"u1": "Alice", "u2": "u2", "u3": "u3"}

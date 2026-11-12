@@ -2,7 +2,7 @@
 
 Mirrors the skill-side test layout: in-memory cluster store + fake
 embedder, ``cluster_by_geometry`` patched, call the strategy directly and
-check the single returned :class:`ProfileClusterUpdated`.
+check what the cluster store holds; the strategy emits no event.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everos.core.locks import LOCKS
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
+from everos.memory.events import EpisodeExtracted
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
 from everos.memory.ports import Scope
 from everos.memory.strategies import (
@@ -79,7 +79,7 @@ def test_spec() -> None:
     spec = TRIGGER_PROFILE_CLUSTERING_SPEC
     assert spec.name == "trigger_profile_clustering"
     assert EpisodeExtracted in spec.trigger.on
-    assert spec.emits == frozenset({ProfileClusterUpdated})
+    assert spec.emits == frozenset()
     assert spec.max_retries == 2
     assert spec.applies_to is not None
 
@@ -94,7 +94,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
         patch(f"{_MODULE}.mint_cluster_id", return_value="cl_newuser00001"),
         structlog.testing.capture_logs() as captured,
     ):
-        events = await trigger_profile_clustering(_event(language="Chinese"), deps)
+        events = await trigger_profile_clustering(_event(), deps)
 
     new_cluster, existing = mock_cluster.call_args.args
     assert isinstance(new_cluster, AlgoCluster)
@@ -111,12 +111,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
     assert clusters.owners["cl_newuser00001"] == (_ALICE, "user_memory")
     assert clusters.member_types["cl_newuser00001"] == {"ep_20260517_0001": "episode"}
 
-    (announced,) = events
-    assert isinstance(announced, ProfileClusterUpdated)
-    assert announced.memcell_id == "mc_aaaaaaaaaaa1"
-    assert announced.cluster_id == "cl_newuser00001"
-    assert announced.owner_id == "u_alice"
-    assert announced.language == "Chinese"
+    assert events == []
     assert any(r.get("event") == "profile_cluster_updated" for r in captured)
 
 
@@ -153,8 +148,7 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     persisted = deps.stores.cluster.clusters["cl_existing0001"]
     assert persisted.count == 2
     assert persisted.members == ["ep_20260517_0000", "ep_20260517_0001"]
-    (announced,) = events
-    assert announced.cluster_id == "cl_existing0001"
+    assert events == []
 
 
 # ── partition lock (owner_id-level serialisation) ────────────────────────

@@ -68,7 +68,6 @@ from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory import IngestResult
 from everos.memory.events import (
     EpisodeExtracted,
-    ProfileClusterUpdated,
     SkillClusterUpdated,
 )
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
@@ -85,7 +84,6 @@ from everos.memory.strategies.extract_agent_skill import _ClusterMissingError
 from tests.fakes import (
     bundled_instructions,
     make_deps,
-    make_indexes,
     make_memory_service,
     user_track_llm,
 )
@@ -455,7 +453,7 @@ async def _cluster(world: _World, owner: str, entry: str | None = None) -> None:
         mine = [(e, m) for e, m in mine if e == entry]
     entry, (session, memcell) = world.rng.choice(mine)
     deps = make_deps(stores=world.stores, embedding=_Embedder(world))
-    events = await trigger_profile_clustering(
+    await trigger_profile_clustering(
         EpisodeExtracted(
             memcell_id=memcell,
             episode_entry_id=entry,
@@ -468,8 +466,6 @@ async def _cluster(world: _World, owner: str, entry: str | None = None) -> None:
         ),
         deps,
     )
-    if not events:
-        _event("cluster: skipped, source gone")
 
 
 class _MdIndex:
@@ -644,21 +640,21 @@ _ACTIONS = st.one_of(
 
 
 async def _profile(world: _World, owner: str) -> None:
-    """Profile extraction from the owner's clusters: its partition lock, the
-    model under it, then the owner lock for the write."""
-    clusters = await world.stores.cluster.list_for_owner(_scope(owner), "user_memory")
-    if not clusters:
+    """Profile extraction from one of the owner's episodes: its partition lock,
+    the model under it, then the owner lock for the write."""
+    mine = [(e, m) for (o, e), m in world.written.items() if o == owner]
+    if not mine:
         return
-    deps = make_deps(
-        stores=world.stores,
-        embedding=_Embedder(world),
-        indexes=make_indexes(episode=_MdIndex(world)),
-    )
+    entry, (session, memcell) = world.rng.choice(mine)
+    deps = make_deps(stores=world.stores, embedding=_Embedder(world))
     await extract_user_profile(
-        ProfileClusterUpdated(
-            memcell_id="mc_0",
-            cluster_id=world.rng.choice(clusters).id or "",
+        EpisodeExtracted(
+            memcell_id=memcell,
+            episode_entry_id=entry,
+            episode_text="t",
+            episode_timestamp_ms=_TS,
             owner_id=owner,
+            session_id=session,
             app_id="a",
             project_id="p",
         ),
@@ -907,7 +903,7 @@ async def _run(
             async def profile(*args: Any, **kwargs: Any) -> AlgoProfile:
                 await asyncio.sleep(world.rng.random() * 0.004)
                 return AlgoProfile(
-                    owner_id=kwargs["sender_id"], summary="p", timestamp=_TS
+                    owner_id=kwargs["owner_id"], summary="p", timestamp=_TS
                 )
 
             async def skills(*args: Any, **kwargs: Any) -> SkillExtractionResult:
@@ -916,7 +912,7 @@ async def _run(
                 return SkillExtractionResult(None, {}, [OpOutcome(0, skill, None, {})])
 
             extractor_cls.return_value.aextract_from_text = extract
-            profile_cls.return_value.aextract = profile
+            profile_cls.return_value.aextract_from_episodes = profile
             skill_cls.return_value.aextract_with_reason = skills
             await _seed(world)
             await _phase(world, first, crash)
