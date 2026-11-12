@@ -114,7 +114,7 @@ index catches up asynchronously.
                       │                             │
                       │              ┌──────────────┴───────────────┐
                       │              ▼                              ▼
-                      │   UserMemoryPipeline (sync)      AgentMemoryPipeline (events only)
+                      │   ConversationPipeline (sync)    AgentMemoryPipeline (events only)
                       │   writes episode .md NOW          emits AgentPipelineStarted
                       ▼              │                              │
    (response returns once md is on disk)                           │

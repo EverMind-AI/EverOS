@@ -54,7 +54,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
+        "description": "Add messages into the conversation + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
         "operationId": "add_memory_api_v1_memory_add_post",
         "requestBody": {
           "content": {
@@ -2262,7 +2262,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the user-memory + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
+        "description": "Add messages into the conversation + agent-memory pipelines.\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
         "operationId": "add_memory_api_v2_memory_add_post",
         "requestBody": {
           "content": {

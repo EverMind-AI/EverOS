@@ -64,7 +64,7 @@ marks the places where 2.0 replaces an EverMemOS design.
 | D11 | Relational expansion follows stored links (scene, decision chain, subjects), not the request's wording, and keeps the decider's candidate format. | New. |
 | D12 | Search returns a constraint block (subject, scope, status, source quote) built first from write-time verified items. | New. |
 | D13 | Forget and delete travel along sources; forgetting a message re-extracts the segment without it. | Adapted from the 2.0 picture forget. |
-| D14 | Without `group_id` the existing one-to-one path runs unchanged. | Adapted: EverMemOS used an `assistant` scene for one-to-one chats. |
+| D14 | Without `group_id` a one-person conversation runs the existing one-to-one path unchanged; a session of two or more people is their implicit group (section 7.9, amended 2026-11-12). | Adapted: EverMemOS used an `assistant` scene for one-to-one chats. |
 | D15 | Step 1 adds no prompt text; Step 2's two new prompts live in EverOS's prompt registry for 2.0 and move to everalgo afterwards. | Adapted: EverMemOS kept its group prompts in-tree. |
 | D16 | Stores that ingested a group under one user are rebuilt from raw conversations, not converted. | n/a |
 | D17 | Profile items read from a picture go to the picture's poster only, on every path. | n/a (fixes a 2.0 development-line leak). |
@@ -620,7 +620,9 @@ would index such a file as a user ([Section 2](#2-the-code-today)).
 
 ### 7.1 Flow
 
-For a batch with `group_id`, the 2.0 write steps run as follows:
+For a batch with `group_id` -- or a batch whose session holds two or more
+people, which is their implicit group ([Section 7.9](#79-implicit-groups-two-people-are-a-group-too))
+-- the 2.0 write steps run as follows:
 
 1. **Receive.** Validate; bind the session to the group (409 on conflict);
    apply inline roster events; open implicit intervals for unknown senders;
@@ -846,9 +848,11 @@ personal state. The state only affects ranking; it never returns content.
 
 ### 7.8 Cost
 
-Per segment with `s` distinct human senders:
+Per segment with `s` distinct human senders (the left column is what a session
+of several people without `group_id` cost until 2026-11-12; such a session now
+takes the group path, as its implicit group):
 
-| Work | One-to-one path with several senders (today) | Group path |
+| Work | Per-sender copies (until 2026-11-12) | Group path |
 |---|---|---|
 | Episode extraction calls | 1 | 1 |
 | Episode entries, index rows | `s` | 1 |
@@ -860,6 +864,66 @@ Per segment with `s` distinct human senders:
 
 The [GroupAssistBench](#131-groupassistbench) cost probe measures the real
 numbers per message before any full build.
+
+### 7.9 Implicit groups: two people are a group too
+
+Decided 2026-11-12. A session sent without `group_id` whose messages come from
+two or more people is not a one-to-one conversation, so it is not remembered as
+one. Until then its segments were extracted once and written once per human
+sender, each person owning a full copy (and a profile update per sender per
+segment); now the session is the implicit group of its people and takes the
+group path of [Section 7.1](#71-flow) unchanged.
+
+- **When.** The people are the role `user` senders of the batch and of the
+  session's open buffer together. Two or more, for a session not bound to a
+  group, make it their implicit group under the session lock, before anything
+  of the batch is written. One person, with or without the assistant, stays
+  one-to-one ([Section 10](#10-one-to-one-conversations-stay-unchanged)).
+- **Id.** `implicit_` followed by 32 hex digits of the SHA-256 of the sorted,
+  distinct people's ids joined by newlines: path-safe, fixed length, and the
+  same for every session between the same people, so two people share one
+  group across their conversations. The prefix is reserved: `/memory/add`
+  with such a `group_id`, `PUT /groups/{id}` and `POST /groups/{id}/roster`
+  on one answer 422. Reads, forgets and updates address it by its id like any
+  group's.
+- **Group and roster.** Created on first sight: `created_at` is the earliest
+  message of the batch and the open buffer, `created_by` is null, and
+  `history_visible_from` is `creation`. Every sender of those messages joins
+  at `created_at`: a person as `member`, an assistant as the group's
+  `assistant` (source `implicit`, display name from the first message's
+  `sender_name`). The group has no owner or admin, so, as in any group without
+  managers ([Section 9.1](#91-rules)), each member may forget anything in it.
+- **The session.** It is bound to the group (D18) like a declared group's;
+  later batches inherit the binding. When a second person arrives in a
+  session that was one-to-one, the open buffer is not cut: what it holds goes
+  with the group (a streaming client's first message would otherwise become
+  a one-message personal episode); segments already cut stay the first
+  person's own.
+- **A third person later.** The people are the group's identity, so a batch
+  in which a person who is not a member speaks into a session bound to an
+  implicit group is refused with 409 before anything is written. The client
+  sends the new conversation as a new session, which is the implicit group of
+  its own people, or names a `group_id`. Admitting the newcomer into the
+  pair's group would show them every later conversation of the pair (the id
+  maps the pair's next session to the same group); moving the session to the
+  new group would split one session across two groups, which the
+  session-keyed forget, message-forget and buffer reads do not support
+  ([Section 9.4](#94-forget-and-delete-propagation)). An assistant first seen
+  later joins: assistants are not part of the identity.
+- **What follows.** One episode per segment under `groups/<id>/`, the members'
+  profiles in the group from each member's own segments, the group profile and
+  the group's scenes ([Sections 7.2-7.7](#72-group-episode)). The personal
+  profile is no longer fed by such sessions: group content never feeds
+  personal memory. A person reads the group as a member: a group search with
+  `asker_id`, or their personal search with `include_groups`
+  ([Section 8.8](#88-a-personal-search-over-the-users-groups)).
+- **Cost.** Per segment of a two-person session, the write side goes from
+  one extraction call plus two profile updates (one per person) to one
+  extraction call, `2 / member_profile_every` member-profile updates and
+  `1 / group_profile_batch` group-profile updates, amortised, plus one at each
+  flush. The read side is unchanged for a one-person conversation; a person
+  reading the pair's memory with `include_groups` pays the reads of
+  [Section 8.8](#88-a-personal-search-over-the-users-groups) (no model call).
 
 ---
 
@@ -1174,12 +1238,13 @@ runs the same propagation: it is a forget, soft and reversible.
 
 ## 10. One-to-one conversations stay unchanged
 
-- A batch without `group_id`, for a session that is not bound to a group, runs
-  today's path: same extraction, same per-sender files under `users/<sender>/`,
-  same index rows.
-- A batch without `group_id` that carries several human senders keeps the
-  per-sender behaviour and logs `memorize.multi_sender_without_group` once per
-  session. Group chats must send `group_id`.
+- A batch without `group_id`, for a session that is not bound to a group and
+  holds one person (with or without the assistant), runs today's path: same
+  extraction, same files under `users/<sender>/`, same index rows.
+- A batch without `group_id` whose session holds two or more people is their
+  implicit group ([Section 7.9](#79-implicit-groups-two-people-are-a-group-too),
+  2026-11-12): one episode per segment under `groups/`, read by its people as
+  members. The per-sender copies of such a session are gone.
 - Search, get and forget with `user_id` behave as today; `asker_id` is optional
   and defaults to the owner. `include_groups` ([Section 8.8](#88-a-personal-search-over-the-users-groups))
   is off unless a request sets it; without it the request, the response and
@@ -1191,9 +1256,11 @@ runs the same propagation: it is a forget, soft and reversible.
   buffered messages only when the owner is a sender of that session (today it
   returns them for any session id).
 - Regression gate: with a fake model and fixed embeddings, one-to-one fixtures
-  (LoCoMo and LongMemEval conversations) produce byte-identical markdown and
-  identical index rows before and after the change, and the full LoCoMo and
-  LongMemEval runs score the same within run-to-run noise.
+  (a LongMemEval-shaped chat and a picture chat) produce byte-identical
+  markdown and identical index rows before and after the change, and the full
+  LongMemEval runs score the same within run-to-run noise. The golden's LoCoMo
+  excerpt (two people) pins their implicit group instead; LoCoMo, two speakers
+  per conversation, is re-measured on it.
 
 ---
 
@@ -1792,6 +1859,27 @@ Step 2 differs from the text above in these places:
      holds what it wrote answers 409.
   5. The verifier stays strict: a message cited under the wrong segment,
      even one of the same session, is dropped (`unknown_message`).
+
+### Implementation notes (one conversation path, 2026-11-12)
+
+- **One pipeline.** `pipeline/conversation.py` (`ConversationPipeline`) writes
+  every segment, in its session's space: a group's (declared or implicit:
+  roster block, speaker labels, attribution, forgotten messages left out,
+  pictures dated by their message and attributed to their poster, and the
+  re-extraction a forget runs) or one person's own (the one-to-one prompt and
+  records, byte for byte). The language block, the extraction call, picture
+  persistence and episode persistence are one code path.
+- **One event.** `EpisodeExtracted` carries `owner_type`, and for a group the
+  human `speaker_ids` and the `group_key` the idle trigger buckets on;
+  `GroupEpisodeExtracted` is gone. Each strategy takes its space's episodes
+  only (`applies_to`): the personal profile, user scenes and clustering a
+  user's; the member profiles, group profile and group scenes a group's. A
+  persisted run naming the old event is dropped with a warning on replay.
+- **One writer per kind.** Episodes, picture memories and scene versions each
+  have one writer (`OwnedDailyWriter`), instantiated per owner type; the
+  files are what the two writers wrote.
+- **One dispatch.** `Memorizer._extract` runs the conversation pipeline (and
+  the agent pipeline in agent mode) over every cell, group or not.
 
 ---
 

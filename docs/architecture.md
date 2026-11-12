@@ -401,18 +401,20 @@ extract/
 ├── ingest/       Standardized message intake + multi-modal parser dispatch
 ├── parser/       Input parsing (format normalization, message preprocessing)
 ├── boundary/     BoundaryDetection: session buffer -> memcells (+ ledger, quarantine)
-├── pipeline/     Per-cell extraction (Episode md + the events that announce it);
-│                 the group pipeline writes one group episode per segment
+├── pipeline/     Per-cell extraction (Episode md + the events that announce it):
+│                 one episode per segment, in its session's space
 └── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
 ```
 
 `BoundaryDetection` is built by the bootstrap and injected into
 `MemoryService`; it owns the session buffer, the `memcell` ledger and the
-quarantine of a session the model keeps failing to segment. A cell of a
-session bound to a group goes to `GroupMemoryPipeline` (and, in agent mode,
-the agent pipeline) instead of the one-to-one user pipeline: one episode
-under `groups/<group_id>/`, speakers labelled by their roster names, and the
-attribution fields set by code (`pipeline/group_render.py`). Why in the
+quarantine of a session the model keeps failing to segment. Every cell goes
+to `ConversationPipeline` (and, in agent mode, the agent pipeline), which
+writes one episode in the session's space: under `groups/<group_id>/` for a
+session bound to a group -- declared, or the implicit group of a session of
+two or more people -- with speakers labelled by their roster names and the
+attribution fields set by code (`pipeline/group_render.py`); under
+`users/<sender>/` for one person's conversation with the assistant. Why in the
 domain: deciding where an episode ends is a memory rule, and keeping it out
 of the service lets it be tested against in-memory stores and a scripted
 model. `llm_retry.py` centralizes the host's retry of `LLMOutputError` for

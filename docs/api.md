@@ -1669,7 +1669,13 @@ the messages; for an existing group the `asker_id` must be an owner or admin)
 and `messages[].message_id`. A sender who is not a member joins at their first
 message (`[groups] implicit_join`); an unknown group is created
 (`[groups] implicit_create`). Group messages never become per-sender personal
-memory.
+memory. A batch without `group_id` whose session holds two or more people
+(role `user` senders) is their implicit group: `implicit_<hash>`, the same for
+every session between the same people, created with them (and the assistant)
+as members and history visible from creation; a person who first speaks in
+such a session later is `409`, and a client never names an `implicit_` group
+on `/memory/add`, `PUT /groups/{id}` or the roster route (`422`). See
+[group-memory.md, section 7.9](group-memory.md#79-implicit-groups-two-people-are-a-group-too).
 
 `/memory/search` and `/memory/get` take `group_id` or `group_ids` (one pool)
 with `asker_id` and `audience` (`asker`, default; `group`: only what every

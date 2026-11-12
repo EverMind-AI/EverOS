@@ -35,10 +35,10 @@ only to an asker who can see every one of them.
 
 ## How a scene is written
 
-The `update_user_scenes` strategy runs on every `EpisodeExtracted` the
-one-to-one pipeline publishes (not on a Reflection merge), and
-`update_group_scenes` on every `GroupEpisodeExtracted`; both run the scene
-core under the owner's scene lock:
+The `update_user_scenes` strategy runs on every `EpisodeExtracted` of a
+user's own episode (not on a Reflection merge), and `update_group_scenes` on
+every `EpisodeExtracted` of a group's (`owner_type` `group`, a declared or an
+implicit group's); both run the scene core under the owner's scene lock:
 
 1. **Place.** The episode is embedded and folded into the user's scene
    clusters with everalgo's `cluster_by_geometry` (`[clustering] threshold`
