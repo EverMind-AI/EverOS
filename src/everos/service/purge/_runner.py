@@ -135,6 +135,8 @@ class _Run:
     run_seconds: float
     retries: int
     fence_tokens: frozenset[int] | None = None
+    at_store: str | None = None
+    """The store whose step runs or comes next (blamed when the budget ends)."""
     marker: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -288,12 +290,12 @@ class PurgeRunner:
         except TimeoutError as exc:
             if deadline.expired():
                 error = "purge run budget exhausted"
-                if all(s.state != "failed" for s in run.steps.values()):
-                    # Ran out while waiting for in-flight work: the second
-                    # pass never started; its first store did not get done.
-                    first = next(iter(run.steps.values()))
-                    run.steps[first.store] = PurgeStep(
-                        first.store, "failed", first.deleted, error
+                stuck = run.steps.get(run.at_store or "")
+                if stuck is not None and stuck.state != "failed":
+                    # Out of time between steps, or in the wait for work in
+                    # flight: blame the step that was to run next.
+                    run.steps[stuck.store] = PurgeStep(
+                        stuck.store, "failed", stuck.deleted, error
                     )
                 return "failed", error
             return "retry", repr(exc)[:500]
@@ -327,8 +329,10 @@ class PurgeRunner:
             (5, "ome", self._step_ome),
             (6, "md_change_state", self._step_change_state),
         ):
+            run.at_store = store
             await afailpoint(f"purge.before_step{n}")
             await self._run_step(run, store, step, at_least=before.get(store, 0))
+        run.at_store = None
 
     async def _run_step(
         self,
@@ -440,6 +444,7 @@ class PurgeRunner:
         added to ``run_seconds`` (persisted every few seconds) so a restart
         does not reset it.
         """
+        run.at_store = next(iter(run.steps))  # the second pass starts there
         saved = time.monotonic()
         while not await self._drained(run):
             await asyncio.sleep(_DRAIN_POLL_S)

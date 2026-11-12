@@ -198,6 +198,10 @@ async def test_budget_timeout_fails_hung_step(
     arm(monkeypatch, tmp_path, "purge.before_step3=pause")  # never released
     assert await p.run_to_end(job_id) == "failed"
     assert "budget" in ((await _row(p, job_id)).last_error or "")
+    steps = {s.store: s for s in (await p.service.get(job_id)).steps}
+    # Out of time before step 3 ran: step 3 is blamed, not the done ones.
+    assert (steps["inbox"].state, steps["markdown"].state) == ("done", "done")
+    assert steps["lancedb"].state == "failed" and "budget" in steps["lancedb"].error
 
 
 async def test_finalize_failure_keeps_mark(
