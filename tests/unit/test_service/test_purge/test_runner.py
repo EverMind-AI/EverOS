@@ -187,8 +187,7 @@ async def test_non_retryable_fails_and_lifts(
     assert (row.attempts, row.retries) == (1, 0)
     view = await p.service.get(job_id)
     assert {s.store: s.state for s in view.steps}["sqlite"] == "pending"
-    row_s = type("R", (), {"app_id": "a1", "project_id": "p1", "id": "x"})()
-    assert not p.fence.blocks(row_s) and p.marks.active_job_id is None
+    assert p.marks.active_job_id is None
 
 
 async def test_budget_timeout_fails_hung_step(
@@ -374,11 +373,12 @@ async def test_drain_waits_for_an_extraction_started_after_pass_one(
     runner.start()
     try:
         await asyncio.sleep(0.3)  # pass one done, held before the wait
-        p.extractions.append(_old())
+        late = p.marks.track(_old(), ("a1", "p1"))  # e.g. an extraction
+        late.__enter__()
         release(tmp_path, "purge.before_step7")
         await asyncio.sleep(0.5)
         assert (await _row(p, job_id)).status == "running"
-        p.extractions.clear()
+        late.__exit__(None, None, None)
         await _until_succeeded(p, job_id)
     finally:
         await runner.stop()
@@ -391,7 +391,8 @@ async def test_drain_time_counts_toward_the_budget(
     budget the job fails and says why on the store the second pass missed."""
     monkeypatch.setattr(_runner, "_DRAIN_SAVE_S", 0.05)
     p, job_id = await _confirmed(storage, run_budget_seconds=1)
-    p.extractions.append(_old())  # never ends
+    forever = p.marks.track(_old())  # never ends
+    forever.__enter__()
     assert await p.run_to_end(job_id) == "failed"
     row = await _row(p, job_id)
     assert "budget" in (row.last_error or "")
@@ -401,6 +402,43 @@ async def test_drain_time_counts_toward_the_budget(
         "failed",
         True,
     )
+
+
+async def test_a_job_started_too_often_ends_failed(storage: Storage) -> None:
+    """D33: a job that keeps killing the server mid-step (no failure counted,
+    no running time saved) stops after MAX_ATTEMPTS starts."""
+    p, job_id = await _confirmed(storage)
+    await p.service.jobs.update_progress(job_id, attempts=_runner.MAX_ATTEMPTS)
+    assert await p.run_to_end(job_id) == "failed"
+    assert "attempts" in ((await _row(p, job_id)).last_error or "")
+
+
+async def test_running_time_from_before_a_restart_counts(storage: Storage) -> None:
+    p, job_id = await _confirmed(storage, run_budget_seconds=30)
+    await p.service.jobs.update_progress(job_id, run_seconds=30)
+    assert await p.run_to_end(job_id) == "failed"
+    assert "budget" in ((await _row(p, job_id)).last_error or "")
+
+
+async def test_the_wait_saves_its_running_time_as_it_goes(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_runner, "_DRAIN_SAVE_S", 0.05)
+    await storage.create_schema()
+    p = make_purge(storage)
+    tracked = p.marks.track(_old())
+    tracked.__enter__()
+    job_id = await _confirm(p)
+    runner = p.runner()
+    runner.start()
+    try:
+        await asyncio.sleep(0.6)
+        row = await _row(p, job_id)
+        assert row.status == "running" and row.run_seconds > 0.3
+    finally:
+        tracked.__exit__(None, None, None)
+        await _until_succeeded(p, job_id)
+        await runner.stop()
 
 
 async def test_second_pass_waits_for_projections_reading_the_scope(

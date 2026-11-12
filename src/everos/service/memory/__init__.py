@@ -53,13 +53,11 @@ from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from everalgo.llm import LLMClient
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
-    from everos.core.purge_marks import PurgeMarks, PurgeScope
+    from everos.core.purge_marks import PurgeMarks
     from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
@@ -91,8 +89,8 @@ class MemoryService:
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
         purge_marks: The root's purge marks: the async queue drops rows a
-            purge superseded and registers each delivery while it runs.
-            ``None`` ignores purges.
+            purge superseded; each delivery and each extraction is registered
+            while it runs, so a purge can wait for it. ``None`` ignores purges.
     """
 
     def __init__(
@@ -127,6 +125,7 @@ class MemoryService:
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            purge_marks=purge_marks,
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
@@ -229,11 +228,6 @@ class MemoryService:
         except asyncio.CancelledError:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
-
-    def extractions_before(self, at: datetime, scope: PurgeScope) -> int:
-        """Running extractions of input taken in before ``at`` that may write
-        ``scope`` (a purge of it waits for them)."""
-        return self._extractions.started_before(at, scope.covers)
 
     async def finish_interrupted_deletions(
         self, *, skip: Callable[[Scope], bool] | None = None

@@ -78,8 +78,6 @@ class Purge:
     storage: Storage
     engine: FakeEngine
     fence: DeleteFence
-    extractions: list[datetime]
-    """Origins of the extractions the service reports running."""
 
     @property
     def marks(self) -> PurgeMarks:
@@ -99,7 +97,6 @@ class Purge:
             engine=svc.engine,
             fence=svc.fence,
             scope_of=svc.scope_of,
-            extractions_before=svc.extractions_before,
             **({"backoff": lambda n: 0.01, "poll_seconds": 0.05} | kw),
         )
         svc._runner = runner
@@ -124,7 +121,6 @@ def make_purge(storage: Storage, **settings: Any) -> Purge:
     root = storage.root
     engine = FakeEngine()
     fence = DeleteFence()
-    extractions: list[datetime] = []
     service = PurgeService(
         settings=PurgeSettings(**settings),
         root=root.root,
@@ -136,9 +132,8 @@ def make_purge(storage: Storage, **settings: Any) -> Purge:
         index_store="lancedb",
         engine=engine,  # type: ignore[arg-type]
         fence=fence,
-        extractions_before=lambda at, scope: sum(1 for o in extractions if o < at),
     )
-    return Purge(service, storage, engine, fence, extractions)
+    return Purge(service, storage, engine, fence)
 
 
 async def seed_scope(storage: Storage, app: str, project: str, n: int = 2) -> None:

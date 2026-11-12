@@ -23,13 +23,14 @@ from __future__ import annotations
 __all__ = [
     "MARKS",
     "ORIGIN",
+    "PURGE_DISCARD_PREFIX",
     "PurgeMarkRegistry",
     "PurgeMarks",
     "PurgeScope",
     "Tombstone",
+    "origin_or_now",
 ]
 
-import itertools
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -38,8 +39,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from everos.core.utils.datetime import get_utc_now
+
 ORIGIN: ContextVar[datetime | None] = ContextVar("everos_origin", default=None)
 """When the system took in the input the current task is working on."""
+
+PURGE_DISCARD_PREFIX = "purge_in_progress: "
+"""``last_error`` prefix of an async request a purge dropped (``/tasks`` code)."""
+
+
+def origin_or_now() -> datetime:
+    """The current task's input origin; now, outside such a task."""
+    return ORIGIN.get() or get_utc_now()
 
 
 @dataclass(frozen=True)
@@ -85,8 +96,7 @@ class PurgeMarks:
         self._job_id: str | None = None
         self._scope: PurgeScope | None = None
         self._tombstones: list[Tombstone] = []
-        self._tracked: dict[int, tuple[datetime, tuple[str, str] | None]] = {}
-        self._seq = itertools.count()
+        self._tracked: dict[object, tuple[datetime, tuple[str, str] | None]] = {}
 
     @property
     def active_job_id(self) -> str | None:
@@ -127,7 +137,7 @@ class PurgeMarks:
 
         ``where`` is the ``(app_id, project_id)`` it writes, when known.
         """
-        token = next(self._seq)
+        token = object()
         self._tracked[token] = (origin, where)
         try:
             yield
@@ -144,7 +154,7 @@ class PurgeMarks:
 
 
 class PurgeMarkRegistry:
-    """Marks per memory root; use the module-level :data:`MARKS`."""
+    """:class:`PurgeMarks` per memory root; use the module-level :data:`MARKS`."""
 
     def __init__(self) -> None:
         self._by_root: dict[Path, PurgeMarks] = {}
@@ -155,9 +165,6 @@ class PurgeMarkRegistry:
         if marks is None:
             marks = self._by_root[key] = PurgeMarks()
         return marks
-
-    def roots(self) -> list[tuple[Path, PurgeMarks]]:
-        return list(self._by_root.items())
 
     def reset(self) -> None:
         """Forget every root (tests, and a simulated restart)."""

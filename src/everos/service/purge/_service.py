@@ -72,7 +72,6 @@ class PurgeService:
     index_store: str
     engine: OfflineEngine
     fence: DeleteFence
-    extractions_before: Callable[[datetime, PurgeScope], int]
     _nonces: dict[str, _Nonce] = field(default_factory=dict, init=False)
     _reserved: set[str] = field(default_factory=set, init=False)
     _recording: asyncio.Event | None = field(default=None, init=False)
@@ -291,7 +290,6 @@ class PurgeService:
             engine=self.engine,
             fence=self.fence,
             scope_of=self.scope_of,
-            extractions_before=self.extractions_before,
         )
         self._runner.start()
 

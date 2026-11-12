@@ -159,7 +159,6 @@ class PurgeRunner:
         engine: OfflineEngine,
         fence: DeleteFence,
         scope_of: Callable[[str, str | None, str | None], PurgeScope],
-        extractions_before: Callable[[datetime, PurgeScope], int],
         backoff: Callable[[int], float] = _backoff,
         poll_seconds: float = 5.0,
     ) -> None:
@@ -173,7 +172,6 @@ class PurgeRunner:
         self._engine = engine
         self._fence = fence
         self._scope_of = scope_of
-        self._extractions_before = extractions_before
         self._backoff = backoff
         self._poll = poll_seconds
         self._task: asyncio.Task[None] | None = None
@@ -403,7 +401,10 @@ class PurgeRunner:
             run.fence_tokens = reading
         else:  # second pass: they end before the index is cleared
             await afailpoint("purge.pass2.before_index")
-            await self._wait_for(lambda: not reading & self._fence.in_flight())
+            while True:  # the projection's state; nothing to await
+                if not reading & self._fence.in_flight():
+                    break
+                await asyncio.sleep(_DRAIN_POLL_S)
         return moved
 
     async def _step_index(self, run: _Run) -> int:
@@ -458,8 +459,6 @@ class PurgeRunner:
             return False
         if self._marks.tracked_before(run.at, run.scope):
             return False
-        if self._extractions_before(run.at, run.scope):
-            return False
         for r in await self._engine.running_runs():
             in_scope = payload_in_scope(run.scope, r.event_payload)
             if in_scope is False:
@@ -474,13 +473,6 @@ class PurgeRunner:
             if began < run.at:
                 return False
         return True
-
-    async def _wait_for(self, done: Callable[[], bool]) -> None:
-        """Poll ``done`` (other components' state; nothing to wait on)."""
-        while True:
-            if done():
-                return
-            await asyncio.sleep(_DRAIN_POLL_S)
 
     # ── step 9 ───────────────────────────────────────────────────────
 

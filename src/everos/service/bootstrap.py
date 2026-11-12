@@ -384,7 +384,6 @@ def build_application(
         index_store=settings.index.backend,
         engine=engine,
         fence=fence,
-        extractions_before=memory.extractions_before,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(

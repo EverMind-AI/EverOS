@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.sql import ColumnElement
 
-from everos.core.purge_marks import PurgeScope
+from everos.core.purge_marks import PURGE_DISCARD_PREFIX, PurgeScope
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
 
@@ -35,7 +35,7 @@ _SCOPED: tuple[Any, ...] = (
 )
 """Tables with ``app_id`` / ``project_id``; ``cluster`` goes with its members."""
 
-INBOX_DISCARD_PREFIX = "purge_in_progress: "
+INBOX_DISCARD_PREFIX = PURGE_DISCARD_PREFIX
 
 
 def _in_scope(table: Any, scope: PurgeScope) -> list[ColumnElement[bool]]:

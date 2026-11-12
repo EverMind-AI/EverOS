@@ -181,9 +181,10 @@ class MarkdownOwnerDirStore:
     async def restore_today_counters(self, scope: Scope, moved_owner_dir: Path) -> None:
         """Put the owner's today's files back, empty, from a moved copy.
 
-        For a purge, which has its scope marked: nothing else may write there
-        meanwhile, so no owner lock is taken -- a ``/delete`` stopped after its
-        rename holds that lock, and waiting for it would stall the purge.
+        For a purge, which takes no owner lock: a ``/delete`` of the scope
+        may be stopped after its rename, holding that lock, and the purge
+        must not stall behind it. A write to the scope meanwhile may race
+        this put-back; writes during a purge may be partly lost (spec v3 G1).
         """
         await self._keep_today_counters(scope, moved_owner_dir)
 

@@ -37,13 +37,13 @@ from everos.core.errors import (
     QueueSaturatedError,
 )
 from everos.core.observability.logging import bound_log_context, get_logger
-from everos.core.purge_marks import ORIGIN
+from everos.core.purge_marks import ORIGIN, PURGE_DISCARD_PREFIX
 from everos.memory.models import MemorizeTask
 from everos.memory.ports import MemorizeInboxStore, SessionKey
 
 from ._queue_models import QUEUE_LOGGER, Deliver, QueueHealth, error_summary
 
-PURGE_DISCARDED = "purge_in_progress: discarded by purge; do not resend"
+PURGE_DISCARDED = f"{PURGE_DISCARD_PREFIX}discarded by purge; do not resend"
 """``last_error`` of a row a purge of its scope superseded before delivery."""
 
 logger = get_logger(QUEUE_LOGGER)
