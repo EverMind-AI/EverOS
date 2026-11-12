@@ -112,7 +112,7 @@ English runs at about six per word with the space, so a reply only a little
 over the asked length is kept whole; a language written without spaces packs
 more into each character and stays far under it."""
 
-_SENTENCE_ENDS = ".!?。！？"
+_SENTENCE_ENDS = ".!?\u3002\uff01\uff1f"
 """Where a clipped narrative may end: Latin and full-width sentence marks."""
 
 
