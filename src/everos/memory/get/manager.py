@@ -45,6 +45,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import (
     EpisodeIndex,
+    Filter,
     GroupProfileIndex,
     ImageMemoryIndex,
     Page,
@@ -129,34 +130,33 @@ class GetManager:
                 audience=req.audience,
             ),
         )
-        where = compile_scoped_for_get(req.filters, scope.predicate)
+        where = compile_scoped_for_get(req.filters, await self._pool(req, scope))
         page = Page(
             sort_by=req.sort_by,
             number=req.page,
             size=req.page_size,
             descending=descending,
         )
-        if req.include_groups:
-            data = await self._list_with_groups(req, scope, page)
-            return GetResponse(request_id=request_id, data=data)
-
         match req.memory_type:
-            case GetMemoryType.EPISODE:
-                # Scene versions share the episode table; they list as scenes.
-                where = all_of(where, ne("parent_type", "scene"))
-                episodes = await self._ep.paginate(where, page)
-                items = [self._shape_episode(e) for e in episodes.items]
-                data = GetData(
-                    episodes=items,
-                    total_count=episodes.total,
-                    count=len(items),
+            case GetMemoryType.EPISODE | GetMemoryType.SCENE:
+                # Scene versions share the episode table (``parent_type =
+                # scene``): an episode listing shows none, a scene listing
+                # only them.
+                scenes = req.memory_type == GetMemoryType.SCENE
+                kind = (
+                    eq("parent_type", "scene") if scenes else ne("parent_type", "scene")
                 )
-            case GetMemoryType.SCENE:
-                scenes = await self._ep.paginate(
-                    all_of(where, eq("parent_type", "scene")), page
+                found = await self._ep.paginate(all_of(where, kind), page)
+                items = [self._shape_episode(e) for e in found.items]
+                if req.include_groups:
+                    items = [_owned(item) for item in items]
+                data = (
+                    GetData(scenes=items, total_count=found.total, count=len(items))
+                    if scenes
+                    else GetData(
+                        episodes=items, total_count=found.total, count=len(items)
+                    )
                 )
-                items = [self._shape_episode(e) for e in scenes.items]
-                data = GetData(scenes=items, total_count=scenes.total, count=len(items))
             case GetMemoryType.IMAGE_MEMORY:
                 if self._images is None:
                     raise RuntimeError("picture listings need the picture index")
@@ -198,31 +198,21 @@ class GetManager:
 
         return GetResponse(request_id=request_id, data=data)
 
-    async def _list_with_groups(
-        self, req: GetRequest, scope: ReadScope, page: Page
-    ) -> GetData:
-        """The user's episodes or scenes and their groups', as one list.
+    async def _pool(self, req: GetRequest, scope: ReadScope) -> Filter:
+        """The owner part of a listing's ``where``: the read scope's predicate.
 
-        ``include_groups``: the groups come from the access policy
-        (:meth:`AccessPolicy.member_groups`), each read as a group listing by
-        the user reads it. Their predicate is ORed onto the personal one, so
-        one index query sorts, counts and pages both; every item names its
-        owner.
+        ``include_groups`` ORs onto it the user's current groups, from the
+        access policy (:meth:`AccessPolicy.member_groups`), each read as a
+        group listing by the user reads it: one index query then sorts,
+        counts and pages the user's records and the groups' together, and
+        every item names its owner.
         """
+        if not req.include_groups:
+            return scope.predicate
         groups = await self._access.member_groups(scope, only=req.include_group_ids)
-        pooled = (
-            scope.predicate
-            if groups is None
-            else any_of(scope.predicate, groups.predicate)
-        )
-        where = compile_scoped_for_get(req.filters, pooled)
-        scenes = req.memory_type == GetMemoryType.SCENE
-        kind = eq("parent_type", "scene") if scenes else ne("parent_type", "scene")
-        found = await self._ep.paginate(all_of(where, kind), page)
-        items = [_owned(self._shape_episode(e)) for e in found.items]
-        if scenes:
-            return GetData(scenes=items, total_count=found.total, count=len(items))
-        return GetData(episodes=items, total_count=found.total, count=len(items))
+        if groups is None:
+            return scope.predicate
+        return any_of(scope.predicate, groups.predicate)
 
     # ── Shapers ──────────────────────────────────────────────────────
 
