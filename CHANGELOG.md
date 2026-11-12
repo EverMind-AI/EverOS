@@ -78,8 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **everalgo moves to the 2026-11-11 release candidates**:
-  `everalgo-core 0.7.0rc1`, `everalgo-boundary 0.5.0rc1`,
+- **everalgo moves to the 2026-11 line**: `everalgo-core 0.7.0`,
+  `everalgo-boundary 0.5.0`, and the release candidates
   `everalgo-user-memory 0.9.0rc8`, `everalgo-agent-memory 0.6.0rc4` and
   `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
   `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
@@ -88,6 +88,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the next two entries). `0.9.0rc6` and `0.9.0rc7` are skipped: under the
   default strict reply format, rc6's profile reply schemas were refused by
   OpenAI, and rc7's profile calls now and then stalled until `max_tokens`.
+- **Boundary detection replies are short.** Each boundary call's `reasoning`
+  is one sentence of at most 25 words, on both strategies, so a call returns
+  much sooner: on qwen3-4b-instruct-2507 the median batch reply fell from 299
+  to 38–78 output tokens, and on gpt-4.1-mini from 108 to 31–39. The prompts
+  now ask whether a message starts a new episode, and the batch reply names
+  the start labels, which keeps where a small model cuts. On LoCoMo
+  (gpt-4.1-mini, three runs each) the batch score did not change measurably
+  (−0.15 points re-judged, 95% CI [−0.87, +0.52]), with about a quarter fewer,
+  longer memcells; `strategy = "step"` with prompt-only boundary replies
+  scored 94.03% re-judged.
 - **Profile items must be grounded in what was said, and new profiles add no
   `implicit_traits`.** Every item the model writes carries a quote that has to
   be found in that batch's episode narratives, or the item is dropped. An
