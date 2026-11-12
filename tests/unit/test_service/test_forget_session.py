@@ -209,6 +209,22 @@ async def test_undo_brings_the_conversation_back() -> None:
     assert {kind for kind, _ in eraser.requeued} == {"episode", "image_memory"}
 
 
+async def test_undo_hands_the_episode_files_back_to_the_cascade() -> None:
+    """The cascade is handed the files the undo rewrote, not the entry ids.
+
+    An entry id is no path: queued as one, the projection never re-read the
+    file, and the restored episodes waited for the next full scan.
+    """
+    forget, undo, _, eraser = _manager(_episode("ep_1"), _episode("ep_2"))
+    await forget.forget_session(scope=_scope(), session_id="s1")
+    eraser.requeued.clear()
+
+    await undo.undo_session(scope=_scope(), session_id="s1")
+
+    episode_files = {_episode("ep_1").ref.md_path}
+    assert ("episode", episode_files) in eraser.requeued
+
+
 async def test_a_second_undo_of_a_conversation_restores_nothing() -> None:
     forget, undo, _, _ = _manager(_episode("ep_1"))
     await forget.forget_session(scope=_scope(), session_id="s1")

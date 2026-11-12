@@ -216,7 +216,9 @@ class UndoManager:
                 images=(),
             )
 
-        restored_episodes = await self._restore_session_episodes(scope, session_id)
+        restored_episodes, episode_files = await self._restore_session_episodes(
+            scope, session_id
+        )
         restored_images = await self._restore_session_images(scope, session_id)
         # A scene the forget took with its last episode comes back with it.
         stores = self._stores
@@ -236,8 +238,8 @@ class UndoManager:
         await self._eraser.requeue(
             "image_memory", {row.ref.md_path for row in restored_images}
         )
-        if restored_episodes:
-            await self._eraser.requeue("episode", restored_episodes)
+        if episode_files:
+            await self._eraser.requeue("episode", episode_files)
         if scenes:
             await self._eraser.requeue("scene", {s.ref.md_path for s in scenes})
         # Under the profile lock until the log says "remembered", as the forget.
@@ -269,8 +271,13 @@ class UndoManager:
 
     async def _restore_session_episodes(
         self, scope: Scope, session_id: str
-    ) -> set[str]:
-        """Drop this conversation's forget mark from its episodes; the files touched.
+    ) -> tuple[set[str], set[str]]:
+        """Drop this conversation's forget mark from its episodes.
+
+        Returns the entries marked current again and the files they are in:
+        the files are what the cascade is handed to project once more (an
+        entry id is no path, and queued as one the restored rows waited for
+        the next full scan).
 
         Reads markdown: the forget erased the index rows through the fence, so
         the files are the only record of which entries carried the mark. An
@@ -282,6 +289,7 @@ class UndoManager:
         for md_path, entry_id in entries:
             by_file.setdefault(md_path, set()).add(entry_id)
         restored: set[str] = set()
+        files: set[str] = set()
         for md_path, entry_ids in by_file.items():
             marks = await self._stores.episode.deprecations(scope, md_path)
             targets = [
@@ -293,7 +301,8 @@ class UndoManager:
                 continue
             await self._stores.episode.clear_deprecations(scope, targets)
             restored |= set(targets)
-        return restored
+            files.add(md_path)
+        return restored, files
 
     async def _restore_session_images(
         self, scope: Scope, session_id: str

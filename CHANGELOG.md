@@ -439,6 +439,10 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **Undoing a forgotten conversation re-indexes its episodes at once.** The
+  undo handed the cascade the restored episodes' entry ids where it expects
+  their files, so nothing was projected again and the episodes stayed out of
+  search until the next full scan of the memory root.
 - **A refused picture no longer reaches the parser.** With `[extraction]
   vision = true`, a picture over an `[images]` limit (or not a picture) was
   still handed to the `[multimodal]` parser: a paid call whose text was then
