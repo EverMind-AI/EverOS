@@ -3,6 +3,7 @@ drops what that work derives, and holds nothing else back (spec v3 §5.6)."""
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from typing import Any
@@ -14,6 +15,7 @@ from everos.core.utils.datetime import from_iso_format
 from tests.acceptance.memory_delete.conftest import chat
 from tests.acceptance.memory_delete.proxy import Rule
 
+from .fake_upstream import Override
 from .journey import finish, purge
 from .observe import md_counts, release, s_leftovers, wait_idle
 from .seed import scope_token, talk
@@ -75,57 +77,87 @@ def test_t31_1_an_old_run_busy_past_a_minute_is_waited_for(
     _cleared(world, job)
 
 
-def _case_in_flight(world: Any, proxy: Any, *, hold_skill: bool) -> tuple[Any, Any]:
-    """S's agent-case extraction held mid-call (a run on old input); the
-    skill extraction it would lead to optionally held too."""
+def _clustering_in_flight(
+    world: Any, proxy: Any, fake: Any, *, hold_skill: bool
+) -> tuple[Rule, Rule | None]:
+    """S's skill clustering held mid-call (a run on input older than the
+    purge, with no source check of its own); the skill extraction it leads
+    to optionally held too."""
     srv = world.srv
-    case = _hold(proxy, "_CaseCompressReply")
-    skill = _hold(proxy, "_SkillExtractReply", word="") if hold_skill else None
-    talk(srv, "u1", "case-in-flight", TOKEN, WHERE)
+    word = f"{TOKEN}derive"
+    # A task unlike the seeded ones: the clustering asks the model to place
+    # it (with the seeded intent the embedding match skips the model).
+    fake.override(
+        Override(
+            pattern=word,
+            name="_CaseCompressReply",
+            reply=json.dumps(
+                {
+                    "task_intent": f"Plan a weekend museum visit {word}",
+                    "approach": "1. Looked up the opening hours.\n2. Booked.",
+                    "key_insight": "Check opening hours first.",
+                    "quality_score": 0.8,
+                }
+            ),
+        )
+    )
+    cluster = proxy.add(
+        Rule(target="llm", pattern='"_ClusterAssignmentReply"', mode="hold")
+    )
+    skill = (
+        proxy.add(Rule(target="llm", pattern='"_SkillExtractReply"', mode="hold"))
+        if hold_skill
+        else None
+    )
+    talk(srv, "u1", "derive", word, WHERE)
     assert proxy.wait_held("llm", timeout=120)
-    return case, skill
+    running = [r["strategy_name"] for r in _runs(srv.root) if r["status"] == "running"]
+    assert "trigger_skill_clustering" in running, running
+    return cluster, skill
 
 
 def test_t32_1_what_an_old_run_derives_is_dropped(
-    make_world: Any, purge_proxy: Any
+    make_world: Any, purge_proxy: Any, fake: Any
 ) -> None:
-    """A32: the case extraction ends during the wait; the clustering it
-    triggers inherits its old time and is dropped before it runs, so the
-    skill extraction downstream is never even called."""
+    """A32: a skill clustering of S (no source check of its own) is in flight
+    at T; it ends during the wait, writes its cluster and emits the skill
+    extraction's event. That event inherits the clustering's old time and is
+    dropped before it runs -- the skill extraction is never even called --
+    and the second pass clears the cluster."""
     world = make_world("T32.1")
     srv = world.srv
-    case, skill = _case_in_flight(world, purge_proxy, hold_skill=True)
+    cluster, skill = _clustering_in_flight(world, purge_proxy, fake, hold_skill=True)
     job_id, _ = purge(srv, **S)
-    at = from_iso_format(srv.job(job_id).json()["data"]["created_at"])
     _first_pass_done(srv, job_id)
-    case.release.set()
+    cluster.release.set()
     job = finish(srv, job_id, timeout=180)
     assert job["status"] == "succeeded", job
     calls = skill.hits  # type: ignore[union-attr]
     purge_proxy.clear()
-    clustering = [
+    at = from_iso_format(job["created_at"])
+    derived = [
         r
         for r in _runs(srv.root)
-        if r["strategy_name"] == "trigger_skill_clustering"
+        if r["strategy_name"] == "extract_agent_skill"
         and from_iso_format(r["started_at"]) > at
     ]
-    world.ev.json("after_t", {"skill_calls": calls, "clustering": clustering})
-    assert clustering and {r["run_id"] for r in clustering} <= _discarded(srv)
+    world.ev.json("after_t", {"skill_calls": calls, "skill_runs": derived})
+    assert derived and {r["run_id"] for r in derived} <= _discarded(srv)
     assert calls == 0
     _cleared(world, job)
 
 
 def test_t33_1_an_old_run_ending_in_the_wait_leaves_no_content(
-    make_world: Any, purge_proxy: Any
+    make_world: Any, purge_proxy: Any, fake: Any
 ) -> None:
-    """A33: nothing of S's events stays in ome.db (no dead letter left by a
-    derived run that found its cluster gone)."""
+    """A33: nothing of S's events stays in ome.db -- no dead letter left by
+    a derived run that would find its cluster gone (v2 left one)."""
     world = make_world("T33.1")
     srv = world.srv
-    case, _ = _case_in_flight(world, purge_proxy, hold_skill=False)
+    cluster, _ = _clustering_in_flight(world, purge_proxy, fake, hold_skill=False)
     job_id, _ = purge(srv, **S)
     _first_pass_done(srv, job_id)
-    case.release.set()
+    cluster.release.set()
     job = finish(srv, job_id, timeout=180)
     assert job["status"] == "succeeded", job
     purge_proxy.clear()

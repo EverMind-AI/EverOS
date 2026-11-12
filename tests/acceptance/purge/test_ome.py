@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from everos.core.utils.datetime import from_iso_format
+from everos.core.utils.datetime import from_iso_format, get_utc_now
 from tests.acceptance.memory_delete.proxy import Rule
 from tests.fakes.llm import UNUSABLE_REPLY
 
@@ -73,20 +73,48 @@ def _hold_facts(proxy: Any, token: str) -> Rule:
     )
 
 
-def _backlog(world: Any, proxy: Any, app: str, project: str, n: int) -> None:
-    """``n`` agent sessions of (app, project) queued behind a held run of
-    (a2, p1), which takes the only OME slot. The purge does not wait for the
-    blocker (another range), so it ends with the backlog still queued."""
+def _backlog(world: Any, proxy: Any, app: str, project: str) -> None:
+    """A backlog of (app, project) the purge must drop, behind a held run of
+    (a2, p1) in the only OME slot (the purge does not wait for another
+    range, so it ends with the backlog still queued).
+
+    The backlog is the part no source check covers: (app, project)'s agent
+    case is extracted first (its memcell still there), and the event it
+    emits -- which carries the case's content to the skill clustering --
+    lands in the queue behind the held (a2, p1) run. First-stage events
+    alone would prove nothing: their writes are skipped once the memcell
+    is gone, drop rule or not."""
     srv = world.srv
+    token = scope_token(app, project)
+    began = get_utc_now()
+    cases = md_counts(srv.root, app, project)["md.agent_case"]
+    case = proxy.add(
+        Rule(
+            target="llm",
+            pattern=f'(?=.*"_CaseCompressReply")(?=.*{token})',
+            mode="hold",
+        )
+    )
+    talk(srv, "u1", "backlog", token, {"app_id": app, "project_id": project})
+    assert proxy.wait_held("llm", timeout=60)  # the case extraction, in the slot
     blocker = scope_token("a2", "p1")
     _hold_facts(proxy, blocker)
     talk(srv, "u1", "blocker", blocker, {"app_id": "a2", "project_id": "p1"})
-    assert proxy.wait_held("llm", timeout=60)
-    token = scope_token(app, project)
-    for i in range(n):
-        talk(srv, "u1", f"backlog-{i}", token, {"app_id": app, "project_id": project})
-    running = [r for r in _runs(srv.root) if r["status"] == "running"]
+    case.release.set()  # the case lands; its follow-up queues behind a2's runs
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        running = [r for r in _runs(srv.root) if r["status"] == "running"]
+        if [_scope_of(r["event_payload"]) for r in running] == [("a2", "p1")]:
+            break
+        time.sleep(0.2)
     assert [_scope_of(r["event_payload"]) for r in running] == [("a2", "p1")]
+    assert md_counts(srv.root, app, project)["md.agent_case"] > cases  # it landed
+    clustering = [
+        r
+        for r in _after(_runs(srv.root), began)
+        if r["strategy_name"] == "trigger_skill_clustering"
+    ]
+    assert clustering == [], clustering  # its follow-up is still queued
 
 
 def _discarded(srv: Any) -> set[str]:
@@ -111,7 +139,7 @@ def _drain_and_check(world: Any, proxy: Any, job: dict[str, Any]) -> None:
 def test_t9_1_backlog_never_writes_back(make_world: Any, purge_proxy: Any) -> None:
     world = make_world("T9.1", EVEROS_OME__MAX_CONCURRENT_RUNS="1")
     srv = world.srv
-    _backlog(world, purge_proxy, "a1", "p1", 4)
+    _backlog(world, purge_proxy, "a1", "p1")
     job_id, _ = purge(srv, **S)
     _drain_and_check(world, purge_proxy, finish(srv, job_id, timeout=180))
 
@@ -121,7 +149,7 @@ def test_t24_1_app_tombstone_covers_its_projects(
 ) -> None:
     world = make_world("T24.1", EVEROS_OME__MAX_CONCURRENT_RUNS="1")
     srv = world.srv
-    _backlog(world, purge_proxy, "a1", "p1", 4)
+    _backlog(world, purge_proxy, "a1", "p1")
     job_id, _ = purge(srv, scope="app", app_id="a1")
     _drain_and_check(world, purge_proxy, finish(srv, job_id, timeout=180))
 
@@ -132,7 +160,7 @@ def test_t24_2_latest_purge_of_a_scope_wins(make_world: Any, purge_proxy: Any) -
     first, _ = purge(srv, **S)
     assert finish(srv, first)["status"] == "succeeded"
     wait_idle(srv.base, srv.root, timeout=180)
-    _backlog(world, purge_proxy, "a1", "p1", 3)  # events after T1
+    _backlog(world, purge_proxy, "a1", "p1")  # events after T1
     second, _ = purge(srv, **S)
     _drain_and_check(world, purge_proxy, finish(srv, second, timeout=180))
 

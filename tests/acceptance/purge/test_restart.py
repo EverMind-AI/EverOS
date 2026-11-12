@@ -102,8 +102,17 @@ def test_t12_2_an_old_run_replayed_after_the_purge_stays_out(
     world.ev.json("e0_rows", e0_rows)
     replayed = [r for r in e0_rows if r["status"] == "success"]
     assert replayed and all(r["event_payload"] == "" for r in replayed), e0_rows
-    left = s_leftovers(root, "a1", "p1", before=from_iso_format(job["created_at"]))
-    world.ev.json("s_left", left)
+    at = from_iso_format(job["created_at"])
+    left = s_leftovers(root, "a1", "p1", before=at)
+    world.ev.json("s_left_after_failed_purge", left)
+    # The job failed, so its second pass never ran: the run's own crashed
+    # row keeps the event until the range is purged again -- nothing else.
+    assert left == {"ome.run_record_payload": [(e0[1], "crashed")]}, left
+    again, _ = purge(srv, **S)
+    second = finish(srv, again, timeout=120)
+    assert second["status"] == "succeeded", second
+    left = s_leftovers(root, "a1", "p1", before=from_iso_format(second["created_at"]))
+    world.ev.json("s_left_after_second_purge", left)
     assert left == {}, left
 
 

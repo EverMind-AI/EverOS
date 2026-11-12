@@ -81,18 +81,21 @@ def _probes(srv: Any) -> dict[str, Callable[[], httpx.Response]]:
 
 
 def _measure(srv: Any, until: Callable[[], bool] | None = None) -> dict[str, Any]:
-    """``PROBES`` calls of each probe (or as many as fit until ``until``)."""
-    out: dict[str, Any] = {}
-    for name, call in _probes(srv).items():
-        codes, seconds = [], []
-        for _ in range(PROBES):
-            if until is not None and until():
-                break
+    """``PROBES`` rounds of every probe in turn (or as many as fit before
+    ``until`` holds; at least one)."""
+    probes = _probes(srv)
+    seen: dict[str, tuple[list[int], list[float]]] = {n: ([], []) for n in probes}
+    for i in range(PROBES):
+        if i and until is not None and until():
+            break
+        for name, call in probes.items():
             t0 = time.monotonic()
-            codes.append(call().status_code)
-            seconds.append(time.monotonic() - t0)
-        out[name] = {"codes": sorted(set(codes)), "n": len(codes), "seconds": seconds}
-    return out
+            seen[name][0].append(call().status_code)
+            seen[name][1].append(time.monotonic() - t0)
+    return {
+        name: {"codes": sorted(set(codes)), "n": len(codes), "seconds": seconds}
+        for name, (codes, seconds) in seen.items()
+    }
 
 
 def _compare(base: dict[str, Any], during: dict[str, Any]) -> dict[str, Any]:
