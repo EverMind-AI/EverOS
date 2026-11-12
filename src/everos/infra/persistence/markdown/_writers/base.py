@@ -27,12 +27,16 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import anyio
 
 from everos.core.observability.logging import get_logger
-from everos.core.utils.datetime import today_with_timezone
+from everos.core.utils.datetime import (
+    get_now_with_timezone,
+    to_iso_format,
+    today_with_timezone,
+)
 from everos.infra.persistence.markdown._base.entries import (
     Entry,
     EntryId,
@@ -54,7 +58,7 @@ class BaseDailyWriter:
     """Append a new entry to today's (or a given date's) daily-log file.
 
     Subclasses bind a single :class:`BaseFrontmatter` subclass via the
-    ``schema`` ClassVar. The schema must declare ``SCOPE_DIR``,
+    ``schema`` attribute. The schema must declare ``SCOPE_DIR``,
     ``ENTRY_ID_PREFIX``, ``DIR_NAME``, and ``FILE_PREFIX`` —
     ``SCOPE_DIR`` is provided by inheriting :class:`UserScopedFrontmatter`
     or :class:`AgentScopedFrontmatter` (or by a custom scope mixin).
@@ -65,7 +69,9 @@ class BaseDailyWriter:
     separate layout layer.
     """
 
-    schema: ClassVar[type[BaseFrontmatter]]  # subclass must declare
+    schema: type[BaseFrontmatter]
+    """Bound by the subclass, or per instance before ``__init__`` runs
+    (:class:`OwnedDailyWriter`)."""
 
     def __init__(
         self,
@@ -73,11 +79,9 @@ class BaseDailyWriter:
         *,
         writer: MarkdownWriter | None = None,
     ) -> None:
-        schema = getattr(type(self), "schema", None)
+        schema = getattr(self, "schema", None)
         if schema is None:
-            raise TypeError(
-                f"{type(self).__name__} must declare a class-level ``schema`` attribute"
-            )
+            raise TypeError(f"{type(self).__name__} must declare ``schema``")
         for attr in ("SCOPE_DIR", "ENTRY_ID_PREFIX", "DIR_NAME", "FILE_PREFIX"):
             if not getattr(schema, attr, None):
                 raise TypeError(f"{schema.__name__} missing ClassVar {attr!r}")
@@ -494,6 +498,64 @@ class BaseDailyWriter:
             / self.schema.DIR_NAME
             / f"{self.schema.FILE_PREFIX}-{date.isoformat()}.md"
         )
+
+
+OwnerKind = Literal["user", "group"]
+"""The owners an :class:`OwnedDailyWriter` writes for."""
+
+
+class OwnedDailyWriter(BaseDailyWriter):
+    """A daily log a user or a group owns: one writer for both.
+
+    The two owner types share the chassis and differ only in what the files
+    say about their owner: the schema (directory, entry-id prefix, ``type``)
+    and the frontmatter's owner key (``user_id`` / ``group_id``) with its
+    ``track``. A subclass binds the kind's two schemas and its log name; an
+    instance writes one owner type's files, so an index row id
+    (``<owner_id>_<entry_id>``) never meets the other owner type's.
+
+    A group's log ids and types are the user's with a ``group_`` prefix:
+    ``episode_log_<id>_<date>`` / ``group_episode_log_<id>_<date>``.
+    """
+
+    schemas: ClassVar[Mapping[OwnerKind, type[BaseFrontmatter]]]
+    log_name: ClassVar[str]
+
+    def __init__(
+        self,
+        root: MemoryRoot,
+        *,
+        owner_type: OwnerKind = "user",
+        writer: MarkdownWriter | None = None,
+    ) -> None:
+        self.schema = self.schemas[owner_type]
+        self._owner_type: OwnerKind = owner_type
+        super().__init__(root, writer=writer)
+
+    def _frontmatter_updates(
+        self,
+        scope_id: str,
+        date: _dt.date,
+        *,
+        next_count: int,
+    ) -> Mapping[str, Any] | None:
+        group = self._owner_type == "group"
+        kind = self.schema.model_fields["type"].default
+        return {
+            "id": f"{'group_' if group else ''}{self.log_name}_{scope_id}_"
+            f"{date.isoformat()}",
+            "type": kind,
+            "file_type": kind,
+            "schema_version": 1,
+            "group_id" if group else "user_id": scope_id,
+            "track": self._owner_type,
+            "date": date.isoformat(),
+            "entry_count": next_count,
+            "last_appended_at": to_iso_format(get_now_with_timezone()),
+        }
+
+    async def _current_count(self, path: Path) -> int:
+        return await self._count_from_frontmatter(path)
 
 
 def _mark_of(value: object) -> str | None:

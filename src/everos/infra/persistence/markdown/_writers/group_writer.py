@@ -1,4 +1,4 @@
-"""Group writers: ``group.md`` (meta + roster log) and the group daily logs.
+"""Group writers: ``group.md`` (meta + roster log) and the group profile's logs.
 
 ``group.md`` is append-only below its frontmatter: a roster change is a new
 entry, never an edit of an old one (docs/group-memory.md, section 4.3). The
@@ -7,9 +7,9 @@ ids are ``gr_<YYYYMMDD>_<seq>``: the date is the event's own UTC date and
 ``seq`` counts the file's entries of that date, so a backdated event minted
 today still sorts under the day it happened.
 
-The daily-log writers are :class:`BaseDailyWriter` over the group schemas; only
-their frontmatter differs from the user kinds (``group_id`` / ``track:
-group``).
+A group's episodes, picture memories and scene versions are written by the
+writers a user's are (:class:`~.base.OwnedDailyWriter`); the group profile's
+daily logs are the group's alone (:class:`GroupProfileWriter`).
 """
 
 from __future__ import annotations
@@ -31,13 +31,7 @@ from .._base import (
     MarkdownWriter,
     render_structured_entry,
 )
-from .._mds import (
-    GroupEpisodeDailyFrontmatter,
-    GroupFrontmatter,
-    GroupImageMemoryDailyFrontmatter,
-    GroupProfileDailyFrontmatter,
-    GroupSceneDailyFrontmatter,
-)
+from .._mds import GroupFrontmatter, GroupProfileDailyFrontmatter
 from .base import BaseDailyWriter
 
 
@@ -113,90 +107,6 @@ class GroupWriter:
                 frontmatter_updates={**frontmatter, "entry_count": count},
             )
             return ids
-
-
-class GroupEpisodeWriter(BaseDailyWriter):
-    """Daily-log writer for group episodes (``gep_<YYYYMMDD>_<seq>``)."""
-
-    schema = GroupEpisodeDailyFrontmatter
-
-    def _frontmatter_updates(
-        self,
-        scope_id: str,
-        date: _dt.date,
-        *,
-        next_count: int,
-    ) -> Mapping[str, Any] | None:
-        return {
-            "id": f"group_episode_log_{scope_id}_{date.isoformat()}",
-            "type": "group_episode_daily",
-            "file_type": "group_episode_daily",
-            "schema_version": 1,
-            "group_id": scope_id,
-            "track": "group",
-            "date": date.isoformat(),
-            "entry_count": next_count,
-            "last_appended_at": to_iso_format(get_now_with_timezone()),
-        }
-
-    async def _current_count(self, path: Path) -> int:
-        return await self._count_from_frontmatter(path)
-
-
-class GroupImageMemoryWriter(BaseDailyWriter):
-    """Daily-log writer for group picture memories (``gim_<YYYYMMDD>_<seq>``)."""
-
-    schema = GroupImageMemoryDailyFrontmatter
-
-    def _frontmatter_updates(
-        self,
-        scope_id: str,
-        date: _dt.date,
-        *,
-        next_count: int,
-    ) -> Mapping[str, Any] | None:
-        return {
-            "id": f"group_image_log_{scope_id}_{date.isoformat()}",
-            "type": "group_image_memory_daily",
-            "file_type": "group_image_memory_daily",
-            "schema_version": 1,
-            "group_id": scope_id,
-            "track": "group",
-            "date": date.isoformat(),
-            "entry_count": next_count,
-            "last_appended_at": to_iso_format(get_now_with_timezone()),
-        }
-
-    async def _current_count(self, path: Path) -> int:
-        return await self._count_from_frontmatter(path)
-
-
-class GroupSceneWriter(BaseDailyWriter):
-    """Daily-log writer for group scene versions (``gsc_<YYYYMMDD>_<seq>``)."""
-
-    schema = GroupSceneDailyFrontmatter
-
-    def _frontmatter_updates(
-        self,
-        scope_id: str,
-        date: _dt.date,
-        *,
-        next_count: int,
-    ) -> Mapping[str, Any] | None:
-        return {
-            "id": f"group_scene_log_{scope_id}_{date.isoformat()}",
-            "type": "group_scene_daily",
-            "file_type": "group_scene_daily",
-            "schema_version": 1,
-            "group_id": scope_id,
-            "track": "group",
-            "date": date.isoformat(),
-            "entry_count": next_count,
-            "last_appended_at": to_iso_format(get_now_with_timezone()),
-        }
-
-    async def _current_count(self, path: Path) -> int:
-        return await self._count_from_frontmatter(path)
 
 
 class GroupProfileWriter(BaseDailyWriter):

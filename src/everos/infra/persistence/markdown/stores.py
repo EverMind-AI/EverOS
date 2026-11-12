@@ -74,10 +74,7 @@ from ._writers import (
     AgentSkillWriter,
     BaseDailyWriter,
     EpisodeWriter,
-    GroupEpisodeWriter,
-    GroupImageMemoryWriter,
     GroupProfileWriter,
-    GroupSceneWriter,
     ImageMemoryWriter,
     SceneWriter,
 )
@@ -420,7 +417,7 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             root,
             EpisodeWriter(root),
             _episode_entry,
-            group_writer=GroupEpisodeWriter(root),
+            group_writer=EpisodeWriter(root, owner_type="group"),
         )
 
     async def append(
@@ -649,7 +646,7 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
             root,
             ImageMemoryWriter(root),
             _image_memory_entry,
-            group_writer=GroupImageMemoryWriter(root),
+            group_writer=ImageMemoryWriter(root, owner_type="group"),
         )
 
     async def append(
@@ -1018,7 +1015,10 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
 
     def __init__(self, root: MemoryRoot) -> None:
         super().__init__(
-            root, SceneWriter(root), _scene_entry, group_writer=GroupSceneWriter(root)
+            root,
+            SceneWriter(root),
+            _scene_entry,
+            group_writer=SceneWriter(root, owner_type="group"),
         )
 
     async def latest(self, scope: Scope, scene_id: str) -> Stored[Scene] | None:
