@@ -17,7 +17,12 @@ What these pin (``everos.memory.extract.pipeline.profile_items``):
 - a forgotten picture takes the items and the replaced values resting on it
   alone, and an undo puts them back once, history in its place;
 - a forgotten conversation takes those every segment of which is forgotten,
-  one at least its own, and never an item with no recorded segments.
+  one at least its own, and never an item with no recorded segments;
+- a person's edit is a new item linked to the old one, held, with the old
+  one's provenance; a release changes the hold only;
+- an update's reply never changes a held item: a new value, a retirement or
+  a merge of it is undone, and the model's new value stays beside it, linked
+  to nothing; a model-written item never inherits a person's marks.
 """
 
 from __future__ import annotations
@@ -32,8 +37,11 @@ from everos.memory.extract.pipeline.profile_items import (
     HISTORY_LIMIT,
     SOURCE_IMAGE_KEYS,
     bounded_history,
+    edit_item,
     forget_images,
+    forget_items,
     forget_segments,
+    keep_held,
     restore_items,
     rests_on,
     stamp_update,
@@ -531,3 +539,112 @@ def test_rests_on_names_a_removed_entry_by_its_segments() -> None:
     assert rests_on({"source_memcell_ids": ["mc_1", "mc_2"]}, ["mc_2"])
     assert not rests_on({"source_memcell_ids": ["mc_1"]}, ["mc_2"])
     assert not rests_on({"description": "no segments"}, ["mc_2"])
+
+
+# ── a person's edit, and what an update does to it ───────────────────────
+
+
+def test_a_persons_edit_is_a_held_new_value_with_the_old_provenance() -> None:
+    old = _profile(_stored("Lives in Paris", "pi_paris"))
+
+    profile, history, new_id = edit_item(
+        old,
+        [],
+        "pi_paris",
+        description="Lives in Berlin",
+        hold=True,
+        edited_by="u1",
+        at=90,
+    )
+
+    item = _extra(profile.explicit_info[0])
+    assert profile.explicit_info[0].description == "Lives in Berlin"
+    assert new_id == item["item_id"] != "pi_paris"
+    assert (item["supersedes"], item["since"], item["held"]) == ("pi_paris", 90, True)
+    assert (item["edited_by"], item["edited_at"]) == ("u1", 90)
+    assert item["source_memcell_ids"] == ["mc_1"]
+    assert history[0]["superseded_by"] == new_id and history[0]["replaced_at"] == 90
+    assert [c[0]["item_id"] for c in replaced_chains([item], history)] == ["pi_paris"]
+
+
+def test_a_release_changes_the_hold_only() -> None:
+    held = _profile(_stored("Lives in Paris", "pi_paris", held=True, edited_by="u1"))
+
+    profile, history, item_id = edit_item(
+        held, [], "pi_paris", description=None, hold=False, edited_by="u1", at=95
+    )
+
+    assert item_id == "pi_paris" and history == []
+    assert _extra(profile.explicit_info[0])["held"] is False
+
+
+def test_an_update_never_changes_a_held_item() -> None:
+    old = _profile(
+        _stored("Lives in Paris", "pi_paris", held=True, edited_by="u1"),
+        _stored("Cycles", "pi_bike"),
+    )
+
+    profile, replaced = _stamp(old, _new_value(old, "Lives in Berlin"))
+    profile, replaced, kept = keep_held(old, profile, replaced)
+
+    paris, berlin, bike = profile.explicit_info
+    assert paris.description == "Lives in Paris" and _extra(paris)["held"] is True
+    assert berlin.description == "Lives in Berlin"
+    assert "supersedes" not in _extra(berlin) and "since" not in _extra(berlin)
+    assert "held" not in _extra(berlin)  # a model's item carries no edit marks
+    assert _extra(bike)["item_id"] == "pi_bike"
+    assert replaced == [] and kept == ["pi_paris"]
+
+
+def test_a_retired_or_merged_held_item_comes_back() -> None:
+    old = _profile(
+        _stored("Lives in Paris", "pi_paris", held=True), _stored("Cycles", "pi_bike")
+    )
+    update = ProfileUpdate(
+        profile=_algo(old.explicit_info[1]),
+        explicit_info=(ItemOrigin(change="kept", from_items=(("explicit_info", 1),)),),
+        implicit_traits=(),
+        retired=(
+            RetiredItem(
+                ref=("explicit_info", 0),
+                item=profile_mapper.to_algo(old).explicit_info[0],
+                change="deprecated",
+                sources=("mc_3",),
+                reason="moved",
+            ),
+        ),
+    )
+
+    profile, replaced = _stamp(old, update)
+    profile, replaced, kept = keep_held(old, profile, replaced)
+
+    assert [i.description for i in profile.explicit_info] == [
+        "Cycles",
+        "Lives in Paris",
+    ]
+    assert replaced == [] and kept == ["pi_paris"]
+
+
+def test_a_held_item_the_update_left_alone_is_not_reported() -> None:
+    old = _profile(_stored("Lives in Paris", "pi_paris", held=True))
+    update = ProfileUpdate(
+        profile=_algo(old.explicit_info[0]),
+        explicit_info=(ItemOrigin(change="kept", from_items=(("explicit_info", 0),)),),
+        implicit_traits=(),
+    )
+
+    profile, replaced = _stamp(old, update)
+    assert keep_held(old, profile, replaced)[2] == []
+
+
+def test_a_forget_by_id_takes_the_item_or_the_replaced_value() -> None:
+    profile = _profile(_stored("Lives in Berlin", "pi_berlin"))
+    profile.history = [{"item_id": "pi_paris", "description": "Lives in Paris"}]
+
+    kept, removed, count = forget_items(profile, ["pi_paris"])
+    assert kept is not None and count == 0
+    assert removed == [
+        ("history", {"item_id": "pi_paris", "description": "Lives in Paris"})
+    ]
+    kept, removed, count = forget_items(profile, ["pi_berlin"])
+    assert kept is not None and kept.explicit_info == [] and count == 1

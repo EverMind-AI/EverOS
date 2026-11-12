@@ -17,6 +17,11 @@ versions are rows of the episode table, ``parent_type = scene``).
   An episode that joins no scene costs no call.
 - **Versions.** Every change is a new version under ``users/<u>/scenes/``;
   the version it replaces is marked superseded, so only the newest competes.
+- **Held versions.** A version a person wrote through ``POST /memory/update``
+  is held unless they released it: while the newest version is held, an
+  episode joining the scene joins its cluster and no narrative is written (no
+  model call). Released (an update with ``hold = false``), the next join
+  writes over the person's narrative with every episode that joined since.
 - **Forgetting.** Members are read through their marks
   (:mod:`~everos.memory.extract.scene.members`): a forgotten episode is no
   member, a rewritten one counts as its new version. A version whose members
@@ -125,6 +130,15 @@ async def _write_version(
     settings = load_settings().scenes
     previous, mark = await _newest(deps, scope, scene_id)
     if previous is not None and event.episode_entry_id in previous.item.member_ids:
+        return
+    if previous is not None and mark is None and previous.item.held:
+        logger.info(
+            "user_scene_held",
+            owner_id=scope.owner_id,
+            scene_id=scene_id,
+            version=previous.item.version,
+            entry_id=previous.ref.entry_id,
+        )
         return
     members = await alive_members(deps.stores.episode, scope, member_ids)
     if len(members) < settings.min_members:

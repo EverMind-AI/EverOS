@@ -30,17 +30,30 @@ A forgotten picture reaches the items, and the replaced values, read off it
 alone (:func:`forget_images`); a forgotten conversation reaches those every
 segment of which is forgotten (:func:`forget_segments`); an undo puts them back
 (:func:`restore_items`).
+
+A person changes an item through ``POST /memory/update`` (:func:`edit_item`):
+a new value is a new item linked to the old one, as a model's is, and carries
+who wrote it; it is **held** unless the caller says otherwise. The next update
+keeps a held item as it is (:func:`keep_held`): the model reads it, and
+whatever its reply did to it -- a new value, a retirement, a merge -- leaves
+the held item standing where it was; a new value the model wrote for it stays
+beside it as an item of its own, linked to nothing.
 """
 
 from __future__ import annotations
 
 __all__ = [
+    "BUCKETS",
     "HISTORY_LIMIT",
     "SOURCE_IMAGE_KEYS",
     "bounded_history",
+    "edit_item",
+    "find_item",
     "forget_images",
+    "forget_items",
     "forget_segments",
     "item_source_images",
+    "keep_held",
     "mint_item_id",
     "normalised",
     "restore_items",
@@ -56,11 +69,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from everos.memory.models import (
+    EDIT_KEYS,
     MEMBER_VERSION_KEYS,
     ExplicitInfoItem,
     ImplicitTraitItem,
     MemCell,
     Profile,
+    is_held,
     replaced_chains,
 )
 
@@ -84,8 +99,13 @@ _PROVENANCE = (
     "source_end",
     SOURCE_IMAGE_KEYS,
     *MEMBER_VERSION_KEYS,
+    *EDIT_KEYS,
 )
-"""The keys :func:`stamp_update` owns on an item."""
+"""The keys :func:`stamp_update` owns on an item. A new item the model wrote
+never inherits a person's edit marks from the item it came from."""
+
+BUCKETS: tuple[str, str] = ("explicit_info", "implicit_traits")
+"""The two lists of profile items."""
 
 _NOT_WORDS = re.compile(r"[\W_]+")
 """What a rewrite that only re-punctuates a description changes."""
@@ -190,8 +210,12 @@ class _Stamper:
     def stamp(
         self, bucket: str, index: int, item: BaseModel, origin: ItemOrigin
     ) -> dict[str, Any]:
-        """The item's fields and extras with its provenance set."""
-        fields = item.model_dump()
+        """The item's fields and extras with its provenance set.
+
+        A person's edit marks ride only on an item kept as it was; an item the
+        reply wrote (a new value, a merge, an addition) is the model's.
+        """
+        fields = {k: v for k, v in item.model_dump().items() if k not in EDIT_KEYS}
         extra = dict(item.model_extra or {})
         if origin.change == "kept" or (
             origin.change == "modified" and (bucket, index) not in self._new_value
@@ -490,6 +514,178 @@ def restore_items(
     if replaced:  # newest first; a stable sort keeps the order of equal times
         profile.history.sort(key=_replaced_at, reverse=True)
     return profile, restored, replaced
+
+
+def keep_held(
+    old: Profile | None,
+    profile: Profile,
+    replaced: Sequence[Mapping[str, Any]],
+) -> tuple[Profile, list[dict[str, Any]], list[str]]:
+    """``profile`` with every item a person holds back as it stood in ``old``.
+
+    The plan's "an item a person changed is not changed by the model again":
+    the update reads a held item like any other (so it does not add the fact a
+    second time), and this undoes whatever its reply did to it. The held item
+    stands where the reply left it, or where its new value stands, or -- when
+    the reply retired or merged it -- at the end of its list. Its history
+    entry from this update is dropped. A new value the model wrote for it is
+    kept as an item of its own with its ``supersedes`` / ``since`` link
+    removed: the person's value is not replaced, and what the conversation
+    said is not lost either. A merge that took a held item keeps the merged
+    item.
+
+    Returns:
+        ``(profile, replaced, kept)`` -- the profile and the history entries
+        to write, and the ids of the held items the reply had changed.
+    """
+    entries = [dict(entry) for entry in replaced]
+    if old is None:
+        return profile, entries, []
+    held: dict[str, tuple[str, _Item]] = {}
+    for bucket in BUCKETS:
+        for item in getattr(old, bucket):
+            item_id = (item.model_extra or {}).get("item_id")
+            if isinstance(item_id, str) and is_held(item):
+                held[item_id] = (bucket, item)
+    if not held:
+        return profile, entries, []
+    unchanged = {
+        str((item.model_extra or {}).get("item_id"))
+        for bucket in BUCKETS
+        for item in getattr(profile, bucket)
+        if (item.model_extra or {}).get("item_id") in held
+        and item.description == held[str(item.model_extra["item_id"])][1].description
+    }
+    placed: set[str] = set()
+    lists: dict[str, list[_Item]] = {bucket: [] for bucket in BUCKETS}
+    for bucket in BUCKETS:
+        for item in getattr(profile, bucket):
+            extra = item.model_extra or {}
+            own, replaces = extra.get("item_id"), extra.get("supersedes")
+            if own in held:
+                if own not in placed:
+                    lists[held[own][0]].append(held[own][1])
+                    placed.add(str(own))
+                continue
+            if replaces in held:
+                if replaces not in placed:
+                    lists[held[replaces][0]].append(held[replaces][1])
+                    placed.add(str(replaces))
+                item = type(item).model_validate(
+                    {
+                        k: v
+                        for k, v in item.model_dump().items()
+                        if k not in MEMBER_VERSION_KEYS
+                    }
+                )
+            lists[bucket].append(item)
+    for item_id, (bucket, item) in held.items():
+        if item_id not in placed:
+            lists[bucket].append(item)
+    kept_back = [entry for entry in entries if entry.get("item_id") not in held]
+    changed = [item_id for item_id in held if item_id not in unchanged]
+    return profile.model_copy(update=lists), kept_back, changed
+
+
+def find_item(
+    profile: Profile | None,
+    history: Sequence[Mapping[str, Any]],
+    item_id: str,
+) -> tuple[str, Mapping[str, Any]] | None:
+    """Where ``item_id`` is: ``(bucket, item)`` for a current item, ``("history",
+    entry)`` for a replaced value (its newest entry), ``None`` when neither."""
+    if profile is not None:
+        for bucket in BUCKETS:
+            for item in getattr(profile, bucket):
+                if (item.model_extra or {}).get("item_id") == item_id:
+                    return bucket, item.model_dump()
+    for entry in history:
+        if isinstance(entry, Mapping) and entry.get("item_id") == item_id:
+            return "history", entry
+    return None
+
+
+def edit_item(
+    profile: Profile,
+    history: Sequence[Mapping[str, Any]],
+    item_id: str,
+    *,
+    description: str | None,
+    hold: bool,
+    edited_by: str,
+    at: int,
+) -> tuple[Profile, list[dict[str, Any]], str]:
+    """A person's change of the current item ``item_id``.
+
+    A new ``description`` is a new value: a new item (a fresh id) that keeps
+    the old one's provenance -- its segments, span, pictures and category --
+    names it in ``supersedes``, and records who wrote it, when (``since`` and
+    ``edited_at``) and whether it is held; the old item moves to the history
+    with ``replaced_at`` and the new id in ``superseded_by``, as a model's new
+    value does. Without a new description only the hold changes, in place: a
+    release is no new value.
+
+    Returns:
+        ``(profile, history, item_id)`` -- what to write, and the id of the
+        item that now holds the value.
+
+    Raises:
+        KeyError: ``item_id`` is no current item of ``profile``.
+    """
+    for bucket in BUCKETS:
+        items: list[_Item] = list(getattr(profile, bucket))
+        for index, item in enumerate(items):
+            if (item.model_extra or {}).get("item_id") != item_id:
+                continue
+            old = item.model_dump()
+            if description is None or description == item.description:
+                data = {**old, "held": hold}
+                if hold:
+                    data |= {"edited_by": edited_by, "edited_at": at}
+                items[index] = type(item).model_validate(data)
+                return (
+                    profile.model_copy(update={bucket: items}),
+                    list(history),
+                    item_id,
+                )
+            new_id = mint_item_id()
+            data = {
+                **{k: v for k, v in old.items() if k not in (*EDIT_KEYS, "previous")},
+                "description": description,
+                "item_id": new_id,
+                "supersedes": item_id,
+                "since": at,
+                "edited_by": edited_by,
+                "edited_at": at,
+                "held": hold,
+            }
+            items[index] = type(item).model_validate(data)
+            entry = {**old, "replaced_at": at, "superseded_by": new_id}
+            return (
+                profile.model_copy(update={bucket: items}),
+                [entry, *(dict(e) for e in history)],
+                new_id,
+            )
+    raise KeyError(item_id)
+
+
+def forget_items(
+    existing: Profile | None, item_ids: Collection[str]
+) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
+    """Drop the items and replaced values named by ``item_ids`` (a forget by id).
+
+    Returns:
+        ``(profile, removed, count)`` as :func:`forget_images` returns them.
+    """
+    if existing is None:
+        return None, [], 0
+    wanted = set(item_ids)
+
+    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
+        extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
+        return extra.get("item_id") not in wanted
+
+    return _without(existing, survives)
 
 
 def _history_key(entry: Mapping[str, Any]) -> tuple[str, str, object]:

@@ -21,6 +21,9 @@ Built from operators that already exist, with no new prompt text (D15):
   only the newest competes. A version spans its members (``source_start`` of
   the first to the end of the last), so a read shows it only to an asker who
   can see every one of them; the episodes still return on their own.
+- **Held versions.** While the newest version is one a person wrote through
+  ``POST /memory/update`` and did not release, a joining episode joins the
+  cluster and no narrative is written over theirs (no call).
 
 An opt-in: the strategy runs only with ``[groups] scenes = true`` (default
 ``false``). A user's scenes (``update_user_scenes``, docs/scenes.md) share
@@ -111,6 +114,17 @@ async def _write_version(
     """
     previous = await deps.stores.scene.latest(scope, scene_id)
     if previous is not None and event.episode_entry_id in previous.item.member_ids:
+        return
+    if previous is not None and previous.item.held:
+        # A person's version (POST /memory/update), not released: the episode
+        # joined the cluster above; no narrative is written over theirs.
+        logger.info(
+            "group_scene_held",
+            group_id=scope.owner_id,
+            scene_id=scene_id,
+            version=previous.item.version,
+            entry_id=previous.ref.entry_id,
+        )
         return
     members = sorted(
         await deps.stores.episode.read_many(scope, member_ids),

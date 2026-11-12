@@ -22,8 +22,8 @@ from everos.component.images import ImageLimits
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
-from everos.memory.models import ExplicitInfoItem, Profile
-from everos.memory.ports import Scope
+from everos.memory.models import FORGOTTEN_MARK, Episode, ExplicitInfoItem, Profile
+from everos.memory.ports import NO_SOURCE_CHECK, Scope
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
 from tests.fakes import make_deps
 
@@ -244,25 +244,115 @@ async def test_the_owners_pictures_are_attached_and_another_senders_are_not() ->
     assert (stored.explicit_info[0].model_extra or {})["source_image_ids"] == [_CAT]
 
 
-async def test_a_segment_of_a_forgotten_conversation_is_not_read() -> None:
+def _seed_episode(deps: MemoryDeps, memcell_id: str = "mc_1") -> str:
+    """The segment's episode, as the pipeline wrote it before the event."""
+    entry_id = f"ep_{memcell_id}"
+    deps.stores.episode.seed(
+        _scope(),
+        entry_id,
+        Episode(
+            owner_id="u_alice",
+            episode="...",
+            summary="...",
+            timestamp=_TS,
+            session_id="sess_1",
+            parent_id=memcell_id,
+        ),
+    )
+    return entry_id
+
+
+async def test_a_segment_whose_episode_is_forgotten_is_not_read() -> None:
     model = _Model(json.dumps({"operations": [{"action": "none"}]}))
     deps = _deps(model)
     deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
-    forgotten = await deps.stores.forget_log.record(
-        target="session",
-        target_id="sess_1",
-        app_id="default",
-        project_id="default",
-        owner_id="u_alice",
+    entry_id = _seed_episode(deps)
+    (stored,) = await deps.stores.episode.read_many(_scope(), [entry_id])
+    await deps.stores.episode.deprecate(
+        _scope(),
+        entries=[(stored.ref.md_path, entry_id)],
+        replaced_by=FORGOTTEN_MARK,
+        only_if=NO_SOURCE_CHECK,
     )
     event = _event().model_copy(update={"session_id": "sess_1"})
 
     await extract_user_profile(event, deps)
     assert model.sent == []
 
-    await deps.stores.forget_log.mark_undone(forgotten.forget_id)
+    await deps.stores.episode.clear_deprecations(_scope(), [entry_id])
     await extract_user_profile(event, deps)
     assert len(model.sent) == 1  # remembered again
+
+
+async def test_a_conversation_sent_again_after_its_forget_is_read() -> None:
+    """A live forget of the conversation covers the segments it marked, not
+    new ones the conversation got afterwards (sent again, or continued)."""
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    _seed_episode(deps)
+    await deps.stores.forget_log.record(
+        target="session",
+        target_id="sess_1",
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+    )
+
+    await extract_user_profile(
+        _event().model_copy(update={"session_id": "sess_1"}), deps
+    )
+    assert len(model.sent) == 1
+
+
+async def test_an_update_keeps_a_held_item_and_the_new_value_beside_it() -> None:
+    reply = {
+        "operations": [
+            {
+                "action": "modify",
+                "ref": "e1",
+                "data": {
+                    "description": "Lives in Berlin.",
+                    "category": "Home",
+                    "evidence": "I moved to Berlin.",
+                },
+                "sources": ["s1"],
+                "pictures": [],
+            }
+        ]
+    }
+    model = _Model(json.dumps(reply))
+    deps = _deps(model)
+    deps.stores.memcell.seed("mc_2", _memcell(("u_alice", "I moved to Berlin.")))
+    await deps.stores.profile.write(
+        _scope(),
+        Profile(
+            owner_id="u_alice",
+            summary="s",
+            timestamp=_TS,
+            explicit_info=[
+                ExplicitInfoItem(
+                    description="Lives in Paris.",
+                    category="Home",
+                    item_id="pi_paris",
+                    source_memcell_ids=["mc_1"],
+                    held=True,
+                    edited_by="u_alice",
+                )
+            ],
+        ),
+    )
+
+    await extract_user_profile(_event("mc_2"), deps)
+
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None
+    paris, berlin = stored.explicit_info
+    assert paris.description == "Lives in Paris."
+    assert (paris.model_extra or {})["held"] is True
+    assert berlin.description == "Lives in Berlin."
+    assert "supersedes" not in (berlin.model_extra or {})
+    assert stored.history == []
 
 
 async def test_a_forgotten_picture_is_taken_out_of_the_update() -> None:

@@ -42,6 +42,10 @@ group's segments are.
   this update's span (``since``), and the old one's history entry names the
   new one (``superseded_by``). The history keeps the values a current item
   still shows as replaced when older entries drop off.
+- **Held items.** An item a person changed through ``POST /memory/update`` is
+  held unless they released it, as on ``user.md``: whatever the update's reply
+  did to it is undone, and a new value the model wrote for it stays as an
+  item of its own (:func:`~everos.memory.extract.pipeline.profile_items.keep_held`).
 - **Language.** A stored ``primary_language`` wins, as for ``user.md``. Until
   one is stored, an update that a segment's event runs is told that event's
   language -- the conversation's, resolved in code by the group pipeline --
@@ -67,6 +71,7 @@ from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.pictures import profile_pictures
 from everos.memory.extract.pipeline.profile_items import (
     bounded_history,
+    keep_held,
     stamp_update,
 )
 from everos.memory.groups import readable_segments
@@ -231,6 +236,14 @@ async def _update(
         replaced_at=segments[-1][1].timestamp,
         primary_language=output_language,
     )
+    stamped, replaced, held = keep_held(old, stamped, replaced)
+    if held:
+        logger.info(
+            "member_profile_held_items_kept",
+            group_id=scope.owner_id,
+            member_id=member_id,
+            item_ids=held,
+        )
     logger.info(
         "member_profile_updated",
         group_id=scope.owner_id,
