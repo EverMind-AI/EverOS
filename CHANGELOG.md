@@ -226,7 +226,9 @@ machinery that keeps a deleted memory from coming back.
     messages on LoCoMo conversations 0-1 (46 calls, +13% of the $0.200 text
     write cost) and $0.039 on MemEye's 8 conversations (151 calls, +21% of
     $0.186); peak prices double both. About $0.00044 a call; the prompt
-    stays near 1,100-1,200 tokens over a run (largest 1,890).
+    stays near 1,100-1,200 tokens over a run (largest 1,890). Read side,
+    LoCoMo 0-1 with the 27B decider: a scene is in the core on 66% of
+    questions, +5.6% decider prompt tokens, +2.3% returned context.
   - `ClusterStore.find_cluster_for_member` takes a `kind`: an episode now
     sits in its profile cluster and its scene's.
 

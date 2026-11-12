@@ -62,6 +62,16 @@ same `subject - body` line as an episode. A search result marks it
 `type: "Scene"`. `get` lists a user's scenes under `memory_type = "scene"`
 and never under `"episode"`.
 
+Measured on the LoCoMo conversations 0-1 store of the cost probe (233
+questions, search only, Qwen3.8-27B base as the decider, top 20), against
+the same store with its scenes removed: a scene reached the decider's core
+in 154 questions (66%) and made up 22% of the core items; the core grew
+from 4.5 to 5.3 items; the decider read 845 more prompt tokens a question
+(+5.6%) and the returned context grew by about 200 tokens (+2.3%). Scenes
+took 3.6 of the 20 returned places, so the returned episodes covered all
+gold sessions on 98.7% of the questions instead of 100% (a scene has no
+session of its own). Whether answers improve is not measured yet.
+
 ## Forgetting and deletion
 
 Forgetting follows the sources:
