@@ -1,4 +1,6 @@
-# Custom instructions for episode reflection (``EpisodeReflector.areflect``).
+# Custom instructions for the scene narrative call (``chat.scene_update``): a
+# user's and a group's scenes. The file keeps the name of the Reflection merge
+# that read it before scenes replaced it.
 #
 # What it does
 #   When enabled, ``instructions`` is appended verbatim after the

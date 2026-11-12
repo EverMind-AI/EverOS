@@ -29,7 +29,6 @@ def hermetic_env(*, plain_output: bool = False) -> dict[str, str]:
     }
     env["EVEROS_LLM__API_KEY"] = "test-key"
     env["EVEROS_EMBEDDING__API_KEY"] = ""
-    env["EVEROS_RERANK__API_KEY"] = ""
     if plain_output:
         env.pop("FORCE_COLOR", None)
         env["NO_COLOR"] = "1"

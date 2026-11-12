@@ -13,26 +13,25 @@ from everos.core.locks import LOCKS, owner_key
 from everos.core.utils.datetime import from_iso_format, to_timestamp_ms
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    MarkdownAgentCaseStore,
-    MarkdownAgentSkillStore,
     MarkdownEpisodeStore,
+    MarkdownGroupProfileStore,
     MarkdownImageMemoryStore,
     MarkdownProfileStore,
     MarkdownReader,
+    MarkdownSceneStore,
     parse_structured_entry,
 )
 from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
     Episode,
     Profile,
 )
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
-    AgentCaseStore,
-    AgentSkillStore,
     EpisodeStore,
+    GroupProfileStore,
+    ImageMemoryStore,
     ProfileStore,
+    SceneStore,
     Scope,
 )
 
@@ -48,10 +47,6 @@ def root(tmp_path: Path) -> MemoryRoot:
 
 def _user() -> Scope:
     return Scope(app_id="app", project_id="proj", owner_id="u1", owner_type="user")
-
-
-def _agent() -> Scope:
-    return Scope(app_id="app", project_id="proj", owner_id="a1", owner_type="agent")
 
 
 async def _entries(root: MemoryRoot, md_path: str) -> dict[str, dict]:
@@ -117,22 +112,12 @@ async def test_only_if_runs_inside_owner_lock(root: MemoryRoot) -> None:
     assert seen == [frozenset({("owner", owner_key("app", "proj", "user", "u1"))})]
 
 
-async def test_profile_and_skill_writes_hold_the_owner_lock(root: MemoryRoot) -> None:
-    """A whole-owner deletion takes the same lock; these writes must too."""
+async def test_profile_writes_hold_the_owner_lock(root: MemoryRoot) -> None:
+    """A whole-owner deletion takes the same lock; this write must too."""
     profiles = MarkdownProfileStore(root)
-    skills = MarkdownAgentSkillStore(root)
     async with LOCKS.hold("owner", owner_key("app", "proj", "user", "u1")):
         blocked = asyncio.create_task(
             profiles.write(_user(), Profile(owner_id="u1", summary="s", timestamp=_TS))
-        )
-        await asyncio.sleep(0.05)
-        assert not blocked.done()
-    await blocked
-    async with LOCKS.hold("owner", owner_key("app", "proj", "agent", "a1")):
-        blocked = asyncio.create_task(
-            skills.write(
-                _agent(), AgentSkill(id="sk1", name="k", description="d", content="c")
-            )
         )
         await asyncio.sleep(0.05)
         assert not blocked.done()
@@ -141,9 +126,10 @@ async def test_profile_and_skill_writes_hold_the_owner_lock(root: MemoryRoot) ->
 
 def test_adapters_satisfy_their_ports(root: MemoryRoot) -> None:
     assert isinstance(MarkdownEpisodeStore(root), EpisodeStore)
-    assert isinstance(MarkdownAgentCaseStore(root), AgentCaseStore)
+    assert isinstance(MarkdownImageMemoryStore(root), ImageMemoryStore)
     assert isinstance(MarkdownProfileStore(root), ProfileStore)
-    assert isinstance(MarkdownAgentSkillStore(root), AgentSkillStore)
+    assert isinstance(MarkdownSceneStore(root), SceneStore)
+    assert isinstance(MarkdownGroupProfileStore(root), GroupProfileStore)
 
 
 async def test_episode_append_returns_a_root_relative_ref(root: MemoryRoot) -> None:
@@ -198,9 +184,12 @@ async def test_episode_from_before_2001_keeps_its_date(root: MemoryRoot) -> None
     assert from_iso_format(entry["inline"]["timestamp"]) == when
 
 
-async def test_merged_episode_has_cluster_parent_and_no_session(
+async def test_a_merged_episode_of_an_earlier_build_still_reads_back(
     root: MemoryRoot,
 ) -> None:
+    """The Reflection merge of an earlier 2.0 build wrote episodes over a
+    cluster: ``parent_type: cluster`` and no session. Nothing writes one now;
+    a store that holds one (rendered here as that build did) still reads it."""
     merged = Episode(
         owner_id="u1",
         episode="merged story",
@@ -211,14 +200,16 @@ async def test_merged_episode_has_cluster_parent_and_no_session(
         parent_type="cluster",
     )
 
-    (ref,) = await MarkdownEpisodeStore(root).append_many(
-        _user(), [merged], only_if=NO_SOURCE_CHECK
-    )
+    store = MarkdownEpisodeStore(root)
+    (ref,) = await store.append_many(_user(), [merged], only_if=NO_SOURCE_CHECK)
 
     entry = (await _entries(root, ref.md_path))[ref.entry_id]
     assert entry["inline"]["parent_type"] == "cluster"
     assert "session_id" not in entry["inline"]
     assert entry["sections"] == {"Subject": "Topic", "Content": "merged story"}
+    (stored,) = await store.read_many(_user(), [ref.entry_id])
+    assert stored.item == merged
+    assert stored.ref == ref
 
 
 async def test_episode_language_is_an_inline_field_only_when_known(
@@ -274,26 +265,6 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
 
     parsed = await MarkdownReader.read(root.root / ref.md_path)
     assert parsed.frontmatter["deprecated_entries"] == {ref.entry_id: "ep_merged"}
-
-
-async def test_agent_case_lands_in_its_log(root: MemoryRoot) -> None:
-    case_ref = await MarkdownAgentCaseStore(root).append(
-        _agent(),
-        AgentCase(
-            owner_id="a1",
-            task_intent="fix bug",
-            approach="bisect",
-            quality_score=0.9,
-            timestamp=_TS,
-            session_id="s1",
-            parent_id="mc_1",
-        ),
-        only_if=NO_SOURCE_CHECK,
-    )
-
-    case = (await _entries(root, case_ref.md_path))[case_ref.entry_id]
-    assert case_ref.md_path.startswith("app/proj/agents/a1/")
-    assert case["sections"] == {"TaskIntent": "fix bug", "Approach": "bisect"}
 
 
 async def test_profile_round_trips(root: MemoryRoot) -> None:
@@ -419,41 +390,6 @@ async def test_profile_read_drops_an_item_with_no_description(
 
     assert profile is not None
     assert [i.description for i in profile.implicit_traits] == ["patient"]
-
-
-async def test_agent_skill_round_trips_and_is_deleted_by_name(
-    root: MemoryRoot,
-) -> None:
-    store = MarkdownAgentSkillStore(root)
-    skill = AgentSkill(
-        id="a1_debugging",
-        cluster_id="cl_1",
-        name="debugging",
-        description="how to debug",
-        content="1. reproduce\n2. bisect",
-        confidence=0.7,
-        maturity_score=0.8,
-        source_case_ids=["ac_1"],
-    )
-
-    ref = await store.write(_agent(), skill)
-    (stored,) = await store.list_by_cluster(_agent(), "cl_1")
-
-    assert stored.item == skill
-    assert stored.ref == ref
-    assert ref.entry_id == "debugging"
-    assert await store.list_by_cluster(_agent(), "cl_other") == []
-    assert await store.delete(_agent(), "debugging") is True
-    assert await store.list_by_cluster(_agent(), "cl_1") == []
-
-
-async def test_agent_skill_name_is_sanitized_for_storage(root: MemoryRoot) -> None:
-    ref = await MarkdownAgentSkillStore(root).write(
-        _agent(), AgentSkill(id="x", cluster_id="cl_1", name="Fix It", content="c")
-    )
-
-    assert ref.entry_id != "Fix It"
-    assert ref.id == f"a1_{ref.entry_id}"
 
 
 @pytest.mark.parametrize("store_type", [MarkdownEpisodeStore, MarkdownImageMemoryStore])

@@ -131,14 +131,16 @@ async def test_a_requeued_file_carries_the_kind_its_path_matches() -> None:
 async def test_erase_owner_deletes_by_owner_and_never_raises() -> None:
     profile = _RecordingRepo()
     eraser = FencedIndexEraser(
-        index_repositories(user_profile=profile, agent_skill=_RecordingRepo(hang=True)),
+        index_repositories(
+            user_profile=profile, image_memory=_RecordingRepo(hang=True)
+        ),
         DeleteFence(),
         _RecordingLedger(),  # type: ignore[arg-type]
         timeout_s=0.05,
     )
 
     with structlog.testing.capture_logs() as logs:
-        await eraser.erase_owner(_SCOPE, ["user_profile", "agent_skill"])
+        await eraser.erase_owner(_SCOPE, ["user_profile", "image_memory"])
 
     (where,) = profile.deletes
     assert where == all_of(
@@ -146,7 +148,7 @@ async def test_erase_owner_deletes_by_owner_and_never_raises() -> None:
     )
     assert [
         e["table"] for e in logs if e["event"] == "memory_delete_index_erase_failed"
-    ] == ["agent_skill"]
+    ] == ["image_memory"]
 
 
 def _episode(owner_id: str, entry_id: str, *, dim: int) -> Episode:

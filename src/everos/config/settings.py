@@ -671,36 +671,6 @@ class VisionEmbeddingSettings(_Section):
     """Separate budget for the interactive query embed, as on ``[embedding]``."""
 
 
-class RerankSettings(_Section):
-    """Rerank client configuration.
-
-    Unlike LLM / embedding (single OpenAI-compatible shape), rerank API
-    schemas differ between providers — DeepInfra uses ``POST {base_url}/
-    {model}`` with a custom body, vLLM uses ``POST {base_url}/rerank``
-    with ``{model, query, documents}``. ``provider`` picks which client
-    implementation the factory builds.
-
-    Env binding:
-        EVEROS_RERANK__PROVIDER
-        EVEROS_RERANK__MODEL
-        EVEROS_RERANK__API_KEY
-        EVEROS_RERANK__BASE_URL
-        EVEROS_RERANK__TIMEOUT_SECONDS
-        EVEROS_RERANK__MAX_RETRIES
-        EVEROS_RERANK__BATCH_SIZE
-        EVEROS_RERANK__MAX_CONCURRENT
-    """
-
-    provider: Literal["deepinfra", "vllm", "dashscope"] = "deepinfra"
-    model: str | None = None
-    api_key: SecretStr | None = None
-    base_url: str | None = None
-    timeout_seconds: float = Field(default=30.0, gt=0)
-    max_retries: int = Field(default=3, ge=0)
-    batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=50, ge=1)
-
-
 class BoundaryDetectionSettings(_Section):
     """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
 
@@ -767,15 +737,6 @@ class AsyncQueueSettings(_Section):
 class MemorizeSettings(_Section):
     """Memorize use-case configuration.
 
-    ``mode`` selects what boundary detection sees and which pipelines are
-    dispatched. A service process serves one mode at a time; toggling
-    requires a restart.
-
-        - ``"chat"``  -> tool rows are dropped before boundary detection and
-          only the user-memory pipeline runs.
-        - ``"agent"`` -> tool rows stay in the cells (the model sees only the
-          chat messages) and both user-memory + agent-memory pipelines run.
-
     ``session_lock_timeout_seconds`` caps how long one ``add()`` / ``flush()``
     invocation can hold the per-session lock. Covers boundary LLM call +
     memcell DB writes + (synchronous portion of) pipeline dispatch. Stops
@@ -791,34 +752,14 @@ class MemorizeSettings(_Section):
     such a request was a hard delete.
 
     Env binding:
-        EVEROS_MEMORIZE__MODE
         EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS
         EVEROS_MEMORIZE__DELETE_WAIT_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__*  (see :class:`AsyncQueueSettings`)
     """
 
-    mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
     delete_wait_seconds: float = Field(default=10.0, gt=0)
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
-
-
-class AgentMemorySettings(_Section):
-    """Agent-memory extraction (``[agent_memory]``).
-
-    ``case_gate_enabled`` puts everalgo's correctness gate in front of
-    agent-case extraction: the extraction LLM judges whether the
-    conversation's work was completed correctly, and only admitted
-    conversations become cases (each admitted case then drives skill
-    extraction whatever its quality score). It costs one extra LLM call per
-    conversation up to the gate's length threshold. Off, cases are admitted
-    by everalgo's complexity and value filters, as before. Needs a restart.
-
-    Env binding:
-        EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED
-    """
-
-    case_gate_enabled: bool = False
 
 
 class ClusteringSettings(_Section):
@@ -1127,25 +1068,6 @@ class MilvusSettings(_Section):
         return value
 
 
-class KnowledgeSearchSettings(_Section):
-    """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
-
-    recall_n: int = 200
-    rerank_n: int = 50
-    mass_top_m: int = 50
-    lam: float = Field(0.1, alias="lambda")
-    top_k_cap: int = 100
-
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
-
-
-class KnowledgeSettings(_Section):
-    """``[knowledge]`` — knowledge module configuration."""
-
-    max_upload_bytes: int = 52_428_800  # 50 MiB
-    search: KnowledgeSearchSettings = KnowledgeSearchSettings()
-
-
 class GroupsSettings(_Section):
     """Group memory (``[groups]``, docs/group-memory.md sections 5.2 and 7.4).
 
@@ -1316,6 +1238,7 @@ class _ReadOnlySwitchSource(PydanticBaseSettingsSource):
 
 
 IGNORED_KEYS: Mapping[str, str] = {
+    "agent_memory": "removed in EverOS 2.0 with agent memory",
     "decider.code_pin": (
         "a label the evaluation launchers export (EVEROS_DECIDER__CODE_PIN) to "
         "record which EverOS build ran; EverOS does not read it"
@@ -1324,12 +1247,13 @@ IGNORED_KEYS: Mapping[str, str] = {
     "decider.invalid_reply_retries": (
         "removed: an unusable decider reply is one failed attempt of [decider] retries"
     ),
-    "knowledge.search.session_lock_timeout_seconds": (
-        "placed here by an older `everos init` template and never read here; "
-        "the lock timeout is [memorize] session_lock_timeout_seconds"
-    ),
+    "knowledge": "removed in EverOS 2.0 with the knowledge base",
     "llm.search_timeout_seconds": (
         "not read by EverOS 2; a decider round's deadline is [decider] timeout_seconds"
+    ),
+    "memorize.mode": (
+        "removed in EverOS 2.0 with agent memory: memory is chat memory, and a "
+        "tool row is dropped before segmentation"
     ),
     "memory.root": (
         "removed in EverOS 1.x: the root is --root, EVEROS_ROOT or ~/.everos"
@@ -1339,6 +1263,7 @@ IGNORED_KEYS: Mapping[str, str] = {
         "launchers still export EVEROS_MULTIMODAL__MAX_TOKENS"
     ),
     "observability.recall_hit_threshold": "removed with the search hit verdict",
+    "rerank": "removed in EverOS 2.0 with knowledge search, its one user",
     "search.facts_per_episode": "removed with atomic facts",
     "search.vector_strategy": "removed in EverOS 1.x with the vector search method",
 }
@@ -1494,10 +1419,8 @@ class Settings(BaseSettings):
     decider: DeciderSettings = DeciderSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     vision_embedding: VisionEmbeddingSettings = VisionEmbeddingSettings()
-    rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
-    agent_memory: AgentMemorySettings = AgentMemorySettings()
     clustering: ClusteringSettings = ClusteringSettings()
     scenes: ScenesSettings = ScenesSettings()
     cascade: CascadeSettings = CascadeSettings()
@@ -1505,7 +1428,6 @@ class Settings(BaseSettings):
     multimodal: MultimodalSettings = MultimodalSettings()
     images: ImagesSettings = ImagesSettings()
     extraction: ExtractionSettings = ExtractionSettings()
-    knowledge: KnowledgeSettings = KnowledgeSettings()
     groups: GroupsSettings = GroupsSettings()
     search: GroupSearchSettings = GroupSearchSettings()
     access: AccessSettings = AccessSettings()

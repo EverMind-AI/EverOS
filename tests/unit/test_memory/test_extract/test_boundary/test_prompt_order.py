@@ -195,7 +195,7 @@ async def test_a_second_add_repeats_the_first_adds_records_as_a_prefix(
         ingested = await ingest.process(
             payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
         )
-        outcome = await boundary.detect(ingested, mode="chat", is_final=False)
+        outcome = await boundary.detect(ingested, is_final=False)
         assert outcome.status == "accumulated"
 
     first, second = (request[-1].content for request in sent)

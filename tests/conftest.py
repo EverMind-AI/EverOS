@@ -107,7 +107,7 @@ def _reset_settings_cache() -> Iterator[None]:
     # gets a lock bound to a dead loop and the strategy dies with
     # ``RuntimeError: ... is bound to a different event loop``. It hits
     # the parametrised suites hardest, where both backends replay the
-    # same agent ids, and it surfaces as a dead-lettered OME run rather
+    # same owner ids, and it surfaces as a dead-lettered OME run rather
     # than a test error — reported as a flake on whichever parameter
     # happens to run second.
     structlog.reset_defaults()

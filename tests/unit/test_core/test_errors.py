@@ -7,24 +7,22 @@ from everos.core.errors import (
     CapabilityError,
     ConfigurationError,
     ConflictError,
-    DocumentNotFoundError,
     DomainError,
-    DuplicateDocumentError,
     EmbeddingServiceError,
     ExternalServiceError,
-    ExtractionEmptyError,
     FilterError,
+    ForgottenMemoryError,
     InfrastructureError,
     InvalidInputError,
     LLMServiceError,
     MultimodalNotEnabledError,
     NotFoundError,
     PathTraversalError,
-    RerankServiceError,
+    RosterConflictError,
     StorageError,
-    TopicNotFoundError,
     UnsupportedModalityError,
     VectorStoreError,
+    VersionConflictError,
 )
 
 
@@ -35,15 +33,12 @@ class TestDomainBranch:
         assert issubclass(ConflictError, DomainError)
         assert issubclass(InvalidInputError, DomainError)
 
-    def test_not_found_subtypes(self) -> None:
-        assert issubclass(DocumentNotFoundError, NotFoundError)
-        assert issubclass(TopicNotFoundError, NotFoundError)
-
     def test_conflict_subtypes(self) -> None:
-        assert issubclass(DuplicateDocumentError, ConflictError)
+        assert issubclass(VersionConflictError, ConflictError)
+        assert issubclass(ForgottenMemoryError, ConflictError)
+        assert issubclass(RosterConflictError, ConflictError)
 
     def test_invalid_input_subtypes(self) -> None:
-        assert issubclass(ExtractionEmptyError, InvalidInputError)
         assert issubclass(FilterError, InvalidInputError)
 
     def test_path_traversal_is_domain_not_invalid_input(self) -> None:
@@ -65,7 +60,6 @@ class TestInfrastructureBranch:
     def test_external_service_subtypes(self) -> None:
         assert issubclass(LLMServiceError, ExternalServiceError)
         assert issubclass(EmbeddingServiceError, ExternalServiceError)
-        assert issubclass(RerankServiceError, ExternalServiceError)
 
 
 class TestCapabilityBranch:
@@ -86,11 +80,6 @@ class TestConfigurationBranch:
 
 
 class TestBackwardCompat:
-    def test_old_document_already_exists_alias(self) -> None:
-        from everos.core.errors import DocumentAlreadyExistsError
-
-        assert DocumentAlreadyExistsError is DuplicateDocumentError
-
     def test_old_validation_error_alias(self) -> None:
         from everos.core.errors import ValidationError
 
@@ -104,7 +93,7 @@ class TestMRODispatch:
         assert isinstance(exc, AppError)
 
     def test_instantiation_with_message(self) -> None:
-        exc = DocumentNotFoundError("d_abc123")
+        exc = NotFoundError("d_abc123")
         assert str(exc) == "d_abc123"
         exc2 = LLMServiceError("timeout after 30s")
         assert str(exc2) == "timeout after 30s"

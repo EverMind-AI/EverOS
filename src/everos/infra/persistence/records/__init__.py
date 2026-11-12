@@ -13,25 +13,20 @@ External usage::
 
     from everos.infra.persistence.records import (
         Episode,
-        AgentCase,
         GroupProfileItem,
-        AgentSkill,
+        ImageMemory,
         UserProfile,
-        KnowledgeTopic,
         ParentType,
     )
 """
 
 from ._parent_type import ParentType as ParentType
 from ._provenance_key import EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY
-from .agent_case import AgentCase as AgentCase
-from .agent_skill import AgentSkill as AgentSkill
 from .base import IndexRecord as IndexRecord
 from .episode import Episode as Episode
 from .group_profile_item import GroupProfileItem as GroupProfileItem
 from .image_memory import ImageMemory as ImageMemory
 from .index_record import IndexRecordMeta as IndexRecordMeta
-from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
 from .user_profile import UserProfile as UserProfile
 from .user_profile import member_profile_row_id as member_profile_row_id
 from .vector import DenseVector as DenseVector
@@ -40,15 +35,12 @@ from .vector import is_vector_field as is_vector_field
 
 __all__ = [
     "EMBEDDING_MODEL_KEY",
-    "AgentCase",
-    "AgentSkill",
     "DenseVector",
     "Episode",
     "GroupProfileItem",
     "ImageMemory",
     "IndexRecord",
     "IndexRecordMeta",
-    "KnowledgeTopic",
     "ParentType",
     "UserProfile",
     "VectorColumn",

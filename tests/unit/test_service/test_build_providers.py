@@ -21,7 +21,6 @@ from everos.config.settings import (
     EmbeddingSettings,
     LLMSettings,
     MultimodalSettings,
-    RerankSettings,
 )
 from everos.service import bootstrap as bootstrap_mod
 from everos.service import build_providers
@@ -61,7 +60,6 @@ def _unconfigured() -> Settings:
     return Settings(
         llm=_LLM,
         embedding=EmbeddingSettings(model=None, api_key=None, base_url=None),
-        rerank=RerankSettings(model=None, api_key=None, base_url=None),
         multimodal=MultimodalSettings(api_key=None, base_url=None),
     )
 
@@ -70,7 +68,6 @@ def test_unconfigured_optional_providers_are_none() -> None:
     providers = build_providers(_unconfigured())
 
     assert providers.embedding is None
-    assert providers.rerank is None
     assert providers.multimodal_llm is None
 
 
@@ -104,9 +101,6 @@ def test_configured_optional_providers_are_built() -> None:
         embedding=EmbeddingSettings(
             model="m", api_key=SecretStr("sk-test"), base_url="https://e.test"
         ),
-        rerank=RerankSettings(
-            model="r", api_key=SecretStr("sk-test"), base_url="https://r.test"
-        ),
         multimodal=MultimodalSettings(
             model="mm", api_key=SecretStr("sk-test"), base_url="https://m.test"
         ),
@@ -115,16 +109,12 @@ def test_configured_optional_providers_are_built() -> None:
     providers = build_providers(settings)
 
     assert providers.embedding is not None
-    assert providers.rerank is not None
     assert providers.multimodal_llm is not None
 
 
 @pytest.mark.parametrize(
     ("factory", "event"),
-    [
-        ("build_embedding_provider", "embedding_capability_build_failed"),
-        ("build_rerank_provider", "rerank_capability_build_failed"),
-    ],
+    [("build_embedding_provider", "embedding_capability_build_failed")],
 )
 def test_a_factory_failure_is_logged_with_its_reason(
     monkeypatch: pytest.MonkeyPatch,

@@ -34,22 +34,16 @@ from everos.infra.persistence.locking import memory_root_lock
 
 from ..records import (
     EMBEDDING_MODEL_KEY,
-    AgentCase,
-    AgentSkill,
     Episode,
     ImageMemory,
     IndexRecord,
-    KnowledgeTopic,
     UserProfile,
 )
 from ._base import indexes
 from ._base.arrow import arrow_schema_for
-from ._repos.agent_case import _AgentCaseRepo
-from ._repos.agent_skill import _AgentSkillRepo
 from ._repos.episode import _EpisodeRepo
 from ._repos.group_profile_item import _GroupProfileItemRepo
 from ._repos.image_memory import _ImageMemoryRepo
-from ._repos.knowledge_topic import _KnowledgeTopicRepo
 from ._repos.user_profile import _UserProfileRepo
 from .lancedb_manager import LanceDbConnection
 
@@ -95,8 +89,9 @@ _TABLE_SCHEMA_VERSION = 5
 
 v2 = ``vector: DenseVector | None`` on the business tables that carried a
 vector column then (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`). The
-``atomic_fact`` and ``foresight`` tables it also altered are no longer
-opened: a store that still has them keeps them, untouched.
+``atomic_fact``, ``foresight``, ``agent_case``, ``agent_skill`` and
+``knowledge_topic`` tables it also altered are no longer opened: a store that
+still has them keeps them, untouched.
 
 v3 = ``image_memory.visual_vector: DenseVector | None`` — the picture's own
 embedding, added so a question about what a picture looks like can reach it
@@ -118,10 +113,10 @@ Added nullable; an existing row holds NULL and reads ``[]`` / ``None`` /
 ``timestamp``. Only rows a group owns are ever compared on the window columns,
 and those are written with them.
 
-v5 = the rest of group memory's columns (docs/group-memory.md, sections 6.3
-and 9.1): ``user_profile.subject_id``, the member a ``group`` row is about,
-and ``agent_case.source_group_id``, the group a case was learned in. Added
-nullable; a personal profile row and a case from no group hold NULL.
+v5 = the rest of group memory's columns (docs/group-memory.md, section 6.3):
+``user_profile.subject_id``, the member a ``group`` row is about. Added
+nullable; a personal profile row holds NULL. (It also added
+``agent_case.source_group_id``, a table no longer opened.)
 
 A new *table* needs no version: :meth:`LanceDbConnection.table` creates a
 missing table from its record on first open, and verification and the FTS
@@ -135,16 +130,11 @@ hard-coded body that silently replays the previous step.
 """
 
 
-BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[IndexRecord], ...] = (
-    Episode,
-    AgentCase,
-    AgentSkill,
-    KnowledgeTopic,
-)
+BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[IndexRecord], ...] = (Episode,)
 """Business schemas whose ``vector`` column needs the v2 nullability
 migration. ``Episode.subject_vector`` was already nullable in v1.1.1 and
 is intentionally left out of this migration. ``UserProfile`` has no
-vector column; ``knowledge_document`` has no LanceDB table.
+vector column.
 
 An explicit tuple rather than "every table with a vector column": it names the
 tables that existed when v2 shipped, so a vector table added later -- created
@@ -184,13 +174,10 @@ class LanceIndexBackend:
         self._schemas = tuple(schemas)
         self.repositories = IndexRepositories(
             episode=_EpisodeRepo(source=connection, dim=dim),
-            agent_case=_AgentCaseRepo(source=connection, dim=dim),
-            agent_skill=_AgentSkillRepo(source=connection, dim=dim),
             image_memory=_ImageMemoryRepo(
                 source=connection, dim=dim, column_dims=column_dims
             ),
             user_profile=_UserProfileRepo(source=connection, dim=dim),
-            knowledge_topic=_KnowledgeTopicRepo(source=connection, dim=dim),
             group_profile_item=_GroupProfileItemRepo(source=connection, dim=dim),
         )
 
@@ -426,15 +413,11 @@ class LanceIndexBackend:
         )
 
     async def _migrate_v5_group_owned(self) -> None:
-        """v5 -- ``user_profile.subject_id`` and ``agent_case.source_group_id``.
+        """v5 -- ``user_profile.subject_id``.
 
-        Additive and metadata-only, like v4: a personal profile row and a
-        case learned outside any group read NULL.
+        Additive and metadata-only, like v4: a personal profile row reads NULL.
         """
-        await self._add_nullable_columns(
-            {UserProfile: ("subject_id",), AgentCase: ("source_group_id",)},
-            version=5,
-        )
+        await self._add_nullable_columns({UserProfile: ("subject_id",)}, version=5)
 
     async def _add_nullable_columns(
         self,

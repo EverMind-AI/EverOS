@@ -65,7 +65,7 @@ class ForgetEntry:
         removed_profile_items: ``(bucket, item)`` pairs the forget took out of
             the profile, kept whole so an undo can put them back.
         undone: Whether an undo has already reversed this forget.
-        owner_type: ``user``, ``agent`` or ``group``.
+        owner_type: ``user`` or ``group``.
         requested_by: Who asked for a group forget; ``None`` elsewhere.
         undo: What a group forget's undo restores (the material it took out
             of markdown, what it wrote, what it queued), as the forget

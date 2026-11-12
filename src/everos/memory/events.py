@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from everalgo.types import MemCell
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from everos.memory.ports import Event
 
@@ -27,67 +26,8 @@ def parse_group_key(key: str) -> tuple[str, str, str] | None:
     return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
 
 
-class AgentPipelineStarted(Event):
-    """Fired at the start of :class:`AgentMemoryPipeline.run`, once per cell.
-
-    Only emitted in ``mode="agent"`` (the agent pipeline does not run in
-    chat mode). Subscribers handle the agent-side processing chain
-    (case extraction, agent-skill clustering) in parallel with the user
-    chain. Carries the algo-side ``MemCell`` so crash recovery has the full
-    payload (OME serialises events to JSON via Pydantic v2 nested-model
-    handling).
-
-    ``group_id`` is the group the cell's session is bound to: a case learned
-    from it carries the group (docs/group-memory.md, section 9.1).
-    """
-
-    memcell_id: str
-    session_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    memcell: MemCell
-    group_id: str | None = None
-
-
-class ReflectedEpisode(BaseModel):
-    """One cluster member a Reflection merge replaces, located in markdown."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    entry_id: str
-    md_path: str
-    parent_id: str
-
-
-class ReflectionContext(BaseModel):
-    """What finishing one Reflection merge needs, captured when it was merged.
-
-    The merge step writes the merged episode and publishes it; the finishing
-    step runs on that event, so the snapshot it acts on travels with the
-    event instead of living in a waiting coroutine.
-
-    Attributes:
-        cluster_id: The cluster that was merged.
-        mode: ``"init"`` for a first merge, ``"update"`` when the cluster
-            already held a merged episode.
-        source_members: ``(member_id, member_type)`` pairs at merge time.
-        episodes: The member episodes as they were read for the merge.
-        merged_episode: Text of the merged episode (the new centroid source).
-        last_ts: Newest member timestamp, epoch milliseconds.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    cluster_id: str
-    mode: Literal["init", "update"]
-    source_members: list[tuple[str, str]]
-    episodes: list[ReflectedEpisode]
-    merged_episode: str
-    last_ts: int
-
-
 class EpisodeExtracted(Event):
-    """Fired once per episode the conversation pipeline writes, and per merge.
+    """Fired once per episode the conversation pipeline writes.
 
     A segment's episode lives in one space: a user's own (``owner_type``
     ``user``: a one-to-one conversation, ``owner_id`` the user) or a group's
@@ -98,13 +38,11 @@ class EpisodeExtracted(Event):
     (docs/group-memory.md, section 7.1 step 6): group content never feeds
     personal memory.
 
-    Carries ``episode_text`` so downstream clustering can embed it without
+    Carries ``episode_text`` so the scene strategies can embed it without
     racing the cascade (cascade also embeds, but at the LanceDB layer —
     keeping a copy on the event is cheaper than polling LanceDB until the
-    row appears). ``episode_timestamp_ms`` rides along so the cluster
-    strategy can stamp the algo-side ``Cluster.last_ts`` without a second
-    md read. Reflection's merged episodes announce themselves with the same
-    event (``source="reflection"``).
+    row appears). ``episode_timestamp_ms`` rides along so the scene cluster
+    can stamp the algo-side ``Cluster.last_ts`` without a second md read.
 
     Attributes:
         speaker_ids: A group episode's human members whose own (role
@@ -125,10 +63,6 @@ class EpisodeExtracted(Event):
     session_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
-    source: str = "pipeline"
-    reflection: ReflectionContext | None = None
-    """Set on Reflection's merged episode (``source="reflection"``): what the
-    step that finishes the merge (``finish_reflection``) deprecates."""
     language: str | None = None
     """The episode's ``OutputLanguage`` value (see ``Episode.language``); the
     extractions this event drives write in it. ``None`` lets each extractor
@@ -137,12 +71,28 @@ class EpisodeExtracted(Event):
     speaker_ids: list[str] = Field(default_factory=list)
     group_key: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_reflection_keys(cls, data: Any) -> Any:
+        """Read a run an earlier 2.0 build persisted, before Reflection went.
+
+        Its payload carries ``source`` (always ``"pipeline"`` for the runs of
+        the strategies that remain; Reflection's own were ``finish_reflection``
+        runs, dropped as an unknown strategy) and ``reflection`` (``null``).
+        """
+        if isinstance(data, dict) and ("source" in data or "reflection" in data):
+            data = {k: v for k, v in data.items() if k not in _REFLECTION_KEYS}
+        return data
+
     @model_validator(mode="after")
     def _fill_group_key(self) -> EpisodeExtracted:
         if self.owner_type == "group" and self.group_key is None:
             key = group_key(self.app_id, self.project_id, self.owner_id)
             object.__setattr__(self, "group_key", key)
         return self
+
+
+_REFLECTION_KEYS = frozenset({"source", "reflection"})
 
 
 class GroupFlushed(Event):
@@ -158,87 +108,3 @@ class GroupFlushed(Event):
     session_id: str
     app_id: str = "default"
     project_id: str = "default"
-
-
-class AgentCaseExtracted(Event):
-    """Fired by ``extract_agent_case`` after the AgentCase md is written.
-
-    Carries the full case body (``task_intent`` / ``approach`` / ``key_insight``)
-    so downstream strategies do not need to read LanceDB — they receive strong-
-    consistency data on the event bus, avoiding the cascade lag that made
-    ``extract_agent_skill`` retry-then-dead-letter on every run.
-
-    ``quality_score`` and ``case_gate`` let ``trigger_skill_clustering``
-    short-circuit before any embedding work when algo would not distil the
-    case into a skill.
-    ``case_timestamp_ms`` drives the algo-side ``Cluster.last_ts`` for the
-    time-window filter in :func:`everalgo.clustering.cluster_by_geometry`.
-    """
-
-    memcell_id: str
-    case_entry_id: str
-    task_intent: str
-    approach: str = ""
-    """Case's Approach section verbatim. Defaults empty for back-compat with
-    pending 1.2.2 events in the OME run_record queue."""
-    key_insight: str | None = None
-    """Case's optional KeyInsight section. Defaults None for the same
-    back-compat reason as ``approach``."""
-    quality_score: float
-    case_timestamp_ms: int
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    case_gate: dict[str, Any] | None = None
-    """The case's admission decision when a correctness gate admitted it;
-    ``None`` when no gate ran (see :attr:`AgentCase.case_gate`)."""
-
-
-class ProfileClusterUpdated(Event):
-    """Fired after the user-memory cluster strategy has merged a new
-    memcell into a cluster.
-
-    ``cluster_id`` is the new or merged cluster the source memcell now
-    belongs to. No strategy consumes it since the profile update reads each
-    new segment from its :class:`EpisodeExtracted` directly; Reflection reads
-    the clusters from their store.
-    """
-
-    memcell_id: str
-    cluster_id: str
-    owner_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    language: str | None = None
-    """Carried over from the triggering :class:`EpisodeExtracted`."""
-
-
-class SkillClusterUpdated(Event):
-    """Fired after the agent-case cluster strategy has merged a new
-    case into a cluster.
-
-    Drives the agent-skill extraction strategy. Carries a snapshot of the
-    triggering case body (``task_intent`` / ``approach`` / ``key_insight`` /
-    ``quality_score`` / ``case_timestamp_ms``) plus ``case_vector`` (already
-    embedded by ``trigger_skill_clustering``) so ``extract_agent_skill`` can
-    build its algo input without a LanceDB probe that races cascade.
-    """
-
-    case_entry_id: str
-    cluster_id: str
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    task_intent: str = ""
-    """Case task_intent for algo-side rendering. Default empty for back-compat
-    with 1.2.2 payloads in the OME run_record queue; 1.2.3+ emitters populate it."""
-    approach: str = ""
-    key_insight: str | None = None
-    quality_score: float = 0.0
-    case_timestamp_ms: int = 0
-    case_vector: list[float] | None = None
-    """Case task_intent embedding, produced by trigger_skill_clustering when it
-    embeds for cluster matching. Passed through so extract_agent_skill does not
-    need a second embedding call for the > MAX_SKILLS_IN_PROMPT top-k branch."""
-    case_gate: dict[str, Any] | None = None
-    """Passed through from :attr:`AgentCaseExtracted.case_gate`."""

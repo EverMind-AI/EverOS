@@ -2,9 +2,9 @@
 
 Verify the registered kinds' globs match the right paths and reject
 noise (random ``.md``, swp files, profile-style paths, the group profile's
-``pending.md``, and the atomic-fact / foresight logs a store written before
-EverOS 2.0 still holds). ``match_kind`` must walk the registry in declared
-order and pick the first matching spec.
+``pending.md``, and the agent, knowledge, atomic-fact and foresight files a
+store written before EverOS 2.0 still holds). ``match_kind`` must walk the
+registry in declared order and pick the first matching spec.
 """
 
 from __future__ import annotations
@@ -22,14 +22,6 @@ from everos.infra.cascade import KIND_REGISTRY, match_kind
             "episode",
         ),
         ("claude_code/oss/users/u_jason/episodes/episode-2026-01-01.md", "episode"),
-        (
-            "default_app/default_project/agents/a1/.cases/agent_case-2026-05-14.md",
-            "agent_case",
-        ),
-        (
-            "default_app/default_project/agents/a1/skills/skill_contract_risk_scan/SKILL.md",
-            "agent_skill",
-        ),
         (
             "default_app/p/groups/trip/profile/group_profile-2026-03-02.md",
             "group_profile",
@@ -63,23 +55,25 @@ def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -
         # The group profile's pending batch is state beside the logs, never
         # indexed.
         "default_app/p/groups/trip/profile/pending.md",
-        # Logs of the kinds EverOS 2.0 removed: an older store still has them
+        # Files of the kinds EverOS 2.0 removed: an older store still has them
         # on disk, and the cascade must leave them alone.
         "default_app/default_project/users/u1/.atomic_facts/atomic_fact-2026-05-14.md",
         "default_app/default_project/users/u1/.foresights/foresight-2026-05-14.md",
+        "default_app/default_project/agents/a1/.cases/agent_case-2026-05-14.md",
+        "default_app/default_project/agents/a1/skills/skill_contract_risk_scan/SKILL.md",
+        "default_app/default_project/knowledge/Sports/doc_1/index.md",
+        "default_app/default_project/knowledge/Sports/doc_1/01_rules.md",
     ],
 )
 def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_fourteen_kinds() -> None:
+def test_registry_has_exactly_ten_kinds() -> None:
     """The registry pins the cascade surface — no silent registration."""
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
         "episode",
-        "agent_case",
-        "agent_skill",
         "image_memory",
         "user_profile",
         "scene",
@@ -89,8 +83,6 @@ def test_registry_has_exactly_fourteen_kinds() -> None:
         "group_member_profile",
         "group_profile",
         "group_roster",
-        "knowledge_document",
-        "knowledge_topic",
     ]
 
 

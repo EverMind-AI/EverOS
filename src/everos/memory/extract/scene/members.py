@@ -3,8 +3,7 @@
 A scene names its episodes by entry id when a version is written. An episode
 can change after that without the scene knowing: a picture forget writes a
 new version without the picture and marks the old one superseded by it; a
-Reflection merge marks its sources merged into the merged episode; a session
-forget marks it ``forgotten``; a hard delete removes it. So a member is read
+session forget marks it ``forgotten``; a hard delete removes it. So a member is read
 through its marks: a supersession leads to the successor, ``forgotten`` or a
 missing entry ends it. That answers both what a scene update reads (the
 current text of each member, never a version a forget replaced) and when a

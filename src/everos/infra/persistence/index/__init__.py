@@ -36,7 +36,6 @@ from .predicate import lte as lte
 from .predicate import ne as ne
 from .predicate import one_of as one_of
 from .predicate import primary_key as primary_key
-from .protocols import AgentSkillIndexRepository as AgentSkillIndexRepository
 from .protocols import EpisodeIndexRepository as EpisodeIndexRepository
 from .protocols import IndexBackend as IndexBackend
 from .protocols import IndexRepository as IndexRepository
@@ -57,7 +56,6 @@ from .vector_projection import VectorProjection as VectorProjection
 __all__ = [
     "BUSINESS_SCHEMAS",
     "VECTOR_PROJECTIONS",
-    "AgentSkillIndexRepository",
     "All",
     "AnyOf",
     "Comparison",

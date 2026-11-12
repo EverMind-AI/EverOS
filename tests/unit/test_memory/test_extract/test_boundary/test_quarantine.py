@@ -6,11 +6,12 @@ later call on the session would merge it back in and fail the same way. The
 third consecutive call that ends this way moves the session's buffer (and
 that call's own messages) to the ``quarantine`` track, raises an error the
 client can tell apart, and the next call starts from an empty buffer.
-Input the operator cannot take at all -- a message everalgo refuses, or a
-row that maps to no conversation item (an orphan tool result) -- counts the
-same way but is never retried. Infrastructure failures (no quota, network)
-are not counted: they propagate on the first attempt, so the buffer waits
-for the service to come back.
+Input the operator cannot take at all -- a message everalgo refuses --
+counts the same way but is never retried. Infrastructure failures (no quota,
+network) are not counted: they propagate on the first attempt, so the buffer
+waits for the service to come back. A tool row is not chat: it is dropped
+before anything is buffered or cut, so it never poisons a session -- not
+even one an older build left in the buffer.
 
 Real: ingest, :class:`BoundaryDetection`, everalgo's boundary operator and
 the SQLite stores on a temp file. Scripted: the model's replies.
@@ -44,6 +45,7 @@ from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
+from everos.memory.ports import SessionKey
 from tests.fakes import (
     UNUSABLE_REPLY,
     boundary_reply,
@@ -68,12 +70,13 @@ class _Stage:
         self.buffer = UnprocessedBufferRepo(session_factory=self.factory)
         self.replies: list[str | Exception] = []
         self.llm = FakeLLMClient(handler=self._reply)
+        self.session_buffer = SqliteSessionBufferStore(
+            self.buffer, SessionCutRepo(session_factory=self.factory)
+        )
         self.boundary = BoundaryDetection(
             llm=self.llm,
             instructions=bundled_instructions(),
-            session_buffer=SqliteSessionBufferStore(
-                self.buffer, SessionCutRepo(session_factory=self.factory)
-            ),
+            session_buffer=self.session_buffer,
             limits=BoundaryDetectionSettings(
                 hard_token_limit=10_000, hard_msg_limit=100
             ),
@@ -101,7 +104,7 @@ class _Stage:
             multimodal_llm=None,
             raw_file_builder=unused_raw_file_builder,
         )
-        return await self.boundary.buffer(ingested, mode="chat")
+        return await self.boundary.buffer(ingested)
 
     async def add(
         self, session: str, start: int, *, final: bool = False
@@ -111,23 +114,49 @@ class _Stage:
             multimodal_llm=None,
             raw_file_builder=unused_raw_file_builder,
         )
-        return await self.boundary.detect(ingested, mode="chat", is_final=final)
+        return await self.boundary.detect(ingested, is_final=final)
 
-    async def add_orphan_tool_row(self, session: str, start: int) -> BoundaryOutcome:
-        """An agent-mode add whose tool row answers no tool call."""
+    async def add_refused(self, session: str, start: int) -> BoundaryOutcome:
+        """An add with a message everalgo refuses: text without a timestamp."""
         payload = _payload(session, start)
         payload["messages"].append(
-            {
-                "content": "tool output",
-                "timestamp": BASE_TS + start,
-                "sender_id": "tool",
-                "role": "tool",
-            }
+            {"content": "undated", "timestamp": 0, "sender_id": "u", "role": "user"}
         )
         ingested = await ingest.process(
             payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
         )
-        return await self.boundary.detect(ingested, mode="agent", is_final=False)
+        return await self.boundary.detect(ingested, is_final=False)
+
+    async def add_with_tool_row(
+        self, session: str, start: int, *, defer: bool = False
+    ) -> BoundaryOutcome:
+        """An add whose messages include a tool row answering no tool call."""
+        ingested = await ingest.process(
+            _with_tool_row(_payload(session, start), start),
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+        )
+        if defer:
+            return await self.boundary.buffer(ingested)
+        return await self.boundary.detect(ingested, is_final=False)
+
+    async def leave_tool_row_buffered(self, session: str, start: int) -> None:
+        """A tool row in the buffer, as an agent-mode build left one there."""
+        ingested = await ingest.process(
+            _with_tool_row({"session_id": session, "messages": []}, start),
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+        )
+        [row] = ingested.messages
+        await self.session_buffer.keep(
+            SessionKey(
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                session_id=session,
+            ),
+            [row],
+            last_message_ts=row.timestamp,
+        )
 
     async def tracks(self, session: str) -> dict[str, list[str]]:
         return {
@@ -150,6 +179,18 @@ def _payload(session: str, start: int) -> dict[str, Any]:
             }
         ],
     }
+
+
+def _with_tool_row(payload: dict[str, Any], start: int) -> dict[str, Any]:
+    payload["messages"].append(
+        {
+            "content": "tool output",
+            "timestamp": BASE_TS + start,
+            "sender_id": "tool",
+            "role": "tool",
+        }
+    )
+    return payload
 
 
 async def test_third_consecutive_unusable_call_quarantines_the_buffer() -> None:
@@ -217,18 +258,46 @@ async def test_sessions_are_counted_apart() -> None:
         assert (await stage.tracks("s1"))["quarantine"] == []
 
 
-async def test_an_orphan_tool_row_counts_without_reaching_the_model() -> None:
-    """A row that maps to no conversation item poisons the session too."""
+async def test_a_refused_message_counts_without_reaching_the_model() -> None:
+    """A message everalgo refuses poisons the session too, and is not retried."""
     async with _Stage() as stage:
         for start in (1, 2):
-            with pytest.raises(ValueError, match="cannot map"):
-                await stage.add_orphan_tool_row("s1", start)
+            with pytest.raises(ValueError, match="timestamp"):
+                await stage.add_refused("s1", start)
         with pytest.raises(SessionBufferQuarantinedError):
-            await stage.add_orphan_tool_row("s1", 3)
+            await stage.add_refused("s1", 3)
         assert stage.llm.call_count == 0, "never retried, never sent"
         tracks = await stage.tracks("s1")
         assert tracks["memorize"] == []
         assert sorted(tracks["quarantine"]) == [
+            "m_s1_0_001",
             "m_s1_1700000000003_000",
-            "m_s1_1700000000003_001",
         ]
+
+
+async def test_a_tool_row_is_dropped_and_never_poisons_the_session() -> None:
+    """The agent-mode add that once poisoned a session: its tool row is not
+    chat, so it is dropped before the buffer and the chat rows go on."""
+    async with _Stage() as stage:
+        deferred = await stage.add_with_tool_row("s1", 1, defer=True)
+        assert (deferred.status, deferred.message_count) == ("accumulated", 1)
+        for start in (2, 3, 4):
+            outcome = await stage.add_with_tool_row("s1", start)
+            assert (outcome.status, outcome.message_count) == ("accumulated", 1)
+        assert stage.llm.call_count == 3
+        assert await stage.tracks("s1") == {
+            "memorize": [f"m_s1_170000000000{start}_000" for start in (1, 2, 3, 4)],
+            "quarantine": [],
+        }
+
+
+async def test_a_tool_row_an_older_build_buffered_is_dropped_too() -> None:
+    async with _Stage() as stage:
+        await stage.leave_tool_row_buffered("s1", 1)
+        assert (await stage.tracks("s1"))["memorize"] == ["m_s1_1700000000001_000"]
+
+        outcome = await stage.add("s1", 2, final=True)
+
+        assert outcome.status == "extracted"
+        assert outcome.per_cell_message_ids == [["m_s1_1700000000002_000"]]
+        assert await stage.tracks("s1") == {"memorize": [], "quarantine": []}

@@ -64,12 +64,12 @@ MULTIROUND_ONLY = (
 )
 """What a request naming a removed method is told."""
 
-NO_AGENT_SEARCH = (
-    "agent memory is not searchable: multi-round retrieval, the only search "
-    "method, covers user and group memory; list an agent's cases and skills "
-    "with POST /api/v2/memory/get"
+NO_AGENT_MEMORY = (
+    "EverOS 2.0 has no agent memory: name a user (user_id) or a group; "
+    "agent_id, context_group_id and the agent_case / agent_skill memory types "
+    "are not accepted"
 )
-"""What a request for an agent's memory is told."""
+"""What a request for an agent's memory is told (search, get and delete)."""
 
 
 class FilterNode(BaseModel):
@@ -137,9 +137,8 @@ class SearchRequest(BaseModel):
     derived properties so the rename only affects the wire contract, not the
     internal recall plumbing.
 
-    An ``agent_id`` is refused with :data:`NO_AGENT_SEARCH`: agent cases and
-    skills are extracted and listed by ``/memory/get``, but multi-round
-    retrieval does not rank them.
+    An ``agent_id`` is refused with :data:`NO_AGENT_MEMORY`: EverOS 2.0 has no
+    agent memory.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -216,7 +215,7 @@ class SearchRequest(BaseModel):
         if isinstance(data, dict) and (
             data.get("agent_id") is not None or data.get("context_group_id") is not None
         ):
-            raise ValueError(NO_AGENT_SEARCH)
+            raise ValueError(NO_AGENT_MEMORY)
         return data
 
     @field_validator("method", mode="before")
@@ -351,7 +350,8 @@ class SearchEpisodeItem(BaseModel):
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
-    """``None`` for merged episodes (Reflection aggregation products)."""
+    """``None`` for an episode merged from several sessions (by the Reflection
+    of an earlier 2.0 build)."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
     subject_ids: list[str] = Field(default_factory=list)
@@ -506,8 +506,8 @@ class UnprocessedMessageDTO(BaseModel):
     No extracted memcell yet, no owner inference yet (attribution
     happens at boundary detection). Returned by ``/search`` **only when**
     ``filters.session_id`` is present as a top-level eq predicate —
-    unprocessed messages have no ``user_id`` / ``agent_id`` to filter
-    on, so session is the only meaningful query dimension.
+    unprocessed messages have no ``user_id`` to filter on, so session is
+    the only meaningful query dimension.
     """
 
     model_config = ConfigDict(extra="forbid")

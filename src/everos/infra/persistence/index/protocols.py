@@ -203,26 +203,6 @@ class EpisodeIndexRepository(IndexRepository[T], Protocol[T]):
 
 
 @runtime_checkable
-class AgentSkillIndexRepository(IndexRepository[T], Protocol[T]):
-    """AgentSkill-only cluster reads every backend must also provide."""
-
-    async def count_in_cluster(self, *, owner_id: str, cluster_id: str) -> int: ...
-
-    async def find_in_cluster(
-        self, *, owner_id: str, cluster_id: str, limit: int
-    ) -> list[Any]: ...
-
-    async def find_topk_relevant_in_cluster(
-        self,
-        *,
-        owner_id: str,
-        cluster_id: str,
-        query_vector: Sequence[float],
-        top_k: int,
-    ) -> list[Any]: ...
-
-
-@runtime_checkable
 class IndexBackend(Protocol):
     """Lifecycle contract for one configured derived-index backend."""
 
@@ -264,7 +244,6 @@ class IndexBackend(Protocol):
 
 
 __all__ = [
-    "AgentSkillIndexRepository",
     "EpisodeIndexRepository",
     "IndexBackend",
     "IndexRepository",

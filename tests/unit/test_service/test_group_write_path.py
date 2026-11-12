@@ -21,9 +21,7 @@ scripted model (``tests/helpers/groups.py``). What these pin:
 - the extraction call is told the group's language, resolved from its human
   messages -- for a picture-only segment, from the session's earlier
   segments -- and that language, not the reply's, is what the episode and
-  its event carry;
-- in agent mode a group cell also reaches the agent pipeline, and the event
-  names the group, so a case learned from it carries ``source_group_id``.
+  its event carry.
 """
 
 from __future__ import annotations
@@ -343,28 +341,3 @@ async def test_a_picture_only_segment_is_told_the_group_s_language(
             e.language for e in world.bus.events if isinstance(e, EpisodeExtracted)
         ]
         assert languages == ["English", "English"]
-
-
-async def test_in_agent_mode_a_group_cell_reaches_the_agent_track_with_its_group(
-    tmp_path: Path,
-) -> None:
-    async with GroupWorld.open(
-        tmp_path, llm=FakeLLMClient(handler=_Model("Ava answered Chen.")), mode="agent"
-    ) as world:
-        await _roster(world)
-        await _send(
-            world,
-            "s_group",
-            _message("u_chen", 1_000, "Which flight?"),
-            _message("bot_ava", 2_000, "The 08:10 one.", "assistant"),
-        )
-        kinds = [type(e).__name__ for e in world.bus.events]
-        assert sorted(kinds) == [
-            "AgentPipelineStarted",
-            "EpisodeExtracted",
-            "GroupFlushed",
-        ]
-        started = next(
-            e for e in world.bus.events if type(e).__name__ == "AgentPipelineStarted"
-        )
-        assert started.group_id == "trip"

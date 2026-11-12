@@ -7,10 +7,9 @@ from typing import ClassVar, Literal
 import pytest
 
 from everos.infra.persistence.markdown import (
-    AgentScopedFrontmatter,
     BaseFrontmatter,
     DailyLogPathMixin,
-    SkillPathMixin,
+    GroupScopedFrontmatter,
     UserScopedFrontmatter,
     dump_frontmatter,
     parse_frontmatter,
@@ -132,60 +131,15 @@ def test_daily_log_path_glob_user_scope() -> None:
     assert _UserDaily.path_glob() == "*/*/users/*/demo/entry-*.md"
 
 
-def test_daily_log_path_glob_agent_scope() -> None:
-    """Same mixin, agent scope swaps the leading directory."""
+def test_daily_log_path_glob_group_scope() -> None:
+    """Same mixin, group scope swaps the leading directory."""
 
-    class _AgentDaily(DailyLogPathMixin, AgentScopedFrontmatter):
-        DIR_NAME: ClassVar[str] = "cases"
-        FILE_PREFIX: ClassVar[str] = "case"
-        type: Literal["_agent_daily"] = "_agent_daily"
+    class _GroupDaily(DailyLogPathMixin, GroupScopedFrontmatter):
+        DIR_NAME: ClassVar[str] = "demo"
+        FILE_PREFIX: ClassVar[str] = "entry"
+        type: Literal["_group_daily"] = "_group_daily"
 
-    assert _AgentDaily.path_glob() == "*/*/agents/*/cases/case-*.md"
-
-
-def test_skill_path_glob() -> None:
-    """SkillPathMixin builds ``<scope>/*/<container>/<prefix>*/<main>``."""
-
-    class _AgentSkill(SkillPathMixin, AgentScopedFrontmatter):
-        SKILLS_CONTAINER_NAME: ClassVar[str] = "skills"
-        SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
-        SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
-        type: Literal["_agent_skill"] = "_agent_skill"
-
-    assert _AgentSkill.path_glob() == "*/*/agents/*/skills/skill_*/SKILL.md"
-
-
-def test_skill_dir_name_sanitizes_traversal_payload() -> None:
-    """``skill_dir_name`` is the sanitization point ``AgentSkillWriter`` /
-    ``AgentSkillReader`` both derive from — a traversal payload must not
-    survive into the directory segment.
-    """
-
-    class _AgentSkill(SkillPathMixin, AgentScopedFrontmatter):
-        SKILLS_CONTAINER_NAME: ClassVar[str] = "skills"
-        SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
-        SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
-        type: Literal["_agent_skill_dirname"] = "_agent_skill_dirname"
-
-    segment = _AgentSkill.skill_dir_name("../" * 8 + "tmp/pwned")
-    assert segment.startswith("skill_")
-    assert "/" not in segment
-    assert "\\" not in segment
-    # No separator survives, so the dots left behind form one opaque
-    # component — not a ``..`` path-traversal segment.
-    assert segment.split("/") == [segment]
-
-
-def test_skill_dir_name_preserves_cjk_and_spaces() -> None:
-    class _AgentSkill(SkillPathMixin, AgentScopedFrontmatter):
-        SKILLS_CONTAINER_NAME: ClassVar[str] = "skills"
-        SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
-        SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
-        type: Literal["_agent_skill_dirname_cjk"] = "_agent_skill_dirname_cjk"
-
-    segment = _AgentSkill.skill_dir_name("修复 Django 自动重载问题")
-    assert "修复" in segment
-    assert "Django" in segment
+    assert _GroupDaily.path_glob() == "*/*/groups/*/demo/entry-*.md"
 
 
 def test_strategy_mixin_overrides_base_via_mro() -> None:

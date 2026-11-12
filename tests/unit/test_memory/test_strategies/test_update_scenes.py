@@ -317,12 +317,12 @@ async def test_each_owner_has_its_own_switch(scenes: Any) -> None:
 
 
 @pytest.mark.usefixtures("scenes")
-async def test_only_pipeline_episodes_with_an_embedder_apply() -> None:
+async def test_only_a_users_episodes_with_an_embedder_apply() -> None:
     deps = make_deps(llm=FakeLLMClient(handler=_SceneModel()), embedding=_Same())
     event = _event("ep_20260101_0001", 1)
     assert UPDATE_USER_SCENES_SPEC.applies_to(event, deps) is True
-    merged = event.model_copy(update={"source": "reflection"})
-    assert UPDATE_USER_SCENES_SPEC.applies_to(merged, deps) is False
+    group = _group_event("gep_20260101_0001", 1)
+    assert UPDATE_USER_SCENES_SPEC.applies_to(group, deps) is False
     bare = make_deps(llm=FakeLLMClient(handler=_SceneModel()), embedding=None)
     assert UPDATE_USER_SCENES_SPEC.applies_to(event, bare) is False
 
@@ -412,7 +412,7 @@ async def test_a_group_version_spans_its_members_and_unites_them() -> None:
     assert v1.item.sender_ids == ["u_chen", "bot_ava"]
     assert v1.item.subject_ids == ["u_chen", "bot_ava"]
     assert v1.item.origin == "mixed"
-    # The same capped call as a user's scenes, not an uncapped reflection.
+    # The same capped call as a user's scenes.
     assert "At most 300 words in all" in model.calls[0]["system"]
     assert model.calls[0]["max_tokens"] == reply_token_cap(300)
 

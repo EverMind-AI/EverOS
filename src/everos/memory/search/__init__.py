@@ -16,8 +16,6 @@ Where everalgo's ``Candidate`` type may appear -- three places, nowhere else:
   records -> response DTOs.
 * ``llm_multiround.py`` -- the retrieval loop (iterative per-sub-query blocks
   with an LLM core selector), hosted here pending upstreaming to everalgo.
-  ``callbacks.py`` keeps the cross-encoder ``RerankFn`` factory knowledge
-  search uses.
 
 ``manager.py`` orchestrates: it resolves the read scope, runs the loop,
 attaches profiles and referenced pictures, and neither constructs nor
@@ -48,6 +46,7 @@ its flat-DSL variant without forking the field allow-list.
 from .audience import with_audience as with_audience
 from .decider_health import DeciderHealth as DeciderHealth
 from .decider_health import DeciderStatus as DeciderStatus
+from .dto import NO_AGENT_MEMORY as NO_AGENT_MEMORY
 from .dto import AudienceItem as AudienceItem
 from .dto import FilterNode as FilterNode
 from .dto import GroupProfileEntry as GroupProfileEntry
@@ -79,6 +78,7 @@ from .shaper import group_source as group_source
 
 __all__ = [
     "ALLOWED_FIELDS",
+    "NO_AGENT_MEMORY",
     "RESERVED_FIELDS",
     "AudienceItem",
     "DeciderHealth",

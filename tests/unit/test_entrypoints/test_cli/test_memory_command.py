@@ -108,7 +108,7 @@ def test_history_prints_its_json_alone_and_logs_on_stderr(tmp_path: Path) -> Non
 
     assert [v["id"] for v in history["versions"]] == [episode]
     assert history["versions"][0]["state"] == "current"
-    assert "rerank_capability_build_failed" in stderr  # the logs went here
+    assert "embedding_capability_build_failed" in stderr  # the logs went here
     assert _TZ_WARNING not in stderr
 
 

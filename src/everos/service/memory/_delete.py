@@ -14,8 +14,6 @@ ones, and the profile reads them (it skips only what is forgotten).
   (target ``session``);
 * ``session_id`` alone -- that conversation in the memory of every user that
   holds it, one forget each;
-* ``agent_id`` -- refused (422): an agent's memory has no forget yet, and 2.0
-  deletes nothing;
 * ``/delete_by_ids`` -- the episodes by id, per owner (target ``record``); an id
   that names nothing is skipped, as before.
 
@@ -24,14 +22,13 @@ A group's delete is already a forget (``MemoryService.delete_in_group``).
 
 from __future__ import annotations
 
-__all__ = ["NO_AGENT_FORGET", "DeleteAlias", "DeleteResult"]
+__all__ = ["DeleteAlias", "DeleteResult"]
 
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from everos.core.errors import InvalidInputError
 from everos.core.observability.logging import get_logger
 from everos.memory.ports import Scope
 
@@ -43,11 +40,6 @@ if TYPE_CHECKING:
 logger = get_logger("everos.service.memory")
 
 _MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
-
-NO_AGENT_FORGET = (
-    "an agent's memory cannot be deleted: EverOS 2.0 has no hard delete, and "
-    "an agent's memory has no forget yet"
-)
 
 
 @dataclass(frozen=True)
@@ -84,28 +76,20 @@ class DeleteAlias:
         app_id: str,
         project_id: str,
         user_id: str | None,
-        agent_id: str | None,
         session_id: str | None,
     ) -> DeleteResult:
         """Forget one user's memory, one conversation of it, or a conversation
         everywhere.
 
         Raises:
-            InvalidInputError: An agent's memory (422).
             SessionBusyError: The conversation stays busy (503).
         """
-        if agent_id is not None:
-            raise InvalidInputError(NO_AGENT_FORGET)
         if user_id is None:
             if session_id is None:
-                raise ValueError("a deletion needs user_id, agent_id or session_id")
-            owners = [
-                scope
-                for scope in await self._stores.owner_dir.owners_with_session(
-                    app_id, project_id, session_id
-                )
-                if scope.owner_type == "user"
-            ]
+                raise ValueError("a deletion needs user_id or session_id")
+            owners = await self._stores.owner_dir.owners_with_session(
+                app_id, project_id, session_id
+            )
             filters = ["session_id"]
         else:
             owners = [

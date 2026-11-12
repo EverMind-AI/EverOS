@@ -13,10 +13,9 @@ pipelines (see ``tests/e2e/test_add_flush_*_pipeline_e2e.py``). It
 exercises every kind that writes md and indexes into LanceDB, not just
 the 4 daily-log kinds covered by the white-box integration test.
 
-Daily-log kinds (episode / image_memory / agent_case) hold
-many entries per md and use a per-entry digest; user_profile +
-agent_skill are single-md-per-row and digest the file as a whole
-(agent_skill additionally folds in concatenated ``references/*.md``).
+Daily-log kinds (episode / image_memory / scene / group_profile) hold
+many entries per md and use a per-entry digest; user_profile is
+single-md-per-row and digests the file as a whole.
 
 Mirroring vs. importing handler digests
 ---------------------------------------
@@ -28,8 +27,8 @@ The per-kind digest construction here mirrors the handler implementation
   so the mirror is one short loop that's robust against handler
   refactors (re-ordering, renaming keys) as long as the ClassVar drives
   truth.
-- ``ProfileHandler`` / ``AgentSkillHandler`` build their digest
-  inline in ``handle_added_or_modified``; the field set is duplicated
+- ``ProfileHandler`` builds its digest inline in
+  ``handle_added_or_modified``; the field set is duplicated
   here with a comment pointing at the source location. If a handler
   changes its digest formula, the consistency check will fail loudly —
   intentional friction so the test stays a real consumer of the
@@ -44,15 +43,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import anyio
-
 from everos.infra.cascade._projections._common import content_sha256, resolve_scope
 from everos.infra.cascade._projections._daily_log_base import BaseDailyLogHandler
-from everos.infra.cascade._projections.agent_skill import AgentSkillHandler
 from everos.infra.cascade._projections.profile import ProfileHandler
 from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec
 from everos.infra.persistence.index import IndexRepositories, eq, primary_key
-from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader
+from everos.infra.persistence.markdown import (
+    MarkdownReader,
+)
 from everos.infra.persistence.markdown._base.entries import StructuredEntry
 from everos.infra.persistence.records import member_profile_row_id
 from everos.memory.models import with_previous_values
@@ -123,8 +121,6 @@ async def assert_md_lance_strict_consistent(
         repo = index.for_schema(spec.index_schema) if spec.index_schema else None
         if spec.handler_factory is ProfileHandler:
             check = _check_profile
-        elif spec.handler_factory is AgentSkillHandler:
-            check = _check_agent_skill
         else:
             check = _check_daily_log
         entry_total, lance_total = await check(spec, repo, root, md_paths)
@@ -166,7 +162,7 @@ async def assert_md_lance_strict_consistent(
     return stats
 
 
-# ── Daily-log kinds (episode / image_memory / agent_case) ──
+# ── Daily-log kinds (episode / image_memory / scene / group_profile) ──
 
 
 def _daily_log_sha_for_entry(
@@ -284,75 +280,6 @@ async def _check_profile(
 
 
 # ── agent_skill (SKILL.md + references/*.md, PK = <owner>_<name>) ──────
-
-
-async def _check_agent_skill(
-    spec: KindSpec, repo: Any, root: Path, md_paths: list[str]
-) -> tuple[int, int]:
-    """Mirror :meth:`AgentSkillHandler.handle_added_or_modified` digest."""
-    for md_path in md_paths:
-        absolute = root / md_path
-        parsed = await MarkdownReader.read(absolute)
-        fm = parsed.frontmatter
-        owner_id = str(fm.get("agent_id", ""))
-        name = str(fm.get("name", ""))
-        if not owner_id or not name:
-            raise AssertionError(
-                f"agent_skill md missing required frontmatter "
-                f"(agent_id / name): {md_path}"
-            )
-        skill_id = f"{owner_id}_{name}"
-
-        skill_dir = absolute.parent
-        references_dir = skill_dir / AgentSkillFrontmatter.SKILL_REFERENCES_DIR_NAME
-        references_content = await _concat_references(references_dir)
-
-        # Mirror of AgentSkillHandler.handle_added_or_modified.
-        md_sha = content_sha256(
-            {
-                "frontmatter:name": name,
-                "frontmatter:description": str(fm.get("description", "")),
-                "frontmatter:confidence": str(float(fm.get("confidence", 0.0))),
-                "frontmatter:maturity_score": str(float(fm.get("maturity_score", 0.0))),
-                "body": parsed.body.rstrip(),
-                "references_content": references_content,
-            }
-        )
-        app_id, project_id = resolve_scope(md_path)
-        lance_row = await repo.find_one_where(primary_key(app_id, project_id, skill_id))
-        if lance_row is None:
-            raise AssertionError(
-                f"agent_skill row missing for skill {skill_id!r} @ {md_path}"
-            )
-        if lance_row.content_sha256 != md_sha:
-            raise AssertionError(
-                f"agent_skill sha mismatch @ {md_path}:\n"
-                f"  md sha:    {md_sha}\n"
-                f"  lance sha: {lance_row.content_sha256}"
-            )
-        if lance_row.md_path != md_path:
-            raise AssertionError(
-                f"agent_skill md_path drift @ {md_path}: "
-                f"lance row has md_path={lance_row.md_path!r}"
-            )
-    n = len(md_paths)
-    return n, n
-
-
-async def _concat_references(references_dir: Path) -> str:
-    """Mirror :func:`agent_skill._concat_references` for the test side."""
-    apath = anyio.Path(references_dir)
-    if not await apath.is_dir():
-        return ""
-    paths = sorted(
-        [p async for p in apath.iterdir() if p.name.endswith(".md")],
-        key=lambda p: p.name,
-    )
-    pieces: list[str] = []
-    for path in paths:
-        text = await path.read_text(encoding="utf-8")
-        pieces.append(text.rstrip())
-    return "\n\n".join(pieces)
 
 
 # ── small utilities ────────────────────────────────────────────────────

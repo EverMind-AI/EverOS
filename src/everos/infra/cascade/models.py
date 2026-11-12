@@ -20,7 +20,7 @@ class ScanInput:
     ``md_path`` is **relative to the memory root** (e.g.
     ``users/u1/episodes/episode-2026-05-14.md``). ``mtime`` is the
     POSIX timestamp captured at scan time; ``kind`` is the
-    registry-matched name (``"episode"`` / ``"agent_skill"`` / …).
+    registry-matched name (``"episode"`` / ``"user_profile"`` / …).
     """
 
     md_path: str

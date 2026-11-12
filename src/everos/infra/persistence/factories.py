@@ -20,18 +20,13 @@ from .groups import GroupRosterStore
 from .images import FileImageStore
 from .index import DerivedIndex
 from .index.adapters import (
-    AgentCaseIndexAdapter,
-    AgentSkillIndexAdapter,
     EpisodeIndexAdapter,
     GroupProfileIndexAdapter,
     ImageMemoryIndexAdapter,
-    KnowledgeTopicIndexAdapter,
     ProfileIndexAdapter,
 )
 from .lancedb import LanceDbConnection, LanceIndexBackend
 from .markdown import (
-    MarkdownAgentCaseStore,
-    MarkdownAgentSkillStore,
     MarkdownEpisodeStore,
     MarkdownGroupProfileStore,
     MarkdownImageMemoryStore,
@@ -46,7 +41,6 @@ from .sqlite import (
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
     SqliteMessageForgetStore,
-    SqliteReflectionReportStore,
     SqliteRepos,
     SqliteSessionBufferStore,
     SqliteSessionPurgeStore,
@@ -61,15 +55,12 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         images=FileImageStore(root, sqlite.image_original),
         forget_log=SqliteForgetLogStore(sqlite.forget_log),
         profile=MarkdownProfileStore(root),
-        agent_case=MarkdownAgentCaseStore(root),
-        agent_skill=MarkdownAgentSkillStore(root),
         session_buffer=SqliteSessionBufferStore(
             sqlite.unprocessed_buffer, sqlite.session_cut
         ),
         memcell=SqliteMemcellStore(sqlite.memcell),
         cluster=SqliteClusterStore(sqlite.cluster),
         memorize_inbox=SqliteMemorizeInboxStore(sqlite.memorize_inbox),
-        reflection_report=SqliteReflectionReportStore(sqlite.reflection_report),
         owner_dir=MarkdownOwnerDirStore(root),
         session_purge=SqliteSessionPurgeStore(sqlite.session_purge),
         groups=GroupRosterStore(root, sqlite.group_roster),
@@ -114,10 +105,7 @@ def build_indexes(index: DerivedIndex) -> Indexes:
     repos = index.repositories
     return Indexes(
         episode=EpisodeIndexAdapter(repos.episode),
-        agent_case=AgentCaseIndexAdapter(repos.agent_case),
-        agent_skill=AgentSkillIndexAdapter(repos.agent_skill),
         image_memory=ImageMemoryIndexAdapter(repos.image_memory),
         profile=ProfileIndexAdapter(repos.user_profile),
-        knowledge_topic=KnowledgeTopicIndexAdapter(repos.knowledge_topic),
         group_profile=GroupProfileIndexAdapter(repos.group_profile_item),
     )

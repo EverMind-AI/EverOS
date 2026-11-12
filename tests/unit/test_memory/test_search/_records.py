@@ -8,22 +8,15 @@ conversion is covered by the index adapter tests.
 
 from __future__ import annotations
 
-import datetime as dt
 from collections.abc import Sequence
 from typing import Any
 
-from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
-    Episode,
-    KnowledgeTopic,
-)
+from everos.memory.models import Episode
 from everos.memory.ports import (
     Filter,
     MemoryRef,
     OwnerType,
     Scope,
-    ScoredKnowledgeTopic,
     SearchHit,
     Stored,
 )
@@ -72,78 +65,8 @@ def stored_episode(
     )
 
 
-def stored_case(
-    entry_id: str,
-    *,
-    owner_id: str = "agent_1",
-    task_intent: str = "fix the build",
-    approach: str = "read the log",
-    quality_score: float = 0.8,
-) -> Stored[AgentCase]:
-    return Stored(
-        ref=_ref(owner_id, entry_id),
-        scope=scope(owner_id, "agent"),
-        item=AgentCase(
-            owner_id=owner_id,
-            task_intent=task_intent,
-            approach=approach,
-            quality_score=quality_score,
-            key_insight=None,
-            timestamp=TS_MS,
-            session_id="sess_a",
-            parent_id="mc_1",
-        ),
-    )
-
-
-def stored_skill(
-    skill_id: str,
-    *,
-    owner_id: str = "agent_1",
-    name: str = "debugging",
-    description: str = "find the bug",
-    source_case_ids: Sequence[str] = (),
-) -> Stored[AgentSkill]:
-    return Stored(
-        ref=MemoryRef(id=skill_id, entry_id=name, md_path="skill_x/SKILL.md"),
-        scope=scope(owner_id, "agent"),
-        item=AgentSkill(
-            id=skill_id,
-            name=name,
-            description=description,
-            content="steps",
-            confidence=0.7,
-            maturity_score=0.6,
-            source_case_ids=list(source_case_ids),
-        ),
-    )
-
-
-def topic(topic_id: str, *, category_id: str = "Outdoors") -> KnowledgeTopic:
-    stamp = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
-    return KnowledgeTopic(
-        topic_id=topic_id,
-        doc_id="d_1",
-        app_id="default",
-        project_id="default",
-        category_id=category_id,
-        topic_name=f"name {topic_id}",
-        topic_path=f"Doc > {topic_id}",
-        depth=1,
-        summary=f"summary {topic_id}",
-        created_at=stamp,
-        updated_at=stamp,
-    )
-
-
 def hit[T](stored: Stored[T], score: float | None = None) -> SearchHit[T]:
     return SearchHit(stored=stored, score=score)
-
-
-def topic_hit(t: KnowledgeTopic, score: float | None = None) -> ScoredKnowledgeTopic:
-    return ScoredKnowledgeTopic(
-        topic=t, md_path=f"knowledge/{t.topic_id}.md", score=score
-    )
 
 
 class ScriptedIndex:

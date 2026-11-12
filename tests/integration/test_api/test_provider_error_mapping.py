@@ -30,12 +30,12 @@ def _build_app_with_probes() -> FastAPI:
     async def probe_embed() -> None:
         raise ProviderNotConfiguredError(provider="embedding")
 
-    @app.get("/probe_rerank_with_alt")
-    async def probe_rerank() -> None:
+    @app.get("/probe_multimodal_with_alt")
+    async def probe_multimodal() -> None:
         raise ProviderNotConfiguredError(
-            provider="rerank",
-            feature="agent_hybrid",
-            alternative_hint="Set enable_llm_rerank=true.",
+            provider="multimodal_llm",
+            feature="multimodal_upload",
+            alternative_hint="Send the picture's description as text.",
         )
 
     return app
@@ -65,6 +65,6 @@ async def test_message_field_carries_toml_path():
 
 
 async def test_alternative_hint_present_in_message():
-    _, body = await _get("/probe_rerank_with_alt")
+    _, body = await _get("/probe_multimodal_with_alt")
     assert "Alternative:" in body["error"]["message"]
-    assert "enable_llm_rerank=true" in body["error"]["message"]
+    assert "Send the picture's description as text." in body["error"]["message"]

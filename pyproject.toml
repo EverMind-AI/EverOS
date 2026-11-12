@@ -296,7 +296,6 @@ forbidden_modules = [
     "everos.memory.extract",
     "everos.memory.get",
     "everos.memory.custom_instructions",
-    "everos.memory.reflection",
     "everos.memory.search",
     "everos.memory.strategies",
     "everos.memory._partition_locks",
@@ -393,9 +392,7 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown._readers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.owner_dir",
-    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
-    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",
     "everos.infra.persistence.index -> everos.infra.persistence.index.maintenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.vector_projection",
     "everos.infra.persistence.index -> everos.infra.persistence.index.vector_backfill",
@@ -421,10 +418,7 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records.vector",
     "everos.infra.persistence.records -> everos.infra.persistence.records._parent_type",
     "everos.infra.persistence.records -> everos.infra.persistence.records._provenance_key",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_case",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.agent_skill",
     "everos.infra.persistence.records -> everos.infra.persistence.records.episode",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.knowledge_topic",
     "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
     # The cascade facade assembles its public surface from its own modules.
     "everos.infra.cascade -> everos.infra.cascade._worker",
@@ -510,7 +504,6 @@ forbidden_modules = [
     "everos.memory.mappers",
     "everos.memory.models",
     "everos.memory.custom_instructions",
-    "everos.memory.reflection",
     "everos.memory.search",
     "everos.memory.strategies",
 ]
@@ -531,7 +524,6 @@ forbidden_modules = [
     "everos.component.embedding",
     "everos.component.llm",
     "everos.component.parser",
-    "everos.component.rerank",
     "everos.component.tokenizer",
 ]
 allow_indirect_imports = true

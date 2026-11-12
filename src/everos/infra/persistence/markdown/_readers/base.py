@@ -82,7 +82,7 @@ class BaseDailyReader:
         """Read the daily-log file for ``(scope_id, date)``.
 
         Args:
-            scope_id: ``user_id`` or ``agent_id``.
+            scope_id: ``user_id`` or ``group_id``.
             date: Date bucket — defaults to today in the configured TZ.
             app_id: App scope segment (defaults to the ``"default"`` space).
             project_id: Project scope segment (defaults to ``"default"``).
@@ -166,7 +166,7 @@ class BaseDailyReader:
         self, scope_id: str, date: _dt.date, app_id: str, project_id: str
     ) -> Path:
         """Build the daily-log path for ``scope_id`` on ``date``."""
-        # SCOPE_DIR ("users" / "agents") names the matching MemoryRoot method,
+        # SCOPE_DIR ("users" / "groups") names the matching MemoryRoot method,
         # which prepends the <app>/<project> business prefix.
         scope_dir = getattr(self._root, f"{self.schema.SCOPE_DIR}_dir")
         return (

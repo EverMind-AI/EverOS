@@ -17,14 +17,15 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade._projections import AgentCaseHandler, HandlerDeps
+from everos.infra.cascade._projections import HandlerDeps
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.cascade._projections.episode import EpisodeHandler
+from everos.infra.cascade._projections.image_memory import ImageMemoryHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import Comparison, Predicate
 from everos.infra.persistence.markdown import (
-    AgentCaseWriter,
     EpisodeWriter,
+    ImageMemoryWriter,
     StructuredEntry,
 )
 from tests.fakes import handler_deps
@@ -94,7 +95,6 @@ _INLINE = {
     "session_id": "s1",
     "timestamp": "2026-05-14T10:00:00+00:00",
     "parent_id": "mc_1",
-    "quality_score": "0.5",
 }
 
 
@@ -118,9 +118,9 @@ def _entry(sections: dict[str, str]) -> ParsedEntry:
     ("handler_cls", "sections", "expected_texts"),
     [
         (
-            AgentCaseHandler,
-            {"TaskIntent": " scan contract ", "Approach": "read pages"},
-            ("scan contract",),
+            ImageMemoryHandler,
+            {"Description": " a red bicycle ", "OCR": "SALE"},
+            ("a red bicycle",),
         ),
         (
             EpisodeHandler,
@@ -220,38 +220,43 @@ async def test_missing_provider_writes_null_vectors_through_batch_path(  # type:
     assert {r.episode_tokens for r in repo.rows} == {"aa S1", "bbbb"}
 
 
-async def test_agent_cases_of_one_file_go_out_in_one_batch(  # type: ignore[no-untyped-def]
+async def test_image_memories_of_one_file_go_out_in_one_batch(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A file holding many entries (here a day's twenty agent cases) goes out
+    """A file holding many entries (here a day's twenty pictures) goes out
     as one request the provider chunks, not twenty. Second witness for the
     batching contract next to the episode test above, on a kind that embeds
     one text per entry."""
     embedder = _RecordingEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
+    monkeypatch.setattr(ImageMemoryHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    writer = AgentCaseWriter(deps.memory_root)
-    intents = [f"task intent number {i}" for i in range(20)]
-    for intent in intents:
+    writer = ImageMemoryWriter(deps.memory_root)
+    descriptions = [f"picture description number {i}" for i in range(20)]
+    for i, description in enumerate(descriptions):
+        image_id = f"{i:064x}"
         await writer.append_entry(
-            "a1",
+            "u1",
             inline={
-                "owner_id": "a1",
+                "owner_id": "u1",
                 "session_id": "s1",
                 "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_type": "memcell",
                 "parent_id": "mc_1",
-                "quality_score": 0.5,
+                "image_id": image_id,
+                "original_path": f"figures/{image_id}.png",
+                "media_type": "png",
+                "width": 640,
+                "height": 480,
             },
-            sections={"TaskIntent": intent, "Approach": "read pages"},
+            sections={"Description": description},
             date=_dt.date(2026, 5, 14),
         )
-    path = deps.memory_root.agents_dir() / "a1" / ".cases" / "agent_case-2026-05-14.md"
-    rel = path.relative_to(deps.memory_root.root).as_posix()
+    rel = "default_app/default_project/users/u1/images/image-2026-05-14.md"
 
-    outcome = await AgentCaseHandler(deps).handle_added_or_modified(rel)
+    outcome = await ImageMemoryHandler(deps).handle_added_or_modified(rel)
 
     assert outcome.upserted == 20
     assert embedder.single == []
-    assert embedder.batches == [intents]
-    assert [row.vector[0] for row in repo.rows] == [float(len(t)) for t in intents]
+    assert embedder.batches == [descriptions]
+    assert [row.vector[0] for row in repo.rows] == [float(len(t)) for t in descriptions]

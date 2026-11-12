@@ -92,7 +92,6 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     errors.VersionConflictError: _Rule(409, ErrorCode.VERSION_CONFLICT),
     errors.ForgottenMemoryError: _Rule(409, ErrorCode.MEMORY_FORGOTTEN),
     errors.ConflictError: _Rule(409, ErrorCode.CONFLICT),
-    errors.ExtractionEmptyError: _Rule(422, ErrorCode.EXTRACTION_EMPTY),
     errors.InvalidInputError: _Rule(422, ErrorCode.INVALID_INPUT),
     # Transient, retryable.
     errors.InfrastructureError: _Rule(

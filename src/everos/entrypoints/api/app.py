@@ -39,7 +39,6 @@ from .routes import (
     groups,
     health,
     images,
-    knowledge,
     memorize,
     memory_edit,
     metrics,
@@ -147,7 +146,6 @@ def create_app(
     app.include_router(images.router, prefix="/api/v1")
     app.include_router(memory_edit.router, prefix="/api/v1")
     app.include_router(ome.router, prefix="/api/v1")
-    app.include_router(knowledge.router, prefix="/api/v1")
     # Operational, not a memory API: it stops a background subsystem. Mounted on
     # both prefixes so a caller does not have to know which one this build serves.
     app.include_router(cascade.router, prefix="/api/v1")
@@ -162,7 +160,6 @@ def create_app(
     app.include_router(memory_edit.router, prefix="/api/v2")
     app.include_router(delete.router, prefix="/api/v2")
     app.include_router(ome.router, prefix="/api/v2")
-    app.include_router(knowledge.router, prefix="/api/v2")
     app.include_router(cascade.router, prefix="/api/v2")
     app.include_router(tasks.router, prefix="/api/v2")
 

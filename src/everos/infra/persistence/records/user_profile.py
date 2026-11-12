@@ -1,8 +1,8 @@
 """Derived-index ``user_profile`` record.
 
 Profile is a single-file kind: one ``users/<user_id>/user.md`` per
-user, replaced wholesale on edit (mirrors ``AgentSkill`` for the
-upsert/single-row contract). The same table holds the member-in-group
+user, replaced wholesale on edit (an upsert of a single row). The same
+table holds the member-in-group
 profiles (``groups/<g>/members/<m>.md``, docs/group-memory.md section 6.3):
 ``owner_type = group``, ``owner_id`` the group and ``subject_id`` the member,
 under the row id :func:`member_profile_row_id` gives. The index row is a
@@ -47,8 +47,7 @@ class UserProfile(IndexRecord):
     owner_id: str
     owner_type: str
     """``"user"`` for a personal profile, ``"group"`` for a member's profile
-    inside a group; agent-side profiles would live in a sibling table once
-    that schema lands."""
+    inside a group."""
 
     subject_id: str | None = None
     """The member a ``group`` row is about; ``None`` on a personal profile,

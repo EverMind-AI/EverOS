@@ -83,7 +83,6 @@
    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
    "project_id": "default",
    "session_id": "s_locomo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -95,7 +94,6 @@
    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
    "project_id": "default",
    "session_id": "s_locomo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -107,7 +105,6 @@
    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
    "project_id": "default",
    "session_id": "s_locomo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -119,7 +116,6 @@
    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
    "project_id": "default",
    "session_id": "s_locomo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -137,7 +133,6 @@
    "owner_id": "user_001",
    "project_id": "default",
    "session_id": "s_solo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -149,7 +144,6 @@
    "owner_id": "user_001",
    "project_id": "default",
    "session_id": "s_solo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -161,7 +155,6 @@
    "owner_id": "user_001",
    "project_id": "default",
    "session_id": "s_solo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -173,7 +166,6 @@
    "owner_id": "user_001",
    "project_id": "default",
    "session_id": "s_solo",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   },
   {
@@ -185,14 +177,11 @@
    "owner_id": "u_pic",
    "project_id": "default",
    "session_id": "s_picture",
-   "source": "pipeline",
    "type": "EpisodeExtracted"
   }
  ],
  "get": {
   "caroline+groups:episode": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 4,
    "episodes": [
     {
@@ -315,16 +304,12 @@
    "total_count": 4
   },
   "caroline:profile": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 0,
    "episodes": [],
    "profiles": [],
    "total_count": 0
   },
   "u_pic:episode": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 1,
    "episodes": [
     {
@@ -348,16 +333,12 @@
    "total_count": 1
   },
   "u_pic:profile": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 0,
    "episodes": [],
    "profiles": [],
    "total_count": 0
   },
   "user_001:episode": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 4,
    "episodes": [
     {
@@ -429,8 +410,6 @@
    "total_count": 4
   },
   "user_001:profile": {
-   "agent_cases": [],
-   "agent_skills": [],
    "count": 0,
    "episodes": [],
    "profiles": [],

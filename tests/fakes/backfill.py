@@ -1,11 +1,9 @@
 """Doubles for the collaborators :class:`~everos.service.BackfillDeps` names.
 
 :class:`InMemoryVectorTable` stands in for one index table's maintenance
-handle (scan / update / optimize / prune), :class:`ScriptedReplayEngine` for
-the throw-away engine a replay phase builds, :class:`RecordingCascade` for
-the skill-file sync and :class:`InMemorySkillFiles` for the ``SKILL.md``
-probe. :func:`backfill_deps` assembles them over
-:func:`~tests.fakes.unused_backfill_deps`, so a test names only what its
+handle (scan / update / optimize / prune). :func:`backfill_deps` assembles
+the vectors phase's backfill over them, on top of
+:func:`~tests.fakes.unused_backfill_deps`, so a test names only what the
 phase reaches::
 
     deps = backfill_deps(embedding=FakeEmbeddingProvider(), episode=[row])
@@ -15,24 +13,21 @@ phase reaches::
 from __future__ import annotations
 
 __all__ = [
-    "InMemorySkillFiles",
     "InMemoryVectorTable",
-    "RecordingCascade",
-    "ScriptedReplayEngine",
     "backfill_deps",
     "episode_row",
 ]
 
 import dataclasses
 import datetime as dt
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.persistence.index import ProjectionVectorBackfill
-from everos.memory.ports import Event, Filter, Scope, StrategySpec
+from everos.memory.ports import Filter
 from everos.service import BackfillDeps
 
 from ._filter import matches
@@ -91,66 +86,6 @@ class InMemoryVectorTable:
         self.pruned.append(older_than)
 
 
-class ScriptedReplayEngine:
-    """A replay engine that records what it was given and never dispatches.
-
-    ``start_error`` is raised by :meth:`start` (a server that took the lock
-    after the probe); ``drains`` is what :meth:`wait_idle` answers.
-    """
-
-    def __init__(
-        self, *, start_error: Exception | None = None, drains: bool = True
-    ) -> None:
-        self.start_error = start_error
-        self.drains = drains
-        self.specs: list[StrategySpec] = []
-        self.emitted: list[Event] = []
-        self.started = False
-        self.stopped = False
-
-    def build(self, specs: Sequence[StrategySpec]) -> ScriptedReplayEngine:
-        self.specs = list(specs)
-        return self
-
-    async def start(self) -> None:
-        if self.start_error is not None:
-            raise self.start_error
-        self.started = True
-
-    async def stop(self) -> None:
-        self.stopped = True
-
-    async def emit(self, event: Event) -> None:
-        self.emitted.append(event)
-
-    async def wait_idle(self, *, timeout: float) -> bool:  # noqa: ASYNC109
-        return self.drains
-
-
-class RecordingCascade:
-    """Records each ``sync_once`` call's ``kinds``."""
-
-    def __init__(self, on_sync: Callable[[], None] | None = None) -> None:
-        self.syncs: list[set[str] | None] = []
-        self._on_sync = on_sync
-
-    async def sync_once(self, *, kinds: set[str] | None = None) -> int:
-        self.syncs.append(kinds)
-        if self._on_sync is not None:
-            self._on_sync()
-        return 0
-
-
-class InMemorySkillFiles:
-    """``SKILL.md`` probe over a set of ``(owner_id, cluster_id)`` pairs."""
-
-    def __init__(self, named: set[tuple[str, str]] | None = None) -> None:
-        self.named = named or set()
-
-    async def names_cluster(self, scope: Scope, cluster_id: str) -> bool:
-        return (scope.owner_id, cluster_id) in self.named
-
-
 def episode_row(entry_id: str = "ep_1", **overrides: Any) -> dict[str, Any]:
     """A raw ``episode`` index row from a pipeline memcell."""
     row: dict[str, Any] = {
@@ -171,10 +106,6 @@ def episode_row(entry_id: str = "ep_1", **overrides: Any) -> dict[str, Any]:
     return {**row, **overrides}
 
 
-async def _no_schema() -> None:
-    return None
-
-
 def backfill_deps(
     *,
     tables: Mapping[str, InMemoryVectorTable] | None = None,
@@ -183,10 +114,9 @@ def backfill_deps(
     """Backfill wiring over in-memory tables; anything unnamed fails loudly.
 
     Every vector table starts empty; ``tables`` replaces some. The lock is
-    free and the schema step is a no-op unless overridden.
+    free unless overridden.
     """
-    base = unused_backfill_deps()
-    vector_tables = {name: InMemoryVectorTable(name) for name in base.vector_tables}
+    vector_tables = {name: InMemoryVectorTable(name) for name in _VECTOR_TABLES}
     vector_tables.update(tables or {})
     fields: dict[str, Any] = {
         "vectors": ProjectionVectorBackfill(
@@ -194,8 +124,10 @@ def backfill_deps(
             tokenizer=build_tokenizer(),
             prune_retention=dt.timedelta(seconds=60),
         ),
-        "vector_tables": vector_tables,
-        "ensure_schema": _no_schema,
         "ome_lock": FakeOmeLock(),
     }
-    return dataclasses.replace(base, **{**fields, **overrides})
+    return dataclasses.replace(unused_backfill_deps(), **{**fields, **overrides})
+
+
+_VECTOR_TABLES = ("episode", "image_memory")
+"""The index tables that carry a vector column."""

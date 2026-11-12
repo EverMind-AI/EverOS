@@ -7,7 +7,7 @@ writers must match):
 
 ``inline`` block:
 
-- ``owner_id``: ``user_id`` or ``agent_id`` — duplicates the
+- ``owner_id``: ``user_id`` or ``group_id`` — duplicates the
   frontmatter scope so the cascade can derive it without re-reading
   the frontmatter.
 - ``session_id``: conversation scope.

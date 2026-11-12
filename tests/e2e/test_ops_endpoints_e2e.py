@@ -4,8 +4,8 @@ Pins the parity rows the route-level unit tests could not: ``GET /tasks``
 (and ``/tasks/{task_id}``) reports an ``async_mode`` request through to its
 delivery, ``POST /cascade/quiesce`` drains and stops a running cascade (and
 answers 503 when there is none), and ``GET /metrics`` serves the Prometheus
-exposition. Hermetic: the extraction model is canned, no embedding or rerank
-is configured.
+exposition. Hermetic: the extraction model is canned, no embedding is
+configured.
 """
 
 from __future__ import annotations
@@ -30,10 +30,9 @@ async def _client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncC
     from everos.entrypoints.api.app import create_app
     from everos.service import build_application
 
-    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
     load_settings.cache_clear()
     settings = load_settings()
-    providers = make_providers(llm=user_track_llm(), embedding=None, rerank=None)
+    providers = make_providers(llm=user_track_llm(), embedding=None)
     app = create_app(application=build_application(settings, providers=providers))
     async with (
         app.router.lifespan_context(app),

@@ -31,7 +31,7 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
             project_id: Project scope segment (default ``"default"``).
             parent_type: When non-``None``, restrict the count to rows whose
                 ``parent_type`` matches (e.g. ``"memcell"`` to exclude
-                Reflection-merged rows with ``parent_type='cluster'``). Kept
+                scene versions with ``parent_type='scene'``). Kept
                 optional so callers without a parent-type requirement rely on
                 the ``None`` default meaning "count everything".
 
@@ -41,11 +41,10 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
         same escape discipline (:func:`_q`) as
         :meth:`list_by_owner_after_ts`.
 
-        Excludes rows with ``deprecated_by IS NOT NULL`` (Reflection-
-        superseded episodes) from the count, matching the filter idiom
-        used by :func:`memory.search.filters.compile_filters` and the
-        reflection read paths. Keeps the profile-throttle count aligned
-        with the "live" episode surface the strategy actually operates on.
+        Excludes rows with ``deprecated_by IS NOT NULL`` (superseded or
+        forgotten episodes) from the count, matching the filter idiom used by
+        :func:`memory.search.filters.compile_filters`. Keeps the count aligned
+        with the "live" episode surface.
         """
         filter_str = (
             f"owner_id = '{_q(owner_id)}' "
@@ -75,10 +74,10 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
         scoped by parent_type and app/project. No vector dependency —
         Tier 1-safe. Rows with vector=None are included.
 
-        Excludes rows with ``deprecated_by IS NOT NULL`` (Reflection-
-        superseded episodes) — matches the filter idiom used by
-        :func:`memory.search.filters.compile_filters` and reflection
-        reads, so a caller is never handed a superseded episode.
+        Excludes rows with ``deprecated_by IS NOT NULL`` (superseded or
+        forgotten episodes) — matches the filter idiom used by
+        :func:`memory.search.filters.compile_filters`, so a caller is never
+        handed a superseded episode.
 
         Args:
             owner_id: Owner identifier.

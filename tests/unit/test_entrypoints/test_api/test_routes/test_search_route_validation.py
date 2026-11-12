@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.service import build_application
+from everos.service import NO_AGENT_MEMORY, build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import Storage
 
@@ -71,14 +71,16 @@ async def test_empty_user_id_returns_422(client: AsyncClient) -> None:
 
 
 async def test_an_agent_scope_returns_422_saying_why(client: AsyncClient) -> None:
-    """Multi-round retrieval does not cover agent memory: an ``agent_id`` is
-    refused with a message that says so and where cases and skills are read."""
-    for body in (_body(agent_id="agent_x"), {"agent_id": "agent_x", "query": "q"}):
+    """EverOS 2.0 has no agent memory: an ``agent_id`` (or a
+    ``context_group_id``) is refused with a message that says so."""
+    for body in (
+        _body(agent_id="agent_x"),
+        {"agent_id": "agent_x", "query": "q"},
+        _body(context_group_id="g1"),
+    ):
         resp = await client.post("/api/v1/memory/search", json=body)
         assert resp.status_code == 422
-        message = resp.json()["error"]["message"]
-        assert "agent memory is not searchable" in message
-        assert "/api/v2/memory/get" in message
+        assert NO_AGENT_MEMORY in resp.json()["error"]["message"]
 
 
 @pytest.mark.parametrize("method", ["keyword", "vector", "hybrid", "agentic", "bm42"])

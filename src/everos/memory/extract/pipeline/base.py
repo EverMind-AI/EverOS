@@ -1,7 +1,7 @@
 """Pipeline contract: one boundary cell in, the cell's outcome and events out.
 
 The service layer walks the cells the boundary stage cut and hands each one
-to every pipeline of the configured mode. A pipeline does the cell's
+to the conversation pipeline. A pipeline does the cell's
 in-request work (Episode extraction and its markdown write) and returns the
 events that announce it; it never publishes them. The service publishes
 each cell's events as soon as that cell is done, so a cell that fails later
@@ -19,7 +19,7 @@ from typing import Literal, Protocol
 from everos.memory.models import IngestResult, MemCell
 from everos.memory.ports import Event
 
-type Track = Literal["conversation", "agent_memory"]
+type Track = Literal["conversation"]
 """Which pipeline a :class:`PipelineOutcome` sums up."""
 
 

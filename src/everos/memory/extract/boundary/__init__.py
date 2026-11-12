@@ -8,6 +8,5 @@ from __future__ import annotations
 
 from .detection import BoundaryDetection as BoundaryDetection
 from .detection import BoundaryOutcome as BoundaryOutcome
-from .messages import Mode as Mode
 
-__all__ = ["BoundaryDetection", "BoundaryOutcome", "Mode"]
+__all__ = ["BoundaryDetection", "BoundaryOutcome"]

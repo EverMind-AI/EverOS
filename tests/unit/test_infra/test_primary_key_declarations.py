@@ -10,22 +10,18 @@ import pytest
 from everos.infra.persistence.index import check_primary_keys
 from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.records import (
-    AgentCase,
-    AgentSkill,
     Episode,
     GroupProfileItem,
+    ImageMemory,
     IndexRecord,
-    KnowledgeTopic,
     UserProfile,
 )
 from tests.fakes import TEST_DIM
 
 BUSINESS_TABLES = (
     Episode,
-    AgentCase,
-    AgentSkill,
+    ImageMemory,
     UserProfile,
-    KnowledgeTopic,
     GroupProfileItem,
 )
 

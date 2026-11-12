@@ -16,7 +16,6 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import ChatMessage as AlgoMessage
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as MemCell
@@ -29,9 +28,10 @@ logger = get_logger(__name__)
 
 _Role = Literal["user", "assistant", "tool"]
 EpisodeParentType = Literal["memcell", "cluster", "scene"]
-"""What an episode row rests on: a memcell (a segment), a cluster (a Reflection
-merge), or a scene -- a group scene version, which the episode table holds
-next to the group's episodes (docs/group-memory.md, section 7.7)."""
+"""What an episode row rests on: a memcell (a segment), or a scene -- a scene
+version, which the episode table holds next to the owner's episodes
+(docs/scenes.md). ``cluster`` is read only: an episode the Reflection merge of
+an earlier 2.0 build wrote over a cluster; nothing writes one now."""
 Origin = Literal["member", "assistant", "mixed"]
 """Whose messages a group record rests on (docs/group-memory.md, section 4.5)."""
 
@@ -123,9 +123,8 @@ class Episode(BaseModel):
     ``parent_id`` is the source memcell id. The new everalgo types no
     longer carry ``parent_id`` on Episode, so everos fills it from the
     memcell currently being processed (the pipeline knows the id — it
-    created the memcell). ``parent_type`` is
-    ``"cluster"`` for an episode Reflection merged out of a cluster, in
-    which case ``parent_id`` is that cluster's id.
+    created the memcell). ``parent_type`` is ``"scene"`` for a scene
+    version, whose ``parent_id`` is the scene id.
 
     ``image_ids`` are the pictures this episode's body refers to, and it is
     what makes that reference resolvable: the body names a picture by id and
@@ -213,40 +212,6 @@ class Episode(BaseModel):
         data["language"] = language
         data["image_ids"] = list(image_ids)
         return cls.model_validate(data)
-
-
-class AgentCase(BaseModel):
-    """Domain AgentCase — algo-emitted business fields + everos context.
-
-    Composed (not inherited) from :class:`everalgo.types.AgentCase`; the two
-    convert through :mod:`everos.memory.mappers.agent_case`. everos keeps the
-    semantic fields algo emits (``task_intent`` / ``approach`` /
-    ``quality_score`` / ``key_insight`` / ``timestamp``) and adds engineering
-    context (``owner_id`` = agent_id, ``session_id`` / ``parent_id``).
-
-    ``case_gate`` is the admission decision when the case passed everalgo's
-    correctness gate (``None`` when no gate ran). It travels with the case to
-    skill extraction, which treats an admitted case as worth a skill whatever
-    its quality score; the case markdown does not record it.
-    """
-
-    owner_id: str
-    task_intent: str
-    approach: str
-    quality_score: float
-    key_insight: str | None = None
-    timestamp: int
-    case_gate: dict[str, Any] | None = None
-
-    # everos engineering metadata.
-    session_id: str
-    parent_id: str
-    source_group_id: str | None = None
-    """The group whose segment the case was learned from; ``None`` for a case
-    from a session bound to no group. Such a case is returned only to reads
-    in that group's context (docs/group-memory.md, section 9.1)."""
-
-    model_config = ConfigDict(extra="allow")
 
 
 class ImageMemory(BaseModel):
@@ -812,24 +777,6 @@ def _preview(item: object) -> str:
     return text[:_DROPPED_PREVIEW_CHARS]
 
 
-class AgentSkill(BaseModel):
-    """Domain agent skill — a reusable procedure aggregated from cases.
-
-    Mirrors the fields of everalgo-core 0.6 ``AgentSkill``; stage 3/4
-    converges the two. ``id`` survives a rename, which is how a renamed
-    skill is told apart from a new one.
-    """
-
-    id: str
-    cluster_id: str = ""
-    name: str = ""
-    description: str = ""
-    content: str = ""
-    confidence: float = 0.0
-    maturity_score: float = 0.6
-    source_case_ids: list[str] = Field(default_factory=list)
-
-
 class Cluster(BaseModel):
     """Domain cluster snapshot — a group of related memories of one owner.
 
@@ -848,86 +795,8 @@ class Cluster(BaseModel):
     members: list[str] = Field(default_factory=list)
 
 
-class KnowledgeMemory(BaseModel):
-    """Domain knowledge memory — one node of an extracted topic tree.
-
-    Mirrors everalgo-knowledge ``KnowledgeMemory`` (flattened DFS form; the
-    node at ``topic_index=0`` is the document root and carries the title as
-    ``topic`` and the document summary). :mod:`everos.memory.mappers.knowledge`
-    converts between the two.
-    """
-
-    doc_id: str
-    topic_index: int
-    topic: str
-    summary: str
-    content: str = ""
-    block_refs: list[int] = Field(default_factory=list)
-    depth: int
-    parent_index: int | None = None
-    children_index: list[int] = Field(default_factory=list)
-    topic_path: str
-    content_labels: list[str] = Field(default_factory=list)
-    category_id: str = ""
-
-
-class KnowledgeCategory(BaseModel):
-    """One entry of a project's knowledge taxonomy."""
-
-    id: str
-    description: str = ""
-
-
-class KnowledgeDocument(BaseModel):
-    """Domain knowledge document — the metadata of one uploaded document.
-
-    Identified by ``doc_id`` alone: where its markdown lives is the knowledge
-    store's business (``WrittenDocument`` reports it to the catalog).
-
-    ``created_at`` / ``updated_at`` are set by the catalog that records the
-    document; a document read straight from its markdown has neither.
-    """
-
-    doc_id: str
-    app_id: str
-    project_id: str
-    category_id: str
-    title: str
-    summary: str = ""
-    source_name: str | None = None
-    source_type: str | None = None
-    created_at: dt.datetime | None = None
-    updated_at: dt.datetime | None = None
-
-
-class KnowledgeTopic(BaseModel):
-    """Domain knowledge topic — one node of a document's topic tree.
-
-    Knowledge is project-level, not owned by a user or agent, so the topic
-    carries its own ``app_id`` / ``project_id`` instead of an owner
-    ``Scope``. ``content``, ``content_labels`` and ``children_topic_ids`` are
-    only held by the catalog; a search hit leaves them empty.
-    """
-
-    topic_id: str
-    doc_id: str
-    app_id: str
-    project_id: str
-    category_id: str
-    topic_name: str
-    topic_path: str
-    depth: int
-    summary: str
-    parent_topic_id: str | None = None
-    content: str = ""
-    content_labels: list[str] = Field(default_factory=list)
-    children_topic_ids: list[str] = Field(default_factory=list)
-    created_at: dt.datetime
-    updated_at: dt.datetime
-
-
-ClusterKind = Literal["user_memory", "agent_case", "group_scene", "user_scene"]
-ClusterMemberType = Literal["episode", "case"]
+ClusterKind = Literal["group_scene", "user_scene"]
+ClusterMemberType = Literal["episode"]
 
 
 def mint_cluster_id() -> str:
@@ -941,7 +810,7 @@ class MemcellRecord(BaseModel):
     Attributes:
         memcell_id: everos-minted identifier of the slice.
         cell: The algorithm-side cell (items + timestamp).
-        raw_type: Source shape of the slice (conversation / agent trace).
+        raw_type: Source shape of the slice (``Conversation``).
         message_ids: Ids of the buffered messages the slice consumed.
         sender_ids: Distinct senders in the slice, first-seen order.
     """
@@ -975,34 +844,6 @@ class MemorizeTask(BaseModel):
     last_error: str | None
     created_at: dt.datetime
     updated_at: dt.datetime
-
-
-class ReflectionReport(BaseModel):
-    """Audit record of one completed Reflection merge.
-
-    Attributes:
-        id: Report identifier.
-        cluster_id: Cluster that was reflected.
-        owner_id: Owner of the cluster.
-        app_id: Application scope.
-        project_id: Project scope.
-        mode: ``"init"`` or ``"update"``.
-        source_members: ``(member_id, member_type)`` pairs consumed.
-        merged_entry_id: Entry id of the merged episode.
-    """
-
-    id: str
-    cluster_id: str
-    owner_id: str
-    app_id: str
-    project_id: str
-    mode: Literal["init", "update"]
-    source_members: list[tuple[str, str]]
-    merged_entry_id: str
-
-    @property
-    def source_count(self) -> int:
-        return len(self.source_members)
 
 
 # ── Groups (docs/group-memory.md, sections 4.2-4.3) ─────────────────────
@@ -1228,9 +1069,6 @@ __all__ = [
     "MEMBER_PREVIOUS_LIMIT",
     "MEMBER_VERSION_KEYS",
     "AccessRole",
-    "AgentCase",
-    "AgentSkill",
-    "AlgoAgentCase",
     "AlgoEpisode",
     "AlgoMessage",
     "CanonicalMessage",
@@ -1257,7 +1095,6 @@ __all__ = [
     "Origin",
     "Profile",
     "ProfileSource",
-    "ReflectionReport",
     "Roster",
     "RosterEvent",
     "RosterOp",

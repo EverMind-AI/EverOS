@@ -1,10 +1,7 @@
-"""SQLite side of memory deletion: session purge, cluster and report removal."""
+"""SQLite side of memory deletion: session purge and cluster removal."""
 
 from __future__ import annotations
 
-import json
-
-import numpy as np
 from everalgo.types import ChatMessage, MemCell
 from sqlalchemy import func, select
 
@@ -12,12 +9,8 @@ from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
     SqliteMemcellStore,
-    SqliteReflectionReportStore,
     SqliteSessionPurgeStore,
     session_scope,
-)
-from everos.infra.persistence.sqlite._tables import (
-    Cluster as ClusterRow,
 )
 from everos.infra.persistence.sqlite._tables import (
     ClusterMember,
@@ -26,7 +19,7 @@ from everos.infra.persistence.sqlite._tables import (
     MemorizeInbox,
     UnprocessedBuffer,
 )
-from everos.memory.models import Cluster, MemcellRecord, ReflectionReport
+from everos.memory.models import Cluster, MemcellRecord
 from everos.memory.ports import Scope, SessionKey
 from tests.fakes.storage import Storage
 
@@ -166,7 +159,7 @@ async def _seed_cluster(
 ) -> None:
     await store.upsert(
         scope,
-        "user_memory",
+        "user_scene",
         Cluster(
             id=cluster_id,
             centroid=(0.25, 0.5, 0.75),
@@ -177,32 +170,6 @@ async def _seed_cluster(
         ),
         member_type="episode",
     )
-
-
-async def test_detach_keeps_centroid_and_sets_fields(storage: Storage) -> None:
-    """B5: members and the snapshot fields change; the centroid bytes do not."""
-    await storage.create_schema()
-    store = SqliteClusterStore(storage.sqlite.cluster)
-    await _seed_cluster(store, _ALICE, "cl_1", ["e1", "e2", "e3"])
-    async with session_scope(storage.database.session_factory) as s:
-        before = (await s.get(ClusterRow, "cl_1")).centroid_blob
-
-    await store.detach(
-        "cl_1", ["e2"], count=2, last_ts=99, preview=["e3 text", "e1 text"]
-    )
-
-    cluster = await store.get("cl_1")
-    assert cluster is not None
-    assert (sorted(cluster.members), cluster.count, cluster.last_ts) == (
-        ["e1", "e3"],
-        2,
-        99,
-    )
-    async with session_scope(storage.database.session_factory) as s:
-        row = await s.get(ClusterRow, "cl_1")
-        assert row.centroid_blob == before
-        assert json.loads(row.preview_json) == ["e3 text", "e1 text"]
-    assert np.frombuffer(before, dtype=np.float32).tolist() == [0.25, 0.5, 0.75]
 
 
 async def test_delete_cluster_removes_members_first(storage: Storage) -> None:
@@ -217,47 +184,3 @@ async def test_delete_cluster_removes_members_first(storage: Storage) -> None:
         assert (
             await s.execute(select(func.count()).select_from(ClusterMember))
         ).scalar_one() == 0
-
-
-async def test_delete_for_owner_scoped_to_app_project(storage: Storage) -> None:
-    await storage.create_schema()
-    store = SqliteClusterStore(storage.sqlite.cluster)
-    other_project = Scope(app_id="a", project_id="p2", owner_id="u1", owner_type="user")
-    other_owner = Scope(app_id="a", project_id="p", owner_id="u2", owner_type="user")
-    await _seed_cluster(store, _ALICE, "cl_1", ["e1"])
-    await _seed_cluster(store, _ALICE, "cl_2", ["e2"])
-    await _seed_cluster(store, other_project, "cl_3", ["e1"])
-    await _seed_cluster(store, other_owner, "cl_4", ["e1"])
-
-    assert await store.delete_for_owner(_ALICE, "user_memory") == 2
-
-    assert [c.id for c in await store.list_for_owner(_ALICE, "user_memory")] == []
-    assert len(await store.list_for_owner(other_project, "user_memory")) == 1
-    assert len(await store.list_for_owner(other_owner, "user_memory")) == 1
-
-
-async def test_report_delete_for_owner_scoped(storage: Storage) -> None:
-    await storage.create_schema()
-    reports = SqliteReflectionReportStore(storage.sqlite.reflection_report)
-    for i, (owner, project) in enumerate(
-        [("u1", "p"), ("u1", "p"), ("u1", "p2"), ("u2", "p")]
-    ):
-        await reports.create(
-            ReflectionReport(
-                id=f"r{i}",
-                cluster_id=f"cl_{i}",
-                owner_id=owner,
-                app_id="a",
-                project_id=project,
-                mode="init",
-                source_members=[("e1", "episode")],
-                merged_entry_id="m",
-            )
-        )
-
-    assert await reports.delete_for_owner(_ALICE) == 2
-
-    assert await reports.reflected_cluster_ids(_ALICE) == set()
-    assert await reports.reflected_cluster_ids(
-        Scope(app_id="a", project_id="p2", owner_id="u1", owner_type="user")
-    ) == {"cl_2"}

@@ -283,9 +283,9 @@ class BoundaryMachine(RuleBasedStateMachine):
         )
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:
-            outcome = await self.boundary.buffer(ingested, mode="chat")
+            outcome = await self.boundary.buffer(ingested)
         else:
-            outcome = await self.boundary.detect(ingested, mode="chat", is_final=final)
+            outcome = await self.boundary.detect(ingested, is_final=final)
         return outcome.status
 
     # ── rules ──────────────────────────────────────────────────────────────

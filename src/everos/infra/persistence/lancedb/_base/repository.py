@@ -1052,12 +1052,11 @@ class LanceRepoBase[T: IndexRecord]:
 class LanceDailyLogRepoBase[T: IndexRecord](LanceRepoBase[T]):
     """LanceRepoBase + queries unique to daily-log tables.
 
-    Daily-log tables (``episode`` / ``image_memory`` / ``agent_case``)
-    share a fixed schema slice: ``entry_id`` (md seq id), ``session_id``
-    (conversation scope), and ``parent_type`` / ``parent_id`` (record
-    lineage). The queries below compose those
-    columns; ``agent_skill`` is *not* a daily-log (it is a named
-    single-file entity) and uses :class:`LanceRepoBase` directly.
+    Daily-log tables (``episode`` / ``image_memory``) share a fixed schema
+    slice: ``entry_id`` (md seq id), ``session_id`` (conversation scope), and
+    ``parent_type`` / ``parent_id`` (record lineage). The queries below
+    compose those columns; ``user_profile`` is *not* a daily-log (one row
+    per person) and uses :class:`LanceRepoBase` directly.
     """
 
     async def find_by_owner_entry(

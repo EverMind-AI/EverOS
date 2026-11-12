@@ -1,12 +1,12 @@
 """Tests for :class:`ProfileHandler` — single-file profile reconcile.
 
-A profile is the second single-file kind (after AgentSkill) — one document
-per person and space, ``users/<user_id>/user.md`` or
-``groups/<g>/members/<m>.md``, replaced wholesale on edit. One handler
-upserts one row per document and skips when the content-bearing digest
-(summary + JSON buckets) is unchanged. These tests verify the upsert / skip
-path, the JSON encoding of ``explicit_info`` / ``implicit_traits``, the
-owner columns of a member's row, and the missing-owner guards.
+A profile is a single-file kind — one document per person and space,
+``users/<user_id>/user.md`` or ``groups/<g>/members/<m>.md``, replaced
+wholesale on edit. One handler upserts one row per document and skips when
+the content-bearing digest (summary + JSON buckets) is unchanged. These
+tests verify the upsert / skip path, the JSON encoding of ``explicit_info`` /
+``implicit_traits``, the owner columns of a member's row, and the
+missing-owner guards.
 """
 
 from __future__ import annotations

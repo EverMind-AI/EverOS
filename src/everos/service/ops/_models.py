@@ -33,7 +33,6 @@ class Capabilities:
     """
 
     embedding: bool
-    rerank: bool
     multimodal_llm: bool
     parser: bool
     index_backend: str
@@ -50,7 +49,6 @@ class ProviderStatus:
     """
 
     embed: bool
-    rerank: bool
     multimodal_llm: bool
     parser: bool
     decider: bool = False

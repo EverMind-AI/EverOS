@@ -418,7 +418,7 @@ async def test_update_preserves_vectors_on_a_row_that_has_them(
 
     The only prior coverage ran against ``user_profile``, which carries no
     vector column — so the read-back-and-re-upsert of a 1024-d vector (the
-    path backfill and reflection both take) was never exercised remotely.
+    path backfill takes) was never exercised remotely.
     """
     from everos.infra.persistence.index import eq, primary_key
 
@@ -578,59 +578,6 @@ async def test_cross_project_rows_share_an_id(storage_view: StorageView) -> None
         [beta.model_copy(update={"episode": "go v2"})]
     )
     assert await storage_view.repos.episode.count_where(eq("owner_id", "u1")) == 2
-
-
-async def test_find_topk_relevant_in_cluster_hydrates_own_scope(
-    storage_view: StorageView,
-) -> None:
-    """A24: the by-id hydration after dense search stays inside the caller's space."""
-    from everos.infra.persistence.index import eq, primary_key
-    from everos.infra.persistence.records import AgentSkill
-
-    def skill(project: str, description: str) -> AgentSkill:
-        vector = [0.0] * 1024
-        vector[3] = 1.0
-        return AgentSkill(
-            id="agent_run_the_linter",
-            owner_id="agent",
-            owner_type="agent",
-            app_id="test_app",
-            project_id=project,
-            name="run_the_linter",
-            description=description,
-            description_tokens=description,
-            content=description,
-            content_tokens=description,
-            confidence=0.9,
-            maturity_score=1.0,
-            source_case_ids=[],
-            cluster_id="cl_1",
-            md_path=(
-                f"test_app/{project}/agents/agent/skills/skill_run_the_linter/SKILL.md"
-            ),
-            content_sha256=project,
-            vector=vector,
-        )
-
-    repo = storage_view.repos.agent_skill
-    await repo.ensure_collection()
-    await storage_view.repos.agent_skill.upsert(
-        [skill("alpha", "alpha flavour"), skill("beta", "beta flavour")]
-    )
-    assert (
-        await storage_view.repos.agent_skill.count_where(eq("owner_id", "agent")) == 2
-    )
-    query = [0.0] * 1024
-    query[3] = 1.0
-    hits = await repo.find_topk_relevant_in_cluster(
-        owner_id="agent", cluster_id="cl_1", query_vector=query, top_k=5
-    )
-    assert {h.project_id for h in hits} == {"alpha", "beta"}
-    for hit in hits:
-        same = await storage_view.repos.agent_skill.find_one_where(
-            primary_key("test_app", hit.project_id, hit.id)
-        )
-        assert same is not None and same.description == hit.description
 
 
 async def test_embedding_model_attestation_round_trips_on_the_collection(

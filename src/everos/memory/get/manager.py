@@ -8,8 +8,6 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
   versions, rows of the episode table (``parent_type = scene``)
 * ``user`` + ``profile``       → ``data.profiles`` (one-row KV fetch
   from the ``user_profile`` table; at most one item)
-* ``agent`` + ``agent_case``   → ``data.agent_cases``
-* ``agent`` + ``agent_skill``  → ``data.agent_skills``
 * ``group`` + ``episode``      → ``data.episodes`` inside the asker's windows
 * ``group`` + ``scene``        → ``data.scenes``: the scene versions, which share
   the episode table (``parent_type = scene``) and its windows
@@ -41,10 +39,11 @@ from everos.memory.access import (
     ScopeRequest,
     resolve_identity,
 )
-from everos.memory.models import AgentCase, AgentSkill, Episode, ImageMemory
+from everos.memory.models import (
+    Episode,
+    ImageMemory,
+)
 from everos.memory.ports import (
-    AgentCaseIndex,
-    AgentSkillIndex,
     EpisodeIndex,
     GroupProfileIndex,
     ImageMemoryIndex,
@@ -67,8 +66,6 @@ from everos.memory.search import (
 )
 
 from .dto import (
-    GetAgentCaseItem,
-    GetAgentSkillItem,
     GetData,
     GetEpisodeItem,
     GetImageItem,
@@ -88,8 +85,6 @@ class GetManager:
 
     Args:
         episode_index: Episode reads.
-        agent_case_index: Agent-case reads.
-        agent_skill_index: Agent-skill reads.
         profile_index: User and member-in-group profile reads.
         image_index: Picture-memory reads (group listings); ``None`` refuses
             them.
@@ -100,8 +95,6 @@ class GetManager:
         self,
         *,
         episode_index: EpisodeIndex,
-        agent_case_index: AgentCaseIndex,
-        agent_skill_index: AgentSkillIndex,
         profile_index: ProfileIndex,
         access: AccessPolicy,
         image_index: ImageMemoryIndex | None = None,
@@ -111,8 +104,6 @@ class GetManager:
         self._images = image_index
         self._group_profile = group_profile_index
         self._ep = episode_index
-        self._case = agent_case_index
-        self._skill = agent_skill_index
         self._profile = profile_index
 
     # ── Public entry ─────────────────────────────────────────────────
@@ -134,10 +125,8 @@ class GetManager:
                 app_id=req.app_id,
                 project_id=req.project_id,
                 user_id=req.user_id,
-                agent_id=req.agent_id,
                 group_ids=req.scope_group_ids,
                 audience=req.audience,
-                context_group_id=req.context_group_id,
             ),
         )
         where = compile_scoped_for_get(req.filters, scope.predicate)
@@ -206,34 +195,6 @@ class GetManager:
                     total_count=len(profiles),
                     count=len(profiles),
                 )
-            case GetMemoryType.AGENT_CASE:
-                cases = await self._case.paginate(scope.cases_where(where), page)
-                items = [self._shape_agent_case(c) for c in cases.items]
-                data = GetData(
-                    agent_cases=items,
-                    total_count=cases.total,
-                    count=len(items),
-                )
-            case GetMemoryType.AGENT_SKILL:
-                # AgentSkill has no ``timestamp`` column. Silently
-                # downgrade ``sort_by`` to ``updated_at`` (the index's
-                # row-maintenance column) so the caller cannot
-                # accidentally trigger a schema error.
-                skills = await self._skill.paginate(
-                    where,
-                    Page(
-                        sort_by="updated_at",
-                        number=req.page,
-                        size=req.page_size,
-                        descending=descending,
-                    ),
-                )
-                items = [self._shape_agent_skill(s) for s in skills.items]
-                data = GetData(
-                    agent_skills=items,
-                    total_count=skills.total,
-                    count=len(items),
-                )
 
         return GetResponse(request_id=request_id, data=data)
 
@@ -286,39 +247,6 @@ class GetManager:
             subject=episode.subject,
             episode=episode.episode,
             type="Scene" if episode.parent_type == "scene" else "Conversation",
-        )
-
-    @staticmethod
-    def _shape_agent_case(stored: Stored[AgentCase]) -> GetAgentCaseItem:
-        case = stored.item
-        return GetAgentCaseItem(
-            id=stored.ref.id,
-            entry_id=stored.ref.entry_id,
-            agent_id=case.owner_id,
-            app_id=stored.scope.app_id,
-            project_id=stored.scope.project_id,
-            session_id=case.session_id,
-            task_intent=case.task_intent,
-            approach=case.approach,
-            quality_score=case.quality_score,
-            key_insight=case.key_insight,
-            timestamp=to_display_tz(from_timestamp_ms(case.timestamp)),
-        )
-
-    @staticmethod
-    def _shape_agent_skill(stored: Stored[AgentSkill]) -> GetAgentSkillItem:
-        skill = stored.item
-        return GetAgentSkillItem(
-            id=stored.ref.id,
-            agent_id=stored.scope.owner_id,
-            app_id=stored.scope.app_id,
-            project_id=stored.scope.project_id,
-            name=skill.name,
-            description=skill.description,
-            content=skill.content,
-            confidence=skill.confidence,
-            maturity_score=skill.maturity_score,
-            source_case_ids=skill.source_case_ids,
         )
 
     # ── Profile ──────────────────────────────────────────────────────

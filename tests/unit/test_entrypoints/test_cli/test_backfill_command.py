@@ -8,13 +8,11 @@ stays scoped to the scaffold contract:
 
 - the ``backfill`` subcommand is registered alongside sync/status/fix
 - ``--help`` output and ``--phase`` choice validation
-- ``run_backfill`` phase filtering (``all`` vs a single slug)
+- ``run_backfill`` phase filtering (``all`` vs a single slug); the one
+  phase is ``vectors``, and the retired ``clusters`` / ``skills`` slugs are
+  refused
 - ``--yes`` / interactive confirmation behaviour, including abort (exit 1)
   and an unexpected-error path (exit 2)
-
-Task 22-23 replace the remaining stub phase bodies (``clusters`` /
-``skills``); this file must not assert anything about real
-cluster/skill behaviour.
 
 Now that ``"vectors"`` opens real LanceDB tables, every test is
 isolated under a tmp memory root (``_isolated_lancedb_root`` below) so
@@ -138,8 +136,9 @@ def test_backfill_help_exits_zero() -> None:
     assert "--yes" in stdout
 
 
-def test_backfill_invalid_phase_rejected() -> None:
-    result = CliRunner().invoke(cascade_mod.app, ["backfill", "--phase", "bogus"])
+@pytest.mark.parametrize("phase", ["bogus", "clusters", "skills"])
+def test_backfill_invalid_phase_rejected(phase: str) -> None:
+    result = CliRunner().invoke(cascade_mod.app, ["backfill", "--phase", phase])
     assert result.exit_code != 0
 
 
@@ -151,12 +150,10 @@ async def test_run_backfill_single_phase_runs_only_that_phase(
     ops: OpsService,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = await run_backfill(ops, phase="clusters", auto_yes=True)
+    code = await run_backfill(ops, phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
     assert code == 0
-    assert "Phase 2" in out
-    assert "Phase 1" not in out
-    assert "Phase 3" not in out
+    assert "Phase 1" in out
 
 
 async def test_run_backfill_all_runs_every_phase(
@@ -167,8 +164,6 @@ async def test_run_backfill_all_runs_every_phase(
     out = capsys.readouterr().out
     assert code == 0
     assert "Phase 1" in out
-    assert "Phase 2" in out
-    assert "Phase 3" in out
 
 
 async def test_run_backfill_yes_skips_confirmation(
@@ -260,7 +255,7 @@ def test_backfill_cli_abort_via_n_returns_exit_code_one(
 
 def test_backfill_cli_yes_flag_auto_confirms() -> None:
     result = CliRunner().invoke(
-        cascade_mod.app, ["backfill", "--phase", "clusters", "--yes"]
+        cascade_mod.app, ["backfill", "--phase", "vectors", "--yes"]
     )
     assert result.exit_code == 0
-    assert "Phase 2" in result.stdout
+    assert "Phase 1" in result.stdout

@@ -3,13 +3,11 @@
 Two feature-name vocabularies exist and deliberately do not share a source
 of truth:
 
-- ``ProviderNotConfiguredError.feature`` (raised per request by the
-  knowledge endpoints and backfill): a granular tag for the one endpoint
-  that failed -- ``"knowledge"`` | ``"skill_extraction_backfill"``. It
-  appears in the HTTP 422 ``message``.
+- ``ProviderNotConfiguredError.feature`` (raised by backfill): a granular tag
+  for the one operation that failed -- ``"backfill"``. It appears in the
+  error message.
 - :func:`compute_disabled_features`: a capability-level tag for a whole
   feature category the current tier disables -- ``"vector_recall"`` |
-  ``"reflection"`` | ``"skill_extraction"`` | ``"knowledge"`` |
   ``"multimodal_upload"``. It appears in ``GET /health``'s
   ``disabled_features``. Memory search is never disabled: without an
   embedder it recalls by keyword (BM25) only, which ``"vector_recall"``
@@ -77,7 +75,6 @@ async def health_report(
     decider_health = decider.snapshot() if decider is not None else None
     providers = ProviderStatus(
         embed=admin.embedding_probed(),
-        rerank=capabilities.rerank,
         multimodal_llm=capabilities.multimodal_llm,
         parser=capabilities.parser,
         decider=decider_health is not None and decider_health.reachable is True,
@@ -121,19 +118,17 @@ def compute_disabled_features(caps: Mapping[str, bool]) -> list[str]:
     """Derive the features the configured providers leave disabled.
 
     Args:
-        caps: Availability of ``"embed"``, ``"rerank"``, ``"multimodal_llm"``
-            and ``"parser"``.
+        caps: Availability of ``"embed"``, ``"multimodal_llm"`` and
+            ``"parser"``.
 
     Returns:
         A subset of ``"vector_recall"`` (multi-round search recalls by keyword
-        only), ``"reflection"``, ``"skill_extraction"``, ``"knowledge"`` and
-        ``"multimodal_upload"``.
+        only) and ``"multimodal_upload"`` (a non-text chat item is not read
+        into text).
     """
     disabled: list[str] = []
     if not caps["embed"]:
-        disabled.extend(["vector_recall", "reflection", "skill_extraction"])
-    if not (caps["embed"] and caps["rerank"]):
-        disabled.append("knowledge")
+        disabled.append("vector_recall")
     if not (caps["multimodal_llm"] and caps["parser"]):
         disabled.append("multimodal_upload")
     return disabled

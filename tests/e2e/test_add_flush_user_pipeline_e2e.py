@@ -311,7 +311,7 @@ async def test_async_client_starts_and_health_responds(
     from everos.service import build_application
 
     settings = load_settings()
-    providers = make_providers(llm=user_track_llm(), embedding=None, rerank=None)
+    providers = make_providers(llm=user_track_llm(), embedding=None)
     app = create_app(application=build_application(settings, providers=providers))
     async with (
         app.router.lifespan_context(app),
@@ -365,12 +365,11 @@ async def test_add_flush_get_on_canned_user_track(
     from everos.entrypoints.api.app import create_app
     from everos.service import build_application
 
-    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
     monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
     load_settings.cache_clear()
     settings = load_settings()
     llm = user_track_llm(boundary="boundary_empty")
-    providers = make_providers(llm=llm, embedding=None, rerank=None)
+    providers = make_providers(llm=llm, embedding=None)
     app = create_app(application=build_application(settings, providers=providers))
     episode = json.loads(user_track_script("episode"))
     profile = {

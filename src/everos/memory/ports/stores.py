@@ -11,38 +11,30 @@ __all__ = [
     "LOST_STATUS_WRITE",
     "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
-    "AgentCaseStore",
-    "AgentSkillStore",
     "ClusterStore",
     "EpisodeStore",
     "GroupProfileStore",
     "ImageMemoryStore",
-    "KnowledgeCatalog",
-    "KnowledgeStore",
     "MemcellStore",
     "MemorizeInboxStore",
     "NoSourceCheck",
     "OwnerDirDeletion",
     "OwnerDirStore",
     "ProfileStore",
-    "ReflectionReportStore",
     "SceneStore",
     "SessionBufferStore",
     "SessionPurgeStore",
     "SourceCheck",
     "Withdrawal",
     "WithdrawnEntry",
-    "WrittenDocument",
 ]
 
 import datetime as dt
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Protocol, final, runtime_checkable
+from typing import Final, Protocol, final, runtime_checkable
 
 from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
     CanonicalMessage,
     Cluster,
     ClusterKind,
@@ -50,20 +42,14 @@ from everos.memory.models import (
     Episode,
     GroupProfileItem,
     ImageMemory,
-    KnowledgeCategory,
-    KnowledgeDocument,
-    KnowledgeMemory,
-    KnowledgeTopic,
     MemCell,
     MemcellRecord,
     MemorizeTask,
     Profile,
-    ReflectionReport,
     Scene,
 )
 from everos.memory.ports.query import (
     MemoryRef,
-    Page,
     PageResult,
     Scope,
     SessionKey,
@@ -220,10 +206,6 @@ class EpisodeStore(Protocol):
 
     async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
         """Remove these entries, each file under the owner lock; their refs."""
-        ...
-
-    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
-        """Entries the owner's files mark as merged into one of ``targets``."""
         ...
 
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
@@ -574,44 +556,7 @@ class GroupProfileStore(Protocol):
         ...
 
 
-# ── Agent track ──────────────────────────────────────────────────────────
-
-
-@runtime_checkable
-class AgentCaseStore(Protocol):
-    """Agent-case truth: append-only daily logs per agent (``only_if``: above)."""
-
-    async def append(
-        self,
-        scope: Scope,
-        case: AgentCase,
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> MemoryRef | None: ...
-
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id``; their refs.
-
-        Takes the owner lock once first (a barrier), then rewrites each file
-        under it. The caller deletes the session's memcells before.
-        """
-        ...
-
-
-@runtime_checkable
-class AgentSkillStore(Protocol):
-    """One document per agent skill, addressed by its name.
-
-    A skill's ``MemoryRef.entry_id`` is the storage-safe form of its name.
-    """
-
-    async def list_by_cluster(
-        self, scope: Scope, cluster_id: str
-    ) -> list[Stored[AgentSkill]]: ...
-
-    async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef: ...
-
-    async def delete(self, scope: Scope, skill_name: str) -> bool: ...
+# ── Owner directories ────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -620,9 +565,8 @@ class OwnerDirDeletion:
 
     Attributes:
         refs: The daily-log entries, by index table (``episode``,
-            ``image_memory``, ``agent_case``).
-        count: Entries, plus one per skill directory, plus one for
-            ``user.md``.
+            ``image_memory``).
+        count: Entries, plus one for ``user.md``.
     """
 
     refs: Mapping[str, Sequence[MemoryRef]]
@@ -644,7 +588,7 @@ class OwnerDirStore(Protocol):
     async def owners_with_session(
         self, app_id: str, project_id: str, session_id: str
     ) -> list[Scope]:
-        """Every user and agent whose files mention ``session_id`` (slow path)."""
+        """Every user whose files mention ``session_id`` (slow path)."""
         ...
 
 
@@ -732,24 +676,6 @@ class MemcellStore(Protocol):
         """
         ...
 
-    async def mark_case_extracted(
-        self,
-        memcell_id: str,
-        *,
-        skip_reason: str | None,
-        skip_detail: Mapping[str, Any],
-    ) -> None:
-        """Record that agent-case extraction ran for a memcell, and why it
-        produced nothing if it did not.
-
-        "Extracted" means the extraction ran to completion, not that it
-        produced a case: ``skip_reason`` is ``None`` exactly when a case came
-        out. A gated trajectory is a successful run with no output, so this
-        stamp is the only place its reason survives. An unknown
-        ``memcell_id`` is a no-op.
-        """
-        ...
-
 
 # ── Clusters ─────────────────────────────────────────────────────────────
 
@@ -787,59 +713,13 @@ class ClusterStore(Protocol):
     ) -> str | None:
         """The cluster a memory already belongs to, or ``None``.
 
-        An episode can sit in two clusters of its owner -- the profile's
-        (``user_memory``) and its scene's (``user_scene``) -- so a caller
-        that means one names its ``kind``.
+        ``kind`` narrows the lookup to one cluster kind (an older store can
+        still hold clusters of kinds nothing reads any more).
         """
-        ...
-
-    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
-        """``(member_id, member_type)`` pairs in the order they joined."""
-        ...
-
-    async def replace_members(
-        self,
-        cluster_id: str,
-        *,
-        removed: Collection[str],
-        added: str,
-        member_type: ClusterMemberType,
-        centroid: Sequence[float],
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        """Fold ``removed`` members into the merged memory ``added``.
-
-        The cluster's snapshot (centroid, count, latest timestamp, preview)
-        is restamped in the same step, so membership and snapshot never
-        disagree.
-        """
-        ...
-
-    async def detach(
-        self,
-        cluster_id: str,
-        member_ids: Collection[str],
-        *,
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        """Remove members and restamp count / last_ts / preview; the
-        centroid stays."""
         ...
 
     async def delete(self, cluster_id: str) -> None:
         """Delete a cluster with its members."""
-        ...
-
-    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
-        """Delete every cluster of the owner of this kind; how many."""
-        ...
-
-    async def list_distinct_owners(self) -> list[Scope]:
-        """Every owner that has at least one cluster."""
         ...
 
 
@@ -912,19 +792,6 @@ class MemorizeInboxStore(Protocol):
 
 
 @runtime_checkable
-class ReflectionReportStore(Protocol):
-    """Audit trail of Reflection merges."""
-
-    async def create(self, report: ReflectionReport) -> None: ...
-
-    async def reflected_cluster_ids(self, scope: Scope) -> set[str]: ...
-
-    async def delete_for_owner(self, scope: Scope) -> int:
-        """Delete every report of the owner; how many."""
-        ...
-
-
-@runtime_checkable
 class SessionPurgeStore(Protocol):
     """A session's conversation state, for deleting the session."""
 
@@ -936,148 +803,3 @@ class SessionPurgeStore(Protocol):
         memories came from the session).
         """
         ...
-
-
-# ── Knowledge base ───────────────────────────────────────────────────────
-#
-# Knowledge is project-level: records are addressed by ``(app_id,
-# project_id)`` and their own ids, never by an owner ``Scope``.
-
-
-@dataclass(frozen=True)
-class WrittenDocument:
-    """Where a knowledge document landed -- the storage side of its identity.
-
-    The domain ``KnowledgeDocument`` carries no path; the store finds a
-    document by its id, and this value object hands the location to whoever
-    keeps a record of it (the catalog), as ``MemoryRef`` does for owner
-    memories.
-
-    Attributes:
-        location: The document's directory, as an absolute path.
-        md_path: The document's ``index.md``, relative to the memory root.
-        original_file_path: The stored copy of the uploaded file, when one
-            exists.
-    """
-
-    location: str
-    md_path: str
-    original_file_path: str | None
-
-
-@runtime_checkable
-class KnowledgeStore(Protocol):
-    """Knowledge truth: one markdown directory per document, plus the taxonomy.
-
-    Every file-system detail of the knowledge tree lives behind this port:
-    directory layout, frontmatter, the uploaded originals, the backup a
-    replacement keeps until it succeeds.
-    """
-
-    async def categories(self, app_id: str, project_id: str) -> list[KnowledgeCategory]:
-        """The project's taxonomy, created with its defaults on first use."""
-        ...
-
-    async def write_document(
-        self,
-        app_id: str,
-        project_id: str,
-        memories: Sequence[KnowledgeMemory],
-        *,
-        source_name: str | None,
-        source_type: str | None,
-        original: bytes | None,
-    ) -> WrittenDocument:
-        """Write a document's topic tree, keeping ``original`` under its name.
-
-        Raises:
-            InvalidInputError: ``source_name`` cannot hold ``original``.
-            PathTraversalError: ``source_name`` would escape the document.
-        """
-        ...
-
-    async def replace_document(
-        self,
-        previous: KnowledgeDocument,
-        memories: Sequence[KnowledgeMemory],
-        *,
-        source_name: str | None,
-        source_type: str | None,
-        original: bytes | None,
-    ) -> WrittenDocument:
-        """Write over ``previous``; on any failure its files come back."""
-        ...
-
-    async def delete_document(self, app_id: str, project_id: str, doc_id: str) -> int:
-        """Remove every directory of ``doc_id``; returns the topic files removed."""
-        ...
-
-    async def read_document(
-        self, app_id: str, project_id: str, doc_id: str
-    ) -> KnowledgeDocument | None:
-        """The document as its ``index.md`` records it; ``None`` when absent."""
-        ...
-
-    async def update_document(
-        self, document: KnowledgeDocument, *, previous_category_id: str
-    ) -> WrittenDocument:
-        """Write ``document``'s title / category to its markdown.
-
-        A category other than ``previous_category_id`` moves the directory.
-
-        Returns:
-            Where the document is afterwards.
-
-        Raises:
-            DocumentNotFoundError: The document is not on disk.
-            PathTraversalError: The category would leave the knowledge tree.
-        """
-        ...
-
-    async def original_file(self, document: KnowledgeDocument) -> str | None:
-        """Absolute path of the stored upload, when it exists."""
-        ...
-
-
-@runtime_checkable
-class KnowledgeCatalog(Protocol):
-    """Knowledge state: the document and topic records the cascade keeps.
-
-    Reads serve the document / topic APIs and search; the one write records a
-    metadata patch at once instead of waiting for the cascade.
-    """
-
-    async def get_document(self, doc_id: str) -> KnowledgeDocument | None: ...
-
-    async def get_documents(
-        self, doc_ids: Collection[str]
-    ) -> list[KnowledgeDocument]: ...
-
-    async def document_exists(self, doc_id: str) -> bool: ...
-
-    async def list_documents(
-        self,
-        app_id: str,
-        project_id: str,
-        *,
-        category_id: str | None,
-        page: Page,
-    ) -> PageResult[KnowledgeDocument]:
-        """``page.sort_by`` is ``created_at``, ``updated_at`` or ``title``."""
-        ...
-
-    async def count_by_category(
-        self, app_id: str, project_id: str
-    ) -> dict[str, int]: ...
-
-    async def record_document(
-        self, document: KnowledgeDocument, *, md_path: str
-    ) -> None:
-        """Insert or update ``document``, stored at ``md_path`` (its ``index.md``)."""
-        ...
-
-    async def get_topics(self, topic_ids: Sequence[str]) -> list[KnowledgeTopic]: ...
-
-    async def topics_of(self, doc_id: str) -> list[KnowledgeTopic]: ...
-
-    async def count_topics(self, doc_id: str) -> int: ...

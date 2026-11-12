@@ -73,18 +73,16 @@ def test_user_visible_dirs_default_scope(tmp_path: Path) -> None:
     # Omitting app/project resolves to the default space; "default" lands as
     # the reserved ``default_app`` / ``default_project`` directory names.
     base = mr.root / "default_app" / "default_project"
-    assert mr.agents_dir() == base / "agents"
     assert mr.users_dir() == base / "users"
-    assert mr.knowledge_dir() == base / "knowledge"
+    assert mr.groups_dir() == base / "groups"
 
 
 def test_user_visible_dirs_named_scope(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path)
     # A non-default app/project maps to itself (no ``default_*`` rewrite).
     base = mr.root / "claude_code" / "oss"
-    assert mr.agents_dir("claude_code", "oss") == base / "agents"
     assert mr.users_dir("claude_code", "oss") == base / "users"
-    assert mr.knowledge_dir("claude_code", "oss") == base / "knowledge"
+    assert mr.groups_dir("claude_code", "oss") == base / "groups"
 
 
 def test_dotfile_paths(tmp_path: Path) -> None:
@@ -106,9 +104,8 @@ def test_ensure_creates_required_dirs(tmp_path: Path) -> None:
     assert mr.lancedb_dir.is_dir()
     assert mr.tmp_dir.is_dir()
     # User-visible dirs are NOT pre-created.
-    assert not mr.agents_dir().exists()
     assert not mr.users_dir().exists()
-    assert not mr.knowledge_dir().exists()
+    assert not mr.groups_dir().exists()
 
 
 def test_ensure_is_idempotent(tmp_path: Path) -> None:

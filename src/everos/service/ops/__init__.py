@@ -11,7 +11,7 @@ Presentation stays with the caller: the CLI prints and picks exit codes,
 the routes shape response DTOs. Every method delegates to a private step
 module -- ``_cascade`` (the server starts the orchestrator, a CLI command
 drives it one pass at a time), ``_health``, ``_ome``, ``_tasks`` and
-the ``backfill`` package (its three phases, in order) -- which holds the
+the ``backfill`` package (its one phase, ``vectors``) -- which holds the
 rules those surfaces used to carry.
 """
 
@@ -26,7 +26,6 @@ __all__ = [
     "Capabilities",
     "CascadeHealthReport",
     "CascadeStatus",
-    "ClustersPhaseResult",
     "HealthReport",
     "NullBackfillPresenter",
     "OmeRun",
@@ -35,7 +34,6 @@ __all__ = [
     "ProviderStatus",
     "QuiesceResult",
     "RebuildResult",
-    "SkillsPhaseResult",
     "VectorsPhaseResult",
     "compute_disabled_features",
     "format_tokens",
@@ -62,9 +60,7 @@ from .backfill import BackfillDeps as BackfillDeps
 from .backfill import BackfillOutcome as BackfillOutcome
 from .backfill import BackfillPresenter as BackfillPresenter
 from .backfill import BackfillSummary as BackfillSummary
-from .backfill import ClustersPhaseResult as ClustersPhaseResult
 from .backfill import NullBackfillPresenter as NullBackfillPresenter
-from .backfill import SkillsPhaseResult as SkillsPhaseResult
 from .backfill import VectorsPhaseResult as VectorsPhaseResult
 from .backfill import format_tokens as format_tokens
 from .backfill import run_backfill

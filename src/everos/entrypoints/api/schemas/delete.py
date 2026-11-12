@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from everos.service import NO_AGENT_MEMORY
 
 from .ids import (
     PATH_SAFE_CHARSET,
@@ -22,10 +24,10 @@ _EPISODE_ID = re.compile(r"(?P<owner>[a-zA-Z0-9_.@+-]{1,128})_ep_(?P<day>\d{8})_
 class DeleteRequest(BaseModel):
     """Which memories to delete: an owner, a session, or one owner's session.
 
-    At least one of ``user_id``, ``agent_id`` and ``session_id``; never both
-    ``user_id`` and ``agent_id``. EverOS 2.0 has no hard delete: a delete is a
-    forget of the same scope (``POST /memory/forget``, run at once), reversible
-    by the ``forget_ids`` it answers with; an ``agent_id`` is refused (422).
+    At least one of ``user_id`` and ``session_id``. EverOS 2.0 has no hard
+    delete: a delete is a forget of the same scope (``POST /memory/forget``,
+    run at once), reversible by the ``forget_ids`` it answers with. EverOS 2.0
+    has no agent memory: an ``agent_id`` is refused (422).
 
     With ``group_id`` the delete is the group's (docs/group-memory.md,
     section 15): an owner's or admin's forget -- soft, propagated, undone by
@@ -43,7 +45,6 @@ class DeleteRequest(BaseModel):
         default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
     )
     user_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
-    agent_id: PathSafeId | None = Field(default=None, min_length=1, max_length=128)
     session_id: SessionId | None = Field(default=None, min_length=1, max_length=128)
     group_id: PathSafeId | None = Field(
         default=None,
@@ -59,15 +60,18 @@ class DeleteRequest(BaseModel):
         description="Who asks, for a group-scoped delete (an owner or admin).",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_agent_scope(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("agent_id") is not None:
+            raise ValueError(NO_AGENT_MEMORY)
+        return data
+
     @model_validator(mode="after")
     def _one_scope(self) -> DeleteRequest:
-        if self.user_id is None and self.agent_id is None and self.session_id is None:
-            raise ValueError("set at least one of user_id, agent_id, session_id")
-        if self.user_id is not None and self.agent_id is not None:
-            raise ValueError("user_id and agent_id are mutually exclusive")
+        if self.user_id is None and self.session_id is None:
+            raise ValueError("set at least one of user_id, session_id")
         if self.group_id is not None:
-            if self.agent_id is not None:
-                raise ValueError("a group-scoped delete takes no agent_id")
             if self.user_id is not None and self.session_id is not None:
                 raise ValueError(
                     "a group-scoped delete names one session_id or one user_id"

@@ -58,7 +58,7 @@ def compile_filters(
     """Validate request filters and return one normalized predicate tree.
 
     The owner part is :func:`everos.memory.access.owner_predicate`, the one a
-    personal or agent read scope compiles to; a read that went through the
+    personal read scope compiles to; a read that went through the
     access policy uses :func:`compile_scoped` with its scope's predicate.
     """
     return compile_scoped(

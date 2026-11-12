@@ -83,7 +83,6 @@ async def memorize_env_scripted(
     started: dict[str, Any] = {"application": None}
 
     async def _setup(*, fake_llm: FakeLLMClient) -> None:
-        monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
         monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
         monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
         from everos.config import load_settings

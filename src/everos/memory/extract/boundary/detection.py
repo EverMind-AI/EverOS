@@ -1,14 +1,13 @@
 """Boundary detection: the session buffer cut into memcells.
 
-Owns the buffer / merge / boundary / tail sequence so the same cells feed
-the user-memory pipeline and, in agent mode, the agent-memory pipeline. It
-also owns the ``memcell`` ledger: each cell gets exactly one row, whatever
-the mode, and both pipelines reference that row's ``memcell_id``.
+Owns the buffer / merge / boundary / tail sequence that feeds the extraction
+pipelines, and the ``memcell`` ledger: each cell gets exactly one row, and
+the pipeline references that row's ``memcell_id``.
 
-Both modes run :func:`everalgo.boundary.adetect_boundaries` over one buffer
-track. Chat mode first drops tool rows; agent mode keeps them, and the
-algorithm keeps them in the cells without showing them to the model.
-Switching mode needs a fresh process (``settings.memorize.mode``).
+:func:`everalgo.boundary.adetect_boundaries` runs over one buffer track of
+chat rows: tool rows are dropped before anything is buffered or cut
+(:func:`~.messages.chat_rows`), and so is a tool row an older build left in
+a session's buffer.
 """
 
 from __future__ import annotations
@@ -34,9 +33,8 @@ from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
 from everos.memory.ports import SessionBufferStore, SessionKey
 
 from .messages import (
-    Mode,
+    chat_rows,
     close_complete_tail,
-    filter_for_mode,
     merge_dedupe_sort,
     picture_names,
     slice_tail,
@@ -51,10 +49,8 @@ logger = get_logger(__name__)
 
 type Status = Literal["accumulated", "extracted", "skipped"]
 
-_RAW_TYPE_BY_MODE: dict[Mode, str] = {
-    "chat": "Conversation",
-    "agent": "AgentTrajectory",
-}
+_RAW_TYPE = "Conversation"
+"""The memcell row's ``raw_type``: every cell is a slice of a chat."""
 
 
 class BoundaryOutcome(NamedTuple):
@@ -62,13 +58,13 @@ class BoundaryOutcome(NamedTuple):
 
     Attributes:
         cells: The memcells cut this call.
-        memcell_ids: Their ids, minted here and shared by both pipelines.
+        memcell_ids: Their ids, minted here.
         per_cell_message_ids: The buffered message ids each cell consumed.
         per_cell_all_senders: Each cell's distinct senders, first-seen order.
         status: ``extracted`` when cells were cut, ``accumulated`` when the
             messages wait in the buffer, ``skipped`` when there was nothing
             to do or no model to ask.
-        message_count: Fresh rows this call contributed (after the mode filter).
+        message_count: Fresh chat rows this call contributed.
         tail_complete: The model's verdict that the uncut tail is already a
             complete episode; ``None`` when no model judged it. ``True`` on a
             non-final call has already closed the tail into the last cell.
@@ -119,21 +115,22 @@ class BoundaryDetection:
         self._attempt_timeout = attempt_timeout
         self._quarantine = SessionQuarantine(session_buffer)
 
-    async def buffer(self, ingested: IngestResult, *, mode: Mode) -> BoundaryOutcome:
+    async def buffer(self, ingested: IngestResult) -> BoundaryOutcome:
         """Merge fresh messages into the session buffer without asking the model.
 
         The low-cost half of a deferred add: a later flush cuts the buffer.
         """
-        fresh = filter_for_mode(ingested.messages, mode)
+        fresh = chat_rows(ingested.messages)
         if not fresh:
             return _empty_outcome("skipped", message_count=0)
         session = _session_of(ingested)
-        merged = merge_dedupe_sort(await self._session_buffer.list(session), fresh)
+        buffered = chat_rows(await self._session_buffer.list(session))
+        merged = merge_dedupe_sort(buffered, fresh)
         await self._keep_buffered(session, merged)
         return _empty_outcome("accumulated", message_count=len(fresh))
 
     async def detect(
-        self, ingested: IngestResult, *, mode: Mode, is_final: bool
+        self, ingested: IngestResult, *, is_final: bool
     ) -> BoundaryOutcome:
         """Cut the buffer plus fresh messages into cells and keep the tail.
 
@@ -142,7 +139,6 @@ class BoundaryDetection:
 
         Args:
             ingested: This call's messages.
-            mode: ``chat`` or ``agent``.
             is_final: Flush: the algorithm closes the trailing segment too.
 
         Raises:
@@ -155,11 +151,11 @@ class BoundaryDetection:
             TimeoutError: A model attempt ran past ``attempt_timeout``.
         """
         session = _session_of(ingested)
-        fresh = filter_for_mode(ingested.messages, mode)
+        fresh = chat_rows(ingested.messages)
         if not fresh and not is_final:
             return _empty_outcome("skipped", message_count=0)
         buffered = await self._session_buffer.list(session)
-        merged = merge_dedupe_sort(buffered, fresh)
+        merged = merge_dedupe_sort(chat_rows(buffered), fresh)
         if not merged:
             return _empty_outcome("accumulated", message_count=0)
         if not is_final and not any(m.role == "user" for m in merged):
@@ -167,7 +163,7 @@ class BoundaryDetection:
             await self._keep_buffered(session, merged)
             return _empty_outcome("accumulated", message_count=len(fresh))
         result = await self._segment_or_quarantine(
-            session, merged, buffered=buffered, mode=mode, is_final=is_final
+            session, merged, buffered=buffered, is_final=is_final
         )
         result = self._close_complete_tail(session, result, is_final=is_final)
         if not result.cells:
@@ -178,7 +174,7 @@ class BoundaryDetection:
                 tail_complete=result.tail_complete,
             )
         return await self._commit_cells(
-            session, merged, result, mode=mode, message_count=len(fresh)
+            session, merged, result, message_count=len(fresh)
         )
 
     @staticmethod
@@ -200,20 +196,18 @@ class BoundaryDetection:
         merged: list[CanonicalMessage],
         *,
         buffered: Sequence[CanonicalMessage],
-        mode: Mode,
         is_final: bool,
     ) -> DetectionResult:
         """Segment ``merged``, counting a poisoned outcome towards the quarantine.
 
-        Three outcomes say the session's input itself is bad and the next
-        call would hit it again: an unusable reply on every attempt
-        (``LLMOutputError``), a message the operator refuses (everalgo's
-        ``InvalidInputError``, a ``ValueError``) and a row that maps to no
-        conversation item (``ValueError``). Only the first is retried. Any
-        other error is infrastructure and propagates uncounted.
+        Two outcomes say the session's input itself is bad and the next call
+        would hit it again: an unusable reply on every attempt
+        (``LLMOutputError``) and a message the operator refuses (everalgo's
+        ``InvalidInputError``, a ``ValueError``). Only the first is retried.
+        Any other error is infrastructure and propagates uncounted.
         """
         try:
-            result = await self._segment(merged, mode=mode, is_final=is_final)
+            result = await self._segment(merged, is_final=is_final)
         except (LLMOutputError, ValueError):
             buffered_ids = {m.message_id for m in buffered}
             unsaved = [m for m in merged if m.message_id not in buffered_ids]
@@ -223,7 +217,7 @@ class BoundaryDetection:
         return result
 
     async def _segment(
-        self, merged: list[CanonicalMessage], *, mode: Mode, is_final: bool
+        self, merged: list[CanonicalMessage], *, is_final: bool
     ) -> DetectionResult:
         """One bounded-retry boundary call; each attempt has its own deadline.
 
@@ -249,7 +243,7 @@ class BoundaryDetection:
         # A generation span, so the call's token usage is costed (a span-typed
         # observation's usage is dropped).
         with memory_span("everos.memcell.boundary", observation_type="generation"):
-            return await retry_llm_output(attempt, operator="boundary", mode=mode)
+            return await retry_llm_output(attempt, operator="boundary")
 
     async def _commit_cells(
         self,
@@ -257,7 +251,6 @@ class BoundaryDetection:
         merged: list[CanonicalMessage],
         result: DetectionResult,
         *,
-        mode: Mode,
         message_count: int,
     ) -> BoundaryOutcome:
         """Record one memcell row per cell and keep only the tail buffered,
@@ -266,7 +259,6 @@ class BoundaryDetection:
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
         names = _per_cell_picture_names(merged, result.cells)
-        raw_type = _RAW_TYPE_BY_MODE[mode]
         last_cell_ts = max(cell.timestamp for cell in result.cells)
         await self._session_buffer.cut(
             session,
@@ -274,7 +266,7 @@ class BoundaryDetection:
                 MemcellRecord(
                     memcell_id=memcell_id,
                     cell=cell,
-                    raw_type=raw_type,
+                    raw_type=_RAW_TYPE,
                     message_ids=ids,
                     sender_ids=cell_senders,
                 )

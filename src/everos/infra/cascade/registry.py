@@ -18,8 +18,6 @@ import dataclasses
 from pathlib import PurePosixPath
 
 from everos.infra.persistence.markdown import (
-    AgentCaseDailyFrontmatter,
-    AgentSkillFrontmatter,
     BaseFrontmatter,
     EpisodeDailyFrontmatter,
     GroupEpisodeDailyFrontmatter,
@@ -29,32 +27,23 @@ from everos.infra.persistence.markdown import (
     GroupProfileDailyFrontmatter,
     GroupSceneDailyFrontmatter,
     ImageMemoryDailyFrontmatter,
-    KnowledgeDocumentFrontmatter,
-    KnowledgeTopicFrontmatter,
     SceneDailyFrontmatter,
     UserProfileFrontmatter,
 )
 from everos.infra.persistence.records import (
-    AgentCase,
-    AgentSkill,
     Episode,
     GroupProfileItem,
     ImageMemory,
-    KnowledgeTopic,
     UserProfile,
 )
 
 from ._projections import (
-    AgentCaseHandler,
-    AgentSkillHandler,
     EpisodeHandler,
     GroupProfileHandler,
     GroupRosterHandler,
     Handler,
     HandlerDeps,
     ImageMemoryHandler,
-    KnowledgeDocumentHandler,
-    KnowledgeTopicHandler,
     ProfileHandler,
 )
 
@@ -107,18 +96,6 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         frontmatter_schema=EpisodeDailyFrontmatter,
         index_schema=Episode,
         handler_factory=EpisodeHandler,
-    ),
-    KindSpec(
-        name="agent_case",
-        frontmatter_schema=AgentCaseDailyFrontmatter,
-        index_schema=AgentCase,
-        handler_factory=AgentCaseHandler,
-    ),
-    KindSpec(
-        name="agent_skill",
-        frontmatter_schema=AgentSkillFrontmatter,
-        index_schema=AgentSkill,
-        handler_factory=AgentSkillHandler,
     ),
     KindSpec(
         name="image_memory",
@@ -187,18 +164,6 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         handler_factory=GroupRosterHandler,
         index_schema=None,
     ),
-    KindSpec(
-        name="knowledge_document",
-        frontmatter_schema=KnowledgeDocumentFrontmatter,
-        handler_factory=KnowledgeDocumentHandler,
-        index_schema=None,
-    ),
-    KindSpec(
-        name="knowledge_topic",
-        frontmatter_schema=KnowledgeTopicFrontmatter,
-        handler_factory=KnowledgeTopicHandler,
-        index_schema=KnowledgeTopic,
-    ),
 )
 """Every cascade kind, evaluated in declaration order by :func:`match_kind`."""
 
@@ -223,22 +188,14 @@ def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
     dispatch. Constructing once at orchestrator startup keeps the
     per-row hot path free of factory churn.
 
-    Every handler registers unconditionally. Capability-dependent
-    steps live inside the handlers themselves:
+    Every handler registers unconditionally. Capability-dependent steps
+    live inside the handlers themselves: a vector projection writes
+    ``vector=None`` when no embedding provider is injected (the column has
+    been nullable since the embedding-soft-dependency migration).
 
-    - :class:`KnowledgeDocumentHandler` is SQLite-only; no capability
-      dependency.
-    - :class:`KnowledgeTopicHandler.handle_added_or_modified` writes
-      ``vector=None`` when no embedding provider is injected — the column has been
-      nullable since the embedding-soft-dependency migration.
-      ``handle_deleted`` is pure SQL/LanceDB delete.
-
-    Prior versions gated the two knowledge handlers off as an atomic
-    pair when embed OR rerank was unavailable — that gate broke the
-    delete path (worker marks the row failed with "no handler
-    registered", stranding SQLite / LanceDB rows after
-    ``shutil.rmtree`` cleared the md). Search-side gating is
-    enforced separately at the route level, so cascade does not need
-    to gate writes.
+    A markdown file no kind matches -- an older store's agent, knowledge,
+    fact or foresight files -- is never scanned or queued: the scanner walks
+    the kinds' globs only, and the watcher drops a path :func:`match_kind`
+    does not match.
     """
     return {spec.name: spec.handler_factory(deps) for spec in KIND_REGISTRY}

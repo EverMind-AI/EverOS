@@ -516,7 +516,6 @@ def _announce(
         session_id=ingested.session_id,
         app_id=ingested.app_id,
         project_id=ingested.project_id,
-        source="pipeline",
         language=found.language,
         **group,
     )

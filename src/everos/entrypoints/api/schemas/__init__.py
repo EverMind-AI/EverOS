@@ -48,21 +48,6 @@ from .health import MemorizeQueueHealthBlock as MemorizeQueueHealthBlock
 from .ids import AppScopeId as AppScopeId
 from .ids import PathSafeId as PathSafeId
 from .ids import ProjectScopeId as ProjectScopeId
-from .knowledge import CategoryDTO as CategoryDTO
-from .knowledge import CategoryListResponse as CategoryListResponse
-from .knowledge import DocumentContextDTO as DocumentContextDTO
-from .knowledge import DocumentCreateResponse as DocumentCreateResponse
-from .knowledge import DocumentDeleteResponse as DocumentDeleteResponse
-from .knowledge import DocumentDetailResponse as DocumentDetailResponse
-from .knowledge import DocumentListResponse as DocumentListResponse
-from .knowledge import DocumentOverviewItemDTO as DocumentOverviewItemDTO
-from .knowledge import DocumentPatchRequest as DocumentPatchRequest
-from .knowledge import DocumentPatchResponse as DocumentPatchResponse
-from .knowledge import KnowledgeSearchRequest as KnowledgeSearchRequest
-from .knowledge import KnowledgeSearchResponse as KnowledgeSearchResponse
-from .knowledge import SearchHitDTO as SearchHitDTO
-from .knowledge import TopicDetailResponse as TopicDetailResponse
-from .knowledge import TopicOverviewDTO as TopicOverviewDTO
 from .memorize import AcceptedResponseData as AcceptedResponseData
 from .memorize import AddResponseData as AddResponseData
 from .memorize import ContentItemDTO as ContentItemDTO
@@ -93,22 +78,12 @@ __all__ = [
     "AddResponseData",
     "AppScopeId",
     "CascadeHealthBlock",
-    "CategoryDTO",
-    "CategoryListResponse",
     "ContentItemDTO",
     "DeciderHealthBlock",
     "DeleteByIdsRequest",
     "DeleteByIdsResponseData",
     "DeleteRequest",
     "DeleteResponseData",
-    "DocumentContextDTO",
-    "DocumentCreateResponse",
-    "DocumentDeleteResponse",
-    "DocumentDetailResponse",
-    "DocumentListResponse",
-    "DocumentOverviewItemDTO",
-    "DocumentPatchRequest",
-    "DocumentPatchResponse",
     "ErrorDetail",
     "ErrorResponse",
     "FlushResponseData",
@@ -129,8 +104,6 @@ __all__ = [
     "GroupUpsertResponseData",
     "HealthCapabilities",
     "HealthResponse",
-    "KnowledgeSearchRequest",
-    "KnowledgeSearchResponse",
     "MemberIntervalDTO",
     "MemorizeAddRequest",
     "MemorizeFlushRequest",
@@ -151,12 +124,9 @@ __all__ = [
     "RosterChangeResponseData",
     "RosterEventDTO",
     "RunSummary",
-    "SearchHitDTO",
     "SuccessEnvelope",
     "ToolCallDTO",
     "ToolFunctionDTO",
-    "TopicDetailResponse",
-    "TopicOverviewDTO",
     "TriggerRequest",
     "TriggerResponse",
     "UndoForgetRequest",

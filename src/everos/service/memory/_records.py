@@ -101,8 +101,9 @@ class Version[T: (Episode, ImageMemory, Scene)]:
         stored: The version as its file holds it.
         mark: ``None`` while current, the forget marker, or the successor's
             entry id.
-        merged: The successor is a merge of several versions (a Reflection
-            merge); only meaningful when ``mark`` names one.
+        merged: The successor is a merge of several versions (one an earlier
+            2.0 build's Reflection wrote); only meaningful when ``mark`` names
+            one.
     """
 
     stored: Stored[T]

@@ -13,9 +13,7 @@ The single ``upsert_with_members`` write path is what every cluster
 strategy invokes after a merge / new-cluster decision: it stamps the
 ``cluster`` row (UPSERT) and reconciles the ``cluster_member`` rows
 (diff-then-insert; pre-existing members are kept, new members appended)
-so calls are idempotent even if a strategy retries. Reflection's merge
-uses ``replace_members``, which swaps members and restamps the row in one
-transaction.
+so calls are idempotent even if a strategy retries.
 """
 
 from __future__ import annotations
@@ -24,7 +22,7 @@ import json
 
 import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -152,37 +150,6 @@ class ClusterRepo(RepoBase[Cluster]):
 
     # ── Lightweight queries ───────────────────────────────────────────────
 
-    async def get_members_with_type(self, cluster_id: str) -> list[tuple[str, str]]:
-        """Return ``(member_id, member_type)`` pairs for a cluster.
-
-        Args:
-            cluster_id: Target cluster identifier.
-        """
-        async with session_scope(self._factory) as s:
-            stmt = (
-                select(ClusterMember.member_id, ClusterMember.member_type)
-                .where(ClusterMember.cluster_id == cluster_id)
-                .order_by(ClusterMember.added_ts)
-            )
-            return list((await s.execute(stmt)).all())
-
-    async def list_distinct_owners(
-        self,
-    ) -> list[tuple[str, str, str, str]]:
-        """Return distinct ``(owner_id, owner_type, app_id, project_id)`` tuples.
-
-        Used by the Reflection cron strategy to enumerate all scope
-        combinations that may have clusters to reflect.
-        """
-        async with session_scope(self._factory) as s:
-            stmt = select(
-                Cluster.owner_id,
-                Cluster.owner_type,
-                Cluster.app_id,
-                Cluster.project_id,
-            ).distinct()
-            return list((await s.execute(stmt)).all())
-
     # ── Write ──────────────────────────────────────────────────────────────
 
     async def upsert_with_members(
@@ -269,84 +236,6 @@ class ClusterRepo(RepoBase[Cluster]):
                 s.add_all(new_member_rows)
             await s.commit()
 
-    async def replace_members(
-        self,
-        cluster_id: str,
-        *,
-        removed: set[str],
-        added: str,
-        member_type: str,
-        centroid_blob: bytes,
-        count: int,
-        last_ts_ms: int,
-        preview_json: str,
-    ) -> None:
-        """Swap members and restamp the cluster row in one transaction.
-
-        Args:
-            cluster_id: Target cluster identifier.
-            removed: Member ids to delete; may be empty.
-            added: Member id appended after the removal.
-            member_type: Kind discriminator of ``added``.
-            centroid_blob: Serialised float32 centroid vector bytes.
-            count: Updated member count.
-            last_ts_ms: Latest member timestamp in epoch milliseconds.
-            preview_json: JSON-encoded preview text list.
-        """
-        async with session_scope(self._factory) as s:
-            if removed:
-                await s.execute(
-                    delete(ClusterMember)
-                    .where(ClusterMember.cluster_id == cluster_id)
-                    .where(ClusterMember.member_id.in_(removed))
-                )
-            s.add(
-                ClusterMember(
-                    cluster_id=cluster_id,
-                    member_id=added,
-                    member_type=member_type,
-                    added_ts=get_utc_now(),
-                )
-            )
-            await s.execute(
-                update(Cluster)
-                .where(Cluster.cluster_id == cluster_id)
-                .values(
-                    centroid_blob=centroid_blob,
-                    count=count,
-                    last_ts_ms=last_ts_ms,
-                    preview_json=preview_json,
-                )
-            )
-            await s.commit()
-
-    async def detach(
-        self,
-        cluster_id: str,
-        member_ids: set[str],
-        *,
-        count: int,
-        last_ts_ms: int,
-        preview_json: str,
-    ) -> None:
-        """Remove members and restamp the row in one transaction.
-
-        The centroid is left as it is: it moves only when a member is added.
-        """
-        async with session_scope(self._factory) as s:
-            if member_ids:
-                await s.execute(
-                    delete(ClusterMember)
-                    .where(ClusterMember.cluster_id == cluster_id)
-                    .where(ClusterMember.member_id.in_(member_ids))
-                )
-            await s.execute(
-                update(Cluster)
-                .where(Cluster.cluster_id == cluster_id)
-                .values(count=count, last_ts_ms=last_ts_ms, preview_json=preview_json)
-            )
-            await s.commit()
-
     async def delete_cluster(self, cluster_id: str) -> None:
         """Delete a cluster and its members (members first: foreign key)."""
         async with session_scope(self._factory) as s:
@@ -355,39 +244,6 @@ class ClusterRepo(RepoBase[Cluster]):
             )
             await s.execute(delete(Cluster).where(Cluster.cluster_id == cluster_id))
             await s.commit()
-
-    async def delete_for_owner(
-        self,
-        owner_id: str,
-        owner_type: str,
-        kind: str,
-        *,
-        app_id: str,
-        project_id: str,
-    ) -> int:
-        """Delete every cluster of one owner and kind in one space; how many."""
-        async with session_scope(self._factory) as s:
-            ids = list(
-                (
-                    await s.execute(
-                        select(Cluster.cluster_id)
-                        .where(Cluster.app_id == app_id)
-                        .where(Cluster.project_id == project_id)
-                        .where(Cluster.owner_id == owner_id)
-                        .where(Cluster.owner_type == owner_type)
-                        .where(Cluster.kind == kind)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            if ids:
-                await s.execute(
-                    delete(ClusterMember).where(ClusterMember.cluster_id.in_(ids))
-                )
-                await s.execute(delete(Cluster).where(Cluster.cluster_id.in_(ids)))
-            await s.commit()
-        return len(ids)
 
 
 def _row_to_algo(row: Cluster, members: list[str]) -> AlgoCluster:

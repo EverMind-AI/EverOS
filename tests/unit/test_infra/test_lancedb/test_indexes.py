@@ -20,17 +20,10 @@ from everos.config import load_settings
 from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import (
-    AgentCaseIndexAdapter,
-    AgentSkillIndexAdapter,
     EpisodeIndexAdapter,
-    KnowledgeTopicIndexAdapter,
+    GroupProfileIndexAdapter,
+    ImageMemoryIndexAdapter,
     ProfileIndexAdapter,
-)
-from everos.infra.persistence.lancedb import (
-    AgentCase as AgentCaseRow,
-)
-from everos.infra.persistence.lancedb import (
-    AgentSkill as AgentSkillRow,
 )
 from everos.infra.persistence.lancedb import (
     Episode as EpisodeRow,
@@ -39,13 +32,12 @@ from everos.infra.persistence.lancedb import (
     UserProfile as UserProfileRow,
 )
 from everos.infra.persistence.markdown import MarkdownEpisodeStore
-from everos.memory.models import AgentCase, Episode, Profile
+from everos.memory.models import Episode, Profile
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
-    AgentCaseIndex,
-    AgentSkillIndex,
     EpisodeIndex,
-    KnowledgeTopicIndex,
+    GroupProfileIndex,
+    ImageMemoryIndex,
     Page,
     ProfileIndex,
     Scope,
@@ -58,9 +50,6 @@ from tests.fakes.storage import Storage
 _DIM = 1024
 _TS = 1_747_216_800_000  # 2025-05-14T10:00:00Z
 _USER = Scope(app_id="default", project_id="default", owner_id="u1", owner_type="user")
-_AGENT = Scope(
-    app_id="default", project_id="default", owner_id="a1", owner_type="agent"
-)
 
 
 class _WhitespaceTokenizer(Tokenizer):
@@ -94,13 +83,12 @@ async def _real_lancedb(
 
 def test_adapters_satisfy_their_ports(storage: Storage) -> None:
     assert isinstance(EpisodeIndexAdapter(storage.repos.episode), EpisodeIndex)
-    assert isinstance(AgentCaseIndexAdapter(storage.repos.agent_case), AgentCaseIndex)
     assert isinstance(
-        AgentSkillIndexAdapter(storage.repos.agent_skill), AgentSkillIndex
+        ImageMemoryIndexAdapter(storage.repos.image_memory), ImageMemoryIndex
     )
     assert isinstance(ProfileIndexAdapter(storage.repos.user_profile), ProfileIndex)
     assert isinstance(
-        KnowledgeTopicIndexAdapter(storage.repos.knowledge_topic), KnowledgeTopicIndex
+        GroupProfileIndexAdapter(storage.repos.group_profile_item), GroupProfileIndex
     )
 
 
@@ -133,7 +121,8 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     await handler.handle_added_or_modified(ref.md_path)
     index = EpisodeIndexAdapter(storage.repos.episode)
 
-    (stored,) = await index.find_by_entry_ids(_USER, [ref.entry_id])
+    (found,) = await index.find(all_of(_USER.to_filter(), eq("entry_id", ref.entry_id)))
+    stored = found.stored
     page = await index.paginate(_USER.to_filter(), Page(sort_by="timestamp"))
     after = await index.list_after(_USER, _TS - 1, parent_type="memcell")
     hits = await index.sparse_search(["trip"], _USER.to_filter(), limit=5)
@@ -153,10 +142,6 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     assert dense[0].score is not None and 0.0 <= dense[0].score <= 1.0
     assert [h.stored.ref.id for h in subject] == [ref.id]
     assert [(h.stored.ref.entry_id, h.score) for h in every] == [(ref.entry_id, None)]
-    orphans = await index.orphans(
-        all_of(_USER.to_filter(), eq("parent_type", "cluster")), limit=10
-    )
-    assert orphans == []
 
 
 async def test_episode_find_with_and_without_limit(storage: Storage) -> None:
@@ -195,85 +180,6 @@ async def test_episode_find_with_and_without_limit(storage: Storage) -> None:
         "episode 1",
         "episode 2",
     }
-
-
-async def test_agent_case_reads_return_domain_cases(storage: Storage) -> None:
-    await storage.repos.agent_case.upsert(
-        [
-            AgentCaseRow(
-                id="a1_ac_1",
-                entry_id="ac_1",
-                owner_id="a1",
-                owner_type="agent",
-                session_id="s1",
-                timestamp=dt.datetime(2025, 5, 14, 10, tzinfo=dt.UTC),
-                parent_id="mc_1",
-                quality_score=0.8,
-                task_intent="fix flaky test",
-                task_intent_tokens="fix flaky test",
-                approach="retry",
-                approach_tokens="retry",
-                md_path="agents/a1/.agent_cases/c.md",
-                content_sha256="x" * 64,
-            )
-        ]
-    )
-    index = AgentCaseIndexAdapter(storage.repos.agent_case)
-    expected = AgentCase(
-        owner_id="a1",
-        task_intent="fix flaky test",
-        approach="retry",
-        quality_score=0.8,
-        timestamp=_TS,
-        session_id="s1",
-        parent_id="mc_1",
-    )
-
-    (stored,) = await index.find_by_entry_ids(_AGENT, ["ac_1"])
-    page = await index.paginate(_AGENT.to_filter(), Page(sort_by="timestamp"))
-
-    assert stored.item == expected
-    assert stored.ref.id == "a1_ac_1"
-    assert page.total == 1 and page.items[0].item == expected
-
-
-async def test_agent_skill_reads_return_domain_skills(storage: Storage) -> None:
-    await storage.repos.agent_skill.upsert(
-        [
-            AgentSkillRow(
-                id=f"a1_{name}",
-                owner_id="a1",
-                owner_type="agent",
-                name=name,
-                description=f"desc {name}",
-                description_tokens=f"desc {name}",
-                content="body",
-                content_tokens="body",
-                confidence=0.5,
-                maturity_score=0.6,
-                source_case_ids=["ac_1"],
-                cluster_id="cl_1",
-                md_path=f"agents/a1/skills/skill_{name}/SKILL.md",
-                content_sha256="x" * 64,
-                vector=vector,
-            )
-            for name, vector in (
-                ("near", [1.0] + [0.0] * (_DIM - 1)),
-                ("far", [0.0] * (_DIM - 1) + [1.0]),
-            )
-        ]
-    )
-    index = AgentSkillIndexAdapter(storage.repos.agent_skill)
-
-    top = await index.top_k_in_cluster(_AGENT, "cl_1", [1.0] + [0.0] * (_DIM - 1), k=1)
-    page = await index.paginate(_AGENT.to_filter(), Page(sort_by="updated_at"))
-
-    assert [s.item.name for s in top] == ["near"]
-    assert top[0].ref.entry_id == "near"
-    assert top[0].item.source_case_ids == ["ac_1"]
-    assert await index.count() == 2
-    assert await index.count_in_cluster(_AGENT, "cl_1") == 2
-    assert page.total == 2
 
 
 async def test_profile_get_decodes_the_json_buckets(storage: Storage) -> None:

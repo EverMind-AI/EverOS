@@ -16,8 +16,8 @@ straddling windows, a picture memory from before the late joiner, a later
 episode that refers to it, buffered messages before and after the join, and a
 personal episode and profile of ``u_chen``. Cases that need more seed their
 own: member-in-group profile items on both sides of a window, a scene spanning
-a member's absence, agent cases learned in this and another group, and the
-group write path with its strategies.
+a member's absence, and the group write path with its strategies. A read naming
+an agent is refused: EverOS 2.0 has no agent memory.
 
 Every case asserts the record is absent from search (the multi-round
 retrieval's results and its decider's very input), get, attached pictures,
@@ -52,17 +52,20 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import ForbiddenError, RosterConflictError
 from everos.entrypoints.api.app import create_app
-from everos.memory.access import AccessPolicy, resolve_identity
 from everos.memory.models import (
-    AgentCase,
     ExplicitInfoItem,
     Profile,
     ProfileSource,
     Scene,
 )
-from everos.memory.ports import NoSourceCheck, Scope, SessionKey, all_of, eq
+from everos.memory.ports import NoSourceCheck, SessionKey, all_of, eq
 from everos.memory.strategies import STRATEGY_SPECS
-from everos.service import GetRequest, GroupForgetTarget, SearchRequest
+from everos.service import (
+    NO_AGENT_MEMORY,
+    GetRequest,
+    GroupForgetTarget,
+    SearchRequest,
+)
 from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
@@ -70,7 +73,7 @@ NOT_YET: dict[int, str] = {
     6: "history route: not built yet (2.0 history); the group profile's versions"
     " (get include_superseded) are covered by"
     " test_group_profile_items_follow_the_windows",
-    13: "MCP: a separate package (everos-mcp) forwarding the HTTP API",
+    11: "MCP: a separate package (everos-mcp) forwarding the HTTP API",
 }
 """Rows of section 9.3 this suite cannot exercise yet, and why."""
 
@@ -280,7 +283,7 @@ async def test_search_returns_nothing_outside_the_askers_windows(
 async def test_former_and_non_members_read_nothing_of_the_group(
     fixture: _Fixture, asker: str
 ) -> None:
-    """Rows 1, 5 and 10: a former member and a stranger are refused outright."""
+    """Rows 1, 5 and 9: a former member and a stranger are refused outright."""
     with pytest.raises(ForbiddenError):
         await fixture.world.memory.search(_search(group_id="trip", asker_id=asker))
     with pytest.raises(ForbiddenError):
@@ -640,60 +643,50 @@ async def test_a_scene_reaches_only_askers_who_see_all_its_episodes(
     assert bool(listed.data.scenes) == visible
 
 
-async def test_an_agent_case_from_another_group_stays_there(fixture: _Fixture) -> None:
-    """Row 12 and section 13.5: an agent case from another group."""
-    world = fixture.world
-    agent = Scope(
-        app_id=APP, project_id=PROJECT, owner_id="bot_ava", owner_type="agent"
-    )
-    for group, intent in (
-        ("trip", "trip case marker Lisbon"),
-        ("other", "other case marker Lisbon"),
-    ):
-        await world.stores.agent_case.append(
-            agent,
-            AgentCase(
-                owner_id="bot_ava",
-                task_intent=intent,
-                approach="Steps.",
-                quality_score=0.9,
-                timestamp=T0 + 1_000,
-                session_id=f"s_{group}",
-                parent_id=f"mc_{group}",
-                source_group_id=group,
-            ),
-            only_if=NoSourceCheck(),
+async def test_a_read_naming_an_agent_is_refused(fixture: _Fixture) -> None:
+    """EverOS 2.0 has no agent memory (an earlier build's row 12 read path).
+
+    A read naming an agent -- in a group's context or not -- is refused before
+    any record is read, so nothing of the group can reach one.
+    """
+    reads = [
+        ("get", {"agent_id": "bot_ava", "memory_type": "episode"}),
+        ("get", {"agent_id": "bot_ava", "memory_type": "agent_case"}),
+        (
+            "get",
+            {
+                "agent_id": "bot_ava",
+                "context_group_id": "trip",
+                "asker_id": "u_chen",
+                "memory_type": "agent_case",
+            },
+        ),
+        ("search", {"agent_id": "bot_ava", "query": "marker plan Lisbon offsite"}),
+        (
+            "search",
+            {
+                "agent_id": "bot_ava",
+                "context_group_id": "trip",
+                "asker_id": "u_chen",
+                "query": "marker plan Lisbon offsite",
+            },
+        ),
+    ]
+    for path, body in reads:
+        response = await fixture.client.post(
+            f"/api/v2/memory/{path}",
+            json={"app_id": APP, "project_id": PROJECT, **body},
         )
-    await world.project()
-
-    def listing(**scope: Any) -> GetRequest:
-        # Agent memory is read through get: multi-round search covers user
-        # and group memory only, and refuses an agent scope.
-        return GetRequest(
-            app_id=APP,
-            project_id=PROJECT,
-            agent_id="bot_ava",
-            memory_type="agent_case",
-            **scope,
-        )
-
-    def text(response: Any) -> str:
-        return json.dumps(response.data.model_dump(mode="json"))
-
-    in_trip = text(
-        await world.memory.get(listing(context_group_id="trip", asker_id="u_chen"))
-    )
-    assert "trip case marker" in in_trip and "other case marker" not in in_trip
-    plain = text(await world.memory.get(listing()))
-    assert "case marker" not in plain
-    with pytest.raises(ForbiddenError):
-        await world.memory.get(listing(context_group_id="trip", asker_id="u_zoe"))
+        assert response.status_code == 422, (path, body, response.text)
+        assert NO_AGENT_MEMORY in response.json()["error"]["message"], body
+        assert "marker" not in response.text
+    assert not fixture.decider.prompts
 
 
 async def test_group_strategies_read_only_the_groups_own_segments(
     tmp_path: Path,
 ) -> None:
-    """Row 11: group strategies read only the group's segments, member
+    """Row 10: group strategies read only the group's segments, member
     profiles never read ``users/<m>/``, personal strategies never see a group
     segment, and the group profile's update reads only the group's own."""
     profile_prompts: list[str] = []
@@ -897,7 +890,7 @@ async def test_constraints_and_attachments_follow_the_windows(
 
 
 async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -> None:
-    """Row 10 and section 8.7: project scope, project profile, knowledge base."""
+    """Row 9 and section 8.7: project scope and project profile."""
     world = fixture.world
     await world.roster("secret", [join("u_chen", T0), join("u_zoe", T0)])
     await world.episode("secret", "secret marker plan Lisbon offsite", start=T0, end=T0)
@@ -924,16 +917,22 @@ async def test_a_project_scope_reads_only_the_askers_groups(fixture: _Fixture) -
     for word, (start, end) in CONSTRAINED.items():
         seen = _visible("u_evan", T0 + start, T0 + end)
         assert (f"{word}decision" in blob) == seen, word
-    access = AccessPolicy(world.stores.groups)
     for outsider in ("u_betty", "u_zoe_never", "u_amy"):
         with pytest.raises(ForbiddenError):
-            await access.authorize_project_read(
-                resolve_identity(header=None, body_asker=outsider), APP, PROJECT
+            await world.memory.project_profile(
+                app_id=APP, project_id=PROJECT, asker_id=outsider, asserted_asker=None
             )
-    with pytest.raises(ForbiddenError):
-        await world.memory.project_profile(
-            app_id=APP, project_id=PROJECT, asker_id="u_betty", asserted_asker=None
-        )
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(
+                SearchRequest(
+                    app_id=APP,
+                    project_id=PROJECT,
+                    project_scope=True,
+                    asker_id=outsider,
+                    query="marker plan Lisbon offsite",
+                    top_k=20,
+                )
+            )
 
 
 # ── include_groups: a personal search over the user's groups ─────────────
@@ -1368,6 +1367,6 @@ async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:
-    covered = {1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12}
-    assert covered | set(NOT_YET) == set(range(1, 14))
+    covered = {1, 2, 3, 4, 5, 7, 8, 9, 10}
+    assert covered | set(NOT_YET) == set(range(1, 12))
     assert not covered & set(NOT_YET)

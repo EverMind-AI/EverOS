@@ -8,9 +8,8 @@ not import.
 from __future__ import annotations
 
 __all__ = [
-    "Mode",
+    "chat_rows",
     "close_complete_tail",
-    "filter_for_mode",
     "merge_dedupe_sort",
     "picture_names",
     "slice_tail",
@@ -20,34 +19,21 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Literal
 
 from everalgo.boundary import DetectionResult
-from everalgo.types import (
-    ChatMessage,
-    ConversationItem,
-    MemCell,
-    ToolCall,
-    ToolCallFunction,
-    ToolCallRequest,
-    ToolCallResult,
-)
+from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import CanonicalMessage
 
-type Mode = Literal["chat", "agent"]
 
+def chat_rows(messages: Sequence[CanonicalMessage]) -> list[CanonicalMessage]:
+    """The plain user / assistant messages: a chat's memory reads these alone.
 
-def filter_for_mode(
-    messages: Sequence[CanonicalMessage], mode: Mode
-) -> list[CanonicalMessage]:
-    """Chat mode keeps plain user / assistant text; agent mode keeps everything."""
-    if mode == "chat":
-        return [
-            m for m in messages if m.role in ("user", "assistant") and not m.tool_calls
-        ]
-    return list(messages)
+    A tool row and an assistant's tool call are an agent's trajectory, not chat;
+    they are dropped before segmentation, and so never buffered or cut.
+    """
+    return [m for m in messages if m.role in ("user", "assistant") and not m.tool_calls]
 
 
 def merge_dedupe_sort(
@@ -99,10 +85,7 @@ def split_message_ids(
 
 
 def unique_senders(cell: MemCell) -> list[str]:
-    """Distinct ``sender_id`` values in the cell, in first-seen order.
-
-    Tool results carry no sender (a tool runner is not a speaker).
-    """
+    """Distinct ``sender_id`` values in the cell, in first-seen order."""
     senders: list[str] = []
     for item in cell.items:
         sender = getattr(item, "sender_id", None)
@@ -137,43 +120,17 @@ def picture_names(messages: Sequence[CanonicalMessage]) -> dict[str, str]:
 
 
 def to_conversation_item(message: CanonicalMessage) -> ConversationItem:
-    """Map one canonical row to one conversation item, in this order of rules.
-
-    1. ``role="tool"`` with a ``tool_call_id`` -> :class:`ToolCallResult`.
-    2. ``role="assistant"`` with ``tool_calls`` -> :class:`ToolCallRequest`;
-       any text rides along as its ``content``.
-    3. ``role`` ``"user"`` or ``"assistant"`` -> :class:`ChatMessage`.
+    """Map one chat row (see :func:`chat_rows`) to one conversation item.
 
     The mapping is 1:1 so boundary cells can be traced back to message ids.
 
     Raises:
-        ValueError: An orphan tool row or an unexpected role; mapping it to
-            anything would corrupt the cell-to-message index map.
+        ValueError: A row that is not a plain user / assistant message;
+            mapping it to anything would corrupt the cell-to-message index map.
     """
-    if message.role == "tool" and message.tool_call_id:
-        return ToolCallResult(
-            tool_call_id=message.tool_call_id,
-            content=message.text,
-            timestamp=to_timestamp_ms(message.timestamp),
-        )
-    if message.role == "assistant" and message.tool_calls:
-        return ToolCallRequest(
-            tool_calls=[
-                ToolCall(
-                    id=call.id,
-                    function=ToolCallFunction(
-                        name=call.function.get("name", ""),
-                        arguments=call.function.get("arguments", ""),
-                    ),
-                )
-                for call in message.tool_calls
-            ],
-            timestamp=to_timestamp_ms(message.timestamp),
-            content=message.text or None,
-            sender_id=message.sender_id,
-            sender_name=message.sender_name,
-        )
-    if message.role == "user" or message.role == "assistant":
+    if (message.role == "user" or message.role == "assistant") and not (
+        message.tool_calls
+    ):
         # A group batch's own message id, when the client sent one, is the
         # id the group's records cite (source quotes, message-level forget);
         # the generated id stays the buffer's and the memcell row's key.
@@ -188,5 +145,5 @@ def to_conversation_item(message: CanonicalMessage) -> ConversationItem:
     raise ValueError(
         f"cannot map canonical row to a conversation item: role={message.role!r} "
         f"message_id={message.message_id!r} "
-        f"has_tool_call_id={message.tool_call_id is not None}"
+        f"has_tool_calls={bool(message.tool_calls)}"
     )

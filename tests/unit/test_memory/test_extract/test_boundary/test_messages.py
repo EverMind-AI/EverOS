@@ -6,18 +6,12 @@ import datetime as _dt
 
 import pytest
 from everalgo.boundary import DetectionResult
-from everalgo.types import (
-    ChatMessage,
-    ConversationItem,
-    MemCell,
-    ToolCallRequest,
-    ToolCallResult,
-)
+from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 from everos.memory import CanonicalMessage, ToolCall
 from everos.memory.extract.boundary.messages import (
+    chat_rows,
     close_complete_tail,
-    filter_for_mode,
     merge_dedupe_sort,
     slice_tail,
     split_message_ids,
@@ -49,10 +43,10 @@ def _msg(
     )
 
 
-# ── filter_for_mode ──────────────────────────────────────────────────────
+# ── chat_rows ────────────────────────────────────────────────────────────
 
 
-def test_filter_chat_drops_tool_rows() -> None:
+def test_chat_rows_drops_tool_rows_and_tool_calls() -> None:
     msgs = [
         _msg("m1", "user"),
         _msg("m2", "assistant"),
@@ -63,18 +57,9 @@ def test_filter_chat_drops_tool_rows() -> None:
             tool_calls=[ToolCall(id="tc1", function={"name": "f", "arguments": "{}"})],
         ),
     ]
-    out = filter_for_mode(msgs, "chat")
+    out = chat_rows(msgs)
     ids = [m.message_id for m in out]
     assert ids == ["m1", "m2"]
-
-
-def test_filter_agent_keeps_everything() -> None:
-    msgs = [
-        _msg("m1", "user"),
-        _msg("m2", "tool", tool_call_id="tc1"),
-    ]
-    out = filter_for_mode(msgs, "agent")
-    assert [m.message_id for m in out] == ["m1", "m2"]
 
 
 # ── merge_dedupe_sort ────────────────────────────────────────────────────
@@ -232,52 +217,7 @@ def test_unique_senders_preserves_first_occurrence_order() -> None:
     assert unique_senders(cell) == ["alice", "bob"]
 
 
-def test_unique_senders_handles_tool_result_without_sender() -> None:
-    from everalgo.types import MemCell
-
-    cell = MemCell(
-        items=[
-            ChatMessage(
-                id="x",
-                role="user",
-                sender_id="alice",
-                sender_name="Alice",
-                content="",
-                timestamp=0,
-            ),
-            ToolCallResult(tool_call_id="tc1", content="output", timestamp=0),
-        ],
-        timestamp=0,
-    )
-    assert unique_senders(cell) == ["alice"]
-
-
 # ── to_conversation_item ──────────────────────────────────────────────────
-
-
-def test_to_item_tool_role_becomes_tool_call_result() -> None:
-    m = _msg("m_tool", "tool", text="tool output", tool_call_id="tc1")
-    item = to_conversation_item(m)
-    assert isinstance(item, ToolCallResult)
-    assert item.tool_call_id == "tc1"
-    assert item.content == "tool output"
-
-
-def test_to_item_assistant_with_tool_calls_becomes_request() -> None:
-    m = _msg(
-        "m_ac",
-        "assistant",
-        text="picking a tool",
-        tool_calls=[
-            ToolCall(id="tc1", function={"name": "search", "arguments": '{"q":"x"}'})
-        ],
-    )
-    item = to_conversation_item(m)
-    assert isinstance(item, ToolCallRequest)
-    assert len(item.tool_calls) == 1
-    assert item.tool_calls[0].id == "tc1"
-    assert item.tool_calls[0].function.name == "search"
-    assert item.content == "picking a tool"
 
 
 def test_to_item_user_becomes_chat_message() -> None:
@@ -295,12 +235,29 @@ def test_to_item_assistant_text_only_becomes_chat_message() -> None:
     assert item.role == "assistant"
 
 
-def test_to_item_tool_without_id_falls_through_and_raises() -> None:
-    # role=tool but no tool_call_id → not a ToolCallResult; falls to the
-    # final raise (assistant/user branches don't match either).
-    m = _msg("m_orphan", "tool", tool_call_id=None)
+@pytest.mark.parametrize(
+    "message",
+    [
+        _msg("m_tool", "tool", text="tool output", tool_call_id="tc1"),
+        _msg("m_orphan", "tool", tool_call_id=None),
+        _msg(
+            "m_ac",
+            "assistant",
+            text="picking a tool",
+            tool_calls=[
+                ToolCall(
+                    id="tc1", function={"name": "search", "arguments": '{"q":"x"}'}
+                )
+            ],
+        ),
+    ],
+    ids=["tool-result", "orphan-tool-row", "assistant-tool-call"],
+)
+def test_to_item_refuses_a_row_that_is_not_chat(message: CanonicalMessage) -> None:
+    """Only a chat row maps (see ``chat_rows``); a tool row or an assistant's
+    tool call would corrupt the cell-to-message index map."""
     with pytest.raises(ValueError, match="cannot map"):
-        to_conversation_item(m)
+        to_conversation_item(message)
 
 
 def test_to_item_carries_the_epoch_millisecond_timestamp() -> None:

@@ -31,7 +31,6 @@ class HealthCapabilities(BaseModel):
     which never touches the network -- so an unreachable embedding service
     read ``true`` while every write failed (issue #434).
     """
-    rerank: bool
     multimodal_llm: bool
     parser: bool
     decider: bool = Field(

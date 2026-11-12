@@ -1,6 +1,6 @@
-"""Strict md <-> lancedb consistency for the episode and agent-case logs.
+"""Strict md <-> lancedb consistency for the episode log.
 
-For each of these daily-log kinds, seed N entries via the kind's
+For each daily-log kind listed here, seed N entries via the kind's
 writer, wait for the cascade to drain, then assert exact equality
 between md state and LanceDB state:
 
@@ -13,8 +13,8 @@ This is the strict counterpart to the loose ``>=`` assertions in
 :mod:`test_add_flush_user_pipeline_e2e` (which can't be exact because
 LLM output is non-deterministic).
 
-Skill / profile are single-file (not daily-log) kinds and are covered
-by the e2e pipeline tests where the OME drives real LLM emissions.
+Profile is a single-file (not daily-log) kind and is covered by the e2e
+pipeline tests where the OME drives real LLM emissions.
 """
 
 from __future__ import annotations
@@ -33,12 +33,7 @@ from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
 from everos.infra.cascade.registry import KIND_REGISTRY
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import (
-    AgentCaseWriter,
-    EpisodeWriter,
-    MarkdownReader,
-)
-from everos.infra.persistence.records.agent_case import AgentCase
+from everos.infra.persistence.markdown import EpisodeWriter, MarkdownReader
 from everos.infra.persistence.records.episode import Episode
 from tests._consistency_assertions import _daily_log_sha_for_entry
 from tests.fakes.storage import Storage
@@ -81,7 +76,7 @@ class _DailyLogKindCase:
     """A single registered daily-log kind, packaged for parametrization."""
 
     name: str
-    scope: str  # "users" | "agents"
+    scope: str  # "users"
     dir_name: str
     file_prefix: str
     writer_factory: Callable[[MemoryRoot], Any]
@@ -102,23 +97,6 @@ def _ep_item(scope_id: str, j: int):
     )
 
 
-def _ac_item(scope_id: str, j: int):
-    return (
-        {
-            "owner_id": scope_id,
-            "session_id": f"s_{j}",
-            "timestamp": "2026-05-19T07:04:26+00:00",
-            "parent_id": f"mc_{j}",
-            "quality_score": 0.9,
-        },
-        {
-            "TaskIntent": f"task intent {j}",
-            "Approach": f"approach {j}",
-            "KeyInsight": f"insight {j}",
-        },
-    )
-
-
 _KIND_CASES: list[_DailyLogKindCase] = [
     _DailyLogKindCase(
         name="episode",
@@ -128,15 +106,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         writer_factory=EpisodeWriter,
         table_cls=Episode,
         build_item=_ep_item,
-    ),
-    _DailyLogKindCase(
-        name="agent_case",
-        scope="agents",
-        dir_name=".cases",
-        file_prefix="agent_case",
-        writer_factory=AgentCaseWriter,
-        table_cls=AgentCase,
-        build_item=_ac_item,
     ),
 ]
 

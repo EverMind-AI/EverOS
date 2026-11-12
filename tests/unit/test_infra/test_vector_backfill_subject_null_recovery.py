@@ -58,7 +58,7 @@ class _EpisodeLikeSchema:
 class _NonSubjectSchema:
     """Non-Episode schema — filter should stay ``vector IS NULL``."""
 
-    TABLE_NAME = "agent_case"
+    TABLE_NAME = "image_memory"
 
 
 class _RecordingRepo:
@@ -241,11 +241,11 @@ def test_null_filter_widens_only_for_episode() -> None:
     ep_spec = _episode_spec()
     assert _null_filter(ep_spec) == AnyOf((IsNull("vector"), IsNull("subject_vector")))
 
-    case_spec = VectorProjection(
+    image_spec = VectorProjection(
         table=_NonSubjectSchema.TABLE_NAME,
-        text_of=lambda r: r["task_intent"],
+        text_of=lambda r: r["description"],
     )
-    assert _null_filter(case_spec) == IsNull("vector")
+    assert _null_filter(image_spec) == IsNull("vector")
 
 
 def test_extract_row_skips_legitimate_null_subject() -> None:

@@ -13,28 +13,8 @@ from __future__ import annotations
 
 from everos.memory.ports import StrategySpec
 
-from .extract_agent_case import EXTRACT_AGENT_CASE_SPEC as EXTRACT_AGENT_CASE_SPEC
-from .extract_agent_case import extract_agent_case as extract_agent_case
-from .extract_agent_skill import EXTRACT_AGENT_SKILL_SPEC as EXTRACT_AGENT_SKILL_SPEC
-from .extract_agent_skill import extract_agent_skill as extract_agent_skill
 from .extract_user_profile import EXTRACT_USER_PROFILE_SPEC as EXTRACT_USER_PROFILE_SPEC
 from .extract_user_profile import extract_user_profile as extract_user_profile
-from .finish_reflection import FINISH_REFLECTION_SPEC as FINISH_REFLECTION_SPEC
-from .finish_reflection import finish_reflection as finish_reflection
-from .reflect_episodes import REFLECT_EPISODES_SPEC as REFLECT_EPISODES_SPEC
-from .reflect_episodes import reflect_episodes as reflect_episodes
-from .trigger_profile_clustering import (
-    TRIGGER_PROFILE_CLUSTERING_SPEC as TRIGGER_PROFILE_CLUSTERING_SPEC,
-)
-from .trigger_profile_clustering import (
-    trigger_profile_clustering as trigger_profile_clustering,
-)
-from .trigger_skill_clustering import (
-    TRIGGER_SKILL_CLUSTERING_SPEC as TRIGGER_SKILL_CLUSTERING_SPEC,
-)
-from .trigger_skill_clustering import (
-    trigger_skill_clustering as trigger_skill_clustering,
-)
 from .update_group_profile import (
     UPDATE_GROUP_PROFILE_IDLE_SPEC as UPDATE_GROUP_PROFILE_IDLE_SPEC,
 )
@@ -54,14 +34,8 @@ from .update_user_scenes import UPDATE_USER_SCENES_SPEC as UPDATE_USER_SCENES_SP
 from .update_user_scenes import update_user_scenes as update_user_scenes
 
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
-    EXTRACT_AGENT_CASE_SPEC,
     EXTRACT_USER_PROFILE_SPEC,
     UPDATE_USER_SCENES_SPEC,
-    TRIGGER_SKILL_CLUSTERING_SPEC,
-    EXTRACT_AGENT_SKILL_SPEC,
-    TRIGGER_PROFILE_CLUSTERING_SPEC,
-    REFLECT_EPISODES_SPEC,
-    FINISH_REFLECTION_SPEC,
     UPDATE_MEMBER_PROFILES_SPEC,
     UPDATE_GROUP_SCENES_SPEC,
     UPDATE_GROUP_PROFILE_SPEC,
@@ -70,26 +44,14 @@ STRATEGY_SPECS: tuple[StrategySpec, ...] = (
 """Every strategy the service registers, in registration order."""
 
 __all__ = [
-    "EXTRACT_AGENT_CASE_SPEC",
-    "EXTRACT_AGENT_SKILL_SPEC",
     "EXTRACT_USER_PROFILE_SPEC",
-    "FINISH_REFLECTION_SPEC",
-    "REFLECT_EPISODES_SPEC",
     "STRATEGY_SPECS",
-    "TRIGGER_PROFILE_CLUSTERING_SPEC",
-    "TRIGGER_SKILL_CLUSTERING_SPEC",
     "UPDATE_GROUP_PROFILE_IDLE_SPEC",
     "UPDATE_GROUP_PROFILE_SPEC",
     "UPDATE_GROUP_SCENES_SPEC",
     "UPDATE_MEMBER_PROFILES_SPEC",
     "UPDATE_USER_SCENES_SPEC",
-    "extract_agent_case",
-    "extract_agent_skill",
     "extract_user_profile",
-    "finish_reflection",
-    "reflect_episodes",
-    "trigger_profile_clustering",
-    "trigger_skill_clustering",
     "update_group_profile",
     "update_group_scenes",
     "update_member_profiles",

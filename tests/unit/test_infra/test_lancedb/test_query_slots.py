@@ -14,9 +14,9 @@ from pathlib import Path
 
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.lancedb._repos.agent_case import _AgentCaseRepo
+from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.lancedb.lancedb_manager import LanceDbConnection
-from everos.infra.persistence.records import AgentCase
+from everos.infra.persistence.records import Episode
 
 _DIM = 8
 
@@ -46,23 +46,21 @@ async def test_no_more_queries_run_at_once_than_the_cap(tmp_path: Path) -> None:
 
 async def test_a_search_waits_for_a_free_slot(tmp_path: Path) -> None:
     conn = _connection(tmp_path, cap=1)
-    repo = _AgentCaseRepo(source=conn, dim=_DIM)
+    repo = _EpisodeRepo(source=conn, dim=_DIM)
     await repo.upsert(
         [
-            AgentCase(
-                id="a1_ac_0",
-                entry_id="ac_0",
-                owner_id="a1",
-                owner_type="agent",
+            Episode(
+                id="u1_ep_0",
+                entry_id="ep_0",
+                owner_id="u1",
+                owner_type="user",
                 session_id="s1",
                 timestamp=dt.datetime(2026, 11, 5, tzinfo=dt.UTC),
                 parent_id="mc_0",
-                quality_score=0.5,
-                task_intent="plan a hike",
-                task_intent_tokens="plan a hike",
-                approach="check the weather",
-                approach_tokens="check the weather",
-                md_path="agents/a1/.cases/ac.md",
+                sender_ids=["u1"],
+                episode="plan a hike",
+                episode_tokens="plan a hike",
+                md_path="users/u1/episodes/episode-2026-11-05.md",
                 content_sha256="sha0",
                 vector=[0.1] * _DIM,
             )
@@ -74,4 +72,4 @@ async def test_a_search_waits_for_a_free_slot(tmp_path: Path) -> None:
         await asyncio.sleep(0.2)
         assert not search.done()
 
-    assert [row["id"] for row in await search] == ["a1_ac_0"]
+    assert [row["id"] for row in await search] == ["u1_ep_0"]

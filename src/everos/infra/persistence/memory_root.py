@@ -2,11 +2,10 @@
 
 Single root directory holding all persisted memory:
 
-    User-visible (no dot prefix, edited by humans / agents):
-        agents/      per-agent records
+    User-visible (no dot prefix, edited by humans / agents), under
+    ``<app>/<project>/``:
         users/       per-user records
         groups/      per-group records (group.md roster log, group episodes)
-        knowledge/   global shared knowledge
 
     System-managed (dotfile prefix, hidden by default in ls / Finder):
         .index/             derived indexes (rebuildable from markdown)
@@ -36,7 +35,7 @@ from pathlib import Path
 # ── app / project directory-name convention ──────────────────────────────────
 #
 # A memory root is partitioned by ``<app>/<project>`` *before* the user-visible
-# scope dirs (``agents`` / ``users`` / ``knowledge``), so memory for different
+# scope dirs (``users`` / ``groups``), so memory for different
 # (app, project) pairs never shares a directory. The reserved id ``"default"``
 # materialises as ``default_app`` / ``default_project`` on disk (rather than a
 # bare ``default``) so a default space is visually distinct from a user-named
@@ -133,12 +132,6 @@ class MemoryRoot:
     # instance state. Both default to ``"default"`` so call sites that don't
     # yet carry scope still resolve to the default space.
 
-    def agents_dir(self, app_id: str = "default", project_id: str = "default") -> Path:
-        """``<root>/<app>/<project>/agents/`` — per-agent records."""
-        return (
-            self.root / app_dir_name(app_id) / project_dir_name(project_id) / "agents"
-        )
-
     def users_dir(self, app_id: str = "default", project_id: str = "default") -> Path:
         """``<root>/<app>/<project>/users/`` — per-user records."""
         return self.root / app_dir_name(app_id) / project_dir_name(project_id) / "users"
@@ -146,24 +139,12 @@ class MemoryRoot:
     def groups_dir(self, app_id: str = "default", project_id: str = "default") -> Path:
         """``<root>/<app>/<project>/groups/`` -- per-group records.
 
-        A group is a third owner type next to users and agents
-        (docs/group-memory.md, D1): ``groups/<group_id>/group.md`` holds its
-        meta and roster log, and its episodes and picture memories sit under it
-        exactly as a user's do.
+        A group is the owner type next to users (docs/group-memory.md, D1):
+        ``groups/<group_id>/group.md`` holds its meta and roster log, and its
+        episodes and picture memories sit under it exactly as a user's do.
         """
         return (
             self.root / app_dir_name(app_id) / project_dir_name(project_id) / "groups"
-        )
-
-    def knowledge_dir(
-        self, app_id: str = "default", project_id: str = "default"
-    ) -> Path:
-        """``<root>/<app>/<project>/knowledge/`` — shared knowledge."""
-        return (
-            self.root
-            / app_dir_name(app_id)
-            / project_dir_name(project_id)
-            / "knowledge"
         )
 
     # ── System-managed (dotfiles) ───────────────────────────────────────────
@@ -219,11 +200,10 @@ class MemoryRoot:
         here. The engine watches this file and hot-reloads changes within ~2 s.
         No server restart needed.
 
-        Example — enable Reflection with a custom cron::
+        Example — switch the user scenes strategy off::
 
-            [strategies.reflect_episodes]
-            enabled = true
-            cron = "0 3 * * *"
+            [strategies.update_user_scenes]
+            enabled = false
         """
         return self.root / "ome.toml"
 
@@ -249,7 +229,7 @@ class MemoryRoot:
     def ensure(self) -> None:
         """Create the memory-root and the runtime-required dotfile dirs.
 
-        User-visible directories (``agents/`` / ``users/`` / ``knowledge/``)
+        User-visible directories (``users/`` / ``groups/``)
         are *not* pre-created — they appear on first write of their records.
         Only directories the runtime infrastructure requires are made:
 

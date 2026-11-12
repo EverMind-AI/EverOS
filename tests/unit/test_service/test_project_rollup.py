@@ -11,9 +11,7 @@ group. What these pin:
   ``GET /projects/{id}/profile`` is the union of the visible current
   group-profile items of those groups, each tagged with its group, oldest
   first, duplicates across groups kept;
-- an asker in none of the project's groups is refused (403);
-- the project's knowledge base is read by project members only once the
-  project has groups; a project without groups keeps today's behaviour.
+- an asker in none of the project's groups is refused (403).
 """
 
 from __future__ import annotations
@@ -26,14 +24,11 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.errors import ForbiddenError, InvalidInputError
 from everos.entrypoints.api.app import create_app
-from everos.memory.access import AccessPolicy
 from everos.memory.models import Group
 from everos.memory.ports import Scope
 from everos.service import SearchRequest
 from tests.fakes import make_application
-from tests.fakes.application import make_knowledge_service
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
 
 T0 = 1_772_323_200_000
@@ -41,13 +36,6 @@ T0 = 1_772_323_200_000
 
 def _refuse(*_args: Any, **_kwargs: Any) -> str:
     raise AssertionError("no model call expected")
-
-
-class _Counts:
-    """The one catalog read ``list_categories`` makes."""
-
-    async def count_by_category(self, app_id: str, project_id: str) -> dict[str, int]:
-        return {}
 
 
 @pytest.fixture
@@ -151,21 +139,3 @@ async def test_the_project_routes(world: GroupWorld) -> None:
     assert profile.status_code == 200
     assert "ops marker" not in profile.text and "archive" not in profile.text
     assert stranger.status_code == 403
-
-
-async def test_knowledge_reads_need_project_membership_once_it_has_groups(
-    world: GroupWorld,
-) -> None:
-    access = AccessPolicy(world.stores.groups)
-    knowledge = make_knowledge_service(
-        root=world.root, documents=_Counts(), access=access
-    )
-
-    assert await knowledge.list_categories(APP, PROJECT, asker_id="u_chen") is not None
-    with pytest.raises(InvalidInputError):
-        await knowledge.list_categories(APP, PROJECT)
-    with pytest.raises(ForbiddenError):
-        await knowledge.list_categories(APP, PROJECT, asker_id="u_amy")
-    # u_chen left "archive" but is in "design": still a project member.
-    # A project without groups reads as before, with or without an asker.
-    assert await knowledge.list_categories(APP, "no_groups_here") is not None

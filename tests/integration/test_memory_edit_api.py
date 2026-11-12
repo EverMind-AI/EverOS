@@ -13,7 +13,8 @@ and their marks, the memcell table, the index table -- and the user-facing
   the marks;
 - ``/memory/delete`` and ``/delete_by_ids`` forget: the entries stay in
   markdown, marked, the memcells stay, the rows leave the index and ``/get``,
-  and the answer carries the forgets' ids; an agent's memory is 422.
+  and the answer carries the forgets' ids; an ``agent_id`` is 422: 2.0 has
+  no agent memory.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from everos.infra.persistence.markdown import MarkdownEpisodeStore, MarkdownRead
 from everos.infra.persistence.sqlite import SqliteMemcellStore
 from everos.memory.models import Episode, MemcellRecord
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, SessionKey
-from everos.service import build_application
+from everos.service import NO_AGENT_MEMORY, build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
 
@@ -244,7 +245,7 @@ async def test_a_user_delete_forgets_the_owner_only(
 async def test_an_agent_delete_is_refused(client: AsyncClient) -> None:
     resp = await client.post("/api/v2/memory/delete", json={"agent_id": "bot"})
     assert resp.status_code == 422
-    assert "no hard delete" in resp.json()["error"]["message"]
+    assert NO_AGENT_MEMORY in resp.json()["error"]["message"]
 
 
 @pytest.mark.parametrize("user_id", ["a∕b", "a%2Fb", "..", "a/b"])

@@ -22,7 +22,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.records import AgentCase, AgentSkill, Episode, UserProfile
+from everos.infra.persistence.records import Episode, UserProfile
 from everos.service import build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
@@ -61,57 +61,6 @@ def _episode(
         episode=f"body of {entry}",
         episode_tokens=f"body of {entry}",
         md_path=f"users/{owner}/episodes/{entry}.md",
-        content_sha256="abc",
-        vector=[0.0] * 1024,
-    )
-
-
-def _agent_case(
-    entry: str,
-    *,
-    owner: str = "a1",
-    session: str = "sess_x",
-    day: int = 1,
-) -> AgentCase:
-    return AgentCase(
-        id=f"{owner}_{entry}",
-        entry_id=entry,
-        owner_id=owner,
-        owner_type="agent",
-        session_id=session,
-        timestamp=_ts(day),
-        parent_type="memcell",
-        parent_id="mc_99",
-        quality_score=0.8,
-        task_intent=f"intent {entry}",
-        task_intent_tokens=f"intent {entry}",
-        approach=f"approach {entry}",
-        approach_tokens=f"approach {entry}",
-        key_insight=None,
-        md_path=f"agents/{owner}/cases/{entry}.md",
-        content_sha256="abc",
-        vector=[0.0] * 1024,
-    )
-
-
-def _agent_skill(
-    name: str,
-    *,
-    owner: str = "a1",
-) -> AgentSkill:
-    return AgentSkill(
-        id=f"{owner}_{name}",
-        owner_id=owner,
-        owner_type="agent",
-        name=name,
-        description=f"desc {name}",
-        description_tokens=f"desc {name}",
-        content=f"content {name}",
-        content_tokens=f"content {name}",
-        confidence=0.9,
-        maturity_score=0.7,
-        source_case_ids=[f"{owner}_ac_1"],
-        md_path=f"agents/{owner}/skills/{name}/SKILL.md",
         content_sha256="abc",
         vector=[0.0] * 1024,
     )
@@ -174,8 +123,6 @@ async def test_get_episodes_returns_page_and_total(
     assert data["episodes"][1]["id"] == "u1_ep_004"
     # The non-requested kinds are empty arrays (envelope invariant).
     assert data["profiles"] == []
-    assert data["agent_cases"] == []
-    assert data["agent_skills"] == []
 
 
 async def test_get_episodes_filtered_by_session_id(
@@ -344,108 +291,6 @@ async def test_get_episodes_sort_order_asc(
     assert resp.status_code == 200
     ids = [ep["id"] for ep in resp.json()["data"]["episodes"]]
     assert ids == ["u1_ep_001", "u1_ep_002", "u1_ep_003"]
-
-
-# ── Agent-side kinds ────────────────────────────────────────────────────
-
-
-async def test_get_agent_cases_happy_path(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """``agent_case`` listing returns shaped items, populates only that array."""
-    await storage_view.repos.agent_case.upsert(
-        [_agent_case(f"ac_{i:03d}", day=i) for i in range(1, 4)],
-    )
-    resp = await client.post(
-        "/api/v1/memory/get",
-        json={
-            "agent_id": "a1",
-            "memory_type": "agent_case",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["total_count"] == 3
-    assert data["count"] == 3
-    assert [c["id"] for c in data["agent_cases"]] == [
-        "a1_ac_003",
-        "a1_ac_002",
-        "a1_ac_001",
-    ]
-    # Cross-kind envelope stays empty.
-    assert data["episodes"] == []
-    assert data["agent_skills"] == []
-    # AgentCase item shape — score absent (vs SearchAgentCaseItem),
-    # quality_score round-trips.
-    first = data["agent_cases"][0]
-    assert "score" not in first
-    assert first["quality_score"] == 0.8
-    assert first["agent_id"] == "a1"
-
-
-async def test_get_agent_cases_filtered_by_session(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """Filter narrows ``agent_case`` rows to the session."""
-    await storage_view.repos.agent_case.upsert(
-        [
-            _agent_case("ac_001", session="sess_x"),
-            _agent_case("ac_002", session="sess_x"),
-            _agent_case("ac_003", session="sess_y"),
-        ]
-    )
-    resp = await client.post(
-        "/api/v1/memory/get",
-        json={
-            "agent_id": "a1",
-            "memory_type": "agent_case",
-            "filters": {"session_id": "sess_x"},
-        },
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["data"]["total_count"] == 2
-    ids = {c["id"] for c in body["data"]["agent_cases"]}
-    assert ids == {"a1_ac_001", "a1_ac_002"}
-
-
-async def test_get_agent_skills_happy_path(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """``agent_skill`` listing — sort silently uses ``updated_at``."""
-    await storage_view.repos.agent_skill.upsert(
-        [_agent_skill(name) for name in ("planner", "summariser")],
-    )
-    resp = await client.post(
-        "/api/v1/memory/get",
-        json={
-            "agent_id": "a1",
-            "memory_type": "agent_skill",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["total_count"] == 2
-    names = {s["name"] for s in data["agent_skills"]}
-    assert names == {"planner", "summariser"}
-
-
-async def test_get_agent_skills_sort_by_timestamp_silently_downgraded(
-    client: AsyncClient, storage_view: StorageView
-) -> None:
-    """Explicit ``sort_by=timestamp`` does not 500 — manager rewrites to
-    ``updated_at`` (the only temporal column on ``agent_skill``)."""
-    await storage_view.repos.agent_skill.upsert([_agent_skill("planner")])
-    resp = await client.post(
-        "/api/v1/memory/get",
-        json={
-            "agent_id": "a1",
-            "memory_type": "agent_skill",
-            "sort_by": "timestamp",
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["data"]["total_count"] == 1
 
 
 # ── Filter coverage end-to-end ──────────────────────────────────────────
@@ -824,40 +669,39 @@ async def test_get_concurrent_owners_no_cross_contamination(
 async def test_get_concurrent_different_memory_types(
     client: AsyncClient, storage_view: StorageView
 ) -> None:
-    """Concurrent /get on different ``memory_type`` (episode + agent_case +
-    agent_skill) returns each kind in its own envelope slot, with no
-    cross-array bleed."""
+    """Concurrent /get on different ``memory_type`` (episode + profile)
+    returns each kind in its own envelope slot, with no cross-array bleed."""
     await storage_view.repos.episode.upsert([_episode("ep_001", owner="u1")])
-    await storage_view.repos.agent_case.upsert([_agent_case("ac_001", owner="a1")])
-    await storage_view.repos.agent_skill.upsert([_agent_skill("planner", owner="a1")])
+    await storage_view.repos.user_profile.upsert(
+        [
+            UserProfile(
+                id="u1",
+                owner_id="u1",
+                owner_type="user",
+                app_id="default",
+                project_id="default",
+                summary="u1 loves climbing",
+                explicit_info_json="[]",
+                implicit_traits_json="[]",
+                profile_timestamp_ms=1780304400000,
+                md_path="users/u1/user.md",
+                content_sha256="abc",
+            )
+        ]
+    )
 
     async def query(payload: dict[str, object]) -> dict[str, object]:
         resp = await client.post("/api/v1/memory/get", json=payload)
         assert resp.status_code == 200, resp.text
         return resp.json()
 
-    ep_body, case_body, skill_body = await asyncio.gather(
+    ep_body, profile_body = await asyncio.gather(
         query({"user_id": "u1", "memory_type": "episode"}),
-        query(
-            {
-                "agent_id": "a1",
-                "memory_type": "agent_case",
-            }
-        ),
-        query(
-            {
-                "agent_id": "a1",
-                "memory_type": "agent_skill",
-            }
-        ),
+        query({"user_id": "u1", "memory_type": "profile"}),
     )
     # Episode envelope: only ``episodes`` populated.
     assert len(ep_body["data"]["episodes"]) == 1  # type: ignore[index]
-    assert ep_body["data"]["agent_cases"] == []  # type: ignore[index]
-    assert ep_body["data"]["agent_skills"] == []  # type: ignore[index]
-    # Case envelope: only ``agent_cases`` populated.
-    assert len(case_body["data"]["agent_cases"]) == 1  # type: ignore[index]
-    assert case_body["data"]["episodes"] == []  # type: ignore[index]
-    # Skill envelope: only ``agent_skills`` populated.
-    assert len(skill_body["data"]["agent_skills"]) == 1  # type: ignore[index]
-    assert skill_body["data"]["episodes"] == []  # type: ignore[index]
+    assert ep_body["data"]["profiles"] == []  # type: ignore[index]
+    # Profile envelope: only ``profiles`` populated.
+    assert len(profile_body["data"]["profiles"]) == 1  # type: ignore[index]
+    assert profile_body["data"]["episodes"] == []  # type: ignore[index]

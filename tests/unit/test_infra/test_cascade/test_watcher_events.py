@@ -424,7 +424,5 @@ async def test_rename_within_root_moves_the_row(
     await _wait_row(storage, rel_a)
     os.rename(a, b)
     assert (await _wait_row(storage, rel_b)).change_type in {"added", "modified"}
-    await CascadeScanner(runtime, storage.sqlite.md_change_state).scan_once(
-        kinds={"episode"}
-    )
+    await CascadeScanner(runtime, storage.sqlite.md_change_state).scan_once()
     await _wait_row(storage, rel_a, lambda r: r.change_type == "deleted", deadline=5)

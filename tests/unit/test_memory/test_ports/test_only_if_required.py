@@ -14,27 +14,27 @@ from typing import Any
 import pytest
 
 from everos.infra.persistence.markdown import (
-    MarkdownAgentCaseStore,
     MarkdownEpisodeStore,
+    MarkdownImageMemoryStore,
 )
 from everos.memory.ports import (
-    AgentCaseStore,
     EpisodeStore,
+    ImageMemoryStore,
 )
 from tests.fakes.stores import (
-    InMemoryAgentCaseStore,
     InMemoryEpisodeStore,
+    InMemoryImageMemoryStore,
 )
 
 _WRITES: list[tuple[type, str]] = [
     (EpisodeStore, "append"),
     (EpisodeStore, "append_many"),
     (EpisodeStore, "deprecate"),
-    (AgentCaseStore, "append"),
+    (ImageMemoryStore, "append"),
 ]
 _ADAPTERS = {
     EpisodeStore: (MarkdownEpisodeStore, InMemoryEpisodeStore),
-    AgentCaseStore: (MarkdownAgentCaseStore, InMemoryAgentCaseStore),
+    ImageMemoryStore: (MarkdownImageMemoryStore, InMemoryImageMemoryStore),
 }
 
 

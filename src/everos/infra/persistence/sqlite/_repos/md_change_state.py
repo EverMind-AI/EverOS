@@ -229,12 +229,7 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
             row = await s.get(MdChangeState, md_path)
             return row
 
-    async def claim_pending_batch(
-        self,
-        limit: int = 100,
-        *,
-        kinds: set[str] | None = None,
-    ) -> list[MdChangeState]:
+    async def claim_pending_batch(self, limit: int = 100) -> list[MdChangeState]:
         """Claim up to ``limit`` pending rows in LSN order.
 
         Returns the claimed rows (now ``status='processing'``); empty
@@ -244,21 +239,8 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
 
         Args:
             limit: Maximum rows to claim in one batch.
-            kinds: Optional restriction on which ``kind`` values are
-                eligible. ``None`` (the default) claims across every
-                registered kind — the shape the background worker and
-                the CLI ``cascade sync`` path have always used. Passing
-                a set restricts the SELECT + UPDATE to ``kind IN (...)``
-                via parameter binding (no string interpolation), so a
-                Phase-3 sync scoped to ``{"agent_skill"}`` cannot touch
-                unrelated kinds' queue state. Empty set is treated the
-                same as ``None`` — meaning "no kind filter" would be
-                surprising, but returning an empty result is what the
-                caller almost certainly meant, so we short-circuit.
         """
         if limit <= 0:
-            return []
-        if kinds is not None and not kinds:
             return []
         now = get_utc_now()
         async with session_scope(self._factory) as s:
@@ -268,8 +250,6 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                 .order_by(MdChangeState.lsn)
                 .limit(limit)
             )
-            if kinds is not None:
-                pick_stmt = pick_stmt.where(MdChangeState.kind.in_(kinds))
             picks = (await s.execute(pick_stmt)).scalars().all()
             if not picks:
                 return []

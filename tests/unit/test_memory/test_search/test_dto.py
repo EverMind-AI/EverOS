@@ -6,10 +6,13 @@ scope and the removed methods' options are refused at validation.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from pydantic import ValidationError
 
 from everos.memory.search import (
+    NO_AGENT_MEMORY,
     SearchData,
     SearchMethod,
     SearchRequest,
@@ -51,11 +54,15 @@ def test_the_multiround_method_is_accepted_by_name() -> None:
 
 @pytest.mark.parametrize(
     "fields",
-    [{"agent_id": "agent_x"}, {"agent_id": "agent_x", "context_group_id": "g"}],
+    [
+        {"agent_id": "agent_x"},
+        {"agent_id": "agent_x", "context_group_id": "g"},
+        {"user_id": "alice", "context_group_id": "g"},
+    ],
 )
 def test_an_agent_scope_is_refused(fields: dict) -> None:
-    """Multi-round retrieval covers user and group memory only."""
-    with pytest.raises(ValidationError, match="agent memory is not searchable"):
+    """EverOS 2.0 has no agent memory: a search naming an agent is refused."""
+    with pytest.raises(ValidationError, match=re.escape(NO_AGENT_MEMORY)):
         SearchRequest(query="hello", **fields)
 
 

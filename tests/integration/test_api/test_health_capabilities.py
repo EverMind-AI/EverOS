@@ -14,7 +14,6 @@ class TestComputeDisabledFeatures:
         """When all capabilities are available, no features are disabled."""
         caps = {
             "embed": True,
-            "rerank": True,
             "multimodal_llm": True,
             "parser": True,
         }
@@ -25,47 +24,20 @@ class TestComputeDisabledFeatures:
         self,
     ) -> None:
         """When embedding is unavailable, memory search recalls by keyword
-        only (``vector_recall`` off) and reflection and skill extraction are
-        disabled. Memory search itself stays on."""
+        only (``vector_recall`` off). Memory search itself stays on."""
         caps = {
             "embed": False,
-            "rerank": True,
             "multimodal_llm": True,
             "parser": True,
         }
         disabled = compute_disabled_features(caps)
-        expected = {"vector_recall", "reflection", "skill_extraction", "knowledge"}
-        assert set(disabled) == expected
+        assert set(disabled) == {"vector_recall"}
         assert "memory_search" not in disabled
-
-    def test_rerank_unavailable_leaves_memory_search_on(self) -> None:
-        """Multi-round retrieval has no cross-encoder stage: without rerank
-        only knowledge is disabled."""
-        caps = {
-            "embed": True,
-            "rerank": False,
-            "multimodal_llm": True,
-            "parser": True,
-        }
-        disabled = compute_disabled_features(caps)
-        assert disabled == ["knowledge"]
-
-    def test_both_embed_and_rerank_missing_disables_knowledge(self) -> None:
-        """When both embed and rerank are missing, knowledge is disabled."""
-        caps = {
-            "embed": False,
-            "rerank": False,
-            "multimodal_llm": True,
-            "parser": True,
-        }
-        disabled = compute_disabled_features(caps)
-        assert "knowledge" in disabled
 
     def test_multimodal_and_parser_missing_disables_multimodal_upload(self) -> None:
         """When multimodal_llm is unavailable, multimodal_upload is disabled."""
         caps = {
             "embed": True,
-            "rerank": True,
             "multimodal_llm": False,
             "parser": True,
         }
@@ -76,7 +48,6 @@ class TestComputeDisabledFeatures:
         """When parser is unavailable, multimodal_upload is disabled."""
         caps = {
             "embed": True,
-            "rerank": True,
             "multimodal_llm": True,
             "parser": False,
         }
@@ -84,20 +55,16 @@ class TestComputeDisabledFeatures:
         assert "multimodal_upload" in disabled
 
     def test_tier1_only_llm(self) -> None:
-        """Tier 1 (LLM only): many features are disabled."""
+        """Tier 1 (LLM only): every optional feature is disabled."""
         caps = {
             "embed": False,
-            "rerank": False,
             "multimodal_llm": False,
             "parser": False,
         }
         disabled = compute_disabled_features(caps)
-        # Tier 1 disables: vector recall/reflection/skill/knowledge/multimodal
+        # Tier 1 disables: vector recall and the multimodal upload
         expected = {
             "vector_recall",
-            "reflection",
-            "skill_extraction",
-            "knowledge",
             "multimodal_upload",
         }
         assert set(disabled) == expected
@@ -108,7 +75,6 @@ class TestComputeDisabledFeatures:
             param(
                 {
                     "embed": True,
-                    "rerank": True,
                     "multimodal_llm": True,
                     "parser": True,
                 },
@@ -118,22 +84,11 @@ class TestComputeDisabledFeatures:
             param(
                 {
                     "embed": False,
-                    "rerank": True,
                     "multimodal_llm": True,
                     "parser": True,
                 },
-                ["vector_recall", "reflection", "skill_extraction", "knowledge"],
+                ["vector_recall"],
                 id="no_embed",
-            ),
-            param(
-                {
-                    "embed": True,
-                    "rerank": False,
-                    "multimodal_llm": True,
-                    "parser": True,
-                },
-                ["knowledge"],
-                id="no_rerank",
             ),
         ],
     )
@@ -149,7 +104,7 @@ class TestComputeDisabledFeatures:
 
 @mark.asyncio
 async def test_health_endpoint_includes_capabilities() -> None:
-    """GET /health returns the four provider flags; there is no llm flag."""
+    """GET /health returns the provider flags; there is no llm flag."""
     from httpx import ASGITransport, AsyncClient
 
     from everos.config import load_settings
@@ -176,7 +131,6 @@ async def test_health_endpoint_includes_capabilities() -> None:
     assert isinstance(caps, dict)
     assert "llm" not in caps
     assert "embed" in caps
-    assert "rerank" in caps
     assert "multimodal_llm" in caps
     assert "parser" in caps
 
@@ -194,18 +148,14 @@ async def test_health_endpoint_includes_capabilities() -> None:
 
 @mark.asyncio
 @mark.parametrize(
-    ("embed", "rerank", "multimodal_llm", "parser", "expected_disabled"),
+    ("embed", "multimodal_llm", "parser", "expected_disabled"),
     [
         param(
             False,
             False,
             False,
-            False,
             {
                 "vector_recall",
-                "reflection",
-                "skill_extraction",
-                "knowledge",
                 "multimodal_upload",
             },
             id="tier1_llm_only",
@@ -214,20 +164,10 @@ async def test_health_endpoint_includes_capabilities() -> None:
             True,
             False,
             False,
-            False,
-            {"knowledge", "multimodal_upload"},
+            {"multimodal_upload"},
             id="tier2_embed_only",
         ),
         param(
-            True,
-            True,
-            False,
-            False,
-            {"multimodal_upload"},
-            id="tier3_embed_rerank_only",
-        ),
-        param(
-            True,
             True,
             True,
             True,
@@ -239,7 +179,6 @@ async def test_health_endpoint_includes_capabilities() -> None:
 async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     monkeypatch,
     embed: bool,
-    rerank: bool,
     multimodal_llm: bool,
     parser: bool,
     expected_disabled: set[str],
@@ -255,7 +194,7 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     per-tier hard-coded expected set, driven by parametrisation over
     every soft-dependency capability toggle — so a regression in
     :func:`compute_disabled_features` (e.g. dropping the
-    ``knowledge`` disable, mis-spelling a feature name) breaks the
+    ``vector_recall`` disable, mis-spelling a feature name) breaks the
     test rather than staying invisible.
     """
     from httpx import ASGITransport, AsyncClient
@@ -267,7 +206,6 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     application = make_application(
         capabilities=Capabilities(
             embedding=embed,
-            rerank=rerank,
             multimodal_llm=multimodal_llm,
             parser=parser,
             index_backend="lancedb",

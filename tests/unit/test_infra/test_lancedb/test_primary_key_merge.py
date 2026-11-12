@@ -14,7 +14,6 @@ import pyarrow as pa
 import pytest
 
 from everos.config import LanceDBSettings
-from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import primary_key
 from everos.infra.persistence.lancedb import (
@@ -22,7 +21,7 @@ from everos.infra.persistence.lancedb import (
     LanceRepoBase,
     open_lancedb_connection,
 )
-from everos.infra.persistence.records import IndexRecord, KnowledgeTopic
+from everos.infra.persistence.records import IndexRecord
 from tests.fakes import TEST_DIM, arrow_schema
 
 
@@ -91,40 +90,3 @@ async def test_upsert_rejects_undeclared_primary_key(tmp_path: Path) -> None:
     repo = await _repo(tmp_path, _Undeclared, _UndeclaredRepo)
     with pytest.raises(ValueError, match="_Undeclared has no PRIMARY_KEY"):
         await repo.upsert([_Undeclared(id="x")])
-
-
-class _KnowledgeTopicRepo(
-    LanceIndexContract[KnowledgeTopic], LanceRepoBase[KnowledgeTopic]
-):
-    schema = KnowledgeTopic
-
-
-def _topic(project_id: str) -> KnowledgeTopic:
-    return KnowledgeTopic(
-        id="d_abc_0",
-        doc_id="d_abc",
-        category_id="cat",
-        app_id="default",
-        project_id=project_id,
-        topic_name=f"topic in {project_id}",
-        topic_path="root/topic",
-        depth=1,
-        summary=f"summary {project_id}",
-        summary_tokens=f"summary {project_id}",
-        content_tokens=f"content {project_id}",
-        md_path=f"default_app/{project_id}/knowledge/cat/d_abc/0.md",
-        content_sha256=project_id,
-        created_at=get_utc_now(),
-        updated_at=get_utc_now(),
-    )
-
-
-async def test_knowledge_topic_same_node_id_two_projects(tmp_path: Path) -> None:
-    """A25: the declared key is a superset of node_id, so behaviour is unchanged
-    when node_ids differ — and two spaces could even share one."""
-    repo = await _repo(tmp_path, KnowledgeTopic, _KnowledgeTopicRepo)
-    await repo.upsert([_topic("alpha")])
-    await repo.upsert([_topic("beta")])
-    assert await repo.count() == 2
-    beta = await repo.find_one_where(primary_key("default", "beta", "d_abc_0"))
-    assert beta is not None and beta.summary == "summary beta"

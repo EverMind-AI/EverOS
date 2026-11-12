@@ -23,17 +23,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.config import LanceDBSettings
-from everos.infra.cascade._projections.agent_case import AgentCaseHandler
 from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
 from everos.infra.persistence.lancedb._repos.episode import _EpisodeRepo
 from everos.infra.persistence.markdown import EpisodeWriter
-from everos.infra.persistence.records import AgentCase, Episode
+from everos.infra.persistence.records import Episode
 from tests.fakes import TEST_DIM, arrow_schema, handler_deps
 
 _REL = "default_app/default_project/users/u1/episodes/episode-2026-05-14.md"
@@ -197,13 +197,19 @@ async def test_a_mark_survives_a_reembedding_upsert(
     assert await index.marks(ids) == {ids[0]: "ep_new", ids[1]: None}
 
 
+class _RecordWithoutTheColumn(BaseModel):
+    """An index record with no ``deprecated_by`` column."""
+
+    entry_id: str
+
+
 async def test_a_kind_without_the_column_touches_nothing(
     memory_root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
 
     class _Repo:
-        schema = AgentCase
+        schema = _RecordWithoutTheColumn
 
         async def find_by_owner_entries(self, *args: Any, **kwargs: Any) -> list[Any]:
             calls.append("read")
@@ -212,15 +218,15 @@ async def test_a_kind_without_the_column_touches_nothing(
         async def update(self, *args: Any, **kwargs: Any) -> None:
             calls.append("write")
 
-    monkeypatch.setattr(AgentCaseHandler, "index_repo", _Repo())
+    monkeypatch.setattr(EpisodeHandler, "index_repo", _Repo())
     deps = handler_deps(memory_root=memory_root, tokenizer=_Tokens(), embedding=None)
 
-    await AgentCaseHandler(deps)._propagate_deprecations(
-        {"deprecated_entries": {"ac_1": "ac_2"}},
-        "a1",
+    await EpisodeHandler(deps)._propagate_deprecations(
+        {"deprecated_entries": {"ep_1": "ep_2"}},
+        "u1",
         "default",
         "default",
-        entry_ids={"ac_1", "ac_3"},
+        entry_ids={"ep_1", "ep_3"},
     )
 
     assert calls == []

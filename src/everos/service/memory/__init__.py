@@ -171,7 +171,6 @@ class MemoryService:
         conversation_pipeline: The conversation track, run on every cell: one
             episode per cell in its session's space; a forget inside a group
             re-extracts with it.
-        agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
         search_manager: Answers :meth:`search`.
         get_manager: Answers :meth:`get`.
@@ -189,7 +188,6 @@ class MemoryService:
         multimodal_llm: LLMClient | None,
         stores: Stores,
         conversation_pipeline: Pipeline,
-        agent_pipeline: Pipeline,
         bus: EventBus,
         search_manager: SearchManager,
         get_manager: GetManager,
@@ -261,7 +259,6 @@ class MemoryService:
             boundary=boundary,
             multimodal_llm=multimodal_llm,
             conversation_pipeline=conversation_pipeline,
-            agent_pipeline=agent_pipeline,
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
@@ -587,7 +584,6 @@ class MemoryService:
         app_id: str,
         project_id: str,
         user_id: str | None,
-        agent_id: str | None,
         session_id: str | None,
     ) -> DeleteResult:
         """``/delete``, which 2.0 answers with a forget (no hard delete).
@@ -600,8 +596,7 @@ class MemoryService:
         Raises:
             InvalidInputError: The session belongs to a group (inside a group
                 a delete is an owner's or admin's propagated forget,
-                :meth:`delete_in_group`), or an agent's memory, which has no
-                forget yet.
+                :meth:`delete_in_group`).
             SessionBusyError: The conversation stays busy.
         """
         return await self._run_to_completion(
@@ -609,7 +604,6 @@ class MemoryService:
                 app_id=app_id,
                 project_id=project_id,
                 user_id=user_id,
-                agent_id=agent_id,
                 session_id=session_id,
             ),
             label="memory_delete",
@@ -621,7 +615,6 @@ class MemoryService:
         app_id: str,
         project_id: str,
         user_id: str | None,
-        agent_id: str | None,
         session_id: str | None,
     ) -> DeleteResult:
         """Refuse a session of a group, then forget; one supervised step.
@@ -644,7 +637,6 @@ class MemoryService:
             app_id=app_id,
             project_id=project_id,
             user_id=user_id,
-            agent_id=agent_id,
             session_id=session_id,
         )
 

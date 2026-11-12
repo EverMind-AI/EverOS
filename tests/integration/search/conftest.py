@@ -197,7 +197,7 @@ async def search_client(
     """Per-test ``AsyncClient`` reading from the session corpus.
 
     Singletons are reset before the lifespan starts so the search
-    manager builds a fresh embedding / rerank / LLM client per test —
+    manager builds a fresh embedding / LLM client per test —
     we don't want cross-test client state to mask a regression.
     """
     monkeypatch.setenv("EVEROS_ROOT", str(_ingested_memory_root))

@@ -17,7 +17,7 @@ through the facade the routes call. What these pin:
   sources (scenes, picture files, profile items); an entry two forgets name
   stays forgotten until both are undone.
 - **Delete is a forget.** ``/memory/delete`` and ``/delete_by_ids`` answer with
-  forgets (2.0 has no hard delete); an agent's memory is refused.
+  forgets (2.0 has no hard delete).
 """
 
 from __future__ import annotations
@@ -596,7 +596,7 @@ async def test_delete_forgets_and_answers_its_forget_ids(tmp_path: Path) -> None
         a = await _episode(world, "Amy's diary entry one.", at=T0, session="sA")
         await world.project()
         deleted = await world.memory.delete(
-            app_id=APP, project_id=PROJECT, user_id=None, agent_id=None, session_id="sA"
+            app_id=APP, project_id=PROJECT, user_id=None, session_id="sA"
         )
         assert deleted.filters == ["session_id"] and deleted.count == 1
         (forget_id,) = deleted.forget_ids
@@ -608,15 +608,6 @@ async def test_delete_forgets_and_answers_its_forget_ids(tmp_path: Path) -> None
             app_id=APP, project_id=PROJECT, user_id="amy", forget_id=forget_id
         )
         assert a in await _search_ids(world, "diary entry")
-
-        with pytest.raises(InvalidInputError):
-            await world.memory.delete(
-                app_id=APP,
-                project_id=PROJECT,
-                user_id=None,
-                agent_id="bot",
-                session_id=None,
-            )
 
         by_ids = await world.memory.delete_by_ids(
             app_id=APP,
@@ -636,7 +627,7 @@ async def test_a_conversation_sent_again_after_its_delete_is_searchable(
     async with GroupWorld.open(tmp_path) as world:
         old = await _episode(world, "Amy's trip to Kyoto.", at=T0, session="sK")
         await world.memory.delete(
-            app_id=APP, project_id=PROJECT, user_id=None, agent_id=None, session_id="sK"
+            app_id=APP, project_id=PROJECT, user_id=None, session_id="sK"
         )
         again = await _episode(world, "Amy's trip to Kyoto.", at=T0, session="sK")
         ids = await _search_ids(world, "trip Kyoto")

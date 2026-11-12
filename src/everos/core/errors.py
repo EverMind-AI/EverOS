@@ -32,7 +32,6 @@ class ErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"
     CONFLICT = "CONFLICT"
     INVALID_INPUT = "INVALID_INPUT"
-    EXTRACTION_EMPTY = "EXTRACTION_EMPTY"
     BAD_REQUEST = "BAD_REQUEST"
     UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
     EXTERNAL_SERVICE_UNAVAILABLE = "EXTERNAL_SERVICE_UNAVAILABLE"
@@ -67,14 +66,6 @@ class DomainError(AppError):
 
 class NotFoundError(DomainError):
     """A requested resource does not exist."""
-
-
-class DocumentNotFoundError(NotFoundError):
-    """A document with the given identifier was not found."""
-
-
-class TopicNotFoundError(NotFoundError):
-    """A knowledge topic with the given identifier was not found."""
 
 
 class ForbiddenError(DomainError):
@@ -122,16 +113,8 @@ class RosterConflictError(ConflictError):
     """
 
 
-class DuplicateDocumentError(ConflictError):
-    """A document with the same identifier already exists."""
-
-
 class InvalidInputError(DomainError):
     """Input does not meet domain rules."""
-
-
-class ExtractionEmptyError(InvalidInputError):
-    """An extraction pipeline produced no output when output was required."""
 
 
 class FilterError(InvalidInputError):
@@ -229,7 +212,7 @@ class VectorStoreError(InfrastructureError):
 
 
 class ExternalServiceError(InfrastructureError):
-    """An external service (LLM, embedding, rerank) returned an error or timed out."""
+    """An external service (LLM, embedding) returned an error or timed out."""
 
 
 class VectorStoreBusyError(ExternalServiceError):
@@ -258,10 +241,6 @@ class LLMServiceError(ExternalServiceError):
 
 class EmbeddingServiceError(ExternalServiceError):
     """The configured embedding provider returned an error or timed out."""
-
-
-class RerankServiceError(ExternalServiceError):
-    """The configured rerank provider returned an error or timed out."""
 
 
 # ---------------------------------------------------------------------------
@@ -303,8 +282,8 @@ class TokenizerAssetError(CapabilityError):
 class ConfigurationError(AppError):
     """A required configuration is missing or invalid.
 
-    Raised when a mandatory setting (e.g. embedding model, rerank provider)
-    is not configured but the code path requires it.
+    Raised when a mandatory setting (e.g. the embedding model) is not
+    configured but the code path requires it.
     """
 
 
@@ -356,7 +335,6 @@ class EmbeddingProvenanceError(ConfigurationError):
 _PROVIDER_SECTIONS: dict[str, str] = {
     "llm": "llm",
     "embedding": "embedding",
-    "rerank": "rerank",
     "multimodal_llm": "multimodal",
 }
 
@@ -369,9 +347,9 @@ class ProviderNotConfiguredError(ConfigurationError):
 
     Args:
         provider: Which provider is missing. One of ``"llm"``,
-            ``"embedding"``, ``"rerank"``, ``"multimodal_llm"``.
+            ``"embedding"``, ``"multimodal_llm"``.
         feature: Optional user-facing feature that required this
-            provider (e.g. ``"knowledge"``, ``"llm_multiround"``).
+            provider (e.g. ``"backfill"``, ``"llm_multiround"``).
         alternative_hint: Optional alternative workaround the user can
             take without configuring the missing provider.
     """
@@ -399,8 +377,7 @@ class ProviderNotConfiguredError(ConfigurationError):
 # Backward compatibility aliases
 # ---------------------------------------------------------------------------
 
-# Renamed in v0.2 — old names kept for external consumers.
-DocumentAlreadyExistsError = DuplicateDocumentError
+# Renamed in v0.2 — the old name is kept for external consumers.
 ValidationError = InvalidInputError
 
 

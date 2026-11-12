@@ -205,7 +205,7 @@ class MilvusRepoBase[T: BaseModel]:
         Milvus has no partial-column update, so the whole row is read back and
         re-upserted. Both halves must hold the same lock: with the read
         outside it, two concurrent updates to one row (backfill writing
-        ``vector`` while reflection writes ``deprecated_by``) each overwrite
+        ``vector`` while a forget writes ``deprecated_by``) each overwrite
         the other's column with the value they read before it landed.
 
         A primary-key column in ``updates`` is refused: the re-upsert would

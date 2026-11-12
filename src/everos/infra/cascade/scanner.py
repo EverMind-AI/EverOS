@@ -73,32 +73,29 @@ class CascadeScanner:
         self._task = None
         logger.info("cascade_scanner_stopped")
 
-    async def scan_once(
-        self, *, kinds: set[str] | None = None
-    ) -> list[ReconcileDecision]:
-        """One scan + reconcile pass; returns the decisions that were
-        upserted into :class:`MdChangeState`.
+    async def scan_once(self) -> list[ReconcileDecision]:
+        """One scan + reconcile pass over every kind in :data:`KIND_REGISTRY`;
+        returns the decisions that were upserted into :class:`MdChangeState`.
 
         Exposed so the CLI ``cascade sync`` command can trigger a sweep
         without owning a long-lived scanner task.
 
-        Args:
-            kinds: Restrict the walk to specific md kinds (e.g.
-                ``{"agent_skill"}``). ``None`` — the default — walks
-                every kind in :data:`KIND_REGISTRY`, matching the
-                background scanner loop's behaviour.
+        Only the ledger rows of registered kinds are reconciled. A row of a
+        kind this build no longer has (an older store's agent, knowledge,
+        fact or foresight files) names a file the walk never visits, so
+        reconcile would read it as deleted, the re-stat would find the file
+        and queue it again, and the worker would fail it -- on every pass.
+        Such a row is left as it is.
         """
         scan_inputs = await asyncio.to_thread(
-            _collect_scan_inputs, self._memory_root.root, kinds
+            _collect_scan_inputs, self._memory_root.root
         )
-        state = await _load_state_snapshot(self._ledger)
-        if kinds is not None:
-            # reconcile() emits ``deleted`` for every state row missing
-            # from the scan input — with a kind-scoped scan, the state
-            # snapshot must be scoped too, or non-``kinds`` rows would
-            # get spuriously deleted just because we didn't look at
-            # them this sweep.
-            state = {p: s for p, s in state.items() if s.kind in kinds}
+        known = {spec.name for spec in KIND_REGISTRY}
+        state = {
+            path: row
+            for path, row in (await _load_state_snapshot(self._ledger)).items()
+            if row.kind in known
+        }
         decisions = reconcile(scan_inputs, state)
         decisions = await asyncio.to_thread(
             _recheck_deletions, self._memory_root.root, decisions
@@ -132,17 +129,8 @@ class CascadeScanner:
                 continue
 
 
-def _collect_scan_inputs(root: Path, kinds: set[str] | None = None) -> list[ScanInput]:
+def _collect_scan_inputs(root: Path) -> list[ScanInput]:
     """Walk ``root`` once per registered kind, returning every match.
-
-    ``kinds`` — when non-``None`` — restricts the walk to specs whose
-    ``name`` appears in the set; other kinds' md files are neither
-    stat'd nor emitted. Used by kind-scoped sync callers (e.g. Phase-3
-    backfill) so their sweep doesn't touch queue state for unrelated
-    kinds. The paired state-snapshot filter lives in :meth:`scan_once`
-    (reconcile itself is kind-agnostic) — both sides must be scoped or
-    reconcile would emit spurious ``deleted`` decisions for rows the
-    scan simply chose not to look at.
 
     ``stat()`` failure mode discrimination is **load-bearing**: the
     reconciler treats "in state but not in scan" as a deletion signal,
@@ -170,8 +158,6 @@ def _collect_scan_inputs(root: Path, kinds: set[str] | None = None) -> list[Scan
     """
     inputs: list[ScanInput] = []
     for spec in KIND_REGISTRY:
-        if kinds is not None and spec.name not in kinds:
-            continue
         for absolute in root.glob(spec.path_glob()):
             try:
                 mtime = absolute.stat().st_mtime

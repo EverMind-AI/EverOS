@@ -6,14 +6,14 @@ same strategy
 must guard itself, deciding inside the strategy body via
 ``async with lock`` bucketed by a business key). Offline strategies whose
 body is a read →
-modify → write on shared state (cluster rows, user.md, SKILL.md)
-serialise on a business key (``owner_id`` / ``agent_id``) here.
+modify → write on shared state (cluster rows, user.md, a group's profile)
+serialise on a business key (the owner, or a person in a space) here.
 
 The locks live in :data:`everos.core.locks.LOCKS` under the kind
 ``partition:<strategy_name>``: one ``asyncio.Lock`` per
 ``(strategy_name, partition_key)`` pair, never evicted (see that module).
 The table grows with the live partition-key set, which in practice is
-bounded by the agent / user / cluster counts a single everos process owns.
+bounded by the user / group counts a single everos process owns.
 
 No acquire timeout: an OME strategy run has no upstream client
 waiting on it, so timing out a queued caller would only convert
@@ -50,16 +50,6 @@ def get_partition_lock(
     on one key acquire it in FIFO order.
     """
     return LOCKS.hold(f"partition:{strategy_name}", partition_key)
-
-
-def user_cluster_lock(
-    app_id: str, project_id: str, owner_id: str
-) -> AbstractAsyncContextManager[None]:
-    """The lock every writer of one user's clusters holds: profile clustering,
-    Reflection folding members in, and deletion taking them out."""
-    return get_partition_lock(
-        "trigger_profile_clustering", f"{app_id}:{project_id}:{owner_id}"
-    )
 
 
 def profile_lock(

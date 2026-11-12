@@ -36,20 +36,14 @@ from ._base import create_system_engine as create_system_engine
 from ._base import session_scope as session_scope
 from ._repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from ._repos import ClusterRepo as ClusterRepo
-from ._repos import DocumentListPage as DocumentListPage
-from ._repos import DocumentUpsertPayload as DocumentUpsertPayload
 from ._repos import ForgetLogRepo as ForgetLogRepo
 from ._repos import GroupRosterRepo as GroupRosterRepo
 from ._repos import ImageOriginalRepo as ImageOriginalRepo
-from ._repos import KnowledgeDocumentRepo as KnowledgeDocumentRepo
-from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
 from ._repos import MdChangeStateRepo as MdChangeStateRepo
 from ._repos import MemcellRepo as MemcellRepo
 from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
 from ._repos import MessageForgetRepo as MessageForgetRepo
 from ._repos import QueueSummary as QueueSummary
-from ._repos import ReflectionReportRepo as ReflectionReportRepo
-from ._repos import TopicUpsertPayload as TopicUpsertPayload
 from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
 from ._tables import Cluster as Cluster
 from ._tables import ClusterMember as ClusterMember
@@ -58,16 +52,12 @@ from ._tables import ForgetLog as ForgetLog
 from ._tables import GroupMember as GroupMember
 from ._tables import GroupMeta as GroupMeta
 from ._tables import ImageOriginal as ImageOriginal
-from ._tables import KnowledgeDocumentRow as KnowledgeDocumentRow
-from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
 from ._tables import MdChangeState as MdChangeState
 from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
 from ._tables import MessageForget as MessageForget
-from ._tables import ReflectionReport as ReflectionReport
 from ._tables import SessionBinding as SessionBinding
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
-from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
 from .repositories import SqliteRepos as SqliteRepos
 from .sqlite_manager import SqliteDatabase as SqliteDatabase
 from .stores import SqliteClusterStore as SqliteClusterStore
@@ -75,7 +65,6 @@ from .stores import SqliteForgetLogStore as SqliteForgetLogStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteMessageForgetStore as SqliteMessageForgetStore
-from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
 
@@ -86,8 +75,6 @@ __all__ = [
     "ClusterMember",
     "ClusterRepo",
     "ConversationStatus",
-    "DocumentListPage",
-    "DocumentUpsertPayload",
     "Field",
     "ForgetLog",
     "ForgetLogRepo",
@@ -96,10 +83,6 @@ __all__ = [
     "GroupRosterRepo",
     "ImageOriginal",
     "ImageOriginalRepo",
-    "KnowledgeDocumentRepo",
-    "KnowledgeDocumentRow",
-    "KnowledgeTopicRow",
-    "KnowledgeTopicRowRepo",
     "MdChangeState",
     "MdChangeStateRepo",
     "Memcell",
@@ -109,8 +92,6 @@ __all__ = [
     "MessageForget",
     "MessageForgetRepo",
     "QueueSummary",
-    "ReflectionReport",
-    "ReflectionReportRepo",
     "Relationship",
     "RepoBase",
     "SQLModel",
@@ -118,15 +99,12 @@ __all__ = [
     "SqliteClusterStore",
     "SqliteDatabase",
     "SqliteForgetLogStore",
-    "SqliteKnowledgeCatalog",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",
-    "SqliteReflectionReportStore",
     "SqliteRepos",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
-    "TopicUpsertPayload",
     "UnprocessedBuffer",
     "UnprocessedBufferRepo",
     "create_session_factory",

@@ -54,17 +54,16 @@ class _Tokenizer(Tokenizer):
         return [self.tokenize(t) for t in texts]
 
 
-def test_the_resolver_knows_three_owner_directories() -> None:
+def test_the_resolver_knows_two_owner_directories() -> None:
     assert resolve_owner({"user_id": "u1"}, "a/p/users/u1/user.md") == ("u1", "user")
-    assert resolve_owner({"agent_id": "b"}, "a/p/agents/b/.cases/x.md") == (
-        "b",
-        "agent",
-    )
     assert resolve_owner(
         {"group_id": "trip-team"}, "a/p/groups/trip-team/episodes/e.md"
     ) == ("trip-team", "group")
     with pytest.raises(ValueError, match="no owner scope"):
         resolve_owner({"user_id": "u1"}, "a/p/teams/u1/episodes/e.md")
+    # EverOS 2.0 has no agent memory: an older store's agent file has no owner.
+    with pytest.raises(ValueError, match="no owner scope"):
+        resolve_owner({"agent_id": "b"}, "a/p/agents/b/.cases/x.md")
 
 
 def _episode() -> Episode:
@@ -174,23 +173,3 @@ async def test_a_group_picture_memory_carries_its_poster(tmp_path: Path) -> None
     assert (row.owner_type, row.owner_id) == ("group", "trip-team")
     assert row.sender_ids == ["u_chen"]
     assert row.source_start == row.source_end == row.timestamp
-
-
-async def test_other_kinds_refuse_a_group_scope(tmp_path: Path) -> None:
-    """A kind without a group writer refuses a group scope: an agent case is
-    learned by an agent, never owned by a group."""
-    from everos.infra.persistence.markdown import MarkdownAgentCaseStore
-    from everos.memory.models import AgentCase
-
-    store = MarkdownAgentCaseStore(MemoryRoot(tmp_path))
-    case = AgentCase(
-        owner_id="trip-team",
-        task_intent="t",
-        approach="a",
-        quality_score=0.5,
-        timestamp=_END,
-        session_id="s1",
-        parent_id="e",
-    )
-    with pytest.raises(ValueError, match="no group-owned records"):
-        await store.append(_GROUP, case, only_if=NoSourceCheck())

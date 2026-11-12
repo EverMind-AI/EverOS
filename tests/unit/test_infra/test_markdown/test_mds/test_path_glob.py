@@ -8,10 +8,10 @@ from __future__ import annotations
 import pytest
 
 from everos.infra.persistence.markdown import (
-    AgentCaseDailyFrontmatter,
-    AgentSkillFrontmatter,
     EpisodeDailyFrontmatter,
     GroupProfileDailyFrontmatter,
+    ImageMemoryDailyFrontmatter,
+    UserProfileFrontmatter,
 )
 
 
@@ -19,8 +19,8 @@ from everos.infra.persistence.markdown import (
     ("schema", "expected"),
     [
         (EpisodeDailyFrontmatter, "*/*/users/*/episodes/episode-*.md"),
-        (AgentCaseDailyFrontmatter, "*/*/agents/*/.cases/agent_case-*.md"),
-        (AgentSkillFrontmatter, "*/*/agents/*/skills/skill_*/SKILL.md"),
+        (ImageMemoryDailyFrontmatter, "*/*/users/*/images/image-*.md"),
+        (UserProfileFrontmatter, "*/*/users/*/user.md"),
         (
             GroupProfileDailyFrontmatter,
             "*/*/groups/*/profile/group_profile-*.md",

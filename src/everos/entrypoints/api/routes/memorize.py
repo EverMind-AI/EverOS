@@ -90,7 +90,7 @@ async def add_memory(
     request_id: RequestIdDep,
     asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
-    """Add messages into the conversation + agent-memory pipelines.
+    """Add messages into the conversation pipeline (chat memory).
 
     With ``group_id`` the session becomes (or already is) a group session:
     its messages become group memory, never per-sender personal memory.

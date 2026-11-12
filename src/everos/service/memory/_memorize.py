@@ -6,12 +6,11 @@ Memorize, end to end::
         -> the session's space: its group, or one person's own
         -> ingest -> BoundaryDetection (buffer / merge / boundary / tail)
         -> for each cell: ConversationPipeline.run_cell
-                          (+ AgentMemoryPipeline.run_cell in agent mode)
                           -> publish that cell's events on the EventBus
-        -> merge the pipelines' statuses -> MemorizeResult
+        -> the pipeline's status -> MemorizeResult
 
-Boundary detection owns buffer / merge / boundary / tail, so the same cells
-feed both pipelines in agent mode. Publishing is this use case's job:
+Boundary detection owns buffer / merge / boundary / tail. Publishing is this
+use case's job:
 pipelines and strategies return events, and each cell's are published as
 soon as the cell is done, so a failing cell never takes an earlier cell's
 events with it.
@@ -74,7 +73,6 @@ if TYPE_CHECKING:
 
 logger = get_logger("everos.service.memory")
 
-Mode = Literal["chat", "agent"]
 TrackStatus = Literal["accumulated", "extracted", "skipped"]
 
 
@@ -91,7 +89,6 @@ class Memorizer:
             rejected rather than silently dropped).
         conversation_pipeline: The conversation track, run on every cell:
             one episode per cell, in its session's space.
-        agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
         extractions: Keeps extractions alive past a cancelled request.
         raw_file_builder: Host file hydration capability for ingestion.
@@ -109,7 +106,6 @@ class Memorizer:
         boundary: BoundaryDetection,
         multimodal_llm: LLMClient | None,
         conversation_pipeline: Pipeline,
-        agent_pipeline: Pipeline,
         bus: EventBus,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
@@ -127,7 +123,6 @@ class Memorizer:
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
         self._conversation_pipeline = conversation_pipeline
-        self._agent_pipeline = agent_pipeline
         self._bus = bus
         self._extractions = extractions
 
@@ -167,7 +162,6 @@ class Memorizer:
         (found by the concurrent-memorize property test). Extraction runs
         after the lock is released; it only reads memcells, never the buffer.
         """
-        mode = self._settings.memorize.mode
         session_id = payload["session_id"]
 
         span_name = (
@@ -182,7 +176,6 @@ class Memorizer:
             observation_type="span",
             session_id=session_id,
             metadata={
-                "mode": mode,
                 "is_final": is_final,
                 "defer_extraction": defer_extraction,
                 "request_id": resolve_request_id(),
@@ -205,12 +198,9 @@ class Memorizer:
                     own=session_id,
                     others=others,
                 )
-                elsewhere = await self._cut_buffers(
-                    app_id, project_id, held_others, mode=mode
-                )
+                elsewhere = await self._cut_buffers(app_id, project_id, held_others)
                 prepared = await self._cut(
                     payload,
-                    mode=mode,
                     is_final=is_final,
                     defer_extraction=defer_extraction,
                 )
@@ -227,9 +217,7 @@ class Memorizer:
                 for mid in b.memcell_ids
             ]
             extraction = self._extractions.supervise(
-                self._extract_cut(
-                    payload, prepared, elsewhere, mode=mode, is_final=is_final
-                ),
+                self._extract_cut(payload, prepared, elsewhere, is_final=is_final),
                 session_id=session_id,
                 memcell_ids=memcell_ids,
             )
@@ -321,7 +309,7 @@ class Memorizer:
         return got
 
     async def _cut_buffers(
-        self, app_id: str, project_id: str, sessions: Sequence[str], *, mode: Mode
+        self, app_id: str, project_id: str, sessions: Sequence[str]
     ) -> list[tuple[IngestResult, BoundaryOutcome]]:
         """Close each listed session's open buffer into cells (a flush's cut).
 
@@ -341,7 +329,7 @@ class Memorizer:
                 messages=[],
                 group_id=group_id,
             )
-            closed = await self._boundary.detect(empty, mode=mode, is_final=True)
+            closed = await self._boundary.detect(empty, is_final=True)
             if closed.cells:
                 cut.append((empty, closed))
         return cut
@@ -352,14 +340,13 @@ class Memorizer:
         prepared: MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]],
         elsewhere: Sequence[tuple[IngestResult, BoundaryOutcome]],
         *,
-        mode: Mode,
         is_final: bool,
     ) -> MemorizeResult:
         """Extract the batch's own cells, then those cut from the group's others."""
         result = (
             prepared
             if isinstance(prepared, MemorizeResult)
-            else await self._extract(payload, *prepared, mode=mode)
+            else await self._extract(payload, *prepared)
         )
         for ingested, closed in elsewhere:
             await self._extract(
@@ -368,7 +355,6 @@ class Memorizer:
                 ),
                 ingested,
                 [closed],
-                mode=mode,
             )
         await self._announce_flush(payload, is_final=is_final)
         return result
@@ -405,7 +391,6 @@ class Memorizer:
         self,
         payload: dict[str, Any],
         *,
-        mode: Mode,
         is_final: bool,
         defer_extraction: bool,
     ) -> MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]]:
@@ -433,7 +418,6 @@ class Memorizer:
                 session,
                 group_id,
                 buffered=buffered,
-                mode=mode,
                 is_final=is_final,
             )
         ingested = await ingest_process(
@@ -444,17 +428,17 @@ class Memorizer:
             vision=self._vision,
         )
         if defer_extraction and not is_final:
-            buffered = await self._boundary.buffer(ingested, mode=mode)
+            buffered = await self._boundary.buffer(ingested)
             if cut_first:
                 return ingested, cut_first
-            return _result(payload, ingested, _merge_status(buffered.status, "skipped"))
+            return _result(payload, ingested, _status(buffered.status))
 
-        boundary = await self._boundary.detect(ingested, mode=mode, is_final=is_final)
+        boundary = await self._boundary.detect(ingested, is_final=is_final)
         boundaries = [*cut_first, boundary] if boundary.cells else cut_first
 
         if not boundaries:
             # Nothing went past the boundary stage — no pipelines to dispatch.
-            return _result(payload, ingested, _merge_status(boundary.status, "skipped"))
+            return _result(payload, ingested, _status(boundary.status))
         return ingested, boundaries
 
     async def _group_of(
@@ -524,7 +508,6 @@ class Memorizer:
         group_id: str,
         *,
         buffered: Sequence[BatchMessage],
-        mode: Mode,
         is_final: bool,
     ) -> list[BoundaryOutcome]:
         """Admit a group batch; cut the open buffer first when it changes the roster.
@@ -572,7 +555,6 @@ class Memorizer:
                     messages=[],
                     group_id=group_id,
                 ),
-                mode=mode,
                 is_final=True,
             )
             if closed.cells:
@@ -603,19 +585,17 @@ class Memorizer:
         correct, the cut only keeps a new member's first segment theirs.
         The cut cells are extracted after the locks are released.
         """
-        mode = self._settings.memorize.mode
         async with contextlib.AsyncExitStack() as held:
             locked = await self._hold_sessions(
                 held, app_id=app_id, project_id=project_id, own=None, others=sessions
             )
-            cut = await self._cut_buffers(app_id, project_id, locked, mode=mode)
+            cut = await self._cut_buffers(app_id, project_id, locked)
             result = await change()
         for ingested, closed in cut:
             await self._extract(
                 flush_payload(ingested.session_id, app_id, project_id),
                 ingested,
                 [closed],
-                mode=mode,
             )
         return result
 
@@ -624,20 +604,15 @@ class Memorizer:
         payload: dict[str, Any],
         ingested: IngestResult,
         boundaries: Sequence[BoundaryOutcome],
-        *,
-        mode: Mode,
     ) -> MemorizeResult:
         """Run the pipelines over the cells the boundary stage wrote, cell by cell.
 
         The conversation pipeline writes each cell's episode in its session's
-        space (``ingested.group_id``: a group's, else the person's own). In
-        agent mode the agent pipeline runs on the cell too, its event naming
-        the group, so a case the agent learns from a group carries
-        ``source_group_id`` (section 9.1).
+        space (``ingested.group_id``: a group's, else the person's own).
 
         Each pipeline's events for a cell are published as soon as that cell
         is done. A pipeline that fails on a cell is logged and the loop goes
-        on, so the cells (and the other pipeline) that did succeed still
+        on, so the cells that did succeed still
         reach their strategies; the first failure is re-raised once every
         cell has been tried, so the caller still sees the extraction failed.
 
@@ -645,8 +620,6 @@ class Memorizer:
             Exception: The first pipeline failure, after all cells ran.
         """
         pipelines: dict[str, Pipeline] = {"conversation": self._conversation_pipeline}
-        if mode == "agent":
-            pipelines["agent_memory"] = self._agent_pipeline
         outcomes: dict[str, list[CellOutcome]] = {track: [] for track in pipelines}
         first_error: BaseException | None = None
         cells = [c for boundary in boundaries for c in _prepared_cells(boundary)]
@@ -668,14 +641,7 @@ class Memorizer:
         conversation = PipelineOutcome.from_cells(
             "conversation", outcomes["conversation"]
         )
-        agent_status: TrackStatus = (
-            PipelineOutcome.from_cells("agent_memory", outcomes["agent_memory"]).status
-            if mode == "agent"
-            else "skipped"
-        )
-        return _result(
-            payload, ingested, _merge_status(conversation.status, agent_status)
-        )
+        return _result(payload, ingested, _status(conversation.status))
 
 
 def _result(
@@ -750,11 +716,9 @@ def _log_cell_failure(
     )
 
 
-def _merge_status(
-    conversation: TrackStatus, agent: TrackStatus
-) -> Literal["accumulated", "extracted"]:
-    """Either ``extracted`` wins; otherwise ``accumulated``."""
-    if conversation == "extracted" or agent == "extracted":
+def _status(track: TrackStatus) -> Literal["accumulated", "extracted"]:
+    """``extracted`` when the track extracted; otherwise ``accumulated``."""
+    if track == "extracted":
         return "extracted"
     return "accumulated"
 

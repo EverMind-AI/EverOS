@@ -37,16 +37,6 @@ batch_size      = 10
 max_concurrent  = 10
 query_max_concurrent = 16
 
-# ── Rerank ────────────────────────────────────────────
-[rerank]
-model    = "Qwen/Qwen3-Reranker-4B"
-api_key  = "..."
-base_url = "https://api.deepinfra.com/v1/inference"
-timeout_seconds = 30.0
-max_retries     = 3
-batch_size      = 10
-max_concurrent  = 5
-
 # ── Other tunables you may want to override here ──────
 # [memory]
 # root     = "~/.everos"

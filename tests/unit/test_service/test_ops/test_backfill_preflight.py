@@ -1,18 +1,18 @@
-"""Preflight short-circuits of the three backfill phases, and their exit codes.
+"""Preflight short-circuits of the backfill phase, and their exit codes.
 
+The one phase, ``vectors``, runs for ``--phase vectors`` and ``--phase all``.
 Two friendly-error contracts:
 
-1. Missing capability -- without an embedding provider every phase stops
+1. Missing capability -- without an embedding provider the phase stops
    BEFORE its scan and before the y/N prompt, with a toml hint, and
    ``run_backfill`` maps that to exit ``2`` (``FAILED``) rather than ``1``
    ("aborted by user") or the generic "see logs" bucket.
 2. Server running -- when another process holds the memory root's lock,
-   every phase stops before it starts an engine or spends a token and
-   before the prompt, and ``run_backfill`` maps that to exit ``3``
-   (``SERVER_RUNNING``) without a traceback. A server that takes the lock
-   between the probe and the replay engine's start is reported the same.
+   the phase stops before it spends a token and before the prompt, and
+   ``run_backfill`` maps that to exit ``3`` (``SERVER_RUNNING``) without a
+   traceback.
 
-Order inside each phase is capability, then lock: a permanent gap wins over
+Order inside the phase is capability, then lock: a permanent gap wins over
 a transient one. Ctrl-C at the prompt (typer's or click's ``Abort``) is an
 interrupt: exit ``130`` with the resume hint.
 """
@@ -25,7 +25,6 @@ import click
 import pytest
 import typer
 
-from everos.core.errors import MemoryRootLockedError
 from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.service import (
     BackfillDeps,
@@ -37,9 +36,7 @@ from everos.service import (
 from tests.fakes import (
     FakeEmbeddingProvider,
     FakeOmeLock,
-    InMemoryClusterStore,
     InMemoryVectorTable,
-    ScriptedReplayEngine,
     backfill_deps,
     episode_row,
     make_ops,
@@ -74,12 +71,12 @@ class _UnreadTable(InMemoryVectorTable):
 
 
 def _with_work() -> dict[str, InMemoryVectorTable]:
-    """One episode without vectors: enough for every phase to have work."""
+    """One episode without vectors: enough for the phase to have work."""
     return {"episode": InMemoryVectorTable("episode", [episode_row()])}
 
 
 def _unreadable() -> dict[str, InMemoryVectorTable]:
-    return {name: _UnreadTable(name) for name in ("episode", "agent_case")}
+    return {name: _UnreadTable(name) for name in ("episode", "image_memory")}
 
 
 def _blocked_by_server(**overrides: object) -> BackfillDeps:
@@ -113,7 +110,7 @@ async def _run(
 # ── server running ───────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("phase", ["vectors", "clusters", "skills"])
+@pytest.mark.parametrize("phase", ["vectors", "all"])
 async def test_a_running_server_blocks_every_phase_before_any_work(
     phase: str,
 ) -> None:
@@ -123,12 +120,13 @@ async def test_a_running_server_blocks_every_phase_before_any_work(
     outcome, summary = await _run(_blocked_by_server(), phase)
 
     assert outcome is BackfillOutcome.BLOCKED_BY_SERVER
-    result = getattr(summary, phase)
+    result = summary.vectors
+    assert result is not None
     assert result.aborted is True
     assert result.blocked_by_server is True
 
 
-@pytest.mark.parametrize("phase", ["vectors", "clusters", "skills"])
+@pytest.mark.parametrize("phase", ["vectors", "all"])
 async def test_run_backfill_exits_3_when_a_server_runs(
     phase: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -147,32 +145,10 @@ async def test_run_backfill_exits_3_when_a_server_runs(
     assert "MemoryRootLockedError" not in combined
 
 
-async def test_a_server_starting_after_the_probe_still_reports_blocked() -> None:
-    """The probe found the lock free, but a server took it before the replay
-    engine started: the phase reports blocked, it does not leak the error."""
-    engine = ScriptedReplayEngine(start_error=MemoryRootLockedError("race"))
-    deps = backfill_deps(
-        embedding=FakeEmbeddingProvider(),
-        tables=_with_work(),
-        clusters=InMemoryClusterStore(),
-        engine_for=engine.build,
-    )
-    summary = BackfillSummary()
-
-    outcome = await make_ops(backfill=deps).backfill(
-        "clusters", auto_yes=True, presenter=NullBackfillPresenter(), summary=summary
-    )
-
-    assert outcome is BackfillOutcome.BLOCKED_BY_SERVER
-    assert summary.clusters is not None
-    assert summary.clusters.aborted is True
-    assert engine.emitted == []
-
-
 # ── missing capability ───────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("phase", ["vectors", "clusters", "skills"])
+@pytest.mark.parametrize("phase", ["vectors", "all"])
 async def test_missing_embedding_blocks_every_phase_before_scan_and_lock(
     phase: str,
 ) -> None:
@@ -181,7 +157,8 @@ async def test_missing_embedding_blocks_every_phase_before_scan_and_lock(
     outcome, summary = await _run(_no_embedding(), phase)
 
     assert outcome is BackfillOutcome.BLOCKED_BY_CAPABILITY
-    result = getattr(summary, phase)
+    result = summary.vectors
+    assert result is not None
     assert result.blocked_by_capability == "embedding"
     assert result.blocked_by_server is False
     assert result.aborted is False

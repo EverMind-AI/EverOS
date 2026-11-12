@@ -86,7 +86,7 @@ async def test_a_conversation_from_2000_is_cut_and_keeps_its_date(
         payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
     )
 
-    outcome = await boundary.detect(ingested, mode="chat", is_final=True)
+    outcome = await boundary.detect(ingested, is_final=True)
 
     assert outcome.status == "extracted"
     async with factory() as s:

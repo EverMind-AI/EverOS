@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 # Cap how many fact strings we sample per call — running every test
-# against every fact would blow the LLM rerank budget.
+# against every fact would blow the LLM budget.
 _DEFAULT_SEED_LIMIT = 3
 
 # Tokenise on word characters; lowercase; drop short tokens that carry

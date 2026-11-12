@@ -214,7 +214,7 @@ class CascadeOrchestrator:
             without vectors.
         index: The derived index the projections write.
         sqlite: The system-DB repositories: the ``md_change_state`` ledger
-            and the knowledge tables.
+            and the group roster mirror.
         config: Cadences; ``None`` reads them from settings.
         watcher_enabled: Run the filesystem watcher; ``False`` leaves the
             scanner as the only path an md edit takes to the index.
@@ -244,8 +244,6 @@ class CascadeOrchestrator:
             memory_root=memory_root,
             tokenizer=tokenizer,
             index=index.repositories,
-            knowledge_documents=sqlite.knowledge_document,
-            knowledge_topics=sqlite.knowledge_topic,
             embedding=embedding,
             vision_embedding=vision_embedding,
             fence=fence,
@@ -367,38 +365,19 @@ class CascadeOrchestrator:
         self._started = False
         logger.info("cascade_orchestrator_stopped")
 
-    async def sync_once(self, *, kinds: set[str] | None = None) -> int:
-        """One scan + drain cycle (used by CLI ``cascade sync`` and
-        Phase-3 backfill's post-write skill-file sync).
-
-        Args:
-            kinds: Optional restriction on which md kinds the scan
-                walks (e.g. ``{"agent_skill"}``). ``None`` — the default
-                for CLI ``cascade sync`` — scans every registered kind.
-                Phase 3 uses ``{"agent_skill"}`` so an unscoped sweep
-                doesn't tag unrelated kinds (notably ``knowledge_*``,
-                which the current process may not have handlers for)
-                as permanently failed.
+    async def sync_once(self) -> int:
+        """One scan + drain cycle (used by CLI ``cascade sync``).
 
         Returns the number of rows processed in this drain; the worker
         bounds one drain, so the CLI keeps calling :meth:`drain_once` until
         a pass processes nothing.
 
-        An unscoped pass is a full pass over the root, so it first runs
-        :func:`reconcile_index_once`; a ``kinds``-scoped pass drains only
-        those kinds and must not leave the rest queued behind it.
-
-        The ``kinds`` filter is threaded through **both** the scanner
-        AND the worker drain: the scanner scopes what gets enqueued,
-        the worker scopes what gets claimed. Round-1 wired only the
-        scanner side, so a scoped Phase-3 sync could still drain a
-        knowledge md queued in a prior tick and mark it permanently
-        failed — round-2 closes that end.
+        A pass is a full pass over the root, so it first runs
+        :func:`reconcile_index_once`.
         """
-        if kinds is None:
-            await reconcile_index_once(self._memory_root, self._ledger)
-        await self._scanner.scan_once(kinds=kinds)
-        return await self._worker.drain_until_empty(kinds=kinds)
+        await reconcile_index_once(self._memory_root, self._ledger)
+        await self._scanner.scan_once()
+        return await self._worker.drain_until_empty()
 
     async def force_enqueue_all(self) -> list[MdChangeState]:
         """``cascade sync --force-all``: the reconcile pass on demand.

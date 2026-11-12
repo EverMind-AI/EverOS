@@ -4,8 +4,8 @@
 and answer with a forget of the same scope, run at once and reversible by the
 ``forget_ids`` they return (``POST /memory/forget/undo``). A delete naming
 ``group_id`` is the group's: an owner's or admin's forget, soft and
-propagated (docs/group-memory.md, section 15). An agent's memory has no forget
-yet, so a delete naming ``agent_id`` is refused (422).
+propagated (docs/group-memory.md, section 15). EverOS 2.0 has no agent
+memory, so a delete naming ``agent_id`` is refused (422).
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ _RESPONSES: dict[int | str, dict[str, object]] = {
         "description": "Group-scoped: the asker is not an owner or admin",
     },
     422: {
-        "description": "No scope, both user_id and agent_id, an agent's memory "
-        "(it has no forget), or a session bound to a group without group_id"
+        "description": "No scope, an agent_id (2.0 has no agent memory), or a "
+        "session bound to a group without group_id"
     },
     500: {
         "model": ErrorResponse,
@@ -88,7 +88,6 @@ async def delete_memory(
         app_id=req.app_id,
         project_id=req.project_id,
         user_id=req.user_id,
-        agent_id=req.agent_id,
         session_id=req.session_id,
     )
     return SuccessEnvelope(

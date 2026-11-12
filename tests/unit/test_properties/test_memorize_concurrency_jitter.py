@@ -184,7 +184,7 @@ async def _jittered(
     cfg = base.model_copy(
         update={
             "memorize": base.memorize.model_copy(
-                update={"mode": "chat", "session_lock_timeout_seconds": lock_timeout}
+                update={"session_lock_timeout_seconds": lock_timeout}
             )
         }
     )

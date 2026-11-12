@@ -7,14 +7,15 @@ ranked retrieval):
 * ``owner_type`` × ``memory_type`` are strictly paired:
 
   - ``user`` → ``episode`` | ``profile`` | ``scene``
-  - ``agent`` → ``agent_case`` | ``agent_skill``
   - ``group`` → ``episode`` | ``scene`` | ``image_memory`` | ``member_profile``
     (the last with ``member_id``)
 
   ``include_groups`` (off by default) widens a ``user`` listing of
   ``episode`` or ``scene`` by the user's current groups, paged as one list.
+  EverOS 2.0 has no agent memory: ``agent_id`` is refused
+  (:data:`~everos.memory.search.NO_AGENT_MEMORY`).
 
-* ``GetData`` always contains four kind arrays for symmetry with
+* ``GetData`` always contains every kind array for symmetry with
   ``/search``; only the requested kind is populated. ``total_count``
   is the predicate's true match count; ``count`` is the page size
   actually returned.
@@ -30,29 +31,28 @@ from __future__ import annotations
 
 import datetime as _dt
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from everos.memory.search import FilterNode, GroupProfileEntry, SearchSource
+from everos.memory.search import (
+    NO_AGENT_MEMORY,
+    FilterNode,
+    GroupProfileEntry,
+    SearchSource,
+)
 
 
 class GetMemoryType(StrEnum):
-    """The four kinds enumerated by ``/get``.
+    """The kinds enumerated by ``/get``.
 
-    ``episode`` and ``profile`` are user-owned; ``agent_case`` and
-    ``agent_skill`` are agent-owned. Cross-pairs are rejected by
+    ``episode``, ``profile`` and ``scene`` are user-owned; the group kinds
+    need a group scope. Cross-pairs are rejected by
     :meth:`GetRequest._validate_owner_memory_type_pair`.
-
-    Naming note: all four values use the bare kind name (no
-    ``_memory`` suffix) and match the LanceDB table name + everalgo
-    type name for that kind.
     """
 
     EPISODE = "episode"
     PROFILE = "profile"
-    AGENT_CASE = "agent_case"
-    AGENT_SKILL = "agent_skill"
     SCENE = "scene"
     """An owner's current scene versions (user and group scopes)."""
     IMAGE_MEMORY = "image_memory"
@@ -70,20 +70,18 @@ class GetMemoryType(StrEnum):
 class GetRequest(BaseModel):
     """Request body for ``POST /api/v2/memory/get``.
 
-    Callers identify the memory owner via ``user_id`` XOR ``agent_id`` —
+    Callers identify the memory owner via ``user_id`` or a group scope --
     exactly one must be set. Internally the manager keeps using
     ``owner_id`` / ``owner_type`` (the storage tables' columns); those
     are exposed as derived properties so the rename only affects the
-    wire contract.
+    wire contract. An ``agent_id`` is refused with :data:`NO_AGENT_MEMORY`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str | None = Field(default=None, min_length=1)
-    agent_id: str | None = Field(default=None, min_length=1)
-    """Memory owner — provide ``user_id`` for ``episode`` / ``profile`` or
-    ``agent_id`` for ``agent_case`` / ``agent_skill``; exactly one owner scope
-    must be set (``user_id``, ``agent_id``, ``group_id`` or ``group_ids``)."""
+    """Memory owner for ``episode`` / ``profile`` / ``scene``; exactly one owner
+    scope must be set (``user_id``, ``group_id`` or ``group_ids``)."""
     group_id: str | None = Field(default=None, min_length=1)
     group_ids: list[str] | None = Field(default=None, min_length=1, max_length=16)
     """A group scope (docs/group-memory.md, 5.4): ``episode`` only for now. The
@@ -92,9 +90,6 @@ class GetRequest(BaseModel):
     """Who asks: required for a group scope (or the identity header); with
     ``user_id`` optional and equal to it."""
     audience: Literal["asker", "group"] = "asker"
-    context_group_id: str | None = Field(default=None, min_length=1)
-    """With ``agent_id`` only: list the agent's cases in this group's context
-    (the cases learned in it join those learned outside groups)."""
     member_id: str | None = Field(default=None, min_length=1)
     """With ``memory_type = member_profile`` only: whose profile to list."""
     include_superseded: bool = False
@@ -121,55 +116,54 @@ class GetRequest(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
     sort_by: Literal["timestamp", "updated_at"] = "timestamp"
-    """Sort column. ``profile`` and ``agent_skill`` silently override
-    to ``updated_at`` (profile has no timestamp; agent_skill is a
-    named entity with no temporal column)."""
+    """Sort column. ``profile`` silently overrides to ``updated_at`` (a
+    profile has no timestamp)."""
 
     sort_order: Literal["asc", "desc"] = "desc"
     filters: FilterNode | None = None
     """Filters DSL — same shape as ``/search``, ``AND`` / ``OR``
     combinators allowed."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_agent_scope(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        memory_type = data.get("memory_type")
+        if (
+            data.get("agent_id") is not None
+            or data.get("context_group_id") is not None
+            or (isinstance(memory_type, str) and memory_type in _AGENT_KINDS)
+        ):
+            raise ValueError(NO_AGENT_MEMORY)
+        return data
+
     @model_validator(mode="after")
-    def _validate_user_xor_agent(self) -> Self:
+    def _validate_one_scope(self) -> Self:
         scopes = [
             self.user_id is not None,
-            self.agent_id is not None,
             self.group_id is not None,
             self.group_ids is not None,
         ]
         if sum(scopes) != 1:
             raise ValueError(
-                "exactly one of user_id / agent_id / group_id / group_ids "
-                "must be provided"
+                "exactly one of user_id / group_id / group_ids must be provided"
             )
         return self
 
     @model_validator(mode="after")
-    def _validate_context_group(self) -> Self:
-        if self.context_group_id is not None and self.agent_id is None:
-            raise ValueError("context_group_id is valid with agent_id only")
-        return self
-
-    @model_validator(mode="after")
     def _validate_owner_memory_type_pair(self) -> Self:
-        # Runs after the xor validator (declaration order), so ``owner_type``
+        # Runs after the scope validator (declaration order), so ``owner_type``
         # is well-defined here.
         user_kinds = {
             GetMemoryType.EPISODE,
             GetMemoryType.PROFILE,
             GetMemoryType.SCENE,
         }
-        agent_kinds = {GetMemoryType.AGENT_CASE, GetMemoryType.AGENT_SKILL}
         if self.owner_type == "user" and self.memory_type not in user_kinds:
             raise ValueError(
                 f"memory_type {self.memory_type.value!r} is not valid "
                 "when user_id is set"
-            )
-        if self.owner_type == "agent" and self.memory_type not in agent_kinds:
-            raise ValueError(
-                f"memory_type {self.memory_type.value!r} is not valid "
-                "when agent_id is set"
             )
         group_kinds = {
             GetMemoryType.EPISODE,
@@ -227,16 +221,18 @@ class GetRequest(BaseModel):
     def owner_id(self) -> str:
         """Derived from whichever owner scope is set (the first group of a pool)."""
         groups = self.scope_group_ids
-        return self.user_id or self.agent_id or (groups[0] if groups else "")
+        return self.user_id or (groups[0] if groups else "")
 
     @property
-    def owner_type(self) -> Literal["user", "agent", "group"]:
-        """``"user"``, ``"agent"`` or ``"group"``, by the owner scope set."""
+    def owner_type(self) -> Literal["user", "group"]:
+        """``"user"`` or ``"group"``, by the owner scope set."""
         if self.user_id is not None:
             return "user"
-        if self.agent_id is not None:
-            return "agent"
         return "group"
+
+
+_AGENT_KINDS = frozenset({"agent_case", "agent_skill"})
+"""The memory types of the agent memory 2.0 removed (refused by name)."""
 
 
 # ── Item DTOs (mirror Search*Item shapes minus score) ────────────────────
@@ -259,7 +255,8 @@ class GetEpisodeItem(BaseModel):
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
-    """``None`` for an episode Reflection merged from several sessions."""
+    """``None`` for an episode merged from several sessions (by the Reflection
+    of an earlier 2.0 build)."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
     subject_ids: list[str] = Field(default_factory=list)
@@ -315,53 +312,14 @@ class GetImageItem(BaseModel):
     height: int = 0
 
 
-class GetAgentCaseItem(BaseModel):
-    """Agent case listing item — always agent-scoped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    entry_id: str
-    """The case's id inside its owner's markdown (``ac_<YYYYMMDD>_<NNNN>``);
-    what a skill's ``source_case_ids`` refers to. ``id`` is the index row key,
-    ``<agent_id>_<entry_id>``."""
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    session_id: str
-    task_intent: str
-    approach: str
-    quality_score: float
-    key_insight: str | None = None
-    timestamp: _dt.datetime
-
-
-class GetAgentSkillItem(BaseModel):
-    """Agent skill listing item — always agent-scoped."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    agent_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    name: str
-    description: str
-    content: str
-    confidence: float
-    maturity_score: float
-    source_case_ids: list[str] = Field(default_factory=list)
-
-
 # ── Response envelope ────────────────────────────────────────────────────
 
 
 class GetData(BaseModel):
     """Body of ``response.data``.
 
-    All four arrays are always present so client code can iterate
-    without branching on ``memory_type``; the route populates exactly
-    one.
+    Every array is always present so client code can iterate without
+    branching on ``memory_type``; the route populates exactly one.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -374,8 +332,6 @@ class GetData(BaseModel):
     profiles: list[GetProfileItem] = Field(default_factory=list)
     group_profile: list[GroupProfileEntry] = Field(default_factory=list)
     """A group's profile items (``memory_type = group_profile``), newest first."""
-    agent_cases: list[GetAgentCaseItem] = Field(default_factory=list)
-    agent_skills: list[GetAgentSkillItem] = Field(default_factory=list)
     total_count: int = 0
     """Total rows matching the request's owner + filter predicate."""
 

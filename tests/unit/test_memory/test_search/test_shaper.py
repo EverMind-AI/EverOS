@@ -35,7 +35,8 @@ def test_the_dto_id_is_the_global_id_whatever_the_candidate_key() -> None:
 
 
 def test_shape_episodes_drops_unknown_ids_and_wrong_owner_type() -> None:
-    agent_owned = stored_episode("ep_2", owner_type="agent")
+    # No 2.0 scope owns an "agent" record; one an older build indexed is dropped.
+    agent_owned = stored_episode("ep_2", owner_type="agent")  # type: ignore[arg-type]
     items = shape_episodes(
         [_ranked("missing", 0.9), _ranked("ep_2", 0.8)], {"ep_2": agent_owned}
     )

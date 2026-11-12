@@ -2,12 +2,11 @@
 
 Mirrors the algo-side frozen value object (centroid + count + last_ts +
 preview) plus everos engineering metadata (``owner_id`` / ``owner_type``
-/ ``kind``) so a single SQLite table can hold both the user-memory cluster
-track (episode embeddings) and the agent-case cluster track (task_intent
-embeddings). The ``members`` field on the algo type is persisted in the
-sibling :class:`ClusterMember` table to keep the relation queryable from
-both directions (forward by ``cluster_id``, reverse by ``(member_type,
-member_id)``).
+/ ``kind``) so a single SQLite table holds the scene clusters of every user
+and group (episode embeddings). The ``members`` field on the algo type is
+persisted in the sibling :class:`ClusterMember` table to keep the relation
+queryable from both directions (forward by ``cluster_id``, reverse by
+``(member_type, member_id)``).
 """
 
 from __future__ import annotations
@@ -40,16 +39,16 @@ class Cluster(BaseTable, table=True):
     two spaces."""
 
     owner_id: str = Field(index=True)
-    """``user_id`` (kind=``user_memory``) or ``agent_id`` (kind=``agent_case``)."""
+    """``user_id`` (kind=``user_scene``) or ``group_id`` (kind=``group_scene``)."""
 
     owner_type: str
-    """``"user"`` or ``"agent"`` — redundant with ``kind`` today but kept
-    explicit so future kinds (e.g. tenant-level) can plug in without a
-    schema change."""
+    """``"user"`` or ``"group"`` — redundant with ``kind`` today but kept
+    explicit so future kinds can plug in without a schema change."""
 
     kind: str
-    """``"user_memory"`` (episode-vector cluster, drives profile extraction)
-    or ``"agent_case"`` (task_intent-vector cluster, drives skill extraction)."""
+    """``"user_scene"`` or ``"group_scene"`` (episode-vector clusters, one per
+    scene). A store written by an earlier 2.0 build can also hold
+    ``"user_memory"`` and ``"agent_case"`` rows; nothing reads them now."""
 
     centroid_blob: bytes = Field(sa_type=LargeBinary)
     """``np.float32`` centroid serialised via ``ndarray.tobytes()``. The
@@ -89,11 +88,11 @@ class ClusterMember(BaseTable, table=True):
 
     member_id: str = Field(primary_key=True)
     """Opaque entity id grouped into this cluster. Semantics depend on
-    ``member_type`` (e.g. episode entry_id, case entry_id)."""
+    ``member_type`` (an episode entry_id)."""
 
     member_type: str
-    """Caller-defined entity kind (e.g. ``"episode"``, ``"case"``). Kept
-    on the row so the reverse index is self-contained."""
+    """Caller-defined entity kind (``"episode"``). Kept on the row so the
+    reverse index is self-contained."""
 
     added_ts: UtcDatetime = Field(sa_type=UtcDateTimeColumn)
     """When this entity was first attached to the cluster."""

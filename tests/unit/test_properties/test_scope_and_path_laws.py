@@ -1,4 +1,4 @@
-"""Laws of the id, scope-directory and path-segment helpers.
+"""Laws of the id and scope-directory helpers, and of the content hash.
 
 These functions sit between an identifier a client sends and the directory
 it lands in, so a law that fails here is either a path escape or two scopes
@@ -13,11 +13,7 @@ silently sharing a directory.
    aliasing name and nothing else (a ``sender_id`` never goes through the
    mapping).
 2. An accepted id joined under a root stays inside the root.
-3. ``sanitize_dirname`` is idempotent, returns exactly one path component,
-   never ``""`` / ``.`` / ``..`` and never more than 50 characters; the
-   skill-name sanitizer is idempotent and its directory segment is always
-   ``skill_`` plus a traversal-free component.
-4. ``content_sha256`` is deterministic and does not depend on key order.
+3. ``content_sha256`` is deterministic and does not depend on key order.
    It is not claimed injective, and it is not: the canonical form joins
    ``key=value`` lines, so ``{"a": "1\\nb=2"}`` hashes like
    ``{"a": "1", "b": "2"}``. Handler values are section bodies, which can
@@ -41,8 +37,6 @@ from everos.entrypoints.api.schemas.ids import (
 )
 from everos.infra.cascade._projections._common import content_sha256
 from everos.infra.persistence import memory_root as mr
-from everos.infra.persistence.markdown._base.path_safety import sanitize_dirname
-from everos.infra.persistence.markdown._mds.agent_skill import AgentSkillFrontmatter
 
 _candidate_ids = st.text("abcXYZ019_.@+-", min_size=1, max_size=20)
 
@@ -65,7 +59,6 @@ def _accepted(check: Callable[[str], str]) -> Callable[[str], bool]:
 accepted_app_ids = _candidate_ids.filter(_accepted(_check_app))
 accepted_project_ids = _candidate_ids.filter(_accepted(_check_project))
 accepted_ids = _candidate_ids.filter(_accepted(_reject_path_traversal))
-free_text = st.text(max_size=80)
 
 
 @given(x=accepted_app_ids, y=accepted_project_ids)
@@ -92,30 +85,6 @@ def test_accepted_ids_stay_under_the_root(x: str, y: str) -> None:
     target = (root / mr.app_dir_name(x) / mr.project_dir_name(y)).resolve()
     assert target.is_relative_to(root)
     assert len(target.relative_to(root).parts) == 2
-
-
-@given(raw=free_text, fallback=st.sampled_from(["fallback", "x"]))
-def test_sanitize_dirname_is_idempotent_and_one_safe_component(
-    raw: str, fallback: str
-) -> None:
-    out = sanitize_dirname(raw, fallback)
-    assert sanitize_dirname(out, fallback) == out
-    assert out not in ("", ".", "..")
-    assert "/" not in out and "\\" not in out and "\x00" not in out
-    assert len(out) <= 50
-    assert len(Path(out).parts) == 1
-
-
-@given(raw=free_text)
-def test_skill_name_sanitizer_is_idempotent_and_its_dir_is_safe(raw: str) -> None:
-    fm = AgentSkillFrontmatter
-    name = fm.sanitize_skill_name(raw)
-    assert fm.sanitize_skill_name(name) == name
-    segment = fm.skill_dir_name(raw)
-    assert segment == fm.skill_dir_name(name)
-    assert segment.startswith(fm.SKILL_DIR_PREFIX)
-    assert "/" not in segment and "\\" not in segment
-    assert segment not in (".", "..")
 
 
 @given(

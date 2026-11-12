@@ -9,9 +9,9 @@ One handler for both files of the one profile schema (docs/group-memory.md,
   :func:`~everos.infra.persistence.records.member_profile_row_id` gives --
   one no personal profile's id can equal.
 
-Profile is a single-file kind (mirrors AgentSkill), replaced whole on every
-update: no entry markers, no per-entry diff. The row carries the typed
-projection of the frontmatter; the body is display text and is not indexed.
+Profile is a single-file kind, replaced whole on every update: no entry
+markers, no per-entry diff. The row carries the typed projection of the
+frontmatter; the body is display text and is not indexed.
 ``explicit_info`` / ``implicit_traits`` are heterogeneous LLM emissions (small
 dicts, early profiles' strings), and LanceDB has no ``list[dict]`` column, so
 both are json-encoded into ``explicit_info_json`` / ``implicit_traits_json``

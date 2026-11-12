@@ -51,9 +51,7 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # ── Phase A: Tier 1 (LLM only) ──────────────────────────────────────
-    async with _tier_client(
-        tmp_path, monkeypatch, embed_available=False, rerank_available=False
-    ) as client:
+    async with _tier_client(tmp_path, monkeypatch, embed_available=False) as client:
         # All N adds are issued before the single wait below (rather than
         # one add-wait-add-wait cycle) so the cascade watcher's debounce
         # window is only paid once for the whole batch instead of once
@@ -101,9 +99,7 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
     # on-disk root, now with embed configured.
 
     # ── Phase B: Tier 2 (embed added) ────────────────────────────────────
-    async with _tier_client(
-        tmp_path, monkeypatch, embed_available=True, rerank_available=False
-    ) as client:
+    async with _tier_client(tmp_path, monkeypatch, embed_available=True) as client:
         health = await client.get("/health")
         assert health.status_code == 200
         assert health.json()["capabilities"]["embed"] is True, (
@@ -115,9 +111,8 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "rows written before the upgrade must still be NULL pre-backfill"
         )
 
-        # ``run_backfill`` refuses to run against a live OME lock (Phase
-        # 1 / 2 / 3 all preflight it — round-4 review J10 aligned Phase
-        # 1 with the other two). In-process this test still holds the
+        # ``run_backfill`` refuses to run against a live OME lock (the
+        # vectors phase preflights it). In-process this test still holds the
         # server lifespan open around the call, so backfill runs over
         # the production wiring with a lock that reads free, simulating
         # the intended "server stopped, then backfill runs" sequence. A

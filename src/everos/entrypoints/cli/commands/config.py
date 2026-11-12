@@ -42,12 +42,10 @@ _SECTION_NAMES = (
     "llm",
     "multimodal",
     "embedding",
-    "rerank",
     "boundary_detection",
     "memorize",
     "clustering",
     "search",
-    "knowledge",
     "logging",
 )
 

@@ -67,7 +67,7 @@ async def test_upsert_then_list_round_trips_full_algo_cluster(
     cluster = _make_cluster(
         cluster_id="cl_aaa000000001",
         centroid_vals=[0.25, -0.5, 0.75],
-        members=["mc_one", "mc_two"],
+        members=["ep_one", "ep_two"],
         last_ts_ms=1_700_000_001_500,
         count=2,
         preview=["alice likes hiking", "alice plans tokyo"],
@@ -76,18 +76,18 @@ async def test_upsert_then_list_round_trips_full_algo_cluster(
         cluster,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
 
-    rows = await repo.list_for_owner("u_alice", "user_memory")
+    rows = await repo.list_for_owner("u_alice", "user_scene")
     assert len(rows) == 1
     got = rows[0]
     assert got.id == "cl_aaa000000001"
     assert got.count == 2
     assert got.last_ts == 1_700_000_001_500
     assert got.preview == ["alice likes hiking", "alice plans tokyo"]
-    assert got.members == ["mc_one", "mc_two"]
+    assert got.members == ["ep_one", "ep_two"]
     np.testing.assert_allclose(
         np.asarray(got.centroid),
         np.array([0.25, -0.5, 0.75], dtype=np.float32),
@@ -101,46 +101,47 @@ async def test_list_for_owner_isolates_by_owner_and_kind(
     alice = _make_cluster(
         cluster_id="cl_alice00000001",
         centroid_vals=[1.0, 0.0],
-        members=["mc_a"],
+        members=["ep_a"],
     )
     bob = _make_cluster(
         cluster_id="cl_bob0000000001",
         centroid_vals=[0.0, 1.0],
-        members=["mc_b"],
+        members=["ep_b"],
     )
-    agent_case = _make_cluster(
-        cluster_id="cl_case0000001",
+    group = _make_cluster(
+        cluster_id="cl_group000001",
         centroid_vals=[0.5, 0.5],
-        members=["ac_20260517_0001"],
+        members=["gep_20260517_0001"],
     )
     await repo.upsert_with_members(
         alice,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
     await repo.upsert_with_members(
         bob,
         owner_id="u_bob",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
     await repo.upsert_with_members(
-        agent_case,
-        owner_id="agent_42",
-        owner_type="agent",
-        kind="agent_case",
-        member_type="case",
+        group,
+        owner_id="trip",
+        owner_type="group",
+        kind="group_scene",
+        member_type="episode",
     )
 
-    alice_rows = await repo.list_for_owner("u_alice", "user_memory")
-    bob_rows = await repo.list_for_owner("u_bob", "user_memory")
-    agent_rows = await repo.list_for_owner("agent_42", "agent_case")
+    alice_rows = await repo.list_for_owner("u_alice", "user_scene")
+    bob_rows = await repo.list_for_owner("u_bob", "user_scene")
+    group_rows = await repo.list_for_owner("trip", "group_scene")
     assert [r.id for r in alice_rows] == ["cl_alice00000001"]
     assert [r.id for r in bob_rows] == ["cl_bob0000000001"]
-    assert [r.id for r in agent_rows] == ["cl_case0000001"]
+    assert [r.id for r in group_rows] == ["cl_group000001"]
+    assert await repo.list_for_owner("trip", "user_scene") == []
 
 
 # ── upsert (idempotency + members merge) ────────────────────────────────
@@ -153,7 +154,7 @@ async def test_upsert_appends_new_members_and_overwrites_scalar_fields(
     initial = _make_cluster(
         cluster_id="cl_xxxxxxxxxxx1",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
+        members=["ep_one"],
         count=1,
         preview=["first sample"],
     )
@@ -161,15 +162,15 @@ async def test_upsert_appends_new_members_and_overwrites_scalar_fields(
         initial,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
 
     # Merge: same cluster_id, count up, member list grew, centroid shifted.
     updated = _make_cluster(
         cluster_id="cl_xxxxxxxxxxx1",
         centroid_vals=[0.5, 0.5],
-        members=["mc_one", "mc_two"],
+        members=["ep_one", "ep_two"],
         count=2,
         preview=["first sample", "second sample"],
         last_ts_ms=1_700_000_002_000,
@@ -178,15 +179,15 @@ async def test_upsert_appends_new_members_and_overwrites_scalar_fields(
         updated,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
 
-    rows = await repo.list_for_owner("u_alice", "user_memory")
+    rows = await repo.list_for_owner("u_alice", "user_scene")
     assert len(rows) == 1
     got = rows[0]
     assert got.count == 2
-    assert got.members == ["mc_one", "mc_two"]
+    assert got.members == ["ep_one", "ep_two"]
     assert got.preview == ["first sample", "second sample"]
     np.testing.assert_allclose(
         np.asarray(got.centroid),
@@ -199,26 +200,26 @@ async def test_upsert_is_idempotent_under_retry(repo: ClusterRepo) -> None:
     cluster = _make_cluster(
         cluster_id="cl_idempot00001",
         centroid_vals=[0.1, 0.9],
-        members=["mc_one", "mc_two"],
+        members=["ep_one", "ep_two"],
         count=2,
     )
     await repo.upsert_with_members(
         cluster,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
     await repo.upsert_with_members(
         cluster,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
-    rows = await repo.list_for_owner("u_alice", "user_memory")
+    rows = await repo.list_for_owner("u_alice", "user_scene")
     assert len(rows) == 1
-    assert rows[0].members == ["mc_one", "mc_two"]
+    assert rows[0].members == ["ep_one", "ep_two"]
 
 
 async def test_upsert_rejects_unset_cluster_id(repo: ClusterRepo) -> None:
@@ -229,15 +230,15 @@ async def test_upsert_rejects_unset_cluster_id(repo: ClusterRepo) -> None:
         count=1,
         last_ts=1_700_000_000_000,
         preview=[],
-        members=["mc_one"],
+        members=["ep_one"],
     )
     with pytest.raises(ValueError, match="cluster_id"):
         await repo.upsert_with_members(
             cluster,
             owner_id="u_alice",
             owner_type="user",
-            kind="user_memory",
-            member_type="memcell",
+            kind="user_scene",
+            member_type="episode",
         )
 
 
@@ -251,32 +252,32 @@ async def test_find_cluster_id_for_member_reverse_lookup(
     user_cluster = _make_cluster(
         cluster_id="cl_user0000001",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
+        members=["ep_one"],
     )
-    case_cluster = _make_cluster(
-        cluster_id="cl_case0000001",
+    group_cluster = _make_cluster(
+        cluster_id="cl_group000001",
         centroid_vals=[0.0, 1.0],
-        members=["ac_20260517_0001"],
+        members=["gep_20260517_0001"],
     )
     await repo.upsert_with_members(
         user_cluster,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        kind="user_scene",
+        member_type="episode",
     )
     await repo.upsert_with_members(
-        case_cluster,
-        owner_id="agent_42",
-        owner_type="agent",
-        kind="agent_case",
-        member_type="case",
+        group_cluster,
+        owner_id="trip",
+        owner_type="group",
+        kind="group_scene",
+        member_type="episode",
     )
 
     assert (
         await repo.find_cluster_id_for_member(
-            "memcell",
-            "mc_one",
+            "episode",
+            "ep_one",
             app_id="default",
             project_id="default",
             owner_id="u_alice",
@@ -285,19 +286,30 @@ async def test_find_cluster_id_for_member_reverse_lookup(
     )
     assert (
         await repo.find_cluster_id_for_member(
-            "case",
-            "ac_20260517_0001",
+            "episode",
+            "gep_20260517_0001",
             app_id="default",
             project_id="default",
-            owner_id="agent_42",
+            owner_id="trip",
         )
-        == "cl_case0000001"
+        == "cl_group000001"
     )
-    # Type-discriminated: same id under wrong type misses.
+    # Type-discriminated: the same id under another member type misses.
     assert (
         await repo.find_cluster_id_for_member(
-            "case",
-            "mc_one",
+            "memcell",
+            "ep_one",
+            app_id="default",
+            project_id="default",
+            owner_id="u_alice",
+        )
+        is None
+    )
+    # Owner-scoped: one owner's member is no member of the other owner's.
+    assert (
+        await repo.find_cluster_id_for_member(
+            "episode",
+            "gep_20260517_0001",
             app_id="default",
             project_id="default",
             owner_id="u_alice",
@@ -306,18 +318,8 @@ async def test_find_cluster_id_for_member_reverse_lookup(
     )
     assert (
         await repo.find_cluster_id_for_member(
-            "memcell",
-            "ac_20260517_0001",
-            app_id="default",
-            project_id="default",
-            owner_id="agent_42",
-        )
-        is None
-    )
-    assert (
-        await repo.find_cluster_id_for_member(
-            "memcell",
-            "mc_missing",
+            "episode",
+            "ep_missing",
             app_id="default",
             project_id="default",
             owner_id="u_alice",
@@ -354,14 +356,14 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
         alice_cluster,
         owner_id="u_alice",
         owner_type="user",
-        kind="user_memory",
+        kind="user_scene",
         member_type="episode",
     )
     await repo.upsert_with_members(
         bob_cluster,
         owner_id="u_bob",
         owner_type="user",
-        kind="user_memory",
+        kind="user_scene",
         member_type="episode",
     )
 
@@ -398,110 +400,3 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
         )
         is None
     )
-
-
-# ── replace_members ────────────────────────────────────────────────────
-
-
-async def test_replace_members_swaps_members_and_restamps_the_row(
-    repo: ClusterRepo,
-) -> None:
-    """Removed members go, the merged one joins, the snapshot is restamped."""
-    cluster = _make_cluster(
-        cluster_id="cl_rep_00000001",
-        centroid_vals=[1.0, 0.0],
-        members=["ep_one", "ep_two", "ep_three"],
-        count=3,
-        preview=["old preview"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="episode",
-    )
-
-    await repo.replace_members(
-        "cl_rep_00000001",
-        removed={"ep_one", "ep_three"},
-        added="ep_merged",
-        member_type="episode",
-        centroid_blob=np.array([0.5, 0.5], dtype=np.float32).tobytes(),
-        count=1,
-        last_ts_ms=1_700_000_099_000,
-        preview_json='["new preview"]',
-    )
-
-    assert await repo.get_members_with_type("cl_rep_00000001") == [
-        ("ep_two", "episode"),
-        ("ep_merged", "episode"),
-    ]
-    got = await repo.get_with_members("cl_rep_00000001")
-    assert got is not None
-    assert (got.count, got.last_ts, got.preview) == (
-        1,
-        1_700_000_099_000,
-        ["new preview"],
-    )
-    np.testing.assert_allclose(
-        np.asarray(got.centroid), np.array([0.5, 0.5], dtype=np.float32)
-    )
-
-
-async def test_replace_members_with_nothing_removed_only_appends(
-    repo: ClusterRepo,
-) -> None:
-    """An empty ``removed`` set keeps every existing member."""
-    cluster = _make_cluster(
-        cluster_id="cl_rep_00000002",
-        centroid_vals=[1.0, 0.0],
-        members=["ep_one"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="episode",
-    )
-
-    await repo.replace_members(
-        "cl_rep_00000002",
-        removed=set(),
-        added="ep_merged",
-        member_type="episode",
-        centroid_blob=np.array([1.0, 0.0], dtype=np.float32).tobytes(),
-        count=1,
-        last_ts_ms=1_700_000_000_000,
-        preview_json="[]",
-    )
-
-    members = await repo.get_members_with_type("cl_rep_00000002")
-    assert [mid for mid, _ in members] == ["ep_one", "ep_merged"]
-
-
-# ── get_members_with_type ──────────────────────────────────────────────
-
-
-async def test_get_members_with_type_returns_tuples(
-    repo: ClusterRepo,
-) -> None:
-    """Returns (member_id, member_type) tuples in insertion order."""
-    cluster = _make_cluster(
-        cluster_id="cl_mtype000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one", "mc_two"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    members = await repo.get_members_with_type("cl_mtype000001")
-    assert len(members) == 2
-    assert members[0] == ("mc_one", "memcell")
-    assert members[1] == ("mc_two", "memcell")

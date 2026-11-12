@@ -168,8 +168,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     import pyarrow as pa
 
     from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.markdown import AgentCaseWriter
-    from everos.infra.persistence.records.agent_case import AgentCase
+    from everos.infra.persistence.markdown import EpisodeWriter
     from everos.infra.persistence.records.episode import Episode
 
     root = MemoryRoot.resolve()
@@ -177,15 +176,15 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     # The drifted table below is written by hand: declare the store this
     # build's, as its first open would have.
     stamp_store_version(root)
-    owner_id = "a_rebuild"
+    owner_id = "u_rebuild"
     bucket = _dt.date(2026, 5, 18)
     md_path = (
-        f"default_app/default_project/agents/{owner_id}/.cases/"
-        f"agent_case-{bucket.isoformat()}.md"
+        f"default_app/default_project/users/{owner_id}/episodes/"
+        f"episode-{bucket.isoformat()}.md"
     )
 
     async def _seed_md() -> None:
-        writer = AgentCaseWriter(root=root)
+        writer = EpisodeWriter(root=root)
         items = [
             (
                 {
@@ -193,9 +192,9 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
                     "session_id": f"s_{j}",
                     "timestamp": "2026-05-18T07:04:26+00:00",
                     "parent_id": f"mc_{j}",
-                    "quality_score": 0.5,
+                    "sender_ids": [owner_id],
                 },
-                {"TaskIntent": f"seed intent {j}", "Approach": "step one"},
+                {"Subject": f"seed subject {j}", "Content": f"seed content {j}"},
             )
             for j in range(2)
         ]
@@ -222,10 +221,10 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
         finally:
             await storage.aclose()
 
-    async def _agent_case_row_count() -> int:
+    async def _episode_row_count() -> int:
         storage = make_storage(root)
         try:
-            tbl = await storage.lance.table(AgentCase.TABLE_NAME, AgentCase)
+            tbl = await storage.lance.table(Episode.TABLE_NAME, Episode)
             return await tbl.count_rows(filter=f"md_path = '{md_path}'")
         finally:
             await storage.aclose()
@@ -242,11 +241,11 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     assert result.exit_code == 0, result.stdout
     assert "rebuild complete" in result.stdout
 
-    # Table recreated with the correct vector type; md re-indexed.
+    # Table recreated with the correct vector type; md re-indexed into it.
     assert asyncio.run(_episode_subject_vector_type()).equals(
         arrow_schema(Episode).field("subject_vector").type
     )
-    assert asyncio.run(_agent_case_row_count()) == 2
+    assert asyncio.run(_episode_row_count()) == 2
 
 
 def test_rebuild_attests_the_model_that_produced_the_new_vectors(

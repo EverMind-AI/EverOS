@@ -43,6 +43,12 @@ from their personal searches with ``include_groups`` (``<owner>+groups``
 keys), which also read the session's buffer by the group's rules; the plain
 personal reads of the pair (``caroline:profile``) still find nothing of it.
 
+It was edited by hand once (2026-11-12) for the chat-only cut, which removed
+agent memory and Reflection: every event loses ``source`` (always
+``"pipeline"``; it told a pipeline episode from a Reflection merge) and every
+``get`` response loses its empty ``agent_cases`` / ``agent_skills`` arrays.
+Nothing else in it changed.
+
 Fields added after the golden was recorded are allowed in the responses and
 rows only when they are listed in :data:`ADDED_FIELDS` and carry their empty
 default, so every addition to a one-to-one output is a reviewed line here.
@@ -440,7 +446,6 @@ def _settings() -> Settings:
             "lancedb": base.lancedb.model_copy(
                 update={"read_consistency_seconds": 0.0}
             ),
-            "memorize": base.memorize.model_copy(update={"mode": "chat"}),
         }
     )
 
@@ -453,7 +458,6 @@ def _event_view(event: Event) -> dict[str, Any]:
         "session_id",
         "app_id",
         "project_id",
-        "source",
         "language",
         "episode_timestamp_ms",
     )
@@ -496,7 +500,7 @@ async def _run(root: Path) -> dict[str, Any]:
     embedding = FakeEmbeddingProvider(dim=_DIM)
     decider_input = _DeciderInput()
     llm = FakeLLMClient(handler=decider_input)
-    providers = make_providers(llm=llm, embedding=embedding, rerank=None)
+    providers = make_providers(llm=llm, embedding=embedding)
     stores = build_stores(memory_root, storage.sqlite)
     deps = MemoryDeps(
         llm=llm,

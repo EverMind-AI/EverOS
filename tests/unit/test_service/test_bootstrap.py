@@ -1,6 +1,6 @@
 """``build_application`` assembles the app; ``Application`` starts and stops it.
 
-Assembly: one call turns settings into three facades over one set of
+Assembly: one call turns settings into two facades over one set of
 providers, stores and indexes, with every OME strategy registered whatever
 the tier -- the tier lives in the providers the strategies are bound to, so
 a tier change needs a restart. Building opens nothing and writes nothing.
@@ -19,19 +19,17 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.llm import LLMCaseJudge, LLMNotConfiguredError
+from everos.component.llm import LLMNotConfiguredError
 from everos.config import OmeSettings, Settings, load_settings
 from everos.infra.ome import OmeEventBus
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import (
     Application,
-    KnowledgeService,
     MemoryService,
     OpsService,
     build_application,
     configure_process,
 )
-from everos.service.bootstrap import _case_judge
 from tests.fakes import (
     FakeEmbeddingProvider,
     make_application,
@@ -51,7 +49,7 @@ _STARTED = [
 ]
 
 
-_OPTIONAL_SECTIONS = ("DECIDER", "MULTIMODAL", "EMBEDDING", "RERANK")
+_OPTIONAL_SECTIONS = ("DECIDER", "MULTIMODAL", "EMBEDDING")
 
 
 @pytest.fixture
@@ -81,16 +79,15 @@ def _build(settings: Settings, **providers: object) -> Application:
 # ── assembly ───────────────────────────────────────────────────────────────
 
 
-def test_settings_without_optional_providers_build_three_facades_without_disk(
+def test_settings_without_optional_providers_build_two_facades_without_disk(
     settings: Settings, tmp_path: Path
 ) -> None:
     application = build_application(settings)
 
     assert isinstance(application.memory, MemoryService)
-    assert isinstance(application.knowledge, KnowledgeService)
     assert isinstance(application.ops, OpsService)
     snapshot = application.capabilities
-    assert (snapshot.embedding, snapshot.rerank) == (False, False)
+    assert snapshot.embedding is False
     assert snapshot.index_backend == settings.index.backend
     assert not (tmp_path / "root").exists(), "building must not write anything"
 
@@ -158,17 +155,6 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     assert memorizer._boundary._llm is llm
     assert memorizer._boundary._session_buffer is memory._search_manager._session_buffer
     assert memorizer._extractions is memory._extractions
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-def test_the_case_judge_exists_only_with_the_gate_on(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool
-) -> None:
-    monkeypatch.setenv("EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED", str(enabled))
-    load_settings.cache_clear()
-    judge = _case_judge(load_settings(), unscripted_llm())
-    assert isinstance(judge, LLMCaseJudge) is enabled
-    load_settings.cache_clear()
 
 
 def _with(settings: Settings, **sections: object) -> Settings:

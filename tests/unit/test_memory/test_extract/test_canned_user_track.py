@@ -18,7 +18,7 @@ from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
-from everalgo.user_memory import EpisodeReflector, ProfileExtractor
+from everalgo.user_memory import ProfileExtractor
 
 from everos.memory.extract.pipeline.episode import extract_cell
 from tests.fakes import user_track_llm, user_track_script
@@ -128,14 +128,3 @@ async def test_profile_update_scripts(script: str, explicit: int) -> None:
         llm=user_track_llm(profile_update=script)
     ).aextract([_CELL], sender_id="u_alice", old_profile=old)
     assert len(profile.explicit_info) == explicit
-
-
-async def test_reflect_script() -> None:
-    episodes = [
-        AlgoEpisode(
-            owner_id="u_alice", episode=f"e{i}", summary=f"s{i}", timestamp=_TS + i
-        )
-        for i in range(2)
-    ]
-    merged = await EpisodeReflector(llm=user_track_llm()).areflect(episodes)
-    assert merged.summary == json.loads(user_track_script("reflect"))["summary"]

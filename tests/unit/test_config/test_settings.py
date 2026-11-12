@@ -107,16 +107,12 @@ def test_load_settings_is_cached() -> None:
     assert c is not a
 
 
-def test_embedding_rerank_defaults() -> None:
+def test_embedding_defaults() -> None:
     s = Settings()
     assert s.embedding.model == "Qwen/Qwen3-Embedding-4B"
     assert s.embedding.base_url == "https://api.deepinfra.com/v1/openai"
     assert s.embedding.api_key.get_secret_value() == ""
     assert s.embedding.timeout_seconds == 30.0
-    assert s.rerank.model == "Qwen/Qwen3-Reranker-4B"
-    assert s.rerank.base_url == "https://api.deepinfra.com/v1/inference"
-    assert s.rerank.api_key.get_secret_value() == ""
-    assert s.rerank.timeout_seconds == 30.0
     assert s.llm.api_key.get_secret_value() == ""
 
 

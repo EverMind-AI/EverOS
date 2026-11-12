@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from everos.infra.persistence.markdown import (
-    AgentScopedFrontmatter,
     BaseFrontmatter,
+    GroupScopedFrontmatter,
     UserScopedFrontmatter,
 )
 
@@ -46,14 +46,14 @@ def test_user_scoped_requires_user_id() -> None:
         UserScopedFrontmatter(id="x", type="t")  # type: ignore[call-arg]
 
 
-def test_agent_scoped_track_default() -> None:
-    fm = AgentScopedFrontmatter(id="x", type="t", agent_id="agent_zhangsan")
-    assert fm.track == "agent"
+def test_group_scoped_track_default() -> None:
+    fm = GroupScopedFrontmatter(id="x", type="t", group_id="trip")
+    assert fm.track == "group"
 
 
-def test_agent_scoped_requires_agent_id() -> None:
+def test_group_scoped_requires_group_id() -> None:
     with pytest.raises(ValidationError):
-        AgentScopedFrontmatter(id="x", type="t")  # type: ignore[call-arg]
+        GroupScopedFrontmatter(id="x", type="t")  # type: ignore[call-arg]
 
 
 def test_track_literal_rejects_invalid_value() -> None:
@@ -65,4 +65,4 @@ def test_scope_dir_classvars() -> None:
     """Scope mixins declare the top-level memory-root subdirectory."""
     assert BaseFrontmatter.SCOPE_DIR == ""  # scope-agnostic by default
     assert UserScopedFrontmatter.SCOPE_DIR == "users"
-    assert AgentScopedFrontmatter.SCOPE_DIR == "agents"
+    assert GroupScopedFrontmatter.SCOPE_DIR == "groups"

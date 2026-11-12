@@ -14,8 +14,6 @@ import pytest
 from everos.core.errors import PathTraversalError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    MarkdownAgentCaseStore,
-    MarkdownAgentSkillStore,
     MarkdownEpisodeStore,
     MarkdownImageMemoryStore,
     MarkdownOwnerDirStore,
@@ -24,8 +22,6 @@ from everos.infra.persistence.markdown import (
 )
 from everos.infra.persistence.markdown import owner_dir as owner_dir_module
 from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
     Episode,
     ImageMemory,
     Profile,
@@ -126,32 +122,6 @@ async def test_owner_delete_inventories_picture_memories(root: MemoryRoot) -> No
     (new,) = await pictures.append_many(_user(), [_picture()], only_if=NO_SOURCE_CHECK)
     assert new.entry_id not in {r.entry_id for r in old}
     assert new.entry_id.endswith("03")
-
-
-async def test_agent_owner_delete_counts_skill_dirs(root: MemoryRoot) -> None:
-    agent = Scope(app_id="app", project_id="p", owner_id="a1", owner_type="agent")
-    await MarkdownAgentCaseStore(root).append(
-        agent,
-        AgentCase(
-            owner_id="a1",
-            task_intent="t",
-            approach="a",
-            quality_score=0.5,
-            timestamp=_TS,
-            parent_id="mc_1",
-            session_id="s1",
-        ),
-        only_if=NO_SOURCE_CHECK,
-    )
-    skills = MarkdownAgentSkillStore(root)
-    for name in ("x", "y"):
-        await skills.write(agent, AgentSkill(id=name, name=name, content="c"))
-
-    deletion = await MarkdownOwnerDirStore(root).delete(agent)
-
-    assert len(deletion.refs["agent_case"]) == 1
-    assert deletion.count == 1 + 2
-    assert not (root.agents_dir("app", "p") / "a1" / "skills").exists()
 
 
 async def test_delete_of_missing_owner_is_empty(root: MemoryRoot) -> None:
@@ -278,26 +248,15 @@ async def test_owners_with_session(root: MemoryRoot) -> None:
     await episodes.append_many(
         _user("u2"), [_episode("x", "s10")], only_if=NO_SOURCE_CHECK
     )
-    agent = Scope(app_id="app", project_id="p", owner_id="a1", owner_type="agent")
-    await MarkdownAgentCaseStore(root).append(
-        agent,
-        AgentCase(
-            owner_id="a1",
-            task_intent="t",
-            approach="a",
-            quality_score=0.5,
-            timestamp=_TS,
-            parent_id="mc_1",
-            session_id="s1",
-        ),
-        only_if=NO_SOURCE_CHECK,
-    )
+    # An older store's agent memory mentions the session too; EverOS 2.0 has
+    # no agent memory, so no agent is an owner of it.
+    legacy = root.users_dir("app", "p").parent / "agents" / "a1" / ".cases"
+    legacy.mkdir(parents=True)
+    (legacy / "agent_case-2025-05-14.md").write_text("**session_id**: s1\n")
 
     found = await MarkdownOwnerDirStore(root).owners_with_session("app", "p", "s1")
 
     # u2 only mentions s10: the slow path may over-include (its caller
-    # matches exactly), so u2 is allowed but u1 and a1 are required.
-    assert {(s.owner_type, s.owner_id) for s in found} >= {
-        ("user", "u1"),
-        ("agent", "a1"),
-    }
+    # matches exactly), so u2 is allowed but u1 is required.
+    assert ("user", "u1") in {(s.owner_type, s.owner_id) for s in found}
+    assert {s.owner_type for s in found} == {"user"}

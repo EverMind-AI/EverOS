@@ -131,7 +131,6 @@ class GroupWorld:
         llm: Any = None,
         decider: Any = None,
         settings: Settings | None = None,
-        mode: str = "chat",
     ) -> AsyncIterator[GroupWorld]:
         """The stack over ``tmp_path``.
 
@@ -147,7 +146,6 @@ class GroupWorld:
                 "lancedb": base.lancedb.model_copy(
                     update={"read_consistency_seconds": 0.0}
                 ),
-                "memorize": base.memorize.model_copy(update={"mode": mode}),
             }
         )
         root = MemoryRoot(tmp_path)
@@ -180,7 +178,6 @@ class GroupWorld:
                 llm=model,
                 decider=decider or FakeLLMClient(handler=_keep_first_ten),
                 embedding=embedding,
-                rerank=None,
             ),
             deps,
             build_tokenizer(),

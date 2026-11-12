@@ -177,8 +177,15 @@ def open_storage_view(
 
 
 def index_repositories(**repos: Any) -> IndexRepositories:
-    """An :class:`IndexRepositories` with ``repos`` and unused ports elsewhere."""
+    """An :class:`IndexRepositories` with ``repos`` and unused ports elsewhere.
+
+    A name that is no table of it fails: a double handed to a table that does
+    not exist would otherwise be dropped without a word.
+    """
     names = [field.name for field in dataclasses.fields(IndexRepositories)]
+    unknown = sorted(set(repos) - set(names))
+    if unknown:
+        raise TypeError(f"IndexRepositories has no table {unknown}")
     return IndexRepositories(
         **{name: repos.get(name, UnusedPort(f"{name} index")) for name in names}
     )
@@ -189,8 +196,6 @@ def handler_deps(
     memory_root: MemoryRoot,
     tokenizer: Any,
     index: IndexRepositories | None = None,
-    knowledge_documents: Any = None,
-    knowledge_topics: Any = None,
     embedding: Any = None,
     vision_embedding: Any = None,
     fence: Any = None,
@@ -201,8 +206,6 @@ def handler_deps(
         memory_root=memory_root,
         tokenizer=tokenizer,
         index=index or index_repositories(),
-        knowledge_documents=knowledge_documents or UnusedPort("knowledge_documents"),
-        knowledge_topics=knowledge_topics or UnusedPort("knowledge_topics"),
         embedding=embedding,
         vision_embedding=vision_embedding,
         fence=fence,

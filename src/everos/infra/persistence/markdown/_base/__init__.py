@@ -16,14 +16,9 @@ External usage (IO + parse):
 
 External usage (frontmatter schema chassis):
     from everos.infra.persistence.markdown import (
-        BaseFrontmatter, UserScopedFrontmatter, AgentScopedFrontmatter,
-        DailyLogPathMixin, SkillPathMixin, ProfilePathMixin,
-        KnowledgeScopedMixin, KnowledgeDocumentPathMixin,
-        KnowledgeTopicPathMixin,
+        BaseFrontmatter, UserScopedFrontmatter, GroupScopedFrontmatter,
+        DailyLogPathMixin, ProfilePathMixin,
     )
-
-External usage (path safety):
-    from everos.infra.persistence.markdown import sanitize_dirname
 """
 
 from .entries import Entry as Entry
@@ -33,38 +28,27 @@ from .entries import find_entry as find_entry
 from .entries import parse_structured_entry as parse_structured_entry
 from .entries import render_structured_entry as render_structured_entry
 from .entries import split_entries as split_entries
-from .frontmatter import AgentScopedFrontmatter as AgentScopedFrontmatter
 from .frontmatter import BaseFrontmatter as BaseFrontmatter
 from .frontmatter import DailyLogPathMixin as DailyLogPathMixin
 from .frontmatter import GroupScopedFrontmatter as GroupScopedFrontmatter
-from .frontmatter import KnowledgeDocumentPathMixin as KnowledgeDocumentPathMixin
-from .frontmatter import KnowledgeScopedMixin as KnowledgeScopedMixin
-from .frontmatter import KnowledgeTopicPathMixin as KnowledgeTopicPathMixin
 from .frontmatter import ProfilePathMixin as ProfilePathMixin
-from .frontmatter import SkillPathMixin as SkillPathMixin
 from .frontmatter import UserScopedFrontmatter as UserScopedFrontmatter
 from .frontmatter import dump_frontmatter as dump_frontmatter
 from .frontmatter import parse_frontmatter as parse_frontmatter
 from .parsed import ParsedMarkdown as ParsedMarkdown
-from .path_safety import sanitize_dirname as sanitize_dirname
 from .reader import MarkdownReader as MarkdownReader
 from .writer import MarkdownWriter as MarkdownWriter
 
 __all__ = [
-    "AgentScopedFrontmatter",
     "BaseFrontmatter",
     "DailyLogPathMixin",
     "Entry",
     "EntryId",
     "GroupScopedFrontmatter",
-    "KnowledgeDocumentPathMixin",
-    "KnowledgeScopedMixin",
-    "KnowledgeTopicPathMixin",
     "MarkdownReader",
     "MarkdownWriter",
     "ParsedMarkdown",
     "ProfilePathMixin",
-    "SkillPathMixin",
     "StructuredEntry",
     "UserScopedFrontmatter",
     "dump_frontmatter",
@@ -72,6 +56,5 @@ __all__ = [
     "parse_frontmatter",
     "parse_structured_entry",
     "render_structured_entry",
-    "sanitize_dirname",
     "split_entries",
 ]

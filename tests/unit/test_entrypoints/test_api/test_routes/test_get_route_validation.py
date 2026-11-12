@@ -22,7 +22,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.service import build_application
+from everos.service import NO_AGENT_MEMORY, build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import Storage
 
@@ -109,15 +109,32 @@ async def test_invalid_sort_order_returns_422(client: AsyncClient) -> None:
 
 
 async def test_owner_memory_type_mismatch_returns_422(client: AsyncClient) -> None:
-    """``user`` + ``agent_case`` is a hard pydantic error."""
+    """``user`` + a group kind is a hard pydantic error."""
     resp = await client.post(
         "/api/v1/memory/get",
         json={
             "user_id": "u1",
-            "memory_type": "agent_case",
+            "memory_type": "image_memory",
         },
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"user_id": "u1", "memory_type": "agent_case"},
+        {"agent_id": "a1", "memory_type": "agent_skill"},
+        {"agent_id": "a1", "memory_type": "episode"},
+    ],
+)
+async def test_an_agent_listing_returns_422_saying_why(
+    client: AsyncClient, body: dict[str, str]
+) -> None:
+    """EverOS 2.0 has no agent memory: an agent scope or kind is refused."""
+    resp = await client.post("/api/v1/memory/get", json=body)
+    assert resp.status_code == 422
+    assert NO_AGENT_MEMORY in resp.json()["error"]["message"]
 
 
 # ── service.compile_filters_for_get 422 ───────────────────────────────

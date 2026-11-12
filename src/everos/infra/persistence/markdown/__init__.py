@@ -5,17 +5,15 @@ parse + frontmatter chassis) and provides:
 
     * concrete frontmatter schemas under :mod:`._mds`
     * concrete business writers under :mod:`._writers`
-      (``BaseDailyWriter`` + subclasses, ``AgentSkillWriter``)
+      (``BaseDailyWriter`` + subclasses)
     * concrete business readers under :mod:`._readers`
-      (``BaseDailyReader`` + subclasses, ``AgentSkillReader``)
+      (``BaseDailyReader`` + subclasses)
 
 External usage::
 
     from everos.infra.persistence.markdown import (
         BaseDailyWriter, BaseDailyReader,
         EpisodeWriter, EpisodeReader, EpisodeDailyFrontmatter,
-        AgentCaseDailyFrontmatter,
-        AgentSkillFrontmatter, AgentSkillWriter, AgentSkillReader,
     )
 
 Outer layers MUST go through this top-level package because
@@ -23,20 +21,15 @@ Outer layers MUST go through this top-level package because
 layers by import-linter.
 """
 
-from ._base import AgentScopedFrontmatter as AgentScopedFrontmatter
 from ._base import BaseFrontmatter as BaseFrontmatter
 from ._base import DailyLogPathMixin as DailyLogPathMixin
 from ._base import Entry as Entry
 from ._base import EntryId as EntryId
 from ._base import GroupScopedFrontmatter as GroupScopedFrontmatter
-from ._base import KnowledgeDocumentPathMixin as KnowledgeDocumentPathMixin
-from ._base import KnowledgeScopedMixin as KnowledgeScopedMixin
-from ._base import KnowledgeTopicPathMixin as KnowledgeTopicPathMixin
 from ._base import MarkdownReader as MarkdownReader
 from ._base import MarkdownWriter as MarkdownWriter
 from ._base import ParsedMarkdown as ParsedMarkdown
 from ._base import ProfilePathMixin as ProfilePathMixin
-from ._base import SkillPathMixin as SkillPathMixin
 from ._base import StructuredEntry as StructuredEntry
 from ._base import UserScopedFrontmatter as UserScopedFrontmatter
 from ._base import dump_frontmatter as dump_frontmatter
@@ -44,10 +37,7 @@ from ._base import find_entry as find_entry
 from ._base import parse_frontmatter as parse_frontmatter
 from ._base import parse_structured_entry as parse_structured_entry
 from ._base import render_structured_entry as render_structured_entry
-from ._base import sanitize_dirname as sanitize_dirname
 from ._base import split_entries as split_entries
-from ._mds import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
-from ._mds import AgentSkillFrontmatter as AgentSkillFrontmatter
 from ._mds import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from ._mds import GroupEpisodeDailyFrontmatter as GroupEpisodeDailyFrontmatter
 from ._mds import GroupFrontmatter as GroupFrontmatter
@@ -63,31 +53,19 @@ from ._mds import (
 )
 from ._mds import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
-from ._mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
-from ._mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from ._mds import SceneDailyFrontmatter as SceneDailyFrontmatter
 from ._mds import UserProfileFrontmatter as UserProfileFrontmatter
 from ._mds import group_profile_item_from_entry as group_profile_item_from_entry
 from ._mds import render_group_profile_entry as render_group_profile_entry
-from ._readers import AgentCaseReader as AgentCaseReader
-from ._readers import AgentSkillReader as AgentSkillReader
 from ._readers import BaseDailyReader as BaseDailyReader
 from ._readers import EpisodeReader as EpisodeReader
-from ._readers import ensure_taxonomy as ensure_taxonomy
-from ._readers import parse_taxonomy as parse_taxonomy
-from ._writers import AgentCaseWriter as AgentCaseWriter
-from ._writers import AgentSkillWriter as AgentSkillWriter
 from ._writers import BaseDailyWriter as BaseDailyWriter
 from ._writers import EpisodeWriter as EpisodeWriter
 from ._writers import GroupProfileWriter as GroupProfileWriter
 from ._writers import GroupWriter as GroupWriter
 from ._writers import ImageMemoryWriter as ImageMemoryWriter
-from ._writers import KnowledgeWriter as KnowledgeWriter
 from ._writers import SceneWriter as SceneWriter
-from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
 from .owner_dir import MarkdownOwnerDirStore as MarkdownOwnerDirStore
-from .stores import MarkdownAgentCaseStore as MarkdownAgentCaseStore
-from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
 from .stores import MarkdownGroupProfileStore as MarkdownGroupProfileStore
 from .stores import MarkdownImageMemoryStore as MarkdownImageMemoryStore
@@ -95,13 +73,6 @@ from .stores import MarkdownProfileStore as MarkdownProfileStore
 from .stores import MarkdownSceneStore as MarkdownSceneStore
 
 __all__ = [
-    "AgentCaseDailyFrontmatter",
-    "AgentCaseReader",
-    "AgentCaseWriter",
-    "AgentScopedFrontmatter",
-    "AgentSkillFrontmatter",
-    "AgentSkillReader",
-    "AgentSkillWriter",
     "BaseDailyReader",
     "BaseDailyWriter",
     "BaseFrontmatter",
@@ -123,18 +94,9 @@ __all__ = [
     "GroupWriter",
     "ImageMemoryDailyFrontmatter",
     "ImageMemoryWriter",
-    "KnowledgeDocumentFrontmatter",
-    "KnowledgeDocumentPathMixin",
-    "KnowledgeScopedMixin",
-    "KnowledgeTopicFrontmatter",
-    "KnowledgeTopicPathMixin",
-    "KnowledgeWriter",
-    "MarkdownAgentCaseStore",
-    "MarkdownAgentSkillStore",
     "MarkdownEpisodeStore",
     "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
-    "MarkdownKnowledgeStore",
     "MarkdownOwnerDirStore",
     "MarkdownProfileStore",
     "MarkdownReader",
@@ -144,19 +106,15 @@ __all__ = [
     "ProfilePathMixin",
     "SceneDailyFrontmatter",
     "SceneWriter",
-    "SkillPathMixin",
     "StructuredEntry",
     "UserProfileFrontmatter",
     "UserScopedFrontmatter",
     "dump_frontmatter",
-    "ensure_taxonomy",
     "find_entry",
     "group_profile_item_from_entry",
     "parse_frontmatter",
     "parse_structured_entry",
-    "parse_taxonomy",
     "render_group_profile_entry",
     "render_structured_entry",
-    "sanitize_dirname",
     "split_entries",
 ]

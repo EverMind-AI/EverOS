@@ -26,13 +26,10 @@ from .forget_log import MessageForgetStore as MessageForgetStore
 from .groups import GroupRecord as GroupRecord
 from .groups import GroupStore as GroupStore
 from .images import ImageStore as ImageStore
-from .indexes import AgentCaseIndex as AgentCaseIndex
-from .indexes import AgentSkillIndex as AgentSkillIndex
 from .indexes import EpisodeIndex as EpisodeIndex
 from .indexes import GroupProfileIndex as GroupProfileIndex
 from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
-from .indexes import KnowledgeTopicIndex as KnowledgeTopicIndex
 from .indexes import ProfileIndex as ProfileIndex
 from .query import All as All
 from .query import AnyOf as AnyOf
@@ -47,7 +44,6 @@ from .query import Page as Page
 from .query import PageResult as PageResult
 from .query import Scalar as Scalar
 from .query import Scope as Scope
-from .query import ScoredKnowledgeTopic as ScoredKnowledgeTopic
 from .query import SearchHit as SearchHit
 from .query import SessionKey as SessionKey
 from .query import Stored as Stored
@@ -67,14 +63,10 @@ from .query import primary_key as primary_key
 from .stores import LOST_STATUS_WRITE as LOST_STATUS_WRITE
 from .stores import NO_SOURCE_CHECK as NO_SOURCE_CHECK
 from .stores import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
-from .stores import AgentCaseStore as AgentCaseStore
-from .stores import AgentSkillStore as AgentSkillStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
 from .stores import GroupProfileStore as GroupProfileStore
 from .stores import ImageMemoryStore as ImageMemoryStore
-from .stores import KnowledgeCatalog as KnowledgeCatalog
-from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import NoSourceCheck as NoSourceCheck
@@ -82,14 +74,12 @@ from .stores import OwnerDirDeletion as OwnerDirDeletion
 from .stores import OwnerDirStore as OwnerDirStore
 from .stores import PendingBatch as PendingBatch
 from .stores import ProfileStore as ProfileStore
-from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SceneStore as SceneStore
 from .stores import SessionBufferStore as SessionBufferStore
 from .stores import SessionPurgeStore as SessionPurgeStore
 from .stores import SourceCheck as SourceCheck
 from .stores import Withdrawal as Withdrawal
 from .stores import WithdrawnEntry as WithdrawnEntry
-from .stores import WrittenDocument as WrittenDocument
 from .strategy import AppliesTo as AppliesTo
 from .strategy import Counter as Counter
 from .strategy import Cron as Cron
@@ -103,10 +93,6 @@ __all__ = [
     "LOST_STATUS_WRITE",
     "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
-    "AgentCaseIndex",
-    "AgentCaseStore",
-    "AgentSkillIndex",
-    "AgentSkillStore",
     "All",
     "AnyOf",
     "AppliesTo",
@@ -134,9 +120,6 @@ __all__ = [
     "In",
     "IndexEraser",
     "IsNull",
-    "KnowledgeCatalog",
-    "KnowledgeStore",
-    "KnowledgeTopicIndex",
     "ManualTick",
     "MemcellStore",
     "MemorizeInboxStore",
@@ -151,11 +134,9 @@ __all__ = [
     "PendingBatch",
     "ProfileIndex",
     "ProfileStore",
-    "ReflectionReportStore",
     "Scalar",
     "SceneStore",
     "Scope",
-    "ScoredKnowledgeTopic",
     "SearchHit",
     "SessionBufferStore",
     "SessionKey",
@@ -167,7 +148,6 @@ __all__ = [
     "Trigger",
     "Withdrawal",
     "WithdrawnEntry",
-    "WrittenDocument",
     "all_of",
     "any_of",
     "compare",

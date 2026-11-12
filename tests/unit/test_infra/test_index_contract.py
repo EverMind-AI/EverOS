@@ -194,15 +194,12 @@ def test_every_backend_satisfies_the_ports(
     assert all(isinstance(repo, IndexRepository) for repo in repos)
 
 
-def test_the_registered_repository_set_is_the_seven_business_tables() -> None:
+def test_the_registered_repository_set_is_the_four_business_tables() -> None:
     names = [schema.TABLE_NAME for schema in BUSINESS_SCHEMAS]
     assert names == [
         "episode",
-        "agent_case",
-        "agent_skill",
         "image_memory",
         "user_profile",
-        "knowledge_topic",
         "group_profile_item",
     ]
 
@@ -323,11 +320,8 @@ async def test_count_duplicate_keys_uses_the_key_only_backend_read(
         assert await derived.repositories.episode.count_duplicate_keys() == 1
     assert set(counts) == {
         "episode",
-        "agent_case",
-        "agent_skill",
         "image_memory",
         "user_profile",
-        "knowledge_topic",
         "group_profile_item",
     }
 
@@ -452,9 +446,9 @@ def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
 
 
 async def test_bulk_reads_can_skip_vector_columns(derived: DerivedIndex) -> None:
-    """Cascade diffs and agent-skill / reflection hydration read
-    thousands of rows but never touch the vectors; materialising them as
-    Python floats cost ~1.2 GB per pass on a 25k-row daily log.
+    """Cascade diffs read thousands of rows but never touch the vectors;
+    materialising them as Python floats cost ~1.2 GB per pass on a 25k-row
+    daily log.
     """
     rows = [_episode(number) for number in range(3)]
     for row in rows:
@@ -490,11 +484,10 @@ async def test_writing_back_a_projected_row_destroys_the_stored_vector(
     stops being reachable by vector search. Nothing logs it.
 
     No production caller does this today: the cascade diff reads two
-    scalars and upserts freshly built rows, and neither the reflection
-    orchestrator nor agent-skill hydration upserts at all. This pins the
-    hazard so that a future caller cannot introduce it in silence -- if
-    this assertion ever fails because a guard was added, that is an
-    improvement, and this test should become the guard's test.
+    scalars and upserts freshly built rows. This pins the hazard so that a
+    future caller cannot introduce it in silence -- if this assertion ever
+    fails because a guard was added, that is an improvement, and this test
+    should become the guard's test.
     """
     row = _episode(0)
     row.vector = [0.5] * 1024

@@ -10,12 +10,9 @@ from pydantic import BaseModel
 
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade._projections import (
-    AgentCaseHandler,
-    AgentSkillHandler,
     EpisodeHandler,
     HandlerDeps,
     ImageMemoryHandler,
-    KnowledgeTopicHandler,
 )
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.persistence.index import VECTOR_PROJECTIONS
@@ -54,40 +51,7 @@ class RecordingEmbedding:
 async def _normal_row(
     kind: str, deps: HandlerDeps, *, subject: str = "episode subject"
 ) -> BaseModel:
-    if kind == "agent_skill":
-        path = deps.memory_root.root / "agents/a/skills/s/SKILL.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "---\nagent_id: a\nname: s\ndescription: useful skill\n---\nBody.\n"
-        )
-        await AgentSkillHandler(deps).handle_added_or_modified(
-            str(path.relative_to(deps.memory_root.root))
-        )
-        return (await deps.index.agent_skill.scan(with_vectors=True))[0]
-    if kind == "knowledge_topic":
-        return await KnowledgeTopicHandler(deps)._build_lance_row(
-            {
-                "node_id": "n",
-                "doc_id": "d",
-                "category_id": "c",
-                "app_id": "default",
-                "project_id": "default",
-                "topic_name": "topic",
-                "topic_path": "topic",
-                "depth": 0,
-                "parent_node_id": None,
-                "summary": "topic summary",
-                "content": "not the embedding source",
-                "content_labels": [],
-            },
-            "a" * 64,
-            "knowledge/topic.md",
-        )
-    handlers = {
-        "episode": EpisodeHandler,
-        "agent_case": AgentCaseHandler,
-        "image_memory": ImageMemoryHandler,
-    }
+    handlers = {"episode": EpisodeHandler, "image_memory": ImageMemoryHandler}
     entry = ParsedEntry(
         entry_id="entry",
         content_sha256="a" * 64,
@@ -97,12 +61,10 @@ async def _normal_row(
             start=0,
             end=0,
             header=None,
-            inline={"timestamp": "2026-10-27T00:00:00+00:00", "quality_score": "0.9"},
+            inline={"timestamp": "2026-10-27T00:00:00+00:00"},
             sections={
                 "Content": "episode body",
                 "Subject": subject,
-                "TaskIntent": "case intent",
-                "Approach": "not the embedding source",
                 "Description": "picture description",
             },
         ),

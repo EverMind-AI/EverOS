@@ -229,14 +229,6 @@ def test_the_user_predicate_is_the_one_recalls_always_used() -> None:
         eq("project_id", "p"),
         is_null("deprecated_by"),
     )
-    assert owner_predicate(
-        owner_id="b", owner_type="agent", app_id="a", project_id="p"
-    ) == all_of(
-        eq("owner_id", "b"),
-        eq("owner_type", "agent"),
-        eq("app_id", "a"),
-        eq("project_id", "p"),
-    )
 
 
 # ── the two settings of section 15 ───────────────────────────────────────

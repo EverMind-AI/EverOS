@@ -7,10 +7,9 @@ both under one lock); this handler is what re-derives them afterwards -- after
 a hand edit of the file, and on ``everos cascade rebuild`` -- through the same
 projection, so a rebuilt mirror reads exactly as the written one did.
 
-No LanceDB table, no embedding: like the knowledge-document handler, this kind
-writes SQLite only. A log that no longer folds (a hand edit introduced a second
-open interval, say) raises ``ValueError``, which the worker records as
-unrecoverable instead of retrying.
+No LanceDB table, no embedding: this kind writes SQLite only. A log that no
+longer folds (a hand edit introduced a second open interval, say) raises
+``ValueError``, which the worker records as unrecoverable instead of retrying.
 """
 
 from __future__ import annotations

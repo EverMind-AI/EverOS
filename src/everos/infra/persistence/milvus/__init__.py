@@ -21,12 +21,9 @@ from .milvus_manager import MilvusConfigurationError as MilvusConfigurationError
 from .milvus_manager import MilvusConnection as MilvusConnection
 from .milvus_manager import MilvusSchemaMismatchError as MilvusSchemaMismatchError
 from .repos import (
-    _AgentCaseRepo,
-    _AgentSkillRepo,
     _EpisodeRepo,
     _GroupProfileItemRepo,
     _ImageMemoryRepo,
-    _KnowledgeTopicRepo,
     _UserProfileRepo,
 )
 from .repository import MilvusRepoBase as MilvusRepoBase
@@ -63,11 +60,8 @@ class MilvusIndexBackend:
         self._episode = _EpisodeRepo(connection, dim=dim)
         self.repositories = IndexRepositories(
             episode=self._episode,
-            agent_case=_AgentCaseRepo(connection, dim=dim),
-            agent_skill=_AgentSkillRepo(connection, dim=dim),
             image_memory=_ImageMemoryRepo(connection, dim=dim, column_dims=column_dims),
             user_profile=_UserProfileRepo(connection, dim=dim),
-            knowledge_topic=_KnowledgeTopicRepo(connection, dim=dim),
             group_profile_item=_GroupProfileItemRepo(connection, dim=dim),
         )
 

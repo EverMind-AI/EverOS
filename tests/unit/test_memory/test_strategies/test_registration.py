@@ -12,13 +12,7 @@ from everos.memory.events import EpisodeExtracted
 from everos.memory.ports import Idle, Immediate, StrategySpec
 from everos.memory.strategies import (
     STRATEGY_SPECS,
-    extract_agent_case,
-    extract_agent_skill,
     extract_user_profile,
-    finish_reflection,
-    reflect_episodes,
-    trigger_profile_clustering,
-    trigger_skill_clustering,
     update_group_profile,
     update_group_scenes,
     update_member_profiles,
@@ -31,14 +25,8 @@ def test_every_strategy_function_has_one_spec_under_its_name() -> None:
     by_name = {spec.name: spec.fn for spec in STRATEGY_SPECS}
     assert len(by_name) == len(STRATEGY_SPECS)
     assert by_name == {
-        "extract_agent_case": extract_agent_case,
-        "trigger_skill_clustering": trigger_skill_clustering,
-        "extract_agent_skill": extract_agent_skill,
-        "trigger_profile_clustering": trigger_profile_clustering,
         "extract_user_profile": extract_user_profile,
         "update_user_scenes": update_user_scenes,
-        "reflect_episodes": reflect_episodes,
-        "finish_reflection": finish_reflection,
         "update_member_profiles": update_member_profiles,
         "update_group_scenes": update_group_scenes,
         "update_group_profile": update_group_profile,
@@ -88,11 +76,7 @@ def test_an_episode_reaches_the_strategies_of_its_space_only(
     def runs(owner_type: str) -> set[str]:
         return {s.name for s in STRATEGY_SPECS if _admits(s, _episode(owner_type))}
 
-    assert runs("user") == {
-        "extract_user_profile",
-        "update_user_scenes",
-        "trigger_profile_clustering",
-    }
+    assert runs("user") == {"extract_user_profile", "update_user_scenes"}
     assert runs("group") == {
         "update_member_profiles",
         "update_group_scenes",

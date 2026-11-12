@@ -1,7 +1,8 @@
 """``POST /memory/delete`` at the route: validation, envelope, error codes.
 
 2.0 has no hard delete: the service forgets, and the envelope carries the
-forgets' ids. The free-text ``note`` of a by-id delete never reaches it.
+forgets' ids. The free-text ``note`` of a by-id delete never reaches it. 2.0
+has no agent memory: a delete naming ``agent_id`` is refused.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import SessionBusyError
 from everos.entrypoints.api.app import create_app
+from everos.service import NO_AGENT_MEMORY
 from everos.service.memory import DeleteResult
 from tests.fakes import StubMemoryService, make_application
 
@@ -83,8 +85,26 @@ async def test_ok_answers_filters_and_count_in_the_envelope(
         "forget_ids": ["fg_0123456789abcdef"],
     }
     memory.delete.assert_awaited_once_with(
-        app_id="default", project_id="p", user_id=None, agent_id=None, session_id="s1"
+        app_id="default", project_id="p", user_id=None, session_id="s1"
     )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"agent_id": "a1"},
+        {"user_id": "u1", "agent_id": "a1"},
+        {"agent_id": "a1", "session_id": "s1"},
+    ],
+)
+async def test_an_agent_delete_is_refused_with_no_agent_memory(
+    client: AsyncClient, memory: StubMemoryService, body: dict[str, Any]
+) -> None:
+    resp = await client.post("/api/v2/memory/delete", json=body)
+
+    assert resp.status_code == 422, resp.text
+    assert NO_AGENT_MEMORY in resp.json()["error"]["message"]
+    memory.delete.assert_not_awaited()
 
 
 async def test_session_busy_is_503_with_its_code(

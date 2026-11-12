@@ -2,11 +2,10 @@
 
 Path: ``users/<scope_id>/images/image-<YYYY-MM-DD>.md``.
 
-Deliberately *not* dot-prefixed, unlike an agent's ``.cases/``: an image memory
-is material the user asked to have remembered, and its original is referenced
-by a relative path so an editor renders the picture inline (see
-:mod:`everos.component.images` for the layout the relative path resolves
-against).
+Deliberately *not* dot-prefixed: an image memory is material the user asked
+to have remembered, and its original is referenced by a relative path so an
+editor renders the picture inline (see :mod:`everos.component.images` for the
+layout the relative path resolves against).
 
 One entry per picture *occurrence*, not per file: the same picture sent in
 two sessions is one file under ``figures/`` and two entries here, because the

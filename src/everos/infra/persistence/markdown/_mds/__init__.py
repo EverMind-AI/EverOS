@@ -5,7 +5,7 @@ frontmatter class here, subclassing one of the chassis classes from
 :mod:`everos.infra.persistence.markdown._base`:
 
     * :class:`UserScopedFrontmatter` for user-track records
-    * :class:`AgentScopedFrontmatter` for agent-track records
+    * :class:`GroupScopedFrontmatter` for a group's records
     * :class:`BaseFrontmatter` for scope-agnostic records (rare)
 
 Schemas drive path resolution via ClassVars; each storage strategy has
@@ -15,9 +15,6 @@ its own conventions:
   ``<prefix>_<date>_<seq>``), ``DIR_NAME`` (sub-directory under
   ``<scope>/<id>/``) and ``FILE_PREFIX`` (leading token of the daily
   filename joined with ``-<YYYY-MM-DD>.md``).
-- **Skill** schemas (:class:`AgentSkillFrontmatter`) pin the directory
-  layout via five ``SKILL_*`` ClassVars (container / dir prefix /
-  main filename / references / scripts).
 - **Profile** schemas declare ``PROFILE_FILENAME`` (``"user.md"`` /
   ``"group.md"``) and inherit ``SCOPE_DIR`` from a scope mixin; the
   writer/reader pair is duck-typed. A person's profile -- ``user.md`` or a
@@ -29,8 +26,6 @@ its entries: :func:`render_group_profile_entry` and
 of it, shared by the store and the cascade.
 """
 
-from .agent_case import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
-from .agent_skill import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .episode import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from .group import GroupEpisodeDailyFrontmatter as GroupEpisodeDailyFrontmatter
 from .group import GroupFrontmatter as GroupFrontmatter
@@ -51,18 +46,12 @@ from .group_profile import (
     render_group_profile_entry as render_group_profile_entry,
 )
 from .image_memory import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
-from .knowledge_document import (
-    KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
-)
-from .knowledge_topic import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from .profile import GroupMemberProfileFrontmatter as GroupMemberProfileFrontmatter
 from .profile import ProfileFrontmatter as ProfileFrontmatter
 from .profile import UserProfileFrontmatter as UserProfileFrontmatter
 from .scene import SceneDailyFrontmatter as SceneDailyFrontmatter
 
 __all__ = [
-    "AgentCaseDailyFrontmatter",
-    "AgentSkillFrontmatter",
     "EpisodeDailyFrontmatter",
     "GroupEpisodeDailyFrontmatter",
     "GroupFrontmatter",
@@ -72,8 +61,6 @@ __all__ = [
     "GroupProfilePendingFrontmatter",
     "GroupSceneDailyFrontmatter",
     "ImageMemoryDailyFrontmatter",
-    "KnowledgeDocumentFrontmatter",
-    "KnowledgeTopicFrontmatter",
     "ProfileFrontmatter",
     "SceneDailyFrontmatter",
     "UserProfileFrontmatter",

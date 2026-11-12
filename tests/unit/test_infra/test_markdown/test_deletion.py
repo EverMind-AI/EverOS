@@ -118,9 +118,9 @@ async def test_emptied_file_kept_and_next_id_not_reused(root: MemoryRoot) -> Non
 
 
 async def test_remove_session_leaves_deprecated_entries(root: MemoryRoot) -> None:
-    """TLA+ MD_Abl_SDClearsKeys: a session deletion must not clear the merge
-    marks of its entries -- a concurrent by-id deletion of the merged episode
-    finds the merge's sources through them."""
+    """TLA+ MD_Abl_SDClearsKeys: a session deletion must not clear the
+    supersession marks of its entries -- the file's ``deprecated_entries`` are
+    what every later read goes by to tell which version replaced which."""
     store = MarkdownEpisodeStore(root)
     (src, _) = await _write(store, _scope(), "s1", "s2")
     await store.deprecate(
@@ -132,7 +132,9 @@ async def test_remove_session_leaves_deprecated_entries(root: MemoryRoot) -> Non
 
     await store.remove_session(_scope(), "s1")
 
-    assert await store.merged_into(_scope(), ["ep_merged"]) == {src.entry_id}
+    assert await store.deprecations(_scope(), src.md_path) == {
+        src.entry_id: "ep_merged"
+    }
 
 
 async def test_remove_takes_the_owner_lock_and_bumps_the_counter(
@@ -172,10 +174,11 @@ async def test_concurrent_append_survives_rewrite(root: MemoryRoot) -> None:
     assert len(on_disk) == len(kept)
 
 
-async def test_merged_into_and_clear_deprecations(root: MemoryRoot) -> None:
-    """B6 (store side): one step of the closure; clearing drops only the keys."""
+async def test_clear_deprecations_drops_only_the_keys(root: MemoryRoot) -> None:
+    """B6 (store side): clearing drops only the named marks; the rest stay."""
     store = MarkdownEpisodeStore(root)
     a, b, c = await _write(store, _scope(), "s1", "s2", "s3")
+    assert a.md_path == b.md_path == c.md_path
     for src, merged in ((a, "ep_m1"), (b, "ep_m1"), (c, "ep_m2")):
         await store.deprecate(
             _scope(),
@@ -184,11 +187,15 @@ async def test_merged_into_and_clear_deprecations(root: MemoryRoot) -> None:
             only_if=NO_SOURCE_CHECK,
         )
 
-    assert await store.merged_into(_scope(), ["ep_m1"]) == {a.entry_id, b.entry_id}
+    assert await store.deprecations(_scope(), a.md_path) == {
+        a.entry_id: "ep_m1",
+        b.entry_id: "ep_m1",
+        c.entry_id: "ep_m2",
+    }
     await store.clear_deprecations(_scope(), [a.entry_id])
-    assert await store.merged_into(_scope(), ["ep_m1", "ep_m2"]) == {
-        b.entry_id,
-        c.entry_id,
+    assert await store.deprecations(_scope(), a.md_path) == {
+        b.entry_id: "ep_m1",
+        c.entry_id: "ep_m2",
     }
 
 

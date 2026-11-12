@@ -11,8 +11,7 @@ segment, at once.
 - **Trigger.** :class:`EpisodeExtracted` of a user's own episode (one per
   one-to-one segment), with or without an embedding provider. A group's
   episode -- a session of two or more people is a group's -- never triggers
-  it, and neither do Reflection's merged episodes: their segments were read
-  already.
+  it.
 - **Input.** The event's segment, read from the SQLite ledger (the event
   carries its id, so nothing waits for the index), and the pictures the owner
   posted in it (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
@@ -65,13 +64,9 @@ logger = get_logger(__name__)
 
 
 def _profile_applies(event: Event, deps: MemoryDeps) -> bool:
-    """A user's segment episode; not a group's, nor Reflection's merged ones."""
+    """A user's segment episode; not a group's."""
     del deps
-    return (
-        isinstance(event, EpisodeExtracted)
-        and event.source == "pipeline"
-        and event.owner_type == "user"
-    )
+    return isinstance(event, EpisodeExtracted) and event.owner_type == "user"
 
 
 def _profile_language(existing: Profile | None, event: EpisodeExtracted) -> str | None:

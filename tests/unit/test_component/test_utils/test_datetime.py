@@ -478,12 +478,12 @@ def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
     """
     import pyarrow as pa
 
-    from everos.infra.persistence.records.agent_case import AgentCase
     from everos.infra.persistence.records.episode import Episode
+    from everos.infra.persistence.records.group_profile_item import GroupProfileItem
     from everos.infra.persistence.records.image_memory import ImageMemory
     from everos.infra.persistence.records.user_profile import UserProfile
 
-    for cls in (Episode, AgentCase, ImageMemory, UserProfile):
+    for cls in (Episode, GroupProfileItem, ImageMemory, UserProfile):
         schema = arrow_schema(cls)
         ts_fields = [f for f in schema if pa.types.is_timestamp(f.type)]
         assert ts_fields, f"{cls.__name__} has no timestamp fields (unexpected)"

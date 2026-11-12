@@ -6,17 +6,12 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.memory.ports import (
-    AgentCaseIndex,
-    AgentCaseStore,
-    AgentSkillIndex,
-    AgentSkillStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
     MemcellStore,
     ProfileIndex,
     ProfileStore,
-    ReflectionReportStore,
 )
 from tests.fakes import make_deps
 
@@ -28,14 +23,9 @@ _DEPS = make_deps()
     [
         (EpisodeStore, _DEPS.stores.episode),
         (ProfileStore, _DEPS.stores.profile),
-        (AgentCaseStore, _DEPS.stores.agent_case),
-        (AgentSkillStore, _DEPS.stores.agent_skill),
         (MemcellStore, _DEPS.stores.memcell),
         (ClusterStore, _DEPS.stores.cluster),
-        (ReflectionReportStore, _DEPS.stores.reflection_report),
         (EpisodeIndex, _DEPS.indexes.episode),
-        (AgentCaseIndex, _DEPS.indexes.agent_case),
-        (AgentSkillIndex, _DEPS.indexes.agent_skill),
         (ProfileIndex, _DEPS.indexes.profile),
         (EmbeddingProvider, _DEPS.embedding),
     ],

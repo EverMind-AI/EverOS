@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +22,6 @@ from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
-    SqliteReflectionReportStore,
     SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
@@ -31,9 +29,6 @@ from everos.infra.persistence.sqlite import (
 from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
 from everos.infra.persistence.sqlite._repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite._repos.memorize_inbox import MemorizeInboxRepo
-from everos.infra.persistence.sqlite._repos.reflection_report import (
-    ReflectionReportRepo,
-)
 from everos.infra.persistence.sqlite._repos.session_cut import SessionCutRepo
 from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
@@ -42,14 +37,12 @@ from everos.memory.models import (
     CanonicalMessage,
     Cluster,
     MemcellRecord,
-    ReflectionReport,
     ToolCall,
 )
 from everos.memory.ports import (
     ClusterStore,
     MemcellStore,
     MemorizeInboxStore,
-    ReflectionReportStore,
     Scope,
     SessionBufferStore,
     SessionKey,
@@ -69,7 +62,6 @@ class _Stores:
     memcell: SqliteMemcellStore
     cluster: SqliteClusterStore
     inbox: SqliteMemorizeInboxStore
-    report: SqliteReflectionReportStore
     factory: async_sessionmaker[AsyncSession]
 
 
@@ -89,9 +81,6 @@ async def stores(tmp_path: Path) -> AsyncIterator[_Stores]:
         memcell=SqliteMemcellStore(MemcellRepo(session_factory=factory)),
         cluster=SqliteClusterStore(ClusterRepo(session_factory=factory)),
         inbox=SqliteMemorizeInboxStore(MemorizeInboxRepo(session_factory=factory)),
-        report=SqliteReflectionReportStore(
-            ReflectionReportRepo(session_factory=factory)
-        ),
         factory=factory,
     )
     yield stores
@@ -116,7 +105,6 @@ async def test_adapters_satisfy_their_ports(stores: _Stores) -> None:
     assert isinstance(stores.memcell, MemcellStore)
     assert isinstance(stores.cluster, ClusterStore)
     assert isinstance(stores.inbox, MemorizeInboxStore)
-    assert isinstance(stores.report, ReflectionReportStore)
 
 
 async def test_session_buffer_round_trips_messages(stores: _Stores) -> None:
@@ -381,58 +369,6 @@ async def test_memcell_reads_frozen_payload_from_sqlite(stores: _Stores) -> None
     assert tool_result.timestamp == 1_700_000_000_456
 
 
-async def test_memcell_case_extraction_outcome_is_stamped(stores: _Stores) -> None:
-    cell = MemCell(
-        items=[
-            ChatMessage(
-                id="m1", role="user", content="hello", sender_id="u1", timestamp=1
-            )
-        ],
-        timestamp=1_747_216_800_000,
-    )
-    records = [
-        MemcellRecord(
-            memcell_id=memcell_id,
-            cell=cell,
-            raw_type="conversation",
-            message_ids=["m1"],
-            sender_ids=["u1"],
-        )
-        for memcell_id in ("mc_skip", "mc_case")
-    ]
-    await stores.memcell.insert_many(_SESSION, records)
-
-    await stores.memcell.mark_case_extracted(
-        "mc_skip",
-        skip_reason="trajectory_not_closed",
-        skip_detail={"last_item_kind": "tool_result", "note": "x" * 5000},
-    )
-    await stores.memcell.mark_case_extracted(
-        "mc_case", skip_reason=None, skip_detail={}
-    )
-    await stores.memcell.mark_case_extracted(
-        "missing", skip_reason=None, skip_detail={}
-    )
-
-    async with stores.factory() as session:
-        rows = {
-            row.memcell_id: row
-            for row in (await session.execute(select(Memcell))).scalars()
-        }
-    skipped, produced = rows["mc_skip"], rows["mc_case"]
-    assert skipped.case_skip_reason == "trajectory_not_closed"
-    assert skipped.case_extracted_at is not None
-    assert skipped.case_extracted_at.tzinfo is not None
-    assert skipped.case_skip_detail_json is not None
-    detail = json.loads(skipped.case_skip_detail_json)
-    assert detail["last_item_kind"] == "tool_result"
-    assert len(detail["note"]) == 512
-    assert produced.case_skip_reason is None
-    assert produced.case_skip_detail_json is None
-    assert produced.case_extracted_at is not None
-    assert set(rows) == {"mc_skip", "mc_case"}
-
-
 async def test_cluster_lifecycle(stores: _Stores) -> None:
     cluster = Cluster(
         id="cl_1",
@@ -443,43 +379,36 @@ async def test_cluster_lifecycle(stores: _Stores) -> None:
         members=["ep_1", "ep_2"],
     )
 
-    await stores.cluster.upsert(_USER, "user_memory", cluster, member_type="episode")
+    await stores.cluster.upsert(_USER, "user_scene", cluster, member_type="episode")
 
-    assert await stores.cluster.list_for_owner(_USER, "user_memory") == [cluster]
+    assert await stores.cluster.list_for_owner(_USER, "user_scene") == [cluster]
     assert await stores.cluster.get("cl_1") == cluster
     assert await stores.cluster.get("cl_missing") is None
     assert (
         await stores.cluster.find_cluster_for_member(_USER, "episode", "ep_2") == "cl_1"
     )
-    assert await stores.cluster.list_distinct_owners() == [_USER]
 
-    await stores.cluster.replace_members(
-        "cl_1",
-        removed={"ep_1"},
-        added="ep_m",
-        member_type="episode",
-        centroid=[1.0, 0.0],
-        count=1,
-        last_ts=200,
-        preview=["merged"],
+    # A merge upserts the new snapshot: the row is restamped and the new
+    # member appended after the ones the cluster already had.
+    merged = cluster.model_copy(
+        update={
+            "centroid": (1.0, 0.0),
+            "count": 3,
+            "last_ts": 200,
+            "preview": ["merged"],
+            "members": ["ep_1", "ep_2", "ep_3"],
+        }
     )
+    await stores.cluster.upsert(_USER, "user_scene", merged, member_type="episode")
 
-    assert await stores.cluster.members("cl_1") == [
-        ("ep_2", "episode"),
-        ("ep_m", "episode"),
-    ]
-    updated = await stores.cluster.get("cl_1")
-    assert updated is not None
-    assert (updated.centroid, updated.count, updated.last_ts, updated.preview) == (
-        (1.0, 0.0),
-        1,
-        200,
-        ["merged"],
-    )
+    assert await stores.cluster.get("cl_1") == merged
+    assert await stores.cluster.list_for_owner(_USER, "user_scene") == [merged]
 
 
 async def test_cluster_reverse_lookup_names_the_kind(stores: _Stores) -> None:
-    """An episode sits in its profile cluster and its scene's; a kind picks one."""
+    """A store an earlier 2.0 build wrote can hold a profile cluster
+    (``user_memory``) next to the scene's with the same episode; a kind picks
+    one."""
     for cluster_id, kind in (("cl_p", "user_memory"), ("cl_s", "user_scene")):
         await stores.cluster.upsert(
             _USER,
@@ -495,9 +424,9 @@ async def test_cluster_reverse_lookup_names_the_kind(stores: _Stores) -> None:
             member_type="episode",
         )
     find = stores.cluster.find_cluster_for_member
-    assert await find(_USER, "episode", "ep_1", kind="user_memory") == "cl_p"
     assert await find(_USER, "episode", "ep_1", kind="user_scene") == "cl_s"
-    assert await find(_USER, "episode", "ep_1", kind="agent_case") is None
+    assert await find(_USER, "episode", "ep_1", kind="user_memory") == "cl_p"  # type: ignore[arg-type]
+    assert await find(_USER, "episode", "ep_1", kind="group_scene") is None
 
 
 async def test_memorize_inbox_queue_flow(stores: _Stores) -> None:
@@ -531,25 +460,6 @@ async def test_memorize_inbox_queue_flow(stores: _Stores) -> None:
     assert await stores.inbox.fail_abandoned() == 0
     later = get_utc_now() + dt.timedelta(days=1)
     assert await stores.inbox.purge_expired(before=later) == (1, 0)
-
-
-async def test_reflection_reports(stores: _Stores) -> None:
-    report = ReflectionReport(
-        id="rep_1",
-        cluster_id="cl_1",
-        owner_id="u1",
-        app_id="app",
-        project_id="proj",
-        mode="init",
-        source_members=[("ep_1", "episode"), ("ep_2", "episode")],
-        merged_entry_id="ep_m",
-    )
-
-    await stores.report.create(report)
-
-    assert await stores.report.reflected_cluster_ids(_USER) == {"cl_1"}
-    other = Scope(app_id="app", project_id="proj", owner_id="u2", owner_type="user")
-    assert await stores.report.reflected_cluster_ids(other) == set()
 
 
 async def test_stamping_works_on_a_status_table_with_the_older_unique_key(

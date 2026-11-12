@@ -16,7 +16,7 @@ import pytest
 from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    AgentScopedFrontmatter,
+    GroupScopedFrontmatter,
     MarkdownReader,
     UserScopedFrontmatter,
 )
@@ -30,19 +30,19 @@ class _UserDemoFrontmatter(UserScopedFrontmatter):
     type: Literal["user_demo"] = "user_demo"
 
 
-class _AgentDemoFrontmatter(AgentScopedFrontmatter):
-    ENTRY_ID_PREFIX: ClassVar[str] = "ademo"
+class _GroupDemoFrontmatter(GroupScopedFrontmatter):
+    ENTRY_ID_PREFIX: ClassVar[str] = "gdemo"
     DIR_NAME: ClassVar[str] = "demos"
     FILE_PREFIX: ClassVar[str] = "demo"
-    type: Literal["agent_demo"] = "agent_demo"
+    type: Literal["group_demo"] = "group_demo"
 
 
 class _UserDemoWriter(BaseDailyWriter):
     schema = _UserDemoFrontmatter
 
 
-class _AgentDemoWriter(BaseDailyWriter):
-    schema = _AgentDemoFrontmatter
+class _GroupDemoWriter(BaseDailyWriter):
+    schema = _GroupDemoFrontmatter
 
 
 @pytest.fixture
@@ -83,11 +83,11 @@ async def test_append_writes_to_user_track(root: MemoryRoot) -> None:
     assert parsed.entries[0].body == "first"
 
 
-async def test_append_writes_to_agent_track(root: MemoryRoot) -> None:
-    writer = _AgentDemoWriter(root)
-    eid = await writer.append("agent_zhangsan", "trace", date=dt.date(2026, 4, 22))
-    assert eid.prefix == "ademo"
-    expected = root.agents_dir() / "agent_zhangsan" / "demos" / "demo-2026-04-22.md"
+async def test_append_writes_to_group_track(root: MemoryRoot) -> None:
+    writer = _GroupDemoWriter(root)
+    eid = await writer.append("trip", "said", date=dt.date(2026, 4, 22))
+    assert eid.prefix == "gdemo"
+    expected = root.groups_dir() / "trip" / "demos" / "demo-2026-04-22.md"
     assert expected.exists()
 
 

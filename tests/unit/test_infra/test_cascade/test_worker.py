@@ -69,16 +69,7 @@ class _FakeRepo:
     async def read_one(self, md_path: str) -> _Row | None:
         return self.rows.get(md_path) or _Row(md_path)
 
-    async def claim_pending_batch(
-        self, _limit: int, *, kinds: set[str] | None = None
-    ) -> list[_Row]:
-        # Round-2 finding #3: worker now forwards a ``kinds`` scope to
-        # the repo. The fake honors it so ``drain_once(kinds=...)``
-        # exercises the plumbing end-to-end from tests.
-        if kinds is not None:
-            picked = [r for r in self.batch if r.kind in kinds]
-            self.batch = [r for r in self.batch if r.kind not in kinds]
-            return picked
+    async def claim_pending_batch(self, _limit: int) -> list[_Row]:
         items, self.batch = self.batch, []
         return items
 
@@ -202,9 +193,7 @@ class _PerCallFakeRepo(_FakeRepo):
         super().__init__(batch=[])
         self._batches = list(batches)
 
-    async def claim_pending_batch(
-        self, _limit: int, *, kinds: set[str] | None = None
-    ) -> list[_Row]:
+    async def claim_pending_batch(self, _limit: int) -> list[_Row]:
         return self._batches.pop(0) if self._batches else []
 
 
@@ -249,7 +238,7 @@ async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
 async def test_external_service_error_is_retried_then_retryable(
     patched_repo: _FakeRepo,
 ) -> None:
-    """ExternalServiceError (embedding / LLM / rerank) retries up to
+    """ExternalServiceError (embedding / LLM) retries up to
     max_retry then marks retryable=True."""
     patched_repo.batch = [_Row(md_path="a.md")]
     w = CascadeWorker(
@@ -486,9 +475,7 @@ async def test_drain_until_empty_loops_until_no_batch(
     rows = [_Row(md_path=f"a{i}.md") for i in range(3)]
 
     class _ChunkedRepo(_FakeRepo):
-        async def claim_pending_batch(
-            self, _limit: int, *, kinds: set[str] | None = None
-        ) -> list[_Row]:
+        async def claim_pending_batch(self, _limit: int) -> list[_Row]:
             if not self.batch:
                 return []
             head, self.batch = self.batch[:1], self.batch[1:]
@@ -516,8 +503,6 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
         "memory_root",
         "tokenizer",
         "index",
-        "knowledge_documents",
-        "knowledge_topics",
         "embedding",
         "vision_embedding",
         "fence",
@@ -806,7 +791,7 @@ async def test_heartbeat_schedules_every_handler_kind(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(fake_a),
-            "agent_case": _OkHandlerWithRepo(fake_b),
+            "image_memory": _OkHandlerWithRepo(fake_b),
         },
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
@@ -818,7 +803,7 @@ async def test_heartbeat_schedules_every_handler_kind(
     await asyncio.sleep(0.12)
     await w.stop()
     assert fake_a.beats, "heartbeat should have scheduled episode"
-    assert fake_b.beats, "heartbeat should have scheduled agent_case"
+    assert fake_b.beats, "heartbeat should have scheduled image_memory"
 
 
 async def test_optimize_prunes_on_first_call_then_throttles(
@@ -1012,7 +997,7 @@ async def test_rebuild_runs_on_startup_for_every_kind(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(fake_a),
-            "agent_case": _OkHandlerWithRepo(fake_b),
+            "image_memory": _OkHandlerWithRepo(fake_b),
         },
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
@@ -1319,17 +1304,17 @@ def test_worker_health_reports_worst_kind_not_newest_prune(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(_FakeLanceRepo()),
-            "agent_case": _OkHandlerWithRepo(_FakeLanceRepo()),
+            "image_memory": _OkHandlerWithRepo(_FakeLanceRepo()),
         },
         ledger=_UNUSED_LEDGER,
     )
     w._started_at = now - 10_000.0
-    # agent_case pruned just now; episode has not pruned in 3x the threshold.
+    # image_memory pruned just now; episode has not pruned in 3x the threshold.
     fresh = kind_state.KindOptimizerState()
     fresh.last_prune_at = now - 10.0
     dead = kind_state.KindOptimizerState()
     dead.last_prune_at = now - 3 * tuning.PRUNE_STALE_SECONDS_ALERT
-    w._maintenance._optimizer_states["agent_case"] = fresh
+    w._maintenance._optimizer_states["image_memory"] = fresh
     w._maintenance._optimizer_states["episode"] = dead
 
     h = w.health()

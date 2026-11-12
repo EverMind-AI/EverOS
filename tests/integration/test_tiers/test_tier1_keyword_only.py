@@ -3,10 +3,10 @@ embedding model.
 
 Pins the behavior promised to a user who has configured only an LLM:
 writes still work (markdown, cascade rows with no vector, the user profile),
-memory search recalls by keyword (BM25) alone through
-the same multi-round loop, what needs embedding/rerank -- knowledge --
-fails fast with a 422 instead of a silent 200 or a 500, and the background
-strategy engine never registers a strategy it cannot run.
+memory search recalls by keyword (BM25) alone through the same multi-round
+loop, ``/health`` reports vector recall disabled, and the background
+strategy engine registers every strategy, the ones that need an embedder
+guarding their own bodies.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ async def test_search_recalls_by_keyword_without_an_embedder(
 
 
 async def test_the_profile_takes_its_direct_path(tier1_runtime: AsyncClient) -> None:
-    """Without clusters (no embedder) the profile is written from the episode."""
+    """Without an embedder the profile is still written from the episode."""
     await add_and_flush(tier1_runtime, session_id="s_tier1_profile")
 
     from everos.infra.persistence.index import eq
@@ -78,31 +78,7 @@ async def test_the_profile_takes_its_direct_path(tier1_runtime: AsyncClient) -> 
 
 
 # ---------------------------------------------------------------------------
-# 3. Knowledge endpoints all gated off
-# ---------------------------------------------------------------------------
-
-
-async def test_knowledge_create_document_422(tier1_runtime: AsyncClient) -> None:
-    resp = await tier1_runtime.post(
-        "/api/v1/knowledge/documents",
-        data={"title": "Some Title"},
-        files={"file": ("note.txt", b"hello world", "text/plain")},
-    )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
-    assert "knowledge" in body["error"]["message"]
-
-
-async def test_knowledge_search_422(tier1_runtime: AsyncClient) -> None:
-    resp = await tier1_runtime.post(
-        "/api/v1/knowledge/search", json={"query": "anything"}
-    )
-    assert resp.status_code == 422, resp.text
-
-
-# ---------------------------------------------------------------------------
-# 4. /health reflects the Tier 1 capability matrix
+# 3. /health reflects the Tier 1 capability matrix
 # ---------------------------------------------------------------------------
 
 
@@ -114,21 +90,18 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
     caps = body["capabilities"]
     assert "llm" not in caps
     assert caps["embed"] is False
-    assert caps["rerank"] is False
 
+    # multimodal_llm / parser are orthogonal to the tiers: this suite
+    # configures no multimodal model, so the multimodal upload may read
+    # disabled next to vector recall.
     disabled = set(body["disabled_features"])
-    expected_subset = {
-        "vector_recall",
-        "reflection",
-        "skill_extraction",
-        "knowledge",
-    }
-    assert expected_subset <= disabled
+    assert "vector_recall" in disabled
     assert "memory_search" not in disabled
+    assert disabled <= {"vector_recall", "multimodal_upload"}
 
 
 # ---------------------------------------------------------------------------
-# 5. OME registers every strategy in Tier 1 (body-guard, not registration-guard)
+# 4. OME registers every strategy in Tier 1 (body-guard, not registration-guard)
 # ---------------------------------------------------------------------------
 
 

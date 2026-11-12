@@ -1,9 +1,8 @@
 """Base business writer for daily-log markdown files.
 
-Daily-log files (memcell / episode / case / image memory) share three
-things:
+Daily-log files (episode / image memory / scene) share three things:
 
-    * scope (user-track or agent-track, derived from the schema)
+    * scope (user-track or group-track, derived from the schema)
     * filename pattern: ``<FILE_PREFIX>-<YYYY-MM-DD>.md`` under
       ``<scope_root>/<scope_id>/<DIR_NAME>/``
     * entry id pattern: ``<ENTRY_ID_PREFIX>_<YYYYMMDD>_<NNN>``
@@ -61,7 +60,7 @@ class BaseDailyWriter:
     ``schema`` attribute. The schema must declare ``SCOPE_DIR``,
     ``ENTRY_ID_PREFIX``, ``DIR_NAME``, and ``FILE_PREFIX`` —
     ``SCOPE_DIR`` is provided by inheriting :class:`UserScopedFrontmatter`
-    or :class:`AgentScopedFrontmatter` (or by a custom scope mixin).
+    or :class:`GroupScopedFrontmatter` (or by a custom scope mixin).
 
     Path resolution is driven entirely by the schema's ClassVars and
     the given :class:`MemoryRoot` — write, read, and addressing for a
@@ -104,14 +103,14 @@ class BaseDailyWriter:
 
         Unifies the per-schema ``append_entry`` previously duplicated across
         the daily-log writers (:class:`EpisodeWriter`,
-        :class:`AgentCaseWriter`, ...). The whole flow
+        :class:`ImageMemoryWriter`, ...). The whole flow
         (read ``entry_count``, allocate ``EntryId``, render entry body,
         update frontmatter, atomic write) runs inside one per-path lock,
         eliminating the read-modify-write race that previously allowed
         concurrent callers to silently overwrite each other's appends.
 
         Args:
-            scope_id: ``user_id`` or ``agent_id`` (matches the schema's
+            scope_id: ``user_id`` or ``group_id`` (matches the schema's
                 scope flavour).
             inline: Inline metadata (``**key**: value`` lines under the
                 H2 header).
@@ -155,7 +154,7 @@ class BaseDailyWriter:
         that returns ``[]`` without touching the file.
 
         Args:
-            scope_id: Subject scope (user / agent id).
+            scope_id: Subject scope (user / group id).
             items: Sequence of ``(inline, sections)`` pairs.
             date: Date bucket — defaults to today in the configured TZ.
 
@@ -213,7 +212,7 @@ class BaseDailyWriter:
         lock.
 
         Args:
-            scope_id: ``user_id`` or ``agent_id`` (matches the schema's
+            scope_id: ``user_id`` or ``group_id`` (matches the schema's
                 scope flavour).
             entry_body: Content placed between the entry markers.
             date: Date bucket — defaults to today in the configured TZ.
@@ -489,7 +488,7 @@ class BaseDailyWriter:
         self, scope_id: str, date: _dt.date, app_id: str, project_id: str
     ) -> Path:
         """Build the daily-log path for ``scope_id`` on ``date``."""
-        # SCOPE_DIR ("users" / "agents") names the matching MemoryRoot method,
+        # SCOPE_DIR ("users" / "groups") names the matching MemoryRoot method,
         # which prepends the <app>/<project> business prefix.
         scope_dir = getattr(self._root, f"{self.schema.SCOPE_DIR}_dir")
         return (

@@ -14,7 +14,6 @@ __all__ = [
 from pathlib import Path
 from typing import Any
 
-from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
 from everos.component.images import ImageLimits
@@ -25,16 +24,12 @@ from everos.memory.ports import Scope
 
 from .embedding import FakeEmbeddingProvider
 from .indexes import (
-    InMemoryAgentCaseIndex,
-    InMemoryAgentSkillIndex,
     InMemoryEpisodeIndex,
     InMemoryGroupProfileIndex,
     InMemoryImageMemoryIndex,
     InMemoryProfileIndex,
 )
 from .stores import (
-    InMemoryAgentCaseStore,
-    InMemoryAgentSkillStore,
     InMemoryClusterStore,
     InMemoryEpisodeStore,
     InMemoryForgetLogStore,
@@ -45,7 +40,6 @@ from .stores import (
     InMemoryMemcellStore,
     InMemoryMessageForgetStore,
     InMemoryProfileStore,
-    InMemoryReflectionReportStore,
     InMemorySceneStore,
     UnusedPort,
 )
@@ -76,13 +70,10 @@ def make_stores(**overrides: Any) -> Stores:
         "images": InMemoryImageStore(),
         "forget_log": InMemoryForgetLogStore(),
         "profile": InMemoryProfileStore(),
-        "agent_case": InMemoryAgentCaseStore(),
-        "agent_skill": InMemoryAgentSkillStore(),
         "session_buffer": UnusedPort("session_buffer"),
         "memcell": InMemoryMemcellStore(),
         "cluster": InMemoryClusterStore(),
         "memorize_inbox": UnusedPort("memorize_inbox"),
-        "reflection_report": InMemoryReflectionReportStore(),
         "owner_dir": UnusedPort("owner_dir"),
         "session_purge": UnusedPort("session_purge"),
         "groups": InMemoryGroupStore(),
@@ -97,11 +88,8 @@ def make_indexes(**overrides: Any) -> Indexes:
     """Fresh in-memory indexes; keyword arguments replace single indexes."""
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeIndex(),
-        "agent_case": InMemoryAgentCaseIndex(),
-        "agent_skill": InMemoryAgentSkillIndex(),
         "image_memory": InMemoryImageMemoryIndex(),
         "profile": InMemoryProfileIndex(),
-        "knowledge_topic": UnusedPort("knowledge_topic"),
         "group_profile": InMemoryGroupProfileIndex(),
     }
     return Indexes(**{**fields, **overrides})
@@ -114,16 +102,14 @@ def make_deps(
     stores: Stores | None = None,
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
-    case_judge: CaseJudge | None = None,
     picture_limits: ImageLimits | None = None,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
     ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
     :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
-    unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
-    gate) unless given; ``picture_limits`` stays ``None`` (a profile update
-    reads no pictures) unless given.
+    unconfigured provider. ``picture_limits`` stays ``None`` (a profile
+    update reads no pictures) unless given.
     """
     return MemoryDeps(
         llm=unscripted_llm() if llm is _DEFAULT else llm,
@@ -131,7 +117,6 @@ def make_deps(
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
-        case_judge=case_judge,
         picture_limits=picture_limits,
     )
 

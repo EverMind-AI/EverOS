@@ -1,9 +1,9 @@
 """Application assembly: the one place EverOS's objects are built and wired.
 
 :func:`build_application` turns :class:`~everos.config.Settings` into an
-:class:`Application` -- three facades (:class:`MemoryService`,
-:class:`KnowledgeService`, :class:`OpsService`) plus the snapshot of which
-optional providers were configured. Everything below the facades is built
+:class:`Application` -- two facades (:class:`MemoryService`,
+:class:`OpsService`) plus the snapshot of which optional providers were
+configured. Everything below the facades is built
 here and nowhere else: providers, storage adapters, the OME engine with every
 strategy registered, the event bus, the cascade orchestrator, the domain
 pipelines and managers. Entry points (HTTP, CLI) hold one ``Application`` and
@@ -18,7 +18,7 @@ a CLI command opens storage per command through
 tracing down.
 
 An unconfigured optional provider becomes ``None``; whoever needs it decides
-what that means (search degrades, knowledge uploads refuse, the server's
+what that means (search degrades, backfill refuses, the server's
 :meth:`~Application.start` refuses to run without an extraction LLM).
 """
 
@@ -29,7 +29,6 @@ __all__ = [
     "Providers",
     "build_application",
     "build_providers",
-    "build_replay_engine",
     "configure_process",
 ]
 
@@ -37,8 +36,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
-import functools
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from functools import partial
 from pathlib import Path
 from types import TracebackType
@@ -53,7 +51,6 @@ from everos.component.embedding import (
 )
 from everos.component.images import ImageLimits
 from everos.component.llm import (
-    LLMCaseJudge,
     LLMClientConfig,
     LLMNotConfiguredError,
     build_llm_provider,
@@ -62,10 +59,9 @@ from everos.component.llm import (
     resolve_llm_config,
     resolve_multimodal_config,
 )
-from everos.component.parser import aparse_file, build_raw_file, parser_available
-from everos.component.rerank import RerankProvider, build_rerank_provider
+from everos.component.parser import build_raw_file, parser_available
 from everos.component.tokenizer import Tokenizer, build_tokenizer
-from everos.config import OmeSettings, Settings, load_settings, resolve_root
+from everos.config import Settings, load_settings, resolve_root
 from everos.config.search_runtime import SearchConfigSource
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
@@ -99,23 +95,12 @@ from everos.infra.persistence.index import (
     EmbeddingProvenance,
     ProjectionVectorBackfill,
 )
-from everos.infra.persistence.markdown import (
-    MarkdownAgentSkillStore,
-    MarkdownKnowledgeStore,
-)
-from everos.infra.persistence.sqlite import (
-    SqliteDatabase,
-    SqliteKnowledgeCatalog,
-    SqliteRepos,
-)
+from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 from everos.memory.access import AccessPolicy
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.deps import Indexes, MemoryDeps
+from everos.memory.deps import MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
-from everos.memory.extract.pipeline import (
-    AgentMemoryPipeline,
-    ConversationPipeline,
-)
+from everos.memory.extract.pipeline import ConversationPipeline
 from everos.memory.extract.scene import SceneNarrator
 from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
@@ -126,7 +111,6 @@ from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     EpisodeRecaller,
     ImageMemoryRecaller,
-    KnowledgeTopicRecaller,
     ProfileRecaller,
     RecallerDeps,
 )
@@ -136,7 +120,6 @@ from everos.memory.strategies import (
     UPDATE_GROUP_PROFILE_SPEC,
 )
 from everos.service._warmup import warm_token_counter
-from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 
@@ -161,7 +144,6 @@ class Providers:
     multimodal_llm: LLMClient | None
     embedding: EmbeddingProvider | None
     vision_embedding: VisionEmbeddingProvider | None
-    rerank: RerankProvider | None
 
 
 @dataclasses.dataclass
@@ -171,7 +153,7 @@ class _Lifecycle:
 
 @dataclasses.dataclass(frozen=True)
 class Application:
-    """What an entry point holds: three facades plus the provider snapshot.
+    """What an entry point holds: two facades plus the provider snapshot.
 
     ``start`` brings up what a long-running server needs -- system DB,
     index, cascade, OME, the ``async_mode`` queue -- in that order; the
@@ -183,7 +165,6 @@ class Application:
     """
 
     memory: MemoryService
-    knowledge: KnowledgeService
     ops: OpsService
     images: ImageStore
     """Read-only picture access for the two serving routes. Deliberately not on
@@ -330,7 +311,6 @@ def build_providers(settings: Settings) -> Providers:
         ),
         embedding=_embedding_or_none(settings),
         vision_embedding=_vision_embedding_or_none(settings),
-        rerank=_rerank_or_none(settings),
     )
 
 
@@ -363,7 +343,6 @@ def build_application(
         stores=stores,
         indexes=indexes,
         instructions=CustomInstructions(_CONFIG_ROOT),
-        case_judge=_case_judge(settings, providers.llm),
         # The profile update reads a segment's pictures when [llm] reads images.
         picture_limits=_image_limits(settings) if settings.extraction.vision else None,
     )
@@ -391,8 +370,7 @@ def build_application(
         fence=fence,
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
-    # The one access policy every read path asks (docs/group-memory.md, D9),
-    # shared by the memory reads and the project's knowledge base.
+    # The one access policy every read path asks (docs/group-memory.md, D9).
     access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
     # Searches count the decider's rounds into it; /health reports it.
     decider_status = _decider_status(settings, providers)
@@ -406,20 +384,9 @@ def build_application(
         access=access,
         decider_status=decider_status,
     )
-    vector_tables = index.repositories.with_vectors()
     return Application(
         memory=memory,
         images=stores.images,
-        knowledge=_build_knowledge_service(
-            settings,
-            root,
-            providers,
-            indexes,
-            sqlite,
-            tokenizer,
-            capabilities,
-            access=access,
-        ),
         ops=OpsService(
             settings=settings,
             root=root,
@@ -432,21 +399,12 @@ def build_application(
             backfill=BackfillDeps(
                 embedding=providers.embedding,
                 vectors=ProjectionVectorBackfill(
-                    vector_tables,
+                    index.repositories.with_vectors(),
                     tokenizer=tokenizer,
                     prune_retention=dt.timedelta(
                         seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
                     ),
                 ),
-                vector_tables=vector_tables,
-                clusters=stores.cluster,
-                skills=indexes.agent_skill,
-                skill_files=MarkdownAgentSkillStore(root),
-                engine_for=functools.partial(
-                    build_replay_engine, root, deps, settings.ome
-                ),
-                ensure_schema=admin.create_schema,
-                cascade=cascade,
                 ome_lock=ome_lock,
             ),
             capabilities=capabilities,
@@ -463,13 +421,6 @@ def build_application(
 
 
 # ── providers ──────────────────────────────────────────────────────────────
-
-
-def _case_judge(settings: Settings, llm: LLMClient) -> LLMCaseJudge | None:
-    """The agent-case gate's judge, when the gate is on."""
-    if not settings.agent_memory.case_gate_enabled:
-        return None
-    return LLMCaseJudge(llm)
 
 
 def _build_llm(
@@ -529,14 +480,6 @@ def _vision_embedding_or_none(settings: Settings) -> VisionEmbeddingProvider | N
         return None
 
 
-def _rerank_or_none(settings: Settings) -> RerankProvider | None:
-    try:
-        return build_rerank_provider(settings.rerank)
-    except ValueError as exc:
-        logger.warning("rerank_capability_build_failed", reason=str(exc))
-        return None
-
-
 def _decider_status(settings: Settings, providers: Providers) -> DeciderStatus:
     """The decider's status: what it is, for ``/health``, over the client it is.
 
@@ -561,7 +504,6 @@ def _decider_status(settings: Settings, providers: Providers) -> DeciderStatus:
 def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
     return Capabilities(
         embedding=providers.embedding is not None,
-        rerank=providers.rerank is not None,
         multimodal_llm=providers.multimodal_llm is not None,
         # Resolving it once here also pays the optional parser's heavy import
         # at startup rather than inside a request.
@@ -627,36 +569,6 @@ def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
     return spec
 
 
-def build_replay_engine(
-    root: MemoryRoot,
-    deps: MemoryDeps,
-    ome: OmeSettings,
-    specs: Sequence[StrategySpec],
-) -> OfflineEngine:
-    """An unstarted, throw-away engine running only ``specs`` (backfill's replay).
-
-    It shares the server's jobstore, so while a server runs on the same root
-    its start fails on the file lock instead of racing it. Without
-    ``config_path`` it never depends on ``ome.toml``. Crash recovery is off:
-    this engine knows only ``specs``, so re-enqueueing a server's stale
-    RUNNING row for any other strategy would fail on dispatch and lose the
-    event for good; the next server start, which knows every strategy,
-    resumes those rows.
-    """
-    root.ome_db.parent.mkdir(parents=True, exist_ok=True)
-    engine = OfflineEngine(
-        config=OMEConfig(
-            jobstore_path=root.ome_db,
-            crash_recovery_enabled=False,
-            max_concurrent_runs=ome.max_concurrent_runs,
-            run_timeout_seconds=ome.run_timeout_seconds,
-        )
-    )
-    for spec in specs:
-        engine.register(to_ome_strategy(spec, deps))
-    return engine
-
-
 def _image_limits(settings: Settings) -> ImageLimits:
     """``[images]`` as the picture store's bounds.
 
@@ -719,7 +631,6 @@ def _build_memory_service(
             image_limits=_image_limits(settings),
             message_forget=stores.message_forget,
         ),
-        agent_pipeline=AgentMemoryPipeline(),
         # A forget inside a group writes a changed scene again with the scene
         # strategy's own capped call (docs/scenes.md).
         scene_narrator=SceneNarrator(providers.llm, settings.scenes, deps.instructions),
@@ -748,8 +659,6 @@ def _build_memory_service(
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,
-            agent_case_index=indexes.agent_case,
-            agent_skill_index=indexes.agent_skill,
             profile_index=indexes.profile,
             access=access,
             image_index=indexes.image_memory,
@@ -764,43 +673,6 @@ def _build_memory_service(
         ),
         access=access,
     )
-
-
-def _build_knowledge_service(
-    settings: Settings,
-    root: MemoryRoot,
-    providers: Providers,
-    indexes: Indexes,
-    sqlite: SqliteRepos,
-    tokenizer: Tokenizer,
-    capabilities: Capabilities,
-    *,
-    access: AccessPolicy | None = None,
-) -> KnowledgeService:
-    return KnowledgeService(
-        store=MarkdownKnowledgeStore(root),
-        catalog=SqliteKnowledgeCatalog(
-            sqlite.knowledge_document, sqlite.knowledge_topic
-        ),
-        extractor=_knowledge_extractor(providers.llm),
-        embedding=providers.embedding,
-        reranker=providers.rerank,
-        recaller=KnowledgeTopicRecaller(
-            RecallerDeps(tokenizer=tokenizer), indexes.knowledge_topic
-        ),
-        search_config=settings.knowledge.search,
-        parse_file=functools.partial(aparse_file, llm=providers.multimodal_llm),
-        parser_available=capabilities.parser,
-        max_upload_bytes=settings.knowledge.max_upload_bytes,
-        access=access,
-    )
-
-
-def _knowledge_extractor(llm: LLMClient) -> KnowledgeExtractor:
-    # Deferred: everalgo.knowledge is heavy and only knowledge uploads need it.
-    from everalgo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
-
-    return AlgoKnowledgeExtractor(llm=llm)
 
 
 # ── start helpers ──────────────────────────────────────────────────────────

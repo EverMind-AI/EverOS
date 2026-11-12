@@ -16,12 +16,12 @@ def test_error_message_names_provider():
 
 
 def test_error_message_includes_feature_when_given():
-    exc = ProviderNotConfiguredError(provider="rerank", feature="knowledge")
-    assert "required by knowledge" in str(exc)
+    exc = ProviderNotConfiguredError(provider="embedding", feature="backfill")
+    assert "required by backfill" in str(exc)
 
 
 def test_error_message_omits_feature_when_absent():
-    exc = ProviderNotConfiguredError(provider="rerank")
+    exc = ProviderNotConfiguredError(provider="embedding")
     assert "required by" not in str(exc)
 
 
@@ -34,11 +34,11 @@ def test_error_message_includes_toml_path(tmp_path, monkeypatch):
 
 def test_alternative_hint_appended_when_given():
     exc = ProviderNotConfiguredError(
-        provider="rerank",
-        feature="agent_hybrid",
-        alternative_hint="Set enable_llm_rerank=true to use LLM lane.",
+        provider="embedding",
+        feature="llm_multiround",
+        alternative_hint="Search falls back to keyword (BM25) recall.",
     )
-    assert "Alternative: Set enable_llm_rerank=true" in str(exc)
+    assert "Alternative: Search falls back to keyword (BM25) recall." in str(exc)
 
 
 def test_no_env_var_in_message():

@@ -42,7 +42,6 @@ def content_sha256(named_parts: dict[str, str]) -> str:
 
 _OWNER_BY_SCOPE_DIR: dict[str, tuple[str, str]] = {
     "users": ("user", "user_id"),
-    "agents": ("agent", "agent_id"),
     "groups": ("group", "group_id"),
 }
 """Scope directory -> ``(owner_type, frontmatter field holding the owner id)``."""
@@ -53,12 +52,12 @@ def resolve_owner(frontmatter: dict[str, object], md_path: str) -> tuple[str, st
 
     Layout is ``<app>/<project>/<scope>/<owner>/...``, so ``owner_type`` is
     encoded by the **scope segment** (path index 2: ``users`` -> ``"user"``,
-    ``agents`` -> ``"agent"``, ``groups`` -> ``"group"``) -- NOT the path
-    prefix, which leads with ``<app>/<project>``. ``owner_id`` rides on the
-    scope's own frontmatter field (``user_id`` / ``agent_id`` / ``group_id``).
+    ``groups`` -> ``"group"``) -- NOT the path prefix, which leads with
+    ``<app>/<project>``. ``owner_id`` rides on the scope's own frontmatter
+    field (``user_id`` / ``group_id``).
 
     Raises:
-        ValueError: The scope segment is none of the three. Indexing such a
+        ValueError: The scope segment is neither of the two. Indexing such a
             file as a user (the old fallback) would give its rows an empty or
             foreign owner id -- a group file would have landed in the index as
             a user with no id -- so the worker records it as unrecoverable.
@@ -108,13 +107,6 @@ def optional_int(raw: str | None) -> int | None:
     if not raw or not raw.strip():
         return None
     return int(raw.strip())
-
-
-def require_float(raw: str | None, *, field: str) -> float:
-    """Parse a required float inline value."""
-    if not raw or not raw.strip():
-        raise ValueError(f"entry inline is missing required {field!r}")
-    return float(raw.strip())
 
 
 def parse_inline_list(raw: str) -> list[str]:

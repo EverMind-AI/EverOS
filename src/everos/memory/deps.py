@@ -9,8 +9,7 @@ and the service layer decides which adapters stand behind it.
 ``llm`` is always present: the bootstrap refuses to build without one.
 ``embedding`` is ``None`` when the provider is not configured -- optional by
 design (Tier 1 runs without it, and the strategies that need it return no
-events) -- and ``case_judge`` is ``None`` unless the agent-case gate is
-switched on. Neither changes while the process runs: a tier change needs a
+events). It does not change while the process runs: a tier change needs a
 restart.
 """
 
@@ -21,16 +20,11 @@ __all__ = ["Indexes", "MemoryDeps", "Stores"]
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from everalgo.agent_memory import CaseJudge
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.images import ImageLimits
 from everos.memory.ports import (
-    AgentCaseIndex,
-    AgentCaseStore,
-    AgentSkillIndex,
-    AgentSkillStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
@@ -41,14 +35,12 @@ from everos.memory.ports import (
     ImageMemoryIndex,
     ImageMemoryStore,
     ImageStore,
-    KnowledgeTopicIndex,
     MemcellStore,
     MemorizeInboxStore,
     MessageForgetStore,
     OwnerDirStore,
     ProfileIndex,
     ProfileStore,
-    ReflectionReportStore,
     SceneStore,
     SessionBufferStore,
     SessionPurgeStore,
@@ -67,13 +59,10 @@ class Stores:
     images: ImageStore
     forget_log: ForgetLogStore
     profile: ProfileStore
-    agent_case: AgentCaseStore
-    agent_skill: AgentSkillStore
     session_buffer: SessionBufferStore
     memcell: MemcellStore
     cluster: ClusterStore
     memorize_inbox: MemorizeInboxStore
-    reflection_report: ReflectionReportStore
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
     groups: GroupStore
@@ -87,11 +76,8 @@ class Indexes:
     """Every read-side index of the configured engine, typed by its port."""
 
     episode: EpisodeIndex
-    agent_case: AgentCaseIndex
-    agent_skill: AgentSkillIndex
     image_memory: ImageMemoryIndex
     profile: ProfileIndex
-    knowledge_topic: KnowledgeTopicIndex
     group_profile: GroupProfileIndex
 
 
@@ -105,8 +91,6 @@ class MemoryDeps:
         stores: Write-side stores.
         indexes: Read-side indexes.
         instructions: Custom instructions appended to the operators' rules.
-        case_judge: Answers the agent-case gate question; ``None`` runs
-            agent-case extraction without the gate.
         picture_limits: ``[images]``, the scale a profile update reads a
             segment's pictures at; ``None`` when ``llm`` reads no images
             (``[extraction] vision`` off), and the update then reads text only.
@@ -117,5 +101,4 @@ class MemoryDeps:
     stores: Stores
     indexes: Indexes
     instructions: CustomInstructions
-    case_judge: CaseJudge | None = None
     picture_limits: ImageLimits | None = None

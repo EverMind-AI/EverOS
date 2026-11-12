@@ -2,7 +2,8 @@
 
 Field set is fixed by the index tables design spec. Rows are populated
 by the cascade daemon from ``users/<owner_id>/episodes/episode-<YYYY-MM-DD>.md``
-and from ``agents/<owner_id>/episodes/...`` symmetrically.
+and from a group's episode and scene logs (``groups/<group_id>/...``)
+symmetrically; a user's scene versions are rows of this table too.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ class Episode(IndexRecord):
 
     parent_type: str = ParentType.MEMCELL.value
     """Source pointer — :attr:`ParentType.MEMCELL` for an episode,
-    :attr:`ParentType.CLUSTER` for a Reflection merge, :attr:`ParentType.SCENE`
-    for a group scene version (``parent_id`` is then the scene id)."""
+    :attr:`ParentType.SCENE` for a scene version (``parent_id`` is then the
+    scene id); ``cluster`` on an episode an earlier build's Reflection merged."""
 
     parent_id: str
     """Source memcell id. The pipeline knows the memcell currently being
@@ -87,9 +88,9 @@ class Episode(IndexRecord):
     NOT in the hash so editing them doesn't waste an embedding call."""
 
     deprecated_by: str | None = None
-    """Soft-delete marker set by Reflection when this episode is
-    consolidated into a cluster. Value is the cluster entry_id that
-    supersedes this row. ``NULL`` means the row is still active."""
+    """Soft-delete marker: the entry id of the version that superseded this
+    row, or the forgotten mark a forget set (projected from the file's
+    ``deprecated_entries``). ``NULL`` means the row is still active."""
 
     # Group attribution and the membership-window columns
     # (docs/group-memory.md, section 6.3). Filled for ``owner_type = group``

@@ -12,8 +12,6 @@ output, ``AND`` / ``OR`` combinators allowed.
 External usage::
 
     from everos.memory.get import (
-        GetAgentCaseItem,
-        GetAgentSkillItem,
         GetData,
         GetEpisodeItem,
         GetManager,
@@ -25,8 +23,6 @@ External usage::
     )
 """
 
-from .dto import GetAgentCaseItem as GetAgentCaseItem
-from .dto import GetAgentSkillItem as GetAgentSkillItem
 from .dto import GetData as GetData
 from .dto import GetEpisodeItem as GetEpisodeItem
 from .dto import GetImageItem as GetImageItem
@@ -39,8 +35,6 @@ from .filters_adapter import compile_scoped_for_get as compile_scoped_for_get
 from .manager import GetManager as GetManager
 
 __all__ = [
-    "GetAgentCaseItem",
-    "GetAgentSkillItem",
     "GetData",
     "GetEpisodeItem",
     "GetImageItem",

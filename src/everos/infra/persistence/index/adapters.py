@@ -11,12 +11,9 @@ domain must not know (BM25 columns, vector column names, projections).
 from __future__ import annotations
 
 __all__ = [
-    "AgentCaseIndexAdapter",
-    "AgentSkillIndexAdapter",
     "EpisodeIndexAdapter",
     "GroupProfileIndexAdapter",
     "ImageMemoryIndexAdapter",
-    "KnowledgeTopicIndexAdapter",
     "ProfileIndexAdapter",
 ]
 
@@ -29,13 +26,10 @@ from pydantic import BaseModel, ValidationError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
     Episode,
     EpisodeParentType,
     GroupProfileItem,
     ImageMemory,
-    KnowledgeTopic,
     Profile,
 )
 from everos.memory.ports import (
@@ -45,7 +39,6 @@ from everos.memory.ports import (
     Page,
     PageResult,
     Scope,
-    ScoredKnowledgeTopic,
     SearchHit,
     Stored,
     all_of,
@@ -56,7 +49,6 @@ from everos.memory.ports import (
 
 from ..records import member_profile_row_id
 from .protocols import (
-    AgentSkillIndexRepository,
     EpisodeIndexRepository,
     IndexRepository,
 )
@@ -138,18 +130,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
         )
         return [self._hit(row, _cosine_similarity(row)) for row in rows]
 
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[Episode]]:
-        rows = await self._episodes.find_by_owner_entries(
-            scope.owner_id,
-            entry_ids,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            skip_vectors=True,
-        )
-        return [_stored_episode(_fields(r)) for r in rows]
-
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         return await self._paginate(where, page)
 
@@ -179,74 +159,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
             limit=limit,
         )
         return [_stored_episode(_fields(r)) for r in rows]
-
-    async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
-        rows = await self._episodes.find_where(where, limit=limit, skip_vectors=True)
-        return [_stored_episode(_fields(r)) for r in rows]
-
-
-class AgentCaseIndexAdapter(_SearchableIndex[AgentCase]):
-    """Agent-case index reads.
-
-    Args:
-        repo: Agent-case derived-index repository.
-    """
-
-    def __init__(self, repo: IndexRepository[Any]) -> None:
-        super().__init__(repo, _stored_agent_case)
-
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[AgentCase]]:
-        rows = await self._repo.find_by_owner_entries(
-            scope.owner_id,
-            entry_ids,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            skip_vectors=True,
-        )
-        return [_stored_agent_case(_fields(r)) for r in rows]
-
-    async def paginate(
-        self, where: Filter, page: Page
-    ) -> PageResult[Stored[AgentCase]]:
-        return await self._paginate(where, page)
-
-
-class AgentSkillIndexAdapter(_SearchableIndex[AgentSkill]):
-    """Agent-skill index reads.
-
-    Args:
-        repo: Agent-skill derived-index repository.
-    """
-
-    def __init__(self, repo: AgentSkillIndexRepository[Any]) -> None:
-        super().__init__(repo, _stored_agent_skill)
-        self._skills = repo
-
-    async def paginate(
-        self, where: Filter, page: Page
-    ) -> PageResult[Stored[AgentSkill]]:
-        return await self._paginate(where, page)
-
-    async def count(self) -> int:
-        return await self._skills.count()
-
-    async def count_in_cluster(self, scope: Scope, cluster_id: str) -> int:
-        return await self._skills.count_in_cluster(
-            owner_id=scope.owner_id, cluster_id=cluster_id
-        )
-
-    async def top_k_in_cluster(
-        self, scope: Scope, cluster_id: str, vector: Sequence[float], k: int
-    ) -> list[Stored[AgentSkill]]:
-        rows = await self._skills.find_topk_relevant_in_cluster(
-            owner_id=scope.owner_id,
-            cluster_id=cluster_id,
-            query_vector=vector,
-            top_k=k,
-        )
-        return [_stored_agent_skill(_fields(r)) for r in rows]
 
 
 class ImageMemoryIndexAdapter(_SearchableIndex[ImageMemory]):
@@ -411,34 +323,6 @@ class GroupProfileIndexAdapter:
         return _stored_group_profile_items([_fields(row) for row in rows])
 
 
-class KnowledgeTopicIndexAdapter:
-    """Knowledge-topic index search.
-
-    Topics have no owner, so matches come back as
-    :class:`ScoredKnowledgeTopic` rather than an owner-scoped ``Stored``.
-
-    Args:
-        repo: Knowledge-topic derived-index repository.
-    """
-
-    def __init__(self, repo: IndexRepository[Any]) -> None:
-        self._repo = repo
-
-    async def sparse_search(
-        self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[ScoredKnowledgeTopic]:
-        rows = await self._repo.sparse_search(
-            terms, where, columns=self._repo.schema.BM25_FIELDS, limit=limit
-        )
-        return [_scored_topic(_fields(row), _bm25_score(row)) for row in rows]
-
-    async def dense_search(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[ScoredKnowledgeTopic]:
-        rows = await self._repo.dense_search(vector, where, limit=limit)
-        return [_scored_topic(_fields(row), _cosine_similarity(row)) for row in rows]
-
-
 # ── Row -> domain ────────────────────────────────────────────────────────
 
 
@@ -587,65 +471,6 @@ def _stored_profile(fields: Row, *, subject: str) -> Stored[Profile]:
             explicit_info=_json_list(fields["explicit_info_json"]),
             implicit_traits=_json_list(fields["implicit_traits_json"]),
         ),
-    )
-
-
-def _stored_agent_case(fields: Row) -> Stored[AgentCase]:
-    return Stored(
-        ref=_daily_ref(fields),
-        scope=_scope(fields),
-        item=AgentCase(
-            owner_id=fields["owner_id"],
-            task_intent=fields["task_intent"],
-            approach=fields["approach"],
-            quality_score=fields["quality_score"],
-            key_insight=fields.get("key_insight"),
-            timestamp=to_timestamp_ms(fields["timestamp"]),
-            session_id=fields["session_id"],
-            parent_id=fields["parent_id"],
-            source_group_id=fields.get("source_group_id"),
-        ),
-    )
-
-
-def _stored_agent_skill(fields: Row) -> Stored[AgentSkill]:
-    return Stored(
-        ref=MemoryRef(
-            id=fields["id"], entry_id=fields["name"], md_path=fields["md_path"]
-        ),
-        scope=_scope(fields),
-        item=AgentSkill(
-            id=fields["id"],
-            cluster_id=fields.get("cluster_id") or "",
-            name=fields["name"],
-            description=fields["description"],
-            content=fields["content"],
-            confidence=fields["confidence"],
-            maturity_score=fields["maturity_score"],
-            source_case_ids=list(fields.get("source_case_ids") or []),
-        ),
-    )
-
-
-def _scored_topic(fields: Row, score: float | None) -> ScoredKnowledgeTopic:
-    return ScoredKnowledgeTopic(
-        topic=KnowledgeTopic(
-            topic_id=fields["id"],
-            doc_id=fields["doc_id"],
-            app_id=fields["app_id"],
-            project_id=fields["project_id"],
-            category_id=fields["category_id"],
-            topic_name=fields["topic_name"],
-            topic_path=fields["topic_path"],
-            depth=fields["depth"],
-            summary=fields["summary"],
-            parent_topic_id=fields.get("parent_node_id") or None,
-            content_labels=list(fields.get("content_labels") or []),
-            created_at=fields["created_at"],
-            updated_at=fields["updated_at"],
-        ),
-        md_path=fields["md_path"],
-        score=score,
     )
 
 

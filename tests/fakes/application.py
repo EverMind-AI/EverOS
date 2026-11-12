@@ -18,48 +18,35 @@ __all__ = [
     "FakeOmeLock",
     "StubAdmin",
     "StubEngine",
-    "StubKnowledgeService",
     "StubMemoryService",
     "StubOpsService",
     "make_application",
     "make_backfill_deps",
-    "make_knowledge_service",
     "make_memory_service",
     "make_ops",
     "unused_backfill_deps",
 ]
 
 import datetime as dt
-import functools
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-from everos.component.parser import aparse_file
 from everos.component.tokenizer import build_tokenizer
-from everos.config import OmeSettings, Settings, load_settings
+from everos.config import Settings, load_settings
 from everos.core.errors import MemoryRootLockedError, QueueSaturatedError
-from everos.infra.cascade import CascadeOrchestrator
 from everos.infra.cascade._worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
 from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.infra.persistence.index import ProjectionVectorBackfill
-from everos.infra.persistence.markdown import (
-    MarkdownAgentSkillStore,
-    MarkdownKnowledgeStore,
-)
-from everos.infra.persistence.sqlite import SqliteKnowledgeCatalog
-from everos.memory.deps import MemoryDeps
 from everos.service import (
     Application,
     BackfillDeps,
     Capabilities,
     FlushResult,
     HealthReport,
-    KnowledgeService,
     MemorizeResult,
     MemoryService,
     OpsService,
@@ -69,24 +56,14 @@ from everos.service import (
     TaskItem,
     TaskPage,
 )
-from everos.service.bootstrap import build_replay_engine
 
-from .deps import bundled_instructions, make_stores, unscripted_llm
+from .deps import make_stores, unscripted_llm
 from .sources import unused_raw_file_builder
 from .storage import make_storage
 from .stores import InMemoryImageStore, UnusedPort
 
-_VECTOR_TABLES = (
-    "episode",
-    "agent_case",
-    "agent_skill",
-    "image_memory",
-    "knowledge_topic",
-)
-
 _ALL_CAPABILITIES = Capabilities(
     embedding=True,
-    rerank=True,
     multimodal_llm=True,
     parser=True,
     index_backend="lancedb",
@@ -310,11 +287,6 @@ class StubOpsService:
         )
 
 
-def StubKnowledgeService() -> Any:  # noqa: N802 - reads as the class it doubles
-    """A :class:`KnowledgeService` whose every method is an ``AsyncMock``."""
-    return AsyncMock(spec=KnowledgeService)
-
-
 class StubAdmin:
     """Cascade admin double: records the storage steps of ``Application.start``."""
 
@@ -383,7 +355,6 @@ def make_memory_service(**overrides: Any) -> MemoryService:
         "multimodal_llm": None,
         "stores": make_stores(),
         "conversation_pipeline": UnusedPort("conversation_pipeline"),
-        "agent_pipeline": UnusedPort("agent_pipeline"),
         "bus": UnusedPort("bus"),
         "search_manager": UnusedPort("search_manager"),
         "get_manager": UnusedPort("get_manager"),
@@ -391,53 +362,6 @@ def make_memory_service(**overrides: Any) -> MemoryService:
         "index_eraser": UnusedPort("index_eraser"),
     }
     return MemoryService(**{**fields, **overrides})
-
-
-def make_knowledge_service(
-    *,
-    root: MemoryRoot | Path | None = None,
-    extractor: Any = None,
-    embedding: Any = None,
-    reranker: Any = None,
-    recaller: Any = None,
-    search_config: Any = None,
-    parse_file: Any = None,
-    documents: Any = None,
-    topics: Any = None,
-    parser_available: bool = False,
-    max_upload_bytes: int | None = None,
-    access: Any = None,
-) -> KnowledgeService:
-    """A real :class:`KnowledgeService`; unset providers read as unconfigured.
-
-    An unset ``extractor`` fails the test if anything extracts with it.
-
-    The service runs over the production adapters: a markdown knowledge
-    store under ``root`` and a SQLite catalog over ``documents`` / ``topics``
-    (the repositories, often mocks). ``root`` defaults to the configured
-    memory root (``EVEROS_ROOT``) at call time, so a test that sets the env
-    var first gets a service over it.
-    """
-    if root is None:
-        root = MemoryRoot.resolve()
-    elif not isinstance(root, MemoryRoot):
-        root = MemoryRoot(root)
-    return KnowledgeService(
-        store=MarkdownKnowledgeStore(root),
-        catalog=SqliteKnowledgeCatalog(
-            documents or UnusedPort("knowledge documents"),
-            topics or UnusedPort("knowledge topics"),
-        ),
-        extractor=extractor or UnusedPort("knowledge extractor"),
-        embedding=embedding,
-        reranker=reranker,
-        recaller=recaller,
-        search_config=search_config or load_settings().knowledge.search,
-        parse_file=parse_file or functools.partial(aparse_file, llm=None),
-        parser_available=parser_available,
-        access=access,
-        max_upload_bytes=max_upload_bytes or load_settings().knowledge.max_upload_bytes,
-    )
 
 
 def make_providers(**overrides: Any) -> Providers:
@@ -454,7 +378,6 @@ def make_providers(**overrides: Any) -> Providers:
         "multimodal_llm": None,
         "embedding": None,
         "vision_embedding": None,
-        "rerank": None,
     }
     return Providers(**{**fields, **overrides})
 
@@ -463,50 +386,23 @@ def make_backfill_deps(
     *,
     root: MemoryRoot | Path | None = None,
     embedding: Any = None,
-    llm: Any = None,
     **overrides: Any,
 ) -> BackfillDeps:
     """The production backfill wiring over ``root`` (default: the configured one).
 
-    Real storage, stores, indexes and replay engines, as the bootstrap builds
-    them; ``embedding`` defaults to unconfigured and ``llm`` to one that
-    fails the test if called. Keyword overrides
-    replace single fields (``ome_lock``, ``engine_for``, ``vector_tables``,
-    ``cascade``, ...).
+    Real storage and index, as the bootstrap builds them; ``embedding``
+    defaults to unconfigured. Keyword overrides replace single fields
+    (``ome_lock``, ``vectors``).
     """
     storage = make_storage(root if root is not None else MemoryRoot.resolve())
-    deps = MemoryDeps(
-        llm=llm or unscripted_llm(),
-        embedding=embedding,
-        stores=build_stores(storage.root, storage.sqlite),
-        indexes=build_indexes(storage.index),
-        instructions=bundled_instructions(),
-    )
-    tokenizer = build_tokenizer()
-    vector_tables = storage.index.repositories.with_vectors()
     fields: dict[str, Any] = {
         "embedding": embedding,
         "vectors": ProjectionVectorBackfill(
-            vector_tables,
-            tokenizer=tokenizer,
+            storage.index.repositories.with_vectors(),
+            tokenizer=build_tokenizer(),
             prune_retention=dt.timedelta(
                 seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
             ),
-        ),
-        "vector_tables": vector_tables,
-        "clusters": deps.stores.cluster,
-        "skills": deps.indexes.agent_skill,
-        "skill_files": MarkdownAgentSkillStore(storage.root),
-        "engine_for": functools.partial(
-            build_replay_engine, storage.root, deps, OmeSettings()
-        ),
-        "ensure_schema": storage.create_schema,
-        "cascade": CascadeOrchestrator(
-            memory_root=storage.root,
-            tokenizer=tokenizer,
-            embedding=embedding,
-            index=storage.index,
-            sqlite=storage.sqlite,
         ),
         "ome_lock": OmeLock(storage.root.ome_db),
     }
@@ -515,17 +411,9 @@ def make_backfill_deps(
 
 def unused_backfill_deps() -> BackfillDeps:
     """Backfill wiring that fails loudly if reached, over a free root lock."""
-    unused = UnusedPort("backfill")
     return BackfillDeps(
         embedding=None,
-        vectors=unused,  # type: ignore[arg-type]
-        vector_tables=dict.fromkeys(_VECTOR_TABLES, unused),
-        clusters=unused,  # type: ignore[arg-type]
-        skills=unused,  # type: ignore[arg-type]
-        skill_files=unused,  # type: ignore[arg-type]
-        engine_for=unused,  # type: ignore[arg-type]
-        ensure_schema=unused,  # type: ignore[arg-type]
-        cascade=unused,  # type: ignore[arg-type]
+        vectors=UnusedPort("backfill"),  # type: ignore[arg-type]
         ome_lock=FakeOmeLock(),
     )
 
@@ -574,7 +462,6 @@ def make_application(
     *,
     root: Path | None = None,
     memory: Any = None,
-    knowledge: Any = None,
     ops: Any = None,
     capabilities: Capabilities = _ALL_CAPABILITIES,
     lifecycle: list[str] | None = None,
@@ -590,7 +477,6 @@ def make_application(
     return Application(
         memory=memory,
         images=images if images is not None else InMemoryImageStore(),
-        knowledge=knowledge if knowledge is not None else StubKnowledgeService(),
         ops=(
             ops
             if ops is not None

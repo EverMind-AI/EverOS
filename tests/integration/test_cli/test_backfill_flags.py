@@ -1,11 +1,11 @@
 """Integration tests for Task 24's ``cascade backfill`` polish pass.
 
-Covers three behaviours layered on top of Task 20-23's scaffold + three
-phase implementations:
+Covers three behaviours layered on top of Task 20-23's scaffold + the
+phase implementation:
 
 - **Summary block**: after ``run_backfill`` finishes (or is interrupted),
-  a consolidated "Backfill summary" section is printed, one line per
-  phase that actually ran, plus a final ``Exit: <LABEL> (<code>)`` line.
+  a consolidated "Backfill summary" section is printed, one line for
+  the phase that ran, plus a final ``Exit: <LABEL> (<code>)`` line.
 - **Ctrl-C handling**: an interrupt raised from inside a phase body must
   propagate up to ``run_backfill``'s own top-level handler (not be
   swallowed mid-phase), which prints a resume hint and returns exit
@@ -25,11 +25,10 @@ phase implementations:
 - **``--help`` polish**: the CLI help text names every ``--phase`` choice
   and explains what ``--yes`` does.
 
-Phase 1 (``vectors``) is reused for the "real counts" summary case
-because it is the cheapest phase to drive end-to-end (mirrors
-``backfill_runtime`` in ``test_backfill_phase1.py``); Phases 2/3 are
-exercised in the all-zero case only, since Task 24 doesn't add any new
-phase behaviour of its own.
+Phase 1 (``vectors``) -- the one phase -- drives the "real counts"
+summary case end-to-end (mirrors ``backfill_runtime`` in
+``test_backfill_phase1.py``); Task 24 doesn't add any new phase behaviour
+of its own.
 """
 
 from __future__ import annotations
@@ -146,14 +145,10 @@ async def test_summary_block_all_zero_on_empty_db(
     assert "Backfill summary" in out
     assert "Phase 1 (vectors)" in out
     assert "0 rows / 0 failed / 0 tokens" in out
-    assert "Phase 2 (clusters)" in out
-    assert "0 events emitted / 0 clusters created" in out
-    assert "Phase 3 (skills)" in out
-    assert "0 agent cases processed / 0 skills extracted" in out
     assert "Exit: SUCCESS  (0)" in out
 
 
-async def test_summary_block_reports_real_counts_for_ran_phase_only(
+async def test_summary_block_reports_real_counts(
     backfill_runtime: Path,
     capsys: pytest.CaptureFixture[str],
     storage_view: StorageView,
@@ -167,9 +162,6 @@ async def test_summary_block_reports_real_counts_for_ran_phase_only(
     assert "Backfill summary" in out
     assert "Phase 1 (vectors)" in out
     assert "2 rows / 0 failed" in out
-    # Only the phase that actually ran gets a summary line.
-    assert "Phase 2 (clusters)" not in out
-    assert "Phase 3 (skills)" not in out
     assert "Exit: SUCCESS  (0)" in out
 
 
@@ -203,7 +195,7 @@ async def test_synchronous_keyboard_interrupt_mid_phase_returns_130_with_resume_
     assert "partial progress was written" in out
     assert "Resume by running" in out
     assert "everos cascade backfill --phase <phase-name> --yes" in out
-    assert "vectors, clusters, skills, all" in out
+    assert "one of: vectors, all." in out
     # The summary block still prints on interrupt, reflecting no progress yet.
     assert "Backfill summary" in out
     assert "Exit: INTERRUPTED  (130)" in out
@@ -330,7 +322,7 @@ def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
 def test_backfill_help_documents_every_phase_name() -> None:
     result = CliRunner().invoke(cascade_mod.app, ["backfill", "--help"])
     assert result.exit_code == 0
-    for phase_name in ("vectors", "clusters", "skills", "all"):
+    for phase_name in ("vectors", "all"):
         assert phase_name in result.stdout
 
 

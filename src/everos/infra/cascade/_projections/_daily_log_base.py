@@ -1,6 +1,6 @@
 """Shared diff / dispatch loop for every daily-log cascade handler.
 
-The daily-log kinds (episode / agent_case / image_memory) all do the same
+The daily-log kinds (episode / image_memory / group_profile) all do the same
 three-way reconcile against the derived index:
 
 1. Parse the md into structured entries.

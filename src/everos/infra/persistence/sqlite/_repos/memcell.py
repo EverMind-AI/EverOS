@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
@@ -114,25 +114,3 @@ class MemcellRepo(RepoBase[Memcell]):
         ).limit(limit)
         async with session_scope(self._factory) as s:
             return list((await s.execute(stmt)).scalars().all())
-
-    async def mark_case_extracted(
-        self,
-        memcell_id: str,
-        *,
-        extracted_at: dt.datetime,
-        skip_reason: str | None,
-        skip_detail_json: str | None,
-    ) -> None:
-        """Stamp the agent-case extraction outcome; an unknown id updates nothing."""
-        stmt = (
-            update(Memcell)
-            .where(Memcell.memcell_id == memcell_id)
-            .values(
-                case_extracted_at=extracted_at,
-                case_skip_reason=skip_reason,
-                case_skip_detail_json=skip_detail_json,
-            )
-        )
-        async with session_scope(self._factory) as s:
-            await s.execute(stmt)
-            await s.commit()

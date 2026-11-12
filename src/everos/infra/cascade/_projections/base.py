@@ -7,8 +7,8 @@ the per-kind row shape; everything around it (watcher / scanner /
 worker / orchestrator / CLI) is kind-agnostic.
 
 Per-kind handlers share the same dependencies bundle — tokenizer,
-memory-root path resolver, the derived-index repositories, the knowledge
-SQLite repositories and the embedding provider — packaged as
+memory-root path resolver, the derived-index repositories, the group roster
+mirror and the embedding provider — packaged as
 :class:`HandlerDeps`. Construct it once at orchestrator startup, pass to
 every handler factory, no per-row resolution churn. Embedding is a soft
 dependency: with no provider, handlers write rows with ``vector=None``.
@@ -23,11 +23,7 @@ from everos.component.embedding import EmbeddingProvider, VisionEmbeddingProvide
 from everos.component.tokenizer import Tokenizer
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import IndexRepositories
-from everos.infra.persistence.sqlite import (
-    GroupRosterRepo,
-    KnowledgeDocumentRepo,
-    KnowledgeTopicRowRepo,
-)
+from everos.infra.persistence.sqlite import GroupRosterRepo
 
 from .._fence import DeleteFence
 from ..models import HandlerOutcome
@@ -40,9 +36,8 @@ class HandlerDeps:
     Frozen + read-only — handlers never mutate the deps; orchestrator
     is the sole owner. ``memory_root`` is used to resolve the absolute
     file path from the relative ``md_path`` stored in
-    ``md_change_state``. ``index`` holds the table each projection writes;
-    the two knowledge repositories hold the SQLite side of the knowledge
-    kinds. ``embedding`` is ``None`` on a keyword-only deployment: rows are
+    ``md_change_state``. ``index`` holds the table each projection writes.
+    ``embedding`` is ``None`` on a keyword-only deployment: rows are
     then written without vectors. ``fence`` keeps the daily-log projections
     from writing back rows a memory deletion removed; ``None`` (tools that
     run the projections outside the server) leaves it out.
@@ -51,8 +46,6 @@ class HandlerDeps:
     memory_root: MemoryRoot
     tokenizer: Tokenizer
     index: IndexRepositories
-    knowledge_documents: KnowledgeDocumentRepo
-    knowledge_topics: KnowledgeTopicRowRepo
     embedding: EmbeddingProvider | None = None
     vision_embedding: VisionEmbeddingProvider | None = None
     fence: DeleteFence | None = None

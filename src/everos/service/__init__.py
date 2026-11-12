@@ -1,9 +1,8 @@
-"""Application layer: assembly plus three use-case facades.
+"""Application layer: assembly plus two use-case facades.
 
 :func:`build_application` builds an :class:`Application` from settings; an
 entry point holds that one object and calls its facades --
-:class:`MemoryService` (add / flush / search / get),
-:class:`KnowledgeService` (knowledge documents and search) and
+:class:`MemoryService` (add / flush / search / get) and
 :class:`OpsService` (cascade, OME, health, tasks). One CLI command or API
 endpoint maps to one facade method. :func:`prompt_manifest` names the prompts
 this EverOS sends (``everos prompts``).
@@ -21,13 +20,10 @@ External usage::
     await application.aclose()
 """
 
-from everos.core.errors import DocumentNotFoundError as DocumentNotFoundError
-from everos.core.errors import DuplicateDocumentError as DuplicateDocumentError
-from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
-from everos.core.errors import TopicNotFoundError as TopicNotFoundError
 from everos.memory.get import GetRequest as GetRequest
 from everos.memory.get import GetResponse as GetResponse
 from everos.memory.prompt_manifest import prompt_manifest as prompt_manifest
+from everos.memory.search import NO_AGENT_MEMORY as NO_AGENT_MEMORY
 from everos.memory.search import GroupProfileEntry as GroupProfileEntry
 from everos.memory.search import SearchRequest as SearchRequest
 from everos.memory.search import SearchResponse as SearchResponse
@@ -37,20 +33,6 @@ from .bootstrap import Providers as Providers
 from .bootstrap import build_application as build_application
 from .bootstrap import build_providers as build_providers
 from .bootstrap import configure_process as configure_process
-from .knowledge import CategoryOverview as CategoryOverview
-from .knowledge import CreateDocumentResult as CreateDocumentResult
-from .knowledge import DeleteResult as DeleteResult
-from .knowledge import DocumentContext as DocumentContext
-from .knowledge import DocumentDetail as DocumentDetail
-from .knowledge import DocumentListResult as DocumentListResult
-from .knowledge import DocumentOverviewItem as DocumentOverviewItem
-from .knowledge import KnowledgeExtractor as KnowledgeExtractor
-from .knowledge import KnowledgeService as KnowledgeService
-from .knowledge import PatchResult as PatchResult
-from .knowledge import SearchHit as SearchHit
-from .knowledge import SearchKnowledgeResult as SearchKnowledgeResult
-from .knowledge import TopicDetail as TopicDetail
-from .knowledge import TopicOverview as TopicOverview
 from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import FlushResult as FlushResult
 from .memory import GroupForgetResult as GroupForgetResult
@@ -84,7 +66,6 @@ from .ops import BackfillSummary as BackfillSummary
 from .ops import Capabilities as Capabilities
 from .ops import CascadeHealthReport as CascadeHealthReport
 from .ops import CascadeStatus as CascadeStatus
-from .ops import ClustersPhaseResult as ClustersPhaseResult
 from .ops import HealthReport as HealthReport
 from .ops import NullBackfillPresenter as NullBackfillPresenter
 from .ops import OmeRun as OmeRun
@@ -93,13 +74,13 @@ from .ops import OpsService as OpsService
 from .ops import ProviderStatus as ProviderStatus
 from .ops import QuiesceResult as QuiesceResult
 from .ops import RebuildResult as RebuildResult
-from .ops import SkillsPhaseResult as SkillsPhaseResult
 from .ops import VectorsPhaseResult as VectorsPhaseResult
 from .ops import compute_disabled_features as compute_disabled_features
 from .ops import format_tokens as format_tokens
 
 __all__ = [
     "BACKFILL_PHASES",
+    "NO_AGENT_MEMORY",
     "TASK_STATUSES",
     "Application",
     "BackfillDeps",
@@ -109,17 +90,6 @@ __all__ = [
     "Capabilities",
     "CascadeHealthReport",
     "CascadeStatus",
-    "CategoryOverview",
-    "ClustersPhaseResult",
-    "CreateDocumentResult",
-    "DeleteResult",
-    "DocumentContext",
-    "DocumentDetail",
-    "DocumentListResult",
-    "DocumentNotFoundError",
-    "DocumentOverviewItem",
-    "DuplicateDocumentError",
-    "ExtractionEmptyError",
     "FlushResult",
     "GetRequest",
     "GetResponse",
@@ -130,8 +100,6 @@ __all__ = [
     "GroupUpsertResult",
     "GroupView",
     "HealthReport",
-    "KnowledgeExtractor",
-    "KnowledgeService",
     "MemorizeResult",
     "MemoryChanges",
     "MemoryHistory",
@@ -141,7 +109,6 @@ __all__ = [
     "OmeRun",
     "OmeTriggerResult",
     "OpsService",
-    "PatchResult",
     "ProjectMember",
     "ProjectProfile",
     "ProjectView",
@@ -153,16 +120,10 @@ __all__ = [
     "RebuildResult",
     "RosterChangeResult",
     "RosterEventInput",
-    "SearchHit",
-    "SearchKnowledgeResult",
     "SearchRequest",
     "SearchResponse",
-    "SkillsPhaseResult",
     "TaskItem",
     "TaskPage",
-    "TopicDetail",
-    "TopicNotFoundError",
-    "TopicOverview",
     "UpdateResult",
     "UserForgetResult",
     "UserForgetTarget",

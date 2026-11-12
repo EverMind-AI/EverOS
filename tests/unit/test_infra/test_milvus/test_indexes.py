@@ -56,10 +56,8 @@ def test_each_index_is_bound_to_the_milvus_repository(
     repos = milvus_index.repositories
     indexes = build_indexes(milvus_index)
     assert _bound(indexes.episode) is repos.episode
-    assert _bound(indexes.agent_case) is repos.agent_case
-    assert _bound(indexes.agent_skill) is repos.agent_skill
+    assert _bound(indexes.image_memory) is repos.image_memory
     assert _bound(indexes.profile) is repos.user_profile
-    assert _bound(indexes.knowledge_topic) is repos.knowledge_topic
     assert _bound(indexes.group_profile) is repos.group_profile_item
     assert isinstance(indexes.episode, EpisodeIndex)
 
@@ -81,18 +79,13 @@ async def test_rows_come_back_as_domain_episodes(
         content_sha256="x" * 64,
     )
 
-    async def find_by_owner_entries(*_: Any, **__: Any) -> list[EpisodeRow]:
+    async def scan(*_: Any, **__: Any) -> list[EpisodeRow]:
         return [row]
 
-    monkeypatch.setattr(
-        milvus_index.repositories.episode,
-        "find_by_owner_entries",
-        find_by_owner_entries,
-    )
+    monkeypatch.setattr(milvus_index.repositories.episode, "scan", scan)
 
-    (stored,) = await build_indexes(milvus_index).episode.find_by_entry_ids(
-        _USER, ["ep_1"]
-    )
+    (hit,) = await build_indexes(milvus_index).episode.find(_USER.to_filter())
+    stored = hit.stored
 
     assert stored.item == Episode(
         owner_id="u1",

@@ -17,20 +17,14 @@ from __future__ import annotations
 import pytest
 
 from everos.infra.persistence.index import schema_for
-from everos.infra.persistence.records import (
-    AgentCase,
-    AgentSkill,
-    Episode,
-    KnowledgeTopic,
-)
+from everos.infra.persistence.records import Episode, ImageMemory
 from tests.fakes import TEST_DIM, arrow_schema
 
 _VECTOR_COLUMNS = [
     (Episode, "vector"),
     (Episode, "subject_vector"),
-    (AgentCase, "vector"),
-    (AgentSkill, "vector"),
-    (KnowledgeTopic, "vector"),
+    (ImageMemory, "vector"),
+    (ImageMemory, "visual_vector"),
 ]
 
 

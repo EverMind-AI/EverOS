@@ -13,17 +13,16 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import (
-    DocumentNotFoundError,
-    DuplicateDocumentError,
     EmbeddingServiceError,
-    ExtractionEmptyError,
     FilterError,
     LLMNotConfiguredError,
     LLMServiceError,
     MultimodalNotEnabledError,
+    NotFoundError,
     PathTraversalError,
     PayloadTooLargeError,
     QueueSaturatedError,
+    RosterConflictError,
     StorageError,
     UnsupportedModalityError,
 )
@@ -44,15 +43,11 @@ def _make_app() -> FastAPI:
 
     @app.get("/raise/not-found")
     async def _not_found() -> None:
-        raise DocumentNotFoundError("doc_abc123")
+        raise NotFoundError("ep_abc123")
 
     @app.get("/raise/conflict")
     async def _conflict() -> None:
-        raise DuplicateDocumentError("doc_abc123 already exists")
-
-    @app.get("/raise/extraction-empty")
-    async def _extraction_empty() -> None:
-        raise ExtractionEmptyError("extraction produced no output")
+        raise RosterConflictError("member u1 already joined")
 
     @app.get("/raise/filter-error")
     async def _filter_error() -> None:
@@ -145,7 +140,7 @@ def _assert_envelope(data: dict, *, path: str) -> None:
 
 
 async def test_not_found_returns_404(client: AsyncClient) -> None:
-    """DocumentNotFoundError → HTTP 404, code=NOT_FOUND."""
+    """NotFoundError → HTTP 404, code=NOT_FOUND."""
     resp = await client.get("/raise/not-found")
     assert resp.status_code == 404
     data = resp.json()
@@ -172,21 +167,12 @@ async def test_queue_saturated_returns_429(client: AsyncClient) -> None:
 
 
 async def test_conflict_returns_409(client: AsyncClient) -> None:
-    """DuplicateDocumentError → HTTP 409, code=CONFLICT."""
+    """A ConflictError subclass with no rule of its own → HTTP 409, code=CONFLICT."""
     resp = await client.get("/raise/conflict")
     assert resp.status_code == 409
     data = resp.json()
     assert data["error"]["code"] == "CONFLICT"
     _assert_envelope(data, path="/raise/conflict")
-
-
-async def test_extraction_empty_returns_422(client: AsyncClient) -> None:
-    """ExtractionEmptyError → HTTP 422, code=EXTRACTION_EMPTY."""
-    resp = await client.get("/raise/extraction-empty")
-    assert resp.status_code == 422
-    data = resp.json()
-    assert data["error"]["code"] == "EXTRACTION_EMPTY"
-    _assert_envelope(data, path="/raise/extraction-empty")
 
 
 async def test_filter_error_returns_422(client: AsyncClient) -> None:

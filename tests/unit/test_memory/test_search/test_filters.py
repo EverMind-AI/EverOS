@@ -68,24 +68,6 @@ def test_no_filters_emits_base_clause() -> None:
     assert where == All(_BASE_USER)
 
 
-def test_no_filters_agent_omits_deprecated_by() -> None:
-    where = compile_filters(None, owner_id="bot_42", owner_type="agent")
-    assert where == All(
-        (
-            eq("owner_id", "bot_42"),
-            eq("owner_type", "agent"),
-            eq("app_id", "default"),
-            eq("project_id", "default"),
-        )
-    )
-    assert is_null("deprecated_by") not in _clauses(where)
-
-
-def test_owner_type_agent_pinned() -> None:
-    where = compile_filters(None, owner_id="alice", owner_type="agent")
-    assert eq("owner_type", "agent") in _clauses(where)
-
-
 def test_app_project_scope_pinned() -> None:
     where = compile_filters(
         None,
@@ -253,7 +235,7 @@ def test_owner_id_in_filters_rejected() -> None:
 
 
 def test_owner_type_in_filters_rejected() -> None:
-    node = FilterNode.model_validate({"owner_type": "agent"})
+    node = FilterNode.model_validate({"owner_type": "group"})
     with pytest.raises(FilterError, match="reserved"):
         compile_filters(node, owner_id="alice", owner_type="user")
 
@@ -302,8 +284,3 @@ def test_empty_and_array_skips_combinator() -> None:
 def test_compile_filters_excludes_deprecated_by_for_user() -> None:
     where = compile_filters(None, owner_id="u_a", owner_type="user")
     assert is_null("deprecated_by") in _clauses(where)
-
-
-def test_compile_filters_omits_deprecated_by_for_agent() -> None:
-    where = compile_filters(None, owner_id="agent_1", owner_type="agent")
-    assert is_null("deprecated_by") not in _clauses(where)

@@ -24,41 +24,16 @@
 #   cooldown_seconds       = int >= 0       # min seconds between fires
 #   event_field            = str            # dispatch field for counter increment
 
-# ── User-memory pipeline ────────────────────────────────────────────────
+# ── Chat memory ─────────────────────────────────────────────────────────
 
-# Chat memory keeps episodes, picture memories and profiles. Atomic facts
-# and foresight were removed in EverOS 2.0: a [strategies.extract_atomic_facts]
-# or [strategies.extract_foresight] section left in this file only logs a
-# warning.
+# Chat memory keeps episodes, picture memories, profiles and scenes. EverOS
+# 2.0 removed atomic facts, foresight, Reflection, profile clustering and agent
+# memory: a section left in this file for one of their strategies
+# (extract_atomic_facts, extract_foresight, reflect_episodes,
+# finish_reflection, trigger_profile_clustering, extract_agent_case,
+# trigger_skill_clustering, extract_agent_skill) only logs a warning.
 
-# Profile clustering trigger (fires on each EpisodeExtracted event).
-# [strategies.trigger_profile_clustering]
-# enabled = true
-
-# User-profile extraction (runs after clustering trigger fires). Set
+# User-profile update (runs on each EpisodeExtracted event). Set
 # enabled = false to skip in evaluation runs.
 # [strategies.extract_user_profile]
-# enabled = true
-
-# ── Reflection ──────────────────────────────────────────────────────────
-
-# Offline memory consolidation. Disabled by default. To enable,
-# uncomment and set enabled = true. Runs weekly Monday 02:00.
-# Run sparingly — at most once a week. Each run is a lossy LLM re-merge.
-# [strategies.reflect_episodes]
-# enabled = false
-# cron = "0 2 * * 1"
-
-# ── Agent-memory pipeline ───────────────────────────────────────────────
-
-# Agent case extraction (runs per agent memcell). One per tool call cycle.
-# [strategies.extract_agent_case]
-# enabled = true
-
-# Skill clustering trigger (fires on each AgentCaseExtracted event).
-# [strategies.trigger_skill_clustering]
-# enabled = true
-
-# Agent skill extraction (runs after skill clustering trigger fires).
-# [strategies.extract_agent_skill]
 # enabled = true

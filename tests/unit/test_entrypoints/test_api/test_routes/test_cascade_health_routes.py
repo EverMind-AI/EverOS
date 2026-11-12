@@ -33,7 +33,7 @@ def _healthy() -> CascadeHealth:
         unrecoverable_total=0,
         optimize_failure_streak=0,
         prune_stale_seconds=0.0,
-        index_rows={"episode": 1060, "agent_case": 4200},
+        index_rows={"episode": 1060, "image_memory": 4200},
         index_emptied=False,
     )
 
@@ -49,7 +49,7 @@ def _degraded() -> CascadeHealth:
         unrecoverable_total=3,
         optimize_failure_streak=0,
         prune_stale_seconds=1200.0,
-        index_rows={"episode": 1060, "agent_case": 4200},
+        index_rows={"episode": 1060, "image_memory": 4200},
         index_emptied=False,
     )
 
@@ -66,7 +66,7 @@ def _emptied() -> CascadeHealth:
         unrecoverable_total=0,
         optimize_failure_streak=0,
         prune_stale_seconds=0.0,
-        index_rows={"episode": 0, "agent_case": 0},
+        index_rows={"episode": 0, "image_memory": 0},
         index_emptied=True,
     )
 
@@ -103,7 +103,7 @@ async def test_health_healthy_cascade() -> None:
     assert body["status"] == "ok"
     assert body["cascade"]["healthy"] is True
     assert body["cascade"]["reasons"] == []
-    assert body["cascade"]["index_rows"] == {"episode": 1060, "agent_case": 4200}
+    assert body["cascade"]["index_rows"] == {"episode": 1060, "image_memory": 4200}
     assert body["cascade"]["index_emptied"] is False
 
 
@@ -122,7 +122,7 @@ async def test_health_reports_an_emptied_index_without_flipping_healthy() -> Non
     assert resp.status_code == 200
     body = resp.json()
     assert body["cascade"]["index_emptied"] is True
-    assert body["cascade"]["index_rows"] == {"episode": 0, "agent_case": 0}
+    assert body["cascade"]["index_rows"] == {"episode": 0, "image_memory": 0}
     assert body["cascade"]["healthy"] is True
     assert body["cascade"]["reasons"] == []
 

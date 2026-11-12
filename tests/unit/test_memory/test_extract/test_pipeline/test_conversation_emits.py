@@ -134,7 +134,6 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert (extracted.owner_id, extracted.session_id) == ("u1", "s1")
     assert (extracted.owner_type, extracted.speaker_ids) == ("user", [])
     assert extracted.group_key is None
-    assert extracted.source == "pipeline"
     (written,) = [call.args[1] for call in episode_store.append.await_args_list]
     assert written.summary == _EPISODE["summary"]
     assert written.subject == _EPISODE["title"]

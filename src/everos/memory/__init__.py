@@ -16,15 +16,13 @@ everalgo operator imports its types from ``everalgo`` directly.
 Storage is reached only through the protocols in :mod:`everos.memory.ports`;
 path resolution and addressing of markdown records live with the storage
 adapters that implement them. The domain layer here is reserved for actual
-business logic (extract / search / reflection / custom_instructions).
+business logic (extract / search / strategies / custom_instructions).
 """
 
 from ._partition_locks import forget_lock as forget_lock
 from ._partition_locks import group_profile_lock as group_profile_lock
 from ._partition_locks import profile_lock as profile_lock
 from ._partition_locks import scenes_lock as scenes_lock
-from ._partition_locks import user_cluster_lock as user_cluster_lock
-from .models import AgentCase as AgentCase
 from .models import CanonicalMessage as CanonicalMessage
 from .models import Episode as Episode
 from .models import IngestResult as IngestResult
@@ -32,7 +30,6 @@ from .models import MemCell as MemCell
 from .models import ToolCall as ToolCall
 
 __all__ = [
-    "AgentCase",
     "CanonicalMessage",
     "Episode",
     "IngestResult",
@@ -42,5 +39,4 @@ __all__ = [
     "group_profile_lock",
     "profile_lock",
     "scenes_lock",
-    "user_cluster_lock",
 ]

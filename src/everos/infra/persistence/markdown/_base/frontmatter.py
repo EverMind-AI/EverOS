@@ -16,15 +16,14 @@ Two complementary surfaces live here:
    ``sort_keys=False`` so caller-controlled key order is preserved).
 
 2. The L1 chassis classes — :class:`BaseFrontmatter`,
-   :class:`UserScopedFrontmatter`, :class:`AgentScopedFrontmatter`,
-   :class:`GroupScopedFrontmatter` — which fix the *absolute-readonly*
-   fields (``id`` / ``type`` / ``schema_version``) plus scope
-   (``user_id`` / ``agent_id`` / ``group_id`` + ``track``). Every
+   :class:`UserScopedFrontmatter`, :class:`GroupScopedFrontmatter` — which
+   fix the *absolute-readonly* fields (``id`` / ``type`` /
+   ``schema_version``) plus scope (``user_id`` / ``group_id`` + ``track``). Every
    business frontmatter schema in ``infra/persistence/markdown/_mds/``
    subclasses one of these.
 
-Concrete business schemas (``UserMemcellDailyFrontmatter``,
-``SkillFrontmatter``, …) live in ``infra``; they add per-record
+Concrete business schemas (``EpisodeDailyFrontmatter``,
+``UserProfileFrontmatter``, …) live in ``infra``; they add per-record
 business fields plus the path-resolution metadata daily-log writers
 need (``ENTRY_ID_PREFIX`` / ``DIR_NAME`` / ``FILE_PREFIX``).
 """
@@ -36,8 +35,6 @@ from typing import Any, ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict
-
-from .path_safety import sanitize_dirname
 
 # ── YAML helpers ────────────────────────────────────────────────────────
 
@@ -142,13 +139,13 @@ class BaseFrontmatter(BaseModel):
     never be rewritten by a human edit.
 
     Subclasses add scope (``UserScopedFrontmatter`` /
-    ``AgentScopedFrontmatter``) plus per-record business fields.
+    ``GroupScopedFrontmatter``) plus per-record business fields.
     """
 
     SCOPE_DIR: ClassVar[str] = ""
     """Top-level directory under the memory-root that holds this kind.
 
-    Scope mixins set this to ``"users"`` / ``"agents"``. Scope-agnostic
+    Scope mixins set this to ``"users"`` / ``"groups"``. Scope-agnostic
     schemas (rare) leave it empty; consumers that need to resolve a path
     (writers, layout reverse-lookup) must reject schemas with empty
     ``SCOPE_DIR``.
@@ -174,12 +171,12 @@ class BaseFrontmatter(BaseModel):
         for both the writer's path resolution and the scanner's enumeration.
 
         Subclasses must override — typically by mixing in
-        :class:`DailyLogPathMixin` or :class:`SkillPathMixin` *before* the
+        :class:`DailyLogPathMixin` or :class:`ProfilePathMixin` *before* the
         scope mixin in the MRO so this abstract version is shadowed.
         """
         raise NotImplementedError(
             f"{cls.__name__} must declare path_glob() "
-            f"(mix in DailyLogPathMixin / SkillPathMixin, or override directly)"
+            f"(mix in DailyLogPathMixin / ProfilePathMixin, or override directly)"
         )
 
 
@@ -188,7 +185,7 @@ class DailyLogPathMixin:
 
     Files live at ``<SCOPE_DIR>/<scope_id>/<DIR_NAME>/<FILE_PREFIX>-<YYYY-MM-DD>.md``.
     Subclasses must inherit a scope mixin (``UserScopedFrontmatter`` /
-    ``AgentScopedFrontmatter``) supplying ``SCOPE_DIR``, and must declare
+    ``GroupScopedFrontmatter``) supplying ``SCOPE_DIR``, and must declare
     their own ``DIR_NAME`` / ``FILE_PREFIX`` ClassVars.
 
     Place **this mixin first** so Python's MRO resolves ``path_glob()`` to
@@ -215,133 +212,14 @@ class DailyLogPathMixin:
         return f"*/*/{cls.SCOPE_DIR}/*/{cls.DIR_NAME}/{cls.FILE_PREFIX}-*.md"
 
 
-class SkillPathMixin:
-    """Path strategy for skill-directory files.
-
-    Each skill lives at ``<SCOPE_DIR>/<scope_id>/<SKILLS_CONTAINER_NAME>/
-    <SKILL_DIR_PREFIX><skill_name>/<SKILL_MAIN_FILENAME>``. The glob covers
-    every skill's main file; sibling ``references/*.md`` and ``scripts/*``
-    are excluded (they ride alongside the main file and the cascade
-    daemon rebuilds the index column by concatenation, see
-    :class:`AgentSkillFrontmatter`'s docstring).
-
-    Place **this mixin first** so MRO resolves ``path_glob()`` here::
-
-        class AgentSkillFrontmatter(SkillPathMixin, AgentScopedFrontmatter):
-            SKILLS_CONTAINER_NAME: ClassVar[str] = "skills"
-            SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
-            SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
-            ...
-
-    ``skill_dir_name`` / ``sanitize_skill_name`` are the single
-    sanitization point both ``AgentSkillWriter`` and ``AgentSkillReader``
-    derive their ``skill_<name>`` directory segment from, and that
-    ``memory.strategies.extract_agent_skill._persist_skill`` uses to
-    sanitize LLM-emitted ``skill_name`` *before* constructing
-    ``AgentSkillFrontmatter`` — ``skill_name`` is LLM output and must not
-    reach the filesystem, or the frontmatter's traversal validator,
-    unsanitized (CWE-22).
-    """
-
-    SKILLS_CONTAINER_NAME: ClassVar[str]
-    SKILL_DIR_PREFIX: ClassVar[str]
-    SKILL_MAIN_FILENAME: ClassVar[str]
-    SCOPE_DIR: ClassVar[str]
-
-    @classmethod
-    def path_glob(cls) -> str:
-        # Leading ``*/*/`` matches the <app>/<project> scope prefix.
-        return (
-            f"*/*/{cls.SCOPE_DIR}/*/{cls.SKILLS_CONTAINER_NAME}/"
-            f"{cls.SKILL_DIR_PREFIX}*/{cls.SKILL_MAIN_FILENAME}"
-        )
-
-    @classmethod
-    def sanitize_skill_name(cls, skill_name: str) -> str:
-        """Bare sanitized skill name (no ``skill_`` prefix).
-
-        The single sanitization point for a skill's ``name`` value itself —
-        as opposed to :meth:`skill_dir_name`, which additionally prefixes
-        it for the directory segment. Callers building
-        ``AgentSkillFrontmatter.name`` from LLM output (see
-        ``memory.strategies.extract_agent_skill._persist_skill``) route
-        through this *before* constructing the frontmatter, so
-        ``frontmatter.name`` ends up byte-identical to the directory-derived
-        name rather than merely idempotent-if-resanitized.
-
-        This is lossy: distinct raw names can collapse onto the same
-        sanitized name. Dropped punctuation, space/underscore collapse, and
-        the 50-character cap are the visible cases (``"fix django"`` and
-        ``"fix_django"`` both become ``"fix_django"``; ``"fix!django"`` and
-        ``"fixdjango"`` both become ``"fixdjango"``). The larger case is
-        every combining mark: a combining mark alone is not ``\\w``, so it
-        is stripped regardless of script, and two names that differ only in
-        their marks collide — e.g. Devanagari ``"किताब"`` and ``"कताब"``
-        both sanitize to ``"कतब"``; the same holds for Thai tone marks,
-        Hebrew niqqud, and Arabic harakat.
-
-        Case is *not* folded, which makes the collision above
-        filesystem-dependent rather than universal, and is the dimension an
-        LLM varies most freely: ``"Fix Django"`` → ``"Fix_Django"`` and
-        ``"fix django"`` → ``"fix_django"`` are two distinct sanitized
-        names, so they are two rows in LanceDB (a case-sensitive Python
-        string key) but one directory on a case-insensitive filesystem —
-        macOS APFS and Windows NTFS in their default configurations. That
-        splits the invariant this seam otherwise maintains: the surviving
-        ``SKILL.md`` carries one of the two names in its frontmatter while
-        the index still advertises both, so a search hit on the shadowed
-        name resolves to the other skill's content. On a case-sensitive
-        filesystem the same pair simply stays two independent skills.
-
-        Because ``AgentSkillWriter.write_main`` is a full-file replace and
-        the LanceDB primary key is ``f"{agent_id}_{sanitized_name}"``, a
-        collision means the later skill silently overwrites the earlier
-        one — its accumulated ``source_case_ids``, ``maturity_score``, and
-        body are lost, not merged.
-
-        This is deliberate, not an oversight — but not because a collision
-        "usually reads as an intended update". ``_persist_skill`` sanitizes
-        *before* constructing the frontmatter, so the LLM is shown the
-        already-sanitized name in ``existing_relevant_skills``; when it
-        then emits a raw name like ``"fix django"`` after having just been
-        shown ``"fix_django"``, it has affirmatively treated them as two
-        different skills, and the write silently merges them anyway.
-
-        What justifies accepting it is narrower: the two alternatives are
-        both worse here. Detecting a collision and raising would
-        reintroduce the dead-letter DoS this sanitizer was built to avoid —
-        LLM output would again decide whether a run survives. Appending a
-        disambiguating suffix is the real candidate and is left for a
-        deliberate design pass, not dismissed: it does *not* break the
-        ``frontmatter.name`` ≡ directory-suffix identity (writing
-        ``"fix_django_2"`` into both keeps that intact), but it does need a
-        collision probe on a path that currently touches no other skill,
-        and a rule for the case-insensitive-filesystem variant above where
-        the probe must compare case-folded while the key stays exact.
-        """
-        return sanitize_dirname(skill_name, fallback="unnamed")
-
-    @classmethod
-    def skill_dir_name(cls, skill_name: str) -> str:
-        """Sanitized ``skill_<name>`` directory segment (traversal-safe).
-
-        Idempotent in ``skill_name``: calling this again on an already
-        sanitized name (e.g. one recovered by walking the directory tree)
-        returns the same segment, so a reader deriving ``skill_name`` from
-        the on-disk directory and a writer deriving it from raw LLM output
-        land on the same path.
-        """
-        return f"{cls.SKILL_DIR_PREFIX}{cls.sanitize_skill_name(skill_name)}"
-
-
 class ProfilePathMixin:
     """Path strategy for single-file profile markdown.
 
     Profiles live at ``<SCOPE_DIR>/<scope_id>/<PROFILE_FILENAME>`` —
     one fixed-name file directly under the scope's owner directory, no
-    intermediate ``<dir>/`` segment (unlike daily-logs) and no per-name
-    subdir (unlike skills). Subclasses must inherit a scope mixin
-    (``UserScopedFrontmatter`` / ``AgentScopedFrontmatter``) supplying
+    intermediate ``<dir>/`` segment (unlike daily-logs). Subclasses must
+    inherit a scope mixin (``UserScopedFrontmatter`` /
+    ``GroupScopedFrontmatter``) supplying
     ``SCOPE_DIR`` and declare their own ``PROFILE_FILENAME``.
 
     Place **this mixin first** so MRO resolves ``path_glob()`` here::
@@ -384,20 +262,6 @@ class UserScopedFrontmatter(BaseFrontmatter):
     track: Literal["user"] = "user"
 
 
-class AgentScopedFrontmatter(BaseFrontmatter):
-    """Records that belong to a single agent (track = ``agent``).
-
-    Same scope-vs-business split as :class:`UserScopedFrontmatter`:
-    ``agent_id`` is the file-level scope; ``group_id`` etc. ride on
-    each entry, not on the file frontmatter.
-    """
-
-    SCOPE_DIR: ClassVar[str] = "agents"
-
-    agent_id: str
-    track: Literal["agent"] = "agent"
-
-
 class GroupScopedFrontmatter(BaseFrontmatter):
     """Records that belong to a group (track = ``group``).
 
@@ -411,47 +275,3 @@ class GroupScopedFrontmatter(BaseFrontmatter):
 
     group_id: str
     track: Literal["group"] = "group"
-
-
-class KnowledgeScopedMixin:
-    """Records in the knowledge scope (no owner_id).
-
-    Unlike user/agent scopes, knowledge records are not owned by an
-    individual entity. The scope directory is ``knowledge/``.
-    """
-
-    SCOPE_DIR: ClassVar[str] = "knowledge"
-
-
-class KnowledgeDocumentPathMixin:
-    """Path strategy for ``knowledge/{category}/{doc_title}/index.md``.
-
-    Place this mixin first so MRO resolves ``path_glob()`` here::
-
-        class KnowledgeDocumentFrontmatter(
-            KnowledgeDocumentPathMixin, KnowledgeScopedMixin, BaseFrontmatter
-        ): ...
-    """
-
-    SCOPE_DIR: ClassVar[str]
-
-    @classmethod
-    def path_glob(cls) -> str:
-        return f"*/*/{cls.SCOPE_DIR}/*/*/index.md"
-
-
-class KnowledgeTopicPathMixin:
-    """Path strategy for ``knowledge/{category}/{doc_title}/<n>_<name>.md``.
-
-    Place this mixin first so MRO resolves ``path_glob()`` here::
-
-        class KnowledgeTopicFrontmatter(
-            KnowledgeTopicPathMixin, KnowledgeScopedMixin, BaseFrontmatter
-        ): ...
-    """
-
-    SCOPE_DIR: ClassVar[str]
-
-    @classmethod
-    def path_glob(cls) -> str:
-        return f"*/*/{cls.SCOPE_DIR}/*/*/[0-9]*.md"

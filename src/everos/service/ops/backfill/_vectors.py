@@ -51,12 +51,10 @@ async def run_vectors_phase(
         )
         return VectorsPhaseResult(blocked_by_capability="embedding")
 
-    # Phase 2 / Phase 3 both preflight the OME lock; Phase 1 must do
-    # the same. Otherwise ``--phase all`` starts against a running
-    # server, burns through Phase 1's embed API calls (real token
-    # cost + potential commit conflict with the live cascade worker),
-    # then only halts at Phase 2's preflight with exit 3. Fail fast
-    # here so the user's next action is "stop the server" — not
+    # Preflight the OME lock before any embedding call: against a running
+    # server the phase would burn through embed API calls (real token
+    # cost + potential commit conflict with the live cascade worker).
+    # Fail fast so the user's next action is "stop the server" — not
     # "reimburse this month's embedding bill".
     if not await anyio.to_thread.run_sync(deps.ome_lock.is_free):
         presenter.server_running()

@@ -23,9 +23,9 @@ ranking:
 - unprocessed_messages from the boundary-detection buffer
 - timezone discipline across a display-tz switch
 
-Request validation (the removed methods and their options, agent scopes) is
-pinned by the unit suite's ``test_search_route_validation.py``; an agent's
-cases and skills are listed by ``/memory/get`` (``test_get_endpoint_e2e.py``).
+Request validation (the removed methods and their options, and the agent
+scopes EverOS 2.0 refuses) is pinned by the unit suite's
+``test_search_route_validation.py``.
 
 ``test_multiround_recall_with_real_providers`` drives the same route with the
 real embedder and decider from ``.env``: it carries ``@pytest.mark.live_llm``

@@ -1,8 +1,10 @@
-"""System-DB schema creation upgrades a database made before a column existed.
+"""System-DB schema creation over a database an earlier build wrote.
 
-``create_all`` never alters an existing table, so a ``system.db`` written
-before the ``memcell.case_*`` columns must gain them at schema creation,
-keep its rows, and then read and write through the ORM as a fresh one does.
+An earlier 2.0 build stamped the agent-case extraction outcome on each memcell
+in three nullable ``memcell.case_*`` columns. EverOS 2.0 has no agent memory:
+the columns are no longer part of the table model, a fresh database is created
+without them, and a database that has them keeps working -- schema creation
+leaves them as they are, and the ORM reads and writes the table around them.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from everos.memory.models import MemcellRecord
 from everos.memory.ports import SessionKey
 
 _CASE_COLUMNS = {"case_extracted_at", "case_skip_reason", "case_skip_detail_json"}
-_PRE_CASE_MEMCELL_DDL = """
+_CASE_MEMCELL_DDL = """
 CREATE TABLE memcell (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
@@ -37,13 +39,17 @@ CREATE TABLE memcell (
     sender_ids_json VARCHAR NOT NULL,
     payload_json VARCHAR NOT NULL,
     timestamp DATETIME NOT NULL,
+    case_extracted_at DATETIME,
+    case_skip_reason VARCHAR,
+    case_skip_detail_json VARCHAR,
     PRIMARY KEY (memcell_id)
 )
 """
-_LEGACY_ROW = """
+_STAMPED_ROW = """
 INSERT INTO memcell VALUES (
     '2026-01-01 00:00:00', '2026-01-01 00:00:00', 'mc_old', 'app', 'proj', 's1',
-    'memorize', 'conversation', '[]', '[]', :payload, '2026-01-01 00:00:00'
+    'memorize', 'conversation', '[]', '[]', :payload, '2026-01-01 00:00:00',
+    '2026-01-01 00:00:00', 'no_messages_after_strip', NULL
 )
 """
 _SESSION = SessionKey(app_id="app", project_id="proj", session_id="s1")
@@ -64,12 +70,11 @@ async def _memcell_columns(database: SqliteDatabase) -> set[str]:
     return {row[1] for row in rows}
 
 
-async def test_an_older_database_gains_the_case_columns(tmp_path: Path) -> None:
+async def test_a_database_with_the_case_columns_keeps_working(tmp_path: Path) -> None:
     database = SqliteDatabase(MemoryRoot(tmp_path), SqliteSettings())
     async with database.engine.begin() as conn:
-        await conn.execute(text(_PRE_CASE_MEMCELL_DDL))
-        await conn.execute(text(_LEGACY_ROW), {"payload": _cell().model_dump_json()})
-    assert not _CASE_COLUMNS & await _memcell_columns(database)
+        await conn.execute(text(_CASE_MEMCELL_DDL))
+        await conn.execute(text(_STAMPED_ROW), {"payload": _cell().model_dump_json()})
 
     await database.create_schema()
     await database.create_schema()  # idempotent
@@ -84,21 +89,24 @@ async def test_an_older_database_gains_the_case_columns(tmp_path: Path) -> None:
         sender_ids=["u1"],
     )
     await store.insert_many(_SESSION, [record])
-    await store.mark_case_extracted(
-        "mc_old", skip_reason="no_messages_after_strip", skip_detail={}
-    )
     assert await store.find_by_ids(["mc_old", "mc_new"]) == [_cell(), _cell()]
     async with database.engine.connect() as conn:
-        reason = (
+        stamps = (
             await conn.execute(
-                text("SELECT case_skip_reason FROM memcell WHERE memcell_id='mc_old'")
+                text(
+                    "SELECT memcell_id, case_skip_reason FROM memcell "
+                    "ORDER BY memcell_id"
+                )
             )
-        ).scalar()
-    assert reason == "no_messages_after_strip"
+        ).fetchall()
+    assert [tuple(row) for row in stamps] == [
+        ("mc_new", None),
+        ("mc_old", "no_messages_after_strip"),
+    ]
     await database.dispose()
 
 
-async def test_a_fresh_database_is_created_with_the_case_columns(
+async def test_a_fresh_database_is_created_without_the_case_columns(
     tmp_path: Path,
 ) -> None:
     database = SqliteDatabase(MemoryRoot(tmp_path), SqliteSettings())
@@ -106,5 +114,5 @@ async def test_a_fresh_database_is_created_with_the_case_columns(
     tables = await database.create_schema()
 
     assert tables > 0
-    assert await _memcell_columns(database) >= _CASE_COLUMNS
+    assert not _CASE_COLUMNS & await _memcell_columns(database)
     await database.dispose()

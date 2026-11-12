@@ -5,12 +5,6 @@ These JSON files were hand-authored on 2026-10-27 against EverOS commit
 They are synthetic fixtures, not exported production records or payloads
 captured from a previous release. No current model serializer generated them.
 
-- `agent_case_extracted.json` and `skill_cluster_updated.json` omit fields
-  whose defaults are documented for pending older-shaped events in
-  `src/everos/memory/events.py`. This tests that shape, not the provenance of
-  an actual historical release.
-- `user_pipeline_started.json` freezes a nested MemCell and omitted scope
-  and sender-name defaults. Event identity and event time are explicit.
 - `memcell.json` freezes ordered text/tool-result union members and exact
   millisecond timestamps. The SQLite test inserts these bytes directly into
   `memcell.payload_json`; it does not call the current store writer.

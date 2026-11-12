@@ -17,9 +17,9 @@ retryable, see ``_PERMANENT_STATUSES``). Every other entry in that file —
 already extracted, already on disk — never reached the index.
 
 An entry can legitimately carry an empty embedded section: the md is the
-source of truth and stays editable by hand, so a blank section (here an agent
-case's ``TaskIntent``) is a state the cascade has to accept from disk. The
-guard lives in the shared base, so the agent case stands in for every
+source of truth and stays editable by hand, so a blank section (here a picture
+memory's ``Description``) is a state the cascade has to accept from disk. The
+guard lives in the shared base, so the picture memory stands in for every
 daily-log kind.
 
 Expected: the empty text is not sent to the provider at all — the row is
@@ -33,10 +33,10 @@ wrong version of the fix:
 
 - the blank entry sits in the **middle**, not last, so a result list that is
   not realigned with ``flat`` cannot accidentally line up;
-- the non-blank intents have **different lengths** and ``_vec`` encodes
+- the non-blank descriptions have **different lengths** and ``_vec`` encodes
   length in its first component, so a swapped vector is visible rather than
   equal;
-- one case is **whitespace-only** (``"   "``), because TEI accepts that and
+- one description is **whitespace-only** (``"   "``), because TEI accepts that and
   only a ``.strip()`` guard keeps it out — a truthiness guard looks right and
   embeds garbage.
 """
@@ -49,10 +49,10 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider, EmbeddingServiceError
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade._projections import AgentCaseHandler, HandlerDeps
+from everos.infra.cascade._projections import HandlerDeps, ImageMemoryHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import Comparison, Predicate
-from everos.infra.persistence.markdown import AgentCaseWriter
+from everos.infra.persistence.markdown import ImageMemoryWriter
 from tests.fakes import handler_deps
 
 _DIM = 1024
@@ -128,16 +128,18 @@ class _FakeRepo:
         return 0
 
 
-class _UnstrippingAgentCaseHandler(AgentCaseHandler):
+class _UnstrippingImageMemoryHandler(ImageMemoryHandler):
     """A subclass whose ``_embed_texts`` hands back unstripped text.
 
     The guard lives in the base class precisely so a subclass cannot poison a
     batch by returning a whitespace-only string; TEI would accept ``"   "`` and
-    quietly embed nothing useful.
+    quietly embed nothing useful. The markdown writer stores a whitespace-only
+    section as an empty one, so the subclass hands the whitespace back itself.
     """
 
     def _embed_texts(self, entry):  # type: ignore[no-untyped-def]
-        return (entry.structured.sections.get("TaskIntent", ""),)  # no .strip()
+        description = entry.structured.sections.get("Description", "")
+        return (description or "   ",)  # no .strip()
 
 
 def _deps(tmp_path, embedding: EmbeddingProvider | None) -> HandlerDeps:  # type: ignore[no-untyped-def]
@@ -146,26 +148,28 @@ def _deps(tmp_path, embedding: EmbeddingProvider | None) -> HandlerDeps:  # type
     return handler_deps(memory_root=mr, tokenizer=_StubTokenizer(), embedding=embedding)
 
 
-async def _write_cases(deps: HandlerDeps, intents: list[str]) -> str:
-    writer = AgentCaseWriter(deps.memory_root)
-    for i, intent in enumerate(intents):
+async def _write_pictures(deps: HandlerDeps, descriptions: list[str]) -> str:
+    writer = ImageMemoryWriter(deps.memory_root)
+    for i, description in enumerate(descriptions):
+        image_id = f"{i:064x}"
         await writer.append_entry(
-            "a1",
+            "u1",
             inline={
-                "owner_id": "a1",
+                "owner_id": "u1",
                 "session_id": "s1",
                 "timestamp": f"2026-05-14T10:00:0{i}+00:00",
+                "parent_type": "memcell",
                 "parent_id": "mc_1",
-                "quality_score": 0.5,
+                "image_id": image_id,
+                "original_path": f"figures/{image_id}.png",
+                "media_type": "png",
+                "width": 640,
+                "height": 480,
             },
-            sections={"TaskIntent": intent, "Approach": "read pages"},
+            sections={"Description": description},
             date=_dt.date(2026, 5, 14),
         )
-    return (
-        (deps.memory_root.agents_dir() / "a1" / ".cases" / "agent_case-2026-05-14.md")
-        .relative_to(deps.memory_root.root)
-        .as_posix()
-    )
+    return "default_app/default_project/users/u1/images/image-2026-05-14.md"
 
 
 async def test_blank_section_does_not_fail_the_files_other_entries(  # type: ignore[no-untyped-def]
@@ -173,24 +177,24 @@ async def test_blank_section_does_not_fail_the_files_other_entries(  # type: ign
 ) -> None:
     embedder = _StrictEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
+    monkeypatch.setattr(ImageMemoryHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    # blank in the MIDDLE; the two non-blank intents differ in length.
-    rel = await _write_cases(deps, ["aa", "", "cccc"])
+    # blank in the MIDDLE; the two non-blank descriptions differ in length.
+    rel = await _write_pictures(deps, ["aa", "", "cccc"])
 
-    outcome = await AgentCaseHandler(deps).handle_added_or_modified(rel)
+    outcome = await ImageMemoryHandler(deps).handle_added_or_modified(rel)
 
     # Every entry is written, including the blank one.
     assert outcome.upserted == 3
     # The blank text never reached the provider; the rest went in one call.
     assert embedder.batches == [["aa", "cccc"]]
-    by_intent = {row.task_intent: row for row in repo.rows}
-    assert set(by_intent) == {"aa", "", "cccc"}
+    by_description = {row.description: row for row in repo.rows}
+    assert set(by_description) == {"aa", "", "cccc"}
     # Each row carries ITS OWN vector: len("aa")=2, len("cccc")=4.
-    assert by_intent["aa"].vector[0] == 2.0
-    assert by_intent["cccc"].vector[0] == 4.0
+    assert by_description["aa"].vector[0] == 2.0
+    assert by_description["cccc"].vector[0] == 4.0
     # The blank row is written with no vector, and stays repair-able.
-    assert by_intent[""].vector is None
+    assert by_description[""].vector is None
 
 
 async def test_whitespace_only_text_from_a_subclass_is_not_sent(  # type: ignore[no-untyped-def]
@@ -199,15 +203,16 @@ async def test_whitespace_only_text_from_a_subclass_is_not_sent(  # type: ignore
     """``"   "`` is accepted by TEI, so a truthiness guard would embed it."""
     embedder = _StrictEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(_UnstrippingAgentCaseHandler, "index_repo", repo)
+    monkeypatch.setattr(_UnstrippingImageMemoryHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    rel = await _write_cases(deps, ["aa", "   ", "cccc"])
+    rel = await _write_pictures(deps, ["aa", "   ", "cccc"])
 
-    outcome = await _UnstrippingAgentCaseHandler(deps).handle_added_or_modified(rel)
+    handler = _UnstrippingImageMemoryHandler(deps)
+    outcome = await handler.handle_added_or_modified(rel)
 
     assert outcome.upserted == 3
     assert embedder.batches == [["aa", "cccc"]]
-    vectors = {row.task_intent.strip(): row.vector for row in repo.rows}
+    vectors = {row.description.strip(): row.vector for row in repo.rows}
     assert vectors["aa"][0] == 2.0
     assert vectors["cccc"][0] == 4.0
     assert vectors[""] is None
@@ -219,11 +224,11 @@ async def test_a_wholly_blank_file_costs_no_embedding_call(  # type: ignore[no-u
     """Every entry blank: no request at all, and the rows are still written."""
     embedder = _StrictEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
+    monkeypatch.setattr(ImageMemoryHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    rel = await _write_cases(deps, ["", ""])
+    rel = await _write_pictures(deps, ["", ""])
 
-    outcome = await AgentCaseHandler(deps).handle_added_or_modified(rel)
+    outcome = await ImageMemoryHandler(deps).handle_added_or_modified(rel)
 
     assert outcome.upserted == 2
     assert embedder.batches == []
@@ -236,11 +241,11 @@ async def test_a_short_embed_batch_fails_instead_of_misaligning(  # type: ignore
     """A provider returning fewer vectors must raise, not pair them up wrongly."""
     embedder = _ShortReturningEmbedder()
     repo = _FakeRepo()
-    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
+    monkeypatch.setattr(ImageMemoryHandler, "index_repo", repo)
     deps = _deps(tmp_path, embedder)
-    rel = await _write_cases(deps, ["aa", "cccc"])
+    rel = await _write_pictures(deps, ["aa", "cccc"])
 
     with pytest.raises(ValueError):
-        await AgentCaseHandler(deps).handle_added_or_modified(rel)
+        await ImageMemoryHandler(deps).handle_added_or_modified(rel)
     # Nothing half-written: the misaligned rows never reached the repo.
     assert repo.rows == []

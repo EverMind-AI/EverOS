@@ -33,9 +33,8 @@ from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.ports import MemoryRef, OwnerDirDeletion, Scope
 
 from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
-from ._mds import AgentSkillFrontmatter, UserProfileFrontmatter
+from ._mds import UserProfileFrontmatter
 from ._writers import (
-    AgentCaseWriter,
     BaseDailyWriter,
     EpisodeWriter,
     ImageMemoryWriter,
@@ -71,7 +70,6 @@ class MarkdownOwnerDirStore:
                 "image_memory": ImageMemoryWriter(root),
                 "scene": SceneWriter(root),
             },
-            "agent": {"agent_case": AgentCaseWriter(root)},
         }
 
     async def delete(self, scope: Scope) -> OwnerDirDeletion:
@@ -191,8 +189,6 @@ class MarkdownOwnerDirStore:
     def _base(self, owner_type: str, app_id: str, project_id: str) -> Path:
         if owner_type == "user":
             return self._root.users_dir(app_id, project_id)
-        if owner_type == "agent":
-            return self._root.agents_dir(app_id, project_id)
         # A group's directory is never deleted wholesale: group deletion is a
         # propagated forget (docs/group-memory.md, section 9.4), not a rename.
         raise ValueError(f"no owner directory deletion for {owner_type!r} owners")
@@ -202,12 +198,12 @@ class MarkdownOwnerDirStore:
 
         The routes already reject ids with a path separator or ``..``; this
         is the second line: the directory must be exactly the owner's entry
-        under ``users/`` or ``agents/`` of the request's app and project.
+        under ``users/`` of the request's app and project.
         """
         base = self._base(scope.owner_type, scope.app_id, scope.project_id)
         target = base / scope.owner_id
         # ``base / "."`` (or ``""``) is ``base`` itself: the name check refuses
-        # it before anything could move the whole users/ or agents/ folder.
+        # it before anything could move the whole users/ folder.
         if (
             target.name != scope.owner_id
             or target.resolve() != base.resolve() / scope.owner_id
@@ -289,14 +285,6 @@ class MarkdownOwnerDirStore:
             count += len(found)
         if (moved / UserProfileFrontmatter.PROFILE_FILENAME).is_file():
             count += 1
-        skills = moved / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-        if skills.is_dir():
-            count += sum(
-                1
-                for d in skills.iterdir()
-                if d.is_dir()
-                and d.name.startswith(AgentSkillFrontmatter.SKILL_DIR_PREFIX)
-            )
         return OwnerDirDeletion(refs=refs, count=count)
 
 

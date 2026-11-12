@@ -205,9 +205,7 @@ def _capabilities_text() -> Text:
         ("LoCoMo           ", "93.05% (SOTA)", EVEROS_GREEN),
         ("context window   ", "unlimited", EVEROS_CYAN),
         ("hybrid retrieval ", "BM25 + vector", EVEROS_ORANGE),
-        ("agentic rerank   ", "on", EVEROS_YELLOW_SOFT),
         ("multimodal       ", "pdf / image / docs", EVEROS_INK),
-        ("self-evolving    ", "cases -> skills", EVEROS_GREEN),
     )
     parts: list[tuple[str, str]] = []
     for label, value, color in rows:

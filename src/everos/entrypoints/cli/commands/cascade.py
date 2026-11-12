@@ -11,8 +11,8 @@ without standing up the FastAPI app:
 - ``cascade fix`` — list every ``failed`` row. With ``--apply``, also
   reset ``retryable=TRUE`` rows back to ``pending`` and drain the
   worker once so the retry actually runs before the command returns.
-- ``cascade backfill`` — one-shot Tier 1 → Tier 2/3 migration: re-embed
-  vectors, build clusters, extract skills. See
+- ``cascade backfill`` — one-shot Tier 1 → Tier 2 migration: re-embed
+  vectors. See
   :func:`everos.entrypoints.cli.commands._backfill.run_backfill`
   for the phase orchestration.
 - ``cascade rebuild`` — drop every business LanceDB table and re-index
@@ -416,8 +416,6 @@ class _BackfillPhaseOption(enum.StrEnum):
     """``--phase`` choices: ``all`` plus :data:`everos.service.BACKFILL_PHASES`."""
 
     VECTORS = "vectors"
-    CLUSTERS = "clusters"
-    SKILLS = "skills"
     ALL = "all"
 
 
@@ -430,10 +428,8 @@ def backfill(
             "--phase",
             help=(
                 "Which phase to run — vectors (re-embed rows so they become "
-                "searchable by meaning, not just keyword), clusters (group "
-                "re-embedded episodes/agent cases into topics), skills "
-                "(extract reusable agent skills from clustered cases), or "
-                "all (run every phase in order). Default: all."
+                "searchable by meaning, not just keyword), or all (every "
+                "phase in order; today the vectors phase). Default: all."
             ),
         ),
     ] = _BackfillPhaseOption.ALL,
@@ -458,11 +454,11 @@ def backfill(
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
 ) -> None:
-    """Backfill embeddings, clusters, and agent skills after upgrading from
-    Tier 1 (LLM-only) to Tier 2/3 (embedding configured).
+    """Backfill embeddings after upgrading from Tier 1 (LLM-only) to Tier 2
+    (embedding configured).
 
-    Runs up to three phases in order (see ``--phase``), each showing a
-    token-count estimate and confirming before doing any work. The
+    Runs the vectors phase (see ``--phase``), showing a token-count estimate
+    and confirming before doing any work. The
     estimate is an input-token count only (K/M shorthand) — never a
     price, since per-token pricing is provider-specific and can change.
 

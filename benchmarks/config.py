@@ -127,9 +127,9 @@ class BenchmarkConfig(BaseModel):
 
     EverOS has a single `[llm]` setting, so this ONE model does both jobs: it extracts
     memories during ADD and it is the decider inside the multi-round retrieval loop
-    (`extract_agent_case`, `extract_user_profile`, `extract_atomic_facts`,
-    `reflect_episodes` and the search loop all share the one `[llm]` provider).
-    There is no separate decider knob to set.
+    (the episode call, `extract_user_profile`, the scene and group-profile updates
+    and the search loop all share the one `[llm]` provider). There is no separate
+    decider knob to set.
 
     Empty means "leave EVEROS_LLM__MODEL as the environment already has it" -- which is
     the only option when attaching to servers via --base-url, since their backbone was
@@ -436,9 +436,7 @@ class ServingSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     role: str
-    """``decider`` | ``answer`` | ``judge`` | ``embedding`` | ``reranker`` |
-    ``extraction``.
-    """
+    """``decider`` | ``answer`` | ``judge`` | ``embedding`` | ``extraction``."""
     model: str
     endpoint: str = ""
     local: bool = False

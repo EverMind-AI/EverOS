@@ -3,7 +3,7 @@
 Provides:
 
 - ``core_pipeline_runtime``: tmp memory root + packaged ``ome.toml``.
-  Uses the **real** LLM / embedding / rerank creds from ``.env`` per the
+  Uses the **real** LLM / embedding creds from ``.env`` per the
   project test policy.
 - ``async_client``: ``httpx.AsyncClient`` wired into ``create_app()`` with
   the full lifespan stack (SQLite + LanceDB + Cascade + OME).

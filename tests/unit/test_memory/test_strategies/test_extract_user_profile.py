@@ -54,7 +54,6 @@ def _event(
     memcell_id: str = "mc_1",
     *,
     owner_id: str = "u_alice",
-    source: str = "pipeline",
     language: str | None = "English",
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
@@ -63,7 +62,6 @@ def _event(
         episode_text="...",
         episode_timestamp_ms=_TS,
         owner_id=owner_id,
-        source=source,
         language=language,
     )
 
@@ -126,14 +124,15 @@ def _deps(model: _Model, **kwargs: Any) -> MemoryDeps:
     return make_deps(llm=model.llm, **kwargs)
 
 
-def test_spec_listens_to_pipeline_episodes_only() -> None:
+def test_spec_listens_to_a_users_own_episodes_only() -> None:
     spec = EXTRACT_USER_PROFILE_SPEC
     assert spec.name == "extract_user_profile"
     assert list(spec.trigger.on) == [EpisodeExtracted]  # type: ignore[union-attr]
     assert spec.applies_to is not None
     assert spec.applies_to(_event(), make_deps())
     assert spec.applies_to(_event(), make_deps(embedding=None))
-    assert not spec.applies_to(_event(source="reflection"), make_deps())
+    group = _event(owner_id="trip").model_copy(update={"owner_type": "group"})
+    assert not spec.applies_to(group, make_deps())
     assert spec.max_retries == 2
 
 

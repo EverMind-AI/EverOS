@@ -1,19 +1,18 @@
 """Shared fixtures for ``tests/integration/test_tiers/``.
 
-Three runtime fixtures build the real FastAPI app (``create_app()`` with
+Two runtime fixtures build the real FastAPI app (``create_app()`` with
 the full lifespan stack: LLM -> SQLite -> LanceDB -> Cascade -> OME)
-against a per-test ``EVEROS_ROOT``, differing only in which capability
-providers (embedding / rerank) are wired to a working stub provider:
+against a per-test ``EVEROS_ROOT``, differing only in whether the
+embedding provider is wired to a working stub provider:
 
-- ``tier1_runtime`` — LLM only. embed/rerank both unavailable.
-- ``tier2_runtime`` — LLM + embed. rerank unavailable.
-- ``tier3_runtime`` — LLM + embed + rerank, all available.
+- ``tier1_runtime`` — LLM only. embed unavailable.
+- ``tier2_runtime`` — LLM + embed, every provider the chat memory uses.
 
 Every fixture yields a ready ``httpx.AsyncClient`` wired to the app via
 ``ASGITransport`` with the lifespan already started (mirrors
 ``tests/e2e/conftest.py``'s ``async_client`` fixture, but swaps the real
 ``.env`` credentials for deterministic stubs so the suite runs under
-``make integration`` without live LLM/embed/rerank credentials).
+``make integration`` without live LLM/embed credentials).
 
 LLM stubbing notes:
 
@@ -45,7 +44,6 @@ import pytest_asyncio
 from everalgo.testing import FakeLLMClient
 
 from everos.component.embedding import EmbeddingProvider
-from everos.component.rerank import RerankResult
 from tests.fakes import StorageView, make_providers, memorize_llm, open_storage_view
 
 if TYPE_CHECKING:
@@ -68,21 +66,6 @@ class StubEmbedder(EmbeddingProvider):
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [await self.embed(t) for t in texts]
-
-
-class StubReranker:
-    """Deterministic reranker — returns candidates in original order."""
-
-    async def rerank(
-        self,
-        query: str,
-        documents: list[str],
-        *,
-        instruction: str | None = None,
-    ) -> list[RerankResult]:
-        return [
-            RerankResult(index=i, score=1.0 - i * 0.01) for i in range(len(documents))
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +166,8 @@ async def _tier_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     embed_available: bool,
-    rerank_available: bool,
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
     # The test seeds and reads rows through its own connection (see
     # ``tier_storage``); every LanceDB read must see the latest version.
     monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
@@ -199,13 +180,12 @@ async def _tier_client(
     (tmp_path / "ome.toml").write_text("# test\n")
 
     stub_embedder = StubEmbedder() if embed_available else None
-    stub_reranker = StubReranker() if rerank_available else None
     # `/health`'s `embed` reports the startup dimension probe, not whether a
     # provider could be constructed -- that was the half of issue #434 that
     # read `true` against a dead service. The probe builds its own provider
     # from settings (it has to: the installed one truncates to its own `dim`,
     # which would hide a model wider than the column), so it needs a stand-in
-    # here just like the LLM, the embedder and the reranker. Patching the
+    # here just like the LLM and the embedder. Patching the
     # probe rather than its recorded result, because startup re-runs it.
     from everos.infra.persistence.index import EmbeddingProvenance
 
@@ -218,11 +198,7 @@ async def _tier_client(
     from everos.service import build_application
 
     settings = load_settings()
-    providers = make_providers(
-        llm=make_fake_llm(),
-        embedding=stub_embedder,
-        rerank=stub_reranker,
-    )
+    providers = make_providers(llm=make_fake_llm(), embedding=stub_embedder)
     application = build_application(settings, providers=providers)
     _RUNNING["application"] = application
     app = create_app(application=application)
@@ -243,10 +219,8 @@ async def _tier_client(
 async def tier1_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
 ) -> AsyncIterator[httpx.AsyncClient]:
-    """Tier 1: LLM only. embed/rerank/multimodal all unavailable."""
-    async with _tier_client(
-        tmp_path, monkeypatch, embed_available=False, rerank_available=False
-    ) as client:
+    """Tier 1: LLM only. embed/multimodal unavailable."""
+    async with _tier_client(tmp_path, monkeypatch, embed_available=False) as client:
         yield client
 
 
@@ -254,21 +228,8 @@ async def tier1_runtime(
 async def tier2_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
 ) -> AsyncIterator[httpx.AsyncClient]:
-    """Tier 2: LLM + embed. rerank unavailable."""
-    async with _tier_client(
-        tmp_path, monkeypatch, embed_available=True, rerank_available=False
-    ) as client:
-        yield client
-
-
-@pytest_asyncio.fixture
-async def tier3_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
-) -> AsyncIterator[httpx.AsyncClient]:
-    """Tier 3: LLM + embed + rerank, all available."""
-    async with _tier_client(
-        tmp_path, monkeypatch, embed_available=True, rerank_available=True
-    ) as client:
+    """Tier 2: LLM + embed. multimodal unavailable."""
+    async with _tier_client(tmp_path, monkeypatch, embed_available=True) as client:
         yield client
 
 

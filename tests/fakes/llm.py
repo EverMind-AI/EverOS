@@ -4,31 +4,22 @@ A :class:`~everalgo.testing.FakeLLMClient` handler receives the
 ``response_format`` each operator requests, so a test answers per operator
 by the reply model's name instead of by prompt text.
 
-Canned replies live in ``llm_scripts/<track>/*.json``, one file per reply
-(the JSON text the model returns), for the ``user_track``, the
-``agent_track`` and ``knowledge`` (document topic extraction). Each
-user / agent operator has a default script and an empty (or blank) one for
-its skip / failure path::
+Canned replies live in ``llm_scripts/user_track/*.json``, one file per reply
+(the JSON text the model returns). Each operator has a default script and an
+empty (or blank) one for its skip / failure path::
 
     llm = user_track_llm()                         # every default script
     llm = user_track_llm(boundary="boundary_empty")  # one operator overridden
-    llm = agent_track_llm(case_filter="case_filter_empty")
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "AGENT_TRACK_OPERATORS",
     "DECIDER_KEEP_FIRST_TEN",
-    "KNOWLEDGE_OPERATORS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
-    "agent_track_llm",
-    "agent_track_script",
     "boundary_reply",
     "boundary_window",
-    "knowledge_llm",
-    "knowledge_script",
     "memorize_llm",
     "user_track_llm",
     "user_track_script",
@@ -58,31 +49,8 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "episode": "EpisodeReply",
     "profile_update": "_ProfileUpdateReply",
     "profile_consolidate": "_ConsolidateReply",
-    "reflect": "_ReflectOutput",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""
-
-AGENT_TRACK_OPERATORS: Mapping[str, str] = {
-    "boundary": "_BatchReply",
-    "case_filter": "_CaseFilterReply",
-    "case_compress": "_CaseCompressReply",
-    "case_gate": "_SuccessProbability",
-    "skill_cluster": "_ClusterAssignmentReply",
-    "skill_extract": "_SkillExtractReply",
-}
-"""Operator name -> reply model, as :data:`USER_TRACK_OPERATORS`, for the agent
-track."""
-
-
-KNOWLEDGE_OPERATORS: Mapping[str, str] = {
-    "topic_tree": "TopicTreeReply",
-    "category": "CategoryReply",
-    "topic_split": "TopicSplitReply",
-    "uncovered_assign": "UncoveredAssignReply",
-}
-"""Operator name -> reply model for document topic extraction. The default
-``topic_tree`` script is one topic over the first block of a one-paragraph
-document, so the split / uncovered passes are not reached on it."""
 
 
 def boundary_reply(
@@ -117,8 +85,7 @@ def memorize_llm(
 ) -> FakeLLMClient:
     """A model for the memorize path, answering by the reply model requested.
 
-    Boundary and episode replies are scripted here; agent-track operators
-    answer from their default agent-track scripts.
+    Boundary and episode replies are scripted here.
 
     Args:
         boundaries: Either a queue of cut lists, one popped per boundary call
@@ -135,20 +102,16 @@ def memorize_llm(
     Raises:
         KeyError: An override names an unknown user-track operator.
 
-    Other user-track operators, and knowledge extraction, answer from their
-    canned scripts; the multi-round search's decider keeps the first ten
-    candidates and stops (:data:`DECIDER_KEEP_FIRST_TEN`); anything else gets
-    an unusable reply (its background strategy logs and gives up).
+    Other user-track operators answer from their canned scripts; the
+    multi-round search's decider keeps the first ten candidates and stops
+    (:data:`DECIDER_KEEP_FIRST_TEN`); anything else gets an unusable reply (its
+    background strategy logs and gives up).
     """
     queue = None if callable(boundaries) else [list(b) for b in boundaries]
     episode = json.dumps(
         {"content": episode_content, "summary": episode_content, "title": episode_title}
     )
-    canned = {
-        **_canned("agent_track", AGENT_TRACK_OPERATORS, {}),
-        **_canned("knowledge", KNOWLEDGE_OPERATORS, {}),
-        **_user(scripts),
-    }
+    canned = _user(scripts)
 
     def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:
         name = response_format.__name__
@@ -175,30 +138,6 @@ def user_track_script(name: str) -> str:
     return _script("user_track", name)
 
 
-def agent_track_script(name: str) -> str:
-    """The canned reply ``llm_scripts/agent_track/<name>.json``."""
-    return _script("agent_track", name)
-
-
-def knowledge_script(name: str) -> str:
-    """The canned reply ``llm_scripts/knowledge/<name>.json``."""
-    return _script("knowledge", name)
-
-
-def knowledge_llm(**scripts: str) -> FakeLLMClient:
-    """A model answering every knowledge-extraction call from its canned script.
-
-    Args:
-        **scripts: ``operator=script`` overrides, as for :func:`user_track_llm`.
-
-    Raises:
-        KeyError: An override names an unknown operator.
-    """
-    return _scripted_llm(
-        "knowledge", _canned("knowledge", KNOWLEDGE_OPERATORS, scripts)
-    )
-
-
 def user_track_llm(**scripts: str) -> FakeLLMClient:
     """A model answering every user-track operator from its canned script.
 
@@ -209,21 +148,6 @@ def user_track_llm(**scripts: str) -> FakeLLMClient:
         KeyError: An override names an unknown operator.
     """
     return _scripted_llm("user-track", _user(scripts))
-
-
-def agent_track_llm(**scripts: str) -> FakeLLMClient:
-    """A model answering every agent-track operator from its canned script.
-
-    Args:
-        **scripts: ``operator=script`` overrides, e.g.
-            ``case_filter="case_filter_empty"``.
-
-    Raises:
-        KeyError: An override names an unknown operator.
-    """
-    return _scripted_llm(
-        "agent-track", _canned("agent_track", AGENT_TRACK_OPERATORS, scripts)
-    )
 
 
 def _scripted_llm(track: str, by_reply: Mapping[str, str]) -> FakeLLMClient:

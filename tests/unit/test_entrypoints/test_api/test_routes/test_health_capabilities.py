@@ -25,9 +25,7 @@ from tests.fakes import make_application
 from tests.fakes.application import _ALL_CAPABILITIES
 
 # Everything the route reads except the one field under test is pinned off.
-_NEUTRAL = dataclasses.replace(
-    _ALL_CAPABILITIES, rerank=False, multimodal_llm=False, parser=False
-)
+_NEUTRAL = dataclasses.replace(_ALL_CAPABILITIES, multimodal_llm=False, parser=False)
 
 
 async def _embed_from_the_route(*, probed: bool, embedding: bool = True) -> bool:

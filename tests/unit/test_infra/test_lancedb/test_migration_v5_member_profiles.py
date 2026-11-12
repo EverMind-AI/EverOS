@@ -1,10 +1,11 @@
 """LanceDB v5: an existing store gains the rest of the group columns in place.
 
-docs/group-memory.md, sections 6.3 and 9.1: member-in-group profiles are rows
-of the ``user_profile`` table with the member in ``subject_id``, and an agent
-case learned in a group carries ``source_group_id``. A store at v4 opens as
-before: both columns are added nullable, existing rows keep their values and
-read ``None``, and the schema check passes afterwards.
+docs/group-memory.md, section 6.3: member-in-group profiles are rows of the
+``user_profile`` table with the member in ``subject_id``. A store at v4 opens
+as before: the column is added nullable, existing rows keep their values and
+read ``None``, and the schema check passes afterwards. An ``agent_case`` table
+an older store holds (v5 once added ``source_group_id`` to it) is no longer
+opened: it stays as it was.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 import pyarrow as pa
 
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.records import AgentCase, UserProfile
+from everos.infra.persistence.records import UserProfile
 from tests.fakes.storage import arrow_schema, make_storage
 
 
@@ -29,12 +30,10 @@ async def test_v5_adds_subject_id_to_a_v4_store(tmp_path: Path) -> None:
             [f for f in arrow_schema(UserProfile) if f.name != "subject_id"]
         )
         await conn.create_table(UserProfile.TABLE_NAME, schema=old_shape)
-        await conn.create_table(
-            AgentCase.TABLE_NAME,
-            schema=pa.schema(
-                [f for f in arrow_schema(AgentCase) if f.name != "source_group_id"]
-            ),
+        legacy_cases = pa.schema(
+            [pa.field("id", pa.string()), pa.field("task_intent", pa.string())]
         )
+        await conn.create_table("agent_case", schema=legacy_cases)
         table = await conn.open_table(UserProfile.TABLE_NAME)
         at = _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
         await table.add(
@@ -66,8 +65,8 @@ async def test_v5_adds_subject_id_to_a_v4_store(tmp_path: Path) -> None:
         on_disk = await (await conn.open_table(UserProfile.TABLE_NAME)).schema()
         assert "subject_id" in on_disk.names
         assert on_disk.field("subject_id").nullable
-        cases = await (await conn.open_table(AgentCase.TABLE_NAME)).schema()
-        assert cases.field("source_group_id").nullable
+        cases = await (await conn.open_table("agent_case")).schema()
+        assert cases == legacy_cases
         await storage.backend.verify_business_schemas()
         rows = await (await conn.open_table(UserProfile.TABLE_NAME)).query().to_list()
         assert rows[0]["summary"] == "likes tea"

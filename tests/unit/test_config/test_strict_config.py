@@ -103,7 +103,9 @@ def test_a_secret_is_never_echoed(tmp_path: Path) -> None:
 @pytest.mark.parametrize("dotted", sorted(IGNORED_KEYS))
 def test_a_retired_key_is_ignored(tmp_path: Path, dotted: str) -> None:
     *sections, key = dotted.split(".")
-    root = _root(tmp_path, f"[{'.'.join(sections)}]\n{key} = 1\n")
+    # A retired section (no dot) is a whole table, the way old configs carry it.
+    table = f"[{'.'.join(sections)}]\n{key} = 1\n" if sections else f"[{key}]\nx = 1\n"
+    root = _root(tmp_path, table)
 
     settings = Settings(_everos_root=root)
 
@@ -144,14 +146,13 @@ def test_free_form_sections_take_any_key(tmp_path: Path) -> None:
         tmp_path,
         "[llm.extra]\nmax_tokens = 512\n"
         "[llm.extra.extra_body.thinking]\ntype = 'disabled'\n"
-        "[observability.headers]\nX-Anything = 'y'\n"
-        "[knowledge.search]\nlambda = 0.5\n",
+        "[observability.headers]\nX-Anything = 'y'\n",
     )
 
     settings = Settings(_everos_root=root)
 
     assert settings.llm.extra["max_tokens"] == 512
-    assert settings.knowledge.search.lam == 0.5
+    assert settings.observability.headers["X-Anything"] == "y"
 
 
 def test_the_cli_prints_the_reason_and_exits_3(

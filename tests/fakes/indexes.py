@@ -8,8 +8,6 @@ is the same lag the real system has.
 from __future__ import annotations
 
 __all__ = [
-    "InMemoryAgentCaseIndex",
-    "InMemoryAgentSkillIndex",
     "InMemoryEpisodeIndex",
     "InMemoryGroupProfileIndex",
     "InMemoryImageMemoryIndex",
@@ -21,8 +19,6 @@ from typing import Any
 
 from everos.core.utils.datetime import from_timestamp_ms
 from everos.memory.models import (
-    AgentCase,
-    AgentSkill,
     Episode,
     GroupProfileItem,
     ImageMemory,
@@ -86,16 +82,6 @@ class InMemoryEpisodeIndex(_Unsearchable):
     ) -> list[SearchHit[Episode]]:
         raise NotImplementedError
 
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[Episode]]:
-        wanted = set(entry_ids)
-        return [
-            r
-            for r in self.rows
-            if _same_space(r.scope, scope) and r.ref.entry_id in wanted
-        ]
-
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
         raise NotImplementedError
 
@@ -122,74 +108,6 @@ class InMemoryEpisodeIndex(_Unsearchable):
             and r.item.timestamp > after_ts
         ]
         return found if limit is None else found[:limit]
-
-    async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
-        return [r for r in self.rows if matches(where, self._fields(r))][:limit]
-
-
-class InMemoryAgentCaseIndex(_Unsearchable):
-    """Seeded agent cases."""
-
-    def __init__(self) -> None:
-        self.rows: list[Stored[AgentCase]] = []
-
-    def seed(self, *rows: Stored[AgentCase]) -> None:
-        self.rows.extend(rows)
-
-    async def find_by_entry_ids(
-        self, scope: Scope, entry_ids: Sequence[str]
-    ) -> list[Stored[AgentCase]]:
-        wanted = set(entry_ids)
-        return [
-            r
-            for r in self.rows
-            if _same_space(r.scope, scope) and r.ref.entry_id in wanted
-        ]
-
-    async def paginate(
-        self, where: Filter, page: Page
-    ) -> PageResult[Stored[AgentCase]]:
-        raise NotImplementedError
-
-
-class InMemoryAgentSkillIndex(_Unsearchable):
-    """Seeded skills; seed order is the relevance ranking ``top_k`` returns."""
-
-    def __init__(self) -> None:
-        self.rows: list[Stored[AgentSkill]] = []
-        self.top_k_calls: list[tuple[Scope, str, Sequence[float], int]] = []
-
-    def seed(self, *rows: Stored[AgentSkill]) -> None:
-        self.rows.extend(rows)
-
-    async def find(
-        self, where: Filter, *, limit: int | None = None
-    ) -> list[SearchHit[AgentSkill]]:
-        raise NotImplementedError
-
-    async def paginate(
-        self, where: Filter, page: Page
-    ) -> PageResult[Stored[AgentSkill]]:
-        raise NotImplementedError
-
-    async def count(self) -> int:
-        return len(self.rows)
-
-    async def count_in_cluster(self, scope: Scope, cluster_id: str) -> int:
-        return len(self._in_cluster(scope, cluster_id))
-
-    async def top_k_in_cluster(
-        self, scope: Scope, cluster_id: str, vector: Sequence[float], k: int
-    ) -> list[Stored[AgentSkill]]:
-        self.top_k_calls.append((scope, cluster_id, vector, k))
-        return self._in_cluster(scope, cluster_id)[:k]
-
-    def _in_cluster(self, scope: Scope, cluster_id: str) -> list[Stored[AgentSkill]]:
-        return [
-            r
-            for r in self.rows
-            if _same_space(r.scope, scope) and r.item.cluster_id == cluster_id
-        ]
 
 
 class InMemoryImageMemoryIndex(_Unsearchable):

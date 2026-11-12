@@ -31,10 +31,7 @@ Rules the implementation must keep (section 9.1):
 * an owner or admin role grants roster management and forgetting, never extra
   reading; a member may forget only what rests on their own messages;
 * a forgotten message is absent from every read of a session's buffer, as it
-  is from every record a forget rewrote;
-* an agent's cases learned in a group (``source_group_id``) are read only in
-  that group's context, by a current member of it -- the agent itself unless
-  another asker is named (:attr:`ReadScope.case_filter`).
+  is from every record a forget rewrote.
 """
 
 from __future__ import annotations
@@ -159,18 +156,15 @@ class GroupView:
 class ScopeRequest:
     """The scope a read names, before the policy has looked at it.
 
-    Exactly one of ``user_id`` / ``agent_id`` / ``group_ids`` is set; the
+    Exactly one of ``user_id`` / ``group_ids`` / ``project_scope`` is set; the
     request DTOs validate that.
     """
 
     app_id: str = "default"
     project_id: str = "default"
     user_id: str | None = None
-    agent_id: str | None = None
     group_ids: tuple[str, ...] = ()
     audience: Audience = "asker"
-    context_group_id: str | None = None
-    """An agent scope read in a group's context: the group's cases join."""
     project_scope: bool = False
     """Every group of ``project_id`` the asker currently belongs to, as one
     pool (section 8.7); ``group_ids`` is then resolved by the policy."""
@@ -182,8 +176,8 @@ class ReadScope:
 
     Attributes:
         app_id / project_id: The space.
-        owner_type: ``user``, ``agent`` or ``group``.
-        owner_ids: The one user or agent, or every group of the scope.
+        owner_type: ``user`` or ``group``.
+        owner_ids: The one user, or every group of the scope.
         asker_id: Who asks; the owner for a personal read without one.
         audience: ``asker`` or ``group`` (section 15).
         groups: Per group, its roster and the windows in force.
@@ -193,8 +187,6 @@ class ReadScope:
             had except the forgotten ones: what a read of an item's history
             (``include_superseded``) uses. Equal to ``predicate`` outside
             groups.
-        case_filter: For an agent scope, the extra condition on its cases:
-            cases learned outside groups, plus the context group's.
     """
 
     app_id: str
@@ -205,17 +197,12 @@ class ReadScope:
     predicate: Filter
     audience: Audience = "asker"
     groups: tuple[GroupView, ...] = field(default_factory=tuple)
-    case_filter: Filter | None = None
     versions_predicate: Filter | None = None
 
     @property
     def history_predicate(self) -> Filter:
         """``versions_predicate`` when set, else ``predicate``."""
         return self.versions_predicate or self.predicate
-
-    def cases_where(self, where: Filter) -> Filter:
-        """``where`` narrowed to the agent cases this read may see."""
-        return where if self.case_filter is None else all_of(where, self.case_filter)
 
     @property
     def is_group(self) -> bool:
@@ -245,10 +232,10 @@ class ReadScope:
 def owner_predicate(
     *, owner_id: str, owner_type: str, app_id: str, project_id: str
 ) -> Filter:
-    """The owner part of a personal or agent read, as recalls have always used it.
+    """The owner part of a personal read, as recalls have always used it.
 
-    A user read also excludes rows Reflection retired (``deprecated_by``); an
-    agent's cases and skills carry no such column.
+    A user read also excludes the rows a later version or a forget retired
+    (``deprecated_by``).
     """
     base: list[Filter] = [
         eq("owner_id", owner_id),
@@ -596,30 +583,22 @@ class AccessPolicy:
             )
         if request.group_ids:
             return await self._group_scope(identity, request)
-        case_filter: Filter | None = None
-        if request.user_id is not None:
-            if identity.asker_id is not None and identity.asker_id != request.user_id:
-                raise ForbiddenError("a personal memory is read by its owner only")
-            owner_id, owner_type = request.user_id, "user"
-        else:
-            assert request.agent_id is not None
-            owner_id, owner_type = request.agent_id, "agent"
-            case_filter = await self._case_filter(
-                request, asker=identity.asker_id or owner_id
-            )
+        assert request.user_id is not None  # the request DTOs validate one scope
+        owner_id = request.user_id
+        if identity.asker_id is not None and identity.asker_id != owner_id:
+            raise ForbiddenError("a personal memory is read by its owner only")
         return ReadScope(
             app_id=request.app_id,
             project_id=request.project_id,
-            owner_type=owner_type,  # type: ignore[arg-type]
+            owner_type="user",
             owner_ids=(owner_id,),
             asker_id=identity.asker_id or owner_id,
             predicate=owner_predicate(
                 owner_id=owner_id,
-                owner_type=owner_type,
+                owner_type="user",
                 app_id=request.app_id,
                 project_id=request.project_id,
             ),
-            case_filter=case_filter,
         )
 
     async def project_groups(
@@ -640,30 +619,6 @@ class AccessPolicy:
                 found.append(group_id)
         return sorted(found)
 
-    async def authorize_project_read(
-        self, identity: Identity, app_id: str, project_id: str
-    ) -> None:
-        """Raise unless ``identity`` may read the project's knowledge base (9.1).
-
-        A project without groups keeps today's behaviour: anyone who names it
-        reads it. A project with groups is read by its members only -- the
-        current members of any of its groups.
-
-        Raises:
-            InvalidInputError: The project has groups and no asker was named.
-            ForbiddenError: The asker is in none of the project's groups.
-        """
-        if not await self._groups.group_ids(app_id, project_id):
-            return
-        if identity.asker_id is None:
-            raise InvalidInputError(
-                "asker_id is required to read the knowledge of a project with groups"
-            )
-        if not await self.project_groups(app_id, project_id, identity.asker_id):
-            raise ForbiddenError(
-                "the asker is not a member of any group of the project"
-            )
-
     async def _project_groups(
         self, identity: Identity, request: ScopeRequest
     ) -> ScopeRequest:
@@ -683,34 +638,6 @@ class AccessPolicy:
                 "the asker is not a member of any group of the project"
             )
         return replace(request, group_ids=tuple(groups), project_scope=False)
-
-    async def _case_filter(self, request: ScopeRequest, *, asker: str) -> Filter:
-        """Which of an agent's cases a read sees (section 9.1, row 12).
-
-        Cases learned outside any group always; a group's cases only in that
-        group's context, and only for a current member of it.
-
-        Raises:
-            ForbiddenError: The asker is not a current member of the context
-                group (or it does not exist, which answers the same).
-        """
-        outside = is_null("source_group_id")
-        group_id = request.context_group_id
-        if group_id is None:
-            return outside
-        record = await self._groups.get(
-            Scope(
-                app_id=request.app_id,
-                project_id=request.project_id,
-                owner_id=group_id,
-                owner_type="group",
-            )
-        )
-        if record is None or not record.roster.is_current_member(asker):
-            raise ForbiddenError(
-                f"the asker is not a current member of group {group_id!r}"
-            )
-        return any_of(outside, eq("source_group_id", group_id))
 
     async def member_groups(
         self, personal: ReadScope, *, only: Collection[str] | None = None
@@ -850,7 +777,7 @@ class AccessPolicy:
         """The in-flight messages of ``session`` this read may see (row 3).
 
         A group session's buffer is read through a scope that holds its group,
-        message by message against the asker's windows. A personal or agent
+        message by message against the asker's windows. A personal
         read never sees a group session's buffer, and sees another session's
         only when its owner took part in it -- a buffered message of theirs,
         or memory of theirs from that session (``owner_has_memory``).

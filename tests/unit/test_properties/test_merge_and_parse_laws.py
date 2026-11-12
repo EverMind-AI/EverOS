@@ -10,7 +10,8 @@
    in first-occurrence order with no repeats, and coercing the result again
    is the identity. The decider's reply model makes every index an ``int``;
    the strings and bools the parser once tolerated are rejected upstream.
-3. ``_merge_status``: commutative, ``extracted`` absorbs.
+3. ``_status``: a track that extracted reads ``extracted``; one that
+   accumulated or skipped reads ``accumulated``.
 4. ``reconcile``: every path appears at most once; ``added`` is exactly
    scan minus state, ``deleted`` exactly state minus scan minus rows whose
    last cycle was a completed delete; the decision set does not depend on
@@ -31,7 +32,7 @@ from everos.infra.cascade.reconciler import PriorState, reconcile
 from everos.memory.extract.boundary.messages import merge_dedupe_sort
 from everos.memory.models import CanonicalMessage
 from everos.memory.search.llm_multiround import _coerce_core_indices
-from everos.service.memory._memorize import _merge_status
+from everos.service.memory._memorize import _status
 
 _UTC = dt.UTC
 
@@ -101,14 +102,10 @@ def test_coerce_core_indices_laws(raw: list[int], n: int) -> None:
     assert _coerce_core_indices(core, n) == core
 
 
-@given(
-    a=st.sampled_from(["accumulated", "extracted"]),
-    b=st.sampled_from(["accumulated", "extracted"]),
-)
-def test_merge_status_is_commutative_and_extracted_absorbs(a: str, b: str) -> None:
-    assert _merge_status(a, b) == _merge_status(b, a)  # type: ignore[arg-type]
-    assert _merge_status(a, "extracted") == "extracted"  # type: ignore[arg-type]
-    assert _merge_status(a, a) == a  # type: ignore[arg-type]
+@given(track=st.sampled_from(["accumulated", "extracted", "skipped"]))
+def test_status_is_extracted_only_when_the_track_extracted(track: str) -> None:
+    expected = "extracted" if track == "extracted" else "accumulated"
+    assert _status(track) == expected  # type: ignore[arg-type]
 
 
 _paths = st.text("abc", min_size=1, max_size=2).map(lambda s: f"users/u/{s}.md")

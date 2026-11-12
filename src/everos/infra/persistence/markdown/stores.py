@@ -9,8 +9,6 @@ to the memory root, the same convention as the index rows' ``md_path``.
 from __future__ import annotations
 
 __all__ = [
-    "MarkdownAgentCaseStore",
-    "MarkdownAgentSkillStore",
     "MarkdownEpisodeStore",
     "MarkdownGroupProfileStore",
     "MarkdownImageMemoryStore",
@@ -38,8 +36,6 @@ from everos.infra.persistence.memory_root import MemoryRoot
 from everos.infra.persistence.records import member_profile_row_id
 from everos.memory.models import (
     FORGOTTEN_MARK,
-    AgentCase,
-    AgentSkill,
     Episode,
     GroupProfileItem,
     ImageMemory,
@@ -59,7 +55,6 @@ from everos.memory.ports import (
 
 from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
 from ._mds import (
-    AgentSkillFrontmatter,
     GroupMemberProfileFrontmatter,
     GroupProfileDailyFrontmatter,
     GroupProfilePendingFrontmatter,
@@ -68,10 +63,7 @@ from ._mds import (
     group_profile_item_from_entry,
     render_group_profile_entry,
 )
-from ._readers import AgentSkillReader
 from ._writers import (
-    AgentCaseWriter,
-    AgentSkillWriter,
     BaseDailyWriter,
     EpisodeWriter,
     GroupProfileWriter,
@@ -113,7 +105,7 @@ class _DailyLogStore[T]:
         writer: BaseDailyWriter,
         to_entry: Callable[[T], EntryBody],
         *,
-        group_writer: BaseDailyWriter | None = None,
+        group_writer: BaseDailyWriter,
     ) -> None:
         self._root = root
         self._writer = writer
@@ -121,16 +113,9 @@ class _DailyLogStore[T]:
         self._to_entry = to_entry
 
     def _writer_for(self, scope: Scope) -> BaseDailyWriter:
-        """The writer of ``scope``'s owner type: its files and its id prefix.
-
-        A group owns only the kinds that declare a group writer (episodes and
-        picture memories); every other kind refuses a group scope, so nothing
-        can write, say, an agent case under ``groups/``.
-        """
+        """The writer of ``scope``'s owner type: its files and its id prefix."""
         if scope.owner_type != "group":
             return self._writer
-        if self._group_writer is None:
-            raise ValueError(f"{self._KIND} has no group-owned records")
         return self._group_writer
 
     async def _append_many(
@@ -551,19 +536,6 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             removed += await self._rewrite(scope, path, lambda e, ids=ids: e.id in ids)
         return removed
 
-    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
-        """The entries the owner's files mark as merged into any of ``targets``.
-
-        Reads every episode file's ``deprecated_entries`` (no lock). One step:
-        a caller that wants the closure repeats it with the result.
-        """
-        wanted = set(targets)
-        found: set[str] = set()
-        for path in await self._daily_files(scope):
-            marks = await _deprecations(path)
-            found |= {key for key, merged in marks.items() if merged in wanted}
-        return found
-
     async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
         """One file's supersession marks, keyed by the entry they retire."""
         return await _deprecations(self._root.root / md_path)
@@ -596,29 +568,6 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
                 continue
             found += [(path, entry) for entry in parsed.entries if entry.id in ids]
         return found
-
-
-class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
-    """Agent-case daily logs (``agents/<id>/.agent_cases/``).
-
-    Args:
-        root: Memory root the files live under.
-    """
-
-    _KIND = "agent_case"
-
-    def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, AgentCaseWriter(root), _agent_case_entry)
-
-    async def append(
-        self,
-        scope: Scope,
-        case: AgentCase,
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> MemoryRef | None:
-        refs = await self._append_many(scope, [case], only_if)
-        return refs[0] if refs else None
 
 
 _IMAGE_READ_CAP = 1_000
@@ -1005,7 +954,7 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
     against the new one, in the same locked step -- which the cascade turns
     into ``deprecated_by`` on the old row, so only the newest competes. A
     forget marks a version with the forget marker instead. The rows live in
-    the episode table (``parent_type = scene``). An agent has no scenes.
+    the episode table (``parent_type = scene``).
 
     Args:
         root: Memory root the files live under.
@@ -1359,122 +1308,6 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
         )
 
 
-class MarkdownAgentSkillStore:
-    """``agents/<id>/skills/skill_<name>/SKILL.md`` documents.
-
-    A skill's ref ``entry_id`` is its sanitized name, which is also its
-    directory suffix.
-
-    Args:
-        root: Memory root the files live under.
-    """
-
-    def __init__(self, root: MemoryRoot) -> None:
-        self._root = root
-        self._reader = AgentSkillReader(root)
-        self._writer = AgentSkillWriter(root)
-
-    async def list_by_cluster(
-        self, scope: Scope, cluster_id: str
-    ) -> list[Stored[AgentSkill]]:
-        found = await self._reader.list_by_cluster(
-            scope.owner_id,
-            cluster_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-        return [
-            Stored(
-                ref=self._ref(scope, frontmatter.id, frontmatter.name),
-                scope=scope,
-                item=_skill_from_md(frontmatter, body),
-            )
-            for frontmatter, body in found
-        ]
-
-    async def names_cluster(self, scope: Scope, cluster_id: str) -> bool:
-        """Whether any of the agent's ``SKILL.md`` files names ``cluster_id``.
-
-        Reads the raw frontmatter rather than the validated schema
-        :meth:`list_by_cluster` returns: a file that names the cluster counts
-        even when a later schema revision would reject it, so an operational
-        replay never extracts a second skill next to it. A file that does not
-        parse at all is logged and does not count.
-        """
-        skills_dir = (
-            self._root.agents_dir(scope.app_id, scope.project_id)
-            / scope.owner_id
-            / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-        )
-        apath = anyio.Path(skills_dir)
-        if not await apath.is_dir():
-            return False
-        async for skill_dir in apath.iterdir():
-            if not await skill_dir.is_dir():
-                continue
-            if not skill_dir.name.startswith(AgentSkillFrontmatter.SKILL_DIR_PREFIX):
-                continue
-            md_path = skill_dir / AgentSkillFrontmatter.SKILL_MAIN_FILENAME
-            if not await md_path.is_file():
-                continue
-            try:
-                parsed = await MarkdownReader.read(Path(str(md_path)))
-            except Exception as exc:
-                logger.warning(
-                    "cascade_backfill_skill_md_parse_failed",
-                    md_path=str(md_path),
-                    error=repr(exc),
-                )
-                continue
-            if parsed.frontmatter.get("cluster_id") == cluster_id:
-                return True
-        return False
-
-    async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef:
-        name = AgentSkillFrontmatter.sanitize_skill_name(skill.name)
-        frontmatter = AgentSkillFrontmatter(
-            id=f"{scope.owner_id}_{name}",
-            agent_id=scope.owner_id,
-            name=name,
-            description=skill.description,
-            confidence=skill.confidence,
-            maturity_score=skill.maturity_score,
-            source_case_ids=list(skill.source_case_ids),
-            cluster_id=skill.cluster_id or None,
-        )
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            await self._writer.write_main(
-                scope.owner_id,
-                name,
-                frontmatter=frontmatter,
-                body=skill.content,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-            )
-        return self._ref(scope, frontmatter.id, name)
-
-    async def delete(self, scope: Scope, skill_name: str) -> bool:
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            return await self._writer.delete_skill(
-                scope.owner_id,
-                skill_name,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-            )
-
-    def _ref(self, scope: Scope, skill_id: str, name: str) -> MemoryRef:
-        entry_id = AgentSkillFrontmatter.sanitize_skill_name(name)
-        path = self._writer.main_path(
-            scope.owner_id,
-            entry_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-        return MemoryRef(
-            id=skill_id, entry_id=entry_id, md_path=_relative(self._root, path)
-        )
-
-
 def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:
     """The picture memory an entry written by :func:`_image_memory_entry` holds.
 
@@ -1662,8 +1495,8 @@ def _iso(timestamp_ms: int) -> str:
 def _episode_entry(episode: Episode) -> EntryBody:
     """Inline audit fields + Subject / Summary / Content sections.
 
-    ``session_id`` is omitted for an episode without one (a Reflection
-    merge has no session); the cascade reads its absence as ``None``.
+    ``session_id`` is omitted for an episode without one (one an earlier
+    build's Reflection merged); the cascade reads its absence as ``None``.
     ``language`` is omitted when unknown, as in entries written before it.
     """
     inline: dict[str, object] = {"owner_id": episode.owner_id}
@@ -1758,42 +1591,7 @@ def _scene_from_entry(entry: Entry, *, owner_id: str) -> Scene:
     )
 
 
-def _agent_case_entry(case: AgentCase) -> EntryBody:
-    """``quality_score`` rides inline so the cascade hashes it.
-
-    ``source_group_id`` is written only for a case learned in a group, so a
-    case from a session bound to no group reads exactly as before.
-    """
-    inline: dict[str, object] = {
-        "owner_id": case.owner_id,
-        "session_id": case.session_id,
-        "timestamp": _iso(case.timestamp),
-        "parent_type": "memcell",
-        "parent_id": case.parent_id,
-        "quality_score": case.quality_score,
-    }
-    if case.source_group_id is not None:
-        inline["source_group_id"] = case.source_group_id
-    sections = {"TaskIntent": case.task_intent, "Approach": case.approach}
-    if case.key_insight:
-        sections["KeyInsight"] = case.key_insight
-    return inline, sections
-
-
 # ── Markdown -> domain ───────────────────────────────────────────────────
-
-
-def _skill_from_md(frontmatter: AgentSkillFrontmatter, body: str) -> AgentSkill:
-    return AgentSkill(
-        id=frontmatter.id,
-        cluster_id=frontmatter.cluster_id or "",
-        name=frontmatter.name,
-        description=frontmatter.description,
-        content=body,
-        confidence=frontmatter.confidence,
-        maturity_score=frontmatter.maturity_score,
-        source_case_ids=list(frontmatter.source_case_ids),
-    )
 
 
 def _episode_from_entry(entry: Entry, *, owner_id: str) -> Episode:

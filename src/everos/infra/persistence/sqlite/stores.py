@@ -14,7 +14,6 @@ __all__ = [
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",
-    "SqliteReflectionReportStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
 ]
@@ -27,7 +26,7 @@ from typing import Any, cast
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.core.utils.datetime import from_timestamp_ms, get_utc_now, to_timestamp_ms
+from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,
@@ -36,7 +35,6 @@ from everos.memory.models import (
     ClusterMemberType,
     MemcellRecord,
     MemorizeTask,
-    ReflectionReport,
     ToolCall,
 )
 from everos.memory.ports import (
@@ -54,25 +52,18 @@ from ._repos import (
     MemcellRepo,
     MemorizeInboxRepo,
     MessageForgetRepo,
-    ReflectionReportRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
 )
 from ._tables import ForgetLog as ForgetLogRow
 from ._tables import Memcell, MemorizeInbox, UnprocessedBuffer
-from ._tables import ReflectionReport as ReflectionReportRow
 
 _SESSION_TRACK = "memorize"
 """Track of a session's live buffer and its conversation status."""
 _QUARANTINE_TRACK = "quarantine"
 """Track a buffer is moved to when it cannot be segmented."""
 _CENTROID_DTYPE = np.float32
-_MAX_DETAIL_VALUE_CHARS = 512
-"""Cap on each string value of a case-skip detail (e.g. an LLM's free-text
-rationale), so the stored JSON stays parseable in the common case."""
-_MAX_DETAIL_JSON_CHARS = 2000
-"""Hard cap on ``memcell.case_skip_detail_json``; a longer dump is cut."""
 
 
 class SqliteSessionBufferStore:
@@ -203,20 +194,6 @@ class SqliteMemcellStore:
         )
         return [MemCell.model_validate_json(row.payload_json) for row in rows]
 
-    async def mark_case_extracted(
-        self,
-        memcell_id: str,
-        *,
-        skip_reason: str | None,
-        skip_detail: Mapping[str, Any],
-    ) -> None:
-        await self._repo.mark_case_extracted(
-            memcell_id,
-            extracted_at=get_utc_now(),
-            skip_reason=skip_reason,
-            skip_detail_json=_bounded_detail_json(skip_detail),
-        )
-
 
 class SqliteClusterStore:
     """Clusters and membership over ``cluster`` + ``cluster_member``.
@@ -273,78 +250,8 @@ class SqliteClusterStore:
             kind=kind,
         )
 
-    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
-        return [
-            (member_id, member_type)
-            for member_id, member_type in await self._repo.get_members_with_type(
-                cluster_id
-            )
-        ]
-
-    async def replace_members(
-        self,
-        cluster_id: str,
-        *,
-        removed: Collection[str],
-        added: str,
-        member_type: ClusterMemberType,
-        centroid: Sequence[float],
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        await self._repo.replace_members(
-            cluster_id,
-            removed=set(removed),
-            added=added,
-            member_type=member_type,
-            centroid_blob=np.asarray(centroid, dtype=_CENTROID_DTYPE).tobytes(),
-            count=count,
-            last_ts_ms=last_ts,
-            preview_json=json.dumps(list(preview), ensure_ascii=False),
-        )
-
-    async def detach(
-        self,
-        cluster_id: str,
-        member_ids: Collection[str],
-        *,
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        await self._repo.detach(
-            cluster_id,
-            set(member_ids),
-            count=count,
-            last_ts_ms=last_ts,
-            preview_json=json.dumps(list(preview), ensure_ascii=False),
-        )
-
     async def delete(self, cluster_id: str) -> None:
         await self._repo.delete_cluster(cluster_id)
-
-    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
-        return await self._repo.delete_for_owner(
-            scope.owner_id,
-            scope.owner_type,
-            kind,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-
-    async def list_distinct_owners(self) -> list[Scope]:
-        return [
-            Scope(
-                app_id=app_id,
-                project_id=project_id,
-                owner_id=owner_id,
-                owner_type=cast(OwnerType, owner_type),
-            )
-            for owner_id, owner_type, app_id, project_id in (
-                await self._repo.list_distinct_owners()
-            )
-        ]
 
 
 class SqliteMemorizeInboxStore:
@@ -458,30 +365,6 @@ class SqliteMemorizeInboxStore:
         return await self._repo.purge_expired(before=before)
 
 
-class SqliteReflectionReportStore:
-    """Reflection audit trail over ``reflection_report``.
-
-    Args:
-        repo: Repository of the ``reflection_report`` table.
-    """
-
-    def __init__(self, repo: ReflectionReportRepo) -> None:
-        self._repo = repo
-
-    async def create(self, report: ReflectionReport) -> None:
-        await self._repo.create(_report_to_row(report))
-
-    async def reflected_cluster_ids(self, scope: Scope) -> set[str]:
-        return await self._repo.list_reflected_cluster_ids(
-            scope.owner_id, scope.app_id, scope.project_id
-        )
-
-    async def delete_for_owner(self, scope: Scope) -> int:
-        return await self._repo.delete_for_owner(
-            scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
-        )
-
-
 class SqliteSessionPurgeStore:
     """One session's conversation state, deleted in one transaction.
 
@@ -575,18 +458,6 @@ def _record_to_row(record: MemcellRecord, session: SessionKey) -> Memcell:
     )
 
 
-def _bounded_detail_json(detail: Mapping[str, Any]) -> str | None:
-    """Serialise a skip detail with every string value and the dump capped."""
-    if not detail:
-        return None
-    bounded = {
-        key: value[:_MAX_DETAIL_VALUE_CHARS] if isinstance(value, str) else value
-        for key, value in detail.items()
-    }
-    dumped = json.dumps(bounded, ensure_ascii=False, default=str)
-    return dumped[:_MAX_DETAIL_JSON_CHARS]
-
-
 def _row_to_task(row: MemorizeInbox) -> MemorizeTask:
     assert row.id is not None  # set by the database on insert
     return MemorizeTask(
@@ -604,26 +475,6 @@ def _row_to_task(row: MemorizeInbox) -> MemorizeTask:
         last_error=row.last_error,
         created_at=row.created_at,
         updated_at=row.updated_at,
-    )
-
-
-def _report_to_row(report: ReflectionReport) -> ReflectionReportRow:
-    return ReflectionReportRow(
-        id=report.id,
-        cluster_id=report.cluster_id,
-        owner_id=report.owner_id,
-        app_id=report.app_id,
-        project_id=report.project_id,
-        mode=report.mode,
-        source_members=json.dumps(
-            [
-                {"member_id": member_id, "member_type": member_type}
-                for member_id, member_type in report.source_members
-            ],
-            ensure_ascii=False,
-        ),
-        source_count=report.source_count,
-        merged_entry_id=report.merged_entry_id,
     )
 
 

@@ -11,13 +11,10 @@ from ._repos import (
     ForgetLogRepo,
     GroupRosterRepo,
     ImageOriginalRepo,
-    KnowledgeDocumentRepo,
-    KnowledgeTopicRowRepo,
     MdChangeStateRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     MessageForgetRepo,
-    ReflectionReportRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
@@ -33,13 +30,10 @@ class SqliteRepos:
     forget_log: ForgetLogRepo
     group_roster: GroupRosterRepo
     image_original: ImageOriginalRepo
-    knowledge_document: KnowledgeDocumentRepo
-    knowledge_topic: KnowledgeTopicRowRepo
     md_change_state: MdChangeStateRepo
     memcell: MemcellRepo
     memorize_inbox: MemorizeInboxRepo
     message_forget: MessageForgetRepo
-    reflection_report: ReflectionReportRepo
     session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
     unprocessed_buffer: UnprocessedBufferRepo
@@ -53,13 +47,10 @@ class SqliteRepos:
             forget_log=ForgetLogRepo(factory),
             group_roster=GroupRosterRepo(factory),
             image_original=ImageOriginalRepo(factory),
-            knowledge_document=KnowledgeDocumentRepo(factory),
-            knowledge_topic=KnowledgeTopicRowRepo(factory),
             md_change_state=MdChangeStateRepo(factory),
             memcell=MemcellRepo(factory),
             memorize_inbox=MemorizeInboxRepo(factory),
             message_forget=MessageForgetRepo(factory),
-            reflection_report=ReflectionReportRepo(factory),
             session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),
             unprocessed_buffer=UnprocessedBufferRepo(factory),

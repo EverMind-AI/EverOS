@@ -9,9 +9,9 @@ phases and decides when a run stops; everything the user sees lives here:
 - ``1`` — user declined a confirmation prompt.
 - ``2`` — unexpected error mid-phase, or preflight found the required
   provider not configured.
-- ``3`` — Phase 2/3 short-circuited on the OME jobstore lock (another
+- ``3`` — the run short-circuited on the OME jobstore lock (another
   ``everos`` process is running).
-- ``4`` — every phase ran but at least one row failed embedding even
+- ``4`` — the phase ran but at least one row failed embedding even
   after per-row fallback; automation can requeue.
 - ``130`` — Ctrl-C (SIGINT convention: 128 + 2), including Ctrl-C at
   the ``[y/N]`` confirmation prompt (typer/click surfaces that as
@@ -55,20 +55,6 @@ PHASE_COPY: dict[str, PhaseCopy] = {
             "meaning too."
         ),
     ),
-    "clusters": PhaseCopy(
-        title="Phase 2 — group related memories into topics",
-        detail=(
-            "Related memories get clustered together so reflection and "
-            "advanced retrieval can operate on them."
-        ),
-    ),
-    "skills": PhaseCopy(
-        title="Phase 3 — build the agent skill library",
-        detail=(
-            "Distill reusable skills from past agent conversations. Uses "
-            "your LLM — the most expensive step."
-        ),
-    ),
 }
 
 _EXIT_CODES: dict[BackfillOutcome, int] = {
@@ -89,10 +75,10 @@ _EXIT_LABELS: dict[int, str] = {
     130: "INTERRUPTED",
 }
 """Maps :func:`run_backfill`'s exit codes to the summary block's ``Exit:``
-label. ``3`` marks a Phase 2/3 short-circuit because another process
-holds the OME jobstore lock (typically ``everos server start``). ``4``
-marks a partial-success run: every phase ran to completion, but at
-least one row failed embedding even after the per-row fallback —
+label. ``3`` marks a short-circuit because another process holds the OME
+jobstore lock (typically ``everos server start``). ``4`` marks a
+partial-success run: the phase ran to completion, but at least one row
+failed embedding even after the per-row fallback —
 operators consult the ``cascade_backfill_row_embed_failed`` /
 ``..._row_subject_embed_failed`` log events for the failed row ids.
 ``130`` is the SIGINT convention (128 + signal number 2)."""
@@ -109,7 +95,7 @@ def _print_interrupted() -> None:
         fg=typer.colors.YELLOW,
     )
     typer.echo("  everos cascade backfill --phase <phase-name> --yes")
-    typer.echo("where <phase-name> is one of: vectors, clusters, skills, all.")
+    typer.echo("where <phase-name> is one of: vectors, all.")
 
 
 def _print_capability_missing_hint(message: str) -> None:
@@ -125,16 +111,14 @@ def _print_capability_missing_hint(message: str) -> None:
 
 
 def _print_server_running_hint() -> None:
-    """Emit the friendly error shown when preflight or ``engine.start()``
-    detects another process holding the OME jobstore lock.
+    """Emit the friendly error shown when preflight detects another process
+    holding the OME jobstore lock.
 
-    Copy points the user at ``everos server start`` (the usual holder)
-    and Phase 1 (``--phase=vectors``), which never touches OME and so
-    stays fully concurrent with a running server — never at
-    ``EVEROS_*`` env vars.
+    Copy points the user at ``everos server start`` (the usual holder) --
+    never at ``EVEROS_*`` env vars.
     """
     typer.secho(
-        "  Backfill Phase 2/3 needs exclusive access to the OME jobstore,",
+        "  Backfill needs exclusive access to the OME jobstore,",
         fg=typer.colors.RED,
     )
     typer.secho(
@@ -147,8 +131,6 @@ def _print_server_running_hint() -> None:
     )
     typer.echo("")
     typer.echo("  Stop your everos server first, then re-run backfill.")
-    typer.echo("  (Phase 1 --phase=vectors already runs concurrently with the server;")
-    typer.echo("  only Phase 2/3 need offline mode. See spec §10.)")
 
 
 def _print_vectors_estimate(total_rows: int, total_tokens: int) -> None:
@@ -159,29 +141,8 @@ def _print_vectors_estimate(total_rows: int, total_tokens: int) -> None:
     )
 
 
-def _print_clusters_estimate(episode_count: int, case_count: int) -> None:
-    typer.echo(f"  episodes to cluster:     {episode_count:,}")
-    typer.echo(f"  agent cases to cluster:  {case_count:,}\n")
-    typer.echo(
-        "  Uses your embedding provider (and LLM for agent-case merges) — "
-        "cost depends on provider pricing.\n"
-    )
-
-
-def _print_skills_estimate(cases: int, clusters: int) -> None:
-    typer.echo(f"  clusters to extract skills from:  {clusters:,}")
-    typer.echo(f"  agent cases to replay:            {cases:,}\n")
-    typer.echo("  Uses your LLM — cost depends on its per-token pricing.\n")
-
-
 def _print_summary(summary: BackfillSummary, *, exit_code: int) -> None:
     """Print the consolidated post-run summary block.
-
-    Field labels are chosen from what each phase's result dataclass
-    actually tracks — e.g. Phase 3 reports "agent cases processed"
-    (``events_emitted``) rather than "clusters processed", since the
-    distinct cluster count isn't retained on
-    :class:`~everos.service.SkillsPhaseResult`.
 
     On ``exit_code == 4`` (COMPLETED_WITH_FAILURES) also emits a hint
     pointing operators at the per-row failure log events so they can
@@ -195,20 +156,6 @@ def _print_summary(summary: BackfillSummary, *, exit_code: int) -> None:
         typer.echo(
             f"  Phase 1 (vectors)   — {r.rows_processed:,} rows / "
             f"{r.rows_failed:,} failed / {format_tokens(r.tokens_embedded)}"
-        )
-    if summary.clusters is not None:
-        c = summary.clusters
-        created = c.clusters_after - c.clusters_before
-        typer.echo(
-            f"  Phase 2 (clusters)  — {c.events_emitted:,} events emitted / "
-            f"{created:,} clusters created"
-        )
-    if summary.skills is not None:
-        s = summary.skills
-        extracted = s.skills_after - s.skills_before
-        typer.echo(
-            f"  Phase 3 (skills)    — {s.events_emitted:,} agent cases "
-            f"processed / {extracted:,} skills extracted"
         )
     typer.echo("-" * 44)
     label = _EXIT_LABELS.get(exit_code, "UNKNOWN")
@@ -250,12 +197,6 @@ class TyperPresenter:
     def estimate_vectors(self, rows: int, tokens: int) -> None:
         _print_vectors_estimate(rows, tokens)
 
-    def estimate_clusters(self, episodes: int, cases: int) -> None:
-        _print_clusters_estimate(episodes, cases)
-
-    def estimate_skills(self, cases: int, clusters: int) -> None:
-        _print_skills_estimate(cases, clusters)
-
     async def confirm(self, prompt: str, *, auto_yes: bool) -> bool:
         """Ask before a phase spends tokens; ``--yes`` skips the prompt.
 
@@ -268,9 +209,6 @@ class TyperPresenter:
             lambda: typer.confirm(f"Proceed with: {prompt}", default=False)
         )
 
-    def emit_progress(self, done: int, total: int) -> None:
-        typer.echo(f"  emitted {done:,} / {total:,} event(s)")
-
     def row_progress(self, table_name: str, done: int, total: int) -> None:
         typer.echo(f"  {table_name}: processed {done:,} / {total:,} rows")
 
@@ -279,22 +217,6 @@ class TyperPresenter:
             f"phase 1 complete — {rows_processed:,} memories now "
             "searchable by meaning"
             + (f" ({rows_failed:,} failed)" if rows_failed else ""),
-            fg=typer.colors.GREEN,
-        )
-
-    def phase_2_complete(self, before: int, after: int, emitted: int) -> None:
-        typer.secho(
-            f"phase 2 complete — clusters {before:,} -> {after:,} "
-            f"({emitted:,} events processed)",
-            fg=typer.colors.GREEN,
-        )
-
-    def phase_3_complete(
-        self, skills_before: int, skills_after: int, emitted: int
-    ) -> None:
-        typer.secho(
-            f"phase 3 complete — skills {skills_before:,} -> {skills_after:,} "
-            f"({emitted:,} events processed)",
             fg=typer.colors.GREEN,
         )
 

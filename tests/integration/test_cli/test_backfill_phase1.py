@@ -28,10 +28,8 @@ from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
 from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill import run_backfill
-from everos.infra.persistence.lancedb import (
-    AgentCase,
-    Episode,
-)
+from everos.infra.persistence.lancedb import Episode
+from everos.infra.persistence.records import ImageMemory
 from everos.service import OpsService, build_application
 from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
@@ -108,21 +106,24 @@ def _episode(
     )
 
 
-def _case(entry_id: str, *, vector: list[float] | None = None) -> AgentCase:
-    return AgentCase(
-        id=f"a1_{entry_id}",
+def _picture(entry_id: str, *, vector: list[float] | None = None) -> ImageMemory:
+    description = f"a picture of the harbour {entry_id}"
+    return ImageMemory(
+        id=f"u1_{entry_id}",
         entry_id=entry_id,
-        owner_id="a1",
-        owner_type="agent",
+        owner_id="u1",
+        owner_type="user",
         session_id="s1",
         timestamp=get_utc_now(),
         parent_id="mc1",
-        quality_score=0.5,
-        task_intent=f"task intent {entry_id}",
-        task_intent_tokens=f"task intent {entry_id}",
-        approach="step one",
-        approach_tokens="step one",
-        md_path="agents/a1/.cases/agent_case-2026-01-01.md",
+        image_id=hashlib.sha256(b"picture bytes").hexdigest(),
+        original_path="figures/ab/abcdef.png",
+        media_type="png",
+        width=4,
+        height=4,
+        description=description,
+        description_tokens=description,
+        md_path="users/u1/images/image-2026-01-01.md",
         content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
         vector=vector,
     )
@@ -161,7 +162,7 @@ async def test_small_db_backfills_null_vector_rows_only(
     await storage_view.repos.episode.add(
         [_episode("ep1"), _episode("ep2", vector=pre_embedded)]
     )
-    await storage_view.repos.agent_case.add([_case("ac1")])
+    await storage_view.repos.image_memory.add([_picture("im1")])
 
     code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
@@ -169,10 +170,10 @@ async def test_small_db_backfills_null_vector_rows_only(
     assert code == 0
     ep1 = await storage_view.repos.episode.get_by_id("u1_ep1")
     ep2 = await storage_view.repos.episode.get_by_id("u1_ep2")
-    ac1 = await storage_view.repos.agent_case.get_by_id("a1_ac1")
+    im1 = await storage_view.repos.image_memory.get_by_id("u1_im1")
     assert ep1 is not None and ep1.vector is not None
     assert ep2 is not None and ep2.vector == pytest.approx(pre_embedded)
-    assert ac1 is not None and ac1.vector is not None
+    assert im1 is not None and im1.vector is not None
     assert "memories to process:  2" in out
     assert "phase 1 complete" in out
 

@@ -189,14 +189,14 @@ async def test_list_all_returns_every_status_in_lsn_order(
     """`cascade sync --force-all` must see done, failed and pending rows alike."""
     done = "users/u/episodes/episode-2026-05-12.md"
     failed = "users/u/user.md"
-    pending = "agents/a/skills/skill_x/SKILL.md"
+    pending = "users/u/images/image-2026-05-12.md"
     await repo.upsert(done, kind="episode", change_type="added", mtime=1.0)
     await repo.claim_one(done)
     await repo.mark_done(done)
     await repo.upsert(failed, kind="user_profile", change_type="added", mtime=1.0)
     await repo.claim_one(failed)
     await repo.mark_failed(failed, error="boom", retryable=False, new_retry_count=1)
-    await repo.upsert(pending, kind="agent_skill", change_type="added", mtime=1.0)
+    await repo.upsert(pending, kind="image_memory", change_type="added", mtime=1.0)
 
     rows = await repo.list_all()
     assert [r.md_path for r in rows] == [done, failed, pending]

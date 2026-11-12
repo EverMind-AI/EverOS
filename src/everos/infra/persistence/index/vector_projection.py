@@ -61,19 +61,12 @@ class VectorProjection:
         return values
 
 
-def _skill_text(row: Mapping[str, Any]) -> str:
-    return "\n".join(s for s in (row.get("name"), row.get("description")) if s)
-
-
 VECTOR_PROJECTIONS: dict[str, VectorProjection] = {
     spec.table: spec
     for spec in (
         VectorProjection(
             "episode", lambda r: r["episode"], lambda r: r.get("subject") or None
         ),
-        VectorProjection("agent_case", lambda r: r["task_intent"]),
-        VectorProjection("agent_skill", _skill_text),
         VectorProjection("image_memory", lambda r: r["description"]),
-        VectorProjection("knowledge_topic", lambda r: r["summary"]),
     )
 }

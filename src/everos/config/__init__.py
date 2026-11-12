@@ -3,7 +3,7 @@
 Public API:
     from everos.config import (
         Settings, MemorySettings, SqliteSettings, LanceDBSettings,
-        LLMSettings, EmbeddingSettings, RerankSettings,
+        LLMSettings, EmbeddingSettings,
         BoundaryDetectionSettings, CascadeSettings, OmeSettings,
         load_settings, resolve_root, missing_config_error,
     )
@@ -29,7 +29,6 @@ from .settings import MemorySettings as MemorySettings
 from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
 from .settings import OmeSettings as OmeSettings
-from .settings import RerankSettings as RerankSettings
 from .settings import ScenesSettings as ScenesSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
@@ -53,7 +52,6 @@ __all__ = [
     "MilvusSettings",
     "MultimodalSettings",
     "OmeSettings",
-    "RerankSettings",
     "ScenesSettings",
     "Settings",
     "SqliteSettings",

@@ -7,8 +7,6 @@ and returns canned rows; the manager's job is to:
 * dispatch on ``memory_type`` to the matching repo,
 * compile filters once and pass the same ``where`` to the repo,
 * shape rows into the correct ``GetItem`` (lossless except score),
-* silently override ``sort_by`` to ``updated_at`` for ``agent_skill``
-  (the table has no ``timestamp`` column),
 * fetch the owner's single profile row (KV-by-owner) and shape it into
   ``GetProfileItem``, or return ``[]`` on a cold-start miss.
 """
@@ -22,14 +20,10 @@ from typing import Any
 import pytest
 
 from everos.infra.persistence.index.adapters import (
-    AgentCaseIndexAdapter,
-    AgentSkillIndexAdapter,
     EpisodeIndexAdapter,
     ProfileIndexAdapter,
 )
 from everos.infra.persistence.lancedb import (
-    AgentCase,
-    AgentSkill,
     Episode,
     UserProfile,
 )
@@ -128,47 +122,6 @@ def _episode_row(entry: str) -> Episode:
     )
 
 
-def _agent_case_row(entry: str) -> AgentCase:
-    return AgentCase(
-        id=f"a1_{entry}",
-        entry_id=entry,
-        owner_id="a1",
-        owner_type="agent",
-        session_id="sess_x",
-        timestamp=_ts(),
-        parent_type="memcell",
-        parent_id="mc_99",
-        quality_score=0.8,
-        task_intent=f"intent {entry}",
-        task_intent_tokens=f"intent {entry}",
-        approach=f"approach {entry}",
-        approach_tokens=f"approach {entry}",
-        key_insight=None,
-        md_path=f"agents/a1/cases/{entry}.md",
-        content_sha256="abc",
-        vector=[0.0] * 1024,
-    )
-
-
-def _agent_skill_row(name: str) -> AgentSkill:
-    return AgentSkill(
-        id=f"a1_{name}",
-        owner_id="a1",
-        owner_type="agent",
-        name=name,
-        description=f"desc {name}",
-        description_tokens=f"desc {name}",
-        content=f"content {name}",
-        content_tokens=f"content {name}",
-        confidence=0.9,
-        maturity_score=0.7,
-        source_case_ids=["a1_ac_1"],
-        md_path=f"agents/a1/skills/{name}/SKILL.md",
-        content_sha256="abc",
-        vector=[0.0] * 1024,
-    )
-
-
 def _user_profile_row(owner: str = "u1") -> UserProfile:
     return UserProfile(
         id=owner,
@@ -193,27 +146,23 @@ def profile_repo() -> _ProfileStubRepo:
 @pytest.fixture
 def manager(
     profile_repo: _ProfileStubRepo,
-) -> tuple[GetManager, _StubRepo, _StubRepo, _StubRepo]:
+) -> tuple[GetManager, _StubRepo]:
     ep = _StubRepo()
-    ac = _StubRepo()
-    sk = _StubRepo()
     mgr = GetManager(
         access=AccessPolicy(InMemoryGroupStore()),
         episode_index=EpisodeIndexAdapter(ep),  # type: ignore[arg-type]
-        agent_case_index=AgentCaseIndexAdapter(ac),  # type: ignore[arg-type]
-        agent_skill_index=AgentSkillIndexAdapter(sk),  # type: ignore[arg-type]
         profile_index=ProfileIndexAdapter(profile_repo),  # type: ignore[arg-type]
     )
-    return mgr, ep, ac, sk
+    return mgr, ep
 
 
 # ── Episode dispatch ────────────────────────────────────────────────────
 
 
 async def test_episodic_memory_populates_episodes_and_counts(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
 ) -> None:
-    mgr, ep, _, _ = manager
+    mgr, ep = manager
     ep.rows = [_episode_row("ep_1"), _episode_row("ep_2")]
     ep.total = 17  # filtered total may exceed the page
     req = GetRequest(
@@ -229,20 +178,21 @@ async def test_episodic_memory_populates_episodes_and_counts(
     assert resp.data.count == 2
     assert [item.id for item in resp.data.episodes] == ["u1_ep_1", "u1_ep_2"]
     assert resp.data.profiles == []
-    assert resp.data.agent_cases == []
-    assert resp.data.agent_skills == []
+    # 2.0 has no agent memory: the response carries no agent arrays at all.
+    assert "agent_cases" not in resp.data.model_dump()
+    assert "agent_skills" not in resp.data.model_dump()
     # The shaper maps the lance row's owner_id onto the item's user_id field.
     assert all(item.user_id == "u1" for item in resp.data.episodes)
 
 
 async def test_get_uses_propagated_request_id_when_bound(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
 ) -> None:
     """When a request id is bound upstream (middleware), ``get`` reuses it
     instead of minting a fresh one, so the response id matches the trace."""
     from everos.core.context import reset_request_id, set_request_id
 
-    mgr, ep, _, _ = manager
+    mgr, ep = manager
     ep.rows = [_episode_row("ep_1")]
     token = set_request_id("deadbeef" * 4)
     try:
@@ -255,10 +205,10 @@ async def test_get_uses_propagated_request_id_when_bound(
 
 
 async def test_episodic_memory_passes_where_and_sort_to_repo(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
 ) -> None:
     """The compiled ``where`` must include owner_id + filter clauses."""
-    mgr, ep, _, _ = manager
+    mgr, ep = manager
     req = GetRequest(
         user_id="u1",
         memory_type=GetMemoryType.EPISODE,
@@ -285,10 +235,10 @@ async def test_episodic_memory_passes_where_and_sort_to_repo(
 
 
 async def test_profile_miss_returns_empty(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
 ) -> None:
     """Cold start (no profile row yet) → empty list + total_count=0."""
-    mgr, ep, ac, sk = manager  # profile_repo.row defaults to None
+    mgr, ep = manager  # profile_repo.row defaults to None
     req = GetRequest(
         user_id="u1",
         memory_type=GetMemoryType.PROFILE,
@@ -297,14 +247,12 @@ async def test_profile_miss_returns_empty(
     assert resp.data.profiles == []
     assert resp.data.total_count == 0
     assert resp.data.count == 0
-    # The profile path never touches the paginated (episode/case/skill) repos.
+    # The profile path never touches the paginated episode repo.
     assert ep.last.where == ""
-    assert ac.last.where == ""
-    assert sk.last.where == ""
 
 
 async def test_profile_hit_shapes_row_into_item(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
     profile_repo: _ProfileStubRepo,
 ) -> None:
     """A present profile row is fetched by owner and shaped + json-decoded."""
@@ -343,7 +291,7 @@ async def test_profile_hit_shapes_row_into_item(
 
 
 async def test_profile_item_without_description_is_dropped_not_fatal(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
     profile_repo: _ProfileStubRepo,
 ) -> None:
     mgr, *_ = manager
@@ -359,63 +307,6 @@ async def test_profile_item_without_description_is_dropped_not_fatal(
     ]
 
 
-# ── Agent case dispatch ─────────────────────────────────────────────────
-
-
-async def test_agent_case_populates_agent_cases(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
-) -> None:
-    mgr, _, ac, _ = manager
-    ac.rows = [_agent_case_row("ac_1"), _agent_case_row("ac_2")]
-    ac.total = 2
-    req = GetRequest(
-        agent_id="a1",
-        memory_type=GetMemoryType.AGENT_CASE,
-    )
-    resp = await mgr.get(req)
-    assert resp.data.total_count == 2
-    assert resp.data.count == 2
-    assert [item.id for item in resp.data.agent_cases] == ["a1_ac_1", "a1_ac_2"]
-    assert resp.data.episodes == []
-    assert resp.data.agent_skills == []
-
-
-# ── Agent skill dispatch — sort_by silent override ──────────────────────
-
-
-async def test_agent_skill_sort_by_silently_overridden_to_updated_at(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
-) -> None:
-    """``agent_skill`` always sorts by ``updated_at`` (no ``timestamp`` column)."""
-    mgr, _, _, sk = manager
-    sk.rows = [_agent_skill_row("planner")]
-    sk.total = 1
-    req = GetRequest(
-        agent_id="a1",
-        memory_type=GetMemoryType.AGENT_SKILL,
-        # User passes the default — should be silently downgraded.
-        sort_by="timestamp",
-    )
-    resp = await mgr.get(req)
-    assert sk.last.sort_by == "updated_at"
-    assert resp.data.total_count == 1
-    assert resp.data.agent_skills[0].name == "planner"
-
-
-async def test_agent_skill_explicit_updated_at_is_respected(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
-) -> None:
-    """``updated_at`` passes through unchanged (no double-override surprise)."""
-    mgr, _, _, sk = manager
-    req = GetRequest(
-        agent_id="a1",
-        memory_type=GetMemoryType.AGENT_SKILL,
-        sort_by="updated_at",
-    )
-    await mgr.get(req)
-    assert sk.last.sort_by == "updated_at"
-
-
 async def test_profile_missing_in_scope_is_empty(manager, profile_repo) -> None:  # type: ignore[no-untyped-def]
     """A profile row in another project does not answer this project's get."""
     mgr, *_ = manager
@@ -427,11 +318,12 @@ async def test_profile_missing_in_scope_is_empty(manager, profile_repo) -> None:
 
 
 async def test_merged_episode_serialises_null_session_id(
-    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    manager: tuple[GetManager, _StubRepo],
 ) -> None:
-    """B10: a Reflection-merged episode has no session; /get lists it with
-    ``"session_id": null`` instead of failing the whole page."""
-    mgr, ep, _, _ = manager
+    """B10: an episode an earlier 2.0 build's Reflection merged (``parent_type``
+    ``cluster``) has no session; /get lists it with ``"session_id": null``
+    instead of failing the whole page."""
+    mgr, ep = manager
     merged = _episode_row("ep_m").model_copy(
         update={"session_id": None, "parent_type": "cluster", "parent_id": "cl_1"}
     )

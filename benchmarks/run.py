@@ -2776,10 +2776,9 @@ def _get_everos_version() -> str:
 
 
 _PROVENANCE_PACKAGES = (
-    # The everalgo family first: these ARE the algorithms. user-memory / agent-memory do
-    # extraction (they decide what the store contains), rank does retrieval fusion.
+    # The everalgo family first: these ARE the algorithms. user-memory does
+    # extraction (it decides what the store contains), rank does retrieval fusion.
     "everalgo-user-memory",
-    "everalgo-agent-memory",
     "everalgo-rank",
     "everalgo-core",
     "everalgo-clustering",
@@ -2880,10 +2879,7 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
             ServingSpec(role=role, model=model, endpoint=endpoint, extra=extra)
         )
 
-    for role, prefix in (
-        ("embedding", "EVEROS_EMBEDDING__"),
-        ("reranker", "EVEROS_RERANK__"),
-    ):
+    for role, prefix in (("embedding", "EVEROS_EMBEDDING__"),):
         model = os.environ.get(f"{prefix}MODEL", "")
         endpoint = os.environ.get(f"{prefix}BASE_URL", "")
         if not model and not endpoint:

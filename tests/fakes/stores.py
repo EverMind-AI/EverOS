@@ -8,8 +8,6 @@ data instead of on calls. Methods no strategy test needs raise
 from __future__ import annotations
 
 __all__ = [
-    "InMemoryAgentCaseStore",
-    "InMemoryAgentSkillStore",
     "InMemoryClusterStore",
     "InMemoryEpisodeStore",
     "InMemoryForgetLogStore",
@@ -19,7 +17,6 @@ __all__ = [
     "InMemoryMemcellStore",
     "InMemoryMessageForgetStore",
     "InMemoryProfileStore",
-    "InMemoryReflectionReportStore",
     "InMemorySceneStore",
     "UnusedPort",
 ]
@@ -32,8 +29,6 @@ from typing import Any
 
 from everos.memory.models import (
     FORGOTTEN_MARK,
-    AgentCase,
-    AgentSkill,
     Cluster,
     ClusterKind,
     ClusterMemberType,
@@ -44,7 +39,6 @@ from everos.memory.models import (
     MemCell,
     MemcellRecord,
     Profile,
-    ReflectionReport,
     Roster,
     RosterEvent,
     Scene,
@@ -253,16 +247,6 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
         self.records = [s for s in self.records if s not in gone]
         return [s.ref for s in gone]
 
-    async def merged_into(self, scope: Scope, targets: Collection[str]) -> set[str]:
-        prefix = f"{scope.owner_type}s/{scope.owner_id}/"
-        return {
-            key
-            for md_path, marks in self.deprecated.items()
-            if md_path.startswith(prefix)
-            for key, merged in marks.items()
-            if merged in targets
-        }
-
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from every file of this owner's kind.
 
@@ -313,21 +297,6 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             md_path=f"{scope.owner_type}s/{scope.owner_id}/episodes/2026-01-01.md",
         )
         self.records.append(Stored(ref=ref, scope=scope, item=episode))
-
-
-class InMemoryAgentCaseStore(_DailyLog[AgentCase]):
-    def __init__(self) -> None:
-        super().__init__("ac", ".agent_cases")
-
-    async def append(
-        self,
-        scope: Scope,
-        case: AgentCase,
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> MemoryRef | None:
-        refs = await self._append_many(scope, [case], only_if)
-        return refs[0] if refs else None
 
 
 class InMemoryProfileStore:
@@ -575,43 +544,6 @@ class InMemoryGroupProfileStore:
         )
 
 
-class InMemoryAgentSkillStore:
-    """Skills per scope keyed by name; the name doubles as the entry id."""
-
-    def __init__(self) -> None:
-        self.skills: dict[Scope, dict[str, AgentSkill]] = defaultdict(dict)
-        self.deleted: list[tuple[Scope, str]] = []
-
-    def seed(self, scope: Scope, *skills: AgentSkill) -> None:
-        for skill in skills:
-            self.skills[scope][skill.name] = skill
-
-    async def list_by_cluster(
-        self, scope: Scope, cluster_id: str
-    ) -> list[Stored[AgentSkill]]:
-        return [
-            Stored(ref=self._ref(scope, s), scope=scope, item=s)
-            for s in self.skills[scope].values()
-            if s.cluster_id == cluster_id
-        ]
-
-    async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef:
-        self.skills[scope][skill.name] = skill
-        return self._ref(scope, skill)
-
-    async def delete(self, scope: Scope, skill_name: str) -> bool:
-        self.deleted.append((scope, skill_name))
-        return self.skills[scope].pop(skill_name, None) is not None
-
-    @staticmethod
-    def _ref(scope: Scope, skill: AgentSkill) -> MemoryRef:
-        return MemoryRef(
-            id=skill.id,
-            entry_id=skill.name,
-            md_path=f"agents/{scope.owner_id}/skills/skill_{skill.name}/SKILL.md",
-        )
-
-
 class InMemoryMemcellStore:
     """Memcells by id, with the session each was inserted under."""
 
@@ -669,15 +601,6 @@ class InMemoryMemcellStore:
         )
         return [self.cells[memcell_id] for _, memcell_id in found[:limit]]
 
-    async def mark_case_extracted(
-        self,
-        memcell_id: str,
-        *,
-        skip_reason: str | None,
-        skip_detail: Mapping[str, Any],
-    ) -> None:
-        self.case_marks[memcell_id] = (skip_reason, dict(skip_detail))
-
 
 class InMemoryClusterStore:
     """Clusters with their scope, kind and typed membership."""
@@ -727,95 +650,10 @@ class InMemoryClusterStore:
     ) -> str | None:
         raise NotImplementedError
 
-    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
-        cluster = self.clusters.get(cluster_id)
-        if cluster is None:
-            return []
-        types = self.member_types[cluster_id]
-        return [(m, types.get(m, "episode")) for m in cluster.members]
-
-    async def replace_members(
-        self,
-        cluster_id: str,
-        *,
-        removed: Collection[str],
-        added: str,
-        member_type: ClusterMemberType,
-        centroid: Sequence[float],
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        cluster = self.clusters[cluster_id]
-        kept = [m for m in cluster.members if m not in removed]
-        self.clusters[cluster_id] = cluster.model_copy(
-            update={
-                "members": [*kept, added],
-                "centroid": tuple(centroid),
-                "count": count,
-                "last_ts": last_ts,
-                "preview": list(preview),
-            }
-        )
-        self.member_types[cluster_id][added] = member_type
-
-    async def detach(
-        self,
-        cluster_id: str,
-        member_ids: Collection[str],
-        *,
-        count: int,
-        last_ts: int,
-        preview: Sequence[str],
-    ) -> None:
-        cluster = self.clusters[cluster_id]
-        self.clusters[cluster_id] = cluster.model_copy(
-            update={
-                "members": [m for m in cluster.members if m not in member_ids],
-                "count": count,
-                "last_ts": last_ts,
-                "preview": list(preview),
-            }
-        )
-
     async def delete(self, cluster_id: str) -> None:
         self.clusters.pop(cluster_id, None)
         self.owners.pop(cluster_id, None)
         self.member_types.pop(cluster_id, None)
-
-    async def delete_for_owner(self, scope: Scope, kind: ClusterKind) -> int:
-        ids = [cid for cid, owner in self.owners.items() if owner == (scope, kind)]
-        for cid in ids:
-            await self.delete(cid)
-        return len(ids)
-
-    async def list_distinct_owners(self) -> list[Scope]:
-        return list(dict.fromkeys(scope for scope, _ in self.owners.values()))
-
-
-class InMemoryReflectionReportStore:
-    """Reflection reports in creation order."""
-
-    def __init__(self) -> None:
-        self.reports: list[ReflectionReport] = []
-
-    async def create(self, report: ReflectionReport) -> None:
-        self.reports.append(report)
-
-    async def reflected_cluster_ids(self, scope: Scope) -> set[str]:
-        return {
-            r.cluster_id
-            for r in self.reports
-            if (r.owner_id, r.app_id, r.project_id)
-            == (scope.owner_id, scope.app_id, scope.project_id)
-        }
-
-    async def delete_for_owner(self, scope: Scope) -> int:
-        mine = (scope.owner_id, scope.app_id, scope.project_id)
-        kept = [r for r in self.reports if (r.owner_id, r.app_id, r.project_id) != mine]
-        removed = len(self.reports) - len(kept)
-        self.reports = kept
-        return removed
 
 
 class InMemoryForgetLogStore:

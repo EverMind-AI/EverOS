@@ -115,11 +115,11 @@ async def test_ledger_done_over_empty_tables_is_reported(
     emptied, rows = await _verdict(
         storage,
         runtime,
-        rows={"episode": 0, "agent_case": 0},
+        rows={"episode": 0, "image_memory": 0},
         summary=_summary(pending=0, done=106),
     )
     assert emptied is True
-    assert rows == {"episode": 0, "agent_case": 0}
+    assert rows == {"episode": 0, "image_memory": 0}
 
 
 async def test_rows_present_is_not_reported(
@@ -129,7 +129,7 @@ async def test_rows_present_is_not_reported(
     emptied, _ = await _verdict(
         storage,
         runtime,
-        rows={"episode": 1060, "agent_case": 0},
+        rows={"episode": 1060, "image_memory": 0},
         summary=_summary(pending=0, done=106),
     )
     assert emptied is False

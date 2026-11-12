@@ -64,7 +64,7 @@ class EventDispatcher:
             strategy_filter: Restrict to one strategy name. The strategy
                 must still subscribe to ``type(event)`` — a handler is never
                 handed an event class it did not declare (a bare
-                ``ManualTick`` aimed at ``Immediate(on=[AgentCaseExtracted])``
+                ``ManualTick`` aimed at ``Immediate(on=[EpisodeExtracted])``
                 would crash reading fields the tick does not carry). The one
                 exception is a ``ManualTick`` at a ``Cron`` strategy: that is
                 the manual run of a scheduled job, and the tick carries every
@@ -80,7 +80,7 @@ class EventDispatcher:
             target = self._registry.get(strategy_filter)
             subscribed = {m.name for m in self._registry.lookup_by_event(type(event))}
             # A manual run of a scheduled job is what the manual trigger is for
-            # (docs/reflection.md: reflect_episodes + force). CronTick and
+            # (a Cron strategy with ``force``). CronTick and
             # ManualTick carry the same single field, so a Cron handler cannot
             # read anything the tick lacks; Idle handlers can (bucket_key,
             # idle_seconds) and therefore still have to subscribe.

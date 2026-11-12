@@ -8,7 +8,6 @@ from collections.abc import Awaitable, Callable
 
 from everos.core.observability.logging import get_logger
 
-from ._clusters import run_clusters_phase
 from ._deps import (
     BACKFILL_LOGGER,
     BACKFILL_PHASES,
@@ -18,15 +17,12 @@ from ._deps import (
     BackfillSummary,
     PhaseResult,
 )
-from ._skills import run_skills_phase
 from ._vectors import run_vectors_phase
 
 backfill_logger = get_logger(BACKFILL_LOGGER)
 
 _PHASE_RUNNERS: dict[str, Callable[..., Awaitable[PhaseResult]]] = {
     "vectors": run_vectors_phase,
-    "clusters": run_clusters_phase,
-    "skills": run_skills_phase,
 }
 
 
