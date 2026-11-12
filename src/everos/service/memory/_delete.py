@@ -172,6 +172,18 @@ class Deleter:
         ] or await self._stores.owner_dir.owners_with_session(
             session.app_id, session.project_id, session.session_id
         )
+        if not records:
+            # On retry, both the memcells and some owners' markdown may be
+            # gone already. Include their clusters to finish member cleanup.
+            cluster_owners = await self._stores.cluster.list_distinct_owners()
+            owners.extend(
+                owner
+                for owner in cluster_owners
+                if owner.app_id == session.app_id
+                and owner.project_id == session.project_id
+                and owner.owner_type == "user"
+            )
+            owners = list(dict.fromkeys(owners))
         deleted: list[tuple[Scope, Removed]] = []
         for scope in owners:
             deleted.append(
@@ -186,11 +198,18 @@ class Deleter:
             return {
                 "agent_case": await stores.agent_case.remove_session(scope, session_id)
             }
-        return {
+        removed = {
             "episode": await stores.episode.remove_session(scope, session_id),
             "atomic_fact": await stores.atomic_fact.remove_session(scope, session_id),
             "foresight": await stores.foresight.remove_session(scope, session_id),
         }
+        # Scan this owner's clusters even when a retry removed no new entries.
+        # A previous attempt may have stopped after rewriting the markdown.
+        clusters = await stores.cluster.list_for_owner(scope, "user_memory")
+        await self._prune_clusters(
+            scope, {c.id for c in clusters}, {r.entry_id for r in removed["episode"]}
+        )
+        return removed
 
     async def _owner(self, scope: Scope) -> int:
         """Delete the owner's directory, name, clusters and reports; the count."""
@@ -314,6 +333,13 @@ class Deleter:
             found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
             if found is not None:
                 cluster_ids.add(found)
+        await self._prune_clusters(scope, cluster_ids, gone)
+
+    async def _prune_clusters(
+        self, scope: Scope, cluster_ids: set[str], gone: set[str]
+    ) -> None:
+        """Reconcile membership with markdown, using the existing delete lock."""
+        clusters = self._stores.cluster
         for cluster_id in sorted(cluster_ids):
             for attempt in range(_DETACH_ATTEMPTS):
                 ids = [m for m, _ in await clusters.members(cluster_id)]

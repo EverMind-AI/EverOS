@@ -231,6 +231,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deleting a session also removes its episodes from their clusters' members,
+  and a retry after a partial deletion finishes that cleanup (#591). The
+  profile-source guards of #591 are superseded here: the profile is built
+  from episodes read back from markdown, not from cluster members.
+
 - **A benchmark ADD no longer dies waiting for extraction.** OME empties a
   succeeded run's `event_payload` (since #555), and `run.py`'s readiness check
   raised `malformed JSON` on it, failing every conversation once one
