@@ -46,6 +46,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile's LLM is `[llm.profile]`; a reasoning model with thinking on, at its
   default effort, and a longer `timeout_seconds` (240) are recommended there;
   see `docs/configuration.md`.
+- **Benchmark reports give a `Re-judged` score beside `Accuracy`.** With a gold
+  audit, JUDGE grades the answers to the questions it disputes once more, against
+  the audit's corrected answers, with the same judge model, number of runs and
+  majority vote; nothing is searched or answered again, and the rows go to
+  `conv<N>/rejudge_<method>.jsonl` (resumable, so `--stages judge` fills them in
+  for a run judged earlier). `report.txt`, `report.json` and the terminal summary
+  show both scores, overall and per category; until every disputed question is
+  re-judged the report gives no `Re-judged` number and says how many are missing.
+  LoCoMo reads [dial481/locomo-audit](https://github.com/dial481/locomo-audit)
+  `errors.json` (99 of 1,540 questions; `WRONG_CITATION` entries keep their gold)
+  through the new `gold_audit_path` setting; a missing file leaves the run going
+  and the report saying it was not re-judged, and the benchmarks without an audit
+  say so on the `Re-judged` line.
+- **`bash benchmarks/download_data.sh <benchmark>`** fetches exactly the files each
+  adapter reads to the path its config expects -- including LoCoMo's gold audit,
+  pinned to a commit, LongMemEval's extension-less upstream file and SubtleMemory's
+  nested personas -- and runs the EverMemBench conversion. Running it again
+  finishes an interrupted download.
+- **A preflight in `benchmarks/run.py`** lists every missing dataset and key before
+  any server starts, and refuses to start ADD when a started server's `/health`
+  lacks a provider the retrieval method needs. Requirements follow the method, as
+  EverOS's own search does: `keyword` runs on the LLM key alone, the vector-based
+  methods need embedding, and `agentic` (LoCoMo's) needs rerank too. A missing
+  provider used to surface only at search, after ADD had paid for extraction. The
+  decider keeps its own startup probe.
+- **Benchmark `flush_scope`**: `"session"` (the default, unchanged in every shipped
+  config) flushes each dataset session apart; `"conversation"` sends a whole
+  conversation as one EverOS session flushed once at its end, as the EverAlgo
+  reference harness did. Refused for datasets whose sessions carry their own ids.
 
 ### Changed
 
@@ -168,8 +197,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EverAlgo loader writes it (910 of 5,882 turns; the text alone was sent
   before), and the ingest identity carries a `message_format` version so a
   store built from the old text is not reused. `benchmarks/.env.example` no longer points embedding at a local
-  server and asks for the reranker key agentic search cannot run without; the
-  README lists both keys and gives a one-line LoCoMo download.
+  server and asks for the reranker key agentic search cannot run without.
+- **The benchmark ingest identity covers more of what shapes a store.** It now
+  records the messages ingested per conversation (a `--smoke` or `--max-messages`
+  cap), `flush_scope`, and the server settings that change what is stored --
+  `EVEROS_BOUNDARY_DETECTION__STRATEGY`, `EVEROS_CLUSTERING__THRESHOLD`,
+  `EVEROS_CLUSTERING__TIME_WINDOW_DAYS`, `EVEROS_EMBEDDING__DIM`,
+  `EVEROS_EMBEDDING__DIMENSIONS`, `EVEROS_MEMORIZE__MODE`,
+  `EVEROS_LLM__TEMPERATURE` and `EVEROS_LLM__MAX_TOKENS`, read like the keyword
+  tokenizer (the config's `[retrieval_env]` first, then the environment). A
+  results directory built under other values refuses to resume, so a 50-message
+  smoke store is no longer scored as a full one. `run_spec.json` records `smoke`
+  and `max_messages`.
+- **`--smoke` means conversation 0**, both through `run.py` (it took 0 and 1) and
+  through `reproduce.sh` (it passed `--conv all`, so `--smoke` alone trimmed and
+  ingested every conversation); `reproduce.sh` now leaves the default to `run.py`,
+  names smoke runs `<dataset>_smoke`, and says so when `.venv` is missing.
+- **`report.txt` flags what it measured**: a `Scope:` line marks a smoke or trimmed
+  run as not comparable to published results, and `Decider model:` names the
+  decider `run_spec.json` records (model, endpoint and the section the model came
+  from), or that the run's methods use none.
+- **Benchmark docs**: `benchmarks/README.md` (and its Chinese mirror) is a
+  step-by-step guide with a quick start, a check per step, which keys each
+  retrieval method needs, a troubleshooting table and the two scores;
+  `benchmarks/.env.example` opens with a `REQUIRED` block. The root READMEs gain a
+  "Recommended models" table (`[llm.decider]` for the decider) and link the guide,
+  as do `docs/index.md` and `CLAUDE.md`.
 
 ### Removed
 
@@ -184,6 +237,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extraction had finished. Emptied rows now skip the payload filter and still
   count as finished. The "no decider endpoint" notice, which called an agentic
   run "not comparable", is printed only for runs that use `llm_multiround`.
+- `benchmarks/run.py` run directly (without `reproduce.sh`) loaded
+  `benchmarks/.env` only after expanding the config, so `BENCH_DECIDER_*`,
+  `BENCH_DATA_*` and `BENCH_EVAL_ROOT` set there were ignored; a `--methods` value
+  was applied after the method check, so a misspelt one was never refused.
+- A stage-only rerun (no ADD) after a multi-server ADD failed with
+  "--everos-root is required": it looked for `store/`, while a fleet builds
+  `store_s0` .. `store_s<N-1>`. The run now prints the stores it actually uses.
+- A SubtleMemory data path one level above the personas failed every conversation
+  with `conv_index 0 out of range (have 0)`; it now names the expected layout and
+  the download command.
+- `python -m benchmarks.adapters.evermembench` ran its conversion twice and wrote
+  its output file twice.
 
 - The language an episode is detected in, which its atomic facts and a new
   user's profile are then written in, is Chinese, Japanese or English. Every

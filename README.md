@@ -146,8 +146,9 @@ everos init
 ```
 
 This creates `~/.everos/everos.toml` and `~/.everos/ome.toml`. Open
-`~/.everos/everos.toml`; the generated model and OpenRouter URL are already
-correct, so replace only the empty `api_key`:
+`~/.everos/everos.toml`; it comes pre-filled with a recommended model (see
+[Recommended models](#recommended-models)) and the OpenRouter URL, so replace
+only the empty `api_key`:
 
 ```toml
 [llm]
@@ -261,6 +262,23 @@ HTTP 422 if you request a feature that needs them.
 > connects to a running server and uses the real add/flush/search flow. It uses
 > hybrid search, so add an embedding provider before you run it.
 
+### Recommended models
+
+The generated `everos.toml` pre-fills these (all but the decider); any
+OpenAI-compatible model can replace them.
+
+| Role | Section | Recommended model |
+| --- | --- | --- |
+| Memory extraction | `[llm]` | `openai/gpt-4.1-mini` |
+| Retrieval decider for `llm_multiround` search | `[llm.decider]` | `qwen3.6-27B` or `deepseek/deepseek-v4-flash-0731`; left empty, the `[llm]` model decides |
+| Embedding | `[embedding]` | `Qwen/Qwen3-Embedding-4B` |
+| Rerank | `[rerank]` | `Qwen/Qwen3-Reranker-4B` |
+| Multimodal parsing | `[multimodal]` | `google/gemini-3.8-flash` |
+
+The extraction model and the deciders above produced our published benchmark
+results; [benchmarks/README.md](benchmarks/README.md#6-results) lists which
+model ran in which role for each benchmark, and how to reproduce them.
+
 ### Optional: Ingest Multimodal Files
 
 To ingest non-text content (image / pdf / audio / office documents)
@@ -273,8 +291,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 
 This adds the parser's `[svg]` bundle for SVG support via cairosvg; the base
 parser is already required by knowledge ingestion. Configure the `[multimodal]`
-section in `everos.toml`; its default
-model is `google/gemini-3.8-flash` via OpenRouter.
+section in `everos.toml`; it comes pre-filled with the recommended model,
+`google/gemini-3.8-flash` via OpenRouter.
 
 **Office document support requires LibreOffice as a system dependency.**
 The parser shells out to `soffice` (LibreOffice's headless renderer) to
@@ -667,6 +685,7 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 - [docs/everos-demo.md](docs/everos-demo.md) — Demo scope and TUI source layout
 - [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
+- [benchmarks/README.md](benchmarks/README.md) — Run LoCoMo, LongMemEval, EverMemBench and SubtleMemory: data, keys, smoke test, published results
 - [docs/engineering.md](docs/engineering.md) — Contributor engineering reference: build, test, CI, conventions
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes

@@ -672,6 +672,8 @@ def test_the_no_decider_notice_is_given_only_where_a_decider_runs(
     there was false. The decider is cleared either way."""
     for name in ("BENCH_DECIDER_MODEL", "BENCH_DECIDER_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
+    # A developer's own benchmarks/.env must neither set the decider nor leak keys.
+    monkeypatch.setattr(run, "load_dotenv", lambda *_a, **_k: False)
     monkeypatch.setattr(
         sys,
         "argv",

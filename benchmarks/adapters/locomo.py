@@ -19,6 +19,8 @@ import json
 import re
 from typing import Any
 
+from .base import question_key
+
 name = "locomo"
 
 _CATEGORIES = {
@@ -89,6 +91,39 @@ def judge_spec() -> dict[str, Any]:
 
 def categories() -> dict[str, str]:
     return dict(_CATEGORIES)
+
+
+# A WRONG_CITATION entry only moves the evidence pointer; its gold answer stands, so the
+# question is not re-judged. Every other error type disputes the gold itself.
+_AUDIT_GOLD_STANDS = {"WRONG_CITATION"}
+
+
+def gold_corrections(path: str) -> dict[tuple[int, str], str]:
+    """The dial481/locomo-audit ``errors.json`` corrected answers, by question.
+
+    Entries are numbered ``locomo_<conv>_qa<n>`` against the dataset's own question
+    list, so they are keyed by conversation and question text (``question_key``), the
+    form JUDGE can rebuild from any answered row.
+
+    Raises:
+        ValueError: An entry's ``question_id`` is not ``locomo_<conv>_qa<n>``.
+    """
+    with open(path, encoding="utf-8") as f:
+        entries = json.load(f)
+    corrections: dict[tuple[int, str], str] = {}
+    for entry in entries:
+        if entry.get("error_type") in _AUDIT_GOLD_STANDS:
+            continue
+        m = re.fullmatch(r"locomo_(\d+)_qa\d+", str(entry.get("question_id", "")))
+        if m is None:
+            raise ValueError(
+                f"{path}: unexpected question_id {entry.get('question_id')!r}; "
+                "expected locomo_<conv>_qa<n>"
+            )
+        corrections[question_key(int(m[1]), entry["question"])] = str(
+            entry["correct_answer"]
+        )
+    return corrections
 
 
 # Prompts for this benchmark. Byte-identical to the ones the published 90.58% was

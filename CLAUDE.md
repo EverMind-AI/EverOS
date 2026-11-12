@@ -89,3 +89,4 @@ Algorithm assets (prompts, extractors) live in the separate [`everalgo`](https:/
 | Make a commit | use `/commit` |
 | Open a branch / PR | use `/new-branch` / `/pr` |
 | Run checks before pushing | `make ci` |
+| Run a benchmark (LoCoMo, LongMemEval, EverMemBench, SubtleMemory) | [benchmarks/README.md](benchmarks/README.md) — start with its quick start |

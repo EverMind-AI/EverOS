@@ -3,6 +3,9 @@
 
 adapter = "locomo"
 data_path = "${BENCH_DATA_LOCOMO:-benchmarks/data/locomo10.json}"
+# The gold audit (dial481/locomo-audit errors.json): JUDGE re-judges the questions it
+# disputes against its corrected answers, and the report adds that Re-judged score.
+gold_audit_path = "${BENCH_DATA_LOCOMO_AUDIT:-benchmarks/data/locomo-audit-errors.json}"
 results_root = "${BENCH_EVAL_ROOT:-benchmarks/results}/LoCoMo"
 conversations = 10
 app_id = "default"                      # partition key stored in the index, not a directory name

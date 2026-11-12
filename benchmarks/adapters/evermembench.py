@@ -677,7 +677,9 @@ def main() -> None:
     )
     print("categories: " + ", ".join(f"{k}={v}" for k, v in cats.most_common()))
 
-    for path in [args.out] + ([args.also_write] if args.also_write else []):
+    # Both default to the harness's path; writing it twice printed two identical lines.
+    targets = [args.out] + ([args.also_write] if args.also_write else [])
+    for path in dict.fromkeys(targets):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(
             json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -687,10 +689,6 @@ def main() -> None:
         "\nowner mapping for build: list index i -> topic "
         f"{{{', '.join(f'{i}:{t}' for i, t in enumerate(args.topics))}}}"
     )
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

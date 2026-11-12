@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
+# The harness imports its siblings bare (`from config import ...`), so the tests do
+# too: one module object, and this file runs on its own, not only after a sibling
+# test happened to put benchmarks/ on sys.path.
+BENCH = Path(__file__).resolve().parents[2] / "benchmarks"
+if str(BENCH) not in sys.path:
+    sys.path.insert(0, str(BENCH))
+
 
 def test_defaults_construct_without_error() -> None:
     """BenchmarkConfig() with defaults must construct and have all fields."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     cfg = BenchmarkConfig()
     assert isinstance(cfg.methods, str)
@@ -26,7 +34,7 @@ def test_defaults_construct_without_error() -> None:
 
 def test_from_toml_loads_default_config() -> None:
     """from_toml('config') loads benchmarks/config.toml successfully."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     cfg = BenchmarkConfig.from_toml("config")
     assert isinstance(cfg.methods, str)
@@ -35,7 +43,7 @@ def test_from_toml_loads_default_config() -> None:
 
 def test_from_toml_override(tmp_path: Path) -> None:
     """A custom TOML overrides specific fields, rest stay default."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     (tmp_path / "custom.toml").write_text(
         'methods = "hybrid"\ntop_k = 20\n', encoding="utf-8"
@@ -48,7 +56,7 @@ def test_from_toml_override(tmp_path: Path) -> None:
 
 def test_from_toml_missing_file_raises() -> None:
     """from_toml with nonexistent name raises FileNotFoundError."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     with pytest.raises(FileNotFoundError):
         BenchmarkConfig.from_toml("nonexistent")
@@ -56,7 +64,7 @@ def test_from_toml_missing_file_raises() -> None:
 
 def test_frozen_model() -> None:
     """BenchmarkConfig instances are immutable."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     cfg = BenchmarkConfig()
     with pytest.raises(Exception):  # noqa: B017 — ValidationError
@@ -65,7 +73,7 @@ def test_frozen_model() -> None:
 
 def test_concurrency_fields_exist() -> None:
     """Concurrency fields exist and are positive; no legacy 'concurrency' attr."""
-    from benchmarks.config import BenchmarkConfig
+    from config import BenchmarkConfig
 
     cfg = BenchmarkConfig()
     assert cfg.conversations_concurrency >= 1
@@ -75,7 +83,7 @@ def test_concurrency_fields_exist() -> None:
 
 
 def test_search_result_frozen() -> None:
-    from benchmarks.config import SearchResult
+    from config import SearchResult
 
     sr = SearchResult(
         index=0,
@@ -94,7 +102,7 @@ def test_search_result_frozen() -> None:
 
 
 def test_search_result_jsonl_roundtrip() -> None:
-    from benchmarks.config import SearchResult
+    from config import SearchResult
 
     sr = SearchResult(
         index=0,
@@ -113,7 +121,7 @@ def test_search_result_jsonl_roundtrip() -> None:
 
 
 def test_answer_result_tracks_tokens() -> None:
-    from benchmarks.config import AnswerResult
+    from config import AnswerResult
 
     ar = AnswerResult(
         index=0,
@@ -129,7 +137,7 @@ def test_answer_result_tracks_tokens() -> None:
 
 
 def test_judge_result_jsonl_roundtrip() -> None:
-    from benchmarks.config import JudgeResult
+    from config import JudgeResult
 
     jr = JudgeResult(
         index=0,
@@ -148,7 +156,7 @@ def test_judge_result_jsonl_roundtrip() -> None:
 
 
 def test_run_spec_includes_git_hash() -> None:
-    from benchmarks.config import RunSpec
+    from config import RunSpec
 
     spec = RunSpec(
         run_name="v1",
@@ -172,7 +180,7 @@ def test_config_expands_environment_references() -> None:
     """
     import os
 
-    from benchmarks.config import _expand_env
+    from config import _expand_env
 
     os.environ["_CFG_PROBE"] = "http://probe/v1"
     try:
@@ -189,7 +197,7 @@ def test_an_unset_reference_keeps_its_own_name() -> None:
     minutes into a run; the unexpanded text names the variable that is missing. A
     ``:-`` default is honoured when one is written.
     """
-    from benchmarks.config import _ENV_REF, _expand_env
+    from config import _ENV_REF, _expand_env
 
     # Both forms the pattern accepts, so a change to it has to come here first.
     assert _ENV_REF.match("${NAME}")
@@ -211,8 +219,7 @@ def test_results_root_falls_back_when_its_variable_is_unset() -> None:
     optional ones fall back to something that works.
     """
     import run as run_mod
-
-    from benchmarks.config import BenchmarkConfig, unresolved
+    from config import BenchmarkConfig, unresolved
 
     cfg = BenchmarkConfig.from_toml("locomo").model_copy(
         update={"results_root": "${BENCH_EVAL_ROOT}/LoCoMo/EverOS/results"}
@@ -231,7 +238,7 @@ def test_results_root_falls_back_when_its_variable_is_unset() -> None:
 
 def test_unresolved_recognises_only_a_real_reference() -> None:
     """`$HOME` and a bare `{}` are not env references and must pass through."""
-    from benchmarks.config import unresolved
+    from config import unresolved
 
     assert unresolved("${BENCH_EVAL_ROOT}/x")
     assert not unresolved("/tmp/x")

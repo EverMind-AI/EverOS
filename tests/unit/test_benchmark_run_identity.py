@@ -15,6 +15,7 @@ benchmark.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ if str(_BENCH) not in sys.path:
 
 import run as run_mod  # noqa: E402
 from config import (  # noqa: E402
+    INGEST_SERVER_SETTINGS,
     BenchmarkConfig,
     ServingSpec,
     identity_diff,
@@ -101,12 +103,25 @@ def test_a_fresh_directory_has_nothing_to_check(tmp_path: Path) -> None:
         ({"body": "CHANGED"}, {}, "data_digest"),
         ({"adapter": "longmemeval"}, {}, "adapter"),
         ({}, {"backbone": "other-model"}, "extraction_backbone"),
+        ({"flush_scope": "conversation"}, {}, "flush_scope"),
+        ({"message_owner": "eval_owner"}, {}, "message_owner"),
+        *(
+            ({"retrieval_env": {variable: "changed"}}, {}, key)
+            for key, variable in INGEST_SERVER_SETTINGS.items()
+        ),
     ],
 )
 def test_a_different_ingest_refuses(
-    tmp_path: Path, over: dict, serving_kw: dict, expect: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    over: dict,
+    serving_kw: dict,
+    expect: str,
 ) -> None:
-    """Data, adapter and extraction backbone each invalidate the stored memories."""
+    """Data, adapter, extraction backbone, flush scope, message owner and the server
+    settings that shape what is stored each invalidate the stored memories."""
+    for variable in INGEST_SERVER_SETTINGS.values():
+        monkeypatch.delenv(variable, raising=False)
     out = tmp_path / "run"
     _seed_spec(out, _config(tmp_path), _serving())
     body = over.pop("body", "seed")
@@ -175,7 +190,87 @@ def test_the_everalgo_version_is_not_part_of_the_identity(tmp_path: Path) -> Non
         "message_owner",
         "ome_strategies",
         "message_format",
+        "message_cap",
+        "flush_scope",
+        *INGEST_SERVER_SETTINGS,
     }
+
+
+# ── server settings that shape the store ───────────────────────────────────────
+def test_the_ingest_settings_name_settings_everos_has() -> None:
+    """A variable EverOS does not read would gate resume on nothing."""
+    from everos.config import Settings
+
+    for variable in INGEST_SERVER_SETTINGS.values():
+        section, field = variable.removeprefix("EVEROS_").lower().split("__")
+        assert field in Settings.model_fields[section].annotation.model_fields, variable
+
+
+def test_server_ingest_settings_are_read_like_the_tokenizer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`retrieval_env` wins over this process's environment, as it does for the
+    servers; a variable set in neither records as the server default ("")."""
+    for variable in INGEST_SERVER_SETTINGS.values():
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("EVEROS_CLUSTERING__THRESHOLD", "0.5")
+    monkeypatch.setenv("EVEROS_CLUSTERING__TIME_WINDOW_DAYS", "3")
+    cfg = _config(tmp_path, retrieval_env={"EVEROS_CLUSTERING__THRESHOLD": "0.7"})
+
+    got = ingest_identity(cfg, "locomo", _serving())
+
+    assert got["clustering_threshold"] == "0.7"
+    assert got["clustering_time_window_days"] == "3"
+    assert got["embedding_dimensions"] == ""
+
+
+def test_a_server_ingest_setting_is_not_a_read_change(tmp_path: Path) -> None:
+    """Clustering and vectors are fixed at ingest; re-reading cannot change them."""
+    srv = _serving()
+    cfg_a = _config(tmp_path)
+    cfg_b = _config(tmp_path, retrieval_env={"EVEROS_CLUSTERING__THRESHOLD": "0.71"})
+    assert read_identity(cfg_a, srv) == read_identity(cfg_b, srv)
+    assert ingest_identity(cfg_a, "locomo", srv) != ingest_identity(
+        cfg_b, "locomo", srv
+    )
+
+
+def test_a_store_built_from_fewer_messages_is_not_resumed(tmp_path: Path) -> None:
+    """A smoke store (50 messages) must not be scored as a full run's store."""
+    cfg, srv = _config(tmp_path), _serving()
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "run_spec.json").write_text(
+        json.dumps(
+            {
+                "ingest_identity": ingest_identity(cfg, "locomo", srv, message_cap=50),
+                "read_identity": read_identity(cfg, srv),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(run_mod.ResumeIdentityError, match="message_cap: 50 -> 0"):
+        run_mod._check_resume_identity(
+            out, ingest_identity(cfg, "locomo", srv), read_identity(cfg, srv), False
+        )
+
+
+@pytest.mark.parametrize(
+    ("smoke", "max_messages", "cap"), [(False, 0, 0), (True, 0, 50), (True, 200, 200)]
+)
+def test_the_message_cap_follows_the_flags(
+    smoke: bool, max_messages: int, cap: int
+) -> None:
+    args = argparse.Namespace(smoke=smoke, max_messages=max_messages)
+    assert run_mod._message_cap(args) == cap
+
+
+def test_run_spec_records_the_trim(tmp_path: Path) -> None:
+    run_mod._write_run_spec(
+        tmp_path, "r", BenchmarkConfig(), [0], ["add"], smoke=True, max_messages=50
+    )
+    spec = json.loads((tmp_path / "run_spec.json").read_text(encoding="utf-8"))
+    assert (spec["smoke"], spec["max_messages"]) == (True, 50)
 
 
 # ── the keyword tokenizer wrote the store's index ──────────────────────────────

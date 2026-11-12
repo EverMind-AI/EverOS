@@ -85,6 +85,13 @@ def load_units(data_path: str) -> list[dict[str, Any]]:
                             item[k] = src[k]
                 qa.append(item)
         units.append({"sessions": _hs, "index": f"persona_{i}", "qa": qa})
+    # None at all means the root is off by a level (the HF snapshot nests the personas).
+    if not units:
+        raise FileNotFoundError(
+            f"No SubtleMemory personas under {root}: expected "
+            f"{root}/persona_0/bench_instances.json .. persona_9/. "
+            "Fetch them with `bash benchmarks/download_data.sh subtlememory`."
+        )
     return units
 
 
