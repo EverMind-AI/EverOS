@@ -170,7 +170,7 @@ def _image_fields(row: Stored[ImageMemory]) -> Mapping[str, Any]:
         "app_id": row.scope.app_id,
         "project_id": row.scope.project_id,
         "owner_type": row.scope.owner_type,
-        "deprecated_by": None,
+        "deprecated_by": row.item.superseded_by,
     }
 
 

@@ -33,6 +33,7 @@ from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import EpisodeRecaller
 from everos.memory.search.recall.base import RecallerDeps
 from tests.fakes import InMemoryGroupStore, static_trace_path, static_tuning
+from tests.fakes._filter import matches
 
 from ._records import ScriptedIndex, hit, stored_episode
 
@@ -434,15 +435,23 @@ class _PictureIndex:
         return []
 
     async def find(self, where, *, limit: int | None = None):
-        return [SearchHit(stored=row, score=None) for row in self.rows][:limit]
-
-    async def find_by_image_ids(self, scope, image_ids):
-        wanted = set(image_ids)
         return [
-            row
+            SearchHit(stored=row, score=None)
             for row in self.rows
-            if row.item.image_id in wanted and row.item.superseded_by is None
-        ]
+            if matches(where, _picture_columns(row))
+        ][:limit]
+
+
+def _picture_columns(row: Stored[ImageMemory]) -> dict[str, Any]:
+    """The index columns a read scope's predicate filters a picture on."""
+    return {
+        "owner_id": row.scope.owner_id,
+        "owner_type": row.scope.owner_type,
+        "app_id": row.scope.app_id,
+        "project_id": row.scope.project_id,
+        "image_id": row.item.image_id,
+        "deprecated_by": row.item.superseded_by,
+    }
 
 
 async def test_a_referenced_picture_is_attached_and_not_padded_into_the_ranking() -> (

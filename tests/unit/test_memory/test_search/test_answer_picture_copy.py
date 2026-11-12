@@ -43,6 +43,7 @@ from everos.memory.search.recall import EpisodeRecaller, ImageMemoryRecaller
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.shaper import name_copies
 from tests.fakes import InMemoryGroupStore, static_trace_path, static_tuning
+from tests.fakes._filter import matches
 
 from ._records import ScriptedIndex, hit, stored_episode
 
@@ -122,10 +123,23 @@ class _PictureIndex:
         return [SearchHit(stored=row, score=0.9) for row in self.ranked][:limit]
 
     async def find(self, where, *, limit: int | None = None):
-        return [SearchHit(stored=row, score=None) for row in self.rows][:limit]
+        return [
+            SearchHit(stored=row, score=None)
+            for row in self.rows
+            if matches(where, _picture_columns(row))
+        ][:limit]
 
-    async def find_by_image_ids(self, scope, image_ids):
-        return [row for row in self.rows if row.item.image_id in set(image_ids)]
+
+def _picture_columns(row: Stored[ImageMemory]) -> dict[str, Any]:
+    """The index columns a read scope's predicate filters a picture on."""
+    return {
+        "owner_id": row.scope.owner_id,
+        "owner_type": row.scope.owner_type,
+        "app_id": row.scope.app_id,
+        "project_id": row.scope.project_id,
+        "image_id": row.item.image_id,
+        "deprecated_by": row.item.superseded_by,
+    }
 
 
 class _CopyStore:

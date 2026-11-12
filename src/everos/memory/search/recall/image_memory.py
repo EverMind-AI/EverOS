@@ -27,7 +27,6 @@ from everos.memory.models import ImageMemory
 from everos.memory.ports import (
     Filter,
     ImageMemoryIndex,
-    Scope,
     Stored,
     all_of,
     one_of,
@@ -100,38 +99,18 @@ class ImageMemoryRecaller:
         hits = await self._index.visual_search(vector, where, limit=limit)
         return _tagged(from_hits(hits, source="vector"))
 
-    async def fetch_by_entry_ids(
-        self, entry_ids: Sequence[str], where: Filter
-    ) -> RecallResult[ImageMemory]:
-        """Pictures by ``entry_id``, keyed by global id, unscored."""
-        if not entry_ids:
-            return RecallResult.empty()
-        full_where = all_of(where, one_of("entry_id", list(entry_ids)))
-        hits = await self._index.find(full_where, limit=len(entry_ids))
-        return _tagged(from_hits(hits, source="vector"))
-
     async def find_by_image_ids(
-        self, scope: Scope, image_ids: Sequence[str]
-    ) -> list[Stored[ImageMemory]]:
-        """The current picture memories about these files.
-
-        What an episode's ``image_ids`` resolve through.
-
-        Only current occurrences: a forgotten or superseded picture must not be
-        revived into an answer because an episode still refers to it.
-        """
-        if not image_ids:
-            return []
-        return await self._index.find_by_image_ids(scope, list(image_ids))
-
-    async def find_by_image_ids_in(
         self, where: Filter, image_ids: Sequence[str]
     ) -> list[Stored[ImageMemory]]:
         """The current picture memories about these files, inside a read scope.
 
-        ``where`` is the scope's predicate, which already excludes superseded
-        rows and, for a group, everything outside the asker's windows: an
-        episode the asker may see does not bring along a picture they may not.
+        What an episode's ``image_ids`` resolve through. ``where`` is the read
+        scope's predicate of the episode's owner, which already excludes
+        superseded and forgotten rows -- a picture must not be revived into an
+        answer because an episode still refers to it -- and, for a group,
+        everything outside the asker's windows: an episode the asker may see
+        does not bring along a picture they may not. Several occurrences of
+        one picture may come back (one per arrival).
         """
         if not image_ids:
             return []
@@ -140,14 +119,6 @@ class ImageMemoryRecaller:
             limit=max(len(image_ids) * 4, 1),
         )
         return [hit.stored for hit in hits]
-
-    async def fetch_for_parent(
-        self, *, parent_type: str, parent_id: str
-    ) -> list[Stored[ImageMemory]]:
-        """Pictures that arrived with one source segment — the forget edge."""
-        return await self._index.find_by_parent(
-            parent_type=parent_type, parent_id=parent_id
-        )
 
 
 def _tagged(result: RecallResult[ImageMemory]) -> RecallResult[ImageMemory]:
