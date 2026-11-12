@@ -32,6 +32,7 @@ import time
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -41,6 +42,8 @@ import openai
 import requests
 from adapters._profile import with_profile_block
 from dotenv import load_dotenv
+
+from everos.config import LLMTask
 
 # Both this file's own directory and the repo root go on sys.path. The repo root is
 # for `python -m benchmarks.run`; the file's own directory is what makes a standalone
@@ -428,6 +431,79 @@ def server_env_for(
     return env
 
 
+@dataclass(frozen=True)
+class ServerModels:
+    """The LLMs a run points its EverOS servers at.
+
+    A blank field adds nothing, so the server keeps whatever its own configuration
+    says for it.
+
+    Attributes:
+        backbone_model: ``[llm] model``, which every task inherits.
+        backbone_base_url: ``[llm] base_url``.
+        backbone_api_key: ``[llm] api_key``.
+        decider_model: ``[llm.decider] model``.
+        decider_base_url: ``[llm.decider] base_url``.
+        decider_api_key: ``[llm.decider] api_key``.
+    """
+
+    backbone_model: str = ""
+    backbone_base_url: str = ""
+    backbone_api_key: str = field(default="", repr=False)
+    decider_model: str = ""
+    decider_base_url: str = ""
+    decider_api_key: str = field(default="", repr=False)
+
+    def env(self) -> dict[str, str]:
+        """The non-blank fields, under the variable names EverOS reads them from."""
+        values = {
+            "EVEROS_LLM__MODEL": self.backbone_model,
+            "EVEROS_LLM__BASE_URL": self.backbone_base_url,
+            "EVEROS_LLM__API_KEY": self.backbone_api_key,
+            "EVEROS_LLM__DECIDER__MODEL": self.decider_model,
+            "EVEROS_LLM__DECIDER__BASE_URL": self.decider_base_url,
+            "EVEROS_LLM__DECIDER__API_KEY": self.decider_api_key,
+        }
+        return {name: value for name, value in values.items() if value}
+
+
+def server_launch_env(
+    base: Mapping[str, str],
+    root: str | Path,
+    models: ServerModels,
+    extra: Mapping[str, str],
+    *,
+    trace_file: Path | None = None,
+) -> dict[str, str]:
+    """The complete environment one EverOS server of this run is launched with.
+
+    The fleet starts its servers with it and the decider probe resolves the decider
+    under it, so the probe vouches for the configuration the servers actually run.
+
+    Args:
+        base: The inherited environment, normally ``os.environ``.
+        root: The server's ``EVEROS_ROOT``.
+        models: The LLMs the run points the server at.
+        extra: Applied last, over everything else (see :func:`server_env_for`).
+        trace_file: Where the server writes its retrieval trace; ``None`` adds
+            nothing. The probe passes none: no setting reads it.
+
+    Returns:
+        A new mapping; ``base`` is left untouched.
+    """
+    env = {**base, "EVEROS_ROOT": str(root)}
+    if trace_file is not None:
+        env["EVEROS_LLMMR_TRACE_DUMP"] = str(trace_file)
+    env.update(models.env())
+    env.update({str(k): str(v) for k, v in extra.items()})
+    return env
+
+
+def _first_root(roots: Sequence[str] | str) -> Path:
+    """The first ``--everos-root`` path, with ``~`` expanded."""
+    return Path(roots if isinstance(roots, str) else roots[0]).expanduser()
+
+
 def _server_roots_for(
     base_urls: Sequence[str] | str, roots: Sequence[str] | str
 ) -> list[str]:
@@ -481,6 +557,14 @@ class _ServerFleet:
     `everos server start`, then a matching list of --base-url and --everos-root -- leaks
     an implementation detail into the interface and is easy to get subtly wrong (a
     mismatched pair silently polls the wrong store). `--servers N` is the whole knob.
+
+    Args:
+        n: Number of servers; more than one gives each a ``<root>_s<i>`` root.
+        base_root: The store root, or the base the shard roots are named after.
+        first_port: Where the search for free ports starts.
+        models: The LLMs every server is pointed at; ``None`` adds none.
+        extra_env: Applied over everything else in each server's environment.
+        trace_dir: Where each server writes its retrieval trace; ``None`` for none.
     """
 
     def __init__(
@@ -488,21 +572,11 @@ class _ServerFleet:
         n: int,
         base_root: Path,
         first_port: int,
-        backbone_model: str = "",
-        backbone_base_url: str = "",
-        backbone_api_key: str = "",
-        decider_model: str = "",
-        decider_base_url: str = "",
-        decider_api_key: str = "",
-        extra_env: dict[str, str] | None = None,
+        models: ServerModels | None = None,
+        extra_env: Mapping[str, str] | None = None,
         trace_dir: Path | None = None,
     ) -> None:
-        self.decider_model = decider_model
-        self.decider_base_url = decider_base_url
-        self.decider_api_key = decider_api_key
-        self.backbone_model = backbone_model
-        self.backbone_base_url = backbone_base_url
-        self.backbone_api_key = backbone_api_key
+        self.models = models or ServerModels()
         self.extra_env = dict(extra_env or {})
         self.trace_dir = trace_dir
         self.procs: list[subprocess.Popen] = []
@@ -598,34 +672,13 @@ class _ServerFleet:
             # has seen it occupied up to this point.
             _held.close()
             log = root / "server.log"
-            srv_env = {**os.environ, "EVEROS_ROOT": str(root)}
-            # The retrieval trace is what every bad-case attribution reads, and a run
-            # without it cannot be attributed afterwards -- which is why the reference
-            # launchers all export it. It takes a path, so it cannot live in a config
-            # file as a flag; it is derived per server here instead. An operator who
-            # sets it themselves keeps their own value.
-            if self.trace_dir is not None and not os.environ.get(
-                "EVEROS_LLMMR_TRACE_DUMP"
-            ):
-                self.trace_dir.mkdir(parents=True, exist_ok=True)
-                srv_env["EVEROS_LLMMR_TRACE_DUMP"] = str(
-                    self.trace_dir / f"trace_port{port}.jsonl"
-                )
-            if self.backbone_model:
-                srv_env["EVEROS_LLM__MODEL"] = self.backbone_model
-            if self.backbone_base_url:
-                srv_env["EVEROS_LLM__BASE_URL"] = self.backbone_base_url
-            # EVEROS_DECIDER__* is a separate section: extraction keeps [llm], while the
-            # multi-round retrieval decider runs this model instead.
-            if self.decider_model:
-                srv_env["EVEROS_DECIDER__MODEL"] = self.decider_model
-            if self.decider_base_url:
-                srv_env["EVEROS_DECIDER__BASE_URL"] = self.decider_base_url
-            if self.decider_api_key:
-                srv_env["EVEROS_DECIDER__API_KEY"] = self.decider_api_key
-            if self.backbone_api_key:
-                srv_env["EVEROS_LLM__API_KEY"] = self.backbone_api_key
-            srv_env.update({k: str(v) for k, v in self.extra_env.items()})
+            srv_env = server_launch_env(
+                os.environ,
+                root,
+                self.models,
+                self.extra_env,
+                trace_file=self._trace_file(port),
+            )
             self.procs.append(
                 subprocess.Popen(
                     [str(exe), "server", "start", "--port", str(port)],
@@ -642,6 +695,21 @@ class _ServerFleet:
             self.logs.append(log)
             port += 1
         self._await_ready()
+
+    def _trace_file(self, port: int) -> Path | None:
+        """The retrieval trace file of the server on ``port``, its directory created.
+
+        The retrieval trace is what every bad-case attribution reads, and a run
+        without it cannot be attributed afterwards -- which is why the reference
+        launchers all export it. It takes a path, so it cannot live in a config file
+        as a flag; it is derived per server here instead. ``None`` when tracing is
+        off, or when the operator set ``EVEROS_LLMMR_TRACE_DUMP`` themselves: the
+        inherited value then stands.
+        """
+        if self.trace_dir is None or os.environ.get("EVEROS_LLMMR_TRACE_DUMP"):
+            return None
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
+        return self.trace_dir / f"trace_port{port}.jsonl"
 
     def _log_tail(self, url: str, lines: int = 12) -> str:
         """Last few lines the dead child wrote, for the failure message."""
@@ -2820,14 +2888,27 @@ def _results_root(args: argparse.Namespace, config: BenchmarkConfig) -> str:
 _results_root._warned = False  # type: ignore[attr-defined]
 
 
-def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
-    """Snapshot which endpoint served each role, read from the environment.
+_TASK_ENV_PREFIXES = tuple(f"EVEROS_LLM__{task.value.upper()}__" for task in LLMTask)
+"""``EVEROS_LLM__<TASK>__*`` set one task's ``[llm.<task>]``, not the ``[llm]`` every
+task inherits, so they are not the backbone's."""
+
+_LLMMR_KNOBS = ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS")
+"""These decide whether a served decider behaves like the one in production; omitting
+them from a launch script silently changes what was measured."""
+
+
+def _serving_from_env(
+    config: BenchmarkConfig, decider: DeciderProbe | None
+) -> list[ServingSpec]:
+    """Snapshot which endpoint served each role.
 
     Only what this process can actually observe: the answer / judge endpoints it calls
-    itself, and the EverOS-side providers it was told about via ``EVEROS_*``. The
-    retrieval server's own launch argv is not visible from here -- that is why the
-    record keeps ``endpoint`` and ``model`` for remote roles and leaves ``launch_argv``
-    empty rather than guessing.
+    itself, the EverOS-side providers it was told about via ``EVEROS_*``, and the
+    decider as EverOS resolves it under the servers' environment (``decider``, from
+    :func:`_resolve_decider`; ``None`` when the run calls no decider). The retrieval
+    server's own launch argv is not visible from here -- that is why the record keeps
+    ``endpoint`` and ``model`` for remote roles and leaves ``launch_argv`` empty rather
+    than guessing.
     """
     roles: list[ServingSpec] = []
     roles.append(
@@ -2849,35 +2930,29 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
             extra={"runs": config.judge_runs, "temperature": config.judge_temperature},
         )
     )
-    # "backbone+decider", not "decider": EverOS has a single [llm] setting, so the same
-    # model extracted every memory in the store AND made every retrieval decision.
-    # Labelling it "decider" alone hid the extraction half, and which backbone built a
-    # store is not recoverable from the store later. Config first, environment only as a
-    # fallback. Reading the environment alone recorded whatever `benchmarks/.env`
-    # happened to hold, while the servers were started with the config's value -- so a
-    # run that really used gpt-4.1-mini was filed as deepseek. The point of this record
-    # is that someone else can reproduce the number from it.
-    for role, prefix, cfg_model, cfg_url in (
-        ("backbone", "EVEROS_LLM__", config.backbone_model, config.backbone_base_url),
-        ("decider", "EVEROS_DECIDER__", config.decider_model, config.decider_base_url),
-    ):
-        model = cfg_model or os.environ.get(f"{prefix}MODEL", "")
-        endpoint = cfg_url or os.environ.get(f"{prefix}BASE_URL", "")
-        if not model and not endpoint:
-            continue
+    # Config first, environment only as a fallback. Reading the environment alone
+    # recorded whatever `benchmarks/.env` happened to hold, while the servers were
+    # started with the config's value -- so a run that really used gpt-4.1-mini was
+    # filed as deepseek. The point of this record is that someone else can reproduce
+    # the number from it.
+    model = config.backbone_model or os.environ.get("EVEROS_LLM__MODEL", "")
+    endpoint = config.backbone_base_url or os.environ.get("EVEROS_LLM__BASE_URL", "")
+    if model or endpoint:
         extra = {
-            k[len(prefix) :].lower(): v
-            for k, v in os.environ.items()
-            if k.startswith(prefix)
-            and not k.endswith("API_KEY")
-            and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
+            **_section_settings("EVEROS_LLM__", skip=_TASK_ENV_PREFIXES),
+            **_llmmr_knobs(config),
         }
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
-            v = config.retrieval_env.get(k) or os.environ.get(k)
-            if v is not None:
-                extra[k.lower()] = v
         roles.append(
-            ServingSpec(role=role, model=model, endpoint=endpoint, extra=extra)
+            ServingSpec(role="backbone", model=model, endpoint=endpoint, extra=extra)
+        )
+    if decider is not None:
+        roles.append(
+            ServingSpec(
+                role="decider",
+                model=decider.model,
+                endpoint=decider.base_url,
+                extra={"sources": dict(decider.sources), **_llmmr_knobs(config)},
+            )
         )
 
     for role, prefix in (
@@ -2888,75 +2963,43 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
         endpoint = os.environ.get(f"{prefix}BASE_URL", "")
         if not model and not endpoint:
             continue
-        extra = {
-            k[len(prefix) :].lower(): v
-            for k, v in os.environ.items()
-            if k.startswith(prefix)
-            and not k.endswith("API_KEY")
-            and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
-        }
-        # These two decide whether a served decider behaves like the one in production;
-        # omitting them from a launch script silently changes what was measured.
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
-            if role == "decider" and k in os.environ:
-                extra[k.lower()] = os.environ[k]
         roles.append(
             ServingSpec(
                 role=role,
                 model=model,
                 endpoint=endpoint,
                 local="127.0.0.1" in endpoint or "localhost" in endpoint,
-                extra=extra,
+                extra=_section_settings(prefix),
             )
         )
     return roles
 
 
-_DECIDER_MAX_TOKENS_DEFAULT = 512
-"""Mirrors the decider's own ``max_tokens`` default (``LLM_TASK_DEFAULTS`` in
-``everos.config``). Duplicated rather than imported because this harness drives
-EverOS as a server over HTTP and does not import it; a drift here shows up as a
-probe that caps differently from the run it vouches for."""
+def _section_settings(prefix: str, *, skip: Sequence[str] = ()) -> dict[str, str]:
+    """``prefix``'s variables other than model, endpoint and key, by field name.
 
-
-def _decider_max_tokens(config: BenchmarkConfig) -> int:
-    """The reply cap the servers' decider will send, from the config or the environment.
-
-    Read from the same two places as ``_decider_extra`` for the same reason: the launch
-    scripts export one and ``retrieval_env`` carries the other, and the servers take
-    whichever is set.
+    Args:
+        prefix: The section's variable prefix, e.g. ``EVEROS_RERANK__``.
+        skip: Prefixes of variables that belong to another section.
     """
-    raw = config.retrieval_env.get("EVEROS_DECIDER__MAX_TOKENS") or os.environ.get(
-        "EVEROS_DECIDER__MAX_TOKENS", ""
-    )
-    try:
-        return int(raw)
-    except ValueError:
-        return _DECIDER_MAX_TOKENS_DEFAULT
+    return {
+        k[len(prefix) :].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith(prefix)
+        and not k.startswith(tuple(skip))
+        and not k.endswith("API_KEY")
+        and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
+    }
 
 
-def _decider_extra(config: BenchmarkConfig) -> dict[str, Any]:
-    """``EVEROS_DECIDER__EXTRA`` as request kwargs, from the config or the environment.
-
-    The launch scripts export it and the config's ``retrieval_env`` also carries it, and
-    the servers read whichever is set -- so the probe has to look in both, or it vouches
-    for a request nobody makes.
-    """
-    raw = config.retrieval_env.get("EVEROS_DECIDER__EXTRA") or os.environ.get(
-        "EVEROS_DECIDER__EXTRA", ""
-    )
-    if not raw.strip():
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        # Worth saying out loud: the servers ignore it too, so the run would quietly
-        # become a thinking-on run.
-        print(
-            f"  WARNING: EVEROS_DECIDER__EXTRA is not valid JSON, ignoring: {raw[:60]}"
-        )
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+def _llmmr_knobs(config: BenchmarkConfig) -> dict[str, str]:
+    """The :data:`_LLMMR_KNOBS` the run sets, from its config or the environment."""
+    knobs: dict[str, str] = {}
+    for name in _LLMMR_KNOBS:
+        value = config.retrieval_env.get(name) or os.environ.get(name)
+        if value is not None:
+            knobs[name.lower()] = value
+    return knobs
 
 
 class DeciderUnreachableError(RuntimeError):
@@ -3032,118 +3075,150 @@ def _assert_clean_decider_trace(output_dir: Path, methods: Sequence[str]) -> Non
         )
 
 
-def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
-    """``(model, base_url, api_key)`` the servers' decider will actually use.
+_DECIDER_PROBE = Path(__file__).resolve().with_name("decider_probe.py")
 
-    The same ``[decider]`` -> ``[llm]`` fallback
-    ``everos.component.llm.resolve_llm_task(..., LLMTask.DECIDER)`` applies,
-    expressed against the fields this harness pushes into the servers it starts (see
-    ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
-    ``backbone_*`` becomes ``EVEROS_LLM__*``, and anything unset falls through to this
-    process's own environment).
+_NO_CONTENT_REASONS = frozenset({"cut_short", "no_content", "invalid_reply"})
+"""How a reasoning decider that spends its output cap thinking fails the probe."""
 
-    Re-deriving the rule rather than sharing it is what the probe used to do, and it
-    got the rule wrong: it required a decider model *and* an explicit decider URL, so
-    the perfectly valid config that names only ``[decider].model`` and inherits the
-    endpoint was never probed at all -- the one shape the check exists for.
+_THINKING_OFF = (
+    'EVEROS_LLM__DECIDER__EXTRA=\'{"extra_body": {"chat_template_kwargs": '
+    '{"enable_thinking": false}}}\''
+)
+
+
+class DeciderProbe(NamedTuple):
+    """The decider as the run's EverOS servers resolve it, and whether it answered.
+
+    Reported by ``decider_probe.py``, which runs EverOS's own ``resolve_llm_task``
+    and provider in a child process, so nothing here re-derives a precedence rule.
+
+    Attributes:
+        model: The model the decider names.
+        base_url: Its endpoint; empty when none resolves.
+        host: ``base_url``'s host name, for messages.
+        sources: Field -> the section that supplied it: ``"llm.decider"``,
+            ``"decider"`` (deprecated), ``"llm"`` or ``"default"``.
+        outcome: ``"resolved"`` (no request sent), ``"answered"``, ``"failed"`` or
+            ``"not_configured"``.
+        reason: The ``LLMCallError`` reason of a failed request; empty otherwise.
+        error: What went wrong, with the key masked; empty otherwise.
     """
-    model = (
-        config.decider_model
-        or config.backbone_model
-        or config.retrieval_env.get("EVEROS_LLM__MODEL")
-        or os.environ.get("EVEROS_LLM__MODEL", "")
-    )
-    base_url = (
-        config.decider_base_url
-        or config.backbone_base_url
-        or config.retrieval_env.get("EVEROS_LLM__BASE_URL")
-        or os.environ.get("EVEROS_LLM__BASE_URL", "")
-    )
-    api_key = (
-        config.decider_api_key
-        or config.backbone_api_key
-        or config.retrieval_env.get("EVEROS_LLM__API_KEY")
-        or os.environ.get("EVEROS_LLM__API_KEY", "")
-    )
-    return model, base_url, api_key
+
+    model: str
+    base_url: str
+    host: str
+    sources: dict[str, str]
+    outcome: str
+    reason: str
+    error: str
 
 
-def _assert_decider_answers(config: BenchmarkConfig) -> None:
-    """One real call to the configured decider, asserting it returns content.
+def _resolve_decider(
+    config: BenchmarkConfig, server_env: Mapping[str, str], *, ask: bool
+) -> DeciderProbe | None:
+    """The decider the run's servers use, asked one question first when ``ask``.
+
+    EverOS resolves it, in a child process under ``server_env`` -- the environment the
+    servers are launched with (:func:`server_launch_env`) -- so the probe and the
+    record follow the precedence the servers apply, and this process's own environment
+    is left alone.
+
+    Runs that use no multi-round route make no decider calls, so they are neither
+    probed nor recorded; probing them would fail a hybrid run over an endpoint it never
+    touches. Whether a run has a decider does not depend on ``ask``: the read identity
+    is computed from this resolution on every invocation, and a ``--stages judge``
+    resume must see the same decider as the run that searched.
+
+    Args:
+        config: The run's configuration; only its methods are read.
+        server_env: The environment the servers are launched with.
+        ask: Send the decider one request, and stop the run unless it answers.
+
+    Returns:
+        The resolution, or ``None`` when the run calls no decider.
+
+    Raises:
+        DeciderUnreachableError: ``ask`` and the decider did not answer, or the probe
+            produced no report.
+    """
+    if _MULTIROUND_METHOD not in config.parsed_methods:
+        return None
+    probe = _run_decider_probe(server_env, ask=ask)
+    if ask:
+        _assert_decider_answers(probe)
+    return probe
+
+
+def _run_decider_probe(env: Mapping[str, str], *, ask: bool) -> DeciderProbe:
+    """Run ``decider_probe.py`` under ``env`` and read its one-line report.
+
+    ``-P`` keeps this directory off the child's import path, as it is off the
+    servers': its ``config.py`` would otherwise shadow any top-level ``config``.
+
+    Raises:
+        DeciderUnreachableError: The child exited without a report.
+    """
+    command = [sys.executable, "-P", str(_DECIDER_PROBE)]
+    if not ask:
+        command.append("--resolve-only")
+    proc = subprocess.run(
+        command, env=dict(env), capture_output=True, text=True, check=False
+    )
+    try:
+        return DeciderProbe(**json.loads(proc.stdout))
+    except (json.JSONDecodeError, TypeError) as err:
+        last_line = (proc.stderr.strip().splitlines() or ["(no output)"])[-1]
+        raise DeciderUnreachableError(
+            f"decider probe exited {proc.returncode} without a report: "
+            f"{_keys_masked(last_line, env)}"
+        ) from err
+
+
+def _keys_masked(text: str, env: Mapping[str, str]) -> str:
+    """``text`` with the value of every ``*API_KEY`` variable in ``env`` masked."""
+    for name, value in env.items():
+        if name.endswith("API_KEY") and value:
+            text = text.replace(value, "***")
+    return text
+
+
+def _assert_decider_answers(probe: DeciderProbe) -> None:
+    """Accept a decider that answered the probe; refuse one that did not.
 
     Checked by content and not by `/v1/models` or `/health`: a gateway answers both for
     models it will refuse to serve, and the failure this exists to catch is exactly that
     -- a valid endpoint plus a model name it does not host. A reachability check would
-    have passed while every completion 404'd.
+    have passed while every completion 404'd. The request is the decider's own -- same
+    client configuration, same strict reply format -- because every difference between
+    the probe and the real call is a way for the check to be wrong about what it
+    vouches for.
 
-    Gated on whether a decider runs at all, not on whether two config fields happen to
-    be set together. It used to require an explicit decider model *and* an explicit
-    decider URL, which skipped the valid config that names only ``[decider].model`` and
-    inherits the endpoint from the backbone -- and that is the shape the check exists
-    for, since an inherited endpoint that does not serve the named model fails on the
-    first question rather than at startup. Runs that use no multi-round route make no
-    decider calls, so they are still not probed; probing them would fail a hybrid run
-    over an endpoint it never touches.
-
-    When a decider runs but nothing resolves, this says so rather than returning
+    When EverOS resolves no usable endpoint or key, this says so rather than returning
     quietly: a fail-fast promise that silently declines to check is the same silence it
     was added to remove.
+
+    Raises:
+        DeciderUnreachableError: The decider did not answer with a valid reply.
     """
-    if _MULTIROUND_METHOD not in config.parsed_methods:
+    where = f"{probe.model} @ {probe.host or '(no endpoint)'}"
+    if probe.outcome == "answered":
+        print(f"  Decider LLM: {where} -> answered")
         return
-    model, base_url, api_key = resolve_decider_endpoint(config)
-    if not (model and base_url):
+    if probe.outcome == "not_configured":
         print(
-            "  Decider LLM: NOT PROBED -- no model and endpoint could be resolved "
-            "from [decider], the backbone, or EVEROS_LLM__*. A decider that cannot "
-            "answer degrades silently into a fixed top-3 core."
+            "  Decider LLM: NOT PROBED (a decider that cannot answer degrades "
+            f"silently into a fixed top-3 core): {probe.error}"
         )
         return
-    key = api_key or "EMPTY"
-    client = openai.OpenAI(api_key=key, base_url=base_url, timeout=60.0, max_retries=0)
-    where = f"{model} @ {base_url}"
-    # The same EVEROS_DECIDER__EXTRA the servers are launched with. Without it the probe
-    # is not the request the decider makes: on a qwen checkpoint served with
-    # --reasoning-parser, a probe missing enable_thinking=false spends its whole budget
-    # in reasoning_content and returns empty content -- so the probe fails a decider
-    # that would have worked. A check that is not the real call is worse than none.
-    extra = _decider_extra(config)
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Reply with the single word: ready"}],
-            # The decider's own cap, because the decider now sends one. It did not when
-            # this probe was written -- `LLMRoundDecider.__call__` passed the messages
-            # and nothing else -- and an uncapped probe was correct then: a cap made it
-            # reject working setups, where a thinking model spent a small budget on
-            # reasoning tokens and returned empty content while the real, uncapped call
-            # succeeded. Now that the real call is capped, an uncapped probe has the
-            # same defect pointing the other way, and would vouch for a run that cannot
-            # answer inside its own budget. Every difference between this request and
-            # the real one is a way for the check to be wrong about what it vouches for.
-            max_tokens=_decider_max_tokens(config),
-            temperature=0.0,
-            **extra,
-        )
-    except Exception as err:
-        raise DeciderUnreachableError(f"decider {where} did not answer: {err}") from err
-    msg = resp.choices[0].message if resp.choices else None
-    content = (getattr(msg, "content", None) or "") if msg else ""
-    if not content.strip():
-        # Separate "said nothing" from "thought instead of answering": the second has a
-        # specific fix, and the decider's own parser treats both as a failed attempt.
-        thought = getattr(msg, "reasoning_content", None) if msg else None
-        why = (
-            "answered in reasoning_content only -- thinking is still on"
-            if thought
-            else "returned an empty completion"
-        )
-        raise DeciderUnreachableError(
-            f"decider {where} produced no usable content: {why}. Set "
-            'EVEROS_DECIDER__EXTRA=\'{"extra_body": {"chat_template_kwargs": '
-            '{"enable_thinking": false}}}\''
-        )
-    print(f"  Decider LLM: {where} -> {content.strip()[:40]!r}")
+    hint = (
+        ". A reasoning model that spends its output cap thinking fails this way; "
+        f"turn thinking off with {_THINKING_OFF}"
+        if probe.reason in _NO_CONTENT_REASONS
+        else ""
+    )
+    raise DeciderUnreachableError(
+        f"decider {where} did not answer: {probe.error}{hint}"
+    )
 
 
 def _collect_packages() -> dict[str, str]:
@@ -4256,11 +4331,7 @@ def main() -> None:
     # A populated base root with unpopulated shards is unambiguous -- the caller means
     # "read this store" -- so serve it with one server and say so.
     if args.servers > 1 and args.everos_root:
-        _base = Path(
-            args.everos_root[0]
-            if isinstance(args.everos_root, list)
-            else args.everos_root
-        ).expanduser()
+        _base = _first_root(args.everos_root)
         _shards = [_base.parent / f"{_base.name}_s{i}" for i in range(args.servers)]
         _base_has_md = _base.is_dir() and next(_base.rglob("*.md"), None) is not None
         _shards_have_md = any(
@@ -4292,25 +4363,23 @@ def main() -> None:
     if "add" in args.stages:
         _guard_stale_store(args, config)
 
+    models = ServerModels(
+        backbone_model=args.backbone_model or config.backbone_model,
+        backbone_base_url=args.backbone_base_url or config.backbone_base_url,
+        backbone_api_key=config.backbone_api_key,
+        decider_model=config.decider_model,
+        decider_base_url=config.decider_base_url,
+        decider_api_key=config.decider_api_key,
+    )
+    server_extra_env = server_env_for(args.stages, config.retrieval_env)
     fleet: _ServerFleet | None = None
     if args.servers > 0:
-        base = Path(
-            args.everos_root[0]
-            if isinstance(args.everos_root, list)
-            else args.everos_root
-        ).expanduser()
-        backbone = args.backbone_model or config.backbone_model
         fleet = _ServerFleet(
             args.servers,
-            base,
+            _first_root(args.everos_root),
             first_port=args.first_port,
-            backbone_model=backbone,
-            backbone_base_url=args.backbone_base_url or config.backbone_base_url,
-            backbone_api_key=config.backbone_api_key,
-            decider_model=config.decider_model,
-            decider_base_url=config.decider_base_url,
-            decider_api_key=config.decider_api_key,
-            extra_env=server_env_for(args.stages, config.retrieval_env),
+            models=models,
+            extra_env=server_extra_env,
             # None disables retrieval tracing inside the fleet; see
             # BenchmarkConfig.trace.
             trace_dir=(
@@ -4322,6 +4391,12 @@ def main() -> None:
         fleet.start()
         args.base_url = fleet.urls
         args.everos_root = fleet.roots
+    # The first server's environment, built the way the fleet builds it. Servers this
+    # run attached to were launched by someone else; for them this is the closest view
+    # available: their --everos-root, plus what this run would have exported.
+    server_env = server_launch_env(
+        os.environ, _first_root(args.everos_root), models, server_extra_env
+    )
     try:
         # `finally` alone only covers a clean exit or an exception. A SIGTERM -- which
         # is how a lane gets stopped from the outside -- kills the process without
@@ -4336,13 +4411,13 @@ def main() -> None:
             # Not the main thread, or a platform that will not allow it.
             with contextlib.suppress(ValueError, OSError):
                 signal.signal(_sig, _term)
-        _main_inner(args, config)
+        _main_inner(args, config, server_env)
     finally:
         if fleet is not None:
             fleet.stop()
 
 
-def _main_inner(args, config) -> None:
+def _main_inner(args, config, server_env: Mapping[str, str]) -> None:
 
     load_dotenv(Path(__file__).parent / ".env")
 
@@ -4380,7 +4455,11 @@ def _main_inner(args, config) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     _bench = getattr(args, "benchmark", "locomo")
-    _serving = _serving_from_env(config)
+    # Before anything is recorded or asked: the record names the decider the servers
+    # resolve, and a decider that cannot answer degrades silently into a fixed top-3
+    # core while the run still produces a full report.
+    _decider = _resolve_decider(config, server_env, ask="search" in args.stages)
+    _serving = _serving_from_env(config, _decider)
     _ingest_id = ingest_identity(config, _bench, _serving)
     _read_id = read_identity(config, _serving)
     # Before the write, not after: _write_run_spec overwrites the spec recording what
@@ -4412,10 +4491,6 @@ def _main_inner(args, config) -> None:
         f"  Judge  LLM: {config.judge_model} @ {judge_base_url}"
         f" ({judge_client.key_count} keys)"
     )
-    # Before any question is asked: a decider that cannot answer degrades silently into
-    # a fixed top-3 core, and the run still produces a full report.
-    if "search" in args.stages:
-        _assert_decider_answers(config)
     print(f"  Search mode: {config.methods}")
     print(f"  Conversations: {args.conv}")
     print(f"  Stages: {args.stages}")

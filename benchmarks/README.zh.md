@@ -46,6 +46,11 @@ cp benchmarks/.env.example benchmarks/.env
 模型、`top_k`、检索设置和并发在 `benchmarks/configs/<dataset>.toml` 中设置。
 `reproduce.sh` 不传任何模型覆盖参数。
 
+decider 以 `EVEROS_LLM__DECIDER__MODEL` / `__BASE_URL` / `__API_KEY`（即 EverOS 的
+`[llm.decider]`）传给运行启动的服务。`llm_multiround` 运行在第一道题之前，`run.py`
+按这些服务的方式解析 decider（`[llm.decider]` → 已弃用的 `[decider]` → decider
+自己的默认值 → `[llm]`），并通过同一个客户端发一次请求；decider 不回答则停止运行。
+
 ## 4. 运行
 
 ```bash
@@ -89,7 +94,7 @@ benchmarks/results/<Dataset>/<run>/
 └── traces/               逐轮检索 trace
 ```
 
-`run_spec.json` 记录实际提供服务的模型,以及决定库内容的 `everalgo` 包版本。
+`run_spec.json` 记录实际提供服务的模型（decider 按 EverOS 的解析结果记录，附每项设置的来源段）,以及决定库内容的 `everalgo` 包版本。
 
 ## 6. 结果
 
