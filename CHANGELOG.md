@@ -677,6 +677,10 @@ machinery that keeps a deleted memory from coming back.
   otherwise). `scaled_copy` no longer takes `format_name`. Copies already in
   `figures/.cache/` keep their old pixels: delete that directory to have them
   re-rendered on demand (it is always safe to drop).
+- **`thumbnail_path` names the decider's copy with its real extension.** A
+  search result named it `.jpeg` whatever the picture; a greyscale picture's
+  copy is a `.png`. It now takes the extension the picture's copies have (its
+  model copy's), so a caller resolving it finds the file.
 
 ### Removed
 

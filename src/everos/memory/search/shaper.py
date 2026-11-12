@@ -13,6 +13,9 @@ keyed by ``Candidate.id``), so no column name of any index is read here.
   body names a picture by id and never restates it — without resolving the
   reference, an episode selected without its picture would reach the answering
   model as a dangling id and nothing else.
+* A picture's copies are named last, once for the whole response
+  (:func:`name_copies`): the store says which copy files the picture has,
+  which no stored record does.
 
 A candidate whose record is missing or belongs to the wrong owner type is
 dropped with a warning rather than failing the request.
@@ -20,9 +23,10 @@ dropped with a warning rather than failing the request.
 
 from __future__ import annotations
 
+import asyncio
 import re
-from collections.abc import Collection, Iterable, Mapping
-from typing import Any
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from everalgo.types import Candidate
 
@@ -33,6 +37,10 @@ from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import Stored
 
 from .dto import SearchEpisodeItem, SearchImageItem, SearchSource
+
+if TYPE_CHECKING:
+    from everos.component.images import ImageLimits
+    from everos.memory.ports.images import ImageStore
 
 logger = get_logger(__name__)
 
@@ -61,7 +69,9 @@ def shape_images(
 
     ``thumbnail_edge`` is the configured decider size, echoed into the path so
     a caller resolving ``thumbnail_path`` lands on the copy the decider was
-    actually shown rather than on whatever size the cache happens to hold.
+    actually shown rather than on whatever size the cache happens to hold. The
+    path carries the colour copy's extension until :func:`name_copies` has
+    asked the store.
     """
     return [
         item
@@ -134,6 +144,83 @@ def attach_referenced_pictures(
                 attached[(image_id, label)] = picture
             episode.images.append(picture)
     return list(attached.values())
+
+
+async def name_copies(
+    episodes: Sequence[SearchEpisodeItem],
+    images: list[SearchImageItem],
+    *,
+    store: ImageStore | None,
+    limits: ImageLimits | None,
+    thumbnail_edge: int,
+) -> list[SearchImageItem]:
+    """Name every returned picture's two copies after the files the store has.
+
+    ``model_path`` is the answering model's copy (``[images] model_edge``), the
+    one to show an answering model: the original can be many times its size
+    and visual tokens. It is usually on disk already, written when extraction
+    read the picture at that size; a store that has none renders it now, once.
+
+    ``thumbnail_path``, the decider's copy, takes the extension that copy
+    really has. A stored record does not say it, but the model copy does: a
+    copy's format follows the picture and never its edge (PNG for a greyscale
+    picture, JPEG for any other), so both copies of one picture share it.
+
+    A picture the store cannot copy keeps an empty ``model_path`` and its first
+    thumbnail name, and is logged: its description still answers. Without a
+    store or ``[images]`` limits nothing is named.
+
+    Args:
+        episodes: The selected episodes (mutated: their ``images`` named).
+        images: The ranked pictures.
+        store: The picture store.
+        limits: ``[images]``: the model copy's edge and quality.
+        thumbnail_edge: The decider's copy size the thumbnail is named at.
+
+    Returns:
+        ``images`` with both copies named.
+    """
+    if store is None or limits is None:
+        return images
+    ids = list(
+        dict.fromkeys(
+            [image.image_id for image in images]
+            + [image.image_id for episode in episodes for image in episode.images]
+        )
+    )
+    if not ids:
+        return images
+    found = await asyncio.gather(*(_model_copy(store, limits, i) for i in ids))
+    model_paths = dict(zip(ids, found, strict=True))
+
+    def named(image: SearchImageItem) -> SearchImageItem:
+        model_path = model_paths[image.image_id]
+        if not model_path:
+            return image.model_copy(update={"model_path": ""})
+        extension = model_path.rsplit(".", 1)[-1]
+        thumbnail = derived_relpath(image.image_id, thumbnail_edge, extension)
+        return image.model_copy(
+            update={"model_path": model_path, "thumbnail_path": thumbnail}
+        )
+
+    for episode in episodes:
+        episode.images = [named(image) for image in episode.images]
+    return [named(image) for image in images]
+
+
+async def _model_copy(store: ImageStore, limits: ImageLimits, image_id: str) -> str:
+    """One picture's answering-model copy, root-relative; "" when none can be made."""
+    try:
+        return await store.ensure_derived(
+            image_id, edge=limits.model_edge, quality=limits.cache_quality
+        )
+    except (FileNotFoundError, OSError, ValueError) as err:
+        logger.warning(
+            "search_answer_copy_unavailable",
+            image_id=image_id,
+            error=f"{type(err).__name__}: {err}"[:160],
+        )
+        return ""
 
 
 _LABEL_REFERENCE = re.compile(r"\((img-\d+): ([0-9a-f]{64})\)")

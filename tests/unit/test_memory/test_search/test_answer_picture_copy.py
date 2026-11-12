@@ -11,26 +11,37 @@ What these pin:
 - A picture the store cannot copy keeps an empty ``model_path``; the search
   still answers, and the picture still carries its description.
 - Without ``[images]`` limits nothing is asked and the field stays empty.
+- ``thumbnail_path`` carries the extension the decider's copy really has: PNG
+  for a greyscale picture, as its model copy says, never a ``.jpeg`` guess.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import datetime as _dt
+import io
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 from everalgo.testing import FakeLLMClient
+from PIL import Image
 
-from everos.component.images import ImageLimits
+from everos.component.images import ImageLimits, derived_relpath
 from everos.component.tokenizer import Tokenizer
+from everos.config import SqliteSettings
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.images import FileImageStore
+from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 from everos.memory.access import AccessPolicy
 from everos.memory.models import CanonicalMessage, ImageMemory
 from everos.memory.ports import MemoryRef, Scope, SearchHit, SessionKey, Stored
-from everos.memory.search.dto import SearchRequest
+from everos.memory.search.dto import SearchImageItem, SearchRequest
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import EpisodeRecaller, ImageMemoryRecaller
 from everos.memory.search.recall.base import RecallerDeps
+from everos.memory.search.shaper import name_copies
 from tests.fakes import InMemoryGroupStore, static_trace_path, static_tuning
 
 from ._records import ScriptedIndex, hit, stored_episode
@@ -118,17 +129,22 @@ class _PictureIndex:
 
 
 class _CopyStore:
-    """Answers ``ensure_derived`` with the cache path; ``missing`` cannot be read."""
+    """Answers ``ensure_derived`` with the cache path; ``missing`` cannot be read,
+    ``grey`` pictures have PNG copies."""
 
-    def __init__(self, *, missing: set[str] = frozenset()) -> None:
+    def __init__(
+        self, *, missing: set[str] = frozenset(), grey: set[str] = frozenset()
+    ) -> None:
         self.missing = set(missing)
+        self.grey = set(grey)
         self.asked: list[tuple[str, int, int]] = []
 
     async def ensure_derived(self, image_id: str, *, edge: int, quality: int) -> str:
         self.asked.append((image_id, edge, quality))
         if image_id in self.missing:
             raise FileNotFoundError(image_id)
-        return f"figures/.cache/{image_id}-{edge}.jpeg"
+        extension = "png" if image_id in self.grey else "jpeg"
+        return f"figures/.cache/{image_id}-{edge}.{extension}"
 
     async def read_derived(self, image_id: str, *, edge: int, quality: int) -> bytes:
         raise AssertionError("the decider is shown no picture here")
@@ -205,3 +221,72 @@ async def test_without_limits_no_copy_is_asked_for() -> None:
 
     assert response.data.episodes[0].images[0].model_path == ""
     assert store.asked == []
+
+
+async def test_a_greyscale_picture_s_thumbnail_is_named_png() -> None:
+    """The decider's copy of a greyscale picture is PNG, as its model copy is."""
+    store = _CopyStore(grey={_LATTE})
+
+    response = await _manager(store=store).search(_request())
+
+    [attached] = response.data.episodes[0].images
+    assert attached.model_path == f"figures/.cache/{_LATTE}-1024.png"
+    assert attached.thumbnail_path == f"figures/.cache/{_LATTE}-448.png"
+    [ranked] = response.data.images
+    assert ranked.thumbnail_path == f"figures/.cache/{_SIGN}-448.jpeg"
+
+
+async def test_a_picture_without_a_copy_keeps_its_first_thumbnail_name() -> None:
+    store = _CopyStore(missing={_LATTE}, grey={_LATTE})
+
+    response = await _manager(store=store).search(_request())
+
+    [attached] = response.data.episodes[0].images
+    assert attached.thumbnail_path == f"figures/.cache/{_LATTE}-448.jpeg"
+
+
+def _encoded(mode: str) -> bytes:
+    buffer = io.BytesIO()
+    Image.new(mode, (1600, 900), 120 if mode == "L" else (120, 30, 200)).save(
+        buffer, format="PNG"
+    )
+    return buffer.getvalue()
+
+
+async def test_the_names_are_the_files_a_real_store_writes(tmp_path: Path) -> None:
+    """Through the filesystem store: each name is a file once its copy is made."""
+    root = MemoryRoot(tmp_path)
+    root.ensure()
+    database = SqliteDatabase(root, SqliteSettings())
+    await database.create_schema()
+    store = FileImageStore(root, SqliteRepos.over(database).image_original)
+    limits = dataclasses.replace(_LIMITS, max_bytes=10_000_000, formats=("png",))
+    items = []
+    for mode in ("L", "RGB"):
+        stored = await store.store(_encoded(mode), limits=limits)
+        items.append(
+            SearchImageItem(
+                id=f"alice_{mode}",
+                entry_id=f"im_{mode}",
+                image_id=stored.image_id,
+                user_id="alice",
+                timestamp=_dt.datetime(2026, 11, 12, tzinfo=_dt.UTC),
+                description=mode,
+                original_path=await store.relpath_of(stored.image_id),
+                thumbnail_path=derived_relpath(stored.image_id, 448),
+                score=1.0,
+            )
+        )
+
+    grey, colour = await name_copies(
+        [], items, store=store, limits=limits, thumbnail_edge=448
+    )
+
+    assert grey.model_path.endswith("-1024.png")
+    assert grey.thumbnail_path == derived_relpath(grey.image_id, 448, "png")
+    assert colour.model_path.endswith("-1024.jpeg")
+    assert colour.thumbnail_path == derived_relpath(colour.image_id, 448, "jpeg")
+    for item in (grey, colour):
+        assert (tmp_path / item.model_path).is_file()
+        await store.read_derived(item.image_id, edge=448, quality=85)
+        assert (tmp_path / item.thumbnail_path).is_file()
