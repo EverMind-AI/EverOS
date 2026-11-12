@@ -55,8 +55,8 @@ from everalgo.types import ChatMessage
 from everos.core.errors import NotFoundError
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.pipeline.member_profile import wrote_in
-from everos.memory.extract.pipeline.pictures import image_ids_in
-from everos.memory.groups import without_forgotten, without_pictures
+from everos.memory.extract.pipeline.pictures import image_ids_in, without_pictures
+from everos.memory.groups import without_forgotten
 from everos.memory.models import (
     Episode,
     GroupProfileItem,

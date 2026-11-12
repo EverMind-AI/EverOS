@@ -556,6 +556,12 @@ machinery that keeps a deleted memory from coming back.
   undo puts it back while no update has. A user's forget records the dropped
   summary beside the items it took (part `summary`), which also replaces the
   `profile_summary` the owner forget kept in its undo record. Cost: none.
+- **The one-to-one picture reader no longer imports group code.**
+  `without_pictures`, which takes a forgotten picture out of a segment's text,
+  moved from `memory.groups` to the shared `extract.pipeline.pictures`, which
+  the personal profile, the group pipeline and a group forget all read with;
+  the behaviour is the same. A new import contract (`pictures-neutral`) keeps
+  it that way.
 - **No tzlocal warning from a crontab check.** Validating a strategy's
   `Cron` trigger or an `ome.toml` `cron` override asked APScheduler to build a
   trigger in the OS's timezone; in a container with none, tzlocal warned

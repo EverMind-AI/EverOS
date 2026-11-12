@@ -26,7 +26,6 @@ from .audience import RecordAudience as RecordAudience
 from .audience import record_audience as record_audience
 from .forgotten import readable_segments as readable_segments
 from .forgotten import without_forgotten as without_forgotten
-from .forgotten import without_pictures as without_pictures
 from .manager import BatchAdmission as BatchAdmission
 from .manager import BatchMessage as BatchMessage
 from .manager import GroupMetaUpdate as GroupMetaUpdate
@@ -57,5 +56,4 @@ __all__ = [
     "roster_names",
     "verbatim_part",
     "without_forgotten",
-    "without_pictures",
 ]

@@ -436,6 +436,15 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
+# The one-to-one profile reads a cell's pictures with this module, the group
+# pipeline and a group forget with it too: a shared reader that imported group
+# code would make the personal path depend on groups.
+name = "pictures-neutral: the shared picture reader imports no group code"
+type = "forbidden"
+source_modules = ["everos.memory.extract.pipeline.pictures"]
+forbidden_modules = ["everos.memory.groups"]
+
+[[tool.importlinter.contracts]]
 # The facade and the router resolve a configured backend, so they import the
 # engine packages by design. The port definitions must not: the moment protocols or
 # schema knows a concrete engine, "portable" stops being checkable and the

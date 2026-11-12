@@ -82,8 +82,8 @@ layers = [
 
 # plus forbidden contracts: entrypoints-forbidden, infra-inverted,
 # memory-forbidden, core-forbidden, component-forbidden, mappers-pure,
-# ome-ports-only, service-usecases-forbidden, no-bypass-facade
-# (see pyproject.toml)
+# pictures-neutral, ome-ports-only, service-usecases-forbidden,
+# no-bypass-facade (see pyproject.toml)
 ```
 
 The current configuration excludes `TYPE_CHECKING` imports and uses explicit

@@ -31,10 +31,10 @@ from everos.memory.access import (
     ScopeRequest,
     authorize_forget,
 )
+from everos.memory.extract.pipeline.pictures import without_pictures
 from everos.memory.groups import (
     readable_segments,
     without_forgotten,
-    without_pictures,
 )
 from everos.memory.models import (
     CanonicalMessage,

@@ -14,7 +14,10 @@ the same way and route what a picture says about a person the same way
   user at all;
 * :func:`profile_pictures` hands a profile update the pictures one person
   posted in its segments, and nobody else's: a picture says something about
-  its poster only (D17).
+  its poster only (D17);
+* :func:`without_pictures` takes forgotten pictures out of a cell's text, for
+  every reader alike: the one-to-one profile, and a group's re-extraction and
+  profiles.
 """
 
 from __future__ import annotations
@@ -25,16 +28,17 @@ __all__ = [
     "memcell_alive",
     "pictures_of",
     "profile_pictures",
+    "without_pictures",
 ]
 
 from collections.abc import Collection, Sequence
 
 from everalgo.llm import image_url_part_from_bytes
+from everalgo.types import ChatMessage
 from everalgo.user_memory.profile import ProfilePicture
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
-from everos.memory.groups.forgotten import without_pictures
 from everos.memory.models import MemCell
 from everos.memory.ports import MemcellStore, SourceCheck
 from everos.memory.ports.images import ImageStore
@@ -145,9 +149,9 @@ async def profile_pictures(
     its cache), is not attached, and its reference becomes a bare ``[IMAGE]``:
     the update sees that a picture was sent, never what it shows. A picture in
     ``forgotten`` (a forget no undo reversed names it) is taken out of the
-    text, as every group read takes it out
-    (:func:`~everos.memory.groups.without_pictures`): its bytes stay on disk
-    for the undo, so whether they can be read says nothing. ``detail`` is the
+    text (:func:`without_pictures`), as every group read takes it out: its
+    bytes stay on disk for the undo, so whether they can be read says
+    nothing. ``detail`` is the
     image parts' hint, as the picture route sends.
 
     Without a picture store or limits (the extraction model reads no images),
@@ -197,6 +201,37 @@ def _relabelled(cell: MemCell, labels: dict[str, str]) -> MemCell:
         else item
         for item in cell.items
     ]
+    return cell.model_copy(update={"items": items})
+
+
+def without_pictures(cell: MemCell, image_ids: Collection[str]) -> MemCell:
+    """``cell`` with every reference to ``image_ids`` taken out of its messages.
+
+    A picture is in a message as ``[IMAGE: <hash>]``, which is what the
+    extraction route finds; removing the reference removes the picture from
+    the call. A message that held nothing but forgotten pictures is dropped
+    rather than kept as an empty line. The cell itself is never changed.
+    """
+    if not image_ids:
+        return cell
+    references = [f"{_IMAGE_REF_PREFIX}{image_id}]" for image_id in image_ids]
+    items: list[object] = []
+    changed = False
+    for item in cell.items:
+        content = str(getattr(item, "content", "") or "")
+        if not isinstance(item, ChatMessage) or not any(
+            ref in content for ref in references
+        ):
+            items.append(item)
+            continue
+        changed = True
+        for ref in references:
+            content = content.replace(ref, "")
+        text = "\n".join(line.rstrip() for line in content.splitlines() if line.strip())
+        if text.strip():
+            items.append(item.model_copy(update={"content": text}))
+    if not changed:
+        return cell
     return cell.model_copy(update={"items": items})
 
 
