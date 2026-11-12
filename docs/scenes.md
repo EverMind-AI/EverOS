@@ -72,24 +72,37 @@ took 3.6 of the 20 returned places, so the returned episodes covered all
 gold sessions on 98.7% of the questions instead of 100% (a scene has no
 session of its own). Whether answers improve is not measured yet.
 
-## Forgetting and deletion
+## A person's version
 
-Forgetting follows the sources:
+`POST /memory/update` with a scene version's id writes the scene's next
+version with the person's subject, summary and narrative, the same members,
+and `supersedes` / `edited_by` / `edited_at` / `held` (docs/api.md). While
+the newest version is **held**, an episode joining the scene joins its
+cluster and no narrative is written over the person's: no call. Released
+(`hold: false`), the next join writes the narrative over the person's, with
+every episode that joined meanwhile (at most `max_new_episodes` read).
+`GET /memory/history` lists every version of the scene, newest first.
 
-- **A session forget** marks a scene's current version forgotten once none
-  of its episodes is alive any more, and erases its row. While one is alive
-  the scene stays. The undo clears the mark again when an episode comes back.
+## Forgetting
+
+Forgetting follows the sources (EverOS 2.0 has no hard delete):
+
+- **A forget of episodes** -- a session, episodes by id, a time range, the
+  whole user -- marks a scene's current version forgotten once none of its
+  episodes is alive any more, and erases its row. While one is alive the
+  scene stays. The undo clears the mark again when an episode comes back.
+- **A forget of the scene itself** (by id, by a time range, the whole user)
+  marks its current version forgotten and removes its cluster, so the next
+  episode does not write it again; the undo puts both back. Its episodes stay.
 - **A later version** is written from the live episodes only. When a member
   was forgotten after the previous version, that narrative is not carried
   forward: the next version starts over from the live members. A forgotten
   version is never superseded, so its mark stays for the undo.
 - **A picture forget** writes a scene whose narrative names the picture
   again without the reference (a text edit, no model call), like the
-  episodes that named it. A member episode that was rewritten counts as its
-  new version.
-- **A deletion** (a session, episodes by id) removes every scene version that
-  names a deleted episode; an owner deletion removes the scene files and
-  clusters with the rest.
+  episodes that named it -- a held version too. A member episode that was
+  rewritten counts as its new version.
+- **`/memory/delete`** is a forget of the same scope.
 
 ## Cost
 

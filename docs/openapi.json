@@ -674,7 +674,7 @@
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Delete one owner's memories, one session's, or one owner's of a session.\n\nWith ``group_id`` it is the group's delete (docs/group-memory.md, section\n15): an owner's or admin's forget of one session or one member's\nmessages -- soft and propagated -- whose ``forget_id`` undoes it.",
+        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. With ``group_id``\nit is the group's delete (docs/group-memory.md, section 15): an owner's or\nadmin's forget of one session or one member's messages -- soft and\npropagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v1_memory_delete_post",
         "requestBody": {
           "content": {
@@ -708,10 +708,10 @@
             }
           },
           "422": {
-            "description": "No scope, or both user_id and agent_id"
+            "description": "No scope, both user_id and agent_id, an agent's memory (it has no forget), or a session bound to a group without group_id"
           },
           "500": {
-            "description": "Deletion incomplete; send the same request again",
+            "description": "Forget incomplete; send the same request again",
             "content": {
               "application/json": {
                 "schema": {
@@ -721,7 +721,7 @@
             }
           },
           "503": {
-            "description": "SESSION_BUSY: the session is still being memorized; nothing was deleted, retry later",
+            "description": "SESSION_BUSY: the session is still being memorized; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -739,7 +739,7 @@
           "memory"
         ],
         "summary": "Delete Memories By Ids",
-        "description": "Delete episodes by id, with what was merged into them and their facts.\n\nIds that match nothing are skipped (not 404); sending the same request\nagain is harmless.",
+        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more.",
         "operationId": "delete_memories_by_ids_api_v1_memory_delete_by_ids_post",
         "requestBody": {
           "content": {
@@ -763,7 +763,7 @@
             }
           },
           "500": {
-            "description": "Deletion incomplete; send the same request again",
+            "description": "Forget incomplete; send the same request again",
             "content": {
               "application/json": {
                 "schema": {
@@ -790,14 +790,17 @@
         "tags": [
           "memory"
         ],
-        "summary": "Forget Image",
-        "description": "Forget one picture of a user, or a target inside a group.\n\nA body naming ``user_id`` and ``image_id`` forgets the user's picture: its\nmemories, its vector, and what referred to it. A body naming ``group_id``\nforgets inside the group (docs/group-memory.md, section 5.5): messages, a\nmember, a session, records or a picture, propagated to everything derived\nfrom them; ``dry_run`` reports what it would touch, and the returned\n``forget_id`` undoes it.\n\nReturns what was touched, so a caller can see that the target had a\nmemory at all instead of assuming success from an empty 200.",
-        "operationId": "forget_image_api_v1_memory_forget_post",
+        "summary": "Forget",
+        "description": "Forget in a user's memory or a group's, reversibly; a dry run by default.\n\nA body naming ``user_id`` and a ``target`` forgets in the user's memory:\nrecords by id (``record``), one conversation (``session``), everything\n(``owner``), the memories of some kinds in a time range (``condition``),\nor a picture (``image``). A body naming ``group_id`` forgets inside the\ngroup (docs/group-memory.md, section 5.5). Both are a **dry run** unless\n``dry_run`` is false: the answer then says what the forget would touch.\nA real forget answers with what it touched and its ``forget_id``, which\n``/forget/undo`` takes. The picture body (``user_id`` + ``image_id``) is\nthe picture forget, run at once.",
+        "operationId": "forget_api_v1_memory_forget_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserForgetRequest"
+                  },
                   {
                     "$ref": "#/components/schemas/ForgetImageRequest"
                   },
@@ -817,13 +820,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UserForgetResponseData__ForgetImageResponseData__GroupForgetResponseData__"
                 }
               }
             }
           },
           "403": {
-            "description": "Group forget: not a current member, or not allowed this target",
+            "description": "Someone else's personal memory; a group asker who is not a current member, or not allowed this target",
             "content": {
               "application/json": {
                 "schema": {
@@ -833,7 +836,7 @@
             }
           },
           "404": {
-            "description": "No such picture for this user; or the group holds no such message, session, member, record or picture",
+            "description": "A user's record id that names nothing; or the group holds no such message, session, member, record or picture",
             "content": {
               "application/json": {
                 "schema": {
@@ -853,7 +856,7 @@
             }
           },
           "503": {
-            "description": "Group forget: a session it touches is busy; nothing was forgotten, retry later",
+            "description": "A conversation the forget touches is busy; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -881,7 +884,7 @@
           "memory"
         ],
         "summary": "Forget Session",
-        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it. A\nprofile item goes once every segment it rests on is forgotten.",
+        "description": "Forget one conversation's memories for one user, at once and reversibly.\n\nAn alias of ``/forget`` with a ``session`` target and ``dry_run: false``:\nthe conversation's current episode versions and picture memories are\nmarked, and ``/forget/session/undo`` (or ``/forget/undo`` with the\n``forget_id``) reverses it. A picture file survives while any other live\nmemory still references it. A profile item goes once every segment it\nrests on is forgotten.",
         "operationId": "forget_session_api_v1_memory_forget_session_post",
         "requestBody": {
           "content": {
@@ -906,6 +909,16 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The conversation is being memorized; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -975,7 +988,7 @@
           "memory"
         ],
         "summary": "Revise Image Memory",
-        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nThe picture is the same picture: only what the memory says changes. The\nnew entry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
+        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nAn alias of ``/memory/update`` for a picture memory, by its hash. The\npicture is the same picture: only what the memory says changes. The new\nentry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
         "operationId": "revise_image_memory_api_v1_memory_images_revise_post",
         "requestBody": {
           "content": {
@@ -1008,6 +1021,16 @@
               }
             }
           },
+          "409": {
+            "description": "The named occurrence was replaced (VERSION_CONFLICT) or forgotten (MEMORY_FORGOTTEN)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1026,14 +1049,17 @@
         "tags": [
           "memory"
         ],
-        "summary": "Undo Forget Image",
-        "description": "Undo the newest forget of one picture for one user, or a group forget.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.\nA body naming ``group_id`` undoes the group forget ``forget_id``, with the\nforget's own authorisation; 409 when a later forget rewrote what it wrote\n(undo that one first).",
-        "operationId": "undo_forget_image_api_v1_memory_forget_undo_post",
+        "summary": "Undo Forget",
+        "description": "Undo a forget: a user's by ``forget_id``, a group's, or a picture's newest.\n\nA body naming ``user_id`` and ``forget_id`` undoes that forget of the user\n(any target): exactly what it marked comes back, except what another\nlive forget names too. A body naming ``group_id`` undoes the group forget\n``forget_id``, with the forget's own authorisation; 409 when a later\nforget rewrote what it wrote (undo that one first). The picture body\n(``user_id`` + ``image_id``) undoes the picture's newest forget.\n``applied: false`` means there was nothing to undo (already undone, or\nnever forgotten).",
+        "operationId": "undo_forget_api_v1_memory_forget_undo_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserUndoForgetRequest"
+                  },
                   {
                     "$ref": "#/components/schemas/UndoForgetRequest"
                   },
@@ -1053,13 +1079,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UserUndoForgetResponseData__UndoForgetResponseData__GroupUndoForgetResponseData__"
                 }
               }
             }
           },
           "403": {
-            "description": "Group undo: not allowed the forget it reverses",
+            "description": "Someone else's personal memory; a group asker not allowed the forget it reverses",
             "content": {
               "application/json": {
                 "schema": {
@@ -1069,7 +1095,7 @@
             }
           },
           "404": {
-            "description": "No such group forget",
+            "description": "No such forget",
             "content": {
               "application/json": {
                 "schema": {
@@ -1167,6 +1193,224 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/update": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Update Memory",
+        "description": "Change one memory: write a new version that supersedes the one read.\n\nNothing is edited in place: the new version names the old one\n(``supersedes``) and who wrote it, the old one stays readable through\n``GET /memory/history``, and only the new one is searchable once the\nindex has it. The new version is held (the model's later updates leave\nit as it is) unless ``hold`` is false.",
+        "operationId": "update_memory_api_v1_memory_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UpdateMemoryResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Someone else's personal memory; a group asker who may not change the record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: expected_version is not the current version (the message names it); MEMORY_FORGOTTEN: the memory is forgotten, undo the forget first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/history": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Memory History",
+        "description": "Every version of one memory, current first.\n\nEach version says its state (``current``, ``superseded``, ``merged``,\n``forgotten``), its time, who wrote it when a person did, what it rests\non, and the version that replaced it (``next``). Inside a group only the\nversions the asker may see.",
+        "operationId": "memory_history_api_v1_memory_history_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$",
+              "description": "Any version's id, as a read returned it.",
+              "title": "Id"
+            },
+            "description": "Any version's id, as a read returned it."
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_.@+-]+$",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_.@+-]+$",
+              "default": "default",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Who asks; required for a group unless the identity header names them.",
+              "title": "Asker Id"
+            },
+            "description": "Who asks; required for a group unless the identity header names them."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_MemoryHistoryResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Someone else's personal memory; not a member of the group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory, or none of its versions the asker may see",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -2637,14 +2881,17 @@
         "tags": [
           "memory"
         ],
-        "summary": "Forget Image",
-        "description": "Forget one picture of a user, or a target inside a group.\n\nA body naming ``user_id`` and ``image_id`` forgets the user's picture: its\nmemories, its vector, and what referred to it. A body naming ``group_id``\nforgets inside the group (docs/group-memory.md, section 5.5): messages, a\nmember, a session, records or a picture, propagated to everything derived\nfrom them; ``dry_run`` reports what it would touch, and the returned\n``forget_id`` undoes it.\n\nReturns what was touched, so a caller can see that the target had a\nmemory at all instead of assuming success from an empty 200.",
-        "operationId": "forget_image_api_v2_memory_forget_post",
+        "summary": "Forget",
+        "description": "Forget in a user's memory or a group's, reversibly; a dry run by default.\n\nA body naming ``user_id`` and a ``target`` forgets in the user's memory:\nrecords by id (``record``), one conversation (``session``), everything\n(``owner``), the memories of some kinds in a time range (``condition``),\nor a picture (``image``). A body naming ``group_id`` forgets inside the\ngroup (docs/group-memory.md, section 5.5). Both are a **dry run** unless\n``dry_run`` is false: the answer then says what the forget would touch.\nA real forget answers with what it touched and its ``forget_id``, which\n``/forget/undo`` takes. The picture body (``user_id`` + ``image_id``) is\nthe picture forget, run at once.",
+        "operationId": "forget_api_v2_memory_forget_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserForgetRequest"
+                  },
                   {
                     "$ref": "#/components/schemas/ForgetImageRequest"
                   },
@@ -2664,13 +2911,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UserForgetResponseData__ForgetImageResponseData__GroupForgetResponseData__"
                 }
               }
             }
           },
           "403": {
-            "description": "Group forget: not a current member, or not allowed this target",
+            "description": "Someone else's personal memory; a group asker who is not a current member, or not allowed this target",
             "content": {
               "application/json": {
                 "schema": {
@@ -2680,7 +2927,7 @@
             }
           },
           "404": {
-            "description": "No such picture for this user; or the group holds no such message, session, member, record or picture",
+            "description": "A user's record id that names nothing; or the group holds no such message, session, member, record or picture",
             "content": {
               "application/json": {
                 "schema": {
@@ -2700,7 +2947,7 @@
             }
           },
           "503": {
-            "description": "Group forget: a session it touches is busy; nothing was forgotten, retry later",
+            "description": "A conversation the forget touches is busy; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -2728,7 +2975,7 @@
           "memory"
         ],
         "summary": "Forget Session",
-        "description": "Forget one conversation's memories for one user, reversibly.\n\nUnlike ``/memory/delete`` this removes nothing: the episode versions and\npicture memories are marked, and ``/forget/session/undo`` reverses it. A\npicture file survives while any other live memory still references it. A\nprofile item goes once every segment it rests on is forgotten.",
+        "description": "Forget one conversation's memories for one user, at once and reversibly.\n\nAn alias of ``/forget`` with a ``session`` target and ``dry_run: false``:\nthe conversation's current episode versions and picture memories are\nmarked, and ``/forget/session/undo`` (or ``/forget/undo`` with the\n``forget_id``) reverses it. A picture file survives while any other live\nmemory still references it. A profile item goes once every segment it\nrests on is forgotten.",
         "operationId": "forget_session_api_v2_memory_forget_session_post",
         "requestBody": {
           "content": {
@@ -2753,6 +3000,16 @@
           },
           "500": {
             "description": "Forget incomplete; send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The conversation is being memorized; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -2822,7 +3079,7 @@
           "memory"
         ],
         "summary": "Revise Image Memory",
-        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nThe picture is the same picture: only what the memory says changes. The\nnew entry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
+        "description": "Write a revised version of one picture memory; the old one is superseded.\n\nAn alias of ``/memory/update`` for a picture memory, by its hash. The\npicture is the same picture: only what the memory says changes. The new\nentry supersedes the old, and the cascade recomputes its keyword index\nand vector from the new text.",
         "operationId": "revise_image_memory_api_v2_memory_images_revise_post",
         "requestBody": {
           "content": {
@@ -2855,6 +3112,16 @@
               }
             }
           },
+          "409": {
+            "description": "The named occurrence was replaced (VERSION_CONFLICT) or forgotten (MEMORY_FORGOTTEN)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2873,14 +3140,17 @@
         "tags": [
           "memory"
         ],
-        "summary": "Undo Forget Image",
-        "description": "Undo the newest forget of one picture for one user, or a group forget.\n\n``applied: false`` means there was nothing to undo (never forgotten, or\nalready undone); the reported occurrences are still the current state.\nA body naming ``group_id`` undoes the group forget ``forget_id``, with the\nforget's own authorisation; 409 when a later forget rewrote what it wrote\n(undo that one first).",
-        "operationId": "undo_forget_image_api_v2_memory_forget_undo_post",
+        "summary": "Undo Forget",
+        "description": "Undo a forget: a user's by ``forget_id``, a group's, or a picture's newest.\n\nA body naming ``user_id`` and ``forget_id`` undoes that forget of the user\n(any target): exactly what it marked comes back, except what another\nlive forget names too. A body naming ``group_id`` undoes the group forget\n``forget_id``, with the forget's own authorisation; 409 when a later\nforget rewrote what it wrote (undo that one first). The picture body\n(``user_id`` + ``image_id``) undoes the picture's newest forget.\n``applied: false`` means there was nothing to undo (already undone, or\nnever forgotten).",
+        "operationId": "undo_forget_api_v2_memory_forget_undo_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserUndoForgetRequest"
+                  },
                   {
                     "$ref": "#/components/schemas/UndoForgetRequest"
                   },
@@ -2900,13 +3170,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__"
+                  "$ref": "#/components/schemas/SuccessEnvelope_Union_UserUndoForgetResponseData__UndoForgetResponseData__GroupUndoForgetResponseData__"
                 }
               }
             }
           },
           "403": {
-            "description": "Group undo: not allowed the forget it reverses",
+            "description": "Someone else's personal memory; a group asker not allowed the forget it reverses",
             "content": {
               "application/json": {
                 "schema": {
@@ -2916,7 +3186,7 @@
             }
           },
           "404": {
-            "description": "No such group forget",
+            "description": "No such forget",
             "content": {
               "application/json": {
                 "schema": {
@@ -3030,13 +3300,231 @@
         }
       }
     },
+    "/api/v2/memory/update": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Update Memory",
+        "description": "Change one memory: write a new version that supersedes the one read.\n\nNothing is edited in place: the new version names the old one\n(``supersedes``) and who wrote it, the old one stays readable through\n``GET /memory/history``, and only the new one is searchable once the\nindex has it. The new version is held (the model's later updates leave\nit as it is) unless ``hold`` is false.",
+        "operationId": "update_memory_api_v2_memory_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_UpdateMemoryResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Someone else's personal memory; a group asker who may not change the record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: expected_version is not the current version (the message names it); MEMORY_FORGOTTEN: the memory is forgotten, undo the forget first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/history": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Memory History",
+        "description": "Every version of one memory, current first.\n\nEach version says its state (``current``, ``superseded``, ``merged``,\n``forgotten``), its time, who wrote it when a person did, what it rests\non, and the version that replaced it (``next``). Inside a group only the\nversions the asker may see.",
+        "operationId": "memory_history_api_v2_memory_history_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$",
+              "description": "Any version's id, as a read returned it.",
+              "title": "Id"
+            },
+            "description": "Any version's id, as a read returned it."
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_.@+-]+$",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_.@+-]+$",
+              "default": "default",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "asker_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[a-zA-Z0-9_.@+-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Who asks; required for a group unless the identity header names them.",
+              "title": "Asker Id"
+            },
+            "description": "Who asks; required for a group unless the identity header names them."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_MemoryHistoryResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Someone else's personal memory; not a member of the group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory, or none of its versions the asker may see",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/memory/delete": {
       "post": {
         "tags": [
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Delete one owner's memories, one session's, or one owner's of a session.\n\nWith ``group_id`` it is the group's delete (docs/group-memory.md, section\n15): an owner's or admin's forget of one session or one member's\nmessages -- soft and propagated -- whose ``forget_id`` undoes it.",
+        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. With ``group_id``\nit is the group's delete (docs/group-memory.md, section 15): an owner's or\nadmin's forget of one session or one member's messages -- soft and\npropagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v2_memory_delete_post",
         "requestBody": {
           "content": {
@@ -3070,10 +3558,10 @@
             }
           },
           "422": {
-            "description": "No scope, or both user_id and agent_id"
+            "description": "No scope, both user_id and agent_id, an agent's memory (it has no forget), or a session bound to a group without group_id"
           },
           "500": {
-            "description": "Deletion incomplete; send the same request again",
+            "description": "Forget incomplete; send the same request again",
             "content": {
               "application/json": {
                 "schema": {
@@ -3083,7 +3571,7 @@
             }
           },
           "503": {
-            "description": "SESSION_BUSY: the session is still being memorized; nothing was deleted, retry later",
+            "description": "SESSION_BUSY: the session is still being memorized; nothing was forgotten, retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -3101,7 +3589,7 @@
           "memory"
         ],
         "summary": "Delete Memories By Ids",
-        "description": "Delete episodes by id, with what was merged into them and their facts.\n\nIds that match nothing are skipped (not 404); sending the same request\nagain is harmless.",
+        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more.",
         "operationId": "delete_memories_by_ids_api_v2_memory_delete_by_ids_post",
         "requestBody": {
           "content": {
@@ -3125,7 +3613,7 @@
             }
           },
           "500": {
-            "description": "Deletion incomplete; send the same request again",
+            "description": "Forget incomplete; send the same request again",
             "content": {
               "application/json": {
                 "schema": {
@@ -4808,7 +5296,7 @@
           "memory_ids"
         ],
         "title": "DeleteByIdsRequest",
-        "description": "Episodes to delete, by memory id ``<owner_id>_<entry_id>``.\n\nThe whole request is rejected (422, nothing deleted) if any id is not an\nepisode id of a path-safe owner with a real date."
+        "description": "Episodes to delete, by memory id ``<owner_id>_<entry_id>``.\n\nA forget of those episodes (target ``record``, per owner): nothing leaves\nmarkdown. The whole request is rejected (422, nothing forgotten) if any id\nis not an episode id of a path-safe owner with a real date."
       },
       "DeleteByIdsResponseData": {
         "properties": {
@@ -4822,11 +5310,18 @@
             "type": "boolean",
             "title": "Success",
             "default": true
+          },
+          "forget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forget Ids"
           }
         },
         "type": "object",
         "title": "DeleteByIdsResponseData",
-        "description": "``{\"memory_type\": \"episode\", \"success\": true}`` (Cloud's shape)."
+        "description": "``{\"memory_type\": \"episode\", \"success\": true}`` (Cloud's shape), with\nthe forgets it ran (``forget_ids``, one per owner)."
       },
       "DeleteReason": {
         "properties": {
@@ -4955,7 +5450,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "DeleteRequest",
-        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id``, ``agent_id`` and ``session_id``; never both\n``user_id`` and ``agent_id``.\n\nWith ``group_id`` the delete is the group's (docs/group-memory.md,\nsection 15): an owner's or admin's forget -- soft, propagated, undone by\nthe returned ``forget_id`` -- of one of the group's sessions\n(``session_id``) or of one member's messages (``user_id``, the member).\n``asker_id`` names the owner or admin."
+        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id``, ``agent_id`` and ``session_id``; never both\n``user_id`` and ``agent_id``. EverOS 2.0 has no hard delete: a delete is a\nforget of the same scope (``POST /memory/forget``, run at once), reversible\nby the ``forget_ids`` it answers with; an ``agent_id`` is refused (422).\n\nWith ``group_id`` the delete is the group's (docs/group-memory.md,\nsection 15): an owner's or admin's forget -- soft, propagated, undone by\nthe returned ``forget_id`` -- of one of the group's sessions\n(``session_id``) or of one member's messages (``user_id``, the member).\n``asker_id`` names the owner or admin."
       },
       "DeleteResponseData": {
         "properties": {
@@ -4969,6 +5464,13 @@
           "count": {
             "type": "integer",
             "title": "Count"
+          },
+          "forget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forget Ids"
           }
         },
         "type": "object",
@@ -4977,7 +5479,7 @@
           "count"
         ],
         "title": "DeleteResponseData",
-        "description": "What a deletion removed.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Memories removed (entries, plus one per skill and one for the\n        profile when a whole owner is deleted)."
+        "description": "What a delete forgot: EverOS 2.0 has no hard delete.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Memories taken out of default reads (episodes, picture\n        memories, scenes and profile items marked forgotten).\n    forget_ids: The forgets it ran, one per user it reached;\n        ``POST /memory/forget/undo`` takes each."
       },
       "DocumentContextDTO": {
         "properties": {
@@ -5295,7 +5797,9 @@
           "PROVIDER_NOT_CONFIGURED",
           "PAYLOAD_TOO_LARGE",
           "QUEUE_SATURATED",
-          "SESSION_BUSY"
+          "SESSION_BUSY",
+          "VERSION_CONFLICT",
+          "MEMORY_FORGOTTEN"
         ],
         "title": "ErrorCode",
         "description": "Machine-readable error codes returned in the API error envelope.\n\nEach code maps to exactly one HTTP status code. Clients can switch on\nthis value to decide retry / display / routing behaviour without parsing\nthe human-readable ``message`` field."
@@ -6581,7 +7085,7 @@
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
-            "default": false
+            "default": true
           }
         },
         "additionalProperties": false,
@@ -6591,7 +7095,7 @@
           "target"
         ],
         "title": "GroupForgetRequest",
-        "description": "A forget inside a group (docs/group-memory.md, section 5.5).\n\nWho may forget what: a message its sender, a member that member, a record\na member whose own messages alone it rests on, a picture its poster; the\ngroup's owners and admins anything; a session only they. A former member\nor a stranger is refused (403). ``dry_run`` changes nothing and answers\nwith exactly what the real run would touch."
+        "description": "A forget inside a group (docs/group-memory.md, section 5.5).\n\nWho may forget what: a message its sender, a member that member, a record\na member whose own messages alone it rests on, a picture its poster; the\ngroup's owners and admins anything; a session only they. A former member\nor a stranger is refused (403). ``dry_run`` (default **true**) changes\nnothing and answers with exactly what the real run would touch; send\n``dry_run: false`` to forget."
       },
       "GroupForgetResponseData": {
         "properties": {
@@ -7759,6 +8263,183 @@
         ],
         "title": "MemorizeQueueHealthBlock",
         "description": "Readiness of the ``async_mode`` memorize queue.\n\n``healthy`` is the delivery loop being alive. The probe only observes;\nthe loop relaunches itself (and on the next ``/add``), and\n``loop_restarts`` counts how often that happened. ``pending`` and\n``oldest_pending_age_s`` are the backlog: growing with a live loop means\ndelivery is slower than arrival (or the LLM is down), which is a\ncapacity signal, not a liveness one. Alert on ``healthy`` and on\n``loop_restarts`` changing."
+      },
+      "MemoryHistoryResponseData": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "episode",
+              "image_memory",
+              "scene",
+              "profile_item",
+              "group_profile_item"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVersionData"
+            },
+            "type": "array",
+            "title": "Versions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MemoryHistoryResponseData",
+        "description": "Every version of one memory the asker may see, current first."
+      },
+      "MemoryVersionData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "superseded",
+              "forgotten",
+              "merged"
+            ],
+            "title": "State"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "edited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited By"
+          },
+          "edited_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited At"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held",
+            "default": false
+          },
+          "replaced_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaced At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sources": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Sources"
+          },
+          "content": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "MemoryVersionData",
+        "description": "One version of a memory.\n\n``state`` is ``current``, ``superseded`` (a newer version replaced it),\n``merged`` (a merge of several did) or ``forgotten``; ``next`` the version\nthat replaced it. ``sources`` say what it rests on (times there in epoch\nms), ``content`` what it says."
       },
       "MessageItemDTO": {
         "properties": {
@@ -9731,6 +10412,23 @@
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
       },
+      "SuccessEnvelope_MemoryHistoryResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MemoryHistoryResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[MemoryHistoryResponseData]"
+      },
       "SuccessEnvelope_ProjectDTO_": {
         "properties": {
           "request_id": {
@@ -9892,7 +10590,7 @@
         ],
         "title": "SuccessEnvelope[Union[DeleteResponseData, GroupDeleteResponseData]]"
       },
-      "SuccessEnvelope_Union_ForgetImageResponseData__GroupForgetResponseData__": {
+      "SuccessEnvelope_Union_UserForgetResponseData__ForgetImageResponseData__GroupForgetResponseData__": {
         "properties": {
           "request_id": {
             "type": "string",
@@ -9900,6 +10598,9 @@
           },
           "data": {
             "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserForgetResponseData"
+              },
               {
                 "$ref": "#/components/schemas/ForgetImageResponseData"
               },
@@ -9915,9 +10616,9 @@
           "request_id",
           "data"
         ],
-        "title": "SuccessEnvelope[Union[ForgetImageResponseData, GroupForgetResponseData]]"
+        "title": "SuccessEnvelope[Union[UserForgetResponseData, ForgetImageResponseData, GroupForgetResponseData]]"
       },
-      "SuccessEnvelope_Union_UndoForgetResponseData__GroupUndoForgetResponseData__": {
+      "SuccessEnvelope_Union_UserUndoForgetResponseData__UndoForgetResponseData__GroupUndoForgetResponseData__": {
         "properties": {
           "request_id": {
             "type": "string",
@@ -9925,6 +10626,9 @@
           },
           "data": {
             "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserUndoForgetResponseData"
+              },
               {
                 "$ref": "#/components/schemas/UndoForgetResponseData"
               },
@@ -9940,7 +10644,24 @@
           "request_id",
           "data"
         ],
-        "title": "SuccessEnvelope[Union[UndoForgetResponseData, GroupUndoForgetResponseData]]"
+        "title": "SuccessEnvelope[Union[UserUndoForgetResponseData, UndoForgetResponseData, GroupUndoForgetResponseData]]"
+      },
+      "SuccessEnvelope_UpdateMemoryResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UpdateMemoryResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[UpdateMemoryResponseData]"
       },
       "SupersededStatement": {
         "properties": {
@@ -10617,6 +11338,681 @@
         ],
         "title": "UnprocessedMessageDTO",
         "description": "A raw message still in the boundary-detection buffer.\n\nNo extracted memcell yet, no owner inference yet (attribution\nhappens at boundary detection). Returned by ``/search`` **only when**\n``filters.session_id`` is present as a top-level eq predicate —\nunprocessed messages have no ``user_id`` / ``agent_id`` to filter\non, so session is the only meaningful query dimension."
+      },
+      "UpdateMemoryRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who asks; required for a group unless the identity header names them. Recorded on the new version as edited_by."
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$",
+            "title": "Id",
+            "description": "The memory to change."
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "The version the caller read; default: id."
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ocr": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr"
+          },
+          "hold": {
+            "type": "boolean",
+            "title": "Hold",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "UpdateMemoryRequest",
+        "description": "A person's change of one memory: a new version, linked to the old one.\n\nFields a kind takes: an episode or a scene ``subject``, ``summary`` and\n``content``; a picture memory ``description`` and ``ocr``; a profile item\n``description``. A field left out keeps the stored text. ``hold`` (default\ntrue) keeps the new version from the model's later updates; ``hold:\nfalse`` alone releases a held version. ``expected_version`` (default:\n``id``) is the version the caller read; when a newer one exists the\nanswer is 409 and nothing is written."
+      },
+      "UpdateMemoryResponseData": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "episode",
+              "image_memory",
+              "scene",
+              "profile_item"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held"
+          },
+          "edited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited By"
+          },
+          "edited_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited At"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "changed",
+          "held"
+        ],
+        "title": "UpdateMemoryResponseData",
+        "description": "The version a change wrote (or the current one, when nothing changed)."
+      },
+      "UserConditionTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "condition",
+            "title": "Kind"
+          },
+          "memory_types": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "episode",
+                "image_memory",
+                "scene",
+                "profile"
+              ]
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Memory Types"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "memory_types"
+        ],
+        "title": "UserConditionTarget",
+        "description": "The memories of some kinds whose time falls in ``[start, end)``.\n\nEpoch ms; either bound may be left open. A memory's time is when what it\nsays happened; a profile item's, when it was last observed."
+      },
+      "UserForgetRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserRecordTarget"
+              },
+              {
+                "$ref": "#/components/schemas/UserSessionTarget"
+              },
+              {
+                "$ref": "#/components/schemas/UserOwnerTarget"
+              },
+              {
+                "$ref": "#/components/schemas/UserConditionTarget"
+              },
+              {
+                "$ref": "#/components/schemas/UserImageTarget"
+              }
+            ],
+            "title": "Target",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "condition": "#/components/schemas/UserConditionTarget",
+                "image": "#/components/schemas/UserImageTarget",
+                "owner": "#/components/schemas/UserOwnerTarget",
+                "record": "#/components/schemas/UserRecordTarget",
+                "session": "#/components/schemas/UserSessionTarget"
+              }
+            }
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "target"
+        ],
+        "title": "UserForgetRequest",
+        "description": "A forget in one user's memory, by target; a dry run unless told not to.\n\n``dry_run`` (default **true**) changes nothing and answers with what the\nreal run would touch; send ``dry_run: false`` to forget. A real forget\nanswers with its ``forget_id``, the token ``/memory/forget/undo`` takes."
+      },
+      "UserForgetResponseData": {
+        "properties": {
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id",
+            "default": ""
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "target": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Target"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "new_episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New Episodes"
+          },
+          "image_memories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Memories"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
+          "new_scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New Scenes"
+          },
+          "profile_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Profile Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dry_run",
+          "user_id"
+        ],
+        "title": "UserForgetResponseData",
+        "description": "What a forget in a user's memory touched (or would, on a dry run).\n\nRecords are named as a read names them (``<user>_<entry>``), profile items\nby ``item_id``. ``episodes`` and ``scenes`` are the versions taken out of\ndefault reads -- marked forgotten, or (a picture's forget) replaced by the\n``new_episodes`` / ``new_scenes`` written without the picture. ``images``\nare picture files taken out of circulation."
+      },
+      "UserImageTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "image",
+            "title": "Kind"
+          },
+          "image_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Image Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "image_id"
+        ],
+        "title": "UserImageTarget",
+        "description": "One picture by content hash: its memories, and the references to it."
+      },
+      "UserOwnerTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "owner",
+            "title": "Kind"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "UserOwnerTarget",
+        "description": "Everything of the user: episodes, pictures, scenes, the whole profile."
+      },
+      "UserRecordTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "record",
+            "title": "Kind"
+          },
+          "record_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.@+-]{1,300}$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Record Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "record_ids"
+        ],
+        "title": "UserRecordTarget",
+        "description": "Records by id, of any kind: episodes, picture memories, scenes,\nprofile items (and replaced values, by the id a read lists)."
+      },
+      "UserSessionTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "session",
+            "title": "Kind"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "session_id"
+        ],
+        "title": "UserSessionTarget",
+        "description": "Everything one conversation established for the user."
+      },
+      "UserUndoForgetRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id"
+          },
+          "forget_id": {
+            "type": "string",
+            "pattern": "^fg_[0-9a-f]{16}$",
+            "title": "Forget Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "forget_id"
+        ],
+        "title": "UserUndoForgetRequest",
+        "description": "Undo one forget of a user by its id (the ``forget_id`` it answered)."
+      },
+      "UserUndoForgetResponseData": {
+        "properties": {
+          "forget_id": {
+            "type": "string",
+            "title": "Forget Id"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "episodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "image_memories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Memories"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scenes"
+          },
+          "profile_items": {
+            "type": "integer",
+            "title": "Profile Items",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "forget_id",
+          "applied",
+          "user_id"
+        ],
+        "title": "UserUndoForgetResponseData",
+        "description": "What an undo of a user's forget put back; ``applied: false`` when it was\nundone already. ``profile_items`` counts items."
       },
       "ValidationError": {
         "properties": {

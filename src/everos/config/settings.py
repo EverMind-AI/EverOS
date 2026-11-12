@@ -783,9 +783,12 @@ class MemorizeSettings(_Section):
     session_id: on timeout the outer ``asyncio.timeout`` cancels the task
     and the lock auto-releases.
 
-    ``delete_wait_seconds`` caps how long a memory deletion of one session
-    waits for that session's memorize lock (an ``add()`` in progress); past
-    it the deletion answers 503 ``SESSION_BUSY`` and deletes nothing.
+    ``delete_wait_seconds`` caps how long a forget of a conversation (a
+    user's ``session`` target, ``/forget/session``, ``/memory/delete`` with a
+    ``session_id``, and a group forget) waits for that session's memorize
+    lock (an ``add()`` in progress); past it the forget answers 503
+    ``SESSION_BUSY`` and forgets nothing. The name is kept from 1.x, when
+    such a request was a hard delete.
 
     Env binding:
         EVEROS_MEMORIZE__MODE

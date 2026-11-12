@@ -47,8 +47,8 @@ def _read_text_with_retry(path: Path) -> str:
     it with ``os.replace`` can fail with ``PermissionError`` (errno 13) for a
     moment. The writer already retries its own ``os.replace`` for the
     mirror-image case (``writer._replace_with_retry``); a read that races it
-    needs the same patience, or a deletion fails with
-    ``DeletionIncompleteError`` and a cascade projection fails permanently.
+    needs the same patience, or a forget fails half way and a cascade
+    projection fails permanently.
     Measured on the GitHub Windows runner: 16 refused reads in 1.26 million
     while one thread kept replacing the file, none with this retry.
 

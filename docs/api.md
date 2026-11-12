@@ -33,6 +33,11 @@ business semantics the raw spec does not carry.
   - [GET /api/v2/tasks](#get-apiv2tasks)
   - [POST /api/v2/memory/search](#post-apiv2memorysearch)
   - [POST /api/v2/memory/get](#post-apiv2memoryget)
+  - [Changing and forgetting a memory](#changing-and-forgetting-a-memory)
+  - [POST /api/v2/memory/update](#post-apiv2memoryupdate)
+  - [GET /api/v2/memory/history](#get-apiv2memoryhistory)
+  - [POST /api/v2/memory/forget](#post-apiv2memoryforget)
+  - [POST /api/v2/memory/forget/undo](#post-apiv2memoryforgetundo)
   - [POST /api/v2/memory/delete](#post-apiv2memorydelete)
   - [POST /api/v2/memory/delete_by_ids](#post-apiv2memorydelete_by_ids)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
@@ -247,14 +252,16 @@ parsing the human-readable `message` field.
 |---|---|---|---|
 | `NOT_FOUND` | `404` | No | Requested resource does not exist -- or exists but the asker may not see it (a group picture outside their membership windows answers exactly as a missing one) |
 | `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin |
-| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document; a session bound to another group; a roster event that conflicts with the member's open interval) |
+| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document; a session bound to another group; a roster event that conflicts with the member's open interval; a group undo whose forget a later forget rewrote) |
+| `VERSION_CONFLICT` | `409` | No | `/memory/update` named a version that is no longer the current one; `message` names the current version. Read it (`/memory/history`) and decide again |
+| `MEMORY_FORGOTTEN` | `409` | No | `/memory/update` named a forgotten memory; undo the forget first |
 | `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` — and, on `/add` and `/flush`, a session whose buffered messages the model could not segment on three consecutive calls: the buffer is moved to the `quarantine` track of `unprocessed_buffer` so the session can continue, and `message` names the session and the number of messages set aside |
 | `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
-| `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
+| `SESSION_BUSY` | `503` | Yes | A forget of a conversation (`/forget`, `/forget/session`, `/delete` with a `session_id`) while an `/add` holds the session past `delete_wait_seconds`; nothing was forgotten |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
@@ -1282,147 +1289,241 @@ Response (real capture):
 }
 ```
 
-### POST /api/v2/memory/delete
+### Changing and forgetting a memory
 
-Deletes memories by owner, by session, or one owner's memories of a
-session. Aligned with the Cloud endpoint; everos-mcp's `forget_session`
-calls it with only `session_id`.
+EverOS 2.0 never edits or deletes a memory in place. A change writes a **new
+version** that names the one it replaced; a forget **marks** what it reaches,
+and its undo takes the mark away. Every old version stays in markdown, so
+`GET /memory/history` can show it -- a default search or get shows only the
+current versions.
 
-#### Request body
+A memory is named by the id a read returned: `<owner>_<entry_id>` (or the
+bare entry id) for an episode (`ep_` / a group's `gep_`), a picture memory
+(`im_` / `gim_`) or a scene version (`sc_` / `gsc_`), and the `item_id`
+(`pi_<hex>`) for a profile item -- of `user.md`, or of a member's profile in a
+group. A user's memory is named by `user_id`; a group's by `group_id` with
+`asker_id`, under the forget rule: owners and admins may change or forget any
+record of the group, a member those resting on their own messages alone. A
+personal memory is changed and read by its owner: an `asker_id` (or the
+identity header) naming someone else is `403`.
 
-| Field | Type | Required | Default | Constraints |
+| Route | What |
+|---|---|
+| `POST /memory/update` | write a person's new version of one memory |
+| `GET /memory/history` | every version of one memory, current first |
+| `POST /memory/forget` | forget by target; a dry run unless `dry_run: false` |
+| `POST /memory/forget/undo` | undo one forget by the `forget_id` it answered |
+| `POST /memory/forget/session` (+ `/undo`) | alias: a user's `session` target, at once |
+| `POST /memory/images/revise` | alias: `/update` of a picture memory, by its hash |
+| `POST /memory/delete`, `/delete_by_ids` | alias: a forget, at once (2.0 has no hard delete) |
+
+The command line runs the same service functions in-process:
+`everos memory history|update|forget|undo` ([cli.md](cli.md)).
+
+### POST /api/v2/memory/update
+
+Changes one memory: writes a new version that supersedes the one the caller
+read.
+
+| Field | Type | Required | Default | What |
 |---|---|---|---|---|
-| `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
-| `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
-| `user_id` | `string \| null` | see below | `null` | path-safe (same rule as `sender_id`) |
-| `agent_id` | `string \| null` | see below | `null` | path-safe; not together with `user_id` |
-| `session_id` | `string \| null` | see below | `null` | same rule as on `/add` |
+| `app_id`, `project_id` | ScopeId | no | `"default"` | — |
+| `user_id` \| `group_id` | `string` | exactly one | — | whose memory |
+| `asker_id` | `string` | for a group | — | who asks; recorded as `edited_by` (a user's defaults to the user) |
+| `id` | `string` | yes | — | the memory, any version's id |
+| `expected_version` | `string` | no | `id` | the version the caller read |
+| `subject`, `summary`, `content` | `string` | — | stored text | an episode's title, preview and body; a scene's title, summary and narrative |
+| `description`, `ocr` | `string` | — | stored text | a picture memory's description and the text in it; a profile item's `description` |
+| `hold` | `bool` | no | `true` | keep the new version from the model's later updates |
 
-At least one of `user_id`, `agent_id`, `session_id` must be set, and
-`user_id` and `agent_id` are mutually exclusive; anything else (including
-an unknown field) is `422`.
+A field the kind does not take is `422`. The new version keeps what the old
+one rests on -- its time, conversation, segment, speakers, pictures -- and
+adds `supersedes`, `edited_by`, `edited_at` and `held`; the old one is marked
+superseded by it. An episode, picture memory or scene version is a new entry
+in today's daily file, embedded and indexed by the cascade (a search returns
+the new version, and never the old one, once the index has it; usually within
+a second). A profile item is a new item with a fresh `item_id`, `supersedes`
+and `since`; the old item moves to the profile's `history` with
+`superseded_by`, as when the model gives a fact a new value.
 
-#### What each scope deletes
+**Held.** A person's version is held unless `hold` is false: the model's later
+updates leave it as it is.
 
-| Request sets | Memories deleted | Conversation state (buffers, memcells, session status) | Clusters, Reflection reports |
-|---|---|---|---|
-| `session_id` | every owner's episodes, picture memories and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
-| `user_id` | everything of the user, `user.md` included | kept | the user's clusters and reports deleted |
-| `user_id` + `session_id` | the user's episodes and picture memories of the session | kept | kept |
-| `agent_id` | every case and skill of the agent | kept | the agent's case clusters deleted |
-| `agent_id` + `session_id` | the agent's cases of the session | kept | kept |
+- The next **profile update** (one-to-one or a member's) still shows the model
+  a held item, so it does not add the fact again, and undoes whatever its
+  reply did to it: a new value, a retirement, a merge. A new value the model
+  wrote for a held item stays as an item of its own, linked to nothing, so
+  what the conversation said is not lost; the profile's summary is the
+  model's and may mention it.
+- The next **scene update** writes no narrative over a held version (no model
+  call): an episode joining the scene still joins its cluster. Once released,
+  the next join writes the narrative over the person's, with every episode
+  that joined meanwhile (at most `[scenes] max_new_episodes` read).
+- An episode and a picture memory are not rewritten by a model after they are
+  written, so their hold only marks whose text it is. A **forget** reaches a
+  held version like any other: a picture forget writes the version again
+  without the picture's reference, a forget inside a group re-extracts the
+  segment.
 
-#### Response
+`hold: false` alone releases a held version: a new version with the same text
+for an episode, a picture memory or a scene (nothing in a daily log is edited
+in place); for a profile item the flag only, under the same `item_id`. An
+update that changes nothing answers `changed: false` and writes nothing.
 
 ```json
 {
   "request_id": "<32-char hex>",
-  "data": { "filters": ["session_id"], "count": 7 }
+  "data": {
+    "kind": "episode",
+    "id": "amy_ep_20261112_00000003",
+    "supersedes": "amy_ep_20261110_00000007",
+    "changed": true,
+    "held": true,
+    "edited_by": "amy",
+    "edited_at": "2026-11-12T09:30:00+08:00",
+    "member_id": null
+  }
 }
 ```
 
-`filters` names the scope fields the request set. `count` is the number
-of memories removed from markdown: daily-log entries, plus one per skill
-and one for `user.md` when a whole owner is deleted. Sending the same
-request again answers `count: 0`.
+| Status | `error.code` | When |
+|---|---|---|
+| `404` | `NOT_FOUND` | no such memory (a group record the asker cannot see answers the same) |
+| `409` | `VERSION_CONFLICT` | `expected_version` (default `id`) is not the current version; `message` names it |
+| `409` | `MEMORY_FORGOTTEN` | the memory is forgotten |
+| `403` | `FORBIDDEN` | someone else's personal memory; a group asker who may not change the record |
 
-#### Errors specific to this endpoint
+### GET /api/v2/memory/history
 
-| Status | `error.code` | When | What the client does |
-|---|---|---|---|
-| `503` | `SESSION_BUSY` | Only `session_id` was set and the session still has queued or running `async_mode` work, or an `/add` held the session for longer than `[memorize] delete_wait_seconds` (default 10 s). Message: `"... nothing was deleted, retry later"` | retry later |
-| `500` | `INTERNAL_ERROR` | The deletion failed after it had started (disk full, a file it could not rewrite). Message: `"deletion incomplete; retry the same request"` | send the same request again; it finishes the job |
+Every version of one memory, current first, then the older ones newest
+first -- whichever of its ids is asked.
 
-#### Guarantees, and what is not guaranteed
+Query: `id` (required), `user_id` or `group_id` (exactly one), `asker_id` (a
+group's), `app_id`, `project_id`.
 
-- **A deleted memory does not come back** from work that was already in
-  flight when the request was sent -- an extraction, a fact extraction, a
-  Reflection merge -- for a deletion by `session_id` alone and for
-  `delete_by_ids`. With an owner in the request (`user_id` /
-  `agent_id`, with or without `session_id`) it does not hold for work the
-  owner already has in flight: an extraction, a profile update, a skill
-  clustering or skill update that started before the request can write the
-  owner's files again after the `200` -- after a whole-owner deletion,
-  `user.md`, a skill or a cluster can reappear. Stop sending `/add` for
-  the owner and let its extraction settle before deleting with an owner.
-- **The index follows the markdown.** Index rows are removed before the
-  `200`, and the cascade is kept from writing them back. One window
-  remains: a projection that read the file before the deletion can write
-  a row back and delete it again right after (usually milliseconds; up
-  to the 15 s write-lock bound and one retry when the table is busy).
-  When an index table cannot be reached, the deletion still answers
-  `200` (the markdown is the truth), logs
-  `memory_delete_index_erase_failed`, and queues the files again; the
-  cascade removes the rows when the backend is back, within its retry
-  budget. After a longer outage, `everos cascade rebuild` restores the
-  index from markdown.
-- **Not guaranteed:** totals and summaries already derived from deleted
-  memories (a profile, a cluster's preview, a skill) are not rewritten by
-  a session deletion; bytes of a deleted file may remain on disk until
-  the filesystem reuses them; a Reflection-merged episode belongs to no
-  session, so a session deletion keeps it even when its sources go
-  (`delete_by_ids` on it removes it with its sources); the conversation
-  text of an OME run that is still queued, failed, was dead-lettered or
-  was cut off by a crash (the restart re-runs it as a new run),
-  and of any run recorded before this version, stays in `ome.db` until
-  the run ages out (each strategy keeps its last 1000 runs by default);
-  older LanceDB table versions keep deleted rows until the next prune
-  (`cascade.optimize_prune_interval_seconds`, 5 minutes by default);
-  SQLite keeps deleted rows' bytes in free pages until the database is
-  vacuumed; with `observability.capture_content` on, a trace backend keeps
-  what it was sent. A markdown file open in an editor during the deletion
-  writes the deleted entries back if it is saved afterwards -- close
-  editors first. After a whole-owner deletion, setting the system clock
-  back (or changing the time zone) can give a new entry the id a deleted
-  one had.
-- **Known gap.** A `session_id`-only deletion that fails after deleting
-  the session's memcells (`500`, or a crash), followed by a new `/add` on
-  the same session before the resend, can leave entries of the earlier
-  memcells' other owners in place; deleting with `user_id` +
-  `session_id` for those owners removes them.
+Each version: `id`; `state` -- `current`, `superseded` (a newer version
+replaced it), `merged` (a merge of several replaced it), `forgotten`;
+`timestamp` (the memory's own time: when what it says happened); `next` (the
+version that replaced it); `supersedes`; `edited_by` / `edited_at` / `held`
+(a version a person wrote); `replaced_at` and `reason` (a profile value);
+`sources` (conversation, segment, speakers, pictures; a scene's member
+episodes; times there in epoch ms); `content`. `current` is `null` when the
+memory is forgotten or its value was retired.
+
+Read from markdown, never from the index. On `user.md` a value a live forget
+took out is listed `forgotten`. Inside a group only the versions inside the
+asker's membership windows are listed, and a record with none answers `404`;
+what a group forget took out is gone from the files and from the history.
+
+### POST /api/v2/memory/forget
+
+Forgets, reversibly. **A dry run by default**: the answer says what the real
+run would touch, and nothing changes; send `"dry_run": false` to forget. A
+real forget answers with its `forget_id`, the undo token.
+
+A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
+`dry_run`.
+
+| `target.kind` | Fields | Forgets |
+|---|---|---|
+| `record` | `record_ids` (1..100) | the records by id, of any kind: an episode, a picture memory (its current version), a scene (its current version, and its cluster, so it does not grow back), a profile item or a replaced value |
+| `session` | `session_id` | the conversation's current episodes and picture memories |
+| `owner` | — | every current episode, picture memory and scene of the user, and the whole profile: items, replaced values, summary |
+| `condition` | `memory_types` (`episode`, `image_memory`, `scene`, `profile`), `start` and/or `end` (epoch ms, `[start, end)`) | the memories of those kinds whose time falls in the range (a profile item by when it was observed) |
+| `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference |
+
+A forget **follows the sources**: a scene none of whose episodes is alive any
+more is forgotten; a picture file no live memory of the user refers to is
+taken out of circulation (the bytes stay); a profile item, or a replaced
+value, goes once every segment it rests on is forgotten (or every picture it
+was read off). It marks and erases the index rows at once: nothing leaves
+markdown, and the forgotten versions stay readable through
+`/memory/history`. Every forget is recorded in the forget log (`system.db`)
+with what it marked, who asked and why. A conversation sent again after its
+forget (or continued) is new material: its new memories are not forgotten,
+and the profile reads them.
+
+```json
+{
+  "data": {
+    "forget_id": "fg_0123456789abcdef",
+    "dry_run": false,
+    "user_id": "amy",
+    "target": {"kind": "session", "session_id": "trip-chat"},
+    "episodes": ["amy_ep_20261110_00000002"],
+    "new_episodes": [],
+    "image_memories": ["amy_im_20261110_00000001"],
+    "images": ["9f2c…"],
+    "scenes": [],
+    "new_scenes": [],
+    "profile_items": ["pi_3f9a2c71d0be"]
+  }
+}
+```
+
+A group's body (`group_id`, `asker_id`, `target` of kind `message`,
+`member`, `session`, `record` or `image`, `reason`, `dry_run`) forgets
+inside the group ([group-memory.md](group-memory.md), section 5.5), also a dry
+run by default. The picture body of 1.x (`user_id` + `image_id`, no
+`target`) is a user's `image` target run at once.
+
+`404` for a record id that names nothing; `503` `SESSION_BUSY` when a
+conversation it touches stays busy (nothing was forgotten).
+
+### POST /api/v2/memory/forget/undo
+
+Undoes one forget: `user_id` + `forget_id` (any target of the user), or
+`group_id` + `asker_id` + `forget_id`. Exactly what that forget marked comes
+back, and what other live forgets took because of it (a profile item resting
+on its segments); an entry another live forget also names stays forgotten
+until that one is undone too. `applied: false` when it was undone already.
+The picture body (`user_id` + `image_id`) undoes the picture's newest forget,
+and `/forget/session/undo` the conversation's newest.
+
+### POST /api/v2/memory/delete
+
+**EverOS 2.0 has no hard delete.** The route stays for the callers that send
+it -- everos-mcp's `forget_session`, the evaluation harnesses'
+`--replace-sessions` -- and answers with a forget of the same scope, run at
+once and reversible by the `forget_ids` it returns.
+
+| Request sets | Forget |
+|---|---|
+| `user_id` | target `owner` of the user |
+| `user_id` + `session_id` | target `session` of the user |
+| `session_id` | target `session` of every user whose memory holds the conversation, one forget each |
+| `agent_id` (± `session_id`) | refused, `422`: an agent's memory has no forget yet |
+| `group_id` + `asker_id` + `session_id` or `user_id` | the group's delete: an owner's or admin's forget of the session or the member's messages ([group-memory.md](group-memory.md), section 15) |
+
+A session bound to a group without `group_id` is `422`. Nothing leaves
+markdown, and the conversation's segments and buffer stay in `system.db`:
+sending the conversation again writes new memories beside the forgotten ones.
+A user's memories of the conversation are forgotten; an agent's cases of it
+are not (no agent forget yet).
+
+```json
+{
+  "request_id": "<32-char hex>",
+  "data": {"filters": ["session_id"], "count": 7, "forget_ids": ["fg_0123456789abcdef"]}
+}
+```
+
+`count` is the number of memories taken out of default reads: episodes,
+picture memories, scenes and profile items. `503` `SESSION_BUSY` as for a
+forget of the conversation.
 
 ### POST /api/v2/memory/delete_by_ids
 
-Deletes single episodes by memory id, with everything made from them.
-Aligned with the Cloud endpoint.
-
-#### Request body
-
-| Field | Type | Required | Default | Constraints |
-|---|---|---|---|---|
-| `memory_type` | `"episode"` | yes | — | only episodes |
-| `memory_ids` | `string[]` | yes | — | `1..50` ids `<owner_id>_ep_<YYYYMMDD>_<n>`; path-safe owner of 1..128 characters; a real date |
-| `reason` | `{ "code", "note" }` \| `null` | no | `null` | `code` ∈ `hallucination`, `outdated`, `wrong_subject`, `wrong_time`, `redundant`, `missing`, `privacy`, `style`, `other`; `note` ≤ 256 chars |
-| `app_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
-| `project_id` | `string` *(ScopeId)* | no | `"default"` | EverOS addition |
-
-One malformed id rejects the whole request (`422`, nothing deleted).
-Duplicate ids are deleted once; ids that match nothing are skipped (no
-`404`); sending the same request again is harmless. Ids are looked up in
-the request's `app_id` / `project_id` only: the id of a memory in another
-app or project is skipped like one that matches nothing.
-
-#### What it deletes
-
-For each id: the episode; every episode Reflection merged into it,
-transitively; their membership in their
-cluster (the cluster's count, latest timestamp and preview follow the
-remaining members; a cluster left empty is deleted); and their index rows.
-Deleting one source of a merged episode keeps the merged episode.
-
-#### Response
+**A forget**, too: the episodes by id (`memory_type: "episode"`, `memory_ids`
+`<owner_id>_ep_<YYYYMMDD>_<n>`, 1..50; a `reason` whose `code` is kept and
+whose `note` is never logged), target `record` per owner, run at once. One
+malformed id rejects the whole request (`422`). Ids that match nothing are
+skipped; sending the same request again forgets nothing more. The answer is
+Cloud's shape with the forgets' ids:
 
 ```json
-{
-  "request_id": "<32-char hex>",
-  "data": { "memory_type": "episode", "success": true }
-}
+{"data": {"memory_type": "episode", "success": true, "forget_ids": ["fg_…"]}}
 ```
-
-The log line `memory_delete_by_ids` records the reason code and which ids
-were found and which skipped; it never records `note` or any memory text.
-Errors are those of [/delete](#post-apiv2memorydelete) (`422`; `500`
-"deletion incomplete; retry the same request").
 
 ### POST /api/v2/ome/trigger
 
@@ -1538,8 +1639,11 @@ memory.
 with `asker_id` and `audience` (`asker`, default; `group`: only what every
 current member can see). The asker must be a current member of each group, and
 sees only records whose sources lie inside one of their membership windows;
-the search response carries a `scope` block with those windows. Group-scoped
-`/memory/delete` and forget routes answer `422` until group forget lands.
+the search response carries a `scope` block with those windows. A group's
+records are changed with `/memory/update`, read with `/memory/history` and
+forgotten with `/memory/forget` and a group body
+([Changing and forgetting a memory](#changing-and-forgetting-a-memory)); a
+group-scoped `/memory/delete` is an owner's or admin's forget.
 
 **What a group session writes.** Each segment becomes one group episode under
 `groups/<group_id>/episodes/`, with `sender_ids` (who spoke), `subject_ids`

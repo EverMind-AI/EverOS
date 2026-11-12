@@ -26,6 +26,10 @@ failure part-way leaves the store consistent with the log entry that still says
 Idempotency is per forget: the log entry is stamped only after every step
 succeeded, so a crashed undo can be retried, and a second undo of the same
 forget finds no live entry and restores nothing.
+
+An entry another live forget also names stays forgotten (``keep``): the
+conversation forgotten after one of its episodes was forgotten by id, and
+the first undone, leaves that episode forgotten.
 """
 
 from __future__ import annotations
@@ -44,7 +48,11 @@ from everos.service.memory._forget import (
     ForgottenPicture,
     _always,
 )
-from everos.service.memory._forget_session import segments_of
+from everos.service.memory._forget_common import (
+    Named,
+    removed_by_others,
+    segments_of,
+)
 
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
@@ -125,9 +133,10 @@ class UndoManager:
         self._images = images
         self._eraser = eraser
 
-    async def undo_image(self, *, scope: Scope, image_id: str) -> UndoResult:
+    async def undo_image(
+        self, *, scope: Scope, image_id: str, keep: Named | None = None
+    ) -> UndoResult:
         """Bring back everything the newest forget of ``image_id`` removed."""
-        occurrences = await self._stores.image_memory.read_by_image(scope, image_id)
         entry = await self._stores.forget_log.latest_live(
             target="image",
             target_id=image_id,
@@ -135,6 +144,23 @@ class UndoManager:
             project_id=scope.project_id,
             owner_id=scope.owner_id,
         )
+        return await self.undo_image_entry(
+            scope=scope, image_id=image_id, entry=entry, keep=keep
+        )
+
+    async def undo_image_entry(
+        self,
+        *,
+        scope: Scope,
+        image_id: str,
+        entry: ForgetEntry | None,
+        keep: Named | None = None,
+    ) -> UndoResult:
+        """Bring back everything the picture forget ``entry`` removed.
+
+        ``keep`` are the entries other live forgets name: they stay forgotten.
+        """
+        occurrences = await self._stores.image_memory.read_by_image(scope, image_id)
         if entry is None:
             # Never forgotten, or already undone. Clearing the file's status is
             # still correct (a forget whose log write failed leaves it set) and
@@ -152,7 +178,9 @@ class UndoManager:
             )
 
         restored_episodes = await self._restore_episodes(scope, entry)
-        restored_images = await self._restore_images(scope, entry, occurrences)
+        restored_images = await self._restore_images(
+            scope, entry, occurrences, keep=(keep or Named()).image_memories
+        )
         async with user_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
             restored_profile = await self._restore_profile(scope, entry)
         await self._images.restore(image_id)
@@ -187,8 +215,30 @@ class UndoManager:
             pictures=tuple(_picture_of(row, image_id) for row in restored_images),
         )
 
-    async def undo_session(self, *, scope: Scope, session_id: str) -> SessionUndoResult:
-        """Bring back everything the newest forget of one conversation removed.
+    async def undo_session(
+        self, *, scope: Scope, session_id: str, keep: Named | None = None
+    ) -> SessionUndoResult:
+        """Bring back everything the newest forget of one conversation removed."""
+        entry = await self._stores.forget_log.latest_live(
+            target="session",
+            target_id=session_id,
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+        )
+        return await self.undo_session_entry(
+            scope=scope, session_id=session_id, entry=entry, keep=keep
+        )
+
+    async def undo_session_entry(
+        self,
+        *,
+        scope: Scope,
+        session_id: str,
+        entry: ForgetEntry | None,
+        keep: Named | None = None,
+    ) -> SessionUndoResult:
+        """Bring back everything the conversation forget ``entry`` removed.
 
         The same reversal as a picture's, minus the episode *text* rewrite: a
         session forget marks the session's episodes rather than re-writing them
@@ -197,15 +247,10 @@ class UndoManager:
         those marks and the picture files' status".
 
         A conversation that was never forgotten answers ``applied=False`` and
-        reports the state it found.
+        reports the state it found. Only the entries the forget marked come
+        back, and of those not the ones another live forget names (``keep``).
         """
-        entry = await self._stores.forget_log.latest_live(
-            target="session",
-            target_id=session_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-        )
+        keep = keep or Named()
         if entry is None:
             return SessionUndoResult(
                 session_id=session_id,
@@ -217,13 +262,20 @@ class UndoManager:
             )
 
         restored_episodes, episode_files = await self._restore_session_episodes(
-            scope, session_id
+            scope,
+            session_id,
+            keep=keep.episodes,
+            marked={old for old, _ in entry.episode_ids},
         )
-        restored_images = await self._restore_session_images(scope, session_id)
+        restored_images = await self._restore_session_images(
+            scope, session_id, keep=keep.image_memories, marked=set(entry.entry_ids)
+        )
         # A scene the forget took with its last episode comes back with it.
         stores = self._stores
         scenes = (
-            await restore_revived_scenes(stores.episode, stores.scene, scope)
+            await restore_revived_scenes(
+                stores.episode, stores.scene, scope, keep=keep.scenes
+            )
             if scope.owner_type == "user" and restored_episodes
             else []
         )
@@ -270,7 +322,12 @@ class UndoManager:
         )
 
     async def _restore_session_episodes(
-        self, scope: Scope, session_id: str
+        self,
+        scope: Scope,
+        session_id: str,
+        *,
+        keep: set[str],
+        marked: set[str],
     ) -> tuple[set[str], set[str]]:
         """Drop this conversation's forget mark from its episodes.
 
@@ -282,9 +339,17 @@ class UndoManager:
         Reads markdown: the forget erased the index rows through the fence, so
         the files are the only record of which entries carried the mark. An
         episode later superseded by a real replacement keeps its mark — only
-        the forget's own ``forgotten`` marker is cleared.
+        the forget's own ``forgotten`` marker is cleared, on the entries the
+        log says it marked (every one of the session, for a log written
+        before it said), and not on those in ``keep``.
         """
-        entries = await self._stores.episode.entries_for_session(scope, session_id)
+        entries = [
+            (md_path, entry_id)
+            for md_path, entry_id in await self._stores.episode.entries_for_session(
+                scope, session_id
+            )
+            if entry_id not in keep and (not marked or entry_id in marked)
+        ]
         by_file: dict[str, set[str]] = {}
         for md_path, entry_id in entries:
             by_file.setdefault(md_path, set()).add(entry_id)
@@ -305,7 +370,12 @@ class UndoManager:
         return restored, files
 
     async def _restore_session_images(
-        self, scope: Scope, session_id: str
+        self,
+        scope: Scope,
+        session_id: str,
+        *,
+        keep: set[str],
+        marked: set[str],
     ) -> list[Stored[ImageMemory]]:
         """Mark current again the picture memories this conversation's forget retired.
 
@@ -315,7 +385,11 @@ class UndoManager:
         batch read, and inventing a second one would duplicate that logic.
         """
         entries = await self._stores.image_memory.entries_for_session(scope, session_id)
-        wanted = {entry_id for _, entry_id, _ in entries}
+        wanted = {
+            entry_id
+            for _, entry_id, _ in entries
+            if entry_id not in keep and (not marked or entry_id in marked)
+        }
         restored: list[Stored[ImageMemory]] = []
         seen: set[str] = set()
         for image_id in dict.fromkeys(image for _, _, image in entries if image):
@@ -344,6 +418,8 @@ class UndoManager:
         scope: Scope,
         entry: ForgetEntry,
         occurrences: list[Stored[ImageMemory]],
+        *,
+        keep: set[str],
     ) -> list[Stored[ImageMemory]]:
         """Mark current again the occurrences this forget retired, nothing else.
 
@@ -352,7 +428,7 @@ class UndoManager:
         picture is a different decision, and undoing an older one must not
         reverse it.
         """
-        wanted = set(entry.entry_ids)
+        wanted = set(entry.entry_ids) - keep
         targets = [
             row
             for row in occurrences
@@ -428,28 +504,9 @@ class UndoManager:
         """
         removed = list(entry.removed_profile_items)
         mine = await segments_of(self._stores, scope, [session_id])
-        others = await self._stores.forget_log.live_targets(
-            target="session",
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
+        removed += await removed_by_others(
+            self._stores, scope, mine, except_id=entry.forget_id
         )
-        for other in others:
-            if other == session_id:
-                continue
-            later = await self._stores.forget_log.latest_live(
-                target="session",
-                target_id=other,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                owner_id=scope.owner_id,
-            )
-            if later is not None:
-                removed += [
-                    (bucket, item)
-                    for bucket, item in later.removed_profile_items
-                    if profile_items.rests_on(item, mine)
-                ]
         if not removed:
             return 0
         existing = await self._stores.profile.read(scope)

@@ -72,6 +72,14 @@ from .memorize import MemorizeFlushRequest as MemorizeFlushRequest
 from .memorize import MessageItemDTO as MessageItemDTO
 from .memorize import ToolCallDTO as ToolCallDTO
 from .memorize import ToolFunctionDTO as ToolFunctionDTO
+from .memory_edit import MemoryHistoryResponseData as MemoryHistoryResponseData
+from .memory_edit import MemoryVersionData as MemoryVersionData
+from .memory_edit import UpdateMemoryRequest as UpdateMemoryRequest
+from .memory_edit import UpdateMemoryResponseData as UpdateMemoryResponseData
+from .memory_edit import UserForgetRequest as UserForgetRequest
+from .memory_edit import UserForgetResponseData as UserForgetResponseData
+from .memory_edit import UserUndoForgetRequest as UserUndoForgetRequest
+from .memory_edit import UserUndoForgetResponseData as UserUndoForgetResponseData
 from .ome import RunSummary as RunSummary
 from .ome import TriggerRequest as TriggerRequest
 from .ome import TriggerResponse as TriggerResponse
@@ -127,6 +135,8 @@ __all__ = [
     "MemorizeAddRequest",
     "MemorizeFlushRequest",
     "MemorizeQueueHealthBlock",
+    "MemoryHistoryResponseData",
+    "MemoryVersionData",
     "MessageItemDTO",
     "PathSafeId",
     "ProjectDTO",
@@ -154,4 +164,10 @@ __all__ = [
     "UndoForgetSessionRequest",
     "UndoForgetSessionResponseData",
     "UndoRequest",
+    "UpdateMemoryRequest",
+    "UpdateMemoryResponseData",
+    "UserForgetRequest",
+    "UserForgetResponseData",
+    "UserUndoForgetRequest",
+    "UserUndoForgetResponseData",
 ]

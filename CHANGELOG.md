@@ -12,11 +12,49 @@ machinery that keeps a deleted memory from coming back.
 
 ### Added
 
+- **Change, forget and the history of a memory, as endpoints (EverOS 2.0).**
+  Nothing is edited or deleted in place; every change is a new version linked
+  to the old one, and every forget a mark its undo takes away
+  ([docs/api.md](docs/api.md#changing-and-forgetting-a-memory)):
+  - **`POST /api/v2/memory/update`** writes a person's new version of an
+    episode, a picture memory, a scene version, a profile item of `user.md`
+    or of a member's profile in a group. The new version names the one it
+    replaced (`supersedes`), who wrote it and when (`edited_by`,
+    `edited_at`), and keeps what the old one rests on; the old one is marked
+    superseded, and the cascade indexes the new one (both files are handed to
+    it at once). `expected_version` (default: the id given) is the version
+    the caller read: a newer one answers `409 VERSION_CONFLICT` naming it, a
+    forgotten memory `409 MEMORY_FORGOTTEN`.
+  - **Held.** A person's version is held unless `hold: false`: the next
+    profile update (one-to-one and member) keeps a held item as it is -- the
+    model still reads it, whatever its reply does to it is undone, and a new
+    value it writes stays beside it as an item of its own, linked to nothing
+    -- and a scene update writes no narrative over a held version (no call;
+    the joining episode still joins the cluster). `hold: false` alone
+    releases it.
+  - **`GET /api/v2/memory/history`**: every version of a memory, current
+    first, whichever of its ids is asked -- state (`current`, `superseded`,
+    `merged`, `forgotten`), time, sources, who wrote it and the next
+    version. Read from markdown and the forget log; a group asker sees only
+    the versions inside their windows.
+  - **`POST /api/v2/memory/forget` by target for a user**: `record` (ids of
+    any kind), `session`, `owner` (everything, the whole profile included),
+    `condition` (kinds and a time range) and `image`. It follows the
+    sources (scenes, picture files, profile items, as a conversation's forget
+    did), **is a dry run unless `dry_run: false`**, and a real run answers
+    with its `forget_id`, which **`/memory/forget/undo`** takes: exactly what
+    it marked comes back, except what another live forget still names.
+  - **`everos memory history|update|forget|undo`**, the same service
+    functions in-process ([docs/cli.md](docs/cli.md#everos-memory)).
+  - Cost: no model call in any of them; an update embeds its new version
+    once (the embedding provider), a held scene saves the call its next join
+    would have made.
 - **`POST /api/v2/memory/delete`** ([#483](https://github.com/EverMind-AI/EverOS/issues/483)):
   delete by `user_id` / `agent_id`, by `session_id`, or one owner's session;
   answers `{"filters": [...], "count": N}`. A session still being memorized
   answers `503 SESSION_BUSY` and nothing is deleted. everos-mcp's
-  `forget_session` now works against a self-hosted server.
+  `forget_session` now works against a self-hosted server. (In 2.0 it is a
+  forget: see Changed.)
 - **`POST /api/v2/memory/delete_by_ids`**: delete episodes by memory id, with
   what Reflection merged into them and their cluster membership.
 - Configuration: `[memorize] delete_wait_seconds` (default `10`),
@@ -254,6 +292,41 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **No hard delete (EverOS 2.0, breaking).** `POST /api/v2/memory/delete` and
+  `/delete_by_ids` keep their requests and answer with a forget of the same
+  scope, run at once: `user_id` is the user's `owner` target, `user_id` +
+  `session_id` the user's `session`, `session_id` alone the conversation in
+  every user's memory (one forget each), `delete_by_ids` the episodes'
+  `record` target per owner (ids that match nothing are still skipped). The
+  answers add `forget_ids`, the undo tokens. Nothing leaves markdown, and a
+  conversation's segments and buffer stay in `system.db`: a conversation sent
+  again after its delete writes new memories beside the forgotten ones (the
+  evaluation harnesses' `--replace-sessions` keeps working; their stores keep
+  the forgotten copy). `agent_id` is refused (`422`): an agent's memory has no
+  forget yet; a session-only delete leaves an agent's cases of the
+  conversation. The `500 "deletion incomplete"` answer and
+  `DeletionIncompleteError` are gone.
+- **A forget by target is a dry run by default (breaking for group
+  callers).** A group body on `/memory/forget` used to forget at once; it now
+  needs `"dry_run": false`, as a user's target body does. The picture body
+  (`user_id` + `image_id`) and `/forget/session` still run at once.
+- **`/forget/session` and its undo, the picture body of `/forget` and
+  `/images/revise` are aliases** of the general routes, with their own bodies
+  and answers. `/images/revise` now refuses a replaced occurrence (`409
+  VERSION_CONFLICT`) instead of forking it. All of them, and `/history`,
+  refuse a personal memory whose `asker_id` (or identity header) names
+  someone else (`403`).
+- **The profile skips what is forgotten, not a whole conversation forever.**
+  A one-to-one profile update skipped every segment of a conversation with a
+  live forget, including segments the conversation got after the forget; it
+  now skips a segment whose episode is marked forgotten (by any forget). A
+  conversation sent again or continued after its forget reaches the profile
+  like any new one.
+- **A conversation's forget marks its current versions only.** It used to
+  mark every version of the conversation, so its undo turned a version a
+  newer one had replaced (a picture forget's rewrite, a person's edit) back
+  into a current one beside it. The undo of any forget now also leaves an
+  entry another live forget names forgotten.
 - **Unknown configuration keys are rejected.** A key no section declares --
   in `everos.toml`, or an `EVEROS_<SECTION>__<KEY>` variable of an existing
   section -- fails the load with `UnknownConfigKeyError`, listing every
@@ -684,6 +757,10 @@ machinery that keeps a deleted memory from coming back.
 
 ### Removed
 
+- **Hard deletion (EverOS 2.0).** The `Deleter` behind `/memory/delete` and
+  `/delete_by_ids`, its race tests and its real-server acceptance suite
+  (`tests/acceptance/memory_delete`, `make acceptance`) are gone; the routes
+  are forgets (see Changed).
 - **Atomic facts and foresight (EverOS 2.0).** Chat memory keeps episodes,
   picture memories and profiles. The `extract_atomic_facts` and
   `extract_foresight` strategies, the `AtomicFactsExtracted` and

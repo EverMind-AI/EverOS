@@ -446,6 +446,31 @@ def authorize_roster_change(
         raise ForbiddenError("only an owner or admin may change the roster")
 
 
+def authorize_edit(
+    roster: Roster, asker_id: str | None, *, sources: Collection[str]
+) -> None:
+    """Raise unless ``asker_id`` may change a group record resting on ``sources``.
+
+    The forget rule (:func:`authorize_forget`) applied to ``POST
+    /memory/update``: owners and admins may change any record of the group; a
+    member, a record resting on their own messages alone.
+
+    Raises:
+        ForbiddenError: The asker is not a current member, or the record
+            rests on someone else's messages.
+    """
+    current = roster.current(asker_id) if asker_id else None
+    if current is None:
+        raise ForbiddenError("the asker is not a current member of the group")
+    if current.role in MANAGER_ROLES or not roster.has_managers():
+        return
+    if sources and set(sources) == {asker_id}:
+        return
+    raise ForbiddenError(
+        "only an owner or admin may change what rests on another member's messages"
+    )
+
+
 def authorize_forget(
     roster: Roster, asker_id: str | None, *, sources: Collection[str]
 ) -> None:

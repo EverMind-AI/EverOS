@@ -139,6 +139,20 @@ def group_forget_lock(
     return get_partition_lock("group_forget", f"{app_id}:{project_id}:{group_id}")
 
 
+def user_forget_lock(
+    app_id: str, project_id: str, owner_id: str
+) -> AbstractAsyncContextManager[None]:
+    """One forget, undo or update of one user's memory at a time.
+
+    The user's counterpart of :func:`group_forget_lock`: a forget plans from
+    the marks it reads and writes its own, and an update checks the version it
+    replaces is current; two at once could each act on what the other is
+    changing. Taken before any other lock they hold (the scene, profile and
+    owner locks).
+    """
+    return get_partition_lock("user_forget", f"{app_id}:{project_id}:{owner_id}")
+
+
 def _reset_for_tests() -> None:
     """Test-only: drop every lock (see :meth:`everos.core.locks.NamedLocks.reset`)."""
     LOCKS.reset()

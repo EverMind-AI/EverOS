@@ -57,7 +57,10 @@ from .memory import GroupUndoResult as GroupUndoResult
 from .memory import GroupUpsertResult as GroupUpsertResult
 from .memory import GroupView as GroupView
 from .memory import MemorizeResult as MemorizeResult
+from .memory import MemoryChanges as MemoryChanges
+from .memory import MemoryHistory as MemoryHistory
 from .memory import MemoryService as MemoryService
+from .memory import MemoryVersion as MemoryVersion
 from .memory import ProjectMember as ProjectMember
 from .memory import ProjectProfile as ProjectProfile
 from .memory import ProjectView as ProjectView
@@ -67,6 +70,10 @@ from .memory import RosterChangeResult as RosterChangeResult
 from .memory import RosterEventInput as RosterEventInput
 from .memory import TaskItem as TaskItem
 from .memory import TaskPage as TaskPage
+from .memory import UpdateResult as UpdateResult
+from .memory import UserForgetResult as UserForgetResult
+from .memory import UserForgetTarget as UserForgetTarget
+from .memory import UserUndoResult as UserUndoResult
 from .ops import BACKFILL_PHASES as BACKFILL_PHASES
 from .ops import BackfillDeps as BackfillDeps
 from .ops import BackfillOutcome as BackfillOutcome
@@ -124,7 +131,10 @@ __all__ = [
     "KnowledgeExtractor",
     "KnowledgeService",
     "MemorizeResult",
+    "MemoryChanges",
+    "MemoryHistory",
     "MemoryService",
+    "MemoryVersion",
     "NullBackfillPresenter",
     "OmeRun",
     "OmeTriggerResult",
@@ -151,6 +161,10 @@ __all__ = [
     "TopicDetail",
     "TopicNotFoundError",
     "TopicOverview",
+    "UpdateResult",
+    "UserForgetResult",
+    "UserForgetTarget",
+    "UserUndoResult",
     "VectorsPhaseResult",
     "build_application",
     "build_providers",

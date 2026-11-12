@@ -218,10 +218,12 @@ and write their markdown when ready:
   one update call, and a consolidation call only when a part of the profile is
   over its cap and has grown since it was last consolidated. Every item keeps
   its id and source segments; a replaced or retired item moves to the file's
-  `history`, and a new value names the item it replaced. A segment of a
-  forgotten conversation, or a forgotten picture, is never read, and
-  forgetting a conversation takes out the items every segment of which is
-  forgotten
+  `history`, and a new value names the item it replaced. A segment whose
+  episode the owner forgot, or a forgotten picture, is never read, and
+  forgetting a conversation (or episodes) takes out the items every segment
+  of which is forgotten. An item a person changed through
+  `POST /memory/update` is held: the update keeps it as it is, and a new
+  value the model writes for it stays beside it as an item of its own
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design, and the
   `agent_case_skipped` log line says which check skipped them). With

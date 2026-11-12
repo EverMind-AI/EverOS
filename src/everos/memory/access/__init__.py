@@ -29,6 +29,7 @@ from .policy import GroupView as GroupView
 from .policy import ReadScope as ReadScope
 from .policy import ScopeRequest as ScopeRequest
 from .policy import Window as Window
+from .policy import authorize_edit as authorize_edit
 from .policy import authorize_forget as authorize_forget
 from .policy import authorize_manage as authorize_manage
 from .policy import authorize_roster_change as authorize_roster_change
@@ -45,6 +46,7 @@ __all__ = [
     "ReadScope",
     "ScopeRequest",
     "Window",
+    "authorize_edit",
     "authorize_forget",
     "authorize_manage",
     "authorize_roster_change",

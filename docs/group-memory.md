@@ -384,13 +384,21 @@ groups:
 | `member_profile` | requires `member_id` |
 | `group_profile` (Step 2) | items, with `include_superseded` |
 
-The 2.0 history route returns a record's version chain; for group records only
-the versions the asker can see.
+`GET /api/v2/memory/history` (`group_id`, `asker_id`, `id`) returns a record's
+version chain, current first; for group records only the versions inside the
+asker's windows, and a record with none answers 404. `POST /api/v2/memory/update`
+(`group_id`, `asker_id`, `id`, the fields to change) writes a person's new
+version of an episode, a picture memory, a scene version or a member-profile
+item, under the forget rule below: owners and admins any record, a member one
+resting on their own messages alone. A held scene version is not narrated over
+until released; a held member-profile item is kept by the next profile update
+(docs/api.md).
 
 ### 5.5 Forget, undo, delete
 
-Group content is forgotten with the 2.0 forget route (reversible, `dry_run`
-first). Group targets (Step 2):
+Group content is forgotten with the 2.0 forget route: reversible, and a dry
+run unless the body says `"dry_run": false` (the default is `true`, so a
+caller sees what a forget touches before it runs). Group targets (Step 2):
 
 ```json
 {
@@ -400,7 +408,7 @@ first). Group targets (Step 2):
   "asker_id": "u_betty",
   "target": {"kind": "message", "session_id": "trip-team-main", "message_ids": ["m-103"]},
   "reason": "sent by mistake",
-  "dry_run": true
+  "dry_run": false
 }
 ```
 

@@ -43,6 +43,8 @@ class ErrorCode(StrEnum):
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     QUEUE_SATURATED = "QUEUE_SATURATED"
     SESSION_BUSY = "SESSION_BUSY"
+    VERSION_CONFLICT = "VERSION_CONFLICT"
+    MEMORY_FORGOTTEN = "MEMORY_FORGOTTEN"
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +90,28 @@ class ForbiddenError(DomainError):
 
 class ConflictError(DomainError):
     """An operation conflicts with existing state (e.g. duplicate resource)."""
+
+
+class VersionConflictError(ConflictError):
+    """An update named a version of a memory that is no longer the current one.
+
+    ``POST /memory/update`` replaces the version the caller read; another
+    change wrote a newer one since. The message names the current version, so
+    the caller can read it (``GET /memory/history``) and decide again.
+    """
+
+    def __init__(self, message: str, *, current: str | None = None) -> None:
+        super().__init__(message)
+        self.current = current
+
+
+class ForgottenMemoryError(ConflictError):
+    """An update named a memory that is forgotten.
+
+    A forgotten memory is out of every default read; changing it would write a
+    new current version of what the user asked to forget. Undo the forget
+    first.
+    """
 
 
 class RosterConflictError(ConflictError):
@@ -184,14 +208,6 @@ class SessionBusyError(DomainError):
 
     Nothing was deleted. The API layer maps it to HTTP 503 ``SESSION_BUSY``;
     the caller retries later.
-    """
-
-
-class DeletionIncompleteError(AppError):
-    """A memory deletion failed after it had started removing things.
-
-    Part of the scope may be gone. Sending the same request again finishes
-    it. The API layer maps it to HTTP 500.
     """
 
 

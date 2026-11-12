@@ -379,9 +379,10 @@ async def test_group_forget_undo_revise_delete_are_authorised(
     ):
         refused = await client.post(path, json=body)
         assert refused.status_code == 422, (path, refused.text)
-    # The owner forgets; the undo needs the same authorisation.
+    # The owner forgets (a dry run unless told not to); the undo needs the
+    # same authorisation.
     done = await client.post(
-        "/api/v2/memory/forget", json=_forget_body("u_chen", record)
+        "/api/v2/memory/forget", json=_forget_body("u_chen", record, dry_run=False)
     )
     assert done.status_code == 200, done.text
     forget_id = done.json()["data"]["forget_id"]
@@ -466,7 +467,9 @@ async def test_a_forgotten_record_is_absent_for_every_asker(
 
     done = await fixture.client.post(
         "/api/v2/memory/forget",
-        json=_forget_body("u_chen", {"kind": "record", "record_ids": [record]}),
+        json=_forget_body(
+            "u_chen", {"kind": "record", "record_ids": [record]}, dry_run=False
+        ),
     )
     assert done.status_code == 200, done.text
     await world.project()

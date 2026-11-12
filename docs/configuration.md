@@ -326,7 +326,7 @@ have no vector and runs the clustering they never had.
 |---|---|---|---|
 | `mode` | string | `"agent"` | Conversation mode: `chat` (user-memory only) or `agent` (user + agent memory). Requires restart. |
 | `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per add() / flush() invocation. |
-| `delete_wait_seconds` | float | `10.0` | How long a `/delete` by `session_id` waits for an add() in progress on that session; past it the deletion answers `503 SESSION_BUSY` and deletes nothing. |
+| `delete_wait_seconds` | float | `10.0` | How long a forget of a conversation (`/forget` with a `session` target, `/forget/session`, `/delete` with a `session_id`, a group forget) waits for an add() in progress on that session; past it the forget answers `503 SESSION_BUSY` and forgets nothing. |
 
 ### `[memorize.async_queue]`
 

@@ -1,10 +1,12 @@
 """Request / response DTOs of a forget inside a group (docs/group-memory.md, 5.5).
 
-``POST /memory/forget`` takes either body: a personal picture forget
-(``user_id`` + ``image_id``, :class:`ForgetImageRequest`) or a group forget
-(``group_id`` + ``asker_id`` + ``target``, :class:`GroupForgetRequest`); the
-presence of ``group_id`` picks the shape. ``POST /memory/forget/undo`` takes a
-picture's undo or a group forget's ``forget_id``, the same way.
+``POST /memory/forget`` takes three bodies: a group forget (``group_id`` +
+``asker_id`` + ``target``, :class:`GroupForgetRequest`), a user's forget by
+target (``user_id`` + ``target``, :class:`UserForgetRequest`), and the
+picture forget it always took (``user_id`` + ``image_id``,
+:class:`ForgetImageRequest`, run at once). ``group_id`` picks the group's,
+``target`` the user's. ``POST /memory/forget/undo`` takes a group forget's or
+a user's ``forget_id``, or a picture's newest forget, the same way.
 
 A group target is one of five kinds:
 
@@ -34,6 +36,7 @@ from .ids import (
     ProjectScopeId,
     SessionId,
 )
+from .memory_edit import UserForgetRequest, UserUndoForgetRequest
 
 _IMAGE_ID = r"^[0-9a-f]{64}$"
 _FORGET_ID = r"^fg_[0-9a-f]{16}$"
@@ -102,8 +105,9 @@ class GroupForgetRequest(BaseModel):
     Who may forget what: a message its sender, a member that member, a record
     a member whose own messages alone it rests on, a picture its poster; the
     group's owners and admins anything; a session only they. A former member
-    or a stranger is refused (403). ``dry_run`` changes nothing and answers
-    with exactly what the real run would touch.
+    or a stranger is refused (403). ``dry_run`` (default **true**) changes
+    nothing and answers with exactly what the real run would touch; send
+    ``dry_run: false`` to forget.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -123,7 +127,7 @@ class GroupForgetRequest(BaseModel):
     )
     target: GroupTarget
     reason: str | None = Field(default=None, max_length=500)
-    dry_run: bool = False
+    dry_run: bool = True
 
 
 class ForgottenMessageData(BaseModel):
@@ -207,25 +211,44 @@ class GroupUndoForgetResponseData(BaseModel):
     withdrawn: list[str] = Field(default_factory=list)
 
 
-def _by_group_id(body: Any) -> str:
-    """``group`` for a body naming a group, ``user`` for any other."""
+def _forget_shape(body: Any) -> str:
+    """``group`` for a body naming a group, ``user`` for a user's target,
+    ``picture`` for the picture body."""
     if isinstance(body, dict):
-        named = body.get("group_id") is not None
-    else:
-        named = isinstance(body, GroupForgetRequest | GroupUndoForgetRequest)
-    return "group" if named else "user"
+        if body.get("group_id") is not None:
+            return "group"
+        return "user" if "target" in body else "picture"
+    if isinstance(body, GroupForgetRequest):
+        return "group"
+    return "user" if isinstance(body, UserForgetRequest) else "picture"
+
+
+def _undo_shape(body: Any) -> str:
+    """``group`` for a body naming a group, ``user`` for a user's forget id,
+    ``picture`` for a picture's newest forget."""
+    if isinstance(body, dict):
+        if body.get("group_id") is not None:
+            return "group"
+        return "user" if "forget_id" in body else "picture"
+    if isinstance(body, GroupUndoForgetRequest):
+        return "group"
+    return "user" if isinstance(body, UserUndoForgetRequest) else "picture"
 
 
 ForgetRequest = Annotated[
-    Annotated[ForgetImageRequest, Tag("user")]
+    Annotated[UserForgetRequest, Tag("user")]
+    | Annotated[ForgetImageRequest, Tag("picture")]
     | Annotated[GroupForgetRequest, Tag("group")],
-    Discriminator(_by_group_id),
+    Discriminator(_forget_shape),
 ]
-"""``POST /memory/forget``: a personal picture, or a target inside a group."""
+"""``POST /memory/forget``: a user's target, a personal picture, or a target
+inside a group."""
 
 UndoRequest = Annotated[
-    Annotated[UndoForgetRequest, Tag("user")]
+    Annotated[UserUndoForgetRequest, Tag("user")]
+    | Annotated[UndoForgetRequest, Tag("picture")]
     | Annotated[GroupUndoForgetRequest, Tag("group")],
-    Discriminator(_by_group_id),
+    Discriminator(_undo_shape),
 ]
-"""``POST /memory/forget/undo``: a personal picture's, or a group forget's."""
+"""``POST /memory/forget/undo``: a user's forget by id, a personal picture's
+newest forget, or a group forget."""

@@ -1,4 +1,8 @@
-"""``POST /memory/delete`` at the route: validation, envelope, error codes."""
+"""``POST /memory/delete`` at the route: validation, envelope, error codes.
+
+2.0 has no hard delete: the service forgets, and the envelope carries the
+forgets' ids. The free-text ``note`` of a by-id delete never reaches it.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.errors import DeletionIncompleteError, SessionBusyError
+from everos.core.errors import SessionBusyError
 from everos.entrypoints.api.app import create_app
 from everos.service.memory import DeleteResult
 from tests.fakes import StubMemoryService, make_application
@@ -17,7 +21,10 @@ from tests.fakes import StubMemoryService, make_application
 @pytest.fixture
 def memory() -> StubMemoryService:
     stub = StubMemoryService()
-    stub.delete.return_value = DeleteResult(filters=["session_id"], count=3)
+    stub.delete.return_value = DeleteResult(
+        filters=["session_id"], count=3, forget_ids=("fg_0123456789abcdef",)
+    )
+    stub.delete_by_ids.return_value = ("fg_0123456789abcdef",)
     return stub
 
 
@@ -70,7 +77,11 @@ async def test_ok_answers_filters_and_count_in_the_envelope(
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"filters": ["session_id"], "count": 3}
+    assert resp.json()["data"] == {
+        "filters": ["session_id"],
+        "count": 3,
+        "forget_ids": ["fg_0123456789abcdef"],
+    }
     memory.delete.assert_awaited_once_with(
         app_id="default", project_id="p", user_id=None, agent_id=None, session_id="s1"
     )
@@ -89,19 +100,6 @@ async def test_session_busy_is_503_with_its_code(
     error = resp.json()["error"]
     assert error["code"] == "SESSION_BUSY"
     assert "nothing was deleted, retry later" in error["message"]
-
-
-async def test_incomplete_is_500_asking_for_the_same_request(
-    client: AsyncClient, memory: StubMemoryService
-) -> None:
-    memory.delete.side_effect = DeletionIncompleteError("disk full")
-
-    resp = await client.post("/api/v2/memory/delete", json={"user_id": "u1"})
-
-    assert resp.status_code == 500
-    error = resp.json()["error"]
-    assert error["code"] == "INTERNAL_ERROR"
-    assert error["message"] == "deletion incomplete; retry the same request"
 
 
 # ── /delete_by_ids ───────────────────────────────────────────────────────
@@ -156,12 +154,15 @@ async def test_by_ids_ok_dedupes_and_answers_cloud_shape(
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {"memory_type": "episode", "success": True}
+    assert resp.json()["data"] == {
+        "memory_type": "episode",
+        "success": True,
+        "forget_ids": ["fg_0123456789abcdef"],
+    }
     memory.delete_by_ids.assert_awaited_once_with(
         app_id="default",
         project_id="default",
         memory_type="episode",
         ids=[_OK_ID, other],
         reason_code="privacy",
-        note="n",
     )

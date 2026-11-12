@@ -2,10 +2,10 @@
 
 The `everos` command-line entry point covers **setup and operations** —
 generate starter config files (`init`), run the HTTP API server (`server
-start`), inspect effective config (`config show`), and operate the
-md → LanceDB index queue (`cascade`). Hot-path
-business (`/add` `/flush` `/search` `/get`) is the **HTTP API**, not the
-CLI.
+start`), inspect effective config (`config show`), operate the
+md → LanceDB index queue (`cascade`), and change, forget and read the
+versions of one memory (`memory`). Hot-path business (`/add` `/flush`
+`/search` `/get`) is the **HTTP API**, not the CLI.
 
 CLI commands run **in-process** — they call into the `service/` /
 infrastructure layers directly rather than the HTTP loopback.
@@ -32,10 +32,15 @@ everos
 │   └── show [--root PATH]          Show effective configuration
 ├── server
 │   └── start [--host] [--port] [--root] [--reload] [--log-level]   Start the HTTP API server (uvicorn)
-└── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
-    ├── status [--duplicates]       Queue / LSN summary; opt-in duplicate-key scan
-    ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
-    └── fix [--apply]               List failed rows / re-enqueue retryable ones
+├── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
+│   ├── status [--duplicates]       Queue / LSN summary; opt-in duplicate-key scan
+│   ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
+│   └── fix [--apply]               List failed rows / re-enqueue retryable ones
+└── memory                          Change, forget and read the versions of one memory
+    ├── history ID                  Every version, current first (read-only)
+    ├── update ID [--content ...]   A person's new version (held unless --release)
+    ├── forget [TARGET] [--apply]   Forget by target; a dry run unless --apply
+    └── undo FORGET_ID              Undo one forget by its id
 ```
 
 Each subcommand lives in its own module under
@@ -77,6 +82,35 @@ App boot builds the application and starts it (SQLite schema, index
 connection, cascade, OME, the memorize queue); see
 [`service/bootstrap.py`](../src/everos/service/bootstrap.py).
 
+## `everos memory`
+
+A thin layer over the service functions behind `POST /memory/update`,
+`GET /memory/history`, `POST /memory/forget` and `/memory/forget/undo`
+([api.md](api.md#changing-and-forgetting-a-memory)), run in-process. Each
+command names a user's memory with `--user` or a group's with `--group` and
+`--asker`, takes `--root`, `--app-id` and `--project-id`, and prints its
+answer as JSON.
+
+```bash
+everos memory history amy_ep_20261112_00000003 --user amy
+everos memory update amy_ep_20261112_00000003 --user amy --content "Amy adopted a dog."
+everos memory update pi_3f9a2c71d0be --user amy --release      # let the model change it
+everos memory forget --user amy --session trip-chat             # dry run: what it would forget
+everos memory forget --user amy --session trip-chat --apply     # forget; prints the forget_id
+everos memory forget --user amy --types episode,scene --start 1762905600000 --apply
+everos memory forget --group trip --asker u_chen --member u_dan --apply
+everos memory undo fg_0123456789abcdef --user amy
+```
+
+Targets: `--record ID` (repeatable), `--session`, `--owner` (everything of
+the user), `--types` with `--start` / `--end` (epoch ms), `--image HASH`;
+a group's: `--record`, `--session`, `--member`, `--image`. `history` only
+reads and runs beside a server; `update`, `forget --apply` and `undo` write
+and need the memory root to themselves, as `cascade sync` does: while a
+server holds it they exit with code 3 -- use the HTTP API then. An error the
+service answers (no such memory, a version conflict, a forgotten memory) exits
+with code 1 and the message.
+
 ## Configuration via env vars
 
 Both CLI and HTTP server read configuration from `pydantic-settings`:
@@ -114,6 +148,7 @@ everos server start --log-level debug   # see all sql / lance traffic
 | Inspect effective config | — | `everos config show` |
 | Run the server | — | `everos server start` |
 | Index ops (drain / inspect / fix the cascade queue) | — | `everos cascade {status,sync,fix}` |
+| Change / forget / version history of one memory | `/memory/update`, `/forget`, `/history` | `everos memory {update,forget,undo,history}` |
 | Health probe | `GET /health` | (use HTTP) |
 | Metrics scrape | `GET /metrics` | (use HTTP) |
 

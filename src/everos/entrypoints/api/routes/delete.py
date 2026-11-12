@@ -1,7 +1,11 @@
-"""POST /api/v2/memory/delete and /delete_by_ids — delete memories.
+"""POST /api/v2/memory/delete and /delete_by_ids -- forgets, in EverOS 2.0.
 
-A delete naming ``group_id`` is the group's: an owner's or admin's forget,
-soft and propagated (docs/group-memory.md, section 15).
+2.0 has no hard delete: both routes are kept for the callers that send them
+and answer with a forget of the same scope, run at once and reversible by the
+``forget_ids`` they return (``POST /memory/forget/undo``). A delete naming
+``group_id`` is the group's: an owner's or admin's forget, soft and
+propagated (docs/group-memory.md, section 15). An agent's memory has no forget
+yet, so a delete naming ``agent_id`` is refused (422).
 """
 
 from __future__ import annotations
@@ -30,15 +34,18 @@ _RESPONSES: dict[int | str, dict[str, object]] = {
         "model": ErrorResponse,
         "description": "Group-scoped: the asker is not an owner or admin",
     },
-    422: {"description": "No scope, or both user_id and agent_id"},
+    422: {
+        "description": "No scope, both user_id and agent_id, an agent's memory "
+        "(it has no forget), or a session bound to a group without group_id"
+    },
     500: {
         "model": ErrorResponse,
-        "description": "Deletion incomplete; send the same request again",
+        "description": "Forget incomplete; send the same request again",
     },
     503: {
         "model": ErrorResponse,
         "description": "SESSION_BUSY: the session is still being memorized; "
-        "nothing was deleted, retry later",
+        "nothing was forgotten, retry later",
     },
 }
 
@@ -50,11 +57,14 @@ async def delete_memory(
     request_id: RequestIdDep,
     asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[DeleteResponseData | GroupDeleteResponseData]:
-    """Delete one owner's memories, one session's, or one owner's of a session.
+    """Forget one user's memories, one session's, or one user's of a session.
 
-    With ``group_id`` it is the group's delete (docs/group-memory.md, section
-    15): an owner's or admin's forget of one session or one member's
-    messages -- soft and propagated -- whose ``forget_id`` undoes it.
+    EverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an
+    ``owner`` or ``session`` target, run at once. Nothing leaves markdown; the
+    answer's ``forget_ids`` (one per user reached) undo it. With ``group_id``
+    it is the group's delete (docs/group-memory.md, section 15): an owner's or
+    admin's forget of one session or one member's messages -- soft and
+    propagated -- whose ``forget_id`` undoes it.
     """
     if req.group_id is not None:
         deleted, forgotten = await app.memory.delete_in_group(
@@ -83,7 +93,11 @@ async def delete_memory(
     )
     return SuccessEnvelope(
         request_id=request_id,
-        data=DeleteResponseData(filters=result.filters, count=result.count),
+        data=DeleteResponseData(
+            filters=result.filters,
+            count=result.count,
+            forget_ids=list(result.forget_ids),
+        ),
     )
 
 
@@ -91,17 +105,20 @@ async def delete_memory(
 async def delete_memories_by_ids(
     req: DeleteByIdsRequest, app: ApplicationDep, request_id: RequestIdDep
 ) -> SuccessEnvelope[DeleteByIdsResponseData]:
-    """Delete episodes by id, with what was merged into them and their facts.
+    """Forget episodes by id (EverOS 2.0 has no hard delete).
 
-    Ids that match nothing are skipped (not 404); sending the same request
-    again is harmless.
+    ``POST /memory/forget`` with a ``record`` target, per owner, run at once;
+    the answer's ``forget_ids`` undo it. Ids that match nothing are skipped
+    (not 404); sending the same request again forgets nothing more.
     """
-    await app.memory.delete_by_ids(
+    forget_ids = await app.memory.delete_by_ids(
         app_id=req.app_id,
         project_id=req.project_id,
         memory_type=req.memory_type,
         ids=req.memory_ids,
         reason_code=req.reason.code if req.reason else None,
-        note=req.reason.note if req.reason else None,
     )
-    return SuccessEnvelope(request_id=request_id, data=DeleteByIdsResponseData())
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=DeleteByIdsResponseData(forget_ids=list(forget_ids)),
+    )

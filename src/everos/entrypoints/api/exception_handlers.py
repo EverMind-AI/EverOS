@@ -84,16 +84,13 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     # 413 / 429: the batch was not accepted; split it, go sync, or retry later.
     errors.PayloadTooLargeError: _Rule(413, ErrorCode.PAYLOAD_TOO_LARGE),
     errors.QueueSaturatedError: _Rule(429, ErrorCode.QUEUE_SATURATED),
-    # A deletion that found its session busy deleted nothing: retry later.
+    # A forget that found its session busy forgot nothing: retry later.
     errors.SessionBusyError: _Rule(503, ErrorCode.SESSION_BUSY),
-    errors.DeletionIncompleteError: _Rule(
-        500,
-        ErrorCode.INTERNAL_ERROR,
-        message="deletion incomplete; retry the same request",
-        log=("error", "memory_delete_incomplete"),
-    ),
     errors.NotFoundError: _Rule(404, ErrorCode.NOT_FOUND),
     errors.ForbiddenError: _Rule(403, ErrorCode.FORBIDDEN),
+    # An update that lost a race, and one naming a forgotten memory.
+    errors.VersionConflictError: _Rule(409, ErrorCode.VERSION_CONFLICT),
+    errors.ForgottenMemoryError: _Rule(409, ErrorCode.MEMORY_FORGOTTEN),
     errors.ConflictError: _Rule(409, ErrorCode.CONFLICT),
     errors.ExtractionEmptyError: _Rule(422, ErrorCode.EXTRACTION_EMPTY),
     errors.InvalidInputError: _Rule(422, ErrorCode.INVALID_INPUT),

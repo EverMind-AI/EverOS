@@ -3,8 +3,9 @@
 docs/group-memory.md, sections 5.5 and 15. Protocol translation only; the
 service is a stub. What these pin:
 
-- a body naming ``group_id`` is a group forget, any other the personal picture
-  forget it always was; each reaches its own facade method;
+- a body naming ``group_id`` is a group forget, a ``user_id`` with
+  ``image_id`` the personal picture forget it always was; each reaches its own
+  facade method; a group forget is a dry run unless ``dry_run`` is false;
 - each of the five targets reaches the service as it was sent, with the
   gateway's identity header passed through for the service to compare;
 - a group forget's answer names what it touched, and its ``forget_id`` is what
@@ -101,7 +102,8 @@ async def test_every_target_reaches_the_group_forget(
     expected: GroupForgetTarget,
 ) -> None:
     response = await client.post(
-        "/api/v2/memory/forget", json=_body(target, reason="sent by mistake")
+        "/api/v2/memory/forget",
+        json=_body(target, reason="sent by mistake", dry_run=False),
     )
 
     assert response.status_code == 200, response.text
@@ -121,11 +123,14 @@ async def test_every_target_reaches_the_group_forget(
     assert data["target"]["kind"] == expected.kind
 
 
-async def test_a_dry_run_says_so(client: AsyncClient) -> None:
+async def test_a_dry_run_says_so_and_is_the_default(
+    client: AsyncClient, memory: StubMemoryService
+) -> None:
     response = await client.post(
         "/api/v2/memory/forget",
-        json=_body({"kind": "member", "member_id": "u_betty"}, dry_run=True),
+        json=_body({"kind": "member", "member_id": "u_betty"}),
     )
+    assert memory.forget_in_group.await_args.kwargs["dry_run"] is True
     data = response.json()["data"]
     assert (data["dry_run"], data["forget_id"], data["new_episodes"]) == (
         True,
@@ -234,9 +239,15 @@ async def test_a_group_delete_answers_with_its_forget(
     assert (call["session_id"], call["member_id"]) == ("s1", None)
     memory.delete.assert_not_awaited()
 
-    memory.delete.return_value = DeleteResult(filters=["user_id"], count=2)
+    memory.delete.return_value = DeleteResult(
+        filters=["user_id"], count=2, forget_ids=("fg_0123456789abcdee",)
+    )
     personal = await client.post("/api/v2/memory/delete", json={"user_id": "u_chen"})
-    assert personal.json()["data"] == {"filters": ["user_id"], "count": 2}
+    assert personal.json()["data"] == {
+        "filters": ["user_id"],
+        "count": 2,
+        "forget_ids": ["fg_0123456789abcdee"],
+    }
 
 
 @pytest.mark.parametrize(

@@ -30,11 +30,16 @@ conversation.
 The forget follows the episodes into the owner's scenes (docs/scenes.md): a
 scene none of whose episodes is alive any more is marked forgotten too, and its
 index row erased; a scene that still has a live episode stays.
+
+Only the conversation's **current** versions are marked: a version a newer
+one already replaced (a person's edit, a picture forget's rewrite) keeps the
+mark that names its successor, so the chain of versions survives the forget
+and its undo.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -42,8 +47,13 @@ from everos.core.observability.logging import get_logger
 from everos.memory import user_profile_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import forget_orphaned_scenes
-from everos.memory.ports import MemoryRef, Scope, SessionKey
+from everos.memory.ports import MemoryRef, Scope
 from everos.service.memory._forget import FORGET_REASON, _always
+from everos.service.memory._forget_common import (
+    forgotten_segments,
+    removed_item_ids,
+    segments_of,
+)
 
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
@@ -69,6 +79,8 @@ class SessionForgetResult:
             they rest on is now forgotten.
         scenes: Entry ids of the scene versions marked forgotten because none
             of their episodes is alive any more.
+        pictures: Entry ids of the picture memories marked forgotten.
+        profile_items: Ids of the profile items and replaced values taken out.
     """
 
     session_id: str
@@ -78,6 +90,8 @@ class SessionForgetResult:
     forget_id: str
     profiles: int = 0
     scenes: Sequence[str] = ()
+    pictures: Sequence[str] = ()
+    profile_items: Sequence[str] = ()
 
 
 class SessionForgetManager:
@@ -97,13 +111,16 @@ class SessionForgetManager:
         self._eraser = eraser
 
     async def forget_session(
-        self, *, scope: Scope, session_id: str, reason: str | None = None
+        self,
+        *,
+        scope: Scope,
+        session_id: str,
+        reason: str | None = None,
+        requested_by: str | None = None,
     ) -> SessionForgetResult:
         """Mark everything one conversation established for ``scope`` as forgotten."""
-        episodes = await self._stores.episode.entries_for_session(scope, session_id)
-        pictures = await self._stores.image_memory.entries_for_session(
-            scope, session_id
-        )
+        episodes = await current_episodes_of(self._stores, scope, session_id)
+        pictures = await current_pictures_of(self._stores, scope, session_id)
         if episodes:
             await self._stores.episode.deprecate(
                 scope,
@@ -153,6 +170,7 @@ class SessionForgetManager:
                 owner_id=scope.owner_id,
                 owner_type=scope.owner_type,
                 reason=reason,
+                requested_by=requested_by,
                 entry_ids=tuple(item[1] for item in pictures),
                 episode_ids=tuple((entry_id, "") for _, entry_id in episodes),
                 removed_profile_items=profile_removed,
@@ -179,6 +197,8 @@ class SessionForgetManager:
             forget_id=entry.forget_id,
             profiles=profiles,
             scenes=[scene.ref.entry_id for scene in scenes],
+            pictures=[entry_id for _, entry_id, _ in pictures],
+            profile_items=removed_item_ids(profile_removed),
         )
 
     async def _forget_profile(
@@ -197,20 +217,12 @@ class SessionForgetManager:
         existing = await self._stores.profile.read(scope)
         if existing is None:
             return ()
-        earlier = [
-            target
-            for target in await self._stores.forget_log.live_targets(
-                target="session",
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                owner_id=scope.owner_id,
-            )
-            if target != session_id
-        ]
         next_profile, removed, count = profile_items.forget_segments(
             existing,
             await segments_of(self._stores, scope, [session_id]),
-            already=await segments_of(self._stores, scope, earlier),
+            already=await forgotten_segments(
+                self._stores, scope, except_session=session_id
+            ),
         )
         if not removed or next_profile is None:
             return ()
@@ -252,21 +264,27 @@ class SessionForgetManager:
         return released
 
 
-async def segments_of(
-    stores: Stores, scope: Scope, sessions: Collection[str]
-) -> set[str]:
-    """The memcell ids of the segments of ``sessions`` in ``scope``'s space."""
-    found: set[str] = set()
-    for session_id in sessions:
-        cells = await stores.memcell.cells_in_session(
-            SessionKey(
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-                session_id=session_id,
-            )
-        )
-        found.update(cells)
-    return found
+async def current_episodes_of(
+    stores: Stores, scope: Scope, session_id: str
+) -> list[tuple[str, str]]:
+    """``(md_path, entry_id)`` of the conversation's episode versions no mark
+    retires: a superseded one keeps the mark that names its successor."""
+    entries = await stores.episode.entries_for_session(scope, session_id)
+    marks: dict[str, dict[str, str]] = {}
+    for md_path in {md_path for md_path, _ in entries}:
+        marks[md_path] = await stores.episode.deprecations(scope, md_path)
+    return [(md, e) for md, e in entries if not marks[md].get(e)]
+
+
+async def current_pictures_of(
+    stores: Stores, scope: Scope, session_id: str
+) -> list[tuple[str, str, str]]:
+    """``(md_path, entry_id, image_id)`` of the conversation's current picture
+    memories."""
+    entries = await stores.image_memory.entries_for_session(scope, session_id)
+    rows = await stores.image_memory.read_many(scope, [e for _, e, _ in entries])
+    marked = {row.ref.entry_id for row in rows if row.item.superseded_by}
+    return [row for row in entries if row[1] not in marked]
 
 
 def _ref(scope: Scope, md_path: str, entry_id: str) -> MemoryRef:

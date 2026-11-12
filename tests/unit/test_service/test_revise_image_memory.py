@@ -9,6 +9,8 @@ What these pin:
   different picture.
 - The current occurrence is the default target; a named occurrence can be
   revised instead, and an unknown one is a 404 rather than a silent new memory.
+  A replaced occurrence is a 409 naming its current version (the alias goes
+  through ``/memory/update``): revising it would fork the memory.
 - A picture never written is not revised into existence.
 """
 
@@ -18,10 +20,11 @@ import datetime as _dt
 
 import pytest
 
-from everos.core.errors import NotFoundError
+from everos.core.errors import NotFoundError, VersionConflictError
 from everos.memory.models import ImageMemory
 from everos.memory.ports import MemoryRef, Scope, Stored
 from everos.service.memory._revise import RevisionManager
+from everos.service.memory._update import UpdateManager
 from tests.fakes import make_stores
 
 _TS = int(_dt.datetime(2026, 5, 14, 10, tzinfo=_dt.UTC).timestamp() * 1000)
@@ -62,10 +65,16 @@ def _picture(
     )
 
 
+class _Eraser:
+    async def requeue(self, kind: str, md_paths: object) -> None:
+        return None
+
+
 def _manager(*rows: Stored[ImageMemory]) -> tuple[RevisionManager, object]:
     stores = make_stores()
     stores.image_memory.records.extend(rows)
-    return RevisionManager(stores=stores), stores
+    updater = UpdateManager(stores=stores, eraser=_Eraser(), clock=lambda: _TS)
+    return RevisionManager(stores=stores, updater=updater), stores
 
 
 async def test_a_revision_writes_a_new_version_and_supersedes_the_old() -> None:
@@ -128,16 +137,21 @@ async def test_the_current_occurrence_is_the_default_target() -> None:
     assert result.supersedes == "im_2"
 
 
-async def test_a_named_occurrence_can_be_revised() -> None:
-    old, current = _picture("im_1"), _picture("im_2")
-    manager, stores = _manager(old, current)
-    stores.image_memory.deprecated[_picture("im_1").ref.md_path]["im_1"] = "im_2"
+async def test_a_named_occurrence_can_be_revised_and_a_replaced_one_is_409() -> None:
+    # Two arrivals of one picture: two memories, both current.
+    manager, _stores = _manager(_picture("im_1"), _picture("im_2"))
 
     result = await manager.revise_image(
-        scope=_scope(), image_id=_IMAGE_ID, description="revised old", entry_id="im_1"
+        scope=_scope(), image_id=_IMAGE_ID, description="revised", entry_id="im_2"
     )
+    assert result.supersedes == "im_2"
 
-    assert result.supersedes == "im_1"
+    # im_2 is replaced now: a revision of it would fork the memory.
+    with pytest.raises(VersionConflictError) as conflict:
+        await manager.revise_image(
+            scope=_scope(), image_id=_IMAGE_ID, description="again", entry_id="im_2"
+        )
+    assert conflict.value.current == f"u1_{result.entry_id}"
 
 
 async def test_an_unknown_occurrence_is_not_created() -> None:

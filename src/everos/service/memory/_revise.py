@@ -7,11 +7,13 @@ once, and two memories about it would compete with each other for the same
 question.
 
 So a revision writes a new markdown entry carrying the revised text and the
-same picture, then marks the old entry superseded by the new one. The old text
-stays on disk, which is what makes "what did this memory say before" — and an
-undo of a revision, later — answerable. The cascade then recomputes the new
-entry's keyword tokens and vector from the new text, because the entry is new
-rather than edited; nothing recomputes anything by hand.
+same picture, then marks the old entry superseded by the new one -- the
+general ``POST /memory/update`` (:mod:`._update`) does it; this module keeps
+the picture-shaped body. The old text stays on disk, which is what makes "what
+did this memory say before" answerable (``GET /memory/history``). The cascade
+then recomputes the new entry's keyword tokens and vector from the new text,
+because the entry is new rather than edited; nothing recomputes anything by
+hand.
 
 What a revision may touch is deliberately narrow: the description and the text
 visible in the picture. The identity (content hash, path, dimensions, time,
@@ -26,14 +28,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.errors import NotFoundError
-from everos.core.observability.logging import get_logger
+from everos.memory.access import Identity
 from everos.memory.models import ImageMemory
 from everos.memory.ports import Scope, Stored
 
+from ._records import entry_id_of
+from ._update import MemoryChanges, UpdateManager
+
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
-
-logger = get_logger("everos.service.memory")
 
 
 @dataclass(frozen=True)
@@ -56,14 +59,21 @@ class RevisionResult:
 
 
 class RevisionManager:
-    """Writes a superseding version of one picture memory.
+    """Revises one occurrence of a picture: ``POST /memory/images/revise``.
+
+    A thin alias of ``POST /memory/update`` for a picture memory, kept for the
+    body it takes (a picture's hash, optionally which occurrence): it picks
+    the occurrence, and the update writes the new version -- a person's edit,
+    held, refused with 409 when the occurrence was replaced or forgotten.
 
     Args:
         stores: Write-side stores; markdown is the truth.
+        updater: Writes the new version.
     """
 
-    def __init__(self, *, stores: Stores) -> None:
+    def __init__(self, *, stores: Stores, updater: UpdateManager) -> None:
         self._stores = stores
+        self._updater = updater
 
     async def revise_image(
         self,
@@ -73,6 +83,7 @@ class RevisionManager:
         description: str | None = None,
         ocr: str | None = None,
         entry_id: str | None = None,
+        identity: Identity | None = None,
     ) -> RevisionResult:
         """Write a revised version of one occurrence of ``image_id``.
 
@@ -85,10 +96,13 @@ class RevisionManager:
                 picks the current one — the only defensible default, since a
                 superseded occurrence is history and two calls could otherwise
                 each pick a different occurrence.
+            identity: Who asks; the owner when nobody was asserted.
 
         Raises:
             NotFoundError: No current occurrence of this picture for this owner.
             ValueError: Both fields are ``None`` (nothing to change).
+            VersionConflictError: The named occurrence was replaced (409).
+            ForgottenMemoryError: The named occurrence is forgotten (409).
         """
         if description is None and ocr is None:
             raise ValueError("a revision needs a new description or a new ocr")
@@ -99,44 +113,18 @@ class RevisionManager:
                 f"no current picture memory for image {image_id!r}"
                 + (f" and entry {entry_id!r}" if entry_id else "")
             )
-        revised = target.item.model_copy(
-            update={
-                "description": (
-                    target.item.description if description is None else description
-                ),
-                "ocr": target.item.ocr if ocr is None else ocr,
-                "entry_id": None,
-                "md_path": None,
-                "status": "current",
-                "superseded_by": None,
-            }
-        )
-        ref = await self._stores.image_memory.append(scope, revised, only_if=_always)
-        if ref is None:
-            # The store only skips a write whose ``only_if`` failed, and this
-            # one has none: unreachable short of a store bug.
-            raise NotFoundError("the picture memory could not be written")
-        await self._stores.image_memory.deprecate(
-            scope,
-            entries=[(target.ref.md_path, target.ref.entry_id)],
-            replaced_by=ref.entry_id,
-            only_if=_always,
-        )
-        logger.info(
-            "memory.images.revised",
-            image_id=image_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            supersedes=target.ref.entry_id,
-            entry_id=ref.entry_id,
+        result = await self._updater.update(
+            scope=scope,
+            identity=identity or Identity(),
+            record_id=target.ref.entry_id,
+            changes=MemoryChanges(description=description, ocr=ocr),
         )
         return RevisionResult(
             image_id=image_id,
-            entry_id=ref.entry_id,
+            entry_id=entry_id_of(scope.owner_id, result.id),
             supersedes=target.ref.entry_id,
-            description=revised.description,
-            ocr=revised.ocr,
+            description=target.item.description if description is None else description,
+            ocr=target.item.ocr if ocr is None else ocr,
         )
 
 
@@ -152,11 +140,6 @@ def _pick(
         if stored.item.superseded_by is None:
             return stored
     return None
-
-
-async def _always() -> bool:
-    """``only_if`` for a write whose source is the revision itself."""
-    return True
 
 
 __all__ = ["RevisionManager", "RevisionResult"]

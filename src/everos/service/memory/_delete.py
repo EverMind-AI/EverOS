@@ -1,100 +1,82 @@
-"""The memory deletion use case behind ``POST /memory/delete``.
+"""``POST /memory/delete`` and ``/delete_by_ids``: EverOS 2.0 has no hard delete.
 
-Five scopes, one shape: delete the source first, then the memories made
-from it, then their index rows.
+Both routes stay, as thin aliases of a forget, because callers send them (the
+evaluation harnesses' ``--replace-sessions`` sends ``/memory/delete`` with a
+``session_id``): nothing leaves markdown, every memory a delete reaches is
+marked forgotten -- out of every default read and of the index at once -- and
+the answer carries the forget's ``forget_id``, which ``/memory/forget/undo``
+takes. What a conversation's segments and buffer hold in ``system.db`` stays
+too; sending the conversation again writes new memories beside the forgotten
+ones, and the profile reads them (it skips only what is forgotten).
 
-* only ``session_id`` -- the conversation everywhere: refused (503, nothing
-  deleted) while the session has queued work or an ``add()`` holds it past
-  ``delete_wait_seconds``; otherwise, under the session's memorize lock, its
-  memcells, buffers and status go in one transaction, then every owner the
-  memcells name loses that session's entries.
-* ``user_id`` / ``agent_id`` with ``session_id`` -- that owner's entries of
-  the session; the conversation stays.
-* ``user_id`` / ``agent_id`` alone -- the owner's whole directory, its
-  clusters and (for a user) its Reflection reports.
+* ``user_id`` -- the user's whole memory (target ``owner``);
+* ``user_id`` and ``session_id`` -- the user's memory of one conversation
+  (target ``session``);
+* ``session_id`` alone -- that conversation in the memory of every user that
+  holds it, one forget each;
+* ``agent_id`` -- refused (422): an agent's memory has no forget yet, and 2.0
+  deletes nothing;
+* ``/delete_by_ids`` -- the episodes by id, per owner (target ``record``); an id
+  that names nothing is skipped, as before.
 
-A user's scene versions that name a deleted episode go with it
-(docs/scenes.md): what a deleted episode said must not stay in a narrative.
-
-``POST /memory/delete_by_ids`` deletes single episodes by memory id, with
-what was merged into them, their facts, and their cluster membership (see
-:meth:`Deleter.delete_by_ids`).
-
-Once anything is deleted, a failure is reported as incomplete (500): the
-same request finishes the job. Index rows are removed last and never fail
-the request (the markdown is gone; the cascade catches up).
+A group's delete is already a forget (``MemoryService.delete_in_group``).
 """
 
 from __future__ import annotations
 
-__all__ = ["DeleteResult", "Deleter"]
+__all__ = ["NO_AGENT_FORGET", "DeleteAlias", "DeleteResult"]
 
 import re
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from everos.core.errors import (
-    DeletionIncompleteError,
-    PathTraversalError,
-    SessionBusyError,
-)
-from everos.core.failpoints import failpoint
-from everos.core.locks import LOCKS, session_key
+from everos.core.errors import InvalidInputError
 from everos.core.observability.logging import get_logger
-from everos.memory import user_cluster_lock, user_scenes_lock
-from everos.memory.extract.scene import remove_scenes_naming
-from everos.memory.models import Episode
-from everos.memory.ports import MemoryRef, Scope, SessionKey
+from everos.memory.ports import Scope
+
+from ._user_forget import UserForgetManager, UserForgetResult, UserForgetTarget
 
 if TYPE_CHECKING:
-    from everos.config import MemorizeSettings
     from everos.memory.deps import Stores
-    from everos.memory.ports import IndexEraser, OwnerType
 
 logger = get_logger("everos.service.memory")
 
-_QUEUED = "queued work for this session; nothing was deleted, retry later"
-_LOCKED = "session is busy; nothing was deleted, retry later"
 _MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
-_DETACH_ATTEMPTS = 3
-_PREVIEW_CAP = 5
-"""A cluster's preview length, as everalgo clustering keeps it (``preview_cap``
-default, everalgo-clustering 0.2.1 ``clustering/algorithm.py:41``)."""
 
-type Removed = Mapping[str, Sequence[MemoryRef]]
-"""The entries one owner lost, by index table."""
+NO_AGENT_FORGET = (
+    "an agent's memory cannot be deleted: EverOS 2.0 has no hard delete, and "
+    "an agent's memory has no forget yet"
+)
 
 
 @dataclass(frozen=True)
 class DeleteResult:
-    """What a deletion did.
+    """What a delete (a forget, in 2.0) did.
 
     Attributes:
-        filters: The scope fields the request set (``user_id`` /
-            ``agent_id`` / ``session_id``).
-        count: Memories removed from markdown.
+        filters: The scope fields the request set.
+        count: Memories taken out of default reads.
+        forget_ids: The forgets it ran, one per user it reached; each is an
+            undo token.
     """
 
     filters: list[str]
     count: int
+    forget_ids: tuple[str, ...] = ()
 
 
-class Deleter:
-    """Deletes memories by owner, by session, or both.
+class DeleteAlias:
+    """``/memory/delete`` and ``/delete_by_ids`` as forgets.
 
     Args:
-        stores: Write-side stores.
-        eraser: Removes the deleted entries' index rows.
-        settings: ``[memorize]`` (``delete_wait_seconds``).
+        stores: Where the owners of a conversation are found.
+        forgetter: The user's forget, which does the work.
     """
 
-    def __init__(
-        self, *, stores: Stores, eraser: IndexEraser, settings: MemorizeSettings
-    ) -> None:
+    def __init__(self, *, stores: Stores, forgetter: UserForgetManager) -> None:
         self._stores = stores
-        self._eraser = eraser
-        self._wait = settings.delete_wait_seconds
+        self._forgetter = forgetter
 
     async def delete(
         self,
@@ -105,131 +87,61 @@ class Deleter:
         agent_id: str | None,
         session_id: str | None,
     ) -> DeleteResult:
-        """Delete one scope; at least one of the three ids is set."""
-        if user_id is None and agent_id is None:
+        """Forget one user's memory, one conversation of it, or a conversation
+        everywhere.
+
+        Raises:
+            InvalidInputError: An agent's memory (422).
+            SessionBusyError: The conversation stays busy (503).
+        """
+        if agent_id is not None:
+            raise InvalidInputError(NO_AGENT_FORGET)
+        if user_id is None:
             if session_id is None:
                 raise ValueError("a deletion needs user_id, agent_id or session_id")
-            session = SessionKey(app_id, project_id, session_id)
-            count = await self._erase(await self._session(session))
+            owners = [
+                scope
+                for scope in await self._stores.owner_dir.owners_with_session(
+                    app_id, project_id, session_id
+                )
+                if scope.owner_type == "user"
+            ]
             filters = ["session_id"]
         else:
-            owner_type: OwnerType = "user" if user_id is not None else "agent"
-            scope = Scope(
-                app_id=app_id,
-                project_id=project_id,
-                owner_id=user_id or agent_id or "",
-                owner_type=owner_type,
+            owners = [
+                Scope(
+                    app_id=app_id,
+                    project_id=project_id,
+                    owner_id=user_id,
+                    owner_type="user",
+                )
+            ]
+            filters = ["user_id"] if session_id is None else ["user_id", "session_id"]
+        target = (
+            UserForgetTarget(kind="owner")
+            if session_id is None
+            else UserForgetTarget(kind="session", session_id=session_id)
+        )
+        done = [
+            await self._forgetter.forget(
+                scope=scope, target=target, reason="delete", dry_run=False
             )
-            filters = [f"{owner_type}_id"]
-            if session_id is None:
-                count = await self._owner(scope)
-            else:
-                removed = await _incomplete(self._remove_session(scope, session_id))
-                count = await self._erase([(scope, removed)])
-                filters.append("session_id")
+            for scope in owners
+        ]
+        result = DeleteResult(
+            filters=filters,
+            count=sum(_count(r) for r in done),
+            forget_ids=tuple(r.forget_id for r in done),
+        )
         logger.info(
-            "memory_deleted",
+            "memory_delete_forgotten",
             app_id=app_id,
             project_id=project_id,
             filters=filters,
-            count=count,
+            count=result.count,
+            forget_ids=list(result.forget_ids),
         )
-        return DeleteResult(filters=filters, count=count)
-
-    async def _erase(self, deleted: Sequence[tuple[Scope, Removed]]) -> int:
-        """Remove the deleted entries' index rows; how many entries."""
-        failpoint("delete.before_index_erase")
-        for scope, removed in deleted:
-            await self._eraser.erase(scope, removed)
-        return sum(len(refs) for _, removed in deleted for refs in removed.values())
-
-    async def _session(self, session: SessionKey) -> list[tuple[Scope, Removed]]:
-        """Delete one conversation everywhere, under its memorize lock."""
-        inbox = self._stores.memorize_inbox
-        if await inbox.count_pending(session):
-            raise SessionBusyError(_QUEUED)
-        key = session_key(session.app_id, session.project_id, session.session_id)
-        try:
-            async with LOCKS.hold("session", key, max_wait=self._wait):
-                # A request queued while this one waited for the lock.
-                if await inbox.count_pending(session):
-                    raise SessionBusyError(_QUEUED)
-                return await _incomplete(self._purge_session(session))
-        except TimeoutError:  # only the wait for the lock raises it here
-            raise SessionBusyError(_LOCKED) from None
-
-    async def _purge_session(self, session: SessionKey) -> list[tuple[Scope, Removed]]:
-        records = await self._stores.session_purge.purge(session)
-        failpoint("delete.after_sqlite")
-        senders = dict.fromkeys(s for record in records for s in record.sender_ids)
-        # A sender's memories live under users/ or agents/ (the assistant side
-        # of an agent trajectory); trying both costs a scan of a missing dir.
-        owners = [
-            Scope(
-                app_id=session.app_id,
-                project_id=session.project_id,
-                owner_id=sender,
-                owner_type=owner_type,
-            )
-            for sender in senders
-            for owner_type in ("user", "agent")
-        ] or await self._stores.owner_dir.owners_with_session(
-            session.app_id, session.project_id, session.session_id
-        )
-        deleted: list[tuple[Scope, Removed]] = []
-        for scope in owners:
-            deleted.append(
-                (scope, await self._remove_session(scope, session.session_id))
-            )
-            failpoint("delete.after_first_rewrite")
-        return deleted
-
-    async def _remove_session(self, scope: Scope, session_id: str) -> Removed:
-        stores = self._stores
-        if scope.owner_type == "agent":
-            return {
-                "agent_case": await stores.agent_case.remove_session(scope, session_id)
-            }
-        episodes = await stores.episode.remove_session(scope, session_id)
-        scenes = await remove_scenes_naming(
-            stores.scene, scope, [ref.entry_id for ref in episodes]
-        )
-        return {
-            # A scene version is a row of the episode table.
-            "episode": [*episodes, *scenes],
-            # A picture memory names its session like the kinds above. Left out,
-            # a deleted session kept its pictures searchable with no memcell
-            # behind them, and re-sending the session added a second copy.
-            "image_memory": await stores.image_memory.remove_session(scope, session_id),
-        }
-
-    async def _owner(self, scope: Scope) -> int:
-        """Delete the owner's directory, clusters and reports; the count."""
-        stores = self._stores
-        try:
-            deletion = await stores.owner_dir.delete(scope)
-        except PathTraversalError:
-            raise  # refused before anything moved
-        except Exception as exc:
-            raise DeletionIncompleteError(str(exc)) from exc
-        if scope.owner_type == "user":
-            async with user_cluster_lock(
-                scope.app_id, scope.project_id, scope.owner_id
-            ):
-                await _incomplete(stores.cluster.delete_for_owner(scope, "user_memory"))
-                await _incomplete(stores.reflection_report.delete_for_owner(scope))
-            async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
-                await _incomplete(stores.cluster.delete_for_owner(scope, "user_scene"))
-            tables = ["user_profile"]
-        else:
-            await _incomplete(stores.cluster.delete_for_owner(scope, "agent_case"))
-            tables = ["agent_skill"]
-        failpoint("delete.before_index_erase")
-        await self._eraser.erase(scope, deletion.refs)
-        await self._eraser.erase_owner(scope, tables)
-        return deletion.count
-
-    # ── by id ────────────────────────────────────────────────────────────
+        return result
 
     async def delete_by_ids(
         self,
@@ -239,148 +151,50 @@ class Deleter:
         memory_type: str,
         ids: Sequence[str],
         reason_code: str | None,
-        note: str | None,
-    ) -> None:
-        """Delete episodes by memory id (``<owner_id>_<entry_id>``).
+    ) -> tuple[str, ...]:
+        """Forget episodes by memory id (``<owner_id>_<entry_id>``), per owner.
 
-        Per owner, in this order (each step is safe to redo, so the same
-        request finishes a deletion a crash cut short):
-
-        1. the requested entries, under the owner lock -- the barrier: a
-           Reflection finish marks sources only while the merged episode is
-           in md, so none can be marked after this;
-        2. what was merged into them, transitively (read from the merge
-           marks, so it still works on a resend after step 1);
-        3. those episodes out of their clusters, under the clustering lock;
-        4. the merge marks keyed by them -- last, a resend after 1 needs them;
-        5. their index rows.
-
-        ``note`` is never logged.
+        Returns the forgets' ids. The caller's free-text note never reaches
+        here, so it is never logged.
         """
         if memory_type != "episode":
             raise ValueError(f"unsupported memory_type {memory_type!r}")
         by_owner: dict[str, list[str]] = {}
         for memory_id in dict.fromkeys(ids):
-            owner_id, entry_id = _split_memory_id(memory_id)
-            by_owner.setdefault(owner_id, []).append(entry_id)
-        hit: list[str] = []
+            match = _MEMORY_ID.fullmatch(memory_id)
+            if match is None:
+                raise ValueError(f"not an episode memory id: {memory_id!r}")
+            by_owner.setdefault(match["owner"], []).append(match["entry"])
+        forget_ids: list[str] = []
         for owner_id, entry_ids in by_owner.items():
-            scope = Scope(
-                app_id=app_id,
-                project_id=project_id,
-                owner_id=owner_id,
-                owner_type="user",
+            done = await self._forgetter.forget(
+                scope=Scope(
+                    app_id=app_id,
+                    project_id=project_id,
+                    owner_id=owner_id,
+                    owner_type="user",
+                ),
+                target=UserForgetTarget(kind="record", record_ids=tuple(entry_ids)),
+                reason=reason_code or "delete",
+                dry_run=False,
+                strict=False,
             )
-            removed = await _incomplete(self._delete_episodes(scope, entry_ids))
-            hit += [f"{owner_id}_{e}" for e in removed]
+            forget_ids.append(done.forget_id)
         logger.info(
-            "memory_delete_by_ids",
+            "memory_delete_by_ids_forgotten",
             app_id=app_id,
             project_id=project_id,
             reason=reason_code,
-            hit=hit,
-            skipped=[m for m in dict.fromkeys(ids) if m not in set(hit)],
+            forget_ids=forget_ids,
         )
-
-    async def _delete_episodes(self, scope: Scope, targets: Sequence[str]) -> list[str]:
-        """Steps 1-5 for one owner; the requested entries that were in md."""
-        episodes = self._stores.episode
-        requested = set(targets)
-        first = await episodes.remove(scope, requested)
-        failpoint("by_ids.after_step1")
-        closure = set(requested)
-        frontier = set(requested)
-        while frontier:
-            frontier = await episodes.merged_into(scope, frontier) - closure
-            closure |= frontier
-        merged = await episodes.remove(scope, closure - requested)
-        failpoint("by_ids.after_step2")
-        scenes = await remove_scenes_naming(self._stores.scene, scope, closure)
-        await self._detach_from_clusters(scope, closure)
-        await episodes.clear_deprecations(scope, closure)
-        failpoint("by_ids.after_step4")
-        await self._eraser.erase(scope, {"episode": [*first, *merged, *scenes]})
-        return [ref.entry_id for ref in first]
-
-    async def _detach_from_clusters(self, scope: Scope, gone: set[str]) -> None:
-        """Take ``gone`` out of their clusters (and members no longer in md).
-
-        Members and their texts are read without the clustering lock; under
-        it the member list is read again and, if it moved, the round starts
-        over (at most three times, then the md is read under the lock). The
-        clusters are looked up after one pass through the clustering lock, so
-        a run that was placing a gone episode has finished placing it.
-        """
-        clusters = self._stores.cluster
-        # A barrier first: a clustering run that found one of these episodes
-        # still in md before step 1 removed it holds this lock until it has
-        # written the episode into a cluster. Waiting for it here makes the
-        # lookup below see that write; a run that takes the lock after this
-        # finds the episode gone and skips it.
-        async with user_cluster_lock(scope.app_id, scope.project_id, scope.owner_id):
-            pass
-        cluster_ids: set[str] = set()
-        for entry_id in sorted(gone):
-            found = await clusters.find_cluster_for_member(
-                scope, "episode", entry_id, kind="user_memory"
-            )
-            if found is not None:
-                cluster_ids.add(found)
-        for cluster_id in sorted(cluster_ids):
-            for attempt in range(_DETACH_ATTEMPTS):
-                ids = [m for m, _ in await clusters.members(cluster_id)]
-                alive = await self._alive(scope, ids)
-                async with user_cluster_lock(
-                    scope.app_id, scope.project_id, scope.owner_id
-                ):
-                    now = [m for m, _ in await clusters.members(cluster_id)]
-                    if now != ids:
-                        if attempt < _DETACH_ATTEMPTS - 1:
-                            continue
-                        ids, alive = now, await self._alive(scope, now)
-                    await self._restamp(cluster_id, ids, alive, gone)
-                break
-
-    async def _alive(self, scope: Scope, ids: Sequence[str]) -> dict[str, Episode]:
-        stored = await self._stores.episode.read_many(scope, ids)
-        return {s.ref.entry_id: s.item for s in stored}
-
-    async def _restamp(
-        self,
-        cluster_id: str,
-        ids: Sequence[str],
-        alive: Mapping[str, Episode],
-        gone: set[str],
-    ) -> None:
-        left = [alive[m] for m in ids if m not in gone and m in alive]
-        clusters = self._stores.cluster
-        if not left:
-            await clusters.delete(cluster_id)
-            return
-        kept = {m for m in ids if m not in gone and m in alive}
-        newest = sorted(left, key=lambda e: e.timestamp)[-_PREVIEW_CAP:]
-        await clusters.detach(
-            cluster_id,
-            [m for m in ids if m not in kept],
-            count=len(left),
-            last_ts=max(e.timestamp for e in left),
-            preview=[e.episode for e in newest],
-        )
+        return tuple(forget_ids)
 
 
-def _split_memory_id(memory_id: str) -> tuple[str, str]:
-    """``<owner_id>_<entry_id>`` -> ``(owner_id, entry_id)`` (validated upstream)."""
-    match = _MEMORY_ID.fullmatch(memory_id)
-    if match is None:
-        raise ValueError(f"not an episode memory id: {memory_id!r}")
-    return match["owner"], match["entry"]
-
-
-async def _incomplete[T](step: Awaitable[T]) -> T:
-    """Await a step taken after the deletion began; a failure is incomplete."""
-    try:
-        return await step
-    except (SessionBusyError, DeletionIncompleteError):
-        raise
-    except Exception as exc:
-        raise DeletionIncompleteError(str(exc)) from exc
+def _count(result: UserForgetResult) -> int:
+    """Memories one forget took out of default reads."""
+    return (
+        len(result.episodes)
+        + len(result.image_memories)
+        + len(result.scenes)
+        + len(result.profile_items)
+    )

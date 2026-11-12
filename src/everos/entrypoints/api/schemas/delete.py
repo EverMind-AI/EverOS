@@ -23,7 +23,9 @@ class DeleteRequest(BaseModel):
     """Which memories to delete: an owner, a session, or one owner's session.
 
     At least one of ``user_id``, ``agent_id`` and ``session_id``; never both
-    ``user_id`` and ``agent_id``.
+    ``user_id`` and ``agent_id``. EverOS 2.0 has no hard delete: a delete is a
+    forget of the same scope (``POST /memory/forget``, run at once), reversible
+    by the ``forget_ids`` it answers with; an ``agent_id`` is refused (422).
 
     With ``group_id`` the delete is the group's (docs/group-memory.md,
     section 15): an owner's or admin's forget -- soft, propagated, undone by
@@ -76,16 +78,19 @@ class DeleteRequest(BaseModel):
 
 
 class DeleteResponseData(BaseModel):
-    """What a deletion removed.
+    """What a delete forgot: EverOS 2.0 has no hard delete.
 
     Attributes:
         filters: The scope fields the request set.
-        count: Memories removed (entries, plus one per skill and one for the
-            profile when a whole owner is deleted).
+        count: Memories taken out of default reads (episodes, picture
+            memories, scenes and profile items marked forgotten).
+        forget_ids: The forgets it ran, one per user it reached;
+            ``POST /memory/forget/undo`` takes each.
     """
 
     filters: list[str]
     count: int
+    forget_ids: list[str] = Field(default_factory=list)
 
 
 class GroupDeleteResponseData(BaseModel):
@@ -124,8 +129,9 @@ class DeleteReason(BaseModel):
 class DeleteByIdsRequest(BaseModel):
     """Episodes to delete, by memory id ``<owner_id>_<entry_id>``.
 
-    The whole request is rejected (422, nothing deleted) if any id is not an
-    episode id of a path-safe owner with a real date.
+    A forget of those episodes (target ``record``, per owner): nothing leaves
+    markdown. The whole request is rejected (422, nothing forgotten) if any id
+    is not an episode id of a path-safe owner with a real date.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -157,7 +163,9 @@ class DeleteByIdsRequest(BaseModel):
 
 
 class DeleteByIdsResponseData(BaseModel):
-    """``{"memory_type": "episode", "success": true}`` (Cloud's shape)."""
+    """``{"memory_type": "episode", "success": true}`` (Cloud's shape), with
+    the forgets it ran (``forget_ids``, one per owner)."""
 
     memory_type: Literal["episode"] = "episode"
     success: bool = True
+    forget_ids: list[str] = Field(default_factory=list)

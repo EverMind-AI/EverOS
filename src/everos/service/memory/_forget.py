@@ -43,7 +43,7 @@ from everos.core.observability.logging import get_logger
 from everos.memory import user_profile_lock, user_scenes_lock
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import newest_versions
-from everos.memory.models import Episode
+from everos.memory.models import Episode, Scene
 from everos.memory.ports import (
     Filter,
     MemoryRef,
@@ -54,6 +54,8 @@ from everos.memory.ports import (
     is_null,
     ne,
 )
+
+from ._forget_common import removed_item_ids
 
 if TYPE_CHECKING:
     from everos.memory.deps import Indexes, Stores
@@ -117,6 +119,11 @@ class ForgetResult:
         forget_id: The forget log entry this call wrote (``fg_<hex>``), or
             ``""`` when the log store is not configured. An explicit undo can
             name it; the default undo finds it by target.
+        replaced_episodes: Entry ids of the episode versions the rewrites
+            replaced, in the order of ``episodes``.
+        scenes: Entry ids of the scene versions written without the picture.
+        replaced_scenes: Entry ids of the scene versions they replaced.
+        profile_items: Ids of the profile items and replaced values taken out.
     """
 
     image_id: str
@@ -125,6 +132,10 @@ class ForgetResult:
     profiles: int
     pictures: Sequence[ForgottenPicture] = ()
     forget_id: str = ""
+    replaced_episodes: Sequence[str] = ()
+    scenes: Sequence[str] = ()
+    replaced_scenes: Sequence[str] = ()
+    profile_items: Sequence[str] = ()
 
 
 class ForgetManager:
@@ -152,7 +163,12 @@ class ForgetManager:
         self._eraser = eraser
 
     async def forget_image(
-        self, *, scope: Scope, image_id: str, reason: str | None = None
+        self,
+        *,
+        scope: Scope,
+        image_id: str,
+        reason: str | None = None,
+        requested_by: str | None = None,
     ) -> ForgetResult:
         """Forget ``image_id`` for ``scope``'s owner.
 
@@ -186,6 +202,7 @@ class ForgetManager:
                 owner_id=scope.owner_id,
                 owner_type=scope.owner_type,
                 reason=reason,
+                requested_by=requested_by,
                 entry_ids=tuple(hit.stored.ref.entry_id for hit in occurrences),
                 episode_ids=tuple(
                     (stored.ref.entry_id, ref.entry_id)
@@ -221,6 +238,10 @@ class ForgetManager:
                 for hit in occurrences
             ],
             forget_id=entry.forget_id,
+            replaced_episodes=[stored.ref.entry_id for stored in referring],
+            scenes=[ref.entry_id for _, ref in scenes],
+            replaced_scenes=[old.ref.entry_id for old, _ in scenes],
+            profile_items=removed_item_ids(profile_removed),
         )
 
     # ── steps ──────────────────────────────────────────────────────────────
@@ -349,16 +370,19 @@ class ForgetManager:
             )
         return refs
 
-    async def _rewrite_scenes(self, scope: Scope, image_id: str) -> list[MemoryRef]:
+    async def _rewrite_scenes(
+        self, scope: Scope, image_id: str
+    ) -> list[tuple[Stored[Scene], MemoryRef]]:
         """A new version, without the picture, of each scene that names it.
 
         Only a user's current versions: a superseded or forgotten one is out
         of every default read already. The edit is the episodes' own, under
         the owner's scene lock, so a scene update in flight finishes first.
+        Returns each replaced version with the new one's ref.
         """
         if scope.owner_type != "user":
             return []
-        written: list[MemoryRef] = []
+        written: list[tuple[Stored[Scene], MemoryRef]] = []
         async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
             for version, mark in await newest_versions(self._stores.scene, scope):
                 scene = version.item
@@ -379,7 +403,7 @@ class ForgetManager:
                     only_if=_always,
                 )
                 if ref is not None:
-                    written.append(ref)
+                    written.append((version, ref))
         return written
 
 

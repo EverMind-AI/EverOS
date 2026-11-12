@@ -65,11 +65,14 @@ this page only covers what is specific to a self-hosted EverOS.
 
 ## Behaviour on a self-hosted server
 
-- **`forget_session` deletes the session's memories.** It calls
-  [`POST /api/v2/memory/delete`](api.md#post-apiv2memorydelete) with the session id:
-  every owner's memories of that conversation and the conversation itself go. While the
-  session is still being memorized the server answers `SESSION_BUSY` ("nothing was deleted,
-  retry later"), which the tool passes on to the model.
+- **`forget_session` forgets the session's memories.** It calls
+  [`POST /api/v2/memory/delete`](api.md#post-apiv2memorydelete) with the session id,
+  which EverOS 2.0 answers with a forget (it has no hard delete): every user's memories
+  of that conversation are marked forgotten and leave every default read, reversibly
+  (the answer's `forget_ids` undo it through `POST /api/v2/memory/forget/undo`). An
+  agent's cases of the conversation are kept: an agent's memory has no forget yet. While
+  the session is still being memorized the server answers `SESSION_BUSY` ("nothing was
+  forgotten, retry later"), which the tool passes on to the model.
 - **New memories become searchable shortly after saving.** `add_memory` returns once
   extraction has written the Markdown; the search index catches up a moment later.
   `list_memories` shows new entries sooner than `search_memory`.

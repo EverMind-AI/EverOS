@@ -81,18 +81,26 @@ async def forget_orphaned_scenes(
 
 
 async def restore_revived_scenes(
-    episodes: EpisodeStore, scenes: SceneStore, scope: Scope
+    episodes: EpisodeStore,
+    scenes: SceneStore,
+    scope: Scope,
+    *,
+    keep: Collection[str] = (),
 ) -> list[Stored[Scene]]:
     """Clear the forget mark of each scene's newest version with a live episode.
 
     Only the newest version of a scene: an older one was replaced, and
-    bringing it back would make two versions current.
+    bringing it back would make two versions current. A version in ``keep``
+    (one a live forget names itself, rather than through its episodes) stays
+    forgotten.
     """
+    kept = set(keep)
     async with user_scenes_lock(scope.app_id, scope.project_id, scope.owner_id):
         revived = [
             version
             for version, mark in await newest_versions(scenes, scope)
             if mark == FORGOTTEN_MARK
+            and version.ref.entry_id not in kept
             and await alive_members(episodes, scope, version.item.member_ids)
         ]
         if revived:

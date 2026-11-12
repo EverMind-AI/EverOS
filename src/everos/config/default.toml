@@ -264,9 +264,10 @@ mode = "agent"
 # synchronous portion of pipeline dispatch.
 # Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
 session_lock_timeout_seconds = 360.0
-# How long a memory deletion of one session (POST /memory/delete with only
-# session_id) waits for an add() in progress on that session; past it the
-# deletion returns 503 SESSION_BUSY and deletes nothing.
+# How long a forget of a conversation (POST /memory/forget with a session
+# target, /forget/session, POST /memory/delete with a session_id, a group
+# forget) waits for an add() in progress on that session; past it the forget
+# returns 503 SESSION_BUSY and forgets nothing. 2.0 has no hard delete.
 delete_wait_seconds = 10.0
 
 [memorize.async_queue]

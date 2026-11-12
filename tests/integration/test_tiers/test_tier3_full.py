@@ -46,8 +46,10 @@ async def test_user_search_succeeds(tier3_runtime: AsyncClient) -> None:
 
 
 async def test_deletions_take_their_index_rows(tier3_runtime: AsyncClient) -> None:
-    """Both deletion routes erase the episode rows before they answer, on
-    either backend (the Milvus job runs this with ``index=milvus``)."""
+    """Both deletion routes -- forgets in 2.0 -- take the episodes out of the
+    index before they answer, on either backend (the Milvus job runs this with
+    ``index=milvus``). The entries stay in markdown, marked, so a later
+    projection may write a row back: never as a current one."""
     # One sender each: a second write into the same md file does not move the
     # cascade ledger that add_and_flush waits on.
     owners = {"s_tier3_del_session": "u_del_a", "s_tier3_del_id": "u_del_b"}
@@ -56,7 +58,10 @@ async def test_deletions_take_their_index_rows(tier3_runtime: AsyncClient) -> No
         await add_and_flush(tier3_runtime, session_id=sid, sender_id=owner)
 
     async def rows() -> dict[str, list[str]]:
-        return {o: [r["id"] for r in await episode_rows(o)] for o in owners.values()}
+        return {
+            o: [r["id"] for r in await episode_rows(o) if r["deprecated_by"] is None]
+            for o in owners.values()
+        }
 
     before = await rows()
     assert all(before.values()), before

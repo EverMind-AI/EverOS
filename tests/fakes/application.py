@@ -121,6 +121,10 @@ class StubMemoryService:
         self.forget_in_group = AsyncMock()
         self.undo_group_forget = AsyncMock()
         self.delete_in_group = AsyncMock()
+        self.update_memory = AsyncMock()
+        self.memory_history = AsyncMock()
+        self.forget = AsyncMock()
+        self.undo_forget = AsyncMock()
         # A stub serves every picture, as the route did before group memory.
         self.picture_visible = AsyncMock(return_value=True)
 
