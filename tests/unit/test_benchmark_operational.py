@@ -551,6 +551,38 @@ def test_readiness_accepts_the_server_this_run_started(
     fleet._await_ready(timeout_s=1.0)
 
 
+def test_a_start_that_lost_a_race_keeps_one_log_per_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every list the fleet keeps per server still pairs up after a retry.
+
+    Observed 2026-11-13: two of six LoCoMo runs lost a port block, retried, started,
+    then crashed in the capability check with ``zip() argument 2 is longer than
+    argument 1`` -- the retry had cleared the processes, URLs and roots but kept the
+    lost attempt's logs.
+    """
+    root = tmp_path / "store"
+    root.mkdir()
+    monkeypatch.setattr(run_mod.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(run_mod.subprocess, "Popen", lambda *a, **k: _Live(111))
+    attempts: list[int] = []
+
+    def _ready(self: run_mod._ServerFleet, timeout_s: float = 180.0) -> None:
+        attempts.append(self._first_port)
+        if len(attempts) == 1:
+            raise run_mod._PortRaceLostError("lost the first block")
+
+    monkeypatch.setattr(run_mod._ServerFleet, "_await_ready", _ready)
+    fleet = run_mod._ServerFleet(2, root, first_port=19400)
+    monkeypatch.setattr(fleet, "stop", lambda: None)
+
+    fleet.start()
+
+    assert len(attempts) == 2
+    assert len(fleet.procs) == len(fleet.urls) == len(fleet.roots) == 2
+    assert len(fleet.logs) == 2
+
+
 def test_a_server_replaced_after_startup_stops_the_run_before_it_spends(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

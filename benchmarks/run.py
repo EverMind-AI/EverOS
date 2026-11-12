@@ -726,14 +726,15 @@ class _ServerFleet:
                     f"({e}); retrying at {base + (attempt + 1) * 149}"
                 )
                 self.stop()
-                self.procs.clear()
-                self.urls.clear()
-                self.roots.clear()
         raise RuntimeError(
             f"could not claim a free port block after {attempts} attempts from {base}"
         )
 
     def _start_once(self) -> None:
+        # One attempt's servers, built from empty: the four lists pair up by index,
+        # and a lost race's leftovers in any one of them (it was `logs`) misaligned
+        # every later zip of them.
+        self.procs, self.urls, self.roots, self.logs = [], [], [], []
         exe = Path(sys.executable).parent / "everos"
         port = self._first_port
         for root in _store_roots(self._base_root, self.n):
