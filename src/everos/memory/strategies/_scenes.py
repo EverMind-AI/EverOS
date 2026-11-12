@@ -174,8 +174,7 @@ async def _write_version(
         return
     if previous is not None and mark is None and previous.item.held:
         logger.info(
-            "scene_held",
-            owner_type=scope.owner_type,
+            f"{scope.owner_type}_scene_held",
             owner_id=scope.owner_id,
             scene_id=scene_id,
             version=previous.item.version,
@@ -203,8 +202,7 @@ async def _write_version(
         scope, scene, supersedes=supersedes, only_if=NO_SOURCE_CHECK
     )
     logger.info(
-        "scene_written",
-        owner_type=scope.owner_type,
+        f"{scope.owner_type}_scene_written",
         owner_id=scope.owner_id,
         scene_id=scene_id,
         version=scene.version,

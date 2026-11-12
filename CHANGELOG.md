@@ -333,8 +333,9 @@ machinery that keeps a deleted memory from coming back.
     person replaced (`/memory/update`) is read as its new version, and a
     version written from a member that is gone since is not carried
     forward;
-  - log lines `scene_written` / `scene_held` with `owner_type` replace
-    `user_scene_*` / `group_scene_*`.
+  - the `group_scene_written` log line carries the fields `user_scene_written`
+    does (`owner_id`, `joining`, `read`, `mode`, `narrative_chars`,
+    `clipped`).
   - Cost: none for users. A group scene call is now bounded like a user's
     (about $0.00044 a call, prompt near 1,100-1,200 tokens, measured on the
     user side), where the reflector's UPDATE read the whole narrative and
