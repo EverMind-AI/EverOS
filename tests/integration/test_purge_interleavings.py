@@ -13,8 +13,9 @@ An item born while a purge of its scope runs may or may not keep its product
 Products are ``memcell`` rows -- SQLite-only writes; what keeps a stale one
 out is the OME gate and the queue's tombstone check, and the purge waiting
 for older work in flight before it deletes a second time. Items: OME events
-(the real Runner, gate and run-record store) and async memorize rows (the
-real queue and inbox). A restart drops everything in memory, keeps the
+(the real Runner, gate and run-record store), async memorize rows (the
+real queue and inbox) and write requests in flight (tracked as the HTTP
+middleware tracks them). A restart drops everything in memory, keeps the
 stores, rebuilds the marks
 from ``system.db`` and replays what was in flight, as crash recovery does.
 Invariants are checked at stable points: no purge running, nothing queued
@@ -121,6 +122,8 @@ class PurgeMachine(RuleBasedStateMachine):
         self.items: list[Item] = []
         self.purges: list[tuple[tuple[str, str | None, str | None], datetime]] = []
         self.tasks: set[asyncio.Task[Any]] = set()
+        self.writes: dict[asyncio.Task[Any], str] = {}
+        """In-flight write requests and the item each writes."""
         self.crashed = False
         """A run died in flight (its RUNNING row is left) and no restart yet."""
         self.seq = 0
@@ -258,6 +261,27 @@ class PurgeMachine(RuleBasedStateMachine):
 
         self.run(go())
 
+    @rule(where=st.sampled_from(SCOPES), slow=st.booleans())
+    def in_flight_write(self, where: tuple[str, str], slow: bool) -> None:
+        """A write request: tracked from its arrival while it runs (as the
+        HTTP middleware does), it writes its product when it ends -- possibly
+        after a purge confirmed meanwhile, which must wait for it."""
+        key = self._key("wr_")
+        born = get_utc_now()
+        self.items.append(Item(key, *where, born))
+        marks = self.purge.marks
+
+        async def go() -> None:
+            with marks.track(born):
+                await asyncio.sleep(0.3 if slow else 0)
+                await _write_product(key, *where)
+
+        task = self.loop.create_task(go())
+        self.writes[task] = key
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        self.run(asyncio.sleep(0.01))
+
     @rule()
     def deliver_one(self) -> None:
         self.run(self.queue.drain_once())
@@ -271,6 +295,10 @@ class PurgeMachine(RuleBasedStateMachine):
     def restart(self) -> None:
         async def go() -> None:
             await self.runner.stop()
+            # A request still running dies with the process: its client got
+            # an error and its write never happened.
+            died = {self.writes[t] for t in self.tasks if t in self.writes}
+            self.items = [i for i in self.items if i.key not in died]
             for task in list(self.tasks):
                 task.cancel()
             for task in list(self.tasks):

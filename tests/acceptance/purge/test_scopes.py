@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from everos.core.utils.datetime import from_iso_format
 from everos.infra.persistence.markdown import MarkdownReader
 
 from .journey import finish, inbox_rows, purge
@@ -16,6 +17,7 @@ from .observe import (
     SQLITE_TABLES,
     md_counts,
     rows,
+    s_leftovers,
     scope_counts,
     scope_dir,
     scope_dump,
@@ -87,8 +89,11 @@ def _purge_and_check(world: Any, body: dict[str, Any]) -> dict[str, Any]:
     ev.json("after_counts", after)
     ev.json("job", job)
     assert job["status"] == "succeeded", job
+    at = from_iso_format(job["created_at"])
     for app, project in purged:
         assert _zero_except_ledger(after[f"{app}/{project}"]) == {}
+        left = s_leftovers(root, app, project, before=at)  # A37, ome.db included
+        assert left == {}, (app, project, left)
         assert inbox_rows(root, app, project) == []  # D17: history gone too
         _ledger_is_counter_files_only(root, app, project)
     for scope in controls:

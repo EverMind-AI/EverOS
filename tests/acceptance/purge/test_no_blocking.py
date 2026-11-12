@@ -72,10 +72,12 @@ def _routes(srv: Any) -> list[tuple[str, str]]:
 
 
 def _sweep(
-    srv: Any, routes: list[tuple[str, str]], where: dict[str, str]
+    srv: Any,
+    routes: list[tuple[str, str]],
+    where: dict[str, str],
+    ids: dict[str, str],
 ) -> dict[tuple[str, str], int]:
     """Status of one request per route against ``where`` (purge routes skipped)."""
-    ids = _read_ids(srv, where)
     out: dict[tuple[str, str], int] = {}
     for method, path in routes:
         bare = re.sub(r"^/api/v[12]", "", path)
@@ -108,7 +110,8 @@ def test_t7_1_routes_answer_as_without_a_purge(make_world: Any) -> None:
     )
     srv = world.srv
     routes = _routes(srv)
-    baseline = {"other": _sweep(srv, routes, OTHER)}
+    o_ids, s_ids = _read_ids(srv, OTHER), _read_ids(srv, S)
+    baseline = {"other": _sweep(srv, routes, OTHER, o_ids)}
     job_id, _ = purge(srv, scope="project", **S)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:  # the first pass done, held before step 8
@@ -117,25 +120,39 @@ def test_t7_1_routes_answer_as_without_a_purge(make_world: Any) -> None:
             break
         time.sleep(0.2)
     assert job["status"] == "running", job
-    during = {"other": _sweep(srv, routes, OTHER)}
+    during = {
+        "other": _sweep(srv, routes, OTHER, o_ids),
+        "s": _sweep(srv, routes, S, s_ids),
+    }
     # Confirming another range answers the running job (D25), not 409.
     nonce = srv.purge(scope="app", app_id="a2").json()["data"]["nonce"]
     confirm = srv.call("POST", "/memory/purge/confirm", {"nonce": nonce})
     adds = {"other": _add(srv, OTHER, "during-o"), "s": _add(srv, S, "during-s")}
     assert srv.job(job_id).json()["data"]["status"] == "running"  # window open
+    assert confirm.status_code == 202 and confirm.json()["data"]["job_id"] == job_id
+    assert adds == {"other": 200, "s": 200}
+    release(srv.fp_dir, "purge.before_step8")
+    assert finish(srv, job_id)["status"] == "succeeded"
+    # (b): the purged project answers as the cleared project does.
+    cleared = _sweep(srv, routes, S, s_ids)
+
+    def show(codes: dict[tuple[str, str], int]) -> dict[str, int]:
+        return {f"{m} {p}": c for (m, p), c in codes.items()}
+
     world.ev.json(
         "routes",
         {
-            "baseline": {f"{m} {p}": c for (m, p), c in baseline["other"].items()},
-            "during": {f"{m} {p}": c for (m, p), c in during["other"].items()},
+            "baseline_other": show(baseline["other"]),
+            "during_other": show(during["other"]),
+            "during_s": show(during["s"]),
+            "cleared_s": show(cleared),
             "confirm_other": confirm.status_code,
             "adds": adds,
         },
     )
-    assert during == baseline
-    assert 409 not in during["other"].values()
-    assert confirm.status_code == 202 and confirm.json()["data"]["job_id"] == job_id
-    assert adds == {"other": 200, "s": 200}
+    assert during["other"] == baseline["other"]
+    assert during["s"] == cleared
+    for codes in during.values():
+        assert 409 not in codes.values()
+        assert all(c < 500 for c in codes.values()), codes
     assert {m for m, _ in routes} >= {"POST", "PUT", "PATCH", "DELETE"}
-    release(srv.fp_dir, "purge.before_step8")
-    assert finish(srv, job_id)["status"] == "succeeded"
