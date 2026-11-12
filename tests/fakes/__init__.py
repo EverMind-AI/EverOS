@@ -32,6 +32,7 @@ from .backfill import ScriptedReplayEngine as ScriptedReplayEngine
 from .backfill import backfill_deps as backfill_deps
 from .backfill import episode_row as episode_row
 from .deps import bundled_instructions as bundled_instructions
+from .deps import llm_clients as llm_clients
 from .deps import make_deps as make_deps
 from .deps import make_indexes as make_indexes
 from .deps import make_stores as make_stores
@@ -127,6 +128,7 @@ __all__ = [
     "index_repositories",
     "knowledge_llm",
     "knowledge_script",
+    "llm_clients",
     "make_application",
     "make_backfill_deps",
     "make_deps",

@@ -92,6 +92,7 @@ async def test_extracts_per_sender() -> None:
         events = await extract_foresight(_event(), deps)
 
     assert events == []
+    mock_cls.assert_called_once_with(llm=deps.llms.foresight)
     # Per-sender semantics: one LLM call per user sender.
     sender_id_calls = [
         call.kwargs.get("sender_id")

@@ -59,7 +59,7 @@ async def reflect_episodes(event: CronTick, deps: MemoryDeps) -> list[Event]:
         episode_index=deps.indexes.episode,
         memcell_store=deps.stores.memcell,
         report_store=deps.stores.reflection_report,
-        reflector=EpisodeReflector(llm=deps.llm),
+        reflector=EpisodeReflector(llm=deps.llms.reflection),
         custom_instructions=deps.instructions.load("reflect"),
     )
     owners = await deps.stores.cluster.list_distinct_owners()

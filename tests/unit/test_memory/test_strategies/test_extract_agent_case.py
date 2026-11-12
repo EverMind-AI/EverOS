@@ -24,6 +24,7 @@ from tests.fakes import (
     agent_track_llm,
     agent_track_script,
     agent_trajectory,
+    llm_clients,
     make_deps,
     seed_sources,
 )
@@ -50,7 +51,10 @@ def test_spec() -> None:
 
 
 async def test_writes_the_case_and_announces_it() -> None:
-    deps = seed_sources(make_deps(llm=agent_track_llm()), memcell_id="mc_a")
+    # Only the agent_case task can answer: any other task's client refuses.
+    deps = seed_sources(
+        make_deps(llms=llm_clients(agent_case=agent_track_llm())), memcell_id="mc_a"
+    )
     with structlog.testing.capture_logs() as captured:
         events = await extract_agent_case(_event(), deps)
 

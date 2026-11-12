@@ -30,10 +30,12 @@ from everos.memory.search import SearchRequest as SearchRequest
 from everos.memory.search import SearchResponse as SearchResponse
 
 from .bootstrap import Application as Application
+from .bootstrap import LLMTaskResolution as LLMTaskResolution
 from .bootstrap import Providers as Providers
 from .bootstrap import build_application as build_application
 from .bootstrap import build_providers as build_providers
 from .bootstrap import configure_process as configure_process
+from .bootstrap import describe_llm_tasks as describe_llm_tasks
 from .knowledge import CategoryOverview as CategoryOverview
 from .knowledge import CreateDocumentResult as CreateDocumentResult
 from .knowledge import DeleteResult as DeleteResult
@@ -106,6 +108,7 @@ __all__ = [
     "HealthReport",
     "KnowledgeExtractor",
     "KnowledgeService",
+    "LLMTaskResolution",
     "MemorizeResult",
     "MemoryService",
     "NullBackfillPresenter",
@@ -134,5 +137,6 @@ __all__ = [
     "build_providers",
     "compute_disabled_features",
     "configure_process",
+    "describe_llm_tasks",
     "format_tokens",
 ]

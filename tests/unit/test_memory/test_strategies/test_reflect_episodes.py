@@ -122,13 +122,18 @@ async def test_reflect_returns_every_owner_merge() -> None:
             )
         ]
 
-    with patch(
-        "everos.memory.strategies.reflect_episodes.ReflectionOrchestrator"
-    ) as orchestrator_cls:
+    with (
+        patch(
+            "everos.memory.strategies.reflect_episodes.ReflectionOrchestrator"
+        ) as orchestrator_cls,
+        # Imported inside the strategy, so patched where it is defined.
+        patch("everalgo.user_memory.EpisodeReflector") as reflector_cls,
+    ):
         orchestrator_cls.return_value.run = AsyncMock(side_effect=merged_for)
         events = await reflect_episodes(_TICK, deps)
 
     assert sorted(e.owner_id for e in events) == ["u_alice", "u_bob"]
+    reflector_cls.assert_called_once_with(llm=deps.llms.reflection)
 
 
 # ── finish_reflection ────────────────────────────────────────────────────

@@ -24,12 +24,22 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable, Mapping
+from enum import StrEnum
 from functools import cache
 from pathlib import Path
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -62,7 +72,7 @@ def resolve_root(explicit: str | None = None) -> Path:
 
 ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
 """How an LLM section asks its endpoint for JSON; see
-:attr:`LLMSettings.response_format_mode`."""
+:attr:`LLMClientSettings.response_format_mode`."""
 
 
 class MemorySettings(BaseModel):
@@ -150,23 +160,102 @@ class SqliteSettings(BaseModel):
     cache_size_kb: int = Field(default=2048, ge=0)
 
 
-class LLMSettings(BaseModel):
-    """LLM client configuration.
+class LLMTask(StrEnum):
+    """A place the application calls an LLM; each has an optional ``[llm.<task>]``.
 
-    Read by the service layer when lazily constructing the LLM client
-    handed to algo extractors. Provider-agnostic field names — the
-    project follows the OpenAI API protocol so any OpenAI-compatible
-    endpoint plugs in via ``base_url``.
-
-    Env binding (via parent ``Settings``):
-        EVEROS_LLM__MODEL
-        EVEROS_LLM__API_KEY
-        EVEROS_LLM__BASE_URL
-        EVEROS_LLM__TIMEOUT_SECONDS
-        EVEROS_LLM__EXTRA
-        EVEROS_LLM__RESPONSE_FORMAT_MODE
-        EVEROS_LLM__INVALID_REPLY_RETRIES
+    The values are a stable configuration interface -- section names in
+    ``everos.toml`` and ``EVEROS_LLM__<TASK>__<FIELD>`` variables -- so renaming
+    one breaks every config that sets it.
     """
+
+    BOUNDARY = "boundary"
+    EPISODE = "episode"
+    SUMMARY = "summary"
+    ATOMIC_FACT = "atomic_fact"
+    FORESIGHT = "foresight"
+    PROFILE = "profile"
+    REFLECTION = "reflection"
+    AGENT_CASE = "agent_case"
+    AGENT_SKILL = "agent_skill"
+    KNOWLEDGE = "knowledge"
+    SEARCH = "search"
+    DECIDER = "decider"
+
+
+LLM_TASK_DEFAULTS: Final[Mapping[LLMTask, Mapping[str, Any]]] = MappingProxyType(
+    {
+        LLMTask.DECIDER: MappingProxyType(
+            {
+                "timeout_seconds": 60.0,
+                "max_tokens": 512,
+                "sdk_max_retries": 0,
+                "invalid_reply_retries": 1,
+            }
+        ),
+    }
+)
+"""Fields a task takes from its own default, not from ``[llm]``, when its section
+leaves them unset.
+
+Only the decider has any. It runs inside a search request, so one round's
+deadline and retry budget are bounded by the caller waiting on it, not by
+``[llm]``'s background-extraction values. The values are the ones ``[decider]``
+shipped with. ``max_tokens`` is a guard, not a budget: the reply is one JSON
+object of a few dozen tokens, and uncapped, a model that will not stop generates
+until the deadline, losing the round to a timeout instead of a visible parse
+failure. ``sdk_max_retries`` is 0 because ``[decider].retries`` already retries
+at its own layer and the two multiply -- four decider attempts times three SDK
+requests against a 60s deadline was a 728s round."""
+
+
+def _blank_to_none(value: object) -> object:
+    """Read a blank string as an absent value, so the field inherits.
+
+    A config template's ``api_key = ""`` must not mask the key it inherits.
+    """
+    if isinstance(value, SecretStr):
+        return value if value.get_secret_value() else None
+    return None if value == "" else value
+
+
+def _reject_unknown_keys(
+    data: object, section: str, valid: Mapping[str, Iterable[str]]
+) -> None:
+    """Fail on a key ``section`` does not define, listing every valid one.
+
+    Args:
+        data: The raw section, before field validation.
+        section: The section's TOML name, for the message.
+        valid: Valid key names by kind (e.g. ``"fields"``, ``"tasks"``).
+
+    Raises:
+        ValueError: ``data`` is a mapping with a key outside ``valid``.
+    """
+    if not isinstance(data, Mapping):
+        return
+    known = {name for names in valid.values() for name in names}
+    unknown = sorted(str(key) for key in data if key not in known)
+    if unknown:
+        listing = "; ".join(
+            f"{kind}: {', '.join(names)}" for kind, names in valid.items()
+        )
+        raise ValueError(
+            f"unknown key {', '.join(map(repr, unknown))} in [{section}]; "
+            f"valid {listing}"
+        )
+
+
+class LLMClientSettings(BaseModel):
+    """Everything one LLM client is built from.
+
+    ``[llm]`` (:class:`LLMSettings`) holds these for every task, and an
+    ``[llm.<task>]`` section (:class:`LLMTaskSettings`) can override any of
+    them for one task. Provider-agnostic field names -- the project follows the
+    OpenAI API protocol, so any OpenAI-compatible endpoint plugs in via
+    ``base_url``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     model: str = "gpt-4.1-mini"
     api_key: SecretStr | None = None
@@ -224,23 +313,121 @@ class LLMSettings(BaseModel):
     validation against the operator's model, has no choice, or was aborted by
     the server. Bounded here, cheaply, rather than by rerunning the whole
     operator; ``0`` hands the first failure straight to the caller."""
+    temperature: float | None = None
+    """Sampling temperature sent when an operator's call names none.
+
+    A default, never an override: everalgo's agentic retrieval sets its own
+    temperatures per call and keeps them. That is why it is a field and not an
+    ``extra`` entry -- ``extra`` is merged last and would overwrite them.
+    ``None`` leaves it out of the request."""
+    max_tokens: int | None = Field(default=None, ge=1)
+    """Output cap sent when an operator's call names none; ``None`` leaves it
+    out of the request. A reasoning model bills its thinking against it."""
+    sdk_max_retries: int | None = Field(default=None, ge=0)
+    """Transport retries inside the OpenAI SDK; ``None`` keeps the SDK default.
+    They multiply with ``invalid_reply_retries`` and with any retry an operator
+    layers on top."""
+
+
+class LLMTaskSettings(BaseModel):
+    """One task's ``[llm.<task>]``: any of ``[llm]``'s fields, for that task only.
+
+    Every field defaults to ``None``, meaning "inherit from ``[llm]``", and
+    each field is decided on its own: a section that names only ``model`` keeps
+    ``[llm]``'s endpoint, key and ``extra``. ``extra`` is one value -- written,
+    it replaces ``[llm].extra`` whole; it is never merged key by key. A blank
+    ``model``, ``api_key`` or ``base_url`` inherits too. Field meanings are
+    those of :class:`LLMClientSettings`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = None
+    api_key: SecretStr | None = None
+    base_url: str | None = None
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    extra: dict[str, Any] | None = None
+    response_format_mode: ResponseFormatMode | None = None
+    invalid_reply_retries: int | None = Field(default=None, ge=0)
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    sdk_max_retries: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _known_keys_only(cls, data: object) -> object:
+        _reject_unknown_keys(data, "llm.<task>", {"fields": cls.model_fields})
+        return data
+
+    @field_validator("model", "api_key", "base_url", mode="before")
+    @classmethod
+    def _blank_inherits(cls, value: object) -> object:
+        return _blank_to_none(value)
+
+
+class LLMSettings(LLMClientSettings):
+    """``[llm]``: the LLM every task uses, and an optional section per task.
+
+    Configuring ``[llm]`` alone runs everything. A task section
+    (:class:`LLMTaskSettings`) overrides any field for that one task; what it
+    leaves unset comes from ``[llm]``, except the decider fields listed in
+    :data:`LLM_TASK_DEFAULTS`. The section names are :class:`LLMTask`'s values;
+    an unknown section or field fails the load, naming the valid ones.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL ... one
+        per :class:`LLMClientSettings` field
+        EVEROS_LLM__<TASK>__<FIELD>, e.g. EVEROS_LLM__BOUNDARY__MODEL
+    """
+
+    boundary: LLMTaskSettings = LLMTaskSettings()
+    """Boundary detection: cutting a session's messages into memcells."""
+    episode: LLMTaskSettings = LLMTaskSettings()
+    """Episode extraction from each memcell."""
+    summary: LLMTaskSettings = LLMTaskSettings()
+    """The episode's display summary, a call of its own made beside ``episode``."""
+    atomic_fact: LLMTaskSettings = LLMTaskSettings()
+    """Atomic-fact extraction."""
+    foresight: LLMTaskSettings = LLMTaskSettings()
+    """Foresight extraction."""
+    profile: LLMTaskSettings = LLMTaskSettings()
+    """User-profile extraction."""
+    reflection: LLMTaskSettings = LLMTaskSettings()
+    """Episode reflection."""
+    agent_case: LLMTaskSettings = LLMTaskSettings()
+    """Agent-case extraction, and the case gate when it is enabled."""
+    agent_skill: LLMTaskSettings = LLMTaskSettings()
+    """Agent-skill extraction and skill clustering."""
+    knowledge: LLMTaskSettings = LLMTaskSettings()
+    """Topic extraction from uploaded knowledge documents."""
+    search: LLMTaskSettings = LLMTaskSettings()
+    """Search-time calls: agentic retrieval and the LLM rerank lane."""
+    decider: LLMTaskSettings = LLMTaskSettings()
+    """The multi-round retrieval decider (``llm_multiround``). Replaces the LLM
+    fields of ``[decider]``, which are still read (see :class:`DeciderSettings`)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _known_keys_only(cls, data: object) -> object:
+        _reject_unknown_keys(
+            data,
+            "llm",
+            {"fields": LLMClientSettings.model_fields, "tasks": list(LLMTask)},
+        )
+        return data
 
 
 class DeciderSettings(BaseModel):
-    """LLM driving the multi-round retrieval decider.
+    """``[decider]``: how the multi-round retrieval loop runs.
 
-    A flat section mirroring ``[llm]``, kept separate for the same reason
-    ``[multimodal]`` is: the two jobs have different demands. ``[llm]`` extracts
-    memories during ingestion -- a long, throughput-bound batch job -- while this one
-    runs inside the search request and decides, round by round, which episodes are
-    core and what to query next. Sharing one setting forced the decider to be whatever
-    model the store happened to be extracted with, and made "which model made the
-    retrieval decisions" unanswerable after the fact.
+    The decider's LLM is a task, ``[llm.decider]`` (see :class:`LLMSettings`).
+    The LLM fields first below are this section's former spelling of it, still
+    read so that existing configs and ``EVEROS_DECIDER__*`` launch scripts keep
+    working: each one set applies to the decider unless ``[llm.decider]`` sets
+    the same field, and startup logs a deprecation warning. Unset (``None``, or
+    blank for ``model`` / ``api_key`` / ``base_url``) they play no part.
 
-    Empty ``model`` falls back to ``[llm]``, so existing deployments and every store
-    built before this section existed behave exactly as they did.
-
-    The loop-tuning fields below used to exist only as ``EVEROS_LLMMR_*`` environment
+    The loop-tuning fields used to exist only as ``EVEROS_LLMMR_*`` environment
     variables read once at import time inside
     :mod:`everos.memory.search.llm_multiround`. That made them undiscoverable -- nothing
     in the config named them, so an operator could not find out they existed, let
@@ -249,58 +436,27 @@ class DeciderSettings(BaseModel):
     names still win when set, so nothing in flight changes.
 
     Env binding (via parent ``Settings``):
-        EVEROS_DECIDER__MODEL
-        EVEROS_DECIDER__API_KEY
-        EVEROS_DECIDER__BASE_URL
-        EVEROS_DECIDER__TIMEOUT_SECONDS
-        EVEROS_DECIDER__EXTRA
-        EVEROS_DECIDER__MAX_ROUNDS ... and one per field below
+        EVEROS_DECIDER__MAX_ROUNDS ... and one per loop-tuning field
+        EVEROS_DECIDER__MODEL / __API_KEY / __BASE_URL / __TIMEOUT_SECONDS /
+        __EXTRA / __MAX_TOKENS / __SDK_MAX_RETRIES / __RESPONSE_FORMAT_MODE /
+        __INVALID_REPLY_RETRIES (deprecated: EVEROS_LLM__DECIDER__*)
     """
 
-    model: str = ""
+    # ── deprecated: the decider's LLM, now [llm.decider] ─────────────────
+    model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
-    timeout_seconds: float = Field(default=60.0, gt=0)
-    """Per-request deadline for one decider round. See
-    :attr:`LLMSettings.timeout_seconds`; separate because this one sits inside a
-    search request, where the acceptable wait is bounded by the caller rather
-    than by a background queue."""
-    extra: dict[str, Any] = Field(default_factory=dict)
-    """Provider-specific request fields for the decider. See
-    :attr:`LLMSettings.extra`; kept separate so the decider and the extractor can
-    run on gateways with different vocabularies.
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    extra: dict[str, Any] | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    sdk_max_retries: int | None = Field(default=None, ge=0)
+    response_format_mode: ResponseFormatMode | None = None
+    invalid_reply_retries: int | None = Field(default=None, ge=0)
 
-    The field a Qwen endpoint needs lives here::
-
-        EVEROS_DECIDER__EXTRA='
-          {"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
-
-    Without it a Qwen chat template leaves thinking ON, and an un-finetuned model
-    spends the whole budget reasoning: measured on Qwen3.5-0.8B as decider, 39.3% of
-    rounds returned nothing within the 60s deadline, each burning ~729s of retries
-    before falling back to a fixed top-3 core. A finetuned policy does not show this
-    because its targets were rendered with thinking off, so it emits the empty
-    ``<think></think>`` and stops."""
-    max_tokens: int | None = Field(default=512, ge=1)
-    """Output cap for one decider reply. The contract is a single JSON object of a
-    few dozen tokens, so this is a guard, not a budget: uncapped, a model that will
-    not stop generates until the deadline and the round is lost to a timeout rather
-    than to a parse failure that would have been visible."""
-    sdk_max_retries: int | None = Field(default=0, ge=0)
-    """Retries inside the OpenAI SDK. 0 because :attr:`retries` below already retries
-    at this layer, and the two multiply -- see the note in ``OpenAIProvider``. None
-    keeps the SDK default.
-
-    Bounded at zero: the SDK reads it as a count, so a negative value is not "fewer
-    retries" but a misconfiguration that would reach ``AsyncOpenAI`` unexamined."""
-
-    response_format_mode: ResponseFormatMode = "json_schema"
-    """How the reply format is requested. See
-    :attr:`LLMSettings.response_format_mode`. Inherited from ``[llm]``
-    together with the model when ``model`` is empty."""
-    invalid_reply_retries: int = Field(default=1, ge=0)
-    """Extra attempts after an unusable reply. See
-    :attr:`LLMSettings.invalid_reply_retries`."""
+    @field_validator("model", "api_key", "base_url", mode="before")
+    @classmethod
+    def _blank_inherits(cls, value: object) -> object:
+        return _blank_to_none(value)
 
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)
@@ -371,10 +527,10 @@ class MultimodalSettings(BaseModel):
     max_concurrency: int = 4
     response_format_mode: ResponseFormatMode = "json_schema"
     """How the reply format is requested. See
-    :attr:`LLMSettings.response_format_mode`."""
+    :attr:`LLMClientSettings.response_format_mode`."""
     invalid_reply_retries: int = Field(default=1, ge=0)
     """Extra attempts after an unusable reply. See
-    :attr:`LLMSettings.invalid_reply_retries`."""
+    :attr:`LLMClientSettings.invalid_reply_retries`."""
 
     # ``file://`` content-item support (read locally by EverOS, not everalgo).
     file_uri_allow_dirs: list[str] = []
@@ -989,6 +1145,10 @@ class Settings(BaseSettings):
         env_nested_delimiter="__",
         toml_file=_DEFAULT_TOML_PATH,
         extra="ignore",
+        # An error echoes the failing section's input, credentials included: a
+        # mistyped key under [llm] would print the api_key next to it. Only the
+        # outermost model's setting applies to nested errors.
+        hide_input_in_errors=True,
     )
 
     def __init__(self, *, _everos_root: Path | None = None, **kwargs: object) -> None:

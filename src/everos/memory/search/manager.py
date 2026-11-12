@@ -192,8 +192,8 @@ class SearchManager:
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
-        # Multi-round retrieval runs its own client: [decider] falls back to [llm]
-        # field by field, but never shares the extraction client's SDK retries.
+        # Multi-round retrieval runs its own client ([llm.decider]): it inherits
+        # [llm] field by field but never shares another task's SDK retries.
         self._decider_llm = decider_client
         self._search_tokenizer = search_tokenizer
         # The zone the agentic sufficiency prompt shows candidate dates in.

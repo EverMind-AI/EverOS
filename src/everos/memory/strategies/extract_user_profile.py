@@ -267,7 +267,7 @@ async def extract_user_profile(
         # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
         old_profile = profile_mapper.to_algo(existing) if existing else None
         language = _profile_language(existing, event)
-        extractor = ProfileExtractor(llm=deps.llm)
+        extractor = ProfileExtractor(llm=deps.llms.profile)
         new_profile = await extractor.aextract(
             memcells,
             sender_id=event.owner_id,

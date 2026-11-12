@@ -51,7 +51,8 @@ class UserMemoryPipeline:
         memcell_store: Whether the cell still exists when its episodes are
             written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
-        llm_client: LLM for extraction.
+        episode_llm: LLM for the episode extraction.
+        summary_llm: LLM for the display summary.
         tz: The zone message times are shown to the model in.
     """
 
@@ -60,12 +61,13 @@ class UserMemoryPipeline:
         episode_store: EpisodeStore,
         memcell_store: MemcellStore,
         instructions: CustomInstructions,
-        llm_client: LLMClient,
         *,
+        episode_llm: LLMClient,
+        summary_llm: LLMClient,
         tz: tzinfo = UTC,
     ) -> None:
-        self._ep_ext = EpisodeExtractor(llm=llm_client)
-        self._summarizer = EpisodeSummarizer(llm=llm_client)
+        self._ep_ext = EpisodeExtractor(llm=episode_llm)
+        self._summarizer = EpisodeSummarizer(llm=summary_llm)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
         self._instructions = instructions

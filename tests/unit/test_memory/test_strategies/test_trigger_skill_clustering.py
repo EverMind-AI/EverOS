@@ -23,7 +23,12 @@ from everos.memory.strategies import (
     TRIGGER_SKILL_CLUSTERING_SPEC,
     trigger_skill_clustering,
 )
-from tests.fakes import FakeEmbeddingProvider, agent_track_llm, make_deps
+from tests.fakes import (
+    FakeEmbeddingProvider,
+    agent_track_llm,
+    llm_clients,
+    make_deps,
+)
 
 _MODULE = "everos.memory.strategies.trigger_skill_clustering"
 _AGENT = Scope(
@@ -171,7 +176,8 @@ def _seed_dissimilar_cluster(deps: MemoryDeps) -> None:
 async def test_merges_into_existing_cluster_when_the_model_picks_it() -> None:
     """The model picks the existing cluster → persisted under its id."""
     llm = agent_track_llm()
-    deps = make_deps(llm=llm)
+    # Only the agent_skill task can answer: any other task's client refuses.
+    deps = make_deps(llms=llm_clients(agent_skill=llm))
     _seed_dissimilar_cluster(deps)
 
     (announced,) = await trigger_skill_clustering(_event(), deps)

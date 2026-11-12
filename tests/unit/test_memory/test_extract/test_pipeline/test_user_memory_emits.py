@@ -74,7 +74,8 @@ def _pipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
         memcell_store=memcells,
         instructions=bundled_instructions(),
-        llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
+        episode_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
+        summary_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
 
 
@@ -221,6 +222,23 @@ def _requested(llm: FakeLLMClient) -> list[str]:
     return [call.response_format.__name__ for call in llm.calls]
 
 
+async def test_episode_and_summary_each_call_their_own_client() -> None:
+    """``[llm.episode]`` and ``[llm.summary]`` can name different models."""
+    episode_llm, summary_llm = user_track_llm(), user_track_llm()
+    pipeline = UserMemoryPipeline(
+        episode_store=_recording_store(),
+        memcell_store=_alive_memcells(),
+        instructions=bundled_instructions(),
+        episode_llm=episode_llm,
+        summary_llm=summary_llm,
+    )
+
+    await pipeline.run_cell(_INGESTED, _prepared("u1"))
+
+    assert _requested(episode_llm) == ["_EpisodeReply"]
+    assert _requested(summary_llm) == ["_SummaryReply"]
+
+
 async def test_run_emits_extract_and_persist_spans() -> None:
     """run_cell opens an everos.extract generation span (where LLM token
     usage lands) and an everos.persist.markdown span around the md write."""
@@ -328,7 +346,8 @@ async def test_episode_and_summary_requests_show_times_in_the_configured_zone() 
         episode_store=_recording_store(),
         memcell_store=_alive_memcells(),
         instructions=bundled_instructions(),
-        llm_client=llm,
+        episode_llm=llm,
+        summary_llm=llm,
         tz=timezone(timedelta(hours=8)),
     )
 

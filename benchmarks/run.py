@@ -2913,9 +2913,10 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
 
 
 _DECIDER_MAX_TOKENS_DEFAULT = 512
-"""Mirrors ``DeciderSettings.max_tokens``. Duplicated rather than imported because this
-harness drives EverOS as a server over HTTP and does not import it; a drift here shows
-up as a probe that caps differently from the run it vouches for."""
+"""Mirrors the decider's own ``max_tokens`` default (``LLM_TASK_DEFAULTS`` in
+``everos.config``). Duplicated rather than imported because this harness drives
+EverOS as a server over HTTP and does not import it; a drift here shows up as a
+probe that caps differently from the run it vouches for."""
 
 
 def _decider_max_tokens(config: BenchmarkConfig) -> int:
@@ -3035,8 +3036,8 @@ def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
     """``(model, base_url, api_key)`` the servers' decider will actually use.
 
     The same ``[decider]`` -> ``[llm]`` fallback
-    ``everos.component.llm.resolve_decider_config`` applies, expressed against the
-    fields this harness pushes into the servers it starts (see
+    ``everos.component.llm.resolve_llm_task(..., LLMTask.DECIDER)`` applies,
+    expressed against the fields this harness pushes into the servers it starts (see
     ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
     ``backbone_*`` becomes ``EVEROS_LLM__*``, and anything unset falls through to this
     process's own environment).

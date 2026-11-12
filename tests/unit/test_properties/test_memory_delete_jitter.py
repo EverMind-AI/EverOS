@@ -404,7 +404,8 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
         episode_store=world.stores.episode,
         memcell_store=world.stores.memcell,
         instructions=bundled_instructions(),
-        llm_client=llm,
+        episode_llm=llm,
+        summary_llm=llm,
     )
     # The extraction model; sometimes slow enough for a whole session
     # deletion to land between the memcell row and the episode write.

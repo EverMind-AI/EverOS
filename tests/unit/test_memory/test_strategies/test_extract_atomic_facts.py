@@ -68,7 +68,7 @@ async def test_extracts_from_episode_text_and_writes_under_event_owner() -> None
         events = await extract_atomic_facts(_event(), deps)
 
     # Exactly one LLM call with the episode text.
-    extractor_cls.assert_called_once_with(llm=deps.llm)
+    extractor_cls.assert_called_once_with(llm=deps.llms.atomic_fact)
     call = extractor_cls.return_value.aextract_from_text.call_args
     assert call.args[0] == "alice likes hiking and lives in tokyo"
     assert call.kwargs["timestamp"] == 1_700_000_000_000

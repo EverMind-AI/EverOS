@@ -6,6 +6,7 @@ from datetime import UTC, tzinfo
 
 __all__ = [
     "bundled_instructions",
+    "llm_clients",
     "make_deps",
     "make_indexes",
     "make_stores",
@@ -13,6 +14,7 @@ __all__ = [
     "unscripted_llm",
 ]
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +22,7 @@ from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.deps import Indexes, MemoryDeps, Stores
+from everos.memory.deps import Indexes, LLMClients, MemoryDeps, Stores
 from everos.memory.models import Episode, MemCell
 from everos.memory.ports import Scope
 
@@ -63,6 +65,21 @@ def unscripted_llm() -> FakeLLMClient:
     return FakeLLMClient(handler=_refuse)
 
 
+def llm_clients(llm: Any = None, **per_task: Any) -> LLMClients:
+    """``llm`` for every task, except the tasks named in ``per_task``.
+
+    ``llm_clients(fake)`` is the single-model deployment and
+    ``llm_clients(fake, profile=other)`` points one task elsewhere. Without
+    ``llm`` every task gets a refusing client of its own, so a test can tell
+    which task's client a consumer was handed.
+    """
+    tasks = {
+        field.name: llm if llm is not None else unscripted_llm()
+        for field in dataclasses.fields(LLMClients)
+    }
+    return LLMClients(**{**tasks, **per_task})
+
+
 def make_stores(**overrides: Any) -> Stores:
     """Fresh in-memory stores; keyword arguments replace single stores."""
     fields: dict[str, Any] = {
@@ -99,6 +116,7 @@ def make_indexes(**overrides: Any) -> Indexes:
 def make_deps(
     *,
     llm: Any = _DEFAULT,
+    llms: LLMClients | None = None,
     embedding: Any = _DEFAULT,
     stores: Stores | None = None,
     indexes: Indexes | None = None,
@@ -108,13 +126,16 @@ def make_deps(
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
-    ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
-    :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
-    unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
-    gate) unless given.
+    ``llm`` serves every task; without it each task gets its own LLM that
+    refuses every call. ``llms`` (see :func:`llm_clients`) gives tasks clients
+    of their own and wins over ``llm``. ``embedding`` defaults to a
+    :class:`FakeEmbeddingProvider`; pass ``None`` to model an unconfigured
+    provider. ``case_judge`` stays ``None`` (no agent-case gate) unless given.
     """
+    if llms is None:
+        llms = llm_clients(None if llm is _DEFAULT else llm)
     return MemoryDeps(
-        llm=unscripted_llm() if llm is _DEFAULT else llm,
+        llms=llms,
         embedding=FakeEmbeddingProvider() if embedding is _DEFAULT else embedding,
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),

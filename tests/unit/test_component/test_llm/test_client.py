@@ -1,6 +1,6 @@
 """LLM role resolution -- credentials gate, factory inputs, observer choice.
 
-Each role's section resolves into an ``LLMClientConfig`` (or raises
+Each task's resolution becomes an ``LLMClientConfig`` (or raises
 ``LLMNotConfiguredError`` naming the section), which ``build_llm_provider``
 turns into an ``OpenAIProvider``; with ``[observability] enabled`` the
 provider reports to a ``TracingObserver``, otherwise to a ``NullObserver``.
@@ -19,13 +19,13 @@ from everos.component.llm import (
     NullObserver,
     OpenAIProvider,
     build_llm_provider,
+    llm_client_config,
     observer_for,
-    resolve_decider_config,
-    resolve_llm_config,
+    resolve_llm_task,
     resolve_multimodal_config,
 )
 from everos.component.llm._tracing_observer import TracingObserver
-from everos.config import Settings
+from everos.config import LLMTask, LLMTaskSettings, Settings
 from everos.config.settings import (
     LLMSettings,
     MultimodalSettings,
@@ -54,33 +54,43 @@ def _settings(
     )
 
 
+def _config(settings: Settings, task: LLMTask = LLMTask.EPISODE) -> LLMClientConfig:
+    return llm_client_config(resolve_llm_task(settings, task))
+
+
 def test_raises_when_api_key_missing() -> None:
     with pytest.raises(LLMNotConfiguredError, match=r"\[llm\]"):
-        resolve_llm_config(_settings(api_key=None))
+        _config(_settings(api_key=None))
 
 
 def test_raises_when_base_url_missing() -> None:
     with pytest.raises(LLMNotConfiguredError, match=r"\[llm\]"):
-        resolve_llm_config(_settings(base_url=None))
+        _config(_settings(base_url=None))
+
+
+def test_the_message_names_the_task() -> None:
+    with pytest.raises(LLMNotConfiguredError, match="task profile"):
+        _config(_settings(api_key=None), LLMTask.PROFILE)
 
 
 def test_the_factory_builds_an_openai_provider() -> None:
     settings = _settings()
 
-    provider = build_llm_provider(
-        resolve_llm_config(settings), observer=observer_for(settings)
-    )
+    provider = build_llm_provider(_config(settings), observer=observer_for(settings))
 
     assert isinstance(provider, OpenAIProvider)
 
 
 def test_llm_section_reaches_the_factory() -> None:
-    config = resolve_llm_config(
+    config = _config(
         _settings(
             timeout_seconds=30.0,
             extra={"extra_body": {"x": 1}},
             response_format_mode="json_object",
             invalid_reply_retries=3,
+            temperature=0.3,
+            max_tokens=16384,
+            sdk_max_retries=1,
         )
     )
 
@@ -89,9 +99,12 @@ def test_llm_section_reaches_the_factory() -> None:
         api_key="sk-test",
         base_url="https://example.test",
         timeout=30.0,
+        max_retries=1,
         extra={"extra_body": {"x": 1}},
         response_format_mode="json_object",
         invalid_reply_retries=3,
+        temperature=0.3,
+        max_tokens=16384,
     )
 
 
@@ -113,10 +126,15 @@ def test_multimodal_section_reaches_the_factory() -> None:
     )
 
 
-def test_decider_mode_follows_the_section_that_supplies_the_model() -> None:
-    """Format support is a property of the model, so it is inherited with it."""
-    settings = _settings(response_format_mode="prompt_only")
-    assert resolve_decider_config(settings).response_format_mode == "prompt_only"
+def test_decider_mode_is_inherited_field_by_field() -> None:
+    """Naming another model does not reset the mode; setting the mode does.
 
+    Before tasks the mode travelled with whichever section named the model; now
+    every field is decided on its own, like every other task's.
+    """
+    settings = _settings(response_format_mode="prompt_only")
     settings.decider.model = "other-model"
-    assert resolve_decider_config(settings).response_format_mode == "json_schema"
+    assert _config(settings, LLMTask.DECIDER).response_format_mode == "prompt_only"
+
+    settings.llm.decider = LLMTaskSettings(response_format_mode="json_object")
+    assert _config(settings, LLMTask.DECIDER).response_format_mode == "json_object"

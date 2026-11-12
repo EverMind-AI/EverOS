@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selects `nltk`, and the benchmark's ingest identity now records the tokenizer,
   so a store indexed with another one is not resumed. Changing `name` on an
   existing store requires `everos cascade rebuild`.
+- **Per-task LLM sections, `[llm.<task>]`.** `[llm]` alone still runs
+  everything; any of twelve tasks -- `boundary`, `episode`, `summary`,
+  `atomic_fact`, `foresight`, `profile`, `reflection`, `agent_case`,
+  `agent_skill`, `knowledge`, `search`, `decider` -- can override any `[llm]`
+  field for itself (`EVEROS_LLM__<TASK>__<FIELD>` in the environment). Each
+  field is inherited from `[llm]` on its own; `extra` is replaced whole, never
+  merged. Tasks that resolve to the same settings share one client; the decider
+  always has its own. `everos config show` prints what each task resolves to and
+  where each field came from, and the server logs the same at startup
+  (`llm.task.resolved`). See `docs/configuration.md`.
+- **`[llm] temperature`, `max_tokens` and `sdk_max_retries`** (also per task).
+  `temperature` and `max_tokens` are sent only when a call names none -- agentic
+  search keeps its own temperatures -- and, unset, the request carries neither,
+  as before.
 
 ### Changed
 
@@ -45,6 +59,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apply to `batch` only; `step` uses everalgo's own step limits. A tail the
   model judged complete is no longer closed early: the uncut tail waits for
   the next batch or the flush.
+- **The decider's LLM is `[llm.decider]`; the LLM keys of `[decider]` are
+  deprecated.** `[decider]` keeps the multi-round loop tuning. Its `model`,
+  `api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`,
+  `sdk_max_retries`, `response_format_mode` and `invalid_reply_retries` (and
+  `EVEROS_DECIDER__*`) still apply, with a startup warning; `[llm.decider]` wins
+  when both set a field. Unset, `timeout_seconds` (60), `max_tokens` (512),
+  `sdk_max_retries` (0) and `invalid_reply_retries` (1) keep the decider's own
+  defaults rather than `[llm]`'s.
+- **The decider inherits `extra` and `response_format_mode` from `[llm]` field by
+  field.** They used to follow whichever section named the model, so pointing
+  the decider at another model dropped `[llm].extra` -- re-enabling thinking on a
+  Qwen gateway configured to turn it off. A decider on a gateway that rejects
+  `[llm].extra` now sets its own `extra` (even `{}`), which replaces it. A
+  `[decider].extra` that only added keys to `[llm].extra` now replaces it too.
+- **`[llm]` rejects unknown keys.** A mistyped field or task name under `[llm]`
+  or `[llm.<task>]` -- including an `EVEROS_LLM__*` variable -- fails startup
+  with the valid names, where it used to be ignored. Other sections are
+  unchanged. Settings validation errors no longer echo the offending input, so a
+  mistyped `api_key` line is not printed with its key.
+- **`MemoryDeps.llm` is now `MemoryDeps.llms`** (one client per task, an
+  `LLMClients`), `UserMemoryPipeline` takes `episode_llm` and `summary_llm`,
+  and `Providers.llm` / `Providers.decider` became `Providers.llms`. In
+  `everos.component.llm`, `resolve_llm_config`, `resolve_decider_config` and
+  `DeciderClientConfig` gave way to `resolve_llm_task(s)`, `llm_client_config`
+  and `build_llm_task_providers`.
 
 ### Fixed
 

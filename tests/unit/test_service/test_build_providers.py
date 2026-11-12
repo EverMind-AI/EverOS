@@ -9,6 +9,7 @@ only place an operator can tell the two apart.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -35,7 +36,11 @@ class _RecordingLogger:
     """
 
     def __init__(self) -> None:
+        self.infos: list[dict[str, Any]] = []
         self.warnings: list[dict[str, Any]] = []
+
+    def info(self, event: str, **fields: Any) -> None:
+        self.infos.append({"event": event, **fields})
 
     def warning(self, event: str, **fields: Any) -> None:
         self.warnings.append({"event": event, **fields})
@@ -85,12 +90,14 @@ def test_an_unconfigured_llm_fails_the_build(llm: LLMSettings) -> None:
         build_providers(settings)
 
 
-def test_the_llm_and_decider_are_built_from_llm_alone() -> None:
-    providers = build_providers(_unconfigured())
+def test_every_task_is_built_from_llm_alone() -> None:
+    """One provider for the eleven extraction and search tasks, one for the decider."""
+    llms = build_providers(_unconfigured()).llms
 
-    assert providers.llm is not None
-    assert providers.decider is not None
-    assert providers.decider is not providers.llm
+    clients = {f.name: getattr(llms, f.name) for f in dataclasses.fields(llms)}
+    shared = {name for name, llm in clients.items() if llm is llms.boundary}
+    assert shared == set(clients) - {"decider"}
+    assert llms.decider is not llms.boundary
 
 
 def test_configured_optional_providers_are_built() -> None:

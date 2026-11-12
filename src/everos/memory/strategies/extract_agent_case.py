@@ -82,7 +82,7 @@ async def extract_agent_case(
 
     # 2. Run the extractor once; algo returns no case with the gate that
     #    rejected the memcell, or a single case.
-    extractor = AgentCaseExtractor(llm=deps.llm, gate=_case_gate(deps))
+    extractor = AgentCaseExtractor(llm=deps.llms.agent_case, gate=_case_gate(deps))
     result = await extractor.aextract_with_reason(event.memcell)
     if not result.cases:
         logger.info(

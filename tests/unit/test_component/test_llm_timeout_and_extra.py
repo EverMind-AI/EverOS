@@ -31,7 +31,8 @@ from typing import Any
 
 import pytest
 
-from everos.config import load_settings
+from everos.component.llm import resolve_llm_task
+from everos.config import LLMTask, Settings, load_settings
 from everos.config.settings import DeciderSettings, LLMSettings
 
 NO_THINK = '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
@@ -49,8 +50,9 @@ def test_defaults_match_the_algo_defaults() -> None:
     """Absent config, behaviour is byte-identical to before these fields existed."""
     assert LLMSettings().timeout_seconds == 60.0
     assert LLMSettings().extra == {}
-    assert DeciderSettings().timeout_seconds == 60.0
-    assert DeciderSettings().extra == {}
+    settings = Settings(llm=LLMSettings(), decider=DeciderSettings())
+    decider = resolve_llm_task(settings, LLMTask.DECIDER).settings
+    assert (decider.timeout_seconds, decider.extra) == (60.0, {})
 
 
 def test_extra_defaults_are_not_shared_between_instances() -> None:
@@ -89,7 +91,8 @@ def test_client_passes_both_through_to_the_provider_config(
     boundary where the values were being dropped: the settings were correct and
     the client honoured what it was given, but nothing carried one to the other.
     """
-    from everos.component.llm import resolve_llm_config
+    from everos.component.llm import llm_client_config, resolve_llm_task
+    from everos.config import LLMTask
 
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
     monkeypatch.setenv("EVEROS_LLM__BASE_URL", "http://gw.invalid/v1")
@@ -97,7 +100,7 @@ def test_client_passes_both_through_to_the_provider_config(
     monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
     load_settings.cache_clear()
 
-    cfg = resolve_llm_config(load_settings())
+    cfg = llm_client_config(resolve_llm_task(load_settings(), LLMTask.EPISODE))
     assert cfg.timeout == 300.0
     assert cfg.extra == NO_THINK_PARSED
 
@@ -105,10 +108,11 @@ def test_client_passes_both_through_to_the_provider_config(
 def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """The decider needs it too: it runs the same model inside every search.
 
-    Asserted on the resolved config, the one object both the decider client and the
-    benchmark's pre-flight probe are built from.
+    Asserted on the resolved config, the one object the decider client is built
+    from.
     """
-    from everos.component.llm import resolve_decider_config
+    from everos.component.llm import llm_client_config, resolve_llm_task
+    from everos.config import LLMTask
 
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
     monkeypatch.setenv("EVEROS_LLM__BASE_URL", "http://gw.invalid/v1")
@@ -117,7 +121,7 @@ def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("EVEROS_DECIDER__EXTRA", NO_THINK)
     load_settings.cache_clear()
 
-    cfg = resolve_decider_config(load_settings())
+    cfg = llm_client_config(resolve_llm_task(load_settings(), LLMTask.DECIDER))
     assert cfg.timeout == 120.0
     assert cfg.extra == NO_THINK_PARSED
 

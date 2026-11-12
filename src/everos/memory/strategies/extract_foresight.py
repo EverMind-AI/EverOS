@@ -76,7 +76,7 @@ async def extract_foresight(
             if isinstance(m, ChatMessage) and m.role == "user"
         }
     )
-    extractor = ForesightExtractor(llm=deps.llm) if sender_ids else None
+    extractor = ForesightExtractor(llm=deps.llms.foresight) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).
     foresights: list[Foresight] = []

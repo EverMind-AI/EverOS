@@ -38,6 +38,7 @@ from tests.fakes import (
     agent_track_script,
     agent_trajectory,
     bundled_instructions,
+    llm_clients,
     make_indexes,
     unscripted_llm,
 )
@@ -91,7 +92,7 @@ def _install_deps(
     """
     real = build_stores(storage.root, storage.sqlite)
     deps = MemoryDeps(
-        llm=llm if llm is not None else unscripted_llm(),
+        llms=llm_clients(llm if llm is not None else unscripted_llm()),
         embedding=embedding,
         stores=dataclasses.replace(real, **(stores or {})),
         indexes=(

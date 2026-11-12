@@ -26,11 +26,13 @@ from __future__ import annotations
 
 __all__ = [
     "Application",
+    "LLMTaskResolution",
     "Providers",
     "build_application",
     "build_providers",
     "build_replay_engine",
     "configure_process",
+    "describe_llm_tasks",
 ]
 
 import asyncio
@@ -38,7 +40,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import functools
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import partial
 from pathlib import Path
 from types import TracebackType
@@ -52,10 +54,12 @@ from everos.component.llm import (
     LLMCaseJudge,
     LLMClientConfig,
     LLMNotConfiguredError,
+    LLMTaskResolution,
     build_llm_provider,
+    build_llm_task_providers,
+    llm_client_config,
     observer_for,
-    resolve_decider_config,
-    resolve_llm_config,
+    resolve_llm_tasks,
     resolve_multimodal_config,
 )
 from everos.component.parser import aparse_file, build_raw_file, parser_available
@@ -105,7 +109,7 @@ from everos.infra.persistence.sqlite import (
     SqliteRepos,
 )
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.deps import Indexes, MemoryDeps
+from everos.memory.deps import Indexes, LLMClients, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
@@ -136,14 +140,13 @@ _CONFIG_ROOT = Path(__file__).resolve().parent.parent / "config"
 class Providers:
     """The swappable providers an application is built over; ``None`` = absent.
 
-    The extraction ``llm`` (and the ``decider``, which falls back to it) is
-    always present: :func:`build_providers` refuses settings without one.
-    Built from settings by :func:`build_providers`; a test that needs a fake
-    constructs its own.
+    ``llms`` -- one LLM client per task -- is always present:
+    :func:`build_providers` refuses settings without an LLM. Built from
+    settings by :func:`build_providers`; a test that needs a fake constructs
+    its own.
     """
 
-    llm: LLMClient
-    decider: LLMClient
+    llms: LLMClients
     multimodal_llm: LLMClient | None
     embedding: EmbeddingProvider | None
     rerank: RerankProvider | None
@@ -285,23 +288,32 @@ def configure_process(settings: Settings) -> None:
 def build_providers(settings: Settings) -> Providers:
     """Build the providers ``settings`` configures.
 
-    The extraction LLM is required -- memory extraction is what the
-    application is for -- so its absence fails the build. Every other
+    Every task's LLM is required -- memory extraction is what the application
+    is for -- so a task without a usable one fails the build. Every other
     provider is optional and ``None`` when not configured.
 
     Raises:
-        LLMNotConfiguredError: ``[llm]`` lacks ``api_key`` or ``base_url``;
-            the message names the toml section to edit.
+        LLMNotConfiguredError: A task's resolved LLM lacks ``api_key`` or
+            ``base_url`` (with only ``[llm]`` configured: ``[llm]`` does); the
+            message names the toml section to edit.
     """
     return Providers(
-        llm=_build_llm(settings, resolve_llm_config),
-        decider=_build_llm(settings, resolve_decider_config),
+        llms=_build_llm_clients(settings),
         multimodal_llm=_llm_or_none(
             settings, "multimodal_llm", resolve_multimodal_config
         ),
         embedding=_embedding_or_none(settings),
         rerank=_rerank_or_none(settings),
     )
+
+
+def describe_llm_tasks(settings: Settings) -> list[LLMTaskResolution]:
+    """Each task's effective LLM settings and the section each field came from.
+
+    What the application would build its LLM clients from, without building
+    them or checking credentials -- for ``everos config show``.
+    """
+    return list(resolve_llm_tasks(settings).values())
 
 
 def build_application(
@@ -328,12 +340,12 @@ def build_application(
     stores = build_stores(root, sqlite)
     indexes = build_indexes(index)
     deps = MemoryDeps(
-        llm=providers.llm,
+        llms=providers.llms,
         embedding=providers.embedding,
         stores=stores,
         indexes=indexes,
         instructions=CustomInstructions(_CONFIG_ROOT),
-        case_judge=_case_judge(settings, providers.llm),
+        case_judge=_case_judge(settings, providers.llms.agent_case),
         tz=ZoneInfo(settings.memory.timezone),
     )
     ome_lock = OmeLock(root.ome_db)
@@ -418,10 +430,34 @@ def _case_judge(settings: Settings, llm: LLMClient) -> LLMCaseJudge | None:
     return LLMCaseJudge(llm)
 
 
-def _build_llm(
-    settings: Settings, resolve: Callable[[Settings], LLMClientConfig]
-) -> LLMClient:
-    return build_llm_provider(resolve(settings), observer=observer_for(settings))
+def _build_llm_clients(settings: Settings) -> LLMClients:
+    """One client per task; tasks configured alike share one."""
+    resolutions = resolve_llm_tasks(settings)
+    _log_llm_tasks(resolutions.values())
+    providers = build_llm_task_providers(
+        {task: llm_client_config(r) for task, r in resolutions.items()},
+        observer=observer_for(settings),
+    )
+    return LLMClients(**{task.value: llm for task, llm in providers.items()})
+
+
+def _log_llm_tasks(resolutions: Iterable[LLMTaskResolution]) -> None:
+    """Log where each task's LLM settings came from; never the key itself."""
+    for resolution in resolutions:
+        logger.info(
+            "llm.task.resolved",
+            task=str(resolution.task),
+            model=resolution.settings.model,
+            host=resolution.host,
+            sources=dict(resolution.sources),
+        )
+        if resolution.deprecated_fields:
+            logger.warning(
+                "llm.decider.deprecated_section",
+                fields=list(resolution.deprecated_fields),
+                hint="the LLM keys of [decider] are deprecated: move them to "
+                "[llm.decider] (EVEROS_DECIDER__<KEY> -> EVEROS_LLM__DECIDER__<KEY>)",
+            )
 
 
 def _llm_or_none(
@@ -536,7 +572,7 @@ def _build_memory_service(
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
-            detector=BoundaryDetector(llm=providers.llm),
+            detector=BoundaryDetector(llm=providers.llms.boundary),
             instructions=deps.instructions,
             session_buffer=stores.session_buffer,
             settings=settings.boundary_detection,
@@ -549,7 +585,8 @@ def _build_memory_service(
             episode_store=stores.episode,
             memcell_store=stores.memcell,
             instructions=deps.instructions,
-            llm_client=providers.llm,
+            episode_llm=providers.llms.episode,
+            summary_llm=providers.llms.summary,
             tz=deps.tz,
         ),
         agent_pipeline=AgentMemoryPipeline(),
@@ -564,8 +601,8 @@ def _build_memory_service(
             cluster_store=stores.cluster,
             embedding=providers.embedding,
             reranker=providers.rerank,
-            llm_client=providers.llm,
-            decider_client=providers.decider,
+            llm_client=providers.llms.search,
+            decider_client=providers.llms.decider,
             tuning_source=SearchConfigSource().tuning,
             trace_path_source=SearchConfigSource().trace_path,
             tz=deps.tz,
@@ -593,7 +630,7 @@ def _build_knowledge_service(
         catalog=SqliteKnowledgeCatalog(
             sqlite.knowledge_document, sqlite.knowledge_topic
         ),
-        extractor=_knowledge_extractor(providers.llm),
+        extractor=_knowledge_extractor(providers.llms.knowledge),
         embedding=providers.embedding,
         reranker=providers.rerank,
         recaller=KnowledgeTopicRecaller(

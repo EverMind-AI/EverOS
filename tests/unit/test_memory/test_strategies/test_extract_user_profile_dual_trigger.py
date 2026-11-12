@@ -205,6 +205,7 @@ async def test_direct_path_fetches_via_timestamp_and_writes_profile() -> None:
         extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
         await extract_user_profile(_episode_event(language="Japanese"), deps)
 
+    extractor_cls.assert_called_once_with(llm=deps.llms.profile)
     extractor_call = extractor_cls.return_value.aextract.call_args
     assert [len(mc.items) for mc in extractor_call.args[0]] == [1]
     assert extractor_call.kwargs["old_profile"] is None

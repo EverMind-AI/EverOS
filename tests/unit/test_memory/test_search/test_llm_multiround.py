@@ -599,20 +599,20 @@ async def test_injected_decider_drives_the_loop_instead_of_the_prompt_llm() -> N
     assert eps, "the loop must still produce an injection"
 
 
-# -- the settings that bound one round have to be in the outgoing request -----
+# -- the settings that bound one round belong to the decider's client ----------
 
 
-async def test_the_decider_sends_its_max_tokens_and_extra(
+async def test_the_decider_leaves_its_reply_cap_and_extra_to_its_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``[decider].max_tokens`` and ``.extra`` are per-call, not client defaults.
+    """Nothing per call that would override the client built from ``[llm.decider]``.
 
-    ``extra`` is where a Qwen endpoint is told to stop thinking. Left on, an
-    un-finetuned decider spends the whole deadline reasoning: 39.3% of rounds on
-    Qwen3.5-0.8B returned nothing inside 60s, each costing ~729s of nested retries
-    before the fixed top-3 fallback. The field was declared and documented while
-    the client was called with the messages and nothing else, and the suite could not
-    notice because the stub discarded its keyword arguments.
+    The cap and ``extra`` used to be passed on every call from ``[decider]``; a
+    per-call value beats the client's own, so ``[llm.decider].max_tokens`` would
+    have been silently replaced by ``[decider]``'s 512. That the built client
+    really sends them is pinned where it is built
+    (``test_llm_task_resolution.py``). Set here through the deprecated names to
+    show they no longer leak in per call either.
     """
     monkeypatch.setenv("EVEROS_DECIDER__MAX_TOKENS", "256")
     monkeypatch.setenv(
@@ -624,10 +624,8 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
 
     (call,) = llm.calls
     assert call.response_format is _DecisionReply
-    assert call.max_tokens == 256
-    assert call.extra["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
+    assert call.max_tokens is None
+    assert call.extra == {}
 
 
 def test_render_reads_injected_configuration_for_each_candidate() -> None:
