@@ -5,7 +5,8 @@ entry point holds that one object and calls its facades --
 :class:`MemoryService` (add / flush / search / get),
 :class:`KnowledgeService` (knowledge documents and search) and
 :class:`OpsService` (cascade, OME, health, tasks). One CLI command or API
-endpoint maps to one facade method.
+endpoint maps to one facade method. :func:`prompt_manifest` names the prompts
+this EverOS sends (``everos prompts``).
 
 External usage::
 
@@ -26,6 +27,7 @@ from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
 from everos.core.errors import TopicNotFoundError as TopicNotFoundError
 from everos.memory.get import GetRequest as GetRequest
 from everos.memory.get import GetResponse as GetResponse
+from everos.memory.prompt_manifest import prompt_manifest as prompt_manifest
 from everos.memory.search import GroupProfileEntry as GroupProfileEntry
 from everos.memory.search import SearchRequest as SearchRequest
 from everos.memory.search import SearchResponse as SearchResponse
@@ -171,4 +173,5 @@ __all__ = [
     "compute_disabled_features",
     "configure_process",
     "format_tokens",
+    "prompt_manifest",
 ]

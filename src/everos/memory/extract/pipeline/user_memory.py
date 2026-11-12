@@ -6,21 +6,14 @@ sqlite row per cell). This pipeline only handles the user-perspective output of
 one cell: the Episode md, one image-memory md per picture the cell carried, and
 the ``EpisodeExtracted`` events that announce the episodes.
 
-Two extraction routes, chosen per cell by whether it carries a picture:
+Every cell is extracted by one call (:mod:`.episode`), with one prompt: the
+episode and, when the cell carries pictures, one record per picture, in a
+single reply. A cell without pictures sends the conversation alone and gets
+no picture records; nothing else about the call differs. The picture
+memories are written before the episode so that an episode body's ``img-N``
+references name records that exist.
 
-- **Text only** — everalgo's :class:`EpisodeExtractor`, unchanged. This is the
-  overwhelming majority of cells and nothing about it moves.
-- **With pictures** — one call of our own (:mod:`.image_memory`) that renders
-  the cell the same way, hands the model the pictures, and asks for the episode
-  *and* one record per picture in a single reply. A picture cannot travel
-  through ``EpisodeExtractor`` because its message type is text by contract.
-
-Both routes produce an algo ``Episode``, so everything downstream (the md
-writer, the events, the strategies keyed on ``EpisodeExtracted``) is unaware of
-which one ran. The picture memories are written before the episode so that an
-episode body's ``img-N`` references name records that exist.
-
-Both routes are told the language to write in. It is resolved before the call
+The call is told the language to write in. It is resolved before the call
 from the session's human messages
 (:mod:`everos.memory.extract.conversation_language`), never left to the model,
 which answered English picture cells in Chinese; the same language then pins
@@ -41,7 +34,7 @@ from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor, OutputLanguage
+from everalgo.user_memory import OutputLanguage
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
@@ -50,9 +43,8 @@ from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.conversation_language import resolve_cell_language
-from everos.memory.extract.llm_retry import retry_llm_output
-from everos.memory.extract.pipeline import image_memory as image_extract
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
+from everos.memory.extract.pipeline.episode import extract_cell
 from everos.memory.extract.pipeline.pictures import (
     Picture,
     memcell_alive,
@@ -77,9 +69,9 @@ logger = get_logger(__name__)
 
 _Extraction = tuple[AlgoEpisode, dict[str, tuple[str, str]]]
 """What one cell's extraction answers: the episode, and each picture's
-``(description, ocr)`` by label (empty on the text route). One tuple because
-the two are readings of the same call and splitting them would let them drift
-apart."""
+``(description, ocr)`` by label (empty for a cell without pictures). One tuple
+because the two are readings of the same call and splitting them would let
+them drift apart."""
 
 
 class UserMemoryPipeline:
@@ -91,8 +83,8 @@ class UserMemoryPipeline:
             written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
         llm_client: LLM for extraction.
-        image_store: Where pictures are read from; ``None`` disables the
-            picture route (a cell's pictures then contribute nothing).
+        image_store: Where pictures are read from; ``None`` attaches no
+            picture to the call (a cell's pictures then contribute nothing).
         image_memory_store: Where a picture's memory is written; required with
             ``image_store``.
         image_limits: ``[images]`` — the size a picture is scaled to before the
@@ -110,7 +102,6 @@ class UserMemoryPipeline:
         image_memory_store: ImageMemoryStore | None = None,
         image_limits: ImageLimits | None = None,
     ) -> None:
-        self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
         self._instructions = instructions
@@ -204,13 +195,11 @@ class UserMemoryPipeline:
     ) -> _Extraction:
         """One whole-cell episode (and picture descriptions).
 
-        ``sender_id=None`` binds the episode to no user; the fan-out to one copy
-        per sender happens in markdown only, so a cell costs one call. An
-        unusable reply is tried again by :func:`retry_llm_output`. ``language``
-        is named to the model on either route; ``None`` leaves it the choice.
+        The episode is bound to no user; the fan-out to one copy per sender
+        happens in markdown only, so a cell costs one call. An unusable reply
+        is tried again (:func:`.episode.extract_cell`). ``language`` is named
+        to the model; ``None`` leaves it the choice.
         """
-        custom_instructions = self._instructions.load("episode_extract")
-
         with memory_span(
             "everos.extract",
             observation_type="generation",
@@ -223,67 +212,16 @@ class UserMemoryPipeline:
                 "output_language": None if language is None else str(language),
             },
         ) as extract_span:
-            if pictures:
-                algo_ep, described = await self._extract_with_pictures(
-                    prepared, pictures, custom_instructions, language
-                )
-            else:
-                algo_ep, described = await self._extract_text(
-                    prepared, custom_instructions, language
-                )
-            capture_output(extract_span, algo_ep.episode)
-        return algo_ep, described
-
-    async def _extract_text(
-        self,
-        prepared: PreparedCell,
-        custom_instructions: str | None,
-        language: OutputLanguage | None,
-    ) -> tuple[AlgoEpisode, dict[str, tuple[str, str]]]:
-        """The text-only route: everalgo's extractor, told the language."""
-
-        async def attempt() -> AlgoEpisode:
-            return await self._ep_ext.aextract(
-                prepared.cell,
-                sender_id=None,
-                custom_instructions=custom_instructions,
-                output_language=language,
-            )
-
-        return (
-            await retry_llm_output(
-                attempt, operator="episode", memcell_id=prepared.memcell_id
-            ),
-            {},
-        )
-
-    async def _extract_with_pictures(
-        self,
-        prepared: PreparedCell,
-        pictures: Sequence[Picture],
-        custom_instructions: str | None,
-        language: OutputLanguage | None,
-    ) -> _Extraction:
-        """The picture route: one call for the episode and the descriptions."""
-        labels = [(picture.label, picture.data, picture.mime) for picture in pictures]
-        by_label = {picture.label: picture.image_id for picture in pictures}
-
-        async def attempt() -> _Extraction:
-            reply = await image_extract.extract(
+            algo_ep, described = await extract_cell(
                 self._llm,
                 prepared.cell,
-                pictures=labels,
-                custom_instructions=custom_instructions,
+                pictures=pictures,
+                custom_instructions=self._instructions.load("episode_extract"),
                 output_language=language,
+                memcell_id=prepared.memcell_id,
             )
-            return (
-                image_extract.to_episode(reply, prepared.cell, labels=by_label),
-                {fact.ref: (fact.description, fact.ocr) for fact in reply.images},
-            )
-
-        return await retry_llm_output(
-            attempt, operator="image_memory", memcell_id=prepared.memcell_id
-        )
+            capture_output(extract_span, algo_ep.episode)
+        return algo_ep, described
 
     async def _pictures_of(self, cell: AlgoMemCell) -> list[Picture]:
         """The cell's pictures, in conversation order, read and labelled.

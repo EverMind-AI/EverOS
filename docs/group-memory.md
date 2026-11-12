@@ -684,7 +684,7 @@ the sample shows misses.
 
 A picture in a group segment is stored once in `figures/` (unchanged) and gets
 one image memory per occurrence under `groups/<group_id>/images/`, with
-`sender_ids = [poster]`. The picture call writes no profile item: what a picture
+`sender_ids = [poster]`. The episode call writes no profile item: what a picture
 says about a person reaches the profile through the profile update, which is
 handed the pictures its target posted in the segments it reads, and nobody
 else's (section 7.4). The same routing (poster only) applies on the one-to-one
@@ -1134,9 +1134,11 @@ runs the same propagation: it is a forget, soft and reversible.
 ## 11. Where the prompts live
 
 The architecture places algorithm assets in everalgo, which EverOS consumes as
-the `everalgo-*` packages. Two 2.0 prompts already live in EverOS: the
-picture-memory prompt (`src/everos/memory/extract/pipeline/image_memory.py`),
-because everalgo's message type is text-only, and the multi-round decider prompt
+the `everalgo-*` packages. Two 2.0 prompts already live in EverOS: the episode
+prompt every chat cell is extracted with (`chat.episode`,
+`src/everos/memory/extract/pipeline/episode.py`: everalgo's episode rules,
+imported verbatim, plus the picture rules, because everalgo's message type is
+text-only), and the multi-round decider prompt
 (`src/everos/memory/search/llm_multiround.py`), because the decider is a
 pluggable hook of the EverOS retrieval loop. A new everalgo operator also needs an
 everalgo release before EverOS can depend on it. Group memory therefore follows
@@ -1144,7 +1146,7 @@ the same path:
 
 | Prompt | Step | Lives in 2.0 | After 2.0 |
 |---|---|---|---|
-| Group episode | 1 | No new prompt: everalgo `EpisodeExtractor` (text segments) and the EverOS picture-memory prompt (segments with pictures), unchanged. Group information enters as data: speaker labels and the roster block. | unchanged |
+| Group episode | 1 | No new prompt: the one-to-one episode prompt, `chat.episode`, for every segment, pictures or not. Group information enters as data: speaker labels and the roster block. | unchanged |
 | Roster block | 1 | `chat.group_roster_block`, a rendering template in the EverOS prompt registry | moves with the operators below |
 | Member-in-group profile | 1 | No new prompt: everalgo `ProfileExtractor` with `sender_id = member_id` | unchanged |
 | Group-profile update | 2 | `chat.group_profile_update` in EverOS: `src/everos/memory/extract/group_profile/` (prompt, reply schema, verifier, fold) | an everalgo-user-memory operator (`GroupProfileUpdater`) under the same registry id |
@@ -1152,7 +1154,9 @@ the same path:
 
 Every prompt and template is registered with an id, a version and a fingerprint
 and can be overridden like the other 2.0 prompts. Keeping the registry id when a
-prompt moves to everalgo keeps data built from the registry valid. Step 1 needs
+prompt moves to everalgo keeps data built from the registry valid. `everos
+prompts` prints them all, with the fingerprints of the everalgo prompts a store
+is written with (`src/everos/memory/prompt_manifest.py`). Step 1 needs
 no everalgo release at all.
 
 ---
@@ -1487,10 +1491,13 @@ The second half of Step 1 differs from the text above in these places:
   `source.memcell_id` is null. A session-filtered search finds no scene,
   because a scene belongs to no session. `[groups] scenes = true` switches
   scenes on; they are off by default (see the note above).
-- **Prompt registry.** There is no prompt registry on this line either. The
-  roster block is a versioned constant next to its renderer
-  (`memory/extract/pipeline/group_render.py`): id `chat.group_roster_block`,
-  version 1, with a fingerprint the tests pin.
+- **Prompt registry.** There is no central prompt registry on this line
+  either. Each prompt is a versioned constant next to its renderer -- the
+  roster block in `memory/extract/pipeline/group_render.py` (id
+  `chat.group_roster_block`, version 1), the episode prompt in
+  `memory/extract/pipeline/episode.py` (`chat.episode`, version 1) -- with a
+  fingerprint the tests pin; `memory/prompt_manifest.py` lists them, and a
+  test fails when one is left out.
 - **Member-in-group profile format.** There is no 2.0 profile format on this
   line. A member's profile uses `user.md`'s fields, `history` included, plus
   `group_id`, `member_id` and `pending_memcell_ids` (the throttle). Each item

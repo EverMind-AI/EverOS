@@ -224,7 +224,7 @@ async def _model_copy(store: ImageStore, limits: ImageLimits, image_id: str) -> 
 
 
 _LABEL_REFERENCE = re.compile(r"\((img-\d+): ([0-9a-f]{64})\)")
-"""(img-N: <hash>) — the reference shape the picture route writes into a body."""
+"""(img-N: <hash>) — the reference the episode call writes for a picture it read."""
 
 
 def _labels_in(body: str) -> dict[str, str]:

@@ -664,7 +664,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
-        if name == "_EpisodeReply":
+        if name == "EpisodeReply":
             return json.dumps({"title": "Plan", "summary": "Plan.", "content": "Plan."})
         if name == "_ProfileUpdateReply":
             prompt = "\n".join(str(m.content) for m in messages)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import typer
 
-from .commands import cascade, config, demo, init, memory, server
+from .commands import cascade, config, demo, init, memory, prompts, server
 
 app = typer.Typer(
     name="everos",
@@ -31,6 +31,7 @@ app.add_typer(memory.app, name="memory")
 # idiomatic ``alembic init`` / ``django-admin startproject`` shape.
 init.register(app)
 demo.register(app)
+prompts.register(app)
 
 
 if __name__ == "__main__":

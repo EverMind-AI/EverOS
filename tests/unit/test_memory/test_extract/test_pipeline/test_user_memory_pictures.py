@@ -1,4 +1,4 @@
-"""The picture route of ``UserMemoryPipeline.run_cell``.
+"""Pictures in ``UserMemoryPipeline.run_cell``: one call, one prompt, every cell.
 
 What these pin — the contract that makes a picture a memory rather than an
 attachment:
@@ -10,8 +10,9 @@ attachment:
 - A picture memory is written for each user sender, before the episode, and
   its ``image_id`` is the file hash from the conversation text — never the
   per-cell label the reply used (``img-1``).
-- A text-only cell runs everalgo's extractor unchanged. Nothing about the
-  path that handles most cells moves.
+- A text-only cell makes the same call with the same system prompt; it
+  attaches no picture, sends the conversation alone, and writes no picture
+  memory.
 """
 
 from __future__ import annotations
@@ -172,6 +173,26 @@ async def test_a_picture_cell_writes_one_memory_per_picture() -> None:
     assert memory.description == "a latte with heart-shaped foam art"
     assert memory.owner_id == "u1"
     assert memory.parent_id == "mc_a"
+
+
+async def test_a_text_cell_sends_the_picture_cell_s_system_prompt() -> None:
+    """One prompt for every cell: only the user message tells them apart."""
+    text_llm, picture_llm = _RecordingLLM(_EPISODE_REPLY), _RecordingLLM(_image_reply())
+    for llm, items in (
+        (text_llm, [_text_message()]),
+        (picture_llm, [_text_message(), _picture_message()]),
+    ):
+        pipeline, _, _ = _pipeline(llm)
+        cell = MemCell(items=items, timestamp=1_700_000_000_000)
+        await pipeline.run_cell(
+            _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
+        )
+
+    (text_call,), (picture_call,) = text_llm.calls, picture_llm.calls
+    assert text_call[0].content == picture_call[0].content
+    assert isinstance(text_call[1].content, str)
+    assert text_call[1].content.startswith('<conversation count="1">')
+    assert not isinstance(picture_call[1].content, str)
 
 
 async def test_one_call_answers_for_the_episode_and_the_pictures() -> None:

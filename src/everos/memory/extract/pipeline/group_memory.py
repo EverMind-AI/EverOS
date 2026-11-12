@@ -7,9 +7,8 @@ picture says about its poster reaches that member's profile through the
 member-profile update, which reads the poster's pictures itself (D17). It
 never writes under ``users/``.
 
-The extraction call is the one-to-one call -- everalgo's
-:class:`EpisodeExtractor` for text, the EverOS picture call for a segment with
-pictures -- and only what it is given changes (:mod:`.group_render`): speakers
+The extraction call is the one-to-one call (:mod:`.episode`), pictures or
+not, and only what it is given changes (:mod:`.group_render`): speakers
 labelled by their roster names, assistants as ``"<name> (assistant)"``, and the
 roster block appended after the operator's custom instructions. After it, the
 code sets the attribution fields (``sender_ids`` / ``subject_ids`` /
@@ -19,11 +18,11 @@ every read compares with the asker's membership windows.
 The language is the conversation's, resolved in code before the call exactly
 as on the one-to-one path (:mod:`everos.memory.extract.conversation_language`):
 the segment's human messages, and its session's earlier segments when it has
-too little text of its own. It is named to the model on both routes, so the
-picture descriptions get it too, and it
-pins the episode and its event, which carry it on to the member-in-group
-profiles and the scenes. Only a session without a letter anywhere leaves the
-choice to the model; then the language its episode was written in is pinned.
+too little text of its own. It is named to the model, so the picture
+descriptions get it too, and it pins the episode and its event, which carry it
+on to the member-in-group profiles and the scenes. Only a session without a
+letter anywhere leaves the choice to the model; then the language its episode
+was written in is pinned.
 
 Every cell announces its episode as :class:`GroupEpisodeExtracted`, which the
 group strategies consume (member-in-group profiles, scenes). None of the
@@ -46,7 +45,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
-from everalgo.user_memory import EpisodeExtractor, OutputLanguage
+from everalgo.user_memory import OutputLanguage
 
 from everos.component.images import ImageLimits
 from everos.core.observability.logging import get_logger
@@ -55,9 +54,8 @@ from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import GroupEpisodeExtracted
 from everos.memory.extract.conversation_language import resolve_cell_language
-from everos.memory.extract.llm_retry import retry_llm_output
-from everos.memory.extract.pipeline import image_memory as image_extract
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
+from everos.memory.extract.pipeline.episode import extract_cell
 from everos.memory.extract.pipeline.group_render import (
     attribution,
     label_cell,
@@ -131,8 +129,8 @@ class GroupMemoryPipeline:
         groups: The group's meta and roster (labels, roster block, attribution).
         instructions: Custom instructions for the episode operator.
         llm_client: LLM for extraction.
-        image_store: Where pictures are read from; ``None`` disables the
-            picture route.
+        image_store: Where pictures are read from; ``None`` attaches no
+            picture to the call.
         image_memory_store: Where a picture's memory is written.
         image_limits: ``[images]`` -- the size a picture is scaled to.
         message_forget: Which messages are forgotten; a cell is extracted
@@ -153,7 +151,6 @@ class GroupMemoryPipeline:
         message_forget: MessageForgetStore | None = None,
     ) -> None:
         self._message_forget = message_forget
-        self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
         self._groups = groups
@@ -217,9 +214,9 @@ class GroupMemoryPipeline:
         """The segment's group episode, extracted again from ``cell``; not written.
 
         The call :meth:`run_cell` makes -- speaker labels, the roster block,
-        the conversation's language, the picture route when ``cell`` still
-        carries pictures -- over a segment a forget changed: ``cell`` is the
-        stored segment without what was forgotten
+        the conversation's language, the pictures ``cell`` still carries --
+        over a segment a forget changed: ``cell`` is the stored segment
+        without what was forgotten
         (:func:`~everos.memory.groups.without_forgotten`). The pictures'
         descriptions the call returns again are dropped: their memories were
         never made of the forgotten message.
@@ -341,8 +338,7 @@ class GroupMemoryPipeline:
     ) -> _Extraction:
         """The one-to-one extraction call over the labelled cell.
 
-        ``language`` is named to the model on either route; ``None`` leaves
-        it the choice.
+        ``language`` is named to the model; ``None`` leaves it the choice.
         """
         with memory_span(
             "everos.extract",
@@ -357,54 +353,16 @@ class GroupMemoryPipeline:
                 "output_language": None if language is None else str(language),
             },
         ) as extract_span:
-            if pictures:
-                extraction = await self._extract_with_pictures(
-                    memcell_id, labelled, pictures, custom_instructions, language
-                )
-            else:
-
-                async def attempt() -> AlgoEpisode:
-                    return await self._ep_ext.aextract(
-                        labelled,
-                        sender_id=None,
-                        custom_instructions=custom_instructions,
-                        output_language=language,
-                    )
-
-                episode = await retry_llm_output(
-                    attempt, operator="episode", memcell_id=memcell_id
-                )
-                extraction = (episode, {})
-            capture_output(extract_span, extraction[0].episode)
-        return extraction
-
-    async def _extract_with_pictures(
-        self,
-        memcell_id: str,
-        labelled: MemCell,
-        pictures: Sequence[Picture],
-        custom_instructions: str,
-        language: OutputLanguage | None,
-    ) -> _Extraction:
-        labels = [(picture.label, picture.data, picture.mime) for picture in pictures]
-        by_label = {picture.label: picture.image_id for picture in pictures}
-
-        async def attempt() -> _Extraction:
-            reply = await image_extract.extract(
+            extraction = await extract_cell(
                 self._llm,
                 labelled,
-                pictures=labels,
+                pictures=pictures,
                 custom_instructions=custom_instructions,
                 output_language=language,
+                memcell_id=memcell_id,
             )
-            return (
-                image_extract.to_episode(reply, labelled, labels=by_label),
-                {fact.ref: (fact.description, fact.ocr) for fact in reply.images},
-            )
-
-        return await retry_llm_output(
-            attempt, operator="image_memory", memcell_id=memcell_id
-        )
+            capture_output(extract_span, extraction[0].episode)
+        return extraction
 
     async def _persist_images(
         self,

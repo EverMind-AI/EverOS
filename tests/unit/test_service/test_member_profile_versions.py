@@ -46,7 +46,7 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
     prompt = "\n".join(str(getattr(m, "content", m)) for m in messages)
     if name == "_BatchReply":
         return json.dumps({"reasoning": "s", "boundaries": [], "tail_complete": False})
-    if name == "_EpisodeReply":
+    if name == "EpisodeReply":
         return json.dumps({"title": "Chat", "summary": "A chat.", "content": "Chat."})
     found = _TARGET.search(prompt)
     who = found.group(1).strip() if found else "?"

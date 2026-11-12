@@ -30,7 +30,7 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
     name = response_format.__name__
     if name == "_BatchReply":
         return json.dumps({"reasoning": "s", "boundaries": [], "tail_complete": False})
-    if name == "_EpisodeReply":
+    if name == "EpisodeReply":
         return json.dumps(
             {"title": "Trip", "summary": "Trip plans.", "content": "Trip plans."}
         )

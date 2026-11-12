@@ -40,7 +40,7 @@ def _boundary_model(cut_after: int | None = None) -> FakeLLMClient:
     """
 
     def answer(messages: Any, *, response_format: type, **_kw: Any) -> str:
-        if response_format.__name__ == "_EpisodeReply":
+        if response_format.__name__ == "EpisodeReply":
             return json.dumps(
                 {"title": "Plans", "summary": "The group talked.", "content": "Talk."}
             )

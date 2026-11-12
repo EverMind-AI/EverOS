@@ -67,7 +67,7 @@ def _model(narrative: str = "Scene narrative: Amy's Lisbon trip took shape.") ->
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
-        if name == "_EpisodeReply":
+        if name == "EpisodeReply":
             # One text for every segment: equal embeddings, so one scene.
             return json.dumps({"title": "Lisbon", "summary": _TEXT, "content": _TEXT})
         if name == "SceneReply":

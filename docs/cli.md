@@ -28,6 +28,7 @@ a [Typer](https://typer.tiangolo.com/) app.
 ```
 everos
 ├── init [--root PATH] [--force] [--print]   Generate starter config files (everos.toml + ome.toml)
+├── prompts                         Print which prompt versions this EverOS sends (JSON)
 ├── config
 │   └── show [--root PATH]          Show effective configuration
 ├── server
@@ -55,6 +56,17 @@ sync --force-all` (the first full pass after upgrading from before 1.4.2
 does this by itself); to rebuild the whole index from markdown (recovery
 from drift / corruption, and once after upgrading a Milvus root to 1.4.2)
 run `everos cascade rebuild`.
+
+## `everos prompts`
+
+Prints the prompt manifest as JSON: every prompt EverOS registers (id,
+version, fingerprint of its text, and whether it is sent while a store is
+written or while it is searched) and the everalgo prompts it sends unchanged
+(package, installed version, fingerprint). It needs no memory root, no
+configuration and no model. Save it beside a store when the store is built
+(`everos prompts > <store>/prompts.json`): two stores built by the same
+prompts carry the same manifest, and a prompt change shows up as a new
+fingerprint.
 
 ## `everos server start`
 

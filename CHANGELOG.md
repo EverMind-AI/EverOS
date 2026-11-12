@@ -426,6 +426,30 @@ machinery that keeps a deleted memory from coming back.
   shorter), and `profile_delta` with them. The profile update reads the
   segment's pictures itself, the poster's only (D17); `[extraction] vision`
   off attaches none.
+- **One episode prompt for every chat cell** (`chat.episode`, version 1). A
+  text cell went through everalgo's `EpisodeExtractor`, a picture cell
+  through an EverOS prompt that carried everalgo's whole system prompt -- its
+  reply format and an empty language block included -- plus a second
+  language block and a second reply format. Every cell, one-to-one or group,
+  now makes one call: everalgo's episode rules imported byte for byte
+  (`EPISODE_SYSTEM_PROMPT` without its reply format), a `<pictures>` block
+  that applies only when pictures are attached, one reply format (`images`
+  is `[]` without pictures), one language block after every static block,
+  then the custom instructions. Text and picture cells send one system
+  message (2,729 DeepSeek tokens with English named; it was 1,960 for a text
+  cell and 2,724 for a picture cell), so the provider's prefix cache covers
+  both. A text cell gains the picture call's reading: the lenient reply
+  form, one warmer retry of a reply cut at the output cap, and the cap, which
+  now grows with the conversation as well as the pictures (2,048 tokens, plus
+  1,024 per picture, plus one per four characters of conversation, at most
+  32,768; the longest of 78,597 text episodes on record, 2,613 tokens, came
+  from a 24,120-character transcript cell). A picture cell gains everalgo's
+  guards: a blank `content` / `summary` / `title` is unusable, and a summary
+  wider than 400 units is cut at a sentence. The reply model is now
+  `EpisodeReply`, so the JSON schema a `json_schema`-mode call sends changed.
+  `everos prompts` prints the manifest of the prompts EverOS sends: every
+  registered prompt with its version and fingerprint, and the everalgo
+  episode rules and profile prompts with their package version.
 - **Every profile item carries its provenance.** A one-to-one item now
   carries `item_id`, `source_memcell_ids`, `source_start` / `source_end` and,
   when read off a picture, `source_image_ids`, as a member-profile item does;

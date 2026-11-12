@@ -80,7 +80,7 @@ class _Model:
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
-        if name == "_EpisodeReply":
+        if name == "EpisodeReply":
             said = ", ".join(_markers(prompt)) or "nothing"
             return json.dumps(
                 {

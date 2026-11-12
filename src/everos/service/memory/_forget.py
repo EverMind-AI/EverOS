@@ -320,9 +320,10 @@ class ForgetManager:
         hits = await self._indexes.episode.find(
             _current(scope), limit=_EPISODE_SCAN_CAP
         )
-        # Match on the *id*, not on one spelling of the reference: the picture
-        # extractor writes ``(img-1: <id>)`` and the text route writes
-        # ``[IMAGE: <id>]``, and both are the same picture. The hash is 64 hex
+        # Match on the *id*, not on one spelling of the reference: the episode
+        # call writes ``(img-1: <id>)`` for a picture it read, and a body may
+        # keep the conversation's ``[IMAGE: <id>]``; both are the same
+        # picture. The hash is 64 hex
         # characters of an identity, so a substring hit is a reference, not a
         # coincidence.
         return [

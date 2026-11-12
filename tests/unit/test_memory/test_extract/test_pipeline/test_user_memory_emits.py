@@ -1,6 +1,6 @@
 """``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
 
-The episode operator is real (everalgo ``EpisodeExtractor``); the model
+The episode call is real (``pipeline.episode``, everalgo's rules); the model
 answers from the user-track canned scripts.
 """
 

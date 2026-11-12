@@ -1,4 +1,4 @@
-"""The picture call's output cap and its retry on a cut.
+"""The episode call's output cap and its retry on a cut.
 
 At temperature 0, DeepSeek V4.1 Flash sometimes transcribes a text-dense
 picture into ``ocr`` and repeats it until the output limit: on 2026-11-11, two
@@ -6,8 +6,11 @@ or three of MemEye's 168 picture calls did so in each of three builds, ran to
 the 32,768 tokens the builds allowed, and their cells kept no episode and no
 picture memory. What these pin:
 
-- the cap is ``2,048 + 1,024`` output tokens per picture, never above 32,768,
-  and every complete reply measured that day fits under its own;
+- the cap is ``2,048`` output tokens, plus ``1,024`` per picture, plus one per
+  four characters of the rendered conversation, never above 32,768; every
+  complete reply measured fits under its own -- the longest picture replies
+  of 2026-11-11 and the longest text replies on record, which came from long
+  transcript cells and would not fit under ``2,048`` alone;
 - the call asks for that cap even when the deployment configures a larger
   ``max_tokens`` (the builds' 32,768 in ``[llm] extra``), and keeps the
   configured temperature;
@@ -27,8 +30,8 @@ import pytest
 from everalgo.types import ChatMessage, MemCell
 
 from everos.component.llm import LLMCallError, OpenAIProvider
-from everos.memory.extract.pipeline import image_memory
-from everos.memory.extract.pipeline.image_memory import reply_token_cap
+from everos.memory.extract.pipeline import episode
+from everos.memory.extract.pipeline.episode import reply_token_cap
 
 _REPLY = json.dumps(
     {
@@ -43,19 +46,43 @@ _LOOP += '"description": "a comic page", "ocr": "' + "I'D RATHER BE A BARRIER! "
 
 
 @pytest.mark.parametrize(
-    ("pictures", "cap"), [(0, 2048), (1, 3072), (8, 10240), (30, 32768), (40, 32768)]
+    ("pictures", "chars", "cap"),
+    [
+        (0, 0, 2048),
+        (1, 0, 3072),
+        (8, 0, 10240),
+        (1, 400, 3172),
+        (0, 24_120, 8078),
+        (30, 0, 32768),
+        (0, 200_000, 32768),
+    ],
 )
-def test_the_cap_grows_by_picture_and_stops_at_the_ceiling(
-    pictures: int, cap: int
+def test_the_cap_grows_by_picture_and_conversation_and_stops_at_the_ceiling(
+    pictures: int, chars: int, cap: int
 ) -> None:
-    assert reply_token_cap(pictures) == cap
+    assert reply_token_cap(pictures=pictures, conversation_chars=chars) == cap
 
 
-@pytest.mark.parametrize(("pictures", "longest"), [(1, 1486), (8, 2423)])
+@pytest.mark.parametrize(
+    ("pictures", "chars", "longest"),
+    [
+        # The longest picture replies of 2026-11-11, their text not counted.
+        (1, 0, 1486),
+        (8, 0, 2423),
+        # The longest text replies on record: transcript cells of 15-29K chars.
+        (0, 24_120, 2613),
+        (0, 28_895, 2191),
+        (0, 15_232, 2105),
+    ],
+)
 def test_the_longest_replies_measured_fit_under_their_cap(
-    pictures: int, longest: int
+    pictures: int, chars: int, longest: int
 ) -> None:
-    assert longest < reply_token_cap(pictures)
+    assert longest < reply_token_cap(pictures=pictures, conversation_chars=chars)
+
+
+def test_a_cap_of_2048_alone_would_cut_the_longest_text_replies() -> None:
+    assert reply_token_cap(pictures=0, conversation_chars=0) < 2613
 
 
 def _completion(content: str, finish_reason: str) -> httpx.Response:
@@ -111,8 +138,13 @@ def _cell() -> MemCell:
     return MemCell(items=[message], timestamp=1_700_000_000_000)
 
 
-async def _extract(llm: OpenAIProvider) -> image_memory.ImageEpisodeReply:
-    return await image_memory.extract(
+_CAP = reply_token_cap(
+    pictures=1, conversation_chars=len(episode.render_conversation(_cell()))
+)
+
+
+async def _extract(llm: OpenAIProvider) -> episode.EpisodeReply:
+    return await episode.extract(
         llm,
         _cell(),
         pictures=[("img-1", b"picture bytes", "image/jpeg")],
@@ -127,7 +159,7 @@ async def test_a_normal_reply_is_answered_by_the_first_request() -> None:
     reply = await _extract(_provider([_completion(_REPLY, "stop")], seen))
 
     assert reply.title == "Champ Comics Page 1"
-    assert [(b["temperature"], b["max_tokens"]) for b in seen] == [(0.0, 3072)]
+    assert [(b["temperature"], b["max_tokens"]) for b in seen] == [(0.0, _CAP)]
 
 
 async def test_a_cut_reply_is_retried_once_at_the_retry_temperature() -> None:
@@ -138,8 +170,8 @@ async def test_a_cut_reply_is_retried_once_at_the_retry_temperature() -> None:
 
     assert reply.images[0].ocr == "POW"
     assert [(b["temperature"], b["max_tokens"]) for b in seen] == [
-        (0.0, 3072),
-        (0.3, 3072),
+        (0.0, _CAP),
+        (0.3, _CAP),
     ]
     first, second = seen
     assert {k: v for k, v in first.items() if k != "temperature"} == {

@@ -2,7 +2,7 @@
 
 docs/group-memory.md, section 9.4 (a picture; a message's pictures) and 7.3.
 A group batch with a picture goes through the bootstrap's memory service: the
-picture route writes the group episode and one picture memory, and the poster's
+episode call writes the group episode and one picture memory, and the poster's
 member-profile update reads the picture and writes an item off it; then the
 picture is forgotten. What these pin:
 
@@ -61,10 +61,10 @@ class _Model:
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
-        if name == "_EpisodeReply":
-            return json.dumps({"title": "Pets", "summary": said, "content": said})
-        if name == "ImageEpisodeReply":
+        if name == "EpisodeReply":
             labels = sorted(set(re.findall(r"label: (img-\d+)", prompt)))
+            if not labels:
+                return json.dumps({"title": "Pets", "summary": said, "content": said})
             return json.dumps(
                 {
                     "title": "Pets",

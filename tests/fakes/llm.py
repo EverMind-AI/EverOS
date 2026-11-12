@@ -55,7 +55,7 @@ records (``memory.extract.boundary.prompt_order``)."""
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
-    "episode": "_EpisodeReply",
+    "episode": "EpisodeReply",
     "profile_update": "_ProfileUpdateReply",
     "profile_consolidate": "_ConsolidateReply",
     "reflect": "_ReflectOutput",
@@ -161,7 +161,7 @@ def memorize_llm(
             else:
                 cuts = queue.pop(0) if queue else []
             return boundary_reply(cuts, tail_complete=tail_complete)
-        if name == "_EpisodeReply":
+        if name == "EpisodeReply":
             return episode
         if name == "_DecisionReply":
             return DECIDER_KEEP_FIRST_TEN

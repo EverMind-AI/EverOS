@@ -455,5 +455,5 @@ async def test_add_flush_get_on_canned_user_track(
 
     replies = [call.response_format.__name__ for call in llm.calls]
     assert replies.count("_BatchReply") == 2  # the add and the flush
-    assert replies.count("_EpisodeReply") == 1
+    assert replies.count("EpisodeReply") == 1
     assert "_ProfileItems" in replies

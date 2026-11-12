@@ -1,4 +1,4 @@
-# Custom instructions for episode extraction (``EpisodeExtractor.aextract``).
+# Custom instructions for episode extraction (``chat.episode``, every chat cell).
 #
 # What it does
 #   When enabled, ``instructions`` is appended verbatim after the

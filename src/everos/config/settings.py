@@ -257,8 +257,8 @@ class LLMSettings(_Section):
     first failure straight to the caller. A retry is the same request, except
     that it is sampled at :attr:`retry_temperature`."""
     temperature: float | None = Field(default=0.0, ge=0)
-    """Sampling temperature of every extraction call (boundary, episode, profile,
-    the picture route, group memory), unless a call sets its own.
+    """Sampling temperature of every extraction call (boundary, episode with or
+    without pictures, profile, group memory), unless a call sets its own.
     ``None`` leaves the field out of the request, so the endpoint's default applies.
 
     0.0 because extraction should be repeatable: the same conversation should cut

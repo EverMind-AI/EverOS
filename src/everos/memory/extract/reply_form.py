@@ -2,10 +2,11 @@
 
 Replies requested in JSON mode (``response_format_mode = "json_object"``, the
 only mode DeepSeek accepts) are JSON, but not always the JSON the reply model
-describes. On the picture route (2026-11-11, DeepSeek V4.1 Flash, MemEye's
-1,696 messages) 7 of 168 replies (4.2%) failed validation, and each failure
-cost a second call that carried every picture again, although none of them
-said anything a valid reply would not have:
+describes. On the picture route of the time (2026-11-11, DeepSeek V4.1 Flash,
+MemEye's 1,696 messages) 7 of 168 replies (4.2%) failed validation, and each
+failure cost a second call that carried every picture again, although none of
+them said anything a valid reply would not have (every episode reply has been
+read here since 2026-11-12):
 
 - an unknown key written empty inside a picture's entry (``"profile": []``,
   ``"ocr_note": ""``);

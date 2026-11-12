@@ -1,9 +1,10 @@
 """The canned user-track scripts satisfy the real operators they stand in for.
 
 Each script under ``tests/fakes/llm_scripts/user_track`` is fed to the real
-everalgo operator through ``user_track_llm``; a script that drifted from the
-operator's strict reply model fails here instead of deep inside an
-integration test. Every operator also has its empty (or blank) script,
+operator through ``user_track_llm`` -- everalgo's, or for the episode
+EverOS's own call (:mod:`everos.memory.extract.pipeline.episode`); a script
+that drifted from the operator's strict reply model fails here instead of
+deep inside an integration test. Every operator also has its empty (or blank) script,
 which exercises the path where it yields nothing.
 """
 
@@ -17,12 +18,9 @@ from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
-from everalgo.user_memory import (
-    EpisodeExtractor,
-    EpisodeReflector,
-    ProfileExtractor,
-)
+from everalgo.user_memory import EpisodeReflector, ProfileExtractor
 
+from everos.memory.extract.pipeline.episode import extract_cell
 from tests.fakes import user_track_llm, user_track_script
 
 _TS = 1_775_116_800_000
@@ -72,10 +70,21 @@ async def test_boundary_scripts(
     assert len(result.tail) == tail
 
 
-async def test_episode_script() -> None:
-    episode = await EpisodeExtractor(llm=user_track_llm()).aextract(
-        _CELL, sender_id=None
+async def _episode(**scripts: str) -> AlgoEpisode:
+    episode, described = await extract_cell(
+        user_track_llm(**scripts),
+        _CELL,
+        pictures=[],
+        custom_instructions=None,
+        output_language=None,
+        memcell_id="mc_1",
     )
+    assert described == {}
+    return episode
+
+
+async def test_episode_script() -> None:
+    episode = await _episode()
     want = json.loads(user_track_script("episode"))
     assert (episode.episode, episode.summary, episode.subject) == (
         want["content"],
@@ -86,9 +95,7 @@ async def test_episode_script() -> None:
 
 async def test_blank_episode_script_is_unusable() -> None:
     with pytest.raises(LLMOutputError):
-        await EpisodeExtractor(llm=user_track_llm(episode="episode_blank")).aextract(
-            _CELL, sender_id=None
-        )
+        await _episode(episode="episode_blank")
 
 
 @pytest.mark.parametrize(

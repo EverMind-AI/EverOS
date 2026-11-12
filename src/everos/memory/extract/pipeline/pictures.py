@@ -151,8 +151,7 @@ async def profile_pictures(
     ``forgotten`` (a forget no undo reversed names it) is taken out of the
     text (:func:`without_pictures`), as every group read takes it out: its
     bytes stay on disk for the undo, so whether they can be read says
-    nothing. ``detail`` is the
-    image parts' hint, as the picture route sends.
+    nothing. ``detail`` is the image parts' hint, as the episode call sends.
 
     Without a picture store or limits (the extraction model reads no images),
     no picture is attached.

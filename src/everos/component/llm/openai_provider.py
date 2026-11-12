@@ -386,7 +386,7 @@ class OpenAIProvider:
             **extra,
         }
         # A max_tokens in the configured extra is the deployment's ceiling; the
-        # call's own can only lower it (the picture route's runaway guard).
+        # call's own can only lower it (the episode call's runaway guard).
         if max_tokens is not None and isinstance(request.get("max_tokens"), int):
             request["max_tokens"] = min(request["max_tokens"], max_tokens)
         return request

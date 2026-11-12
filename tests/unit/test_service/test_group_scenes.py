@@ -52,7 +52,7 @@ def _model(messages: Any, *, response_format: type, **_: Any) -> str:
     name = response_format.__name__
     if name == "_BatchReply":
         return json.dumps({"reasoning": "s", "boundaries": [], "tail_complete": False})
-    if name == "_EpisodeReply":
+    if name == "EpisodeReply":
         # One text for every segment: equal embeddings, so one scene.
         return json.dumps({"title": "Offsite", "summary": _TEXT, "content": _TEXT})
     if name == "_ReflectOutput":

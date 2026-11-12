@@ -238,7 +238,7 @@ def test_picture_names_are_read_off_the_content_items() -> None:
 
     The rendered text keeps only the hash, so this is the one place the name
     still exists by the time a cell is extracted; the boundary reads it here
-    into the per-cell map the picture route writes memories from.
+    into the per-cell map the episode call's picture memories are written from.
     """
     image_id = "c" * 64
     message = CanonicalMessage(

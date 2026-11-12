@@ -1,4 +1,4 @@
-"""The picture route's reply: lenient about form, strict about meaning.
+"""The episode call's reply: lenient about form, strict about meaning.
 
 Every reply below is one of the shapes DeepSeek V4.1 Flash wrote in JSON mode
 on 2026-11-11 (MemEye at temperature 1.0: 7 of 168 picture calls; CUE-Mem at
@@ -14,7 +14,10 @@ pin:
   before validation -- in the provider's check and in the operator's parse
   alike, so the call is answered by its first reply;
 - ``null`` reads as empty (``ocr``) or as no entries (``images``), and one
-  entry given bare as a list of it;
+  entry given bare as a list of it; a cell without pictures may leave
+  ``images`` out, as everalgo's episode reply does;
+- a reply that leaves ``content``, ``summary`` or ``title`` blank is unusable
+  (``LLMOutputError``, which the pipeline retries), as it is for everalgo;
 - what is not a slip of form still fails: an unknown key that carries
   something (profile operations included), a missing description or episode,
   a wrong type, a form slip the repair does not know;
@@ -34,8 +37,8 @@ from everalgo.types import ChatMessage, MemCell
 from pydantic import ValidationError
 
 from everos.component.llm import OpenAIProvider
-from everos.memory.extract.pipeline import image_memory
-from everos.memory.extract.pipeline.image_memory import ImageEpisodeReply
+from everos.memory.extract.pipeline import episode
+from everos.memory.extract.pipeline.episode import EpisodeReply
 
 _HEAD = (
     '"content": "Wang Lei sent her latte (img-1).", '
@@ -71,7 +74,7 @@ def _reply(images: str = f"[{_IMAGE}]") -> str:
     ],
 )
 def test_an_empty_unknown_key_in_a_pictures_entry_reads_as_absent(image: str) -> None:
-    reply = ImageEpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
+    reply = EpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
 
     assert [(f.ref, f.description, f.ocr) for f in reply.images] == [
         ("img-1", "a latte with heart foam", "")
@@ -80,7 +83,7 @@ def test_an_empty_unknown_key_in_a_pictures_entry_reads_as_absent(image: str) ->
 
 @pytest.mark.parametrize("extra", [', "notes": null', ', "profile": []'])
 def test_an_empty_unknown_key_at_the_top_reads_as_absent(extra: str) -> None:
-    reply = ImageEpisodeReply.model_validate_json(_reply()[:-1] + extra + "}")
+    reply = EpisodeReply.model_validate_json(_reply()[:-1] + extra + "}")
 
     assert (reply.title, [f.ref for f in reply.images]) == ("Latte", ["img-1"])
 
@@ -98,7 +101,7 @@ def test_a_pictures_entry_left_open_is_closed(images: str) -> None:
     with pytest.raises(json.JSONDecodeError):
         json.loads(text)
 
-    reply = ImageEpisodeReply.model_validate_json(text)
+    reply = EpisodeReply.model_validate_json(text)
 
     assert [f.ref for f in reply.images] == ["img-1", "img-2"]
 
@@ -106,7 +109,7 @@ def test_a_pictures_entry_left_open_is_closed(images: str) -> None:
 def test_a_reply_split_in_two_objects_is_read_as_one() -> None:
     text = f'{{{_HEAD}}}\n{{"images": [{_IMAGE}]}}'
 
-    reply = ImageEpisodeReply.model_validate_json(text)
+    reply = EpisodeReply.model_validate_json(text)
 
     assert reply.title == "Latte"
     assert [f.ref for f in reply.images] == ["img-1"]
@@ -120,17 +123,25 @@ def test_a_reply_split_in_two_objects_is_read_as_one() -> None:
 def test_null_reads_as_empty_or_as_no_entries() -> None:
     image = '{"ref": "img-1", "description": "a latte", "ocr": null}'
 
-    reply = ImageEpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
-    bare = ImageEpisodeReply.model_validate_json(_reply(images="null"))
+    reply = EpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
+    bare = EpisodeReply.model_validate_json(_reply(images="null"))
 
     assert reply.images[0].ocr == ""
     assert bare.images == []
 
 
 def test_one_entry_given_bare_reads_as_a_list_of_it() -> None:
-    reply = ImageEpisodeReply.model_validate_json(_reply(images=_IMAGE))
+    reply = EpisodeReply.model_validate_json(_reply(images=_IMAGE))
 
     assert [f.ref for f in reply.images] == ["img-1"]
+
+
+@pytest.mark.parametrize("text", [f"{{{_HEAD}}}", _reply(images="[]")])
+def test_a_cell_without_pictures_answers_with_no_entries(text: str) -> None:
+    """everalgo's episode reply, ``images`` left out, reads like ``[]``."""
+    reply = EpisodeReply.model_validate_json(text)
+
+    assert (reply.title, reply.images) == ("Latte", [])
 
 
 # ---------------------------------------------------------------------------
@@ -157,21 +168,22 @@ def test_one_entry_given_bare_reads_as_a_list_of_it() -> None:
 )
 def test_what_is_not_a_form_slip_still_fails(text: str) -> None:
     with pytest.raises(ValidationError):
-        ImageEpisodeReply.model_validate_json(text)
+        EpisodeReply.model_validate_json(text)
 
 
 def test_the_schema_sent_is_pinned() -> None:
     """sha256 of the json_schema request format: the reply without the profile.
 
-    The reply models' docstrings are part of it; a change here is a change to
-    what every json_schema-mode picture call sends.
+    The reply models' names and docstrings are part of it; a change here is a
+    change to what every json_schema-mode episode call sends, text cells
+    included (``ImageEpisodeReply`` until 2026-11-12: ``2e848a4bc74cae48``).
     """
-    sent = to_openai_response_format(ImageEpisodeReply, "json_schema")
+    sent = to_openai_response_format(EpisodeReply, "json_schema")
     text = json.dumps(sent, sort_keys=True)
 
-    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "2e848a4bc74cae48"
+    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "fa6a897c993c106d"
     assert "profile" not in json.dumps(sent)
-    assert to_openai_response_format(ImageEpisodeReply, "json_object") == {
+    assert to_openai_response_format(EpisodeReply, "json_object") == {
         "type": "json_object"
     }
 
@@ -228,7 +240,7 @@ async def test_a_mendable_reply_answers_the_call_without_a_second_request() -> N
     seen: list[dict[str, Any]] = []
     llm = _provider([_reply(images=f"[{_OPEN}, {_OPEN_2}]")], seen)
 
-    reply = await image_memory.extract(
+    reply = await episode.extract(
         llm,
         _cell(),
         pictures=[("img-1", b"picture bytes", "image/png")],
@@ -244,7 +256,7 @@ async def test_a_slip_the_repair_does_not_know_is_still_retried() -> None:
     seen: list[dict[str, Any]] = []
     llm = _provider([_reply(images=f"[{_IMAGE[:-2]}, {_IMAGE}]"), _reply()], seen)
 
-    reply = await image_memory.extract(
+    reply = await episode.extract(
         llm,
         _cell(),
         pictures=[("img-1", b"picture bytes", "image/png")],
