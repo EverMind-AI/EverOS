@@ -46,6 +46,7 @@ __all__ = [
     "BUCKETS",
     "HISTORY_LIMIT",
     "SOURCE_IMAGE_KEYS",
+    "already_read",
     "bounded_history",
     "edit_item",
     "find_item",
@@ -454,6 +455,22 @@ def forget_segments(
         return not sources or not sources <= gone or not sources & these
 
     return _without(existing, survives)
+
+
+def already_read(profile: Profile | None, memcell_id: str) -> bool:
+    """Whether an item of ``profile`` already rests on the segment.
+
+    Every item an update writes names the segments it was read from, so a
+    segment event delivered again after its update ran (a replay) finds its id
+    on the profile: both profiles ask this before they read a segment, so no
+    segment is read twice.
+    """
+    if profile is None:
+        return False
+    return any(
+        memcell_id in ((item.model_extra or {}).get("source_memcell_ids") or [])
+        for item in (*profile.explicit_info, *profile.implicit_traits)
+    )
 
 
 def rests_on(entry: Mapping[str, Any], segments: Collection[str]) -> bool:

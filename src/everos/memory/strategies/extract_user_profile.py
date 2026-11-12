@@ -52,6 +52,7 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline.pictures import profile_pictures
 from everos.memory.extract.pipeline.profile_items import (
+    already_read,
     bounded_history,
     keep_held,
     stamp_update,
@@ -97,16 +98,6 @@ async def _forgotten_segment(
     return marks.get(event.episode_entry_id) == FORGOTTEN_MARK
 
 
-def _already_read(existing: Profile | None, memcell_id: str) -> bool:
-    """Whether an item of ``existing`` already rests on the segment."""
-    if existing is None:
-        return False
-    return any(
-        memcell_id in ((item.model_extra or {}).get("source_memcell_ids") or [])
-        for item in (*existing.explicit_info, *existing.implicit_traits)
-    )
-
-
 async def extract_user_profile(
     event: EpisodeExtracted, deps: MemoryDeps
 ) -> list[Event]:
@@ -129,7 +120,7 @@ async def extract_user_profile(
             )
             return []
         existing = await deps.stores.profile.read(scope)
-        if _already_read(existing, event.memcell_id):
+        if already_read(existing, event.memcell_id):
             logger.info(
                 "profile_segment_already_read",
                 owner_id=event.owner_id,

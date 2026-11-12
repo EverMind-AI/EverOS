@@ -11,7 +11,8 @@ model. What these pin:
   segments, and a flush of the group runs every pending update;
 - two concurrent updates of one member lose no item (the per-member lock);
   updates of two members run in parallel;
-- a replayed event does not count its segment twice;
+- a replayed event does not count its segment twice, nor queue one an
+  update already read (an item rests on it);
 - the operator is told a language, never left to choose one: the event's
   (the group pipeline's resolved language), a flush's resolved from the
   segments it reads, a stored ``primary_language`` over either;
@@ -214,6 +215,24 @@ async def test_updates_wait_for_member_profile_every_and_run_at_flush(
         _segment(deps, f"mc_{n}", n * 1_000, ("u_chen", f"note {n}"))
         await update_member_profiles(_event(f"mc_{n}", "u_chen"), deps)
     assert len(model.prompts) == 2  # the third new segment ran the update
+
+
+async def test_a_segment_already_read_is_not_queued_again(every: Any) -> None:
+    """A replay after the update read the segment: no second read, no item."""
+    every(1)
+    model = _ProfileModel()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("u_chen", "I'll book flights"))
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+    every(3)
+    await update_member_profiles(_event("mc_1", "u_chen"), deps)
+
+    chen = await deps.stores.member_profile.read(_SCOPE, "u_chen")
+    assert chen is not None and chen.pending_memcell_ids == []
+    assert [i.description for i in chen.profile.explicit_info] == ["Fact 1 about Chen"]
+    assert len(model.prompts) == 1
 
 
 async def test_two_concurrent_updates_of_one_member_lose_no_item(every: Any) -> None:

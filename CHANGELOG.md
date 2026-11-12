@@ -541,6 +541,12 @@ machinery that keeps a deleted memory from coming back.
   forgot were left out of the other's profile updates. Every lookup is keyed
   on the owner's id and type now, and a group's undo by `forget_id` also
   checks the app and project it was made in.
+- **A member's profile reads a segment once.** A segment event delivered
+  again after the member's profile update had read it (a replay) queued the
+  segment again, so the next update read it twice and could add its facts a
+  second time. The member path now skips a segment an item already rests on,
+  as `user.md` did; a forget that needs a segment read again queues it
+  itself, as before.
 - **No tzlocal warning from a crontab check.** Validating a strategy's
   `Cron` trigger or an `ome.toml` `cron` override asked APScheduler to build a
   trigger in the OS's timezone; in a container with none, tzlocal warned

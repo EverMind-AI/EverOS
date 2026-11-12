@@ -24,7 +24,9 @@ group's segments are.
   (``pending_memcell_ids``); the profile is updated after
   ``[groups] member_profile_every`` of them, and on :class:`GroupFlushed`
   for every member with something pending. A replayed event queues its
-  segment once.
+  segment once, and not at all once an item rests on it (it was read): no
+  segment is read twice, as on ``user.md``. A forget that needs a segment
+  read again queues it itself.
 - **Lock.** One per ``(group, member)``: two updates of one member never lose
   each other's items, and the members of one segment update in parallel.
 - **Fan-out.** A flush updates every member with pending segments at once,
@@ -70,6 +72,7 @@ from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.pictures import profile_pictures
 from everos.memory.extract.pipeline.profile_items import (
+    already_read,
     bounded_history,
     keep_held,
     stamp_update,
@@ -139,6 +142,14 @@ async def _queue(
             profile=Profile(owner_id=member_id, summary="", timestamp=0),
         )
         if event.memcell_id in profile.pending_memcell_ids:
+            return
+        if already_read(profile.profile, event.memcell_id):
+            logger.info(
+                "member_profile_segment_already_read",
+                group_id=scope.owner_id,
+                member_id=member_id,
+                memcell_id=event.memcell_id,
+            )
             return
         profile = profile.model_copy(
             update={
