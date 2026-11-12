@@ -2951,7 +2951,11 @@ def _serving_from_env(
                 role="decider",
                 model=decider.model,
                 endpoint=decider.base_url,
-                extra={"sources": dict(decider.sources), **_llmmr_knobs(config)},
+                extra={
+                    "settings": dict(decider.settings),
+                    "sources": dict(decider.sources),
+                    **_llmmr_knobs(config),
+                },
             )
         )
 
@@ -3096,6 +3100,8 @@ class DeciderProbe(NamedTuple):
         model: The model the decider names.
         base_url: Its endpoint; empty when none resolves.
         host: ``base_url``'s host name, for messages.
+        settings: Every other effective field but the key -- output cap, timeout,
+            ``extra`` and the rest -- with ``extra``'s header and query values masked.
         sources: Field -> the section that supplied it: ``"llm.decider"``,
             ``"decider"`` (deprecated), ``"llm"`` or ``"default"``.
         outcome: ``"resolved"`` (no request sent), ``"answered"``, ``"failed"`` or
@@ -3107,6 +3113,7 @@ class DeciderProbe(NamedTuple):
     model: str
     base_url: str
     host: str
+    settings: dict[str, Any]
     sources: dict[str, str]
     outcome: str
     reason: str

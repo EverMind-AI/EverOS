@@ -12,11 +12,17 @@ and the reply model makes the request carry a ``json_schema`` format, as the
 multi-round decider's own call does.
 
 Prints exactly one JSON line on stdout: ``model``, ``base_url``, ``host``,
-``sources`` (field -> the section that supplied it), ``outcome``
-(``resolved`` with ``--resolve-only``; otherwise ``answered``, ``failed`` or
-``not_configured``), ``reason`` (the ``LLMCallError`` reason of a failed
-request) and ``error``. The API key never leaves this process: it is not
-printed, and it is masked out of the error text.
+``settings`` (every other effective field but the key), ``sources`` (field ->
+the section that supplied it), ``outcome`` (``resolved`` with
+``--resolve-only``; otherwise ``answered``, ``failed`` or ``not_configured``),
+``reason`` (the ``LLMCallError`` reason of a failed request) and ``error``.
+The API key never leaves this process: it is not printed, and it is masked out
+of the error text. Inside ``extra``, the values of ``extra_headers`` and
+``extra_query`` are masked too -- the SDK sends them as HTTP headers and URL
+query parameters, which is where a gateway's credentials go -- while
+``extra_body`` and top-level fields stay readable, because they are the
+request parameters (a thinking switch, a reasoning effort) that reproducing a
+run needs.
 """
 
 from __future__ import annotations
@@ -46,6 +52,9 @@ _PROMPT = 'Reply with exactly this JSON object and nothing else: {"ready": true}
 """Spelled out because ``json_object`` and ``prompt_only`` endpoints get no schema."""
 
 _MASK = "***"
+
+_MASKED_EXTRA_KEYS = ("extra_headers", "extra_query")
+"""The ``extra`` entries the SDK sends outside the request body."""
 
 
 class DeciderProbeReply(StrictOutputModel):
@@ -94,8 +103,29 @@ def _describe(resolution: LLMTaskResolution) -> dict[str, Any]:
         "model": resolution.settings.model,
         "base_url": resolution.settings.base_url or "",
         "host": resolution.host or "",
+        "settings": _effective_settings(resolution),
         "sources": dict(resolution.sources),
     }
+
+
+def _effective_settings(resolution: LLMTaskResolution) -> dict[str, Any]:
+    """Every effective field but model and endpoint (reported on their own) and key."""
+    settings = resolution.settings.model_dump(
+        mode="json", exclude={"model", "base_url", "api_key"}
+    )
+    return {**settings, "extra": _masked_extra(settings["extra"])}
+
+
+def _masked_extra(extra: dict[str, Any]) -> dict[str, Any]:
+    """``extra`` with every value under :data:`_MASKED_EXTRA_KEYS` masked."""
+    masked = dict(extra)
+    for key in _MASKED_EXTRA_KEYS:
+        if key in masked:
+            value = masked[key]
+            masked[key] = (
+                dict.fromkeys(value, _MASK) if isinstance(value, dict) else _MASK
+            )
+    return masked
 
 
 def _ask(resolution: LLMTaskResolution) -> dict[str, str]:
