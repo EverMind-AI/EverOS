@@ -13,6 +13,10 @@ multi-round decider picks between them.
 Scenes are **off by default** (`[scenes] users = false`, `[scenes] groups =
 false`) until their cost is accepted; see [Cost](#cost).
 
+Scenes replace Reflection, which EverOS 2.0 no longer has. Unlike a
+Reflection merge, a scene never retires an episode; an episode an earlier
+build's Reflection merged is read like any other.
+
 ## What is stored
 
 | Where | What |
@@ -36,9 +40,10 @@ only to an asker who can see every one of them.
 ## How a scene is written
 
 The `update_user_scenes` strategy runs on every `EpisodeExtracted` of a
-user's own episode (not on a Reflection merge), and `update_group_scenes` on
-every `EpisodeExtracted` of a group's (`owner_type` `group`, a declared or an
-implicit group's); both run the scene core under the owner's scene lock:
+user's own episode, and `update_group_scenes` on every `EpisodeExtracted` of
+a group's (`owner_type` `group`, a declared or an implicit group's); both
+need an embedding provider, and both run the scene core under the owner's
+scene lock:
 
 1. **Place.** The episode is embedded and folded into the user's scene
    clusters with everalgo's `cluster_by_geometry` (`[clustering] threshold`

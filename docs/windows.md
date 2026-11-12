@@ -236,9 +236,8 @@ installed) with Python 3.12 from `uv`:
   (`unit tests (Windows)`, 2583 passed / 4 skipped — the same count as
   Linux); on that machine, integration **183 passed / 5 skipped** and live
   LLM (`slow`) **28 passed / 1 skipped**, both under Python 3.12.
-- All four memory kinds — episode, profile, agent case, agent skill — were
-  produced by a Tier 3 server (real LLM, embedding and rerank providers) and
-  read back through `/get` and `/search`.
+- Episodes and profiles were produced by a server with real LLM and
+  embedding providers and read back through `/get` and `/search`.
 - A 10-hour soak (about 78 000 markdown entries written and rewritten,
   16 000 searches, 2 300 `/add` calls through the extraction path, two
   concurrent `everos cascade sync` processes on the same tree) ended with

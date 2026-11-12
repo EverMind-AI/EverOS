@@ -14,19 +14,19 @@ cross-cutting, usable by every layer: core / component / config
   `entrypoints/api/middleware/`.
 - `service/` — `bootstrap.py` (the composition root: the one place that
   selects and builds adapters, providers and engines and owns their lifecycle)
-  and three facades: `MemoryService` (memorize / flush / search / get + the
-  async queue), `KnowledgeService` (documents, uploads, search), `OpsService`
-  (cascade, backfill, OME trigger, health, tasks). A facade module over
+  and two facades: `MemoryService` (memorize / flush / search / get, change /
+  forget / history, groups + the async queue) and `OpsService` (cascade,
+  backfill, OME trigger, health, tasks). A facade module over
   ~300 lines triggers a split review: split by responsibility into a subpackage
-  (`service/memory/`, `service/ops/`, `service/knowledge/`) with the facade
+  (`service/memory/`, `service/ops/`) with the facade
   class in `__init__` and the use-case steps in private modules. The number is
   the trigger, not the criterion — never contort a signature to stay under it.
 - `memory/` — domain: models, ports (`*Store` / `*Index` / `EventBus` /
-  `StrategySpec`), extract / search / strategies / reflection / mappers /
+  `StrategySpec`), extract / search / strategies / mappers /
   custom_instructions.
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb
   + milvus) and the two domain-agnostic engines (cascade, OME).
-- `component/` — injectable providers (llm / embedding / rerank / parser /
+- `component/` — injectable providers (llm / embedding / parser /
   tokenizer / config loader).
 - `core/` — runtime base: errors, observability, request context, stateless
   utils (`core.utils.datetime`); no web framework.
@@ -37,7 +37,7 @@ cross-cutting, usable by every layer: core / component / config
 1. **Layering**: `entrypoints → service → memory`; `memory` never imports
    `infra`. Infra reaches the domain only through `memory.ports`, `models`,
    `events` and the pure `mappers`; it never invokes a domain workflow
-   (extract / search / strategies / reflection).
+   (extract / search / strategies).
 2. **Entry points only see the service**: `entrypoints` must not import
    `memory`, `infra`, `component` or `everalgo` — not even their data types.
    DTOs and error types come through the `everos.service` facade or

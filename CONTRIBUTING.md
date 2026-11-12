@@ -131,7 +131,7 @@ PRs after required checks pass.
 ### Commit messages
 
 **[Conventional Commits](https://www.conventionalcommits.org)**: `<type>[(scope)]: <description>`
-(e.g. `feat: add agentic rerank`, `fix(search): guard empty profile`). Enforced
+(e.g. `feat(scenes): cap the narrative`, `fix(search): guard empty profile`). Enforced
 locally by `gitlint` in the `commit-msg` hook and in GitHub Actions by the
 `Commit lint` workflow. Use `/commit` for guided generation; full type list:
 [.claude/skills/commit/SKILL.md](.claude/skills/commit/SKILL.md).

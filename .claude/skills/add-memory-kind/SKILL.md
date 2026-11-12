@@ -1,15 +1,15 @@
 ---
 name: add-memory-kind
-description: Add a new business memory kind end-to-end. Pick the storage combination (Markdown / SQLite / LanceDB), pick the markdown strategy (daily-log / skill-named / single-file), then wire up the schema(s), repo(s), and writer(s).
+description: Add a new business memory kind end-to-end. Pick the storage combination (Markdown / SQLite / LanceDB), pick the markdown strategy (daily-log / single-file), then wire up the schema(s), repo(s), and writer(s).
 ---
 
 # /add-memory-kind — Add a new business memory kind
 
 ## When to invoke
 
-Adding a new persisted business entity (Episode, Case, Skill, ImageMemory,
-Profile, or something custom). Multiple storage layers may be
-involved; this skill walks the decision then the wiring.
+Adding a new persisted business entity (Episode, ImageMemory, Scene,
+Profile, a group-profile item, or something custom). Multiple storage
+layers may be involved; this skill walks the decision then the wiring.
 
 ## 1. Decide the storage combination
 
@@ -26,11 +26,11 @@ Common combinations seen in EverOS:
 
 | Combo | Example | Rationale |
 |---|---|---|
-| **md only** | scratch notes / dump bins | text-of-truth, no index needed |
-| **md + lancedb** | episode / memcell / case | text-of-truth + semantic retrieval |
-| **md + sqlite** | profile / playbook / soul.md state | text-of-truth + structured state to query |
-| **md + sqlite + lancedb** | full-blown business records | when you need *both* transactional state AND retrieval |
-| **sqlite only** | audit log / task queue / LSN watermark | system state, never user-facing |
+| **md only** | a group profile's `pending.md` (the pending batch) | text-of-truth, no index needed |
+| **md + lancedb** | episode / image_memory / profile (`user.md` → `user_profile`) / group-profile item | text-of-truth + retrieval |
+| **md + sqlite** | group roster (`group.md` → `group_meta` / `group_member` / `session_binding`) | text-of-truth + structured state to query |
+| **md + sqlite + lancedb** | scene (versions in markdown, rows in the `episode` table, clusters in SQLite) | when you need *both* transactional state AND retrieval |
+| **sqlite only** | memcell ledger / memorize queue / cascade LSN watermark | system state, never user-facing |
 | **lancedb only** | rare; usually you still want md | derived embeddings without text-of-truth |
 
 Rule of thumb: **markdown is the truth**; sqlite and lancedb are derived
@@ -39,25 +39,24 @@ human-readable form (pure system state).
 
 ## 2. Pick the markdown storage strategy (if md is in your combo)
 
-Three strategies — declared in the EverOS Markdown First spec:
+Two strategies — declared in the EverOS Markdown First spec:
 
 | Strategy | Filename | Mutation | Examples |
 |---|---|---|---|
-| **Daily-log append** | `<prefix>-YYYY-MM-DD.md` | append entries | memcell / episode / case / image_memory |
-| **Skill-named in-place** | `skill_<name>.md` | overwrite the file | skills (procedural memory) |
-| **Single-file rewrite** | `user.md` / `agent.md` / `soul.md` / `behaviors.md` / `tools.md` | overwrite the file | profiles / playbooks |
+| **Daily-log append** | `<prefix>-YYYY-MM-DD.md` | append entries | episode / image_memory / scene / group_profile, user and group tracks |
+| **Single-file rewrite** | `user.md` / `groups/<g>/members/<m>.md` | overwrite the file | a person's profile in a space |
 
-This skill currently has a **complete recipe for daily-log append**.
-Skill-named and single-file recipes are sketched at the bottom — their
-base writers (`BaseSkillWriter` / `BaseProfileWriter`) land later in the
-project; until then build a thin wrapper over `MarkdownWriter`
-directly.
+This skill has a **complete recipe for daily-log append**. The
+single-file strategy is sketched in section 6.
 
 ---
 
 ## 3. Markdown daily-log: 4 steps
 
 ### 3.1 Frontmatter schema — `infra/persistence/markdown/_mds/<name>.py`
+
+The episode kind is the model; the snippets below are its real schema and
+writer, abridged.
 
 ```python
 """Episode daily-log frontmatter."""
@@ -67,74 +66,92 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar, Literal
 
-from everos.infra.persistence.markdown import UserScopedFrontmatter
+from everos.infra.persistence.markdown._base.frontmatter import (
+    DailyLogPathMixin,
+    UserScopedFrontmatter,
+)
 
 
-class UserEpisodeDailyFrontmatter(UserScopedFrontmatter):
+class EpisodeDailyFrontmatter(DailyLogPathMixin, UserScopedFrontmatter):
     """``users/<u>/episodes/episode-<YYYY-MM-DD>.md``."""
 
     ENTRY_ID_PREFIX: ClassVar[str] = "ep"
     DIR_NAME: ClassVar[str] = "episodes"
     FILE_PREFIX: ClassVar[str] = "episode"
 
-    type: Literal["user_episode_daily"] = "user_episode_daily"
+    type: Literal["episode_daily"] = "episode_daily"
     date: _dt.date
     entry_count: int = 0
     last_appended_at: _dt.datetime | None = None
 ```
 
-For agent-track kinds subclass `AgentScopedFrontmatter` instead. If
-user-track and agent-track share a kind name (e.g. `memcell`), give
-each a **distinct** `ENTRY_ID_PREFIX` (e.g. `umc` vs `amc`) so reverse
-lookup is unambiguous.
+`DailyLogPathMixin` goes first, so `path_glob()` (what the cascade scans)
+resolves to it. For a group-owned kind subclass `GroupScopedFrontmatter`
+instead (`groups/<g>/...`). When the user and group tracks share a kind
+name, give each a **distinct** `ENTRY_ID_PREFIX` (`ep` vs `gep`, `im` vs
+`gim`, `sc` vs `gsc`): a row id is `<owner>_<entry_id>`, and users and
+groups share one id space.
 
-### 3.2 Re-export — `mds/__init__.py`
+### 3.2 Re-export — `_mds/__init__.py`
 
 ```python
-from .episode import UserEpisodeDailyFrontmatter as UserEpisodeDailyFrontmatter
+from .episode import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 ```
 
 ### 3.3 Business writer — `infra/persistence/markdown/_writers/<name>.py`
 
 ```python
-"""Episode appender."""
+"""Episode daily-log writer."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import datetime as _dt
+from collections.abc import Mapping
+from typing import Any
 
-from everos.infra.persistence.markdown import MarkdownReader
+from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 
-from ..mds import UserEpisodeDailyFrontmatter
+from .._mds import EpisodeDailyFrontmatter
 from .base import BaseDailyWriter
 
 
-class UserEpisodeAppender(BaseDailyWriter):
-    schema = UserEpisodeDailyFrontmatter
+class EpisodeWriter(BaseDailyWriter):
+    schema = EpisodeDailyFrontmatter
 
-    # OPTIONAL: override the count strategy. Default is len(entries);
-    # override to trust the frontmatter field instead.
-    def _current_count(self, path: Path) -> int:
-        if not path.exists():
-            return 0
-        return MarkdownReader.read(path).frontmatter.get("entry_count", 0)
+    # The file-level frontmatter each append writes.
+    def _frontmatter_updates(
+        self, scope_id: str, date: _dt.date, *, next_count: int
+    ) -> Mapping[str, Any] | None:
+        return {
+            "id": f"episode_log_{scope_id}_{date.isoformat()}",
+            "type": "episode_daily",
+            "user_id": scope_id,
+            "track": "user",
+            "date": date.isoformat(),
+            "entry_count": next_count,
+            "last_appended_at": to_iso_format(get_now_with_timezone()),
+        }
 ```
 
-### 3.4 Re-export — `writers/__init__.py`
+The entry count defaults to the entry markers already in the file
+(`BaseDailyWriter._current_count`, async); override it only to trust a
+frontmatter field instead.
+
+### 3.4 Re-export — `_writers/__init__.py`
 
 ```python
-from .episode import UserEpisodeAppender as UserEpisodeAppender
+from .episode_writer import EpisodeWriter as EpisodeWriter
 ```
 
 ### Done — usage
 
 ```python
-from everos.infra.persistence.markdown._writers import UserEpisodeAppender
+from everos.infra.persistence.markdown._writers import EpisodeWriter
 
-appender = UserEpisodeAppender(memory_root)
-eid = appender.append("u_jason", "I went to the doctor today.")
-# → users/u_jason/episodes/episode-<today>.md
-# → entry markers carry an auto-generated EntryId (e.g. ep_20260507_001)
+writer = EpisodeWriter(memory_root)
+eid = await writer.append("u_jason", "I went to the doctor today.")
+# → default_app/default_project/users/u_jason/episodes/episode-<today>.md
+# → entry markers carry an auto-generated EntryId (e.g. ep_20260507_00000001)
 ```
 
 ---
@@ -266,17 +283,17 @@ builds.
 
 ---
 
-## 6. (Future) Skill-named & single-file markdown strategies
+## 6. Single-file markdown strategy
 
-When the new memory kind needs:
+When the new memory kind is one evolving document per owner (like
+`user.md`), mix `ProfilePathMixin` in before the scope mixin and declare
+`PROFILE_FILENAME` (see `UserProfileFrontmatter` in `_mds/profile.py`); a
+file under a sub-directory overrides `path_glob()` instead (see
+`GroupMemberProfileFrontmatter`, `groups/<g>/members/<m>.md`). The whole
+file is rewritten by its store (`MarkdownProfileStore` in
+`infra/persistence/markdown/stores.py`), not by a `BaseDailyWriter`.
 
-- **skill-named** files (one file per named skill, in-place rewrite) — wait
-  for `BaseSkillWriter`, or use `MarkdownWriter.write_markdown` directly
-  with a thin wrapper.
-- **single-file rewrite** (one fixed file like `user.md`) — wait for
-  `BaseProfileWriter`, same fallback.
-
-These strategies do **not** use entry markers; their frontmatter schema
+This strategy does **not** use entry markers; its frontmatter schema
 does not need `ENTRY_ID_PREFIX` (only `id` / `type` / `schema_version` plus
 the scope mixin fields).
 
@@ -309,7 +326,7 @@ Tests by layer:
 | Mistake | Symptom | Fix |
 |---|---|---|
 | Forgot `ENTRY_ID_PREFIX` / `DIR_NAME` / `FILE_PREFIX` on a daily-log schema | `BaseDailyWriter.__init__` raises `TypeError` | Add all three ClassVars |
-| Same `ENTRY_ID_PREFIX` on user + agent variants | `MemoryLayout.locate_for_entry` collision error | Use distinct prefixes (e.g. `umc` vs `amc`) |
+| Same `ENTRY_ID_PREFIX` on user + group variants | A group whose id equals a user's id shares that user's index row ids | Use distinct prefixes (e.g. `ep` vs `gep`) |
 | Skipped one of the four files (schema / writer / table / repo) | One side silently absent | Re-export both/all from each `__init__.py` |
 | `Vector(N)` mismatched with embedding dim | LanceDB raises on insert | Make `N` exactly match the model output |
 | Imported `MemoryLayout` from a writer (infra) | `import-linter` fails (`infra → memory` reverse dep) | Use `MemoryRoot` (in `infra.persistence`) and let the schema's ClassVars drive paths |

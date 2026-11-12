@@ -69,16 +69,19 @@ this page only covers what is specific to a self-hosted EverOS.
   [`POST /api/v2/memory/delete`](api.md#post-apiv2memorydelete) with the session id,
   which EverOS 2.0 answers with a forget (it has no hard delete): every user's memories
   of that conversation are marked forgotten and leave every default read, reversibly
-  (the answer's `forget_ids` undo it through `POST /api/v2/memory/forget/undo`). An
-  agent's cases of the conversation are kept: an agent's memory has no forget yet. While
+  (the answer's `forget_ids` undo it through `POST /api/v2/memory/forget/undo`). While
   the session is still being memorized the server answers `SESSION_BUSY` ("nothing was
   forgotten, retry later"), which the tool passes on to the model.
 - **New memories become searchable shortly after saving.** `add_memory` returns once
   extraction has written the Markdown; the search index catches up a moment later.
   `list_memories` shows new entries sooner than `search_memory`.
-- **Trajectories only become cases when they pass the quality gate.** Short or
-  straightforward runs are stored as episodes but produce no reusable case, so
-  `recall_agent_experience` stays empty until a substantial task has been recorded.
+- **The two agent-experience tools have no agent memory behind them.** EverOS 2.0
+  keeps chat memory only. `record_trajectory` sends the trajectory to `/memory/add`,
+  which drops its tool rows (`role: "tool"`, and the assistant messages that carry
+  `tool_calls`) before segmentation: the plain user and assistant messages (the task
+  request, the final answer) are memorized as the user's chat, and no case or skill is
+  distilled. `recall_agent_experience` searches with `agent_id`, which the server refuses
+  (`422 INVALID_INPUT`: "EverOS 2.0 has no agent memory"), so the tool fails.
 
 ## Remote hosts
 

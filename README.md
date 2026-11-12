@@ -38,9 +38,9 @@
 
 EverOS is a Python library and local-first memory runtime for agents and
 makers. It gives one portable memory layer across coding assistants, apps,
-devices, and workflows from day one. It stores conversations, files, and agent
-trajectories as readable Markdown, then syncs local SQLite and LanceDB indexes
-for fast retrieval and self-evolving reuse.
+devices, and workflows from day one. It stores one-to-one and group chats,
+with the pictures and files shared in them, as readable Markdown, then syncs
+local SQLite and LanceDB indexes for multi-round retrieval.
 
 <table>
 <tr>
@@ -64,24 +64,24 @@ for fast retrieval and self-evolving reuse.
 <td>❌ Often depends on managed services, vector DBs, graph DBs, or server stacks</td>
 </tr>
 <tr>
-<td><strong>User + agent tracks</strong></td>
-<td>✅ User <code>episodes/profile</code> and agent <code>cases/skills</code> are separate first-class surfaces</td>
+<td><strong>Personal + group memory</strong></td>
+<td>✅ A user's <code>episodes/profile</code> and a group's episodes, member profiles and group profile, every group read checked against the asker's membership</td>
 <td>❌ Usually centered on chat history, profiles, entities, facts, or retrieval records</td>
 </tr>
 <tr>
 <td><strong>Orthogonal retrieval</strong></td>
-<td>✅ Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code></td>
+<td>✅ Search by <code>user_id</code>, <code>group_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code></td>
 <td>❌ Usually app, namespace, tenant, thread, or graph scoped</td>
 </tr>
 <tr>
-<td><strong>Knowledge Wiki</strong></td>
-<td>✅ Editable, source-backed Markdown knowledge pages with taxonomy, CRUD APIs, and topic search</td>
-<td>❌ Usually separate from memory, trapped in a dashboard, or not tied back to source files</td>
+<td><strong>Versioned, reversible memory</strong></td>
+<td>✅ A change writes a new version and a forget is a mark its undo takes away; every version stays readable</td>
+<td>❌ Usually overwritten in place or deleted for good</td>
 </tr>
 <tr>
-<td><strong>Reflection</strong></td>
-<td>✅ Offline memory evolution that merges episode clusters and refines profiles and skills between sessions</td>
-<td>❌ Usually retrieval-only memory with little background consolidation or long-horizon improvement</td>
+<td><strong>Multi-round retrieval</strong></td>
+<td>✅ A decider model reads each round's candidates, keeps the core memories and asks follow-up sub-queries</td>
+<td>❌ Usually one top-k lookup per question</td>
 </tr>
 </table>
 
@@ -106,9 +106,9 @@ built into Raven. Choose an integration to open its setup guide.
 
 ## Quick Start
 
-> One OpenRouter API key is enough to start EverOS and write durable memories.
-> Searching them back runs multi-round retrieval, which also needs an
-> embedding provider.
+> One OpenRouter API key is enough to start EverOS, write durable memories and
+> search them back by keyword. An embedding provider adds vector recall to the
+> multi-round search.
 
 ### Prerequisites
 
@@ -178,8 +178,8 @@ Keep the server running, then open a second terminal and check it:
 curl http://127.0.0.1:8000/health
 ```
 
-Look for `"status":"ok"`. With this one-key setup, `capabilities.embed` and
-`capabilities.rerank` remain `false` until you configure them.
+Look for `"status":"ok"`. With this one-key setup, `capabilities.embed`
+stays `false` until you configure `[embedding]`.
 
 ### 5. Add and retrieve your first memory
 
@@ -232,7 +232,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 
 You should see the Yosemite memory in the response. `llm_multiround`
 (multi-round retrieval) is the default and the only search method; without an
-`[embedding]` provider the request answers HTTP 422.
+`[embedding]` provider it recalls by keyword (BM25) only.
 
 > [!TIP]
 > **First memory unlocked.**
@@ -254,8 +254,7 @@ need the features below:
 | Configuration | Adds |
 | --- | --- |
 | `[llm]` only | Core memory flow (add, flush, Markdown, indexing) and multi-round search by keyword |
-| Add `[embedding]` | Vector recall in multi-round search, reflection, and skill extraction |
-| Add `[rerank]` too | Knowledge Wiki |
+| Add `[embedding]` | Vector recall in multi-round search, and scenes (`[scenes]`, off by default) |
 | Add `[multimodal]` and parser extra | Image, PDF, audio, and office-file ingestion |
 
 Missing optional capabilities are reported by `/health` and return a clear

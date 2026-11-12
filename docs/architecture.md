@@ -12,11 +12,11 @@ idempotency, or upgrade guarantees; those require separate evidence.
 - `entrypoints/` (Presentation) — cli + api + tui; translates protocols to
   service calls and results / errors back, nothing else.
 - `service/` (Application) — `bootstrap` (assembly) + the `MemoryService` /
-  `KnowledgeService` / `OpsService` facades.
+  `OpsService` facades.
 - `memory/` (Domain) — models + ports + extract + search + custom_instructions
-  + reflection + strategies + get + events, plus `access` (the one policy
-  every read path asks: who may see which memory) and `groups` (group meta and
-  roster changes).
+  + strategies + get + events, plus `access` (the one policy every read path
+  asks: who may see which memory) and `groups` (group meta and roster
+  changes).
 - `infra/` (Adapters) — `persistence/` (markdown + sqlite + derived index)
   implementing `memory.ports`, and the cascade and OME engines.
 
@@ -24,7 +24,7 @@ Cross-cutting capabilities have no dependency on business layers. Access
 depends on the capability: shared data and utilities differ from external
 services or storage access.
 
-- `component/` — injectable providers (LLM / embedding / rerank / parser /
+- `component/` — injectable providers (LLM / embedding / parser /
   tokenizer / config loader).
 - `core/` — runtime base (errors / observability / context / `utils.datetime`);
   it knows no web framework.
@@ -108,9 +108,9 @@ interpret storage layout.
 
 | Module | Contents |
 |---|---|
-| `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `SearchHit`, `ScoredKnowledgeTopic` |
-| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
-| `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
+| `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `SearchHit` |
+| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `ImageMemoryStore`, `ProfileStore`, `SceneStore`, `GroupProfileStore`, `OwnerDirStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `SessionPurgeStore` |
+| `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `ImageMemoryIndex`, `ProfileIndex`, `GroupProfileIndex`, plus `IndexEraser` (the one index write a deletion makes) |
 | `ports/events.py` | `Event` (frozen, JSON round-trippable, identified by `topic()`) and the scheduler ticks `CronTick` / `IdleTick` / `ManualTick` |
 | `ports/strategy.py` | the triggers `Immediate` / `Cron` / `Idle`, the `Counter` gate, and `StrategySpec` — one strategy's name, function, trigger, `emits`, `applies_to`, gate, retries and enabled flag |
 | `ports/event_bus.py` | `EventBus`, the port through which the service publishes events |
@@ -278,7 +278,7 @@ The application layer has two jobs, kept in separate modules:
 - **Assembly** — `service/bootstrap.py`. `build_application(settings)` selects
   application providers (`build_providers`), storage adapters, the OME engine with
   strategies registered, the event bus, the cascade orchestrator and the domain
-  pipelines and managers, and returns an `Application`: three facades plus a
+  pipelines and managers, and returns an `Application`: two facades plus a
   `Capabilities` snapshot of which optional providers were configured.
   `Application.start()` first acquires the memory root's existing exclusive
   OME lock, then brings up the system DB, the index, the
@@ -293,18 +293,18 @@ The application layer has two jobs, kept in separate modules:
   `bootstrap.configure_process`; internal helpers can be constructed by their
   owning component without becoming separate application dependencies.
 - **Use cases** — one facade per kind of caller, one method per use case:
-  `MemoryService` (memorize / flush / search / get, plus the `async_mode`
-  queue), `KnowledgeService` (document CRUD and knowledge search) and
-  `OpsService` (cascade status / sync / fix / rebuild / quiesce / backfill, OME
-  trigger, health signals, task readers). They receive external collaborators;
-  they do not select application providers or look up hidden business services.
+  `MemoryService` (memorize / flush / search / get, change / forget /
+  history, plus the `async_mode` queue) and `OpsService` (cascade status /
+  sync / fix / rebuild / quiesce / backfill, OME trigger, health signals, task
+  readers). They receive external collaborators; they do not select
+  application providers or look up hidden business services.
   The rules an entry point would otherwise carry
   live here too: which task statuses exist, when an `/add` is queued instead
-  of run inline, how an upload is size-checked and parsed, what a failed
-  health probe reads as, when a backfill run stops. A facade that outgrows
+  of run inline, what a failed health probe reads as, when a backfill run
+  stops. A facade that outgrows
   one module becomes a package with the facade class in `__init__` and the
-  use-case steps in private modules (`service/memory/`, `service/ops/`,
-  `service/knowledge/` — backfill's three phases are `service/ops/backfill/`).
+  use-case steps in private modules (`service/memory/`, `service/ops/` —
+  backfill's vectors phase is `service/ops/backfill/`).
 
 Entry points hold the one `Application`: the HTTP lifespan builds and starts it
 (`app.state.application`), routes call its facades, and a CLI command builds it
@@ -331,11 +331,6 @@ bootstrap builds it and hands it to the vectors phase through `BackfillDeps`;
 the phase keeps preflight, estimate, confirmation and the summary, and is typed
 against the `VectorBackfill` protocol under `TYPE_CHECKING` only. No
 import-linter exception is needed, and a guard test keeps it that way.
-
-Reflection selects ordered retirement references and retains business report
-counts. Markdown stores group those references by file and apply replacement
-markers in file order. This boundary does not add cross-file atomicity or
-change partial-write failure behavior.
 
 ### `entrypoints/`
 
@@ -370,7 +365,6 @@ Do not add process-wide accessors for business services or providers.
 |---|---|---|---|
 | `llm` | `everalgo.llm.LLMClient` | `OpenAIProvider` | `build_llm_provider(resolve_*_config(settings), observer=observer_for(settings))` |
 | `embedding` | `EmbeddingProvider` | `OpenAIEmbeddingProvider` | `build_embedding_provider(settings.embedding)` |
-| `rerank` | `RerankProvider` | DeepInfra / vLLM / DashScope providers | `build_rerank_provider(settings.rerank)` |
 | `parser` | everalgo parser entry | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
 
 Calling EverAlgo's parser from this component is normal integration. Reusing
@@ -386,11 +380,11 @@ A factory raises when its section is missing or wrong
 `build_providers` lets its `LLMNotConfiguredError` propagate, so neither the
 server nor a CLI command that builds the application gets past assembly
 without `[llm]`, and nothing downstream of the bootstrap types the LLM (or
-the decider, which falls back to `[llm]`) as optional. For embedding, rerank
-and multimodal the bootstrap turns the error into `None` with a warning, and
-the `None` is the whole "not configured" signal: search refuses with a 422,
-cascade writes rows without vectors, knowledge uploads refuse, and parsing a
-non-text upload refuses without a multimodal LLM. Why the bootstrap decides
+the decider, which falls back to `[llm]`) as optional. For embedding and
+multimodal the bootstrap turns the error into `None` with a warning, and
+the `None` is the whole "not configured" signal: search recalls by keyword
+only, cascade writes rows without vectors, scenes are not written, and
+parsing a non-text upload refuses without a multimodal LLM. Why the bootstrap decides
 and the factory does not: "absent" is an application decision, while
 "misconfigured" must stay visible to whoever builds the provider.
 
@@ -408,12 +402,14 @@ extract/
 
 `BoundaryDetection` is built by the bootstrap and injected into
 `MemoryService`; it owns the session buffer, the `memcell` ledger and the
-quarantine of a session the model keeps failing to segment. Every cell goes
-to `ConversationPipeline` (and, in agent mode, the agent pipeline), which
-writes one episode in the session's space: under `groups/<group_id>/` for a
-session bound to a group -- declared, or the implicit group of a session of
-two or more people -- with speakers labelled by their roster names and the
-attribution fields set by code (`pipeline/group_render.py`); under
+quarantine of a session the model keeps failing to segment. It reads chat
+rows only: a tool row and an assistant message carrying `tool_calls` are
+dropped before anything is buffered or cut, so every memcell is a slice of a
+chat (`raw_type` `Conversation`). Every cell goes to `ConversationPipeline`,
+which writes one episode in the session's space: under `groups/<group_id>/`
+for a session bound to a group -- declared, or the implicit group of a
+session of two or more people -- with speakers labelled by their roster names
+and the attribution fields set by code (`pipeline/group_render.py`); under
 `users/<sender>/` for one person's conversation with the assistant. Why in the
 domain: deciding where an episode ends is a memory rule, and keeping it out
 of the service lets it be tested against in-memory stores and a scripted
@@ -433,13 +429,14 @@ index backend:
 - Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
 - Handlers for the business kinds: episode, image_memory, user_profile,
-  scene (a user's scene versions, into the episode table), agent_case,
-  agent_skill, knowledge_document, knowledge_topic, and the group kinds -- group_episode, group_scene and
+  scene (a user's scene versions, into the episode table), and the group
+  kinds -- group_episode, group_scene and
   group_image_memory into the episode and picture tables, group_member_profile
   into ``user_profile`` (one profile handler for ``user.md`` and a member's
   file), group_profile into its own ``group_profile_item``
   table (no vector), group_roster (``group.md``) into the SQLite roster
-  mirror
+  mirror. A markdown file no kind matches (an older store's `agents/` or
+  `knowledge/` tree) is never scanned
 
 ### `memory/custom_instructions/`
 
@@ -448,18 +445,8 @@ Per-operator requirements appended to everalgo's bundled rules
 `CustomInstructions.load(operator)` returns the text or `None`; the operator
 receives it as `custom_instructions=` and can neither lose a rule nor change
 its output shape. Operators: boundary detection, episode extraction, profile
-extraction, reflection. See [custom_instructions.md](custom_instructions.md).
-
-### `memory/reflection/`
-
-Offline memory self-improvement (`orchestrator.py`): Select → Merge →
-Deprecate, merging fragmented episodes within a cluster into a single
-coherent narrative. `ReflectionOrchestrator` selects and merges, driven by
-the `reflect_episodes` OME strategy (cron, disabled by default), and returns
-the merged episode with a `ReflectionContext`; `finish_reflection` runs on
-that merged episode's `EpisodeExtracted` event and hands the context to
-`ReflectionFinisher`, which deprecates the replaced members. Nothing else
-has to run between the merge and the deprecation.
+extraction, the scene narrative (`reflect.yaml`). See
+[custom_instructions.md](custom_instructions.md).
 
 ### `memory/strategies/`
 
@@ -477,10 +464,9 @@ them.
   a space, one update core (`strategies/_profiles.py`, everalgo's two profile
   prompts): the owner's `user.md` on each new segment, a member's profile in a
   group every `[groups] member_profile_every` segments and on `GroupFlushed`
-- `extract_agent_case` / `extract_agent_skill` — agent pipeline
-- `reflect_episodes` / `finish_reflection` — offline episode consolidation
-  (cron merge, then deprecation on the merged episode's event)
-- `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
+- `update_group_profile` / `update_group_profile_idle` — a group's profile
+  ([group-memory.md](group-memory.md), section 7.5): a batch of segments, a
+  flush, or a quiet group's idle window
 - `update_user_scenes` / `update_group_scenes` — a user's and a group's
   scenes ([scenes.md](scenes.md)), one core (`strategies/_scenes.py`): on
   each episode, placed among the owner's scene clusters, one capped narrative
@@ -524,23 +510,20 @@ sound dependency structure.
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # daily-log append
     │   ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
     │   └── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
-    ├── agents/<agent_id>/
-    │   ├── .cases/agent_case-<YYYY-MM-DD>.md           # hidden, framework-derived
-    │   └── skills/skill_<name>/SKILL.md                # named-dir
-    ├── groups/<group_id>/                              # group memory (group-memory.md)
-    │   ├── group.md                                    # meta + append-only roster log
-    │   ├── episodes/episode-<YYYY-MM-DD>.md            # one entry per segment
-    │   ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
-    │   ├── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
-    │   ├── members/<member_id>.md                      # member-in-group profile
-    │   └── profile/                                    # group profile
-    │       ├── group_profile-<YYYY-MM-DD>.md           # one entry per item version
-    │       └── pending.md                              # pending batch (not indexed)
-    └── knowledge/                                      # global shared knowledge
+    └── groups/<group_id>/                              # group memory (group-memory.md)
+        ├── group.md                                    # meta + append-only roster log
+        ├── episodes/episode-<YYYY-MM-DD>.md            # one entry per segment
+        ├── images/image-<YYYY-MM-DD>.md                # one entry per picture
+        ├── scenes/scene-<YYYY-MM-DD>.md                # one entry per scene version
+        ├── members/<member_id>.md                      # member-in-group profile
+        └── profile/                                    # group profile
+            ├── group_profile-<YYYY-MM-DD>.md           # one entry per item version
+            └── pending.md                              # pending batch (not indexed)
 ```
 
 System-managed entries (`.index/`, `.tmp/`) and `ome.toml` live directly
-under the memory root.
+under the memory root. A store written by an earlier 2.0 build can also hold
+`agents/` and `knowledge/` trees; nothing reads, indexes or deletes them.
 Full tree + frontmatter chassis: [storage_layout.md](storage_layout.md) and
 [how-memory-works.md](how-memory-works.md). Frontmatter has 4-tier field
 protection (L1 read-only / L2 system / L3 business / L4 user).
@@ -548,17 +531,17 @@ protection (L1 read-only / L2 system / L3 business / L4 user).
 ## everalgo boundary
 
 `everalgo` is a set of PyPI-published packages (`everalgo-user-memory`,
-`everalgo-agent-memory`, `everalgo-rank`, `everalgo-knowledge`, plus the
-optional `everalgo-parser` extra), imported under the `everalgo` namespace,
-providing memory algorithms, parsing, and their data contracts:
+`everalgo-boundary`, `everalgo-clustering`, `everalgo-rank`, on
+`everalgo-core`, plus the optional `everalgo-parser` extra), imported under
+the `everalgo` namespace, providing memory algorithms, parsing, and their
+data contracts:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
 - `everalgo.user_memory` — ConvMemCell / Episode / Profile extractors (the package
   also ships atomic-fact and foresight extractors; EverOS 2.0 does not call them)
-- `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
 - `everalgo.boundary` — boundary detection (conversation -> MemCells)
-- `everalgo.rank` — fusion (multi-round RRF) + the knowledge rerank
-- `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
+- `everalgo.clustering` — the scene placement (`cluster_by_geometry`)
+- `everalgo.rank` — fusion (multi-round RRF)
 
 The integration separates responsibilities:
 
@@ -590,14 +573,10 @@ split into four branches by nature:
 AppError
 ├── DomainError                    (client-side / business-rule violations)
 │   ├── NotFoundError              → 404 NOT_FOUND
-│   │   ├── DocumentNotFoundError
-│   │   └── TopicNotFoundError
 │   ├── ForbiddenError             → 403 FORBIDDEN
 │   ├── ConflictError              → 409 CONFLICT
-│   │   ├── DuplicateDocumentError
 │   │   └── RosterConflictError
 │   ├── InvalidInputError          → 422 INVALID_INPUT
-│   │   ├── ExtractionEmptyError   → 422 EXTRACTION_EMPTY
 │   │   └── FilterError
 │   ├── PathTraversalError         → 400 BAD_REQUEST
 │   ├── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
@@ -608,8 +587,7 @@ AppError
 │   ├── VectorStoreError
 │   └── ExternalServiceError
 │       ├── LLMServiceError
-│       ├── EmbeddingServiceError
-│       └── RerankServiceError
+│       └── EmbeddingServiceError
 ├── CapabilityError                (capability unavailable)  → 503 CAPABILITY_UNAVAILABLE
 │   └── MultimodalNotEnabledError
 └── ConfigurationError             (misconfiguration)         → 500 CONFIGURATION_ERROR
@@ -637,7 +615,7 @@ Translate provider-specific failures at their integration boundary. Shared
 EverAlgo contract errors may remain visible to callers that own their policy:
 
 - `LLMCallError` → `LLMServiceError` at `component/parser/_core.py`
-- Embedding / rerank provider errors → `EmbeddingServiceError` / `RerankServiceError` at their respective protocol modules
+- Embedding provider errors → `EmbeddingServiceError` at the embedding protocol module
 
 An exception family or HTTP status alone does not decide whether repeating a
 partially completed operation is safe. Classify the cause, request conditions,

@@ -41,7 +41,6 @@ business semantics the raw spec does not carry.
   - [POST /api/v2/memory/delete](#post-apiv2memorydelete)
   - [POST /api/v2/memory/delete_by_ids](#post-apiv2memorydelete_by_ids)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
-  - [Knowledge endpoints](#knowledge-endpoints)
   - [Groups](#groups)
 - [OpenAPI spec source](#openapi-spec-source)
 
@@ -55,10 +54,12 @@ business semantics the raw spec does not carry.
 | Port | `8000` | `EVEROS_API__PORT` env var or `--port` flag |
 | Version prefix | `/api/v2` | — |
 
-Business endpoints live under `/api/v2/memory/`, `/api/v2/ome/`, and
-`/api/v2/knowledge/`. Knowledge endpoints have their own dedicated
-reference at [docs/knowledge.md](knowledge.md) and are cross-referenced
-below. The operational endpoints `GET /health`, `GET /metrics` and
+Business endpoints live under `/api/v2/memory/`, `/api/v2/groups/`,
+`/api/v2/projects/`, `/api/v2/tasks/` and `/api/v2/ome/`. EverOS 2.0 keeps
+chat memory only: there are no knowledge-base routes (`/api/v2/knowledge/...`
+answers `404`) and no agent memory (see
+[`/memory/search`](#post-apiv2memorysearch)). The operational endpoints
+`GET /health`, `GET /metrics` and
 `POST /api/v2/cascade/quiesce` exist but are intentionally outside this
 reference — they are runtime probes and shutdown hooks for deployment, not
 part of the application contract. `quiesce` drains the md → index queue and
@@ -78,7 +79,12 @@ probe runs). Like `embed`, that verdict is a startup snapshot. The searches
 themselves keep it current: `rounds` and `failed_rounds` count the decider
 rounds since start, and `last_failure` / `last_failure_at` name the newest
 round that fell back, so a decider that stops answering later shows there
-without `/health` calling a model.
+without `/health` calling a model. The other capability flags are
+`multimodal_llm` and `parser`; there is no `rerank` flag (2.0 has no rerank
+provider). `disabled_features` lists at most two features the configured
+providers leave off: `vector_recall` (no embedder: multi-round search
+recalls by keyword only) and `multimodal_upload` (no multimodal LLM or no
+parser: a non-text chat item is not read into text).
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy
@@ -103,10 +109,10 @@ before exposing the API on any other interface. See
 
 ### Response envelope
 
-Successful responses from the business endpoints (`/memory/*`,
-`/knowledge/*`) wrap the payload in the envelope below (`200 OK`, or
-`201 Created` for a knowledge document upload). `POST /api/v2/ome/trigger`
-and the operational endpoints return their body bare — see each section.
+Successful responses from the business endpoints (`/memory/*`) wrap the
+payload in the envelope below (`200 OK`, or `202 Accepted` for a queued
+`/add` or `/flush`). `POST /api/v2/ome/trigger` and the operational
+endpoints return their body bare — see each section.
 
 ```json
 {
@@ -136,26 +142,18 @@ semantics, retry with backoff. The markdown file is durable
 regardless; index lag never loses data.
 
 The same applies one level up for everything an OME strategy produces
-**after** the extraction call returns: agent cases and skills (agent track)
-and profiles. `/flush` returns once the episode is on disk; the
-`extract_agent_case` strategy then runs its own LLM call, and skill
-clustering runs after that, so `/get` with `memory_type: "agent_case"` can
-legitimately report `total_count: 0` for tens of seconds after a flush that
-returned `"extracted"` (14 s for the case and 32 s for the skill on a
-laptop with a hosted LLM). `GET /health`'s `cascade.pending` does **not**
-cover this window — it only tracks the md → index queue, which is empty
-while the strategy is still thinking. Poll `/get` with a budget instead.
-The agent track also has extraction gates of its own, applied before any
-LLM call: a trajectory with fewer than three tool-call rounds is rejected as
-too simple (`AgentCaseExtractor(min_tool_call_rounds=3)`, the EverOS
-default — so a session with no tool use never yields a case), and so is one
-that does not end on an assistant text message. Trajectories that pass
-those gates can still be dropped by the extractor's own "worth extracting"
-LLM filter. EverOS logs the skip as `agent_case_skipped_by_algo` with the
-memcell and session ids; the reason itself is on the adjacent everalgo log
-line, `skipping memcell (n_items=N): <reason> <detail>`. The same
-"seconds later" rule for every OME-produced kind is summarised in
-[how-memory-works.md](how-memory-works.md).
+**after** the extraction call returns: profiles, scenes (when switched on)
+and a group's profile. `/flush` returns once the episode is on disk; the
+`extract_user_profile` strategy then runs its own LLM call, so `/get` with
+`memory_type: "profile"` can legitimately return the profile as it was
+before that conversation (or `total_count: 0` for a new user) for seconds
+after a flush that returned `"extracted"`. A member's profile in a group
+waits longer: it is updated every `[groups] member_profile_every` segments
+and on each flush of the group. `GET /health`'s `cascade.pending` does
+**not** cover this window — it only tracks the md → index queue, which is
+empty while the strategy is still thinking. Poll `/get` with a budget
+instead. The same "seconds later" rule for every OME-produced kind is
+summarised in [how-memory-works.md](how-memory-works.md).
 
 ### Conventions
 
@@ -205,8 +203,8 @@ storage. This is the same rule users see when reading rendered output:
 
 `app_id` and `project_id` partition memory at the disk layer. Every
 write lands under
-`~/.everos/<app>/<project>/users/<user_id>/...` (or `.../agents/...`
-for the agent track). The default scope materialises on disk as
+`~/.everos/<app>/<project>/users/<user_id>/...` (or
+`.../groups/<group_id>/...` for a group). The default scope materialises on disk as
 `default_app` / `default_project` (the `_app` / `_project` suffix is
 added only for the literal id `"default"` so the default space stays
 visually distinct from user-named scopes).
@@ -235,9 +233,9 @@ the top level (mirroring the success envelope) alongside a nested
   "request_id": "<32-char hex>",
   "error": {
     "code": "NOT_FOUND",
-    "message": "Document 'abc123' not found",
-    "timestamp": "2026-06-01T12:24:46+00:00",
-    "path": "/api/v2/knowledge/documents/abc123"
+    "message": "no memory 'amy_ep_20261112_00000099'",
+    "timestamp": "2026-11-12T09:30:00+00:00",
+    "path": "/api/v2/memory/history"
   }
 }
 ```
@@ -252,17 +250,16 @@ parsing the human-readable `message` field.
 |---|---|---|---|
 | `NOT_FOUND` | `404` | No | Requested resource does not exist -- or exists but the asker may not see it (a group picture outside their membership windows answers exactly as a missing one) |
 | `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin |
-| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document; a session bound to another group; a roster event that conflicts with the member's open interval; a group undo whose forget a later forget rewrote) |
+| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. a session bound to another group; a roster event that conflicts with the member's open interval; a group undo whose forget a later forget rewrote) |
 | `VERSION_CONFLICT` | `409` | No | `/memory/update` named a version that is no longer the current one; `message` names the current version. Read it (`/memory/history`) and decide again |
 | `MEMORY_FORGOTTEN` | `409` | No | `/memory/update` named a forgotten memory; undo the forget first |
 | `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` — and, on `/add` and `/flush`, a session whose buffered messages the model could not segment on three consecutive calls: the buffer is moved to the `quarantine` track of `unprocessed_buffer` so the session can continue, and `message` names the session and the number of messages set aside |
-| `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | A forget of a conversation (`/forget`, `/forget/session`, `/delete` with a `session_id`) while an `/add` holds the session past `delete_wait_seconds`; nothing was forgotten |
-| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
 | `INTERNAL_ERROR` | `500` | No | Unhandled exception (internal details are logged, never leaked) |
@@ -272,7 +269,7 @@ parsing the human-readable `message` field.
 | Field | Type | Description |
 |---|---|---|
 | `code` | `string` | One of the `ErrorCode` values listed above |
-| `message` | `string` | Human-readable reason. For `INVALID_INPUT` from request validation, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. `"Value error, exactly one of user_id / agent_id must be provided"`) |
+| `message` | `string` | Human-readable reason. For `INVALID_INPUT` from request validation, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. `"Value error, exactly one of user_id / group_id / group_ids must be provided"`) |
 | `timestamp` | `string` | ISO-8601 with timezone offset (display tz) |
 | `path` | `string` | Request path, e.g. `/api/v2/memory/add` |
 
@@ -301,9 +298,9 @@ message structure plus a stable `sender_id` for indexing.
 For `role: "user"`, this is the `user_id` the server will index the
 extracted memory under: markdown lands at
 `users/<sender_id>/episodes/...`, and `/search` / `/get` queries with
-`user_id: "<sender_id>"` reach it. For `role: "assistant"` or
-`"tool"`, the field is informational (the LLM sees it during
-extraction but it is not used as an indexing key).
+`user_id: "<sender_id>"` reach it. For `role: "assistant"`, the field is
+informational (the LLM sees it during extraction but it is not used as an
+indexing key).
 
 **`sender_name`** — Optional human-readable display name. Lets the LLM
 use a real name during extraction without changing the indexing key.
@@ -314,6 +311,12 @@ For example, set `sender_id: "u_42"` (stable internal id) and
 - `"user"` — content originates from a human (or human-acting client).
 - `"assistant"` — content from the AI assistant.
 - `"tool"` — output of a tool call; pair with `tool_call_id`.
+
+Memory is chat memory. A tool row (`role: "tool"`) and an assistant message
+that carries `tool_calls` are accepted, and counted in `message_count`, but
+dropped before segmentation: they are never buffered, segmented or extracted,
+whatever text they carry. The user's and the assistant's plain messages of
+the same batch are memorized as usual.
 
 **`timestamp`** — Wall-clock anchor in **Unix epoch milliseconds (ms)**
 per the v1 API contract. Used by extraction to anchor the resulting
@@ -332,7 +335,8 @@ file (`episode-<YYYY-MM-DD>.md` etc.).
   [ContentItem](#contentitem).
 
 **`tool_calls`** — When `role: "assistant"`, the tool calls the
-assistant emitted in this turn (OpenAI Chat Completions shape).
+assistant emitted in this turn (OpenAI Chat Completions shape). Such a
+message is dropped before segmentation (see `role`).
 
 **`tool_call_id`** — When `role: "tool"`, the `id` of the call this
 message is the response to. Required for `role: "tool"`; a tool row
@@ -424,7 +428,7 @@ OpenAI-shaped tool invocation attached to an assistant turn.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `name` | `string` | yes | Function name as registered with the agent |
+| `name` | `string` | yes | Function name the assistant called |
 | `arguments` | `string` | yes | **JSON-encoded string** (OpenAI convention — not an object) |
 
 ### FilterNode (filter DSL)
@@ -529,27 +533,28 @@ Examples:
 The keyword, vector, hybrid and agentic methods were removed in 2.0
 together with atomic facts. A request naming one of them, or any other
 value, is refused with `422 INVALID_INPUT` and a message that says only
-`"llm_multiround"` is supported. Multi-round retrieval needs an
-`[embedding]` provider and calls the `[decider]` model (falling back to
-`[llm]`) once per round.
+`"llm_multiround"` is supported. Multi-round retrieval calls the
+`[decider]` model (falling back to `[llm]`) once per round; without an
+`[embedding]` provider it recalls by BM25 alone.
 
 ### GetMemoryType
 
 | Value | Track | Returned in `data.<plural>` |
 |---|---|---|
-| `"episode"` | user | `data.episodes` — [GetEpisodeItem](#getepisodeitem) |
+| `"episode"` | user, group | `data.episodes` — [GetEpisodeItem](#getepisodeitem) |
 | `"profile"` | user | `data.profiles` — [GetProfileItem](#getprofileitem) |
-| `"agent_case"` | agent | `data.agent_cases` — [GetAgentCaseItem](#getagentcaseitem) |
-| `"agent_skill"` | agent | `data.agent_skills` — [GetAgentSkillItem](#getagentskillitem) |
 | `"scene"` | user, group | `data.scenes` — the owner's current scene versions ([scenes.md](scenes.md)), in the [GetEpisodeItem](#getepisodeitem) shape with `type: "Scene"`; `"episode"` never lists a scene |
 | `"image_memory"` | group | `data.images` — the group's picture memories |
 | `"member_profile"` | group | `data.profiles` — one member's profile in each group of the scope; needs `member_id` |
+| `"group_profile"` | group | `data.group_profile` — the group-profile items the asker can see, newest first; every version with `include_superseded` |
 
 `memory_type` must match the requested owner kind: `"episode"` /
-`"profile"` / `"scene"` take `user_id`; `"agent_case"` / `"agent_skill"`
-require `agent_id`; a group scope (`group_id` / `group_ids`) takes
-`"episode"`, `"scene"`, `"image_memory"` and `"member_profile"`. The
-mismatching combinations are rejected with `422`.
+`"profile"` / `"scene"` take `user_id`; a group scope (`group_id` /
+`group_ids`) takes `"episode"`, `"scene"`, `"image_memory"`,
+`"member_profile"` and `"group_profile"`. The mismatching combinations are
+rejected with `422`. EverOS 2.0 has no agent memory: `"agent_case"` and
+`"agent_skill"` are refused with `422` like an `agent_id`
+([`/memory/get`](#post-apiv2memoryget)).
 
 ## Endpoints
 
@@ -682,7 +687,7 @@ Response (real capture):
 Force the boundary detector to decide **now** for the given session
 buffer. The LLM runs extraction (one call) regardless of whether the
 heuristic would have tripped on its own. Useful at the end of a chat
-or agent run to make sure pending context becomes durable memory.
+to make sure pending context becomes durable memory.
 
 #### Request body
 
@@ -931,10 +936,12 @@ memories, ranked together, plus optional profiles.
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
 
 **Owner scope** — **Exactly one** of `user_id`, `group_id` and
-`group_ids` must be set. Agent memory is not searchable: an `agent_id`
-(with or without `context_group_id`) is refused with `422` and a message
-pointing at [`/memory/get`](#post-apiv2memoryget), which lists an agent's
-cases and skills.
+`group_ids` must be set. EverOS 2.0 has no agent memory: an `agent_id` or a
+`context_group_id` is refused with `422 INVALID_INPUT`, whose message reads
+`"Value error, EverOS 2.0 has no agent memory: name a user (user_id) or a
+group; agent_id, context_group_id and the agent_case / agent_skill memory
+types are not accepted"`. `/memory/get` refuses them the same way, and so
+does `/memory/delete` an `agent_id`.
 
 **`include_groups`** — Off by default; a request without it is answered
 exactly as before. With `user_id`, also search the user's groups: every
@@ -1063,7 +1070,7 @@ User profile. Only populated when `include_profile=true` and
 #### UnprocessedMessageDTO
 
 A raw message still sitting in the boundary-detection buffer — sent to
-`/add` but not yet carved into an episode / case. Returned **only**
+`/add` but not yet carved into an episode. Returned **only**
 when the request's `filters` contains `session_id` as a top-level eq
 scalar (`{"session_id": "<sid>"}`); compound shapes (`AND` / `OR`
 combinators, operator maps such as `{"eq": ...}` / `{"in": ...}`) do
@@ -1140,11 +1147,14 @@ for UI browsing, exports, or filtered scans.
 
 | Field | Type | Required | Default | Constraints |
 |---|---|---|---|---|
-| `user_id` | `string \| null` | XOR with `agent_id` | `null` | `minLength=1` if set |
-| `agent_id` | `string \| null` | XOR with `user_id` | `null` | `minLength=1` if set |
+| `user_id` | `string \| null` | one owner scope | `null` | `minLength=1` if set |
+| `group_id` / `group_ids` | `string` / `array<string>` | one owner scope | `null` | see [Groups](#groups) |
+| `asker_id` | `string \| null` | for a group scope | `null` | `minLength=1` if set |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `memory_type` | [GetMemoryType](#getmemorytype) | yes | — | — |
+| `member_id` | `string \| null` | with `"member_profile"` | `null` | `minLength=1` if set |
+| `include_superseded` | `boolean` | no | `false` | with `"group_profile"` only |
 | `page` | `integer` | no | `1` | `≥ 1` |
 | `page_size` | `integer` | no | `20` | `1..100` |
 | `sort_by` | `"timestamp" \| "updated_at"` | no | `"timestamp"` | — |
@@ -1153,10 +1163,12 @@ for UI browsing, exports, or filtered scans.
 | `include_groups` | `boolean` | no | `false` | with `user_id` and `memory_type` `"episode"` or `"scene"` |
 | `include_group_ids` | `array<string> \| null` | no | `null` | with `include_groups`; `1..16` ids |
 
-**`user_id` / `agent_id`** — **Exactly one** must be set, and it must
-match the track implied by `memory_type` (`"episode"` / `"profile"`
-require `user_id`; `"agent_case"` / `"agent_skill"` require
-`agent_id`).
+**Owner scope** — **Exactly one** of `user_id`, `group_id` and `group_ids`
+must be set, and it must match `memory_type` (see
+[GetMemoryType](#getmemorytype)). An `agent_id`, a `context_group_id` and the
+`agent_case` / `agent_skill` memory types are refused with `422`: EverOS 2.0
+has no agent memory (the message is quoted under
+[`/memory/search`](#post-apiv2memorysearch)).
 
 **`include_groups`** — Off by default. With `user_id` and `memory_type`
 `"episode"` or `"scene"`, also list the records of the user's groups (every
@@ -1170,7 +1182,7 @@ kinds, a group scope and `audience: "group"` answer `422`.
 
 **`memory_type`** — Which item kind to list; see
 [GetMemoryType](#getmemorytype). The route populates exactly one of
-the four arrays in `data` based on this value.
+the arrays in `data` based on this value.
 
 > `"profile"` is a single-row lookup, not a list: an owner has at most
 > one profile. `page`, `page_size`, `filters`, `sort_by` and
@@ -1185,9 +1197,8 @@ items match the request before paging.
 **`page_size`** — Items per page, in `1..100`. Default 20.
 
 **`sort_by`** — Column to sort by. Note: for `memory_type` values
-where `"timestamp"` does not apply (e.g. `"profile"` has no
-timestamp, `"agent_skill"` is a named entity), the server silently
-falls back to `"updated_at"`.
+where `"timestamp"` does not apply (`"profile"` has no timestamp), the
+server silently falls back to `"updated_at"`.
 
 **`sort_order`** — `"desc"` (newest first, default) or `"asc"`.
 
@@ -1196,16 +1207,17 @@ predicate-based filtering before pagination.
 
 #### Response body
 
-`200 OK` returns a SuccessEnvelope wrapping `GetData`. The four
-arrays are always present so client code can iterate without
-branching on `memory_type`; exactly one is populated.
+`200 OK` returns a SuccessEnvelope wrapping `GetData`. Every array is
+always present so client code can iterate without branching on
+`memory_type`; exactly one is populated.
 
 | Field | Type | Notes |
 |---|---|---|
 | `episodes` | `array<GetEpisodeItem>` | Populated when `memory_type="episode"` |
-| `profiles` | `array<GetProfileItem>` | Populated when `memory_type="profile"` |
-| `agent_cases` | `array<GetAgentCaseItem>` | Populated when `memory_type="agent_case"` |
-| `agent_skills` | `array<GetAgentSkillItem>` | Populated when `memory_type="agent_skill"` |
+| `scenes` | `array<GetEpisodeItem>` | Populated when `memory_type="scene"` |
+| `images` | `array<object>` | Populated when `memory_type="image_memory"` |
+| `profiles` | `array<GetProfileItem>` | Populated when `memory_type="profile"` or `"member_profile"` |
+| `group_profile` | `array<object>` | Populated when `memory_type="group_profile"` |
 | `total_count` | `integer` | Total matching records **before** paging |
 | `count` | `integer` | Number of items in **this page** (`len(items)`) |
 
@@ -1220,7 +1232,7 @@ Same shape as [SearchEpisodeItem](#searchepisodeitem) **minus**
 | `user_id` | `string \| null` | Owner |
 | `app_id` | `string` | Scope |
 | `project_id` | `string` | Scope |
-| `session_id` | `string \| null` | Originating session; `null` for an episode Reflection merged from several sessions |
+| `session_id` | `string \| null` | Originating session; `null` for an episode merged from several sessions (by the Reflection of an earlier 2.0 build) |
 | `timestamp` | `string` | ISO-8601 with timezone offset, identical to `/search` (both go through the same `from_iso_format` path) — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
 | `summary` | `string` | Short summary |
@@ -1243,42 +1255,6 @@ Same shape as [SearchEpisodeItem](#searchepisodeitem) **minus**
 | `project_id` | `string` | Scope |
 | `profile_data` | `object` | Free-form structured profile fields |
 
-#### GetAgentCaseItem
-
-An agent case (agent memory is listed here; it is not searchable).
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `string` | `<agent_id>_ac_<YYYYMMDD>_<NNN>` |
-| `entry_id` | `string` | `ac_<YYYYMMDD>_<NNN>`; the id a skill's `source_case_ids` refers to |
-| `agent_id` | `string` | Owner |
-| `app_id` | `string` | Scope |
-| `project_id` | `string` | Scope |
-| `session_id` | `string` | Originating run |
-| `task_intent` | `string` | What the agent was trying to do |
-| `approach` | `string` | How it went about it |
-| `quality_score` | `number` | Quality assessed at extraction time |
-| `key_insight` | `string \| null` | One-line takeaway, if any |
-| `timestamp` | `string` | ISO-8601 UTC |
-
-#### GetAgentSkillItem
-
-An agent skill — a named procedural memory produced by clustering related
-cases.
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `string` | `<agent_id>_sk_<YYYYMMDD>_<NNN>` |
-| `agent_id` | `string` | Owner |
-| `app_id` | `string` | Scope |
-| `project_id` | `string` | Scope |
-| `name` | `string` | Skill name |
-| `description` | `string` | One-line description |
-| `content` | `string` | Full skill body |
-| `confidence` | `number` | Extraction confidence in `[0, 1]` |
-| `maturity_score` | `number` | Maturity assessed at clustering, in `[0, 1]` |
-| `source_case_ids` | `array<string>` | `entry_id` values of the `agent_case` items that contributed to this skill |
-
 #### cURL example
 
 ```bash
@@ -1292,7 +1268,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/get \
   }'
 ```
 
-Response (real capture):
+Response (abridged):
 
 ```json
 {
@@ -1313,9 +1289,10 @@ Response (real capture):
                 "type": "Conversation"
             }
         ],
+        "scenes": [],
+        "images": [],
         "profiles": [],
-        "agent_cases": [],
-        "agent_skills": [],
+        "group_profile": [],
         "total_count": 1,
         "count": 1
     }
@@ -1435,7 +1412,8 @@ Query: `id` (required), `user_id` or `group_id` (exactly one), `asker_id` (a
 group's), `app_id`, `project_id`.
 
 Each version: `id`; `state` -- `current`, `superseded` (a newer version
-replaced it), `merged` (a merge of several replaced it), `forgotten`;
+replaced it), `merged` (the Reflection of an earlier 2.0 build merged it
+with others into one episode), `forgotten`;
 `timestamp` (the memory's own time: when what it says happened); `next` (the
 version that replaced it); `supersedes`; `edited_by` / `edited_at` / `held`
 (a version a person wrote); `replaced_at` and `reason` (a profile value);
@@ -1528,14 +1506,12 @@ once and reversible by the `forget_ids` it returns.
 | `user_id` | target `owner` of the user |
 | `user_id` + `session_id` | target `session` of the user |
 | `session_id` | target `session` of every user whose memory holds the conversation, one forget each |
-| `agent_id` (± `session_id`) | refused, `422`: an agent's memory has no forget yet |
+| `agent_id` (± `session_id`) | refused, `422`: EverOS 2.0 has no agent memory |
 | `group_id` + `asker_id` + `session_id` or `user_id` | the group's delete: an owner's or admin's forget of the session or the member's messages ([group-memory.md](group-memory.md), section 15) |
 
 A session bound to a group without `group_id` is `422`. Nothing leaves
 markdown, and the conversation's segments and buffer stay in `system.db`:
 sending the conversation again writes new memories beside the forgotten ones.
-A user's memories of the conversation are forgotten; an agent's cases of it
-are not (no agent forget yet).
 
 ```json
 {
@@ -1569,7 +1545,7 @@ Manually trigger a registered OME strategy.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `name` | `string` | yes | — | Strategy name (e.g. `reflect_episodes`) |
+| `name` | `string` | yes | — | Strategy name (e.g. `extract_user_profile`) |
 | `timeout` | `float` | no | `120.0` | Max seconds to wait for completion |
 | `force` | `bool` | no | `false` | Bypass the `enabled` gate in `ome.toml` |
 
@@ -1589,11 +1565,16 @@ the operational probes; clients that share a response parser with
 
 **`not_dispatched`** means every subscriber was rejected by one of the
 five dispatch gates (event-class subscription / `_routes_to` / `enabled` /
-`applies_to` / `Counter`). The most common cause is forgetting `"force": true` on a
-strategy that is `enabled=false` in `ome.toml` — e.g. triggering
-`reflect_episodes` without `force` while it is disabled in config
-returns `{"status": "not_dispatched", "dispatched": 0, "runs": []}`
-instead of an error.
+`applies_to` / `Counter`). A manual trigger sends a `ManualTick`, which
+reaches only a strategy that subscribes to it or runs on a `Cron` schedule,
+and only with `"force": true` when the strategy is `enabled=false` in
+`ome.toml`. Every strategy EverOS 2.0 ships runs on an event instead -- a
+new episode (`extract_user_profile`, `update_user_scenes`), a group segment
+or flush (`update_member_profiles`, `update_group_scenes`,
+`update_group_profile`) or a group's idle window
+(`update_group_profile_idle`) -- so triggering one of them returns
+`{"status": "not_dispatched", "dispatched": 0, "runs": []}` instead of an
+error.
 
 > `status: "ok"` means all dispatched strategy runs settled — including
 > runs that dead-lettered (their errors are in `runs[*].error`). It does
@@ -1618,36 +1599,15 @@ See [docs/openapi.json](openapi.json) for the exact generated schema
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/ome/trigger \
   -H 'Content-Type: application/json' \
-  -d '{"name": "reflect_episodes", "force": true}'
+  -d '{"name": "extract_user_profile"}'
+# {"status": "not_dispatched", "name": "extract_user_profile", "dispatched": 0, "runs": []}
 ```
-
----
-
-### Knowledge endpoints
-
-The knowledge base subsystem (`/api/v2/knowledge/*`) provides document
-upload, CRUD, and hybrid search. These endpoints are fully documented
-in their own reference: **[docs/knowledge.md](knowledge.md)**.
-
-Summary of available routes:
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v2/knowledge/documents` | Upload and extract a document |
-| `GET` | `/api/v2/knowledge/documents` | List documents (paginated) |
-| `GET` | `/api/v2/knowledge/documents/{doc_id}` | Get a single document |
-| `PUT` | `/api/v2/knowledge/documents/{doc_id}` | Replace a document |
-| `PATCH` | `/api/v2/knowledge/documents/{doc_id}` | Partial update |
-| `DELETE` | `/api/v2/knowledge/documents/{doc_id}` | Delete a document |
-| `GET` | `/api/v2/knowledge/topics/{topic_id}` | Get a single topic |
-| `POST` | `/api/v2/knowledge/search` | Hybrid search over topics |
-| `GET` | `/api/v2/knowledge/categories` | List taxonomy categories |
 
 ---
 
 ### Groups
 
-Group chats are a third memory owner next to users and agents
+Group chats are the second memory owner next to users
 ([group-memory.md](group-memory.md)). A group has a roster of membership
 intervals (`[joined_at, left_at)`, epoch ms) kept as an append-only log in
 `groups/<group_id>/group.md` and mirrored into `system.db`.
@@ -1715,12 +1675,6 @@ source_end}`. A replaced value outside the asker's windows, or forgotten, is
 not listed, and an item left with none carries none of the three
 ([group-memory.md](group-memory.md), section 7.4). A personal profile is never
 attached. The multi-round search starts from `"<display name>: <question>"`.
-
-**Agent memory in a group.** An agent case learned from a group session
-carries `source_group_id`. `/memory/search` and `/memory/get` with `agent_id`
-return such cases only with `context_group_id` set to that group. The asker
-must be a current member of it, which is the agent itself unless `asker_id`
-names another member. Cases learned outside any group are always returned.
 
 **Identity.** EverOS has no authentication: `asker_id` is the caller's
 assertion. A deployment behind a gateway sets `[access] identity_header`; the

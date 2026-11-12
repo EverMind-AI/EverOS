@@ -79,9 +79,11 @@ machinery that keeps a deleted memory from coming back.
   answers `{"filters": [...], "count": N}`. A session still being memorized
   answers `503 SESSION_BUSY` and nothing is deleted. everos-mcp's
   `forget_session` now works against a self-hosted server. (In 2.0 it is a
-  forget: see Changed.)
+  forget: see Changed; an `agent_id` is refused since agent memory was
+  removed: see Removed.)
 - **`POST /api/v2/memory/delete_by_ids`**: delete episodes by memory id, with
-  what Reflection merged into them and their cluster membership.
+  what Reflection merged into them and their cluster membership. (Reflection
+  is removed since: see Removed.)
 - Configuration: `[memorize] delete_wait_seconds` (default `10`),
   `[cascade] delete_fence_warn_entries` (default `100000`).
 - Metrics: `everos_lock_wait_seconds` / `everos_lock_hold_seconds` (by lock
@@ -148,7 +150,8 @@ machinery that keeps a deleted memory from coming back.
     asker who can see all of its episodes.
   - **Agent cases learned in a group** carry `source_group_id`. They are
     returned only to an agent read in that group's context:
-    `context_group_id`, asked by a current member.
+    `context_group_id`, asked by a current member. (Removed since, with
+    agent memory: see Removed.)
   - **Search:** a group episode carries `owner_type` and
     `source: {memcell_id, from, to}`. `include_profile` attaches the asker's
     and up to three named members' in-group profiles, cut to the asker's
@@ -157,7 +160,8 @@ machinery that keeps a deleted memory from coming back.
   - **Get:** `memory_type` takes `scene`, `image_memory` and
     `member_profile` (with `member_id`) on group scopes.
   - **Table schema version 5** adds `user_profile.subject_id` and
-    `agent_case.source_group_id`. Existing rows read as before.
+    `agent_case.source_group_id`. Existing rows read as before. (The
+    `agent_case` table is no longer opened: see Removed.)
 
 - **Group memory, Step 2** ([docs/group-memory.md](docs/group-memory.md),
   tasks 11-17):
@@ -200,7 +204,8 @@ machinery that keeps a deleted memory from coming back.
     the asker belongs to; `GET /api/v2/projects/{project_id}` and
     `GET /api/v2/projects/{project_id}/profile` read them. A project's
     knowledge base is read by its members only once the project has groups
-    (the knowledge reads take `asker_id`).
+    (the knowledge reads take `asker_id`). (The knowledge base is removed
+    since: see Removed.)
 - **A member's fact that changes keeps its earlier value**
   ([docs/group-memory.md](docs/group-memory.md), section 7.4). When the
   profile operator's UPDATE rewrites a member-in-group profile fact
@@ -290,7 +295,8 @@ machinery that keeps a deleted memory from coming back.
     LoCoMo 0-1 with the 27B decider: a scene is in the core on 66% of
     questions, +5.6% decider prompt tokens, +2.3% returned context.
   - `ClusterStore.find_cluster_for_member` takes a `kind`: an episode now
-    sits in its profile cluster and its scene's.
+    sits in its profile cluster and its scene's. (Profile clustering is
+    removed since: see Removed.)
 - **Search names the answering model's copy of every picture.**
   `SearchImageItem.model_path` -- on ranked pictures and on those attached to
   an episode -- is the `[images] model_edge` copy,
@@ -373,7 +379,8 @@ machinery that keeps a deleted memory from coming back.
   evaluation harnesses' `--replace-sessions` keeps working; their stores keep
   the forgotten copy). `agent_id` is refused (`422`): an agent's memory has no
   forget yet; a session-only delete leaves an agent's cases of the
-  conversation. The `500 "deletion incomplete"` answer and
+  conversation. (Agent memory is removed since: see Removed.) The
+  `500 "deletion incomplete"` answer and
   `DeletionIncompleteError` are gone.
 - **A forget by target is a dry run by default (breaking for group
   callers).** A group body on `/memory/forget` used to forget at once; it now
@@ -438,7 +445,8 @@ machinery that keeps a deleted memory from coming back.
   reported, and a missing rerank provider disables `knowledge` only. The
   startup hint about rows without a vector is logged only when an embedder
   is configured. Cost: no embedding calls at all on such a deployment; the
-  decider prompt is the same size.
+  decider prompt is the same size. (Reflection, skill extraction, rerank and
+  the knowledge base are removed since: see Removed.)
 
 - **The profile reads each segment once, with two prompts** (everalgo
   `ProfileExtractor.aupdate`; the 2.0 design approved on 2026-10-30). Every
@@ -466,7 +474,7 @@ machinery that keeps a deleted memory from coming back.
   `extract_user_profile` now triggers on the pipeline's `EpisodeExtracted`
   with or without an embedding provider and skips a segment an item already
   rests on; the clusters no longer drive it (`trigger_profile_clustering`
-  still runs, for Reflection).
+  still runs, for Reflection). (Both are removed since: see Removed.)
 - **everalgo-user-memory is a vendored local build for the test phase.**
   `pyproject.toml` pins `everalgo-user-memory==0.9.0rc6.dev6` and
   `[tool.uv.sources]` points it at
@@ -550,9 +558,11 @@ machinery that keeps a deleted memory from coming back.
 - **A Reflection merge finishes on the merged episode itself.**
   `finish_reflection` runs on the merged episode's `EpisodeExtracted` event
   and deprecates the replaced members at once; it used to wait for the
-  merged episode's atomic facts to be extracted first.
+  merged episode's atomic facts to be extracted first. (Reflection is
+  removed since: see Removed.)
 - `reflection_report.deprecated_fact_count` is kept in `system.db` for stores
-  that have it and is always written `0`.
+  that have it and is always written `0`. (The table is no longer opened:
+  see Removed.)
 - **Extraction is sampled at temperature 0 again.** `[llm] temperature`
   (default `0.0`) is sent on every boundary, episode, profile, picture-route
   and group call that sets none of its own. Every request sent 0.0 until
@@ -603,6 +613,7 @@ machinery that keeps a deleted memory from coming back.
   checks that what it was derived from still exists; a write whose source was
   deleted is skipped and logged as `memory_write_skipped_source_gone`.
 - User clustering and the Reflection finish embed before taking their locks.
+  (Both are removed since: see Removed.)
 - A succeeded OME run no longer keeps the triggering event (the conversation
   text) in `ome.db`; failed and dead-letter runs keep it for diagnosis.
 - `/get` lists an episode Reflection merged from several sessions with
@@ -625,6 +636,142 @@ machinery that keeps a deleted memory from coming back.
   they went to every sender in the segment. In a one-to-one chat, a picture
   posted by the assistant therefore no longer adds items to the user's
   profile.
+
+### Removed
+
+- **Agent memory, the knowledge base, rerank and Reflection (EverOS 2.0,
+  breaking).** EverOS 2.0 keeps chat memory -- one-to-one and group chats,
+  text and pictures, profiles, scenes, group profiles, and update / forget /
+  history -- and multi-round retrieval, with all of the infrastructure under
+  them. Removed:
+  - **Agent memory.** The agent pipeline; the `extract_agent_case`,
+    `trigger_skill_clustering` and `extract_agent_skill` strategies; agent
+    cases and skills (the markdown under `<app>/<project>/agents/<id>/`,
+    `skills/skill_<name>/SKILL.md` included, and the `agent_case` /
+    `agent_skill` index tables on LanceDB and Milvus); the case judge and
+    `[agent_memory] case_gate_enabled`; the `agent` owner type; the
+    `agent_case` / `agent_skill` memory types of `/memory/get` and
+    `data.agent_cases` / `data.agent_skills` in its answer. A request to
+    `/memory/search`, `/memory/get` or `/memory/delete` that names
+    `agent_id` (or `context_group_id`, or one of the two memory types)
+    answers `422 INVALID_INPUT`: "EverOS 2.0 has no agent memory: name a
+    user (user_id) or a group; agent_id, context_group_id and the
+    agent_case / agent_skill memory types are not accepted". `/memory/add`
+    never took an `agent_id`; an unknown field there is ignored as before.
+  - **`[memorize] mode`.** Memory is chat memory. A tool row
+    (`role: "tool"`, or an assistant message with `tool_calls`) is still
+    accepted by `/memory/add` and dropped before segmentation, as
+    `mode = "chat"` did, and so is a tool row an older build left in a
+    session buffer. Every memcell's `raw_type` is `Conversation`. The default
+    was `"agent"`, which kept tool rows in the cells for the agent pipeline.
+  - **The knowledge base.** Every `/api/v1|v2/knowledge/...` route (document
+    upload, list, get, patch and delete, topics, categories, knowledge
+    search) now answers `404`; `KnowledgeService`; the markdown under
+    `<app>/<project>/knowledge/`; the SQLite tables `knowledge_document` /
+    `knowledge_topic` and the LanceDB table `knowledge_topic`; `[knowledge]`
+    and `[knowledge.search]`; the error code `EXTRACTION_EMPTY`. A project's
+    scope stays: `project_scope` group search and the `/projects` routes
+    are chat features.
+  - **Rerank.** The rerank component and `[rerank]` / `EVEROS_RERANK__*`;
+    knowledge search was its one user. `GET /health` loses
+    `capabilities.rerank`, and `disabled_features` holds at most
+    `vector_recall` (no embedder: keyword recall only) and
+    `multimodal_upload` (no multimodal LLM or parser: a non-text chat item
+    is not read into text); `knowledge`, `reflection` and
+    `skill_extraction` are gone.
+  - **Reflection.** The weekly `reflect_episodes` merge (off by default),
+    `finish_reflection`, the reflection orchestrator, the
+    `reflection_report` table and `docs/reflection.md`. Scenes replace it
+    ([docs/scenes.md](docs/scenes.md)). `custom_instructions/reflect.yaml`
+    stays: the scene narrative call (`chat.scene_update`) reads it.
+  - **Profile clustering.** `trigger_profile_clustering`, which fed only
+    Reflection (the profile update reads each new segment directly). Scenes
+    keep their clusters, and `[clustering]` stays as their geometry.
+  - **Backfill's `clusters` and `skills` phases.** `everos cascade backfill
+    --phase` takes `vectors` or `all`.
+  - **Events.** `EpisodeExtracted` loses `source` and `reflection` (a run an
+    older build persisted still reads); `AgentPipelineStarted`,
+    `AgentCaseExtracted`, `ProfileClusterUpdated` and `SkillClusterUpdated`
+    are gone.
+  - **Dependencies.** `everalgo-agent-memory` and `everalgo-knowledge`.
+    `everalgo-parser` becomes a direct dependency: it came in through
+    `everalgo-knowledge`, reads a chat message's non-text items into text,
+    and brings Pillow, which the picture store needs. `everalgo-rank` stays:
+    multi-round search uses its RRF.
+  - **Docs.** `docs/knowledge.md` and `docs/reflection.md`.
+
+  Compatibility:
+  - **Configuration.** `[agent_memory]`, `[knowledge]` (with
+    `[knowledge.search]`), `[memorize] mode` and `[rerank]` are accepted and
+    ignored with a `config_key_ignored` warning, so an `everos.toml` an older
+    `everos init` wrote, and exported `EVEROS_RERANK__*` /
+    `EVEROS_MEMORIZE__MODE` variables, keep loading
+    ([docs/configuration.md](docs/configuration.md#unknown-keys-are-rejected)).
+    An `ome.toml` section naming a removed strategy only logs
+    `config_override_unknown_strategy`, and a run of one that a store
+    persisted is dropped with `ome_run_dropped_unknown_strategy`.
+  - **Stores.** The store-version gate still refuses 1.x stores. A 2.0
+    store written before this change keeps its leftovers untouched: the
+    `agents/` and `knowledge/` markdown matches no cascade kind and is
+    never scanned; the `agent_case`, `agent_skill` and `knowledge_topic`
+    index tables and the `knowledge_document`, `knowledge_topic` and
+    `reflection_report` SQLite tables are neither opened nor created; the
+    `memcell.case_*` columns stay unused; `cluster` rows of kind
+    `user_memory` / `agent_case` are never read. An episode an earlier
+    Reflection merged (`parent_type: cluster`) is still read, listed and
+    searched like any episode, and the history of the episodes it replaced
+    still shows `merged`. `everos cascade sync --force-all` re-queues every
+    ledger row; a row of a removed kind is then marked failed ("no handler
+    registered"), which `cascade status` counts and `/health`'s `healthy`
+    ignores ([docs/storage_layout.md](docs/storage_layout.md)).
+  - **Cost.** Write side: model calls on a chat are unchanged (a
+    differential run against the base sends the same requests and writes
+    the same markdown, index rows and answers); two background runs less per
+    one-to-one segment (`extract_agent_case`, which skipped a segment
+    without tool calls before any model call, and
+    `trigger_profile_clustering`, with its one embedding call per episode)
+    and one less per group segment (`extract_agent_case`); a conversation
+    with tool calls no longer pays agent-case and skill extraction calls (a
+    chat with fewer than three tool-call rounds never paid them), and a
+    deployment that had switched Reflection on no longer pays its weekly
+    merge. Read side: unchanged; search never covered agent memory or the
+    knowledge base.
+- **Hard deletion (EverOS 2.0).** The `Deleter` behind `/memory/delete` and
+  `/delete_by_ids`, its race tests and its real-server acceptance suite
+  (`tests/acceptance/memory_delete`, `make acceptance`) are gone; the routes
+  are forgets (see Changed).
+- **Atomic facts and foresight (EverOS 2.0).** Chat memory keeps episodes,
+  picture memories and profiles. The `extract_atomic_facts` and
+  `extract_foresight` strategies, the `AtomicFactsExtracted` and
+  `UserPipelineStarted` events, the `users/<id>/.atomic_facts/` and
+  `.foresights/` daily logs, the `atomic_fact` and `foresight` index tables
+  (LanceDB and Milvus) and their cascade handlers are gone; everalgo still
+  ships the two extractors, EverOS no longer calls them. A store written
+  before keeps its leftover files and tables untouched and ignored (deletes
+  no longer reach them); an `ome.toml` naming the two strategies only logs a
+  warning; a cascade change still queued for them is marked failed; a
+  background run still pending for them (or for the removed events) is
+  dropped with a warning instead of failing in the scheduler.
+- **Every search method but multi-round retrieval.** `keyword`, `vector`,
+  `hybrid` and `agentic` are removed (the vector and hybrid routes ranked
+  atomic facts); `llm_multiround` is the default and the only method. A
+  request naming another method answers `422 INVALID_INPUT` saying only
+  `llm_multiround` is supported. Gone with them: the request fields `radius`,
+  `min_score` and `enable_llm_rerank` (now unknown fields, `422`), the
+  response's `episodes[].atomic_facts`, `agent_cases` and `agent_skills`, and
+  `[observability] recall_hit_threshold` (no calibrated score is left).
+- **Agent memory search.** Multi-round retrieval covers user and group memory;
+  a search with `agent_id` (or `context_group_id`) answers `422` and points at
+  `POST /api/v2/memory/get`, which still lists an agent's cases and skills,
+  in a group's context too. Cases and skills are still extracted and indexed.
+  (Agent memory itself is removed since: see the first entry above.)
+- `[decider] full_text` and `EVEROS_LLMMR_DECIDER_FULL_TEXT`. Its default
+  showed the decider only the stored `summary`, a 200-character prefix of the
+  body on most stores, which cost 9.3 points of LoCoMo core-only accuracy; a
+  value still set is ignored.
+- `[decider] invalid_reply_retries`. The decider reads its replies itself, so
+  an unusable reply is one failed attempt of `[decider] retries`; a value
+  still set for it is ignored.
 
 ### Fixed
 
@@ -898,44 +1045,6 @@ machinery that keeps a deleted memory from coming back.
   search result named it `.jpeg` whatever the picture; a greyscale picture's
   copy is a `.png`. It now takes the extension the picture's copies have (its
   model copy's), so a caller resolving it finds the file.
-
-### Removed
-
-- **Hard deletion (EverOS 2.0).** The `Deleter` behind `/memory/delete` and
-  `/delete_by_ids`, its race tests and its real-server acceptance suite
-  (`tests/acceptance/memory_delete`, `make acceptance`) are gone; the routes
-  are forgets (see Changed).
-- **Atomic facts and foresight (EverOS 2.0).** Chat memory keeps episodes,
-  picture memories and profiles. The `extract_atomic_facts` and
-  `extract_foresight` strategies, the `AtomicFactsExtracted` and
-  `UserPipelineStarted` events, the `users/<id>/.atomic_facts/` and
-  `.foresights/` daily logs, the `atomic_fact` and `foresight` index tables
-  (LanceDB and Milvus) and their cascade handlers are gone; everalgo still
-  ships the two extractors, EverOS no longer calls them. A store written
-  before keeps its leftover files and tables untouched and ignored (deletes
-  no longer reach them); an `ome.toml` naming the two strategies only logs a
-  warning; a cascade change still queued for them is marked failed; a
-  background run still pending for them (or for the removed events) is
-  dropped with a warning instead of failing in the scheduler.
-- **Every search method but multi-round retrieval.** `keyword`, `vector`,
-  `hybrid` and `agentic` are removed (the vector and hybrid routes ranked
-  atomic facts); `llm_multiround` is the default and the only method. A
-  request naming another method answers `422 INVALID_INPUT` saying only
-  `llm_multiround` is supported. Gone with them: the request fields `radius`,
-  `min_score` and `enable_llm_rerank` (now unknown fields, `422`), the
-  response's `episodes[].atomic_facts`, `agent_cases` and `agent_skills`, and
-  `[observability] recall_hit_threshold` (no calibrated score is left).
-- **Agent memory search.** Multi-round retrieval covers user and group memory;
-  a search with `agent_id` (or `context_group_id`) answers `422` and points at
-  `POST /api/v2/memory/get`, which still lists an agent's cases and skills,
-  in a group's context too. Cases and skills are still extracted and indexed.
-- `[decider] full_text` and `EVEROS_LLMMR_DECIDER_FULL_TEXT`. Its default
-  showed the decider only the stored `summary`, a 200-character prefix of the
-  body on most stores, which cost 9.3 points of LoCoMo core-only accuracy; a
-  value still set is ignored.
-- `[decider] invalid_reply_retries`. The decider reads its replies itself, so
-  an unusable reply is one failed attempt of `[decider] retries`; a value
-  still set for it is ignored.
 
 ### Known issues
 

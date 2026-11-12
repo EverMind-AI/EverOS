@@ -6,23 +6,25 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 
 ## Scope
 
-**In scope (v1)**:
+**In scope (2.0)**:
 
 - Local deployment for personal agents or small teams
-- Conversation, workflow, agent-trace, file-knowledge → structured memory
+- Chat memory: one-to-one and group chats, text and pictures (other content
+  items are parsed into text) → episodes, picture memories, profiles,
+  scenes and a group's profile
+- Change, forget and history of a memory: every change is a new version,
+  every forget a reversible mark
 - Multi-round retrieval (BM25 + vector + scalar filter per sub-query, RRF,
   an LLM decider that selects the core memories)
 - Cascade index sync (md edit → derived index)
-- Dual-track memory (user-track / agent-track)
-- Offline memory evolution (Profile / Skill), including Reflection — a
-  consolidation strategy within the OME that merges related episodes
-- Knowledge base (document upload, parse, CRUD, semantic search)
 - CLI + HTTP API
 
-**Out of scope (v1, future v2)**:
+**Out of scope (2.0)**:
 
-- Multi-tenant / group / community deployment (10K+ users)
-- End-to-cloud sync (planned for v2)
+- Agent memory (trajectories, cases, skills) and a knowledge base of
+  uploaded documents
+- Multi-tenant / community deployment (10K+ users)
+- End-to-cloud sync
 - Distributed deployment / sharding
 
 ## Design philosophy
@@ -46,7 +48,7 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 
 ### 3. Algorithm-orchestration separation
 
-`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-agent-memory` / `-rank` / `-knowledge`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for boundary detection, episode, profile and reflection it can append requirements to the operator's bundled rules via custom instructions. everalgo knows nothing about storage.
+`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-boundary` / `-clustering` / `-rank` on `-core`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for boundary detection, episode, profile and the scene narrative it can append requirements to the operator's bundled rules via custom instructions. everalgo knows nothing about storage.
 
 This boundary lets the same algorithm power both this open-source lightweight version and other product forms.
 
@@ -82,7 +84,10 @@ Strict single-direction dependency, enforced by `import-linter` in CI.
 - **v0.3** — Production hardening, full CLI, HTTP API, Obsidian demo
 - **v1.0** — Stable API, PyPI release, comprehensive docs
 - **v1.1** — Knowledge base + Reflection (offline memory consolidation)
-- **v2** (future) — Edge-to-cloud sync via EverMe (separate project)
+- **v2.0** — Chat memory only: group memory, scenes, versioned and
+  reversible memory, multi-round retrieval as the one search method; agent
+  memory, the knowledge base and Reflection removed
+- **Later** — Edge-to-cloud sync via EverMe (separate project)
 
 ## Status
 

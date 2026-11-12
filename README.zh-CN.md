@@ -38,9 +38,9 @@
 
 EverOS 是面向 agents 和 makers 的 Python library 与 local-first memory
 runtime。它从 day one 开始就提供一层可携带的记忆层，让记忆穿过 coding
-assistants、apps、devices 和 workflows。它会把 conversations、files 和
-agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
-索引，用于快速检索和自进化复用。
+assistants、apps、devices 和 workflows。它会把一对一对话和群聊（连同其中分享的
+图片和文件）保存为可读 Markdown，并同步本地 SQLite 与 LanceDB 索引，用于多轮
+检索。
 
 <table>
 <tr>
@@ -64,24 +64,24 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 <td>❌ 常依赖 managed service、vector DB、graph DB 或 server stack</td>
 </tr>
 <tr>
-<td><strong>用户 + Agent 双轨</strong></td>
-<td>✅ 用户 <code>episodes/profile</code> 与 Agent <code>cases/skills</code> 是分离的一等记忆表面</td>
+<td><strong>个人 + 群组记忆</strong></td>
+<td>✅ 用户的 <code>episodes/profile</code>，以及群组的 episodes、成员画像和群画像；每次读取群组记忆都按提问者的成员身份校验</td>
 <td>❌ 通常围绕 chat history、profiles、entities、facts 或 retrieval records</td>
 </tr>
 <tr>
 <td><strong>正交检索作用域</strong></td>
-<td>✅ 按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索</td>
+<td>✅ 按 <code>user_id</code>、<code>group_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索</td>
 <td>❌ 通常按 app、namespace、tenant、thread 或 graph 来组织</td>
 </tr>
 <tr>
-<td><strong>Knowledge Wiki</strong></td>
-<td>✅ 可编辑、可溯源的 Markdown 知识页，支持 taxonomy、CRUD APIs 和 topic search</td>
-<td>❌ 通常和 memory 分离，被锁在 dashboard 里，或者无法回溯到源文件</td>
+<td><strong>带版本、可撤销的记忆</strong></td>
+<td>✅ 修改写出新版本，遗忘只是一个可撤销的标记；每个版本都能读到</td>
+<td>❌ 通常原地覆盖，或者直接永久删除</td>
 </tr>
 <tr>
-<td><strong>Reflection</strong></td>
-<td>✅ 离线记忆进化：在 session 之间合并 episode clusters，并持续改进 profiles 和 skills</td>
-<td>❌ 通常只是 retrieval-only memory，缺少后台 consolidation 和长周期改进</td>
+<td><strong>多轮检索</strong></td>
+<td>✅ 决策模型逐轮阅读候选，保留核心记忆，并提出后续子查询</td>
+<td>❌ 通常每个问题只做一次 top-k 查找</td>
 </tr>
 </table>
 
@@ -149,7 +149,7 @@ everos init
 `~/.everos/everos.toml`，配置下面的百炼 provider。
 
 在[百炼控制台](https://bailian.console.aliyun.com/)创建一个华北 2（北京）地域的
-DashScope API Key，并把同一个 Key 复用到三个文本 provider：
+DashScope API Key，并把同一个 Key 复用到两个文本 provider：
 
 ```toml
 [llm]
@@ -162,18 +162,12 @@ model = "text-embedding-v4"
 api_key = "<DASHSCOPE_API_KEY>"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 dimensions = 1024
-
-[rerank]
-provider = "dashscope"
-model = "gte-rerank-v2"
-api_key = "<DASHSCOPE_API_KEY>"
-base_url = "https://dashscope.aliyuncs.com"
 ```
 
 多轮检索（multi-round retrieval，`llm_multiround`，唯一的搜索方式）不配
-Embedding 也能用，这时只用关键词（BM25）召回；Embedding 会加上向量召回；
-DashScope rerank 会进一步启用 Knowledge Wiki。共享 DashScope
-host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
+Embedding 也能用，这时只用关键词（BM25）召回；Embedding 会加上向量召回。共享
+DashScope host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼
+专属 host。
 
 如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
 传入同一个 `--root <path>`。
@@ -190,8 +184,8 @@ everos server start
 curl http://127.0.0.1:8000/health
 ```
 
-确认响应里有 `"status":"ok"`。上面的百炼配置会显示 `llm`、`embed` 和
-`rerank` 三个文本 capability 均可用。
+确认响应里有 `"status":"ok"`。使用上面的百炼配置时，`capabilities.embed` 应为
+`true`。
 
 ### 5. 写入并搜索第一条记忆
 
@@ -255,7 +249,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 | 配置 | 可用能力 |
 | --- | --- |
 | 只配百炼 `[llm]` | 写入、Markdown、索引，以及只用关键词（BM25）召回的多轮检索 |
-| 百炼 `[llm]` + `[embedding]` + `[rerank]` | 多轮检索加上向量召回；reflection、skill extraction、Knowledge Wiki |
+| 百炼 `[llm]` + `[embedding]` | 多轮检索加上向量召回；以及场景（`[scenes]`，默认关闭） |
 | 再添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
 
 `/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会

@@ -229,8 +229,8 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 - 测试：单测在 CI 的 `windows-latest` 上是绿的（`unit tests (Windows)`，2583 通过 / 4 跳过，
   与 Linux 同数）；这台机器上跑了集成 **183 通过 / 5 跳过** 和真实 LLM 的 `slow` 用例
   **28 通过 / 1 跳过**，都在 Python 3.12 下。
-- 四类记忆——episode、profile、agent case、agent skill——都由 Tier 3 服务（真实 LLM、embedding、
-  rerank）产出，并通过 `/get` 和 `/search` 取回。
+- episode 和 profile 由接了真实 LLM 与 embedding 的服务产出，并通过 `/get` 和 `/search`
+  取回。
 - 10 小时浸泡（写入和改写约 78 000 条 md 条目、16 000 次检索、2 300 次走抽取路径的 `/add`，
   另有两个并发的 `everos cascade sync` 进程在同一棵目录树上不停跑）结束时索引完好：每张表都能打开、
   schema 校验通过、每一条格式正确的条目都有对应的行——没有行的只有这轮故意撒进去的畸形文件；

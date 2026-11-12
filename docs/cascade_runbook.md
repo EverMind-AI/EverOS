@@ -51,7 +51,11 @@ lsn:
   zero; sustained lag points at a slow handler or a stuck retry.
 - `failed (retryable=FALSE)` is always user-actionable. Cascade will
   never auto-clear these — they represent malformed md the user must
-  edit.
+  edit. One exception needs no edit: a row of a kind this build no longer
+  has (the agent cases, agent skills, knowledge documents and topics, atomic
+  facts or foresight of a store an earlier build wrote) fails with
+  `no handler registered for kind ...`; its markdown is a leftover nothing
+  reads ([storage_layout.md](storage_layout.md), section 5).
 - `status --duplicates` additionally scans every business table and
   reports duplicate `(app_id, project_id, id)` rows. LanceDB has no
   unique constraint, so a write path that bypasses the merge helper can
@@ -131,20 +135,20 @@ the index. A healthy root is a no-op for the embedder — unchanged entries
 are skipped by digest — so it is the recovery for an index that lost rows
 without a full rebuild: a multi-project root upgraded from a release before
 1.4.2 gets back the rows one project overwrote in another. Its summary
-line lists how many files were in each ledger state before the drain.
+line lists how many files were in each ledger state before the drain. The
+ledger rows of kinds this build no longer has (the agent cases and skills,
+knowledge documents and topics an earlier 2.0 build indexed) are re-queued
+too and marked failed (`no handler registered`), which `cascade status`
+counts and `healthy` ignores.
 
 That pass also runs by itself, once per root: the first full pass after
 upgrading from a release before 1.4.2 (a server start, or an unscoped
 `everos cascade sync`) force-enqueues every ledger row and writes
 `.index/.index_reconcile_version`, so no upgrade step is needed and later
 starts are ordinary. Delete the marker to make the next start repeat it,
-or run `--force-all` for an explicit pass. Two roots need the explicit
-pass: a server started with `[cascade] enabled = false` never runs it
-(stop the server, run `--force-all` once), and a multi-project root where
-reflection ran before 1.4.2 needs `cascade rebuild` once -- the pass does
-not clear the `deprecated_by` stamps one project's reflection left on
-another project's rows, so those rows stay hidden from search until the
-index is rebuilt from markdown.
+or run `--force-all` for an explicit pass. A server started with
+`[cascade] enabled = false` never runs it: stop the server and run
+`--force-all` once.
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
@@ -456,9 +460,3 @@ is a deployment-side change with no schema work.
 - **Parent-id back-link**: Episode rows currently carry
   `parent_id=None`; the writer doesn't preserve the source memcell id
   in the entry inline. Tracked separately.
-- **Reference-file change detection (agent_skill)**: edits to
-  `references/*.md` siblings won't trigger a re-index — only changes
-  to `SKILL.md` itself fire the watcher. Workaround: touch or re-save
-  `SKILL.md` so the watcher fires; with the server stopped,
-  `everos cascade sync agents/<a>/skills/skill_<n>/SKILL.md` re-enqueues
-  it directly.

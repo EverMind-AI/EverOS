@@ -36,7 +36,9 @@ everos
 ├── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
 │   ├── status [--duplicates]       Queue / LSN summary; opt-in duplicate-key scan
 │   ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
-│   └── fix [--apply]               List failed rows / re-enqueue retryable ones
+│   ├── fix [--apply]               List failed rows / re-enqueue retryable ones
+│   ├── rebuild [--yes]             Drop the index tables and re-index every md file
+│   └── backfill [--phase vectors|all] [--yes]   Embed the rows written before an embedder was configured
 └── memory                          Change, forget and read the versions of one memory
     ├── history ID                  Every version, current first (read-only)
     ├── update ID [--content ...]   A person's new version (held unless --release)
@@ -93,6 +95,20 @@ everos server start \
 App boot builds the application and starts it (SQLite schema, index
 connection, cascade, OME, the memorize queue); see
 [`service/bootstrap.py`](../src/everos/service/bootstrap.py).
+
+## `everos cascade backfill`
+
+For a store written without an embedding provider (keyword-only recall),
+once `[embedding]` is configured. It has one phase, `vectors`: every index
+row without a vector is embedded, in batches, so multi-round search recalls
+it by meaning too. `--phase` takes `vectors` or `all` (the default, the same
+phase). It prints an input-token estimate and asks before it spends
+anything (`--yes` skips the question). It needs the memory root to itself:
+while a server holds it, it exits with code 3 before any embedding call.
+Exit code 2 means no embedding provider is configured; 4 means the phase
+ran but some rows still failed to embed (their ids are in the
+`cascade_backfill_row_embed_failed` log events). Running it again picks up
+only what is left.
 
 ## `everos memory`
 
@@ -161,7 +177,7 @@ everos server start --log-level debug   # see all sql / lance traffic
 | Setup (generate config files) | — | `everos init` |
 | Inspect effective config | — | `everos config show` |
 | Run the server | — | `everos server start` |
-| Index ops (drain / inspect / fix the cascade queue) | — | `everos cascade {status,sync,fix}` |
+| Index ops (drain / inspect / fix the cascade queue, rebuild, backfill) | — | `everos cascade {status,sync,fix,rebuild,backfill}` |
 | Change / forget / version history of one memory | `/memory/update`, `/forget`, `/history` | `everos memory {update,forget,undo,history}` |
 | Health probe | `GET /health` | (use HTTP) |
 | Metrics scrape | `GET /metrics` | (use HTTP) |

@@ -24,9 +24,10 @@ Example (abbreviated, from `memory/search/manager.py`):
 ```python
 """SearchManager — top-level orchestrator for POST /api/v2/memory/search.
 
-Hard partition by owner_type: user → episodes (+ profiles), agent →
-agent_cases + agent_skills. The manager never writes to storage; it only
-reads LanceDB + markdown.
+Hard partition by owner_type: user → episodes and pictures in one pool
+(+ profiles), group → a group's episodes, scenes and pictures, read through
+the access policy. The manager never writes memory; it only reads the
+derived index + markdown.
 """
 ```
 

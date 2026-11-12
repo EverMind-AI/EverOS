@@ -23,10 +23,10 @@ cross-cutting, usable by every layer: core / component / config
 ```
 
 - `entrypoints/` — cli + api (incl. HTTP middleware) + tui (protocol translation only)
-- `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `KnowledgeService` / `OpsService` facades
-- `memory/` — domain (models + ports + extract + search + strategies + reflection + custom_instructions)
+- `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `OpsService` facades
+- `memory/` — domain (models + ports + extract + search + strategies + custom_instructions)
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb + milvus) + the cascade and OME engines
-- `component/` — injectable providers (llm / embedding / rerank / parser / tokenizer)
+- `component/` — injectable providers (llm / embedding / parser / tokenizer)
 - `core/` — runtime base (errors / observability / context / utils.datetime)
 - `config/` — configuration data (Settings + default.toml + custom_instructions)
 
@@ -66,7 +66,7 @@ without checking [docs/github-sync.md](docs/github-sync.md).
 Markdown (truth)  +  SQLite (state)  +  LanceDB (vector + BM25 + scalar)
 ```
 
-- Memory root: `~/.everos/{agents,users,knowledge}/` (md files = single source of truth)
+- Memory root: `~/.everos/<app>/<project>/{users,groups}/` (md files = single source of truth)
 - System DB: `~/.everos/.index/sqlite/system.db` (state + audit + queue + metadata)
 - Index: `~/.everos/.index/lancedb/` (rebuildable from md)
 

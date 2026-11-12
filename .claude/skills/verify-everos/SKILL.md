@@ -20,16 +20,14 @@ lsof -nP -iTCP:$PORT -sTCP:LISTEN          # must print nothing
 uv run everos init --root "$ROOT"
 EVEROS_LLM__API_KEY=$OPENROUTER_API_KEY \
 EVEROS_EMBEDDING__API_KEY=$DEEPINFRA_API_KEY \
-EVEROS_RERANK__API_KEY= \
   uv run everos server start --root "$ROOT" --port $PORT > "$ROOT.log" 2>&1 &
 echo $! > "$ROOT.pid"
 ```
 
 The shipped defaults point the LLM at OpenRouter and the embedding at
-DeepInfra, so those two keys are all it needs. Reflection is off by default
-(`docs/reflection.md`); to turn it on, replace the `$ROOT/ome.toml` that
-`init` scaffolds with `[strategies.reflect_episodes]\nenabled = true` before
-starting, as the acceptance tests do.
+DeepInfra, so those two keys are all it needs. Scenes are off by default
+(`docs/scenes.md`); to walk them, start with `EVEROS_SCENES__USERS=true`
+(or `EVEROS_SCENES__GROUPS=true`).
 
 ## 2. Is it ready?
 
@@ -44,11 +42,10 @@ lines of `$ROOT.log` (usually a missing key).
 ## 3. Drive it
 
 - **HTTP**: `POST /api/v2/memory/add`, `/flush`, `/delete`
-  (`user_id` / `agent_id` / `session_id`), `/delete_by_ids`
+  (`user_id` / `session_id`), `/delete_by_ids`
   (`{"memory_type": "episode", "memory_ids": ["<owner>_<entry_id>"]}`),
   `/memory/search` (multi-round retrieval, `method: "llm_multiround"`, the
-  only method; it calls the `[decider]` model), `/memory/get`. Run Reflection now with
-  `POST /api/v2/ome/trigger {"name": "reflect_episodes", "force": true}`.
+  only method; it calls the `[decider]` model), `/memory/get`.
 - **Claude Code, the way users do it**: run everos-mcp against your port and
   start Claude Code with only that server, in a tmux socket of your own
   (`tmux -L <name>`), sending keys and reading the pane:
@@ -67,7 +64,7 @@ lines of `$ROOT.log` (usually a missing key).
 - **Racing a background task**: `make acceptance` (needs the two keys; the
   Milvus cases need docker) starts servers behind a local proxy that can hold
   one model call (`tests/acceptance/memory_delete/proxy.py`), so a deletion
-  can land while an extraction or a Reflection merge is in flight. Check that
+  can land while an extraction is in flight. Check that
   the held call is still the only one of its kind when the deletion answers:
   a model call that times out retries past the hold.
 
@@ -75,7 +72,7 @@ lines of `$ROOT.log` (usually a missing key).
 
 | Fact | Read it from |
 |---|---|
-| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `images/`, `user.md`; agents under `agents/<id>/` (`tests/acceptance/memory_delete/observe.py` `md_entries` parses them) |
+| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `images/`, `scenes/`, `user.md`; a group's under `groups/<id>/` (`tests/acceptance/memory_delete/observe.py` `md_entries` parses them) |
 | Session, cluster, queue state | `$ROOT/.index/sqlite/system.db` (`memcell`, `cluster`, `cluster_member`, `memorize_inbox`, ...); OME runs in `ome.db` beside it |
 | Index rows | LanceDB under `$ROOT/.index/lancedb/` (`observe.py` `lance_ids`); on Milvus read with `consistency_level="Strong"`, or you may see rows from before a deletion |
 | Lock waits and holds | `GET /metrics`: `everos_lock_wait_seconds`, `everos_lock_hold_seconds` (label `kind`: `session`, `owner`, `partition:<strategy>`); compare before/after deltas |
@@ -106,6 +103,5 @@ One row per feature a task has walked on a real server.
 |---|---|---|---|
 | Forget a conversation from Claude Code | everos-mcp `forget_session` (Section 3) | ask the model to remember a sentence (`add_memory`, wait true), then "forget this conversation" | no entry with that `session_id` in the markdown, no `.md` file contains the sentence, `search_memory` finds nothing |
 | Delete a session (`session_id` only) | `POST /api/v2/memory/delete {"session_id": ...}` | while its episode extraction is held at the proxy | 200; the session's `memcell` rows gone; no entry of the session appears in the markdown after the hold is released |
-| Delete a whole user / agent | `POST /api/v2/memory/delete {"user_id": ...}` | after seeding several kinds | 200 with `count`; only today's empty day files remain (they keep the id counters), `user.md` gone, the owner's `cluster` rows and index rows gone; `..` and `a/../b` answer 422 |
-| Delete episodes by id with Reflection on | `POST /api/v2/memory/delete_by_ids` | while the Reflection merge call is held | no merged episode (`parent_type: cluster`) appears; the deleted source is gone, the other source stays |
+| Delete a whole user | `POST /api/v2/memory/delete {"user_id": ...}` | after seeding several kinds | 200 with `count`; only today's empty day files remain (they keep the id counters), `user.md` gone, the owner's `cluster` rows and index rows gone; `..` and `a/../b` answer 422 |
 | Deletion latency | `tests/acceptance/memory_delete/test_t18_1_tb11_1_perf.py`, alone on the machine | a year of day files per user | each deletion <= 1 s; owner-lock holds of all session deletions p99 <= 20 ms, none over 100 ms |

@@ -19,7 +19,7 @@ the schema it has to produce.
 | `boundary_detection.yaml` | `everalgo.boundary.adetect_boundaries` | last block of the system message |
 | `episode_extract.yaml` | the episode call (`chat.episode`), every chat cell | last block of the system message |
 | `profile_extract.yaml` | `ProfileExtractor.aupdate` (every update and consolidation call, one-to-one and member-in-group profiles) | `<additional_requirements>` block closing the system message |
-| `reflect.yaml` | `EpisodeReflector.areflect` (Reflection), and the scene narrative call (`chat.scene_update`, a user's and a group's scenes) | last block of the system message |
+| `reflect.yaml` | the scene narrative call (`chat.scene_update`, a user's and a group's scenes); the file keeps the name of the Reflection merge that read it before scenes replaced it | last block of the system message |
 
 ## File format
 

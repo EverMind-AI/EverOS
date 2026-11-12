@@ -1,11 +1,12 @@
 # Quickstart
 
-> Five minutes from one OpenRouter API key to durable Markdown memory, plus an
-> embedding endpoint to search it back.
+> Five minutes from one OpenRouter API key to durable Markdown memory you can
+> search back.
 
 EverOS runs as a local service. Writing memory needs only an LLM: configure one
 OpenRouter key, start the server, then call the HTTP API. Searching memory runs
-multi-round retrieval, which also needs an embedding provider.
+multi-round retrieval: with the LLM alone it recalls by keyword (BM25), and an
+embedding provider adds vector recall.
 
 ## What the one-key setup includes
 
@@ -13,9 +14,10 @@ With only `[llm]` configured, EverOS can:
 
 - start the server;
 - extract conversations into durable Markdown;
-- keep the local index in sync.
+- keep the local index in sync;
+- search it back by keyword (BM25).
 
-Search (step 8) additionally needs `[embedding]`. Rerank, knowledge, and
+`[embedding]` adds vector recall to the search in step 8. Embedding and
 multimodal providers are optional upgrades, not required for this walkthrough.
 
 ## Prerequisites
@@ -95,11 +97,11 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
-Leave `[rerank]` and `[multimodal]` unchanged for this walkthrough. Their empty
-keys do not prevent the server from starting. To run the search in step 8, also
-fill `[embedding]` with an OpenAI-compatible embedding endpoint (see
-[config.example.toml](config.example.toml)); without it the server starts and
-writes memory, and search answers HTTP 422.
+Leave `[multimodal]` unchanged for this walkthrough. Its empty key does not
+prevent the server from starting. To add vector recall to the search in step 8,
+also fill `[embedding]` with an OpenAI-compatible embedding endpoint (see
+[config.example.toml](config.example.toml)); without it the server starts,
+writes memory, and searches by keyword only.
 
 ## 5. Start the server
 
@@ -121,14 +123,11 @@ the important fields look like this:
 {
   "status": "ok",
   "capabilities": {
-    "embed": false,
-    "rerank": false
+    "embed": false
   },
   "disabled_features": [
-    "memory_search",
-    "reflection",
-    "skill_extraction",
-    "knowledge"
+    "vector_recall",
+    "multimodal_upload"
   ]
 }
 ```
@@ -218,15 +217,10 @@ Your extracted memory is a normal Markdown file under the memory root:
 ~/.everos/
 ├── default_app/
 │   └── default_project/
-│       ├── users/alice/
-│       │   ├── user.md
-│       │   ├── episodes/
-│       │   └── images/
-│       ├── agents/<agent_id>/
-│       │   ├── agent.md
-│       │   ├── .cases/
-│       │   └── skills/
-│       └── knowledge/
+│       └── users/alice/
+│           ├── user.md
+│           ├── episodes/
+│           └── images/
 ├── everos.toml
 ├── ome.toml
 └── .index/
@@ -244,9 +238,8 @@ models for the optional providers.
 
 | Configuration | Available capabilities |
 | --- | --- |
-| `[llm]` only | Add, flush, Markdown persistence, cascade sync |
-| Add `[embedding]` | Multi-round search, reflection, skill extraction |
-| Add `[rerank]` too | Knowledge Wiki |
+| `[llm]` only | Add, flush, Markdown persistence, cascade sync, multi-round search by keyword |
+| Add `[embedding]` | Vector recall in multi-round search; scenes (`[scenes]`, off by default) |
 | Add `[multimodal]` and install `everos[multimodal]` | Image, PDF, audio, and office-file ingestion |
 
 EverOS reports unavailable features through `/health`. Requests that require a

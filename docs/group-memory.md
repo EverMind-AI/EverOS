@@ -118,8 +118,8 @@ Non-goals for 2.0:
 - Per-message access lists inside a group. The unit of visibility is the membership window.
 - Reply threads as a graph. Messages keep their order; `reply_to` is not modelled.
 - Merging identities across groups. Member ids are caller-provided and stable.
-- Group-owned working memory. Agent cases and skills stay per agent ([Section 9.3](#93-the-check-and-where-it-runs)).
-- Dreaming for group owners. Dreaming runs for user and agent owners only.
+- Agent memory, working memory and dreaming, for groups or anyone else. EverOS
+  2.0 keeps chat memory only: no agent cases or skills.
 
 ---
 
@@ -130,17 +130,16 @@ Non-goals for 2.0:
 | Owner type | Id | Directory |
 |---|---|---|
 | `user` | `user_id` | `users/<user_id>/` |
-| `agent` | `agent_id` | `agents/<agent_id>/` |
 | `group` (new) | `group_id` | `groups/<group_id>/` |
 
-`OwnerType` becomes `Literal["user", "agent", "group"]`. A `group_id` uses the
-same path-safe charset and length limits as `user_id`, and is unique within one
-`(app_id, project_id)`.
+`OwnerType` is `Literal["user", "group"]` (EverOS 2.0 has no agent owner). A
+`group_id` uses the same path-safe charset and length limits as `user_id`, and
+is unique within one `(app_id, project_id)`.
 
 A **member id** is the `sender_id` the member's messages carry. It lives in the
 same id space as `user_id`: a person who also talks to the assistant one-to-one
-has `users/<member_id>/` for that personal memory. An assistant member's id is
-its `agent_id`.
+has `users/<member_id>/` for that personal memory. An assistant member is
+identified the same way, by the `sender_id` of its messages.
 
 ### 4.2 Group
 
@@ -196,8 +195,7 @@ A project is the existing `project_id` partition, used as a collaboration
 space. It holds:
 
 - the groups whose `project_id` it is;
-- its members: the union of the current members of those groups (derived, never stored separately);
-- the knowledge base already kept per `(app_id, project_id)`.
+- its members: the union of the current members of those groups (derived, never stored separately).
 
 The project adds no new owner. Project-scope reads (Step 2) run over the groups
 the asker currently belongs to ([Section 8.7](#87-project-roll-up-step-2)).
@@ -324,10 +322,12 @@ gives the group.
 |---|---|
 | one-to-one user | `user_id` (unchanged); `asker_id` optional and, if given, must equal `user_id` |
 | user and their groups (optional, off by default) | `user_id` + `include_groups: true`, optionally `include_group_ids`: the user's memory and every group of the space the user currently belongs to, as one pool ([Section 8.8](#88-a-personal-search-over-the-users-groups)) |
-| agent | `agent_id` (unchanged) |
 | one group | `group_id` + `asker_id` |
 | several groups | `group_ids` + `asker_id` |
 | project (Step 2) | `project_scope: true` + `asker_id`: every group in the project the asker belongs to |
+
+An `agent_id` or `context_group_id` is refused with 422: EverOS 2.0 has no
+agent memory.
 
 Further fields for group scopes:
 
@@ -451,8 +451,6 @@ Markdown stays the source of truth:
 ```
 <memory-root>/<app>/<project>/
 ├── users/ ...                         unchanged
-├── agents/ ...                        unchanged
-├── knowledge/ ...                     unchanged (the project's knowledge base)
 └── groups/
     └── <group_id>/
         ├── group.md                   meta (frontmatter) + roster log (append-only entries)
@@ -469,7 +467,7 @@ Markdown stays the source of truth:
 ```
 
 A new frontmatter mixin, `GroupScopedFrontmatter`, carries `group_id`,
-`track = "group"` and `SCOPE_DIR = "groups"`, next to the user and agent mixins.
+`track = "group"` and `SCOPE_DIR = "groups"`, next to the user mixin.
 
 `group.md`:
 
@@ -1082,8 +1080,6 @@ answered from `joined_after` on the current decision.
 - `GET /api/v2/projects/{project_id}/profile?asker_id=` returns the visible
   current group-profile items of those groups, each tagged with its group, in
   time order. Duplicates across groups are not merged.
-- The project's knowledge base is readable by project members. A project without
-  groups keeps today's knowledge behaviour.
 
 ### 8.8 A personal search over the user's groups
 
@@ -1153,8 +1149,6 @@ Other kinds answer `422`.
 | Personal memory (`users/<u>/`) | `u` only |
 | Group memory (`groups/<g>/`: episodes, picture memories, scenes, member-in-group profiles, group-profile items, buffered messages) | current members of `g`, and only records all of whose sources fall inside one of the asker's membership windows in `g` |
 | Roster and group meta | current members of `g` |
-| Project knowledge base | project members, when the project has groups |
-| Agent memory | the agent; cases extracted from a group segment carry `source_group_id` and are returned only to reads in that group's context |
 
 Consequences, stated explicitly:
 
@@ -1201,11 +1195,9 @@ Every read path calls it:
 | 6 | History | n/a | visible versions only |
 | 7 | Picture bytes (`routes/images.py:233-264`) | no check | a hash referenced by any live group picture memory needs an asker who can see one of them; personal-only hashes behave as today |
 | 8 | Forget, undo, revise, delete | owner given by caller | `authorize`, then the same scope for what is touched |
-| 9 | Knowledge search and get | per (app, project) | project members when the project has groups |
-| 10 | Group and project reads | n/a | current members |
-| 11 | Background strategies | per owner | group strategies read only the group's own segments; member-in-group profiles never read `users/<m>/`; personal strategies never read group segments |
-| 12 | Agent-memory reads | per agent | group-sourced cases filtered by the read's group context |
-| 13 | MCP | through the HTTP API | same as the API; the MCP server forwards `asker_id` |
+| 9 | Group and project reads | n/a | current members |
+| 10 | Background strategies | per owner | group strategies read only the group's own segments; member-in-group profiles never read `users/<m>/`; personal strategies never read group segments |
+| 11 | MCP | through the HTTP API | same as the API; the MCP server forwards `asker_id` |
 
 The test suite in [Section 13.5](#135-built-in-checks) targets every row.
 
@@ -1466,8 +1458,8 @@ LoCoMo and LongMemEval are the one-to-one regression gate of
 - **Leak suite.** Generated rosters and records cover: a late joiner, a member who
   left, a member who rejoined, a non-member, a personal record read by another
   user, a picture hash probe, a session-buffer read, an expansion link into an
-  invisible record, a constraint or profile item whose source is invisible, an
-  agent case from another group. Every case asserts the record is absent from
+  invisible record, a constraint or profile item whose source is invisible.
+  Every case asserts the record is absent from
   search, get, history, attachments, constraints and picture bytes. Zero leaks is
   the pass mark.
 - **Attribution sample.** 100 group segments labelled by hand for senders,
@@ -1507,7 +1499,6 @@ Ordered; each task lists its acceptance tests.
    - `sender_ids`, `subject_ids` and `origin` match fixtures, including an assistant-only segment and a former member named in the text.
    - A picture yields one memory with `sender_ids = [poster]`; its profile items reach only the poster (a test that reproduces today's leak on the multi-sender path now passes).
    - No segment spans a roster change sent while messages were buffered.
-   - An agent case extracted from a group segment carries `source_group_id`.
 5. **Member-in-group profile.**
    - One `members/<m>.md` per speaking member; every item cites source segments containing a message by `m`.
    - Two concurrent updates for one member lose no item; updates for two members run in parallel.
@@ -1521,7 +1512,6 @@ Ordered; each task lists its acceptance tests.
    - A session-filtered search returns no buffered message outside the asker's window.
    - A picture hash referenced only by group memory returns 404 to a non-member.
    - `group_ids` over several groups returns one ranked pool.
-   - An agent case sourced from one group is not returned to a read in another group's context or a one-to-one context.
 8. **Leak suite and one-to-one gate.** The suite of [Section 13.5](#135-built-in-checks) passes with zero leaks; the [Section 10](#10-one-to-one-conversations-stay-unchanged) golden test and score gate pass.
 9. **EverMemBench per member.** Adapter and run as in [Section 13.2](#132-evermembench-per-member).
    - Five projects with three groups each, real member ids; askers parsed for 434 questions.
@@ -1554,7 +1544,6 @@ Ordered; each task lists its acceptance tests.
 16. **Who knew what.** `audience.present` and `audience.joined_after` are right on roster fixtures and appear only on visible records.
 17. **Project roll-up.**
     - `project_scope` covers exactly the asker's current groups in the project; the project profile is the union of visible items, tagged by group.
-    - Knowledge reads require project membership when the project has groups.
 18. **GroupAssistBench L2 and ablations** as in [Section 13.1](#131-groupassistbench).
 19. **GateMem** as in [Section 13.3](#133-gatemem).
 
@@ -1587,12 +1576,10 @@ The first half of Step 1 differs from the text above in these places:
   (the same hash) may also fetch it.
 - **One search method.** Multi-round retrieval (`llm_multiround`) is the only
   search method in 2.0, for one-to-one and group scopes alike; any other
-  method answers 422. Agent memory is listed by `/memory/get` (with
-  `context_group_id`), not searched: a search with `agent_id` answers 422.
+  method answers 422. EverOS 2.0 has no agent memory: an `agent_id` or
+  `context_group_id` answers 422 on search, get and delete.
 - **Client message ids** are kept only on group batches. They are not yet
   persisted in memcells.
-- **Agent-scope buffer reads** follow the users' rule: the agent must be a
-  sender of the session, or hold cases from it.
 - **D17 also applies to one-to-one chats.** A picture the assistant posts adds
   no items to the user's profile.
 
@@ -1661,20 +1648,16 @@ The second half of Step 1 differs from the text above in these places:
   of every session of its group with its own, in sorted order, and cuts their
   buffers before the change applies. A busy session is skipped, as on the
   roster route.
-- **Agent cases.** An agent read in a group's context is `agent_id` plus
-  `context_group_id`. Its asker, the agent itself unless `asker_id` names
-  another, must be a current member, or the read is 403. A group-sourced case
-  carries no source span, so windows are not applied to it. Skills are not
-  filtered by context.
 - **Question rendering** applies to the whole multi-round loop, to the first
   round's recall as well as to the decider, and only to that method. It can
   be switched off with `[groups] asker_in_question`.
 - **Get.** `image_memory` and `member_profile` are available on group scopes
   only: users have no picture listing on this line.
 - **Table schema version 5.** Version 4 had already shipped with the first
-  half. `user_profile.subject_id` and `agent_case.source_group_id` are
-  therefore added by version 5. Milvus still has no migration step, so a
-  Milvus store reports drift and needs `everos cascade rebuild`.
+  half. `user_profile.subject_id` is therefore added by version 5 (which
+  also added `agent_case.source_group_id` to a table EverOS 2.0 no longer
+  opens). Milvus still has no migration step, so a Milvus store reports
+  drift and needs `everos cascade rebuild`.
 - **Episode reader.** Episodes read back from markdown now keep `sender_ids`
   and `language`. Scenes need the members' senders, and an undo used to drop
   both.
@@ -1816,12 +1799,9 @@ Step 2 differs from the text above in these places:
   windows, and includes assistants; `joined_after` leaves out members who
   were present.
 - **Projects.** `GET /projects/{id}` lists the asker's groups and their
-  members only: a roster is read by a group's current members. A knowledge
-  read of a project with groups answers 422 without an asker and 403 for a
-  non-member. Fetching a document or topic by id is not scoped to its
-  project (as before).
-- **One-to-one.** Search responses of user scopes and get responses of user
-  and agent scopes carry the new fields with their empty defaults
+  members only: a roster is read by a group's current members.
+- **One-to-one.** Search and get responses of user scopes carry the new
+  fields with their empty defaults
   (`audience`, `group_profile`, `constraints`, `coverage`); the golden test
   lists them as added fields and its fixture is unchanged.
 - **Real-model check (2026-11-11).** DeepSeek V4.1 Flash, JSON mode,
@@ -1872,14 +1852,14 @@ Step 2 differs from the text above in these places:
 - **One event.** `EpisodeExtracted` carries `owner_type`, and for a group the
   human `speaker_ids` and the `group_key` the idle trigger buckets on;
   `GroupEpisodeExtracted` is gone. Each strategy takes its space's episodes
-  only (`applies_to`): the personal profile, user scenes and clustering a
-  user's; the member profiles, group profile and group scenes a group's. A
-  persisted run naming the old event is dropped with a warning on replay.
+  only (`applies_to`): the personal profile and user scenes a user's; the
+  member profiles, group profile and group scenes a group's. A persisted run
+  naming the old event is dropped with a warning on replay.
 - **One writer per kind.** Episodes, picture memories and scene versions each
   have one writer (`OwnedDailyWriter`), instantiated per owner type; the
   files are what the two writers wrote.
-- **One dispatch.** `Memorizer._extract` runs the conversation pipeline (and
-  the agent pipeline in agent mode) over every cell, group or not.
+- **One dispatch.** `Memorizer._extract` runs the conversation pipeline over
+  every cell, group or not.
 
 ---
 
@@ -1896,7 +1876,6 @@ Step 2 differs from the text above in these places:
 | Benchmarks without access rules (EverMemBench) cannot test visibility. | An evaluator member of all groups for the main number; visibility is tested by the leak suite and GateMem. |
 | GroupAssistBench's official task and judge models are paid, and its licence is non-commercial. | Cost probe and approval before each full run; evaluation-only use; data never committed. |
 | Streaming evaluation waits at every cutoff. | Cutoffs of a group are processed in order with one wait each; groups run in parallel. |
-| Agent cases learned in a group could carry its content elsewhere. | Cases carry `source_group_id` and are filtered by read context; skills summarise across contexts and are told not to copy names or values. |
 | Stores that collapsed groups into one user must be rebuilt. | Documented; no converter is offered. |
 | Members with many windows make long predicates. | Adjacent intervals are merged; the number of windows per member is bounded in practice and measured in the latency check. |
 
@@ -1909,7 +1888,7 @@ decision replaces it.
 |---|---|
 | Does a member see history from before they joined? | No: strict membership windows. A per-group setting `history_visible_from` takes `join` (default) or `creation`; `creation` shows a new member the group's history from its start. |
 | A reply posted to the whole group | `/memory/search` takes `audience`: `asker` (default, the asker's view) or `group` (only content that every current member can see). A client posting into the group uses `group`. |
-| Hard delete inside a group | `/memory/delete` keeps its user and agent scopes. A group-scoped delete is owner/admin only and behaves as a forget (soft, propagated) in Step 2; until then group-scoped delete and forget answer `422`. |
+| Hard delete inside a group | `/memory/delete` keeps its user scopes (an `agent_id` answers `422`: EverOS 2.0 has no agent memory). A group-scoped delete is owner/admin only and behaves as a forget (soft, propagated) in Step 2; until then group-scoped delete and forget answer `422`. |
 | Step 2's two new prompts and the extraction model | They run zero-shot, guarded by the code checks of [Section 7.5](#75-group-profile-step-2) and [Section 8.4](#84-constraint-block-step-2); group-chat data is collected for a later fine-tune. |
 | Paid evaluation runs | A one-group cost probe precedes every full GroupAssistBench run; GateMem is used only once its data licence is confirmed. |
 

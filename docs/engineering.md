@@ -120,8 +120,7 @@ renamed or inlined, and makes every seam a test needs a visible part of the
 API. A self-check that must break production code to prove an invariant
 trips does so through a mutant subclass or a mutated input, never a patch.
 The shared doubles live in [`tests/fakes/`](../tests/fakes/) (in-memory
-stores and indexes, `make_ops` / `make_memory_service` /
-`make_knowledge_service`, `backfill_deps`).
+stores and indexes, `make_ops` / `make_memory_service`, `backfill_deps`).
 
 ## Continuous integration
 

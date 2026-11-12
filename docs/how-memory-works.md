@@ -59,15 +59,12 @@ visually distinct from a user-named one).
 │       │       ├── user.md                 single-file   (profile)
 │       │       ├── episodes/
 │       │       │   └── episode-<YYYY-MM-DD>.md      daily-log append
-│       │       └── images/
-│       │           └── image-<YYYY-MM-DD>.md        daily-log append (pictures)
-│       ├── agents/
-│       │   └── <agent_id>/
-│       │       ├── .cases/                          daily-log (hidden)
-│       │       │   └── agent_case-<YYYY-MM-DD>.md
-│       │       └── skills/                          skill-named dir
-│       │           └── skill_<name>/SKILL.md        (+ references/ scripts/)
-│       └── knowledge/                      ← shared / global
+│       │       ├── images/
+│       │       │   └── image-<YYYY-MM-DD>.md        daily-log append (pictures)
+│       │       └── scenes/
+│       │           └── scene-<YYYY-MM-DD>.md        daily-log append (scene versions)
+│       └── groups/                         ← group memory (group-memory.md)
+│           └── <group_id>/                 group.md, episodes/, images/, scenes/, members/, profile/
 │
 ├── .index/                                 ← system-managed, rebuildable (gitignore)
 │   ├── sqlite/
@@ -105,24 +102,23 @@ is detected, an LLM extracts a cell, writers persist markdown, and the
 index catches up asynchronously.
 
 ```
- POST /add  ──▶  unprocessed_buffer (SQLite)        ← messages accumulate per (session, app, project)
-                      │
+ POST /add  ──▶  unprocessed_buffer (SQLite)        ← chat messages accumulate per (session, app, project);
+                      │                                tool rows are dropped before they reach it
                       ├─ boundary detector trips  ─┐
  POST /flush ─────────┤  (or you force it)          │  one LLM call
                       │                             ▼
                       │                       extract MemCell  ──▶  memcell row (SQLite)
                       │                             │
-                      │              ┌──────────────┴───────────────┐
-                      │              ▼                              ▼
-                      │   ConversationPipeline (sync)    AgentMemoryPipeline (events only)
-                      │   writes episode .md NOW          emits AgentPipelineStarted
-                      ▼              │                              │
-   (response returns once md is on disk)                           │
-                                     ▼                              ▼
-                          ┌───────────────────  Offline Memory Engine (OME)  ───────────────────┐
+                      │                             ▼
+                      │        ConversationPipeline (sync)
+                      │        writes episode .md NOW, emits EpisodeExtracted
+                      ▼                             │
+   (response returns once md is on disk)            │
+                                                    ▼
+                          ┌───────────────────  Offline Memory Engine (OME)  ────────────────────┐
                           │  async strategies write derived .md:                                 │
-                          │  user profile · agent cases · agent skills                          │
-                          └───────────────────────────────┬──────────────────────────────────────┘
+                          │  profiles · scenes (when switched on) · a group's profile            │
+                          └────────────────────────────────┬─────────────────────────────────────┘
                                                            ▼
                                             cascade daemon watches the .md tree
                                                            ▼
@@ -135,7 +131,10 @@ index catches up asynchronously.
   buffer and returns `accumulated` (or `extracted` if the boundary tripped
   on this call). See [api.md](api.md).
 - **`/flush`** forces the boundary now (one extraction LLM call), used at
-  the end of a chat/agent run.
+  the end of a chat.
+- **Memory is chat memory.** A tool row (`role: "tool"`) and an assistant
+  message carrying `tool_calls` are accepted by `/add` but dropped before
+  anything is buffered: they never reach boundary detection or extraction.
 - **Boundary detection** (`memory/extract/boundary/BoundaryDetection`)
   asks the model, in one call over the buffered window, where finished
   episodes end. It also judges whether the trailing segment is already a
@@ -146,11 +145,11 @@ index catches up asynchronously.
   times in a row has its buffer moved to a `quarantine` track so the
   session can continue.
 - Deployments can append requirements to the boundary, episode, profile
-  and reflection prompts with
+  and scene prompts with
   [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
   `extracted`, the episode file is already on disk.
-- Everything else (profile, agent cases/skills) is produced
+- Everything else (profiles, scenes, a group's profile) is produced
   **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
 - The **cascade daemon** turns every `.md` write into LanceDB rows so the
@@ -158,27 +157,23 @@ index catches up asynchronously.
 
 ## Memory types & storage strategies
 
-The one-to-one business memory kinds, each user-, agent-, or globally owned,
-each picking one of three on-disk patterns (group memory has its own kinds,
-see [group-memory.md](group-memory.md)):
+The one-to-one business memory kinds, each owned by a user, each picking one
+of two on-disk patterns (group memory has its own kinds, see
+[group-memory.md](group-memory.md)):
 
 | Kind | Owner | Dir / file | Strategy | Produced by |
 |---|---|---|---|---|
 | **episode** | user | `episodes/episode-<date>.md` | daily-log | extraction (sync) |
 | **image_memory** | user | `images/image-<date>.md` | daily-log | extraction (sync) |
 | **profile** | user | `user.md` | single-file rewrite | OME |
-| **agent_case** | agent | `.cases/agent_case-<date>.md` (hidden) | daily-log | OME |
-| **agent_skill** | agent | `skills/skill_<name>/SKILL.md` | skill-named dir | OME (clustering) |
-| **knowledge_document** | global | `knowledge/<category_id>/<title_dirname>/index.md` | knowledge tree | knowledge service |
-| **knowledge_topic** | global | `knowledge/<category_id>/<title_dirname>/<N>_<topic_slug>.md` | knowledge tree | knowledge service |
+| **scene** | user | `scenes/scene-<date>.md` | daily-log | OME, with `[scenes] users = true` (off by default) |
 
-The three strategies:
+The two strategies:
 
 | Strategy | Shape | Why |
 |---|---|---|
 | **Daily-log append** | `<prefix>-<YYYY-MM-DD>.md`, one entry appended per memory | collapses thousands of per-entry files into one file per day |
-| **Single-file rewrite** | a fixed filename overwritten in place | for a single evolving document (a user/agent profile) |
-| **Skill-named dir** | one directory per skill | a skill is a richer unit (body + optional `references/` `scripts/`) |
+| **Single-file rewrite** | a fixed filename overwritten in place | for a single evolving document (a person's profile) |
 
 !!! note
     The single-file rewrite holds a person's profile in a space: the user's
@@ -224,18 +219,13 @@ and write their markdown when ready:
   of which is forgotten. An item a person changed through
   `POST /memory/update` is held: the update keeps it as it is, and a new
   value the model writes for it stays beside it as an item of its own
-- `extract_agent_case` — a reusable agent trajectory (only when the cell is
-  substantive enough; thin trajectories are skipped by design, and the
-  `agent_case_skipped` log line says which check skipped them). With
-  `[agent_memory] case_gate_enabled`, an LLM judgement of whether the work
-  was completed correctly decides instead
-- `extract_agent_skill` — clusters related cases into a named skill
-- `trigger_profile_clustering` — clusters the owner's episodes (Reflection
-  reads the clusters; the profile no longer does)
-- `trigger_skill_clustering` — triggers agent skill clustering
-- `reflect_episodes` (cron, default off) — offline memory consolidation.
-  Merges fragmented episodes within a cluster into a single coherent
-  narrative and deprecates the originals. Enable via `ome.toml`.
+- `update_user_scenes` — with `[scenes] users = true` (off by default) and an
+  embedding provider: places each new episode among the owner's scene
+  clusters and, when it joins a scene, writes the scene's next version with
+  one capped narrative call ([scenes.md](scenes.md))
+- the group strategies — `update_member_profiles`, `update_group_profile` /
+  `update_group_profile_idle` and `update_group_scenes`
+  ([group-memory.md](group-memory.md))
 
 Strategies are configurable without a code change via **`ome.toml`** at the
 memory root (hot-reloaded within ~2 s). Example — turn one off:
@@ -245,31 +235,22 @@ memory root (hot-reloaded within ~2 s). Example — turn one off:
 enabled = false
 ```
 
-EverOS 2.0 keeps no atomic facts and no foresight: an `ome.toml` that still
-names `extract_atomic_facts` or `extract_foresight` only logs a warning.
+EverOS 2.0 keeps no atomic facts, no foresight, no Reflection, no profile
+clustering and no agent memory: an `ome.toml` section that still names one
+of their strategies (`extract_atomic_facts`, `extract_foresight`,
+`reflect_episodes`, `finish_reflection`, `trigger_profile_clustering`,
+`extract_agent_case`, `trigger_skill_clustering`, `extract_agent_skill`) only
+logs a warning (`config_override_unknown_strategy`), and a run of one that an
+older build left pending is dropped (`ome_run_dropped_unknown_strategy`).
 
 OME keeps its own state in `.index/sqlite/ome.db` (run records, counters)
 and its scheduler jobstore in `.index/sqlite/ome.aps.db` (split so the sync
 APScheduler writer and the async OME writer never contend for one file
 lock).
 
-### Reflection (offline consolidation)
-
-The `reflect_episodes` strategy runs on a cron schedule (default
-`0 2 * * 1` — every Monday at 02:00, disabled by default). It selects clusters with multiple
-members, calls the LLM to merge their episodes into a single narrative,
-writes the merged episode to markdown, and deprecates the originals via
-`deprecated_by` as soon as the merged episode is written. The merged episode uses
-`parent_type=cluster` and `session_id=None`. Enable it in `ome.toml`:
-
-```toml
-[strategies.reflect_episodes]
-enabled = true
-```
-
 !!! tip "Implication for clients"
     After `/flush` returns `extracted`, the **episode** is queryable soon
-    (once cascade indexes it), but **profile / agent cases** appear only
+    (once cascade indexes it), but **profiles and scenes** appear only
     after their OME strategy runs — typically seconds later.
     Poll / retry if you need them immediately.
 
