@@ -146,9 +146,10 @@ async def extract_user_profile(
             limits=deps.picture_limits,
             forgotten=await deps.stores.forget_log.live_targets(
                 target="image",
-                app_id=event.app_id,
-                project_id=event.project_id,
-                owner_id=event.owner_id,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
             ),
         )
         language = _profile_language(existing, event)

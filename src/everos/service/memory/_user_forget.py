@@ -550,7 +550,10 @@ class UserForgetManager:
     async def _forgotten_item_ids(self, scope: Scope) -> set[str]:
         found: set[str] = set()
         for entry in await self._stores.forget_log.live_entries(
-            app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         ):
             found |= set(removed_item_ids(entry.removed_profile_items))
         return found
@@ -803,6 +806,7 @@ class UserForgetManager:
                 app_id=scope.app_id,
                 project_id=scope.project_id,
                 owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
             )
             keep = (
                 await named_by_others(self._stores, scope, except_id=entry.forget_id)
@@ -824,6 +828,7 @@ class UserForgetManager:
                 app_id=scope.app_id,
                 project_id=scope.project_id,
                 owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
             )
             keep = (
                 await named_by_others(self._stores, scope, except_id=entry.forget_id)

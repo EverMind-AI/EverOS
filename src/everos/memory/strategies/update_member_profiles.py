@@ -218,6 +218,7 @@ async def _update(
                 app_id=scope.app_id,
                 project_id=scope.project_id,
                 owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
             ),
         )
     update = await ProfileExtractor(llm=deps.llm).aupdate(

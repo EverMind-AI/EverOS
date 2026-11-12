@@ -468,6 +468,28 @@ async def test_another_members_message_is_refused_and_a_manager_may_forget_it(
         )
 
 
+async def test_an_undo_finds_only_its_own_groups_forget(chat: _Chat) -> None:
+    """A user named like the group, or the same group id in another space,
+    holds forgets the group's undo must not reach."""
+    world = chat.world
+    elsewhere = {"target": "message", "target_id": "s_trip", "owner_id": "trip"}
+    personal = await world.stores.forget_log.record(
+        app_id=APP, project_id=PROJECT, owner_type="user", undo={}, **elsewhere
+    )
+    other_space = await world.stores.forget_log.record(
+        app_id="other", project_id=PROJECT, owner_type="group", undo={}, **elsewhere
+    )
+    for entry in (personal, other_space):
+        with pytest.raises(NotFoundError):
+            await world.memory.undo_group_forget(
+                app_id=APP,
+                project_id=PROJECT,
+                group_id="trip",
+                asker_id="u_chen",
+                forget_id=entry.forget_id,
+            )
+
+
 async def test_a_member_who_leaves_stays_visible_to_the_others(chat: _Chat) -> None:
     world = chat.world
     await world.roster("trip", [leave("u_betty", T0 + 10_000)])

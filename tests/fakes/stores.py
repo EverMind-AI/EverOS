@@ -58,6 +58,7 @@ from everos.memory.ports import (
     GroupRecord,
     MemoryRef,
     NoSourceCheck,
+    OwnerType,
     PendingBatch,
     Scope,
     SessionKey,
@@ -859,28 +860,37 @@ class InMemoryForgetLogStore:
                 return dataclasses.replace(entry, undone=forget_id in self.undone)
         return None
 
-    async def live_entries(
-        self, *, app_id: str, project_id: str, owner_id: str
+    def _live(
+        self, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
     ) -> list[ForgetEntry]:
+        """The owner's live entries, oldest first; keyed on id **and** type."""
         return [
             entry
-            for entry in reversed(self.entries)
-            if entry.owner_id == owner_id
-            and entry.app_id == app_id
-            and entry.project_id == project_id
+            for entry in self.entries
+            if (entry.app_id, entry.project_id, entry.owner_id, entry.owner_type)
+            == (app_id, project_id, owner_id, owner_type)
             and entry.forget_id not in self.undone
         ]
 
+    async def live_entries(
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
+    ) -> list[ForgetEntry]:
+        return list(reversed(self._live(app_id, project_id, owner_id, owner_type)))
+
     async def live_targets(
-        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+        self,
+        *,
+        target: ForgetTarget,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: OwnerType,
     ) -> list[str]:
         return list(
             dict.fromkeys(
                 entry.target_id
-                for entry in self.entries
+                for entry in self._live(app_id, project_id, owner_id, owner_type)
                 if entry.target == target
-                and entry.owner_id == owner_id
-                and entry.forget_id not in self.undone
             )
         )
 
@@ -900,14 +910,10 @@ class InMemoryForgetLogStore:
         app_id: str,
         project_id: str,
         owner_id: str,
+        owner_type: OwnerType,
     ) -> ForgetEntry | None:
-        for entry in reversed(self.entries):
-            if (
-                entry.target == target
-                and entry.target_id == target_id
-                and entry.owner_id == owner_id
-                and entry.forget_id not in self.undone
-            ):
+        for entry in reversed(self._live(app_id, project_id, owner_id, owner_type)):
+            if entry.target == target and entry.target_id == target_id:
                 return entry
         return None
 

@@ -678,17 +678,30 @@ class SqliteForgetLogStore:
         return _forget_entry(row) if row is not None else None
 
     async def live_targets(
-        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+        self,
+        *,
+        target: ForgetTarget,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: OwnerType,
     ) -> list[str]:
         return await self._repo.live_targets(
-            target_kind=target, app_id=app_id, project_id=project_id, owner_id=owner_id
+            target_kind=target,
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
         )
 
     async def live_entries(
-        self, *, app_id: str, project_id: str, owner_id: str
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
     ) -> list[ForgetEntry]:
         rows = await self._repo.live_rows(
-            app_id=app_id, project_id=project_id, owner_id=owner_id
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
         )
         return [_forget_entry(row) for row in rows]
 
@@ -703,6 +716,7 @@ class SqliteForgetLogStore:
         app_id: str,
         project_id: str,
         owner_id: str,
+        owner_type: OwnerType,
     ) -> ForgetEntry | None:
         row = await self._repo.latest_live(
             target_kind=target,
@@ -710,6 +724,7 @@ class SqliteForgetLogStore:
             app_id=app_id,
             project_id=project_id,
             owner_id=owner_id,
+            owner_type=owner_type,
         )
         return _forget_entry(row) if row is not None else None
 

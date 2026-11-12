@@ -316,6 +316,7 @@ class ForgetPlanner:
             app_id=scope.app_id,
             project_id=scope.project_id,
             owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         )
         plan.hidden_pictures = set(hidden)
         if target.kind in ("message", "member", "session"):

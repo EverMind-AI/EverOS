@@ -383,6 +383,27 @@ async def test_a_forgotten_picture_is_taken_out_of_the_update() -> None:
     assert model.images() == 1
 
 
+async def test_a_same_named_groups_forgotten_picture_stays_in_the_update() -> None:
+    """A group whose id is the owner's forgot the picture: not the owner's."""
+    model = _Model(json.dumps({"operations": [{"action": "none"}]}))
+    deps = _deps(model, picture_limits=_LIMITS)
+    deps.stores.images.images[_CAT] = (b"cat", "jpeg")
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", f"My cat [IMAGE: {_CAT}]")))
+    await deps.stores.forget_log.record(
+        target="image",
+        target_id=_CAT,
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+        owner_type="group",
+    )
+
+    await extract_user_profile(_event(), deps)
+
+    assert "My cat [IMAGE: img-1]" in model.user_text()
+    assert model.images() == 1
+
+
 async def test_without_vision_no_picture_is_attached() -> None:
     model = _Model(json.dumps({"operations": [{"action": "none"}]}))
     deps = _deps(model)

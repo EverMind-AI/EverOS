@@ -10,6 +10,8 @@ What these pin — each is a way an undo silently fails:
   that was never forgotten is a no-op that still reports the current state.
 - A picture forgotten *again* after an undo is not brought back by undoing the
   older forget: the newest live forget is the one an undo reverses.
+- A group whose id is the user's never has its forget reversed by the user's
+  undo: the log is read by owner id and type.
 """
 
 from __future__ import annotations
@@ -284,6 +286,28 @@ async def test_a_later_forget_is_not_undone_by_the_older_ones_undo() -> None:
         stores.forget_log.entries[0].forget_id,
         stores.forget_log.entries[-1].forget_id,
     }
+
+
+async def test_a_users_undo_never_reverses_a_same_named_groups_forget() -> None:
+    """A group whose id is the user's forgot the picture last: the user's
+    undo still reverses the user's own forget, and the group's stays live."""
+    forget, undo, stores, _ = _manager(images=(_picture("im_1"),))
+    await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
+    group = await stores.forget_log.record(
+        target="image",
+        target_id=_IMAGE_ID,
+        app_id="app",
+        project_id="proj",
+        owner_id="u1",
+        owner_type="group",
+        undo={"withdrawn": []},
+    )
+
+    result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
+
+    assert result.applied
+    assert result.forget_id == stores.forget_log.entries[0].forget_id
+    assert group.forget_id not in stores.forget_log.undone
 
 
 async def test_only_the_forgets_own_occurrences_come_back() -> None:

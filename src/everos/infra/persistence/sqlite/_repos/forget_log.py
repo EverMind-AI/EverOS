@@ -11,6 +11,10 @@ Two operations, both trivial in isolation and both load-bearing:
   because undoing a forget that a later forget superseded would bring back
   material the user asked to forget again.
 
+Every lookup is keyed on the owner's id and type together: users and groups
+share one id space, so a user and a group with the same id must never read
+each other's forgets.
+
 Rows are never deleted and never edited except for ``undone_at``: the log is
 the audit trail of what was hidden and when it came back.
 """
@@ -78,7 +82,13 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
             return await s.get(ForgetLog, forget_id)
 
     async def live_targets(
-        self, *, target_kind: str, app_id: str, project_id: str, owner_id: str
+        self,
+        *,
+        target_kind: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str,
     ) -> list[str]:
         """Target ids of the owner's live forgets of one kind, oldest first."""
         async with session_scope(self._factory) as s:
@@ -89,6 +99,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.app_id == app_id,  # type: ignore[arg-type]
                     ForgetLog.project_id == project_id,  # type: ignore[arg-type]
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
                 )
                 .order_by(ForgetLog.created_at)  # type: ignore[arg-type]
@@ -96,7 +107,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
             return list(dict.fromkeys((await s.execute(stmt)).scalars().all()))
 
     async def live_rows(
-        self, *, app_id: str, project_id: str, owner_id: str
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: str
     ) -> list[ForgetLog]:
         """The owner's forgets no undo reversed, newest first."""
         async with session_scope(self._factory) as s:
@@ -106,6 +117,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.app_id == app_id,  # type: ignore[arg-type]
                     ForgetLog.project_id == project_id,  # type: ignore[arg-type]
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
                 )
                 .order_by(ForgetLog.created_at.desc())
@@ -139,6 +151,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
         app_id: str,
         project_id: str,
         owner_id: str,
+        owner_type: str,
     ) -> ForgetLog | None:
         """The newest not-yet-undone forget of this target, or ``None``."""
         async with session_scope(self._factory) as s:
@@ -150,6 +163,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.app_id == app_id,  # type: ignore[arg-type]
                     ForgetLog.project_id == project_id,  # type: ignore[arg-type]
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
                 )
                 .order_by(ForgetLog.created_at.desc())

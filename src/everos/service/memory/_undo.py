@@ -143,6 +143,7 @@ class UndoManager:
             app_id=scope.app_id,
             project_id=scope.project_id,
             owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         )
         return await self.undo_image_entry(
             scope=scope, image_id=image_id, entry=entry, keep=keep
@@ -225,6 +226,7 @@ class UndoManager:
             app_id=scope.app_id,
             project_id=scope.project_id,
             owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         )
         return await self.undo_session_entry(
             scope=scope, session_id=session_id, entry=entry, keep=keep

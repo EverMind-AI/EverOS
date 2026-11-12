@@ -520,7 +520,10 @@ class UpdateManager:
     async def _forgotten_item(self, scope: Scope, item_id: str) -> bool:
         """Whether a live forget of the user took the item out of ``user.md``."""
         for entry in await self._stores.forget_log.live_entries(
-            app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         ):
             for _bucket, item in entry.removed_profile_items:
                 if item.get("item_id") == item_id:

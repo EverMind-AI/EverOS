@@ -8,7 +8,8 @@ alone. Two parts are not:
   because everalgo replaces that document wholesale.
 
 This port is that memory. One entry per forget, scoped to the owner the forget
-was for, keyed by what it addressed: a picture hash or a session id. An undo
+was for -- by id **and** type, because a user and a group may share an id --
+keyed by what it addressed: a picture hash or a session id. An undo
 asks for the newest entry of its target that no undo has reversed yet — never
 an older one, because a forget that a later forget superseded must not come
 back.
@@ -37,7 +38,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from .query import SessionKey
+from .query import OwnerType, SessionKey
 
 type ForgetTarget = Literal[
     "image", "session", "message", "member", "record", "owner", "condition"
@@ -128,8 +129,13 @@ class ForgetLogStore(Protocol):
         app_id: str,
         project_id: str,
         owner_id: str,
+        owner_type: OwnerType,
     ) -> ForgetEntry | None:
-        """The newest forget of this target that no undo has reversed."""
+        """The newest forget of this target that no undo has reversed.
+
+        Keyed on the owner's id **and** type: a user and a group share one id
+        space, so an id alone would let one's undo reverse the other's forget.
+        """
         ...
 
     async def get(self, forget_id: str) -> ForgetEntry | None:
@@ -137,7 +143,13 @@ class ForgetLogStore(Protocol):
         ...
 
     async def live_targets(
-        self, *, target: ForgetTarget, app_id: str, project_id: str, owner_id: str
+        self,
+        *,
+        target: ForgetTarget,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: OwnerType,
     ) -> list[str]:
         """The target ids of the owner's forgets of one kind no undo reversed.
 
@@ -147,7 +159,7 @@ class ForgetLogStore(Protocol):
         ...
 
     async def live_entries(
-        self, *, app_id: str, project_id: str, owner_id: str
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
     ) -> list[ForgetEntry]:
         """The owner's forgets no undo reversed, newest first.
 

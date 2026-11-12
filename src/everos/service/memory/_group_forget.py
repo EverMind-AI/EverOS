@@ -549,6 +549,8 @@ class GroupForgetManager:
                 entry is None
                 or entry.owner_type != "group"
                 or entry.owner_id != scope.owner_id
+                or entry.app_id != scope.app_id
+                or entry.project_id != scope.project_id
                 or entry.undo is None
             ):
                 raise NotFoundError(f"no forget {forget_id!r} in the group")

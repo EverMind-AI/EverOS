@@ -8,6 +8,7 @@ docs/group-memory.md, sections 6.2 and 9.4. What these pin:
 - the forget log takes ``owner_type = group``, ``requested_by`` and the undo
   record, finds an entry by id, and says whether a live group forget took a
   picture out -- an undone one does not count;
+- a user and a group with the same id never read each other's live forgets;
 - a ``system.db`` written before ``requested_by`` / ``undo_json`` existed gains
   them at schema creation and keeps its rows.
 """
@@ -134,6 +135,37 @@ async def test_the_log_keeps_a_group_forget_and_finds_its_pictures(
     assert not await log.holds_picture("cd" * 32)  # not a group forget
     assert await log.mark_undone("fg_fixed")
     assert not await log.holds_picture(_HASH)
+
+
+async def test_a_user_and_a_group_of_one_id_read_only_their_own_forgets(
+    repos: SqliteRepos,
+) -> None:
+    """Users and groups share one id space: every lookup keys on the type too."""
+    log = SqliteForgetLogStore(repos.forget_log)
+    space = {"app_id": "app", "project_id": "proj", "owner_id": "trip"}
+    mine = await log.record(target="image", target_id=_HASH, **space)
+    group = await log.record(
+        target="image",
+        target_id=_HASH,
+        owner_type="group",
+        undo={"withdrawn": []},
+        **space,
+    )
+    await log.record(target="image", target_id="cd" * 32, owner_type="group", **space)
+
+    personal = await log.latest_live(
+        target="image", target_id=_HASH, owner_type="user", **space
+    )
+    grouped = await log.latest_live(
+        target="image", target_id=_HASH, owner_type="group", **space
+    )
+    assert personal is not None and personal.forget_id == mine.forget_id
+    assert grouped is not None and grouped.forget_id == group.forget_id
+    assert await log.live_targets(target="image", owner_type="user", **space) == [_HASH]
+    assert [
+        e.forget_id for e in await log.live_entries(owner_type="user", **space)
+    ] == [mine.forget_id]
+    assert await log.live_targets(target="image", owner_type="agent", **space) == []
 
 
 _PRE_GROUP_FORGET_LOG_DDL = """

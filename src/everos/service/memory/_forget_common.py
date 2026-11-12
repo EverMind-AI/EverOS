@@ -70,9 +70,12 @@ async def named_by_others(stores: Stores, scope: Scope, *, except_id: str) -> Na
     """What the user's live forgets other than ``except_id`` keep forgotten."""
     named = Named()
     for entry in await stores.forget_log.live_entries(
-        app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+        app_id=scope.app_id,
+        project_id=scope.project_id,
+        owner_id=scope.owner_id,
+        owner_type=scope.owner_type,
     ):
-        if entry.forget_id == except_id or entry.owner_type != scope.owner_type:
+        if entry.forget_id == except_id:
             continue
         found = entries_named(entry)
         named.episodes.update(found.episodes)
@@ -115,9 +118,12 @@ async def forgotten_segments(
     sessions: list[str] = []
     found: set[str] = set()
     for entry in await stores.forget_log.live_entries(
-        app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+        app_id=scope.app_id,
+        project_id=scope.project_id,
+        owner_id=scope.owner_id,
+        owner_type=scope.owner_type,
     ):
-        if entry.forget_id == except_id or entry.owner_type != scope.owner_type:
+        if entry.forget_id == except_id:
             continue
         if entry.target == "session":
             if entry.target_id != except_session:
@@ -152,9 +158,12 @@ async def removed_by_others(
     wanted = set(segments)
     found: list[tuple[str, dict[str, object]]] = []
     for other in await stores.forget_log.live_entries(
-        app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+        app_id=scope.app_id,
+        project_id=scope.project_id,
+        owner_id=scope.owner_id,
+        owner_type=scope.owner_type,
     ):
-        if other.forget_id == except_id or other.owner_type != scope.owner_type:
+        if other.forget_id == except_id:
             continue
         if other.target == "session":
             candidates = list(other.removed_profile_items)

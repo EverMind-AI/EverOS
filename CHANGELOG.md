@@ -534,6 +534,13 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A user and a group with the same id no longer share forgets.** Users and
+  groups share one id space, but the forget log was read by owner id alone:
+  a personal undo of a picture or a conversation could reverse the group's
+  newer forget of it instead of the user's own, and the pictures one of them
+  forgot were left out of the other's profile updates. Every lookup is keyed
+  on the owner's id and type now, and a group's undo by `forget_id` also
+  checks the app and project it was made in.
 - **No tzlocal warning from a crontab check.** Validating a strategy's
   `Cron` trigger or an `ome.toml` `cron` override asked APScheduler to build a
   trigger in the OS's timezone; in a container with none, tzlocal warned

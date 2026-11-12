@@ -229,7 +229,10 @@ class HistoryReader:
         """Profile values a live forget of the user took out, by item id."""
         found: dict[str, Mapping[str, Any]] = {}
         for entry in await self._stores.forget_log.live_entries(
-            app_id=scope.app_id, project_id=scope.project_id, owner_id=scope.owner_id
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
         ):
             for _bucket, item in entry.removed_profile_items:
                 item_id = item.get("item_id")
