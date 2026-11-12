@@ -159,3 +159,32 @@ async def test_group_records_carry_their_audience(tmp_path: Path) -> None:
         assert profile is not None
         assert all(d.audience is not None for d in profile.decisions)
         assert all(e.audience is None for e in personal.data.episodes)
+
+
+async def test_a_pool_of_groups_attaches_each_groups_own_items(
+    tmp_path: Path,
+) -> None:
+    """An item id is unique within its group only: the first item each group
+    writes on a day has the same id, and the pool still shows both."""
+    async with GroupWorld.open(
+        tmp_path, decider=FakeLLMClient(handler=_Decider(([0], [])))
+    ) as world:
+        for group in ("trip", "ops"):
+            await world.roster(group, [join("u_chen", T0, display_name="Chen")])
+            await world.episode(
+                group, f"{group} plan marker", start=T0 + 1_000, end=T0 + 2_000
+            )
+            await world.profile_item(
+                group, f"{group} decision marker", start=T0 + 1_000, end=T0 + 2_000
+            )
+        await world.project()
+        response = await world.memory.search(
+            _request(group_id=None, group_ids=["trip", "ops"])
+        )
+
+    profile = response.data.group_profile
+    assert profile is not None
+    assert sorted((d.group_id, d.statement) for d in profile.decisions) == [
+        ("ops", "ops decision marker"),
+        ("trip", "trip decision marker"),
+    ]

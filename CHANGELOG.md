@@ -562,6 +562,12 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A search over several groups attaches each group's own profile items.**
+  An item id (`gp_<date>_<seq>`) is unique within its group only, and the
+  group profile a `group_ids` or `project_scope` search attaches was folded
+  by id alone: the first item two groups wrote on the same day was one item,
+  so the response showed one group's decision twice and never the other's.
+  Items are told apart by group and id now.
 - **`everos memory` keeps a settings warning off its JSON.** A key the
   settings ignore is named while they load (`config_key_ignored`; benchmark
   launchers still export `EVEROS_LLM__SEARCH_TIMEOUT_SECONDS`), before the

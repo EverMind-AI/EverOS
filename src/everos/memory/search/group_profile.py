@@ -82,15 +82,20 @@ async def item_versions(
 def visible_profile(
     stored: Sequence[Stored[GroupProfileItem]], *, cap: int
 ) -> tuple[SearchGroupProfile, GroupProfileView]:
-    """The fold of ``stored``, each kind cut to ``cap``, shaped for a response."""
-    by_id = {s.item.item_id: s for s in stored}
+    """The fold of ``stored``, each kind cut to ``cap``, shaped for a response.
+
+    An item id (``gp_<YYYYMMDD>_<seq>``) is unique within its group only, so
+    the items of a pool of groups are told apart by group and id: by id
+    alone, two groups' first items of a day are one item.
+    """
+    by_id = {(s.item.owner_id, s.item.item_id): s for s in stored}
     view = current_profile([s.item for s in stored])
 
     def shaped(items: Sequence[GroupProfileItem]) -> list[GroupProfileEntry]:
         return [
-            shape_profile_item(by_id[i.item_id])
+            shape_profile_item(by_id[(i.owner_id, i.item_id)])
             for i in items[:cap]
-            if i.item_id in by_id
+            if (i.owner_id, i.item_id) in by_id
         ]
 
     return (
