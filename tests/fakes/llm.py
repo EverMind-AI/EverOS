@@ -54,6 +54,7 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "profile_init": "_ProfileItems",
     "profile_update": "_MemCellUpdateOutput",
     "reflect": "_ReflectOutput",
+    "foresights": "_ForesightsReply",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""
 

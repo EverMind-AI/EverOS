@@ -257,6 +257,7 @@ class CascadeOrchestrator:
         self._worker = CascadeWorker(
             self._handlers,
             self._ledger,
+            fence=fence,
             batch_size=self._config.worker_batch_size,
             handler_concurrency=self._config.worker_handler_concurrency,
             max_retry=self._config.worker_max_retry,

@@ -21,6 +21,7 @@ from everalgo.user_memory import (
     AtomicFactExtractor,
     EpisodeExtractor,
     EpisodeReflector,
+    ForesightExtractor,
     ProfileExtractor,
 )
 
@@ -141,3 +142,11 @@ async def test_reflect_script() -> None:
     ]
     merged = await EpisodeReflector(llm=user_track_llm()).areflect(episodes)
     assert merged.summary == json.loads(user_track_script("reflect"))["summary"]
+
+
+async def test_foresight_script() -> None:
+    (foresight,) = await ForesightExtractor(llm=user_track_llm()).aextract(
+        _CELL, sender_id="u_alice"
+    )
+    expected = json.loads(user_track_script("foresights"))["foresights"][0]
+    assert foresight.foresight == expected["content"]

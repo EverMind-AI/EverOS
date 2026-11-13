@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from everos.core.utils.datetime import get_utc_now
+from everos.core.purge_marks import origin_or_now
 
 
 class Event(BaseModel):
@@ -25,7 +25,11 @@ class Event(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_id: str = Field(default_factory=lambda: uuid4().hex)
-    ts: datetime = Field(default_factory=get_utc_now)
+    ts: datetime = Field(default_factory=origin_or_now)
+    """When the system took in the input this event stems from: the request,
+    the queued row or the triggering event (``core.purge_marks.ORIGIN``); an
+    event raised outside such work is stamped with the time it is made. A
+    purge drops a scoped event older than the latest purge of its scope."""
 
     @classmethod
     def topic(cls) -> str:

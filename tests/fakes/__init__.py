@@ -18,6 +18,7 @@ from __future__ import annotations
 from .application import FakeOmeLock as FakeOmeLock
 from .application import StubMemoryService as StubMemoryService
 from .application import StubOpsService as StubOpsService
+from .application import StubPurgeService as StubPurgeService
 from .application import make_application as make_application
 from .application import make_backfill_deps as make_backfill_deps
 from .application import make_knowledge_service as make_knowledge_service
@@ -112,6 +113,7 @@ __all__ = [
     "StorageView",
     "StubMemoryService",
     "StubOpsService",
+    "StubPurgeService",
     "UnusedPort",
     "agent_track_llm",
     "agent_track_script",

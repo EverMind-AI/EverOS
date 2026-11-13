@@ -42,6 +42,9 @@ class ErrorCode(StrEnum):
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     QUEUE_SATURATED = "QUEUE_SATURATED"
     SESSION_BUSY = "SESSION_BUSY"
+    PURGE_IN_PROGRESS = "PURGE_IN_PROGRESS"
+    CROSS_SITE_REFUSED = "CROSS_SITE_REFUSED"
+    PURGE_NONCE_INVALID = "PURGE_NONCE_INVALID"
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +167,32 @@ class SessionBusyError(DomainError):
 
     Nothing was deleted. The API layer maps it to HTTP 503 ``SESSION_BUSY``;
     the caller retries later.
+    """
+
+
+class PurgeInProgressError(DomainError):
+    """A write named the app / project a running purge is clearing.
+
+    Nothing was written. The API layer maps it to HTTP 409
+    ``PURGE_IN_PROGRESS``; the message names the job to poll, and the caller
+    resends once that job has ended.
+    """
+
+
+class CrossSiteRefusedError(DomainError):
+    """A browser page of another site asked for a purge.
+
+    Nothing was counted or deleted. The API layer maps it to HTTP 403
+    ``CROSS_SITE_REFUSED``; the caller purges from a client that is not a
+    browser page of another site (curl, an SDK, a plugin).
+    """
+
+
+class PurgeNonceInvalidError(DomainError):
+    """A purge confirmation named an unknown, expired or already-used nonce.
+
+    Nothing was deleted. The API layer maps it to HTTP 404
+    ``PURGE_NONCE_INVALID``; the caller requests a new nonce.
     """
 
 

@@ -32,6 +32,7 @@ __all__ = [
 ]
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import PathTraversalError, SessionBusyError
@@ -56,11 +57,12 @@ if TYPE_CHECKING:
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
+    from everos.core.purge_marks import PurgeMarks
     from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection
     from everos.memory.extract.pipeline import Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
-    from everos.memory.ports import EventBus, IndexEraser
+    from everos.memory.ports import EventBus, IndexEraser, Scope
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
 
@@ -86,6 +88,9 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
+        purge_marks: The root's purge marks: the async queue drops rows a
+            purge superseded; each delivery and each extraction is registered
+            while it runs, so a purge can wait for it. ``None`` ignores purges.
     """
 
     def __init__(
@@ -102,6 +107,7 @@ class MemoryService:
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
+        purge_marks: PurgeMarks | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -119,6 +125,7 @@ class MemoryService:
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            purge_marks=purge_marks,
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
@@ -126,6 +133,7 @@ class MemoryService:
             inbox=stores.memorize_inbox,
             deliver=self._memorize,
             accept_async=queue_cfg.enabled,
+            marks=purge_marks,
         )
 
     # ── lifecycle ──────────────────────────────────────────────────────────
@@ -221,9 +229,14 @@ class MemoryService:
             logger.warning("memory_delete_by_ids_continues_after_cancel")
             raise
 
-    async def finish_interrupted_deletions(self) -> int:
-        """Finish whole-owner deletions a crash cut short (startup)."""
-        return await self._stores.owner_dir.sweep_trash()
+    async def finish_interrupted_deletions(
+        self, *, skip: Callable[[Scope], bool] | None = None
+    ) -> int:
+        """Finish whole-owner deletions a crash cut short (startup).
+
+        ``skip`` leaves the trash of owners it accepts (a running purge's).
+        """
+        return await self._stores.owner_dir.sweep_trash(skip=skip)
 
     # ── async_mode queue ───────────────────────────────────────────────────
 

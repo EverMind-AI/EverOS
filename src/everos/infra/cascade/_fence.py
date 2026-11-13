@@ -93,6 +93,10 @@ class DeleteFence:
                 threshold=self._warn_entries,
             )
 
+    def in_flight(self) -> frozenset[int]:
+        """Tokens of the runs registered right now."""
+        return frozenset(self._runs)
+
     def blocks(self, row: Any) -> bool:
         """Whether ``row`` (an index record) was fenced by a deletion."""
         return (row.app_id, row.project_id, row.id) in self._entries

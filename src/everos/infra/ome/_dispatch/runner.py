@@ -23,6 +23,7 @@ import asyncio
 import random
 import traceback
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from uuid import uuid4
 
 from everos.core.concurrency import ConcurrencySlot
@@ -34,6 +35,7 @@ from everos.infra.ome._dispatch.strategy import RunContext, StrategyMeta
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.exceptions import StrategyContractError
+from everos.infra.ome.gate import RunGate
 from everos.infra.ome.records import RunRecord
 from everos.memory.ports import Event
 
@@ -51,12 +53,14 @@ class Runner:
         emit_hook: Callable[[Event], Awaitable[None]],
         config: OMEConfig,
         on_dead_letter: Callable[[RunRecord], None] | None = None,
+        gate: RunGate | None = None,
     ) -> None:
         self._rec = run_record_store
         self._sem = engine_sem
         self._emit_hook = emit_hook
         self._config = config
         self._on_dead_letter = on_dead_letter
+        self._gate = gate
 
     async def run(
         self,
@@ -167,6 +171,8 @@ class Runner:
                 event_id=event.event_id,
             ):
                 return True  # mark_running failed; abort run, no DB row exists
+            if not await self._pass_gate(event, current_run_id):
+                return True
             try:
                 token = _CURRENT_STRATEGY.set(meta)
                 try:
@@ -174,6 +180,7 @@ class Runner:
                     # was carried across the APScheduler boundary; otherwise the
                     # agent span roots its own trace (e.g. cron / recovery).
                     with (
+                        self._gate.bind(event) if self._gate else nullcontext(),
                         use_traceparent(traceparent),
                         memory_span(
                             f"everos.ome.{meta.name}",
@@ -225,6 +232,16 @@ class Runner:
                     finished_at=get_utc_now(),
                 )
                 return True
+
+    async def _pass_gate(self, event: Event, run_id: str) -> bool:
+        """``False`` once the gate drops the event (recorded as done)."""
+        if self._gate is None:
+            return True
+        if self._gate.verdict(event) == "discard":
+            await self._rec.mark_success(run_id=run_id, finished_at=get_utc_now())
+            logger.info("ome_run_discarded_by_gate", event_id=event.event_id)
+            return False
+        return True
 
     async def _record_start(
         self,

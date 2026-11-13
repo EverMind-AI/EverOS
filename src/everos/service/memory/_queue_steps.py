@@ -37,10 +37,14 @@ from everos.core.errors import (
     QueueSaturatedError,
 )
 from everos.core.observability.logging import bound_log_context, get_logger
+from everos.core.purge_marks import ORIGIN, PURGE_DISCARD_PREFIX
 from everos.memory.models import MemorizeTask
 from everos.memory.ports import MemorizeInboxStore, SessionKey
 
 from ._queue_models import QUEUE_LOGGER, Deliver, QueueHealth, error_summary
+
+PURGE_DISCARDED = f"{PURGE_DISCARD_PREFIX}discarded by purge; do not resend"
+"""``last_error`` of a row a purge of its scope superseded before delivery."""
 
 logger = get_logger(QUEUE_LOGGER)
 
@@ -177,18 +181,26 @@ async def deliver_row(
     deliver: Deliver,
     mark: Callable[..., Awaitable[None]],
     cfg: AsyncQueueSettings,
+    should_discard: Callable[[MemorizeTask], bool] | None = None,
 ) -> None:
     """Deliver one claimed row, retrying up to ``max_attempts``; record the end.
 
     ``mark`` writes the row's status (the worker's, which tracks lost writes).
+    ``should_discard`` is asked before every attempt: a row a purge of its
+    scope superseded ends ``failed`` without being delivered.
     """
     # Carry the accepting request's id so spans and logs emitted inside
-    # memorize() correlate with the 202 the client received.
+    # memorize() correlate with the 202 the client received; the row's
+    # acceptance time is the origin of everything the delivery emits.
     token = set_request_id(row.request_id)
+    origin = ORIGIN.set(row.created_at)
     try:
         with bound_log_context(request_id=row.request_id):
-            await _deliver_with_retries(row, deliver=deliver, mark=mark, cfg=cfg)
+            await _deliver_with_retries(
+                row, deliver=deliver, mark=mark, cfg=cfg, should_discard=should_discard
+            )
     finally:
+        ORIGIN.reset(origin)
         reset_request_id(token)
 
 
@@ -198,9 +210,24 @@ async def _deliver_with_retries(
     deliver: Deliver,
     mark: Callable[..., Awaitable[None]],
     cfg: AsyncQueueSettings,
+    should_discard: Callable[[MemorizeTask], bool] | None = None,
 ) -> None:
     assert row.id is not None
     for attempt in range(1, cfg.max_attempts + 1):
+        if should_discard is not None and should_discard(row):
+            await mark(
+                row.id,
+                status="failed",
+                attempt=attempt - 1,
+                payload_json="",
+                last_error=PURGE_DISCARDED,
+            )
+            logger.info(
+                "memorize_queue_discarded_by_purge",
+                row_id=row.id,
+                session_id=row.session_id,
+            )
+            return
         try:
             # Inside the try: a row whose body was hand-edited into
             # garbage fails with that reason, not the whole pass.

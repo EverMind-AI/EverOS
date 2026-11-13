@@ -27,6 +27,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from everos.core.observability.logging import get_logger
+from everos.core.purge_marks import ORIGIN
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
 from everos.infra.ome._dispatch.strategy import StrategyMeta
@@ -85,9 +86,11 @@ async def cron_entry(engine_id: str, strategy_name: str) -> None:
 
     Clears ``_CURRENT_STRATEGY`` because APScheduler may inherit the
     context from a running strategy task, which would trip the
-    ``refuse_inside_strategy`` guard on ``engine.emit()``.
+    ``refuse_inside_strategy`` guard on ``engine.emit()``; clears ``ORIGIN``
+    for the same reason: a tick is new input, stamped with the time it fires.
     """
     _CURRENT_STRATEGY.set(None)
+    ORIGIN.set(None)
     engine = ENGINES.get(engine_id)
     if engine is None:
         logger.error(
@@ -104,9 +107,10 @@ async def idle_entry(engine_id: str, strategy_name: str) -> None:
 
     Looks the engine up by id and hands off to
     :meth:`OfflineEngine.run_idle_scan`. Clears ``_CURRENT_STRATEGY``
-    for the same reason as :func:`cron_entry`.
+    and ``ORIGIN`` for the same reason as :func:`cron_entry`.
     """
     _CURRENT_STRATEGY.set(None)
+    ORIGIN.set(None)
     engine = ENGINES.get(engine_id)
     if engine is None:
         logger.error(

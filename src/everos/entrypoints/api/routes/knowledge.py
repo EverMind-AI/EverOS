@@ -25,6 +25,7 @@ from fastapi.params import Form
 
 from everos.core.utils.datetime import to_display_tz
 from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.routes.purge import REFUSED_DURING_PURGE
 from everos.entrypoints.api.schemas import (
     AppScopeId,
     CategoryDTO,
@@ -88,6 +89,7 @@ _PathTopicId = Annotated[str, Path(pattern=_TOPIC_ID_PATTERN)]
     "/documents",
     status_code=201,
     dependencies=[Depends(_require_knowledge_capabilities)],
+    responses=REFUSED_DURING_PURGE,
 )
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def create_document_route(
@@ -101,6 +103,7 @@ async def create_document_route(
     project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Upload a new knowledge document."""
+    app.purge.refuse_writes_to(app_id, project_id)
     result = await app.knowledge.create_from_upload(
         file,
         title=title,
@@ -118,6 +121,7 @@ async def create_document_route(
     "/documents/{doc_id}",
     status_code=200,
     dependencies=[Depends(_require_knowledge_capabilities)],
+    responses=REFUSED_DURING_PURGE,
 )
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def replace_document_route(
@@ -132,6 +136,7 @@ async def replace_document_route(
     project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Replace an existing knowledge document (atomic backup/restore on failure)."""
+    app.purge.refuse_writes_to(app_id, project_id)
     result = await app.knowledge.replace_from_upload(
         doc_id,
         file,
@@ -274,7 +279,7 @@ async def list_categories_route(
     )
 
 
-@router.patch("/documents/{doc_id}")
+@router.patch("/documents/{doc_id}", responses=REFUSED_DURING_PURGE)
 async def patch_document_route(
     app: ApplicationDep,
     request_id: RequestIdDep,
@@ -282,6 +287,7 @@ async def patch_document_route(
     req: DocumentPatchRequest,
 ) -> SuccessEnvelope[DocumentPatchResponse]:
     """Update mutable document metadata fields."""
+    app.purge.refuse_writes_to(req.app_id, req.project_id)
     result = await app.knowledge.patch_document(
         doc_id,
         req.app_id,

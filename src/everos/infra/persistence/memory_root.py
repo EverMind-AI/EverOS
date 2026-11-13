@@ -32,6 +32,8 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
+from everos.core.purge_marks import PurgeScope
+
 # ── app / project directory-name convention ──────────────────────────────────
 #
 # A memory root is partitioned by ``<app>/<project>`` *before* the user-visible
@@ -69,6 +71,28 @@ def app_id_from_dir(dir_name: str) -> str:
 def project_id_from_dir(dir_name: str) -> str:
     """Inverse of :func:`project_dir_name` — recover the ``project_id``."""
     return _DEFAULT_SCOPE_ID if dir_name == _DEFAULT_PROJECT_DIR else dir_name
+
+
+def purge_scope(kind: str, app_id: str | None, project_id: str | None) -> PurgeScope:
+    """A purge's range with the on-disk names of its ids.
+
+    Raises:
+        ValueError: ``kind`` is not ``space`` / ``app`` / ``project``, or an
+            id it needs is missing.
+    """
+    if kind == "space":
+        return PurgeScope("space")
+    if kind == "app" and app_id:
+        return PurgeScope("app", app_id, None, app_dir_name(app_id))
+    if kind == "project" and app_id and project_id:
+        return PurgeScope(
+            "project",
+            app_id,
+            project_id,
+            app_dir_name(app_id),
+            project_dir_name(project_id),
+        )
+    raise ValueError(f"invalid purge scope {kind!r} ({app_id!r}, {project_id!r})")
 
 
 @dataclass(frozen=True, init=False)

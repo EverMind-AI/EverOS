@@ -56,6 +56,7 @@ from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import MdChangeState, MdChangeStateRepo
 
+from .._fence import DeleteFence
 from .._projections import Handler
 from ..models import ChangeType
 from ._health import CascadeWorkerHealth
@@ -127,11 +128,13 @@ class CascadeWorker:
         loop_restart_backoffs_seconds: Sequence[float] = LOOP_RESTART_BACKOFF_SECONDS,
         drain_stall_alert_seconds: float = DRAIN_STALL_ALERT_SECONDS,
         on_unrecoverable: Callable[[str], None] | None = None,
+        fence: DeleteFence | None = None,
     ) -> None:
         if handler_concurrency <= 0:
             raise ValueError("handler_concurrency must be positive")
         self._handlers = handlers
         self._ledger = ledger
+        self._fence = fence
         self._batch_size = batch_size
         self._handler_concurrency = handler_concurrency
         self._handler_semaphore = asyncio.Semaphore(handler_concurrency)
@@ -423,6 +426,10 @@ class CascadeWorker:
                 if row.change_type == "deleted":
                     outcome = await handler.handle_deleted(row.md_path)
                 else:
+                    # Every projection registers before it reads its file and
+                    # ends however it ends: a deletion's fence entries, and a
+                    # purge's wait for in-flight runs, both count on it.
+                    token = self._fence.register_run() if self._fence else None
                     try:
                         outcome = await handler.handle_added_or_modified(row.md_path)
                     except FileNotFoundError:
@@ -434,6 +441,9 @@ class CascadeWorker:
                         # record the fold: the row must describe the index.
                         outcome = await handler.handle_deleted(row.md_path)
                         applied = "deleted"
+                    finally:
+                        if token is not None and self._fence is not None:
+                            self._fence.end_run(token)
             except ExternalServiceError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(

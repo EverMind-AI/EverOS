@@ -26,6 +26,7 @@ from .settings import MemorySettings as MemorySettings
 from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
 from .settings import OmeSettings as OmeSettings
+from .settings import PurgeSettings as PurgeSettings
 from .settings import RerankSettings as RerankSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
@@ -45,6 +46,7 @@ __all__ = [
     "MilvusSettings",
     "MultimodalSettings",
     "OmeSettings",
+    "PurgeSettings",
     "RerankSettings",
     "Settings",
     "SqliteSettings",

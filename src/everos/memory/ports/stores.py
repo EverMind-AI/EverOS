@@ -310,8 +310,11 @@ class OwnerDirStore(Protocol):
         """Remove the owner's directory, keeping today's id counters."""
         ...
 
-    async def sweep_trash(self) -> int:
-        """Finish deletions a crash interrupted; how many it finished."""
+    async def sweep_trash(self, *, skip: Callable[[Scope], bool] | None = None) -> int:
+        """Finish deletions a crash interrupted; how many it finished.
+
+        A trash folder whose owner ``skip`` accepts is left as it is.
+        """
         ...
 
     async def owners_with_session(

@@ -39,15 +39,18 @@ from tests.fakes import (
     unscripted_llm,
 )
 
-# Interrupted whole-owner deletions are finished right after the schema
-# exists, before the cascade or the OME engine can write anything.
+# A running purge's mark is restored and interrupted whole-owner deletions
+# are finished right after the schema exists, before the cascade or the OME
+# engine can write anything; the purge runner starts last.
 _STARTED = [
     "sqlite.create",
+    "purge.restore",
     "memory.finish_interrupted_deletions",
     "index.start",
     "ops.start",
     "ome.start",
     "memory.start",
+    "purge.start",
 ]
 
 
@@ -220,6 +223,7 @@ async def test_start_brings_the_queue_up_last_and_aclose_unwinds_in_reverse(
     events.clear()
     await application.aclose()
     assert events == [
+        "purge.stop",
         "memory.aclose",
         "ome.stop",
         "ops.aclose",
@@ -290,7 +294,13 @@ async def test_a_failing_stop_does_not_skip_the_rest(tmp_path: Path) -> None:
     events.clear()
     await application.aclose()
 
-    assert events == ["memory.aclose", "ops.aclose", "index.close", "sqlite.dispose"]
+    assert events == [
+        "purge.stop",
+        "memory.aclose",
+        "ops.aclose",
+        "index.close",
+        "sqlite.dispose",
+    ]
 
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancellation"])

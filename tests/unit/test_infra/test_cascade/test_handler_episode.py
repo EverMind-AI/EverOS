@@ -380,7 +380,11 @@ async def test_upsert_rechecks_fence_and_deletes_late_rows(
 
     fake_repo.upsert = upsert_while_deleting  # type: ignore[method-assign]
 
-    await handler.handle_added_or_modified(rel)
+    token = fence.register_run()  # as the cascade worker registers every run
+    try:
+        await handler.handle_added_or_modified(rel)
+    finally:
+        fence.end_run(token)
 
     assert len(fake_repo.deletes) == 1
     late_id = fake_repo.upserts[0][0].id

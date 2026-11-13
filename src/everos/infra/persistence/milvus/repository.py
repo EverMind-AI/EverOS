@@ -473,6 +473,16 @@ class MilvusRepoBase[T: BaseModel]:
                 filter=self._expr(predicate),
             )
 
+    async def delete_all(self) -> None:
+        # An explicit always-true filter: what an empty one does differs
+        # across Milvus versions.
+        await self.ensure_collection()
+        client = await self._connection.client()
+        async with _observed(
+            self._write_lock(self.collection_name), self.collection_name
+        ):
+            await _run(client.delete, self.collection_name, filter=f'{PK_FIELD} != ""')
+
     async def delete_by_md_path(self, md_path: str) -> int:
         predicate = eq("md_path", md_path)
         count = await self._count_where(predicate)

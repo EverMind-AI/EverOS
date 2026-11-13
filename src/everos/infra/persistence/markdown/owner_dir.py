@@ -19,13 +19,13 @@ __all__ = ["MarkdownOwnerDirStore"]
 import json
 import shutil
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 import anyio
 
 from everos.core.errors import PathTraversalError
-from everos.core.failpoints import failpoint
+from everos.core.failpoints import afailpoint
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import today_with_timezone
@@ -47,7 +47,8 @@ logger = get_logger(__name__)
 
 _TRASH_PREFIX = "delete-"
 _MANIFEST = "scope.json"
-_MOVED = "owner"
+MOVED_DIR = "owner"
+"""Name of the owner directory inside a ``/delete`` trash folder."""
 
 
 class MarkdownOwnerDirStore:
@@ -84,7 +85,7 @@ class MarkdownOwnerDirStore:
                 if held == scope and t not in self._emptying
             ]
             for earlier in moved:
-                await self._keep_today_counters(scope, earlier / _MOVED)
+                await self._keep_today_counters(scope, earlier / MOVED_DIR)
             if await anyio.Path(owner_dir).is_dir():
                 await self._move(scope, owner_dir, trash)
                 moved.append(trash)
@@ -108,16 +109,24 @@ class MarkdownOwnerDirStore:
             ),
             encoding="utf-8",
         )
-        await anyio.Path(owner_dir).rename(trash / _MOVED)
-        failpoint("delete_owner.after_rename")
-        await self._keep_today_counters(scope, trash / _MOVED)
-        failpoint("delete_owner.after_restore")
+        await anyio.Path(owner_dir).rename(trash / MOVED_DIR)
+        await afailpoint("delete_owner.after_rename")
+        try:
+            await self._keep_today_counters(scope, trash / MOVED_DIR)
+        except FileNotFoundError:
+            if await anyio.Path(trash).exists():
+                raise
+            return  # a purge of the scope took the trash, counters restored
+        await afailpoint("delete_owner.after_restore")
 
     async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
         """Inventory the trash folders, then remove them."""
+        # A purge of the scope may have taken a folder meanwhile: nothing
+        # of it is left to count or remove.
+        left = [t for t in moved if (t / MOVED_DIR).is_dir()]
         try:
-            parts = [await self._inventory(scope, t / _MOVED) for t in moved]
-            for trash in moved:
+            parts = [await self._inventory(scope, t / MOVED_DIR) for t in left]
+            for trash in left:
                 await anyio.to_thread.run_sync(shutil.rmtree, trash)
         finally:
             self._emptying.difference_update(moved)
@@ -139,15 +148,17 @@ class MarkdownOwnerDirStore:
                 scope: Scope | None = Scope(**fields)
             except (OSError, ValueError, TypeError):
                 scope = None  # died before the manifest was written: nothing moved
-            found.append((trash, scope if (trash / _MOVED).is_dir() else None))
+            found.append((trash, scope if (trash / MOVED_DIR).is_dir() else None))
         return found
 
-    async def sweep_trash(self) -> int:
+    async def sweep_trash(self, *, skip: Callable[[Scope], bool] | None = None) -> int:
         finished = 0
         for trash, scope in self._trash_folders():
+            if scope is not None and skip is not None and skip(scope):
+                continue  # a running purge owns this one (it restores, then removes)
             if scope is not None:
                 async with LOCKS.hold("owner", owner_lock(scope)):
-                    await self._keep_today_counters(scope, trash / _MOVED)
+                    await self._keep_today_counters(scope, trash / MOVED_DIR)
             try:
                 await anyio.to_thread.run_sync(shutil.rmtree, trash)
             except OSError as exc:
@@ -162,6 +173,20 @@ class MarkdownOwnerDirStore:
             logger.info("memory_delete_trash_swept", trash=trash.name)
             finished += 1
         return finished
+
+    def trash_folders(self) -> list[tuple[Path, Scope | None]]:
+        """Every ``.tmp/delete-*`` folder with the owner it holds."""
+        return self._trash_folders()
+
+    async def restore_today_counters(self, scope: Scope, moved_owner_dir: Path) -> None:
+        """Put the owner's today's files back, empty, from a moved copy.
+
+        For a purge, which takes no owner lock: a ``/delete`` of the scope
+        may be stopped after its rename, holding that lock, and the purge
+        must not stall behind it. A write to the scope meanwhile may race
+        this put-back; writes during a purge may be partly lost (spec v3 G1).
+        """
+        await self._keep_today_counters(scope, moved_owner_dir)
 
     async def owners_with_session(
         self, app_id: str, project_id: str, session_id: str

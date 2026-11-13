@@ -27,16 +27,21 @@ from everos.core.context import resolve_request_id
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
+from everos.core.purge_marks import origin_or_now
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._models import MemorizeResult
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+    from datetime import datetime
+
     from everalgo.llm import LLMClient
 
     from everos.component.parser import RawFileBuilder
     from everos.config import Settings
+    from everos.core.purge_marks import PurgeMarks
     from everos.memory import IngestResult
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
@@ -46,6 +51,17 @@ logger = get_logger("everos.service.memory")
 
 Mode = Literal["chat", "agent"]
 TrackStatus = Literal["accumulated", "extracted", "skipped"]
+
+
+async def _tracked[T](
+    work: Coroutine[Any, Any, T],
+    marks: PurgeMarks,
+    origin: datetime,
+    where: tuple[str, str],
+) -> T:
+    """Run ``work`` registered with the purge as in-flight work on ``where``."""
+    with marks.track(origin, where):
+        return await work
 
 
 class Memorizer:
@@ -74,7 +90,9 @@ class Memorizer:
         bus: EventBus,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
+        purge_marks: PurgeMarks | None = None,
     ) -> None:
+        self._purge_marks = purge_marks
         self._raw_file_builder = raw_file_builder
         self._settings = settings
         self._boundary = boundary
@@ -164,8 +182,17 @@ class Memorizer:
             # cancelled request (a client that went away). The task is owned
             # by the supervisor, which keeps it, retrieves its outcome and
             # waits for it at shutdown; the request only shields it.
+            work = self._extract(payload, ingested, boundary, mode=mode)
+            if self._purge_marks is not None:
+                # Tracked so a purge of the scope waits for it, even after
+                # the request is gone.
+                where = (
+                    payload.get("app_id", "default"),
+                    payload.get("project_id", "default"),
+                )
+                work = _tracked(work, self._purge_marks, origin_or_now(), where)
             extraction = self._extractions.supervise(
-                self._extract(payload, ingested, boundary, mode=mode),
+                work,
                 session_id=session_id,
                 memcell_ids=boundary.memcell_ids,
             )
