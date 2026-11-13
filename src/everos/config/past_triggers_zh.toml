@@ -1,0 +1,60 @@
+# The built-in Chinese past-time wording of [search] past_triggers
+# (docs/configuration.md, "Asking about the past by its wording"): the
+# Chinese counterpart of past_triggers_en.toml, in simplified and traditional
+# characters.
+#
+# A search that does not set include_past runs as if it did when its question
+# holds a match of one of `words` that no match of `exceptions` covers. Every
+# entry is a Python regular expression, matched anywhere in the question:
+# Chinese puts no space between words, so a trigger that is part of a longer
+# word is told apart by an exception that matches the longer word ("walk
+# over" holds "the past"). [search] past_trigger_words_zh /
+# past_trigger_exceptions_zh replace these lists.
+
+words = [
+  # before, previously, formerly
+  '以前', '之前', '从前', '從前', '先前', '以往', '早先',
+  # the past, once
+  '过去', '過去', '曾经', '曾經',
+  # originally, at first
+  '原来', '原來', '原本', '原先', '起初', '最初', '当初', '當初',
+  # at that time, back then
+  '当时', '當時', '那时', '那時', '那会儿', '那會兒',
+  # last time
+  '上次', '上回',
+  # the old one, the former holder, no longer
+  '旧的', '舊的', '前任', '不再',
+  # before changing it, before switching
+  '改之前', '换之前', '換之前',
+]
+
+exceptions = [
+  # "Go over" as a direction after a verb: walk over, send over, turn over,
+  # pass out, get through.
+  '[走跑飞飛游遊爬跳冲衝跨迈邁绕繞转轉看望瞧送寄发發传傳递遞拿带帶搬开開骑騎赶趕翻晕暈昏睡混熬挺撑撐打汇匯扔推拉踢追渡穿闯闖溜挤擠][过過]去',
+  # "Go over" as a verb: going over, go over there to see someone, when to go.
+  '(?:要|想要|能|会|會|该|該|得|再|先|马上|馬上|赶紧|趕緊|什么时候|什麼時候|几点|幾點|怎么|怎麼)[过過]去',
+  '[过過]去(?:找|看看|接|送|帮|幫|玩|一趟|一下|那边|那邊|那里|那裡)',
+  # Grammar: the past tense, the past participle; "acceptable".
+  '[过過]去(?:式|时|時|分词|分詞|完成)',
+  '[说說][得不][过過]去',
+  # A span counted back from now, shorter than a year, is recent: like
+  # "yesterday", it asks what happened, not what something used to be.
+  '[过過]去(?:的)?(?:(?:这|這|那)[0-9一二两兩三四五六七八九十几幾半]*|[0-9一二两兩三四五六七八九十几幾半]+)(?:个|個)?(?:分钟|分鐘|小时|小時|天|日|周|週|星期|礼拜|禮拜|月)',
+  '[过過]去(?:的)?(?:这|這|那)?半年',
+  # Before a time still to come is a deadline, not the past: before tomorrow,
+  # before next week, before five o'clock.
+  '(?:明天|后天|後天|明早|明晚|今晚|下周|下週|下星期|下礼拜|下禮拜|下个月|下個月|下月|下次|下回|明年|后年|後年|月底|年底|将来|將來|未来|未來|截止|到期|[0-9一二两兩三四五六七八九十]+[点點](?:半|钟|鐘)?)(?:之前|以前)',
+  # "So that is how it is", not "originally".
+  '原[来來](?:如此|是这样|是這樣|这样|這樣|是这么回事|是這麼回事)',
+  # Inside other words: "when the time comes", "at a proper time", "quite
+  # elementary", "can go towards", "take the lead", "good morning, sir",
+  # "how about once more".
+  '[当當][时時][间間]',
+  '[适適恰相应應正][当當][时時]',
+  '相[当當]初',
+  '[可所难難足]以往',
+  '[领領优優首抢搶率]先前',
+  '早先生',
+  '要不再',
+]

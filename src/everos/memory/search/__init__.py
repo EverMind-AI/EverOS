@@ -21,7 +21,9 @@ Where everalgo's ``Candidate`` type may appear -- three places, nowhere else:
 attaches profiles and referenced pictures, and neither constructs nor
 imports an everalgo candidate type. ``forgetting.py`` is the forgetting
 curve's arithmetic (retention, a version's state, reinforcement), off by
-default; the loop reweighs its candidates with it.
+default; the loop reweighs its candidates with it. ``past_triggers.py`` reads
+a question's past-time wording (``[search] past_triggers``, off by default),
+which sends a request that leaves ``include_past`` unset to the past.
 
 External usage::
 

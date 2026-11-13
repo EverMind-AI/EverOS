@@ -7290,6 +7290,17 @@
             },
             "type": "array",
             "title": "Degraded"
+          },
+          "past_trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Past Trigger"
           }
         },
         "additionalProperties": false,

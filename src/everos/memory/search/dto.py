@@ -221,7 +221,10 @@ class SearchRequest(BaseModel):
     ``[search] past_state_factor``, and every returned episode and picture
     then says its ``status`` (and, once replaced, ``superseded_by`` and
     ``valid_until``). No model call; without it a request is answered
-    exactly as before."""
+    exactly as before. Left unset, a deployment with ``[search]
+    past_triggers`` on reads the past when the question holds past-time
+    wording (``data.past_trigger`` then names it); set, true or false, it
+    is followed whatever the question says."""
     asked_at: int | str | None = None
     """When the question is asked: epoch ms or an ISO-8601 time (one without
     an offset is read in the display timezone). The forgetting curve
@@ -833,6 +836,14 @@ class SearchData(BaseModel):
     degraded: list[SearchDegradation] = Field(default_factory=list)
     """What did not run as configured -- a decider round that failed and
     fell back, with the reason. Empty when the search ran as configured."""
+    past_trigger: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """The past-time wording of the question that made this search read the
+    past (``[search] past_triggers``, the request having left
+    ``include_past`` unset), as it reads in the question: ``"used to"``,
+    ``"in 2019"``. Absent from every other response, which stays byte for
+    byte as it was."""
 
 
 class SearchResponse(BaseModel):

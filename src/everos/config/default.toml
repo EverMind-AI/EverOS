@@ -408,6 +408,25 @@ reinforce = true
 # memories (inside groups, never a forgotten one); their score is multiplied
 # by this.
 past_state_factor = 0.3
+# Asking about the past by its wording (docs/configuration.md, [search]); off
+# by default. On, a search that does not set include_past runs as if it did
+# when its question (as asked, never a decider's sub-query) holds past-time
+# wording: a match of past_trigger_words_en (case-insensitive, whole words)
+# or past_trigger_words_zh (anywhere) that no match of that language's
+# past_trigger_exceptions_* covers, or, with past_trigger_dates, a year,
+# month or day that ended before the day it is asked. The response names the
+# trigger (past_trigger). An include_past the request sets always wins. No
+# model call.
+past_triggers = false
+past_trigger_dates = true
+# The four lists hold regular expressions. Unset (as here), they are the
+# built-in lists, everos/config/past_triggers_en.toml and past_triggers_zh.toml
+# in the installed package; a list set here replaces its built-in one, and []
+# switches it off:
+# past_trigger_words_en = ['used to', 'back then']
+# past_trigger_exceptions_en = []
+# past_trigger_words_zh = []
+# past_trigger_exceptions_zh = []
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

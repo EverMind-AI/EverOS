@@ -50,7 +50,11 @@ it adds a group's superseded versions inside the asker's windows and nothing
 else -- never a version outside them, never a forgotten record, never the
 version a forgotten message was taken out of (a live forget retires it) --
 in a group search and in a personal one over the user's groups, and a
-stranger's past holds nothing of two people's copies.
+stranger's past holds nothing of two people's copies. The suite runs with
+``[search] past_triggers`` on, and every read of the past is also asked by
+its wording (the question ends "back then", ``include_past`` left unset): it
+reads exactly what ``include_past`` reads. None of the suite's other
+questions holds a trigger, so they are read as with the switch off.
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
+from everos.config import Settings
 from everos.core.errors import ForbiddenError, NotFoundError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import (
@@ -74,6 +79,7 @@ from everos.memory.models import (
     Scene,
 )
 from everos.memory.ports import NoSourceCheck, SessionKey, all_of, eq
+from everos.memory.search.past_triggers import PastTriggers
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import (
     NO_AGENT_MEMORY,
@@ -96,6 +102,14 @@ NOT_YET: dict[int, str] = {
 T0 = 1_772_323_200_000
 """Every time below is ``T0 + offset`` ms: message timestamps go through the
 ingest's seconds-or-milliseconds detection, which needs real epoch values."""
+
+SETTINGS = Settings().model_copy(
+    update={"search": Settings().search.model_copy(update={"past_triggers": True})}
+)
+"""The suite's settings: asking about the past by its wording is on."""
+
+WORDED = "back then"
+"""The past-time wording a worded read of the past ends its question with."""
 
 # What each record says, so a leak is a string that shows up (offsets from T0).
 ALPHA = "alpha marker plan Lisbon offsite"  # [1000, 2000]
@@ -157,7 +171,9 @@ class _Fixture:
 async def fixture(tmp_path: Path) -> AsyncIterator[_Fixture]:
     decider = _RecordingDecider()
     model = FakeLLMClient(handler=decider)
-    async with GroupWorld.open(tmp_path, llm=model, decider=model) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=model, decider=model, settings=SETTINGS
+    ) as world:
         await world.roster(
             "trip",
             [
@@ -259,6 +275,17 @@ def _everything_text(response: Any) -> str:
     return json.dumps(response.data.model_dump(mode="json"))
 
 
+async def _worded(world: GroupWorld, request: SearchRequest) -> Any:
+    """``request`` asking about the past by its wording: its question ends
+    with :data:`WORDED` and ``include_past`` is left unset. The trigger
+    fired, or the read would prove nothing."""
+    assert "include_past" not in request.model_fields_set
+    worded = request.model_copy(update={"query": f"{request.query} {WORDED}"})
+    response = await world.memory.search(worded)
+    assert response.data.past_trigger == WORDED
+    return response
+
+
 @pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
 async def test_search_returns_nothing_outside_the_askers_windows(
     fixture: _Fixture, asker: str
@@ -295,13 +322,15 @@ async def test_search_returns_nothing_outside_the_askers_windows(
     assert response.data.profiles == []
 
 
+@pytest.mark.parametrize("worded", [False, True], ids=["include_past", "worded"])
 @pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
 async def test_the_past_returns_no_version_outside_the_askers_windows(
-    fixture: _Fixture, asker: str
+    fixture: _Fixture, asker: str, worded: bool
 ) -> None:
     """Rows 1-4 asking about the past: every group record has a newer version;
     the old ones come back inside the asker's windows and nowhere else, in
-    the response and in the decider's input alike."""
+    the response and in the decider's input alike -- asked with
+    ``include_past`` or by the question's wording."""
     world = fixture.world
     for text in GROUP_RECORDS:
         await world.memory.update_memory(
@@ -314,10 +343,14 @@ async def test_the_past_returns_no_version_outside_the_askers_windows(
         )
     await world.project()
     fixture.decider.prompts.clear()
-    response = await world.memory.search(
-        _search(group_id="trip", asker_id=asker, include_past=True)
-    )
-    mixed = await world.memory.search(_mixed(asker, include_past=True))
+    if worded:
+        response = await _worded(world, _search(group_id="trip", asker_id=asker))
+        mixed = await _worded(world, _mixed(asker))
+    else:
+        response = await world.memory.search(
+            _search(group_id="trip", asker_id=asker, include_past=True)
+        )
+        mixed = await world.memory.search(_mixed(asker, include_past=True))
     blob = _everything_text(response) + _everything_text(mixed)
     seen_by_decider = "\n".join(fixture.decider.prompts)
     old = {e.episode for e in response.data.episodes if e.status == "superseded"}
@@ -519,14 +552,21 @@ async def _everything_read_by(fixture: _Fixture, asker: str) -> str:
             update={"filters": None}
         )
     )
+    worded = await _worded(
+        world,
+        _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None}),
+    )
     mixed = await world.memory.search(_mixed(asker))
     mixed_past = await world.memory.search(_mixed(asker, include_past=True))
+    mixed_worded = await _worded(world, _mixed(asker))
     mixed_listing = await world.memory.get(_mixed_listing(asker))
     blobs = [
         _everything_text(response),
         _everything_text(past),
+        _everything_text(worded),
         _everything_text(mixed),
         _everything_text(mixed_past),
+        _everything_text(mixed_worded),
         json.dumps(mixed_listing.model_dump(mode="json")),
         "\n".join(fixture.decider.prompts),
     ]
@@ -774,7 +814,9 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             )
         raise AssertionError(name)
 
-    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=FakeLLMClient(handler=model), settings=SETTINGS
+    ) as world:
         await world.roster("trip", [join("u_chen", T0), join("u_betty", T0)])
         await world.personal_episode("u_chen", "personal marker Porto", at=T0 + 100)
         await world.profile("u_chen", "personal marker Chen lives in Porto")
@@ -1174,7 +1216,9 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
     personal search over the group as for their group search."""
     model = _ChatModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await world.roster(
             "trip",
             [
@@ -1236,10 +1280,12 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
                 _mixed(asker, filters={"session_id": "s_trip"})
             )
             past = await world.memory.search(_mixed(asker, include_past=True))
+            worded = await _worded(world, _mixed(asker))
             blob = (
                 _everything_text(found)
                 + _everything_text(in_buffer)
                 + _everything_text(past)
+                + _everything_text(worded)
             )
             seen = "\n".join(model.decider_prompts)
             assert KEPT_SAID in blob, asker  # the rest is still remembered
@@ -1305,7 +1351,9 @@ async def test_a_forgotten_message_reaches_no_version_and_no_live_row(
     search, the decider's input, a listing or any member's history."""
     model = _ChatModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await world.roster(
             "trip",
             [
@@ -1368,10 +1416,21 @@ async def test_a_forgotten_message_reaches_no_version_and_no_live_row(
             mixed_past = await world.memory.search(
                 _mixed(asker, query="locker code plan marker", include_past=True)
             )
+            worded = await _worded(
+                world,
+                SearchRequest(app_id=APP, project_id=PROJECT, group_id="trip",
+                              asker_id=asker, query="locker code plan marker",
+                              top_k=20),
+            )  # fmt: skip
+            mixed_worded = await _worded(
+                world, _mixed(asker, query="locker code plan marker")
+            )
             blob = (
                 _everything_text(found)
                 + _everything_text(past)
                 + _everything_text(mixed_past)
+                + _everything_text(worded)
+                + _everything_text(mixed_worded)
                 + await _versions_read_by(world, "trip", asker, *forgot.episodes)
             )
             assert KEPT_SAID in blob, asker
@@ -1388,7 +1447,9 @@ async def test_an_implicit_groups_forgotten_message_is_read_by_none(
     nothing of them."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await _talk(
             world,
             "s_trio",
@@ -1428,11 +1489,15 @@ async def test_an_implicit_groups_forgotten_message_is_read_by_none(
             mixed_past = await world.memory.search(
                 _mixed(person, query="cabin marker", include_past=True)
             )
+            worded = await _worded(world, _people(group_id=pair, asker_id=person))
+            mixed_worded = await _worded(world, _mixed(person, query="cabin marker"))
             blob = (
                 _everything_text(group)
                 + _everything_text(mixed)
                 + _everything_text(past)
                 + _everything_text(mixed_past)
+                + _everything_text(worded)
+                + _everything_text(mixed_worded)
                 + await _versions_read_by(world, pair, person, *forgot.episodes)
             )
             assert LATER_PAIR_SAID in blob, person  # Bob's words stay
@@ -1516,7 +1581,9 @@ async def test_an_implicit_group_is_read_by_its_people_only(tmp_path: Path) -> N
     person's own memory holds it."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await _talk(
             world,
             "s_trio",
@@ -1567,7 +1634,9 @@ async def test_two_people_read_their_own_copies_and_a_stranger_nothing(
     path, and no group exists to ask for."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await _talk(
             world,
             "s_pair",
@@ -1588,14 +1657,18 @@ async def test_two_people_read_their_own_copies_and_a_stranger_nothing(
             await world.memory.search(
                 _people(user_id="u_ann", asker_id="u_zoe", include_past=True)
             )
+        with pytest.raises(ForbiddenError):
+            await _worded(world, _people(user_id="u_ann", asker_id="u_zoe"))
         stranger = await world.memory.search(_mixed("u_zoe", query="cabin marker"))
         stranger_past = await world.memory.search(
             _mixed("u_zoe", query="cabin marker", include_past=True)
         )
+        stranger_worded = await _worded(world, _mixed("u_zoe", query="cabin marker"))
         listed = await world.memory.get(_mixed_listing("u_zoe"))
         blob = (
             _everything_text(stranger)
             + _everything_text(stranger_past)
+            + _everything_text(stranger_worded)
             + json.dumps(listed.model_dump(mode="json"))
         )
         assert PAIR_SAID not in blob
@@ -1610,7 +1683,9 @@ async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
     (their own copies) nor what they say later in a session of their own."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
-    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
         await _talk(
             world,
             "s_pair",
@@ -1649,6 +1724,24 @@ async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
         everything = json.dumps(listed_ann.model_dump(mode="json"))
         for said in (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID):
             assert said in everything, said
+
+
+def test_no_other_question_of_the_suite_reads_the_past() -> None:
+    """The suite runs with ``[search] past_triggers`` on: its questions that do
+    not ask about the past hold no trigger, so they are read as with the
+    switch off, and only the worded reads above go to the past."""
+    triggers = PastTriggers.of(SETTINGS.search)
+    assert triggers is not None
+    questions = [
+        "marker plan Lisbon offsite",
+        "What does u_chen plan in Lisbon?",
+        "locker code plan marker",
+        "cabin marker",
+        *(f"What does u_chen plan? {text}" for text in OWN.values()),
+    ]
+    for question in questions:
+        assert triggers.find(question, asked_at_ms=T0) is None, question
+        assert triggers.find(f"{question} {WORDED}", asked_at_ms=T0) == WORDED
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:

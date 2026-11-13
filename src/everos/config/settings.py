@@ -1117,6 +1117,24 @@ class GroupsSettings(_Section):
     group_profile_idle_seconds: int = Field(default=600, ge=2)
 
 
+@cache
+def _past_trigger_file(language: Literal["en", "zh"]) -> dict[str, tuple[str, ...]]:
+    """``past_triggers_<language>.toml`` beside this module: its two lists."""
+    path = Path(__file__).parent / f"past_triggers_{language}.toml"
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+    return {key: tuple(data[key]) for key in ("words", "exceptions")}
+
+
+def _builtin_past_triggers(
+    language: Literal["en", "zh"], key: Literal["words", "exceptions"]
+) -> list[str]:
+    """A built-in list of ``[search] past_triggers``: the default of
+    ``past_trigger_<key>_<language>``. The Chinese words live in a
+    locale-suffixed data file, where the language policy allows them."""
+    return list(_past_trigger_file(language)[key])
+
+
 class GroupSearchSettings(_Section):
     """``[search]`` -- what a group search adds around its ranking (sections
     8.3-8.5), and the forgetting curve every search can rank by.
@@ -1141,7 +1159,18 @@ class GroupSearchSettings(_Section):
     initial value; a read-only server (``[cascade] enabled = false``) never
     reinforces. ``past_state_factor`` multiplies the score of a superseded
     version or a forgotten memory a search with ``include_past`` brings back.
-    No setting here adds a model call.
+
+    Asking about the past by its wording (off by default): ``past_triggers``
+    runs a search that does not set ``include_past`` as if it did when the
+    question as asked holds a match of ``past_trigger_words_en``
+    (case-insensitive, whole words) or ``past_trigger_words_zh`` (anywhere)
+    that no match of that language's ``past_trigger_exceptions_*`` covers, or
+    -- with ``past_trigger_dates`` -- a year, month or day that ended before
+    the day it is asked. The four lists hold regular expressions; unset, they
+    are the built-in lists of ``past_triggers_en.toml`` /
+    ``past_triggers_zh.toml`` beside this module, and a list that is set
+    replaces its built-in one (``[]`` switches it off). No setting here adds
+    a model call.
 
     Env binding:
         EVEROS_SEARCH__EXPANSION
@@ -1155,6 +1184,10 @@ class GroupSearchSettings(_Section):
         EVEROS_SEARCH__RETENTION_WEIGHT
         EVEROS_SEARCH__PAST_STATE_FACTOR
         EVEROS_SEARCH__REINFORCE
+        EVEROS_SEARCH__PAST_TRIGGERS
+        EVEROS_SEARCH__PAST_TRIGGER_DATES
+        EVEROS_SEARCH__PAST_TRIGGER_WORDS_EN / __PAST_TRIGGER_WORDS_ZH (JSON lists)
+        EVEROS_SEARCH__PAST_TRIGGER_EXCEPTIONS_EN / __PAST_TRIGGER_EXCEPTIONS_ZH
     """
 
     expansion: bool = True
@@ -1168,6 +1201,43 @@ class GroupSearchSettings(_Section):
     retention_weight: float = Field(default=0.3, ge=0, le=1)
     past_state_factor: float = Field(default=0.3, gt=0, le=1)
     reinforce: bool = True
+    past_triggers: bool = False
+    past_trigger_dates: bool = True
+    past_trigger_words_en: list[str] = Field(
+        default_factory=lambda: _builtin_past_triggers("en", "words")
+    )
+    past_trigger_exceptions_en: list[str] = Field(
+        default_factory=lambda: _builtin_past_triggers("en", "exceptions")
+    )
+    past_trigger_words_zh: list[str] = Field(
+        default_factory=lambda: _builtin_past_triggers("zh", "words")
+    )
+    past_trigger_exceptions_zh: list[str] = Field(
+        default_factory=lambda: _builtin_past_triggers("zh", "exceptions")
+    )
+
+    @field_validator(
+        "past_trigger_words_en",
+        "past_trigger_exceptions_en",
+        "past_trigger_words_zh",
+        "past_trigger_exceptions_zh",
+    )
+    @classmethod
+    def _past_patterns(cls, value: list[str]) -> list[str]:
+        """Every entry a regular expression that cannot match an empty
+        question (one that did would send every search to the past). It is
+        compiled inside a group, as the matcher puts it, so a global flag
+        such as ``(?i)`` is refused here rather than when the server starts."""
+        for pattern in value:
+            try:
+                compiled = re.compile(f"(?:{pattern})")
+            except re.error as exc:
+                raise ValueError(
+                    f"{pattern!r} is not a regular expression: {exc}"
+                ) from exc
+            if compiled.fullmatch("") is not None:
+                raise ValueError(f"{pattern!r} matches an empty question")
+        return value
 
     @model_validator(mode="after")
     def _strength_cap_above_start(self) -> GroupSearchSettings:

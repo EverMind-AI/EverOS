@@ -44,7 +44,10 @@ reinforcement sink (a read-only server has none); a request's
 ``include_past`` widens the read scope to the versions a default search
 never shows (:meth:`AccessPolicy.past_predicate`), scores them down by
 ``[search] past_state_factor`` and says every returned record's version
-state (:mod:`.past`). Neither adds a model call.
+state (:mod:`.past`). ``[search] past_triggers`` (off by default) reads the
+past for a request that does not set ``include_past`` when its question as
+asked holds past-time wording (:mod:`.past_triggers`); the response then
+names the trigger. None of them adds a model call.
 
 The manager never writes memory; it reads the derived index and markdown,
 and asks the picture store for scaled copies (a disposable cache under
@@ -127,6 +130,7 @@ from .llm_multiround import (
     run_llm_multiround,
 )
 from .past import with_versions
+from .past_triggers import PastTriggers
 from .shaper import attach_referenced_pictures, name_copies
 
 if TYPE_CHECKING:
@@ -237,6 +241,8 @@ class SearchManager:
         self._message_forget = message_forget
         self._scenes = scenes
         self._group_search = group_search or GroupSearchSettings()
+        # [search] past_triggers, compiled once; ``None`` while it is off.
+        self._past_triggers = PastTriggers.of(self._group_search)
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
         self._ep = episode_recaller
@@ -305,10 +311,11 @@ class SearchManager:
             # Then the filters: a malformed `filters` payload is a user input
             # error (422).
             scope = await self._read_scope(req, asserted_asker)
+            now = self._now(req)
+            req, past_trigger = self._asking_about_the_past(req, now)
             groups = await self._member_groups(req, scope)
             owners = await self._owners(req, scope, groups)
             where = compile_scoped(req.filters, owners)
-            now = self._now(req)
             ranked, profiles, unprocessed, group_profile = await asyncio.gather(
                 self._search_episodes(
                     req,
@@ -344,6 +351,7 @@ class SearchManager:
                 profiles=profiles,
                 unprocessed=unprocessed,
                 group_profile=group_profile,
+                past_trigger=past_trigger,
             )
 
             # Returned hits (ids only) — content, so only when capture_content
@@ -381,6 +389,7 @@ class SearchManager:
         profiles: list[SearchProfileItem],
         unprocessed: list[UnprocessedMessageDTO],
         group_profile: SearchGroupProfile | None,
+        past_trigger: str | None,
     ) -> SearchData:
         """What every search answers, with the features its scope switches on.
 
@@ -389,7 +398,8 @@ class SearchManager:
         records before their audience is set) and the loop's ``coverage``. A
         personal search with ``include_groups`` adds the scope block of the
         groups it covered and names the owner of every record; it has no
-        constraint block and no ``coverage``.
+        constraint block and no ``coverage``. A search its question's wording
+        sent to the past names the trigger (``past_trigger``).
         """
         constraints: list[ConstraintItem] = []
         if scope.is_group:
@@ -419,6 +429,7 @@ class SearchManager:
             constraints=constraints,
             coverage=ranked.coverage if scope.is_group else None,
             degraded=_degraded(ranked.failures),
+            past_trigger=past_trigger,
         )
 
     async def _member_groups(
@@ -521,6 +532,8 @@ class SearchManager:
         ``llm_multiround``'s per-sub-query ``rrf(sparse, dense)[:topk]``.
         """
         scope = await self._read_scope(req, None)
+        now = self._now(req)
+        req, _trigger = self._asking_about_the_past(req, now)
         groups = await self._member_groups(req, scope)
         owners = await self._owners(req, scope, groups)
         where = compile_scoped(req.filters, owners)
@@ -530,7 +543,7 @@ class SearchManager:
             decider=decider,
             scope=scope,
             groups=groups,
-            now=self._now(req),
+            now=now,
         )
         episodes = ranked.episodes
         if req.include_past:
@@ -627,6 +640,26 @@ class SearchManager:
         """When the question is asked (``asked_at``, else now), epoch ms."""
         asked = req.asked_at_ms
         return asked if asked is not None else to_timestamp_ms(get_utc_now())
+
+    def _asking_about_the_past(
+        self, req: SearchRequest, now: int
+    ) -> tuple[SearchRequest, str | None]:
+        """The request as the search reads it, and the trigger that changed it.
+
+        With ``[search] past_triggers`` on, a request that does not set
+        ``include_past`` reads the past when its question -- the question as
+        asked, never a sub-query the decider writes -- holds past-time
+        wording (:class:`PastTriggers`); a request that sets it, true or
+        false, is read as it says. ``now`` dates the question: a date before
+        its day is in the past.
+        """
+        if self._past_triggers is None or "include_past" in req.model_fields_set:
+            return req, None
+        trigger = self._past_triggers.find(req.query, asked_at_ms=now)
+        if trigger is None:
+            return req, None
+        logger.debug("search_past_triggered", trigger=trigger)
+        return req.model_copy(update={"include_past": True}), trigger
 
     def _ranking(self, req: SearchRequest, now: int) -> CurveRanking | None:
         """The loop's reweighing: the curve, a past version's state; ``None``

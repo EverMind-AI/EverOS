@@ -1,0 +1,52 @@
+# The built-in English past-time wording of [search] past_triggers
+# (docs/configuration.md, "Asking about the past by its wording").
+#
+# A search that does not set include_past runs as if it did when its question
+# holds a match of one of `words` that no match of `exceptions` covers. Every
+# entry is a Python regular expression, matched case-insensitively and as
+# whole words: a letter or digit right before or after the match is no match.
+# The question is read with its whitespace collapsed to single spaces.
+# [search] past_trigger_words_en / past_trigger_exceptions_en replace these
+# lists.
+#
+# Precise phrases only: a bare "before", "earlier" or "old" is in too many
+# ordinary questions ("before the trip next week", "how old is she").
+
+words = [
+  'used to',
+  'previously',
+  'formerly',
+  'originally',
+  'at first',
+  'back then',
+  'back in the day',
+  'in the past',
+  'at that time',
+  'in those days',
+  'last time',
+  'anymore',
+  # The adverb, never the quantity: "not any more", not "any more questions".
+  'any more(?! \w)',
+  'no longer',
+  # Before something that happened: a past-tense verb follows ("before I
+  # moved", "before we met"); "before I leave" asks about what is to come.
+  '''before (?:i|we|you|he|she|they)(?:'d| had)? (?:\w+ed|was|were|did|had|got|went|came|left|met|began|became|bought|sold|took|made|knew|saw|quit|lost|found|grew|could)''',
+  'changed from',
+  'switched from',
+  'the (?:old|previous|former|original)',
+  '(?:my|our|your|his|her|their) (?:previous|former)',
+]
+
+exceptions = [
+  # "Accustomed to" ("I'm used to it", "getting used to"), or the passive
+  # ("what is the blue folder used to store"): a form of "be" or "get" and at
+  # most three words that are not a person before "used to".
+  '''(?:am|is|are|was|were|be|been|being|get|gets|got|gotten|getting|become|becomes|became|\w+'s|\w+'re|i'm)(?: (?!(?:i|we|you|he|she|they) )[\w-]+){0,3} used to''',
+  # A present-tense verb that only looks past ("before we proceed").
+  'before (?:i|we|you|he|she|they) (?:need|feed|proceed|succeed|exceed|bleed|breed|speed|heed|shed|embed|wed)',
+  # A span counted back from now, shorter than a year, is recent: like
+  # "yesterday", it asks what happened, not what something used to be.
+  'in the past (?:(?:few|couple of|several|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) )?(?:minutes?|hours?|days?|weeks?|months?)',
+  # "The former" as a pronoun.
+  'the former (?:and|or) the latter',
+]
