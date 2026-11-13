@@ -879,6 +879,31 @@ class AccessPolicy:
             any_of(*clauses),
         )
 
+    async def forgotten_pictures(self, scope: ReadScope) -> dict[str, frozenset[str]]:
+        """The pictures each group of ``scope`` forgot, by group id.
+
+        The content hashes of the group's live picture forgets (an undo gives
+        one back). A group's segment keeps the picture's reference in its
+        payload, so a reader that hands segment text to the asker -- a
+        constraint's quote -- takes these out first, as the group's
+        re-extraction and profiles do. One forget-log read per group; nothing
+        for a personal scope or without a forget log.
+        """
+        if not scope.is_group or self._forget_log is None:
+            return {}
+        found: dict[str, frozenset[str]] = {}
+        for view in scope.groups:
+            hashes = await self._forget_log.live_targets(
+                target="image",
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=view.group_id,
+                owner_type="group",
+            )
+            if hashes:
+                found[view.group_id] = frozenset(hashes)
+        return found
+
     async def _group_scope(
         self, identity: Identity, request: ScopeRequest
     ) -> ReadScope:

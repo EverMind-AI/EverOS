@@ -901,6 +901,7 @@ class SearchManager:
             profile=self._group_profile,
             memcells=self._memcells,
             forgotten=self._message_forget,
+            forgotten_pictures=await self._access.forgotten_pictures(scope),
         )
         if self._group_search.constraints != "model" or not constraints:
             return constraints

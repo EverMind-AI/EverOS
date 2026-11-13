@@ -15,12 +15,14 @@ Built once the search loop has stopped, from its core:
    quote is the segment's message sharing the most words with the record.
 
 Every quote is checked once more against the message it cites, in the
-segment's stored cell read without its forgotten messages: a constraint whose
-quote is no longer a verbatim part of a readable message (its segment gone,
-or the message forgotten) is left out. The check is the write path's
-(:func:`everos.memory.groups.verbatim_part`), and the quote returned is the
-message's own words. Every lookup carries the read scope's predicate, so a
-constraint never rests on an item the asker cannot see.
+segment's stored cell read without its forgotten messages and without the
+references to the pictures its group forgot: a constraint whose quote is no
+longer a verbatim part of a readable message (its segment gone, or the
+message forgotten) is left out, and no quote names a forgotten picture. The
+check is the write path's (:func:`everos.memory.groups.verbatim_part`), and
+the quote returned is the message's own words. Every lookup carries the read
+scope's predicate, so a constraint never rests on an item the asker cannot
+see.
 """
 
 from __future__ import annotations
@@ -28,11 +30,12 @@ from __future__ import annotations
 __all__ = ["QUOTE_CHARS", "build_constraints"]
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 from everalgo.types import ChatMessage, MemCell
 
 from everos.memory.access import ReadScope
+from everos.memory.extract.pipeline.pictures import without_pictures
 from everos.memory.groups import normalise_space, readable_segments, verbatim_part
 from everos.memory.models import GroupProfileItem, ProfileSource
 from everos.memory.ports import (
@@ -77,11 +80,14 @@ async def build_constraints(
     profile: GroupProfileIndex,
     memcells: MemcellStore,
     forgotten: MessageForgetStore,
+    forgotten_pictures: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[list[ConstraintItem], dict[str, MemCell]]:
     """The rules-layer constraints of one group search, in block order.
 
     Also returns the segments read on the way, by memcell id: what the model
-    layer is shown and checks its quotes against.
+    layer is shown and checks its quotes against. ``forgotten_pictures`` are
+    the pictures each group forgot (by group id): a segment is read without
+    their references, so no quote names a forgotten picture.
     """
     if not scope.is_group or not core:
         return [], {}
@@ -120,7 +126,14 @@ async def build_constraints(
             built.append((stored.item, stored.scope.owner_id, []))
 
     # A forgotten message is quoted nowhere: the segments are read without
-    # the messages a live forget names (section 9.4).
+    # the messages a live forget names (section 9.4), and without the
+    # references to the pictures their group forgot.
+    # A segment is one session's, and a session is one group's.
+    groups_of = {s.memcell_id: g for i, g, _ in built for s in i.sources}
+    for record in core:
+        segment = _segment(record)
+        if segment is not None and record.group_id is not None:
+            groups_of[segment] = record.group_id
     cells = await readable_segments(
         forgotten,
         await memcells.cells_by_id(
@@ -131,6 +144,13 @@ async def build_constraints(
             )
         ),
     )
+    if forgotten_pictures:
+        cells = {
+            memcell_id: without_pictures(
+                cell, forgotten_pictures.get(groups_of.get(memcell_id, ""), ())
+            )
+            for memcell_id, cell in cells.items()
+        }
     out: list[ConstraintItem] = []
     covered: set[str] = set()
     for item, group_id, chain in built:

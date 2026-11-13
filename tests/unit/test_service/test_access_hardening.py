@@ -17,12 +17,14 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
   assistant's implicit join hides nothing;
 - a group with no owner or admin is managed by its deliverer alone (a member
   may still leave), and by the managers the deliverer adds;
+- a forgotten group picture's hash is quoted by no constraint;
 - with ``[access] identity_header`` set, a request without the header is
   refused.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -37,9 +39,10 @@ from everos.core.errors import ForbiddenError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import Episode
 from everos.memory.ports import NoSourceCheck
-from everos.service import GetRequest, SearchRequest
+from everos.memory.strategies import STRATEGY_SPECS
+from everos.service import ForgetTarget, GetRequest, SearchRequest
 from tests.fakes import make_application
-from tests.helpers.groups import APP, PROJECT, GroupWorld
+from tests.helpers.groups import APP, PROJECT, GroupWorld, join, png
 
 T0 = 1_772_323_200_000
 DAY = 86_400_000
@@ -525,6 +528,50 @@ async def _visible_from_creation(world: GroupWorld, asker: str) -> Any:
         extra=None,
         roster=[],
     )
+
+
+# -- B-4: a forgotten picture is quoted nowhere ----------------------------
+
+
+async def test_a_forgotten_group_picture_is_quoted_by_no_constraint(
+    world: GroupWorld,
+) -> None:
+    await world.roster("trip", [join("u_chen", T0, role="owner"), join("u_betty", T0)])
+    picture = {
+        "type": "image",
+        "base64": base64.b64encode(png(120)).decode("ascii"),
+        "ext": "png",
+        "name": "plan.png",
+    }
+    await _add(
+        world,
+        "s_trip",
+        _message(
+            "u_betty",
+            T0 + 1000,
+            [{"type": "text", "text": "mk_secret the floor plan"}, picture],
+            message_id="m-1",
+        ),
+    )
+    await world.memory.flush(
+        session_id="s_trip", request_id="f", app_id=APP, project_id=PROJECT
+    )
+    await world.run(*STRATEGY_SPECS)
+    await world.project()
+    (row,) = await world.storage.repos.image_memory.scan()
+    before = await world.memory.search(_search("trip", "u_chen"))
+    assert row.image_id in _said(before)  # the quote is the raw message
+    await world.memory.forget_in_group(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id="trip",
+        asker_id="u_betty",
+        target=ForgetTarget(kind="image", image_id=row.image_id),
+    )
+    await world.project()
+    after = await world.memory.search(_search("trip", "u_chen"))
+    assert after.data.constraints, "the episode is still quoted"
+    assert row.image_id not in _said(after)
 
 
 # -- B-5: a gateway's server serves no request without its header ---------
