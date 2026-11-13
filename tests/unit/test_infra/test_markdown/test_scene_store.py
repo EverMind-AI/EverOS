@@ -105,28 +105,6 @@ async def test_a_forget_mark_and_its_undo(root: MemoryRoot) -> None:
     assert await store.deprecations(_user(), ref.md_path) == {}
 
 
-async def test_a_deletion_removes_the_versions_naming_its_episodes(
-    root: MemoryRoot,
-) -> None:
-    store = MarkdownSceneStore(root)
-    await store.append(
-        _user(), _scene(["ep_1", "ep_2"]), supersedes=None, only_if=NO_SOURCE_CHECK
-    )
-    keep = await store.append(
-        _user(),
-        _scene(["ep_10", "ep_20"]).model_copy(update={"scene_id": "cl_other"}),
-        supersedes=None,
-        only_if=NO_SOURCE_CHECK,
-    )
-    removed = await store.remove_naming(_user(), ["ep_2"])
-    assert len(removed) == 1
-    # "ep_1" is a prefix of "ep_10": the member list decides, not the text.
-    assert await store.remove_naming(_user(), ["ep_1"]) == []
-    assert [v.ref.entry_id for v in await store.versions(_user())] == [
-        keep.entry_id  # type: ignore[union-attr]
-    ]
-
-
 async def test_an_agent_has_no_scenes(root: MemoryRoot) -> None:
     agent = Scope(app_id="app", project_id="p", owner_id="a1", owner_type="agent")
     with pytest.raises(ValueError, match="user or a group"):

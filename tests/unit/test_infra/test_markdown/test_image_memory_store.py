@@ -154,24 +154,6 @@ async def test_deprecate_marks_the_old_entry_and_keeps_it(root: MemoryRoot) -> N
     assert len(parsed.entries) == 2
 
 
-async def test_remove_session_drops_only_that_session(root: MemoryRoot) -> None:
-    store = MarkdownImageMemoryStore(root)
-    await store.append_many(
-        _user(),
-        [_image(), _image(session_id="s2")],
-        only_if=NO_SOURCE_CHECK,
-    )
-
-    removed = await store.remove_session(_user(), "s1")
-
-    assert [ref.entry_id for ref in removed]
-    parsed = await MarkdownReader.read(root.root / removed[0].md_path)
-    remaining = [
-        parse_structured_entry(e.body).inline["session_id"] for e in parsed.entries
-    ]
-    assert remaining == ["s2"]
-
-
 async def test_a_deleted_source_skips_the_write(root: MemoryRoot) -> None:
     store = MarkdownImageMemoryStore(root)
 

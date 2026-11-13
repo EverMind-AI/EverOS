@@ -19,10 +19,11 @@ Read from markdown and the forget log only -- no model call, no index:
   out (``forgotten``), from the forget log.
 
 Inside a group the answer holds only the versions the asker may see (their
-membership windows, docs/group-memory.md, section 9.1); a record none of
-whose versions they may see is answered exactly as one that does not exist.
-What a forget inside a group took out is not in the files any more, and not
-in a history either.
+membership windows, docs/group-memory.md, section 9.1), and none a live
+forget marked or replaced -- they may say what was forgotten, and other
+members read the group (section 9.4); a record none of whose versions they
+may see is answered exactly as one that does not exist. A user's own history
+shows the user's forgotten versions as ``forgotten``.
 """
 
 from __future__ import annotations
@@ -38,9 +39,11 @@ from everos.memory.access import ScopeRequest, visible
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.models import Episode, ImageMemory, Profile, Scene
 
+from ._forget_log import Logs, removed_in
 from ._records import (
     RecordKind,
     Version,
+    entry_id_of,
     image_chain,
     kind_of,
     linear_chain,
@@ -125,6 +128,7 @@ class HistoryReader:
     def __init__(self, *, stores: Stores, access: AccessPolicy) -> None:
         self._stores = stores
         self._access = access
+        self._logs = Logs(stores)
 
     async def history(
         self, *, scope: Scope, identity: Identity, record_id: str
@@ -169,7 +173,14 @@ class HistoryReader:
         else:
             versions = await self._profile_item(scope, entry_id)
         if scope.owner_type == "group":
-            versions = [v for v in versions if _visible(reads, scope, v)]
+            hidden = await self._logs.retired(scope)
+            versions = [
+                v
+                for v in versions
+                if v.state != "forgotten"
+                and entry_id_of(scope.owner_id, v.id) not in hidden
+                and _visible(reads, scope, v)
+            ]
         if not versions:
             raise NotFoundError(f"no memory {memory_id(scope, entry_id)!r}")
         current = next((v.id for v in versions if v.state == "current"), None)
@@ -226,16 +237,11 @@ class HistoryReader:
     async def _forgotten_items(self, scope: Scope) -> dict[str, Mapping[str, Any]]:
         """Profile values a live forget of the user took out, by item id."""
         found: dict[str, Mapping[str, Any]] = {}
-        for entry in await self._stores.forget_log.live_entries(
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            owner_type=scope.owner_type,
-        ):
-            for _bucket, item in entry.removed_profile_items:
-                item_id = item.get("item_id")
+        for entry in await self._logs.live(scope):
+            for removed in removed_in(entry):
+                item_id = removed.item.get("item_id")
                 if isinstance(item_id, str):
-                    found.setdefault(item_id, item)
+                    found.setdefault(item_id, removed.item)
         return found
 
     async def _group_profile_item(

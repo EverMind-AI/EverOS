@@ -160,7 +160,7 @@ def _accepted(value: str) -> bool:
     return True
 
 
-async def _written_then_removed(root: Path, session_id: str) -> int:
+async def _written_then_found(root: Path, session_id: str) -> int:
     store = MarkdownEpisodeStore(MemoryRoot(root))
     scope = Scope(
         app_id="default", project_id="default", owner_id="u1", owner_type="user"
@@ -175,10 +175,11 @@ async def _written_then_removed(root: Path, session_id: str) -> int:
         parent_id="mc",
     )
     await store.append(scope, episode, only_if=NO_SOURCE_CHECK)
-    return len(await store.remove_session(scope, session_id))
+    return len(await store.entries_for_session(scope, session_id))
 
 
 @given(session_id=st.text(min_size=1, max_size=128).filter(_accepted))
-def test_accepted_session_id_is_found_by_its_deletion(session_id: str) -> None:
+def test_accepted_session_id_is_found_by_its_forget(session_id: str) -> None:
+    """A conversation's forget finds its entries by the session id as written."""
     with tempfile.TemporaryDirectory() as root:
-        assert asyncio.run(_written_then_removed(Path(root), session_id)) == 1
+        assert asyncio.run(_written_then_found(Path(root), session_id)) == 1

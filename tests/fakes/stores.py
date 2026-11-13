@@ -142,15 +142,17 @@ class _DailyLog[T]:
             and getattr(stored.item, "session_id", None) == session_id
         ]
 
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        return self._remove(
-            scope, lambda item: getattr(item, "session_id", None) == session_id
-        )
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from every file of this owner's kind.
 
-    def _remove(self, scope: Scope, drop: Any) -> list[MemoryRef]:
-        gone = [s for s in self.records if s.scope == scope and drop(s.item)]
-        self.records = [s for s in self.records if s not in gone]
-        return [s.ref for s in gone]
+        The real store knows an entry's file from its id; this fake keys files
+        by owner, so it drops the key wherever the owner has it.
+        """
+        needle = f"/{scope.owner_type}s/{scope.owner_id}/"
+        for md_path, marks in self.deprecated.items():
+            if needle in f"/{md_path}":
+                for key in set(keys) & marks.keys():
+                    del marks[key]
 
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take records out, keeping each whole (as JSON) for :meth:`reinstate`."""
@@ -239,26 +241,6 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
         ]
 
-    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
-        wanted = set(entry_ids)
-        gone = [
-            s for s in self.records if s.scope == scope and s.ref.entry_id in wanted
-        ]
-        self.records = [s for s in self.records if s not in gone]
-        return [s.ref for s in gone]
-
-    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
-        """Drop ``keys`` from every file of this owner's kind.
-
-        The real store knows an entry's file from its id; this fake keys files
-        by owner, so it drops the key wherever the owner has it.
-        """
-        needle = f"/{scope.owner_type}s/{scope.owner_id}/"
-        for md_path, marks in self.deprecated.items():
-            if needle in f"/{md_path}":
-                for key in set(keys) & marks.keys():
-                    del marks[key]
-
     async def read_for_segments(
         self, scope: Scope, memcell_ids: Collection[str]
     ) -> list[Stored[Episode]]:
@@ -280,6 +262,7 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             for s in self.records
             if s.scope == scope
             and (image_id in s.item.episode or image_id in s.item.image_ids)
+            and not self.deprecated.get(s.ref.md_path, {}).get(s.ref.entry_id)
         ]
 
     async def read_all(self, scope: Scope) -> list[tuple[Stored[Episode], str | None]]:
@@ -436,18 +419,6 @@ class InMemorySceneStore:
         for key in set(keys) & mine:
             self.superseded.pop(key, None)
 
-    async def remove_naming(
-        self, scope: Scope, episode_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        wanted = set(episode_ids)
-        gone = [
-            v
-            for v in self.written
-            if v.scope == scope and wanted.intersection(v.item.member_ids)
-        ]
-        self.written = [v for v in self.written if v not in gone]
-        return [v.ref for v in gone]
-
 
 class InMemoryGroupProfileStore:
     """Group-profile items per group scope, in write order, with entry marks.
@@ -522,6 +493,15 @@ class InMemoryGroupProfileStore:
         for _md_path, entry_id in entries:
             self.marks[entry_id] = replaced_by
         return True
+
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        mine = {r.ref.entry_id for r in self.rows if r.ref.md_path == md_path}
+        return {k: v for k, v in self.marks.items() if k in mine}
+
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        mine = {r.ref.entry_id for r in self.rows if r.scope == scope}
+        for key in set(keys) & mine:
+            self.marks.pop(key, None)
 
     async def pending(self, scope: Scope) -> list[str]:
         return list((await self.pending_batch(scope)).memcell_ids)
@@ -847,19 +827,6 @@ class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
         return await self._deprecate(
             entries=entries, replaced_by=replaced_by, only_if=only_if
         )
-
-    async def undeprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        if not await _alive(only_if):
-            return False
-        for md_path, entry_id in entries:
-            self.deprecated[md_path].pop(entry_id, None)
-        return True
 
     async def entries_for_session(
         self, scope: Scope, session_id: str

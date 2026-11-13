@@ -39,9 +39,6 @@ from everos.memory.extract.pipeline.profile_items import (
     SUMMARY,
     bounded_history,
     edit_item,
-    forget_images,
-    forget_items,
-    forget_segments,
     keep_held,
     put_back,
     restore_items,
@@ -408,41 +405,10 @@ def _pictured(*descriptions: str, sources: list[str] | None = None) -> Profile:
     )
 
 
-def test_a_forget_removes_an_item_only_when_every_picture_is_gone() -> None:
-    profile, removed, count = forget_images(
-        _pictured("Has a cat", sources=[_CAT, _CITY]), [_CAT]
-    )
-
-    assert (count, removed) == (0, [])
-    assert [item.description for item in profile.explicit_info] == ["Has a cat"]  # type: ignore[union-attr]
-
-
-def test_a_forget_removes_what_its_picture_alone_established_never_a_text_fact() -> (
-    None
-):
-    profile, removed, count = forget_images(
-        Profile(
-            owner_id="u1",
-            summary="",
-            timestamp=1,
-            explicit_info=[
-                *_pictured("Has a cat", sources=[_CAT]).explicit_info,
-                _item("Works in Python"),
-            ],
-        ),
-        [_CAT],
-    )
-
-    assert count == 1
-    assert [item.description for item in profile.explicit_info] == ["Works in Python"]  # type: ignore[union-attr]
-    assert removed[0][0] == "explicit_info"
-    assert forget_images(None, [_CAT]) == (None, [], 0)
-
-
-def test_an_undo_puts_the_item_back_whole_and_once() -> None:
-    _gone, removed, _ = forget_images(
-        _pictured("Has a cat named Biscuit", sources=[_CAT]), [_CAT]
-    )
+def test_an_old_logs_item_comes_back_whole_and_once() -> None:
+    """A forget logged before places were kept: back by description."""
+    (item,) = _pictured("Has a cat named Biscuit", sources=[_CAT]).explicit_info
+    removed = [("explicit_info", item.model_dump(mode="json"))]
 
     profile, restored, replaced = restore_items(
         None, removed, owner_id="u1", timestamp=1
@@ -461,34 +427,13 @@ def _replaced(description: str, replaced_at: int, **extra: object) -> dict[str, 
     return {"description": description, "replaced_at": replaced_at, **extra}
 
 
-def test_a_forget_takes_a_replaced_value_its_picture_alone_established() -> None:
+def test_an_old_logs_replaced_value_comes_back_in_its_place_once() -> None:
     profile = _profile(_item("Works in Python"))
-    profile.history = [
-        _replaced("Had a black cat", 30, **{SOURCE_IMAGE_KEYS: [_CAT]}),
-        _replaced("Lived in Paris", 20, source_memcell_ids=["mc_1"]),
-        _replaced("Had a grey cat", 10, **{SOURCE_IMAGE_KEYS: [_CAT, _CITY]}),
+    profile.history = [_replaced("Lived in Lyon", 30), _replaced("Lived in Paris", 10)]
+    removed = [
+        ("history", _replaced("Had a black cat", 20, **{SOURCE_IMAGE_KEYS: [_CAT]}))
     ]
-
-    after, removed, count = forget_images(profile, [_CAT])
-
-    assert after is not None
-    assert count == 0  # a replaced value is history, not an item
-    assert [entry["description"] for entry in after.history] == [
-        "Lived in Paris",
-        "Had a grey cat",
-    ]
-    assert removed == [("history", profile.history[0])]
-    assert [i.description for i in after.explicit_info] == ["Works in Python"]
-
-
-def test_an_undo_puts_a_replaced_value_back_in_its_place_once() -> None:
-    profile = _profile(_item("Works in Python"))
-    profile.history = [
-        _replaced("Lived in Lyon", 30),
-        _replaced("Had a black cat", 20, **{SOURCE_IMAGE_KEYS: [_CAT]}),
-        _replaced("Lived in Paris", 10),
-    ]
-    after, removed, _ = forget_images(profile, [_CAT])
+    after = profile
 
     back, restored, replaced = restore_items(after, removed, owner_id="u1", timestamp=1)
     assert (restored, replaced) == (0, 1)
@@ -507,58 +452,13 @@ def _sourced(description: str, *sources: str) -> ExplicitInfoItem:
     return _item(description, source_memcell_ids=list(sources))
 
 
-def test_a_forgotten_conversation_takes_what_no_remembered_segment_supports() -> None:
-    profile = _profile(
-        _sourced("Lives in Paris", "mc_1"),
-        _sourced("Works in Python", "mc_1", "mc_9"),  # mc_9 is remembered
-        _sourced("Has a cat", "mc_1", "mc_5"),  # mc_5 an earlier forget's
-        _sourced("Plays chess", "mc_5"),  # the earlier forget's to take
-        _item("Likes tea"),  # stored before items had segments
-    )
-    profile.history = [
-        _replaced("Lived in Lyon", 30, source_memcell_ids=["mc_1"]),
-        _replaced("Lived in Rome", 20, source_memcell_ids=["mc_9"]),
+def test_an_old_logs_summary_comes_back_while_no_update_wrote_one() -> None:
+    """The summary is written over every item: a forget of one dropped it."""
+    after = _profile(_sourced("Works in Python", "mc_2"))
+    removed = [
+        ("explicit_info", _sourced("Lives in Paris", "mc_1").model_dump(mode="json")),
+        (SUMMARY, {"summary": "Lives in Paris"}),
     ]
-
-    after, removed, count = forget_segments(profile, ["mc_1", "mc_2"], already=["mc_5"])
-
-    assert after is not None
-    assert [i.description for i in after.explicit_info] == [
-        "Works in Python",
-        "Plays chess",
-        "Likes tea",
-    ]
-    assert count == 2
-    assert [(bucket, entry["description"]) for bucket, entry in removed] == [
-        ("explicit_info", "Lives in Paris"),
-        ("explicit_info", "Has a cat"),
-        ("history", "Lived in Lyon"),
-    ]
-    assert [entry["description"] for entry in after.history] == ["Lived in Rome"]
-    assert forget_segments(None, ["mc_1"]) == (None, [], 0)
-    assert forget_segments(after, ["mc_7"]) == (after, [], 0)
-
-
-def test_a_forget_that_takes_an_item_drops_the_summary_an_undo_brings_it() -> None:
-    """The summary is written over every item: a forget of one drops it."""
-    profile = _profile(
-        _sourced("Lives in Paris", "mc_1"), _sourced("Works in Python", "mc_2")
-    )
-    profile.summary = "Lives in Paris"
-    profile.history = [_replaced("Lived in Lyon", 30, source_memcell_ids=["mc_3"])]
-
-    kept, removed, _ = forget_segments(profile, ["mc_3"])  # a replaced value
-    assert kept is not None and kept.summary == "Lives in Paris"
-    assert [bucket for bucket, _ in removed] == ["history"]
-
-    after, removed, count = forget_segments(profile, ["mc_1"])
-    assert after is not None and after.summary == "" and count == 1
-    assert removed[-1] == (SUMMARY, {"summary": "Lives in Paris"})
-    by_id, _, _ = forget_items(
-        _profile(_stored("Has a cat", "pi_cat")).model_copy(update={"summary": "x"}),
-        ["pi_cat"],
-    )
-    assert by_id is not None and by_id.summary == ""
 
     back, items, _ = restore_items(after, removed, owner_id="u1", timestamp=1)
     assert (back.summary, items) == ("Lives in Paris", 1)
@@ -667,19 +567,6 @@ def test_a_held_item_the_update_left_alone_is_not_reported() -> None:
 
     profile, replaced = _stamp(old, update)
     assert keep_held(old, profile, replaced)[2] == []
-
-
-def test_a_forget_by_id_takes_the_item_or_the_replaced_value() -> None:
-    profile = _profile(_stored("Lives in Berlin", "pi_berlin"))
-    profile.history = [{"item_id": "pi_paris", "description": "Lives in Paris"}]
-
-    kept, removed, count = forget_items(profile, ["pi_paris"])
-    assert kept is not None and count == 0
-    assert removed == [
-        ("history", {"item_id": "pi_paris", "description": "Lives in Paris"})
-    ]
-    kept, removed, count = forget_items(profile, ["pi_berlin"])
-    assert kept is not None and kept.explicit_info == [] and count == 1
 
 
 def test_take_out_keeps_each_part_s_place_and_put_back_restores_it() -> None:

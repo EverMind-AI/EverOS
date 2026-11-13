@@ -30,6 +30,11 @@ Two people talking without a ``group_id`` are an implicit group (section
 person who joins later -- refused in the pair's session, a group of their own
 with the pair in a session of the three -- reads nothing of the pair's.
 
+A forget marks rather than removes (one engine for users and groups): the
+version that held a forgotten message stays in markdown, marked, and no read
+reaches it -- no search or decider input, no listing, no version history of
+any member, no live index row; in an explicit group and in an implicit pair.
+
 A personal search with ``include_groups`` reads the user's groups the way a
 group search by the user does, so it takes the same cases: a former member
 and a stranger get nothing of the group (their own memory still answers), a
@@ -50,7 +55,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.errors import ForbiddenError, RosterConflictError
+from everos.core.errors import ForbiddenError, NotFoundError, RosterConflictError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import (
     ExplicitInfoItem,
@@ -62,12 +67,12 @@ from everos.memory.ports import NoSourceCheck, SessionKey, all_of, eq
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import (
     NO_AGENT_MEMORY,
+    ForgetTarget,
     GetRequest,
-    GroupForgetTarget,
     SearchRequest,
 )
 from tests.fakes import make_application
-from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
+from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, live_markdown
 
 NOT_YET: dict[int, str] = {
     6: "history route: not built yet (2.0 history); the group profile's versions"
@@ -1145,7 +1150,7 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
                 project_id=PROJECT,
                 group_id="trip",
                 asker_id="u_dan",
-                target=GroupForgetTarget(
+                target=ForgetTarget(
                     kind="message", session_id="s_trip", message_ids=(message_id,)
                 ),
             )
@@ -1185,6 +1190,176 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
             # The buffer is read by the group's rules: what was not forgotten.
             shown = [m.content for m in in_buffer.data.unprocessed_messages]
             assert shown == ["We still need a BOATRIDE"], asker
+
+
+async def _versions_read_by(
+    world: GroupWorld, group: str, asker: str, *ids: str
+) -> str:
+    """Every version of every live episode the asker may read, and of ``ids``."""
+    listed = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id=group,
+            asker_id=asker,
+            memory_type="episode",
+            page_size=100,
+        )
+    )
+    found: list[str] = []
+    for record_id in dict.fromkeys([*ids, *(e.id for e in listed.data.episodes)]):
+        try:
+            history = await world.memory.memory_history(
+                app_id=APP,
+                project_id=PROJECT,
+                record_id=record_id,
+                group_id=group,
+                asker_id=asker,
+            )
+        except NotFoundError:
+            continue
+        found.append(json.dumps([v.content for v in history.versions]))
+    return json.dumps(listed.data.model_dump(mode="json")) + "\n".join(found)
+
+
+async def _live_rows(world: GroupWorld) -> str:
+    """The index rows a read can reach (a marked row keeps its text)."""
+    rows: list[str] = []
+    for repo in world.storage.repos.all():
+        try:
+            found = await repo.scan()
+        except Exception:  # a table nothing was written to
+            continue
+        rows += [
+            json.dumps(r.model_dump(mode="json"), default=str)
+            for r in found
+            if getattr(r, "deprecated_by", None) is None
+        ]
+    return "\n".join(rows)
+
+
+async def test_a_forgotten_message_reaches_no_version_and_no_live_row(
+    tmp_path: Path,
+) -> None:
+    """A group forget marks rather than removes: the version that held the
+    message stays in markdown, marked, and no read reaches it -- not a
+    search, the decider's input, a listing or any member's history."""
+    model = _ChatModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await world.roster(
+            "trip",
+            [
+                join("u_chen", T0, role="owner", display_name="Chen"),
+                join("u_dan", T0, display_name="Dan"),
+                join("u_evan", T0, display_name="Evan"),
+            ],
+        )
+        await world.memory.add(
+            {"session_id": "s_trip", "app_id": APP, "project_id": PROJECT,
+             "group_id": "trip",
+             "messages": [
+                 {"message_id": "m-1", "sender_id": "u_dan", "role": "user",
+                  "timestamp": T0 + 1000,
+                  "content": f"My locker code is {SECRET_SAID}, keep it"},
+                 {"message_id": "m-2", "sender_id": "u_chen", "role": "user",
+                  "timestamp": T0 + 2000,
+                  "content": f"We meet at the {KEPT_SAID} on Friday"},
+             ]},
+            request_id="r",
+            async_mode=False,
+            defer_extraction=True,
+        )  # fmt: skip
+        await world.memory.flush(
+            session_id="s_trip", request_id="f", app_id=APP, project_id=PROJECT
+        )
+        await world.project()
+        forgot = await world.memory.forget_in_group(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id="u_dan",
+            target=ForgetTarget(
+                kind="message", session_id="s_trip", message_ids=("m-1",)
+            ),
+        )
+        await world.project()
+
+        markdown = "\n".join(
+            p.read_text("utf-8") for p in world.root.root.rglob("*.md")
+        )
+        assert SECRET_SAID in markdown  # marked, not removed
+        assert not [
+            path for path, text in live_markdown(world.root.root).items()
+            if SECRET_SAID in text
+        ]  # fmt: skip
+        assert SECRET_SAID not in await _live_rows(world)
+        for asker in ("u_chen", "u_dan", "u_evan"):
+            model.decider_prompts.clear()
+            found = await world.memory.search(
+                SearchRequest(app_id=APP, project_id=PROJECT, group_id="trip",
+                              asker_id=asker, query="locker code plan marker",
+                              top_k=20)
+            )  # fmt: skip
+            blob = _everything_text(found) + await _versions_read_by(
+                world, "trip", asker, *forgot.episodes
+            )
+            assert KEPT_SAID in blob, asker
+            assert SECRET_SAID not in blob, asker
+            assert SECRET_SAID not in "\n".join(model.decider_prompts), asker
+
+
+async def test_an_implicit_pairs_forgotten_message_is_read_by_neither(
+    tmp_path: Path,
+) -> None:
+    """A message forget inside two people's implicit group: neither reads it
+    again -- a group search, a personal search with ``include_groups``, a
+    version history -- and a stranger still reads nothing of them."""
+    model = _PeopleModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await _talk(
+            world,
+            "s_pair",
+            ("u_ann", f"Book the cabin, the code is {PAIR_SAID}"),
+            ("u_bob", f"Done, and the boat is {LATER_PAIR_SAID}"),
+        )
+        pair = await world.stores.groups.binding(world.session("s_pair"))
+        assert pair is not None and pair.startswith("implicit_")
+        await world.project()
+        cells = await world.stores.memcell.cells_in_session(world.session("s_pair"))
+        (said,) = [
+            item.id
+            for cell in cells.values()
+            for item in cell.items
+            if getattr(item, "sender_id", None) == "u_ann"
+        ]
+        forgot = await world.memory.forget_in_group(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id=pair,
+            asker_id="u_ann",
+            target=ForgetTarget(
+                kind="message", session_id="s_pair", message_ids=(said,)
+            ),
+        )
+        assert forgot.rewritten == 1
+        await world.project()
+
+        for person in ("u_ann", "u_bob"):
+            model.decider_prompts.clear()
+            group = await world.memory.search(_people(group_id=pair, asker_id=person))
+            mixed = await world.memory.search(_mixed(person, query="cabin marker"))
+            blob = (
+                _everything_text(group)
+                + _everything_text(mixed)
+                + await _versions_read_by(world, pair, person, *forgot.episodes)
+            )
+            assert LATER_PAIR_SAID in blob, person  # Bob's words stay
+            assert PAIR_SAID not in blob, person
+            assert PAIR_SAID not in "\n".join(model.decider_prompts), person
+        stranger = await world.memory.search(_mixed("u_zoe", query="cabin marker"))
+        assert LATER_PAIR_SAID not in _everything_text(stranger)
 
 
 PAIR_SAID = "PAIRWALNUT31"

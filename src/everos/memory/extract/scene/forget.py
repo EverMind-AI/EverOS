@@ -9,9 +9,6 @@ happens to it, with no model call:
   only (the strategy never carries a forgotten episode's narrative forward).
 - **An undo** clears that mark on a scene's newest version as soon as one of
   its episodes is alive again (:func:`restore_revived_scenes`).
-- **A deletion** removes every version that names a removed episode
-  (:func:`remove_scenes_naming`): what a deleted episode said must not stay
-  in a narrative.
 
 Each step holds the owner's scene lock, so a scene update in flight finishes
 before a forget reads the scenes, and one that starts later sees the marks.
@@ -22,7 +19,6 @@ from __future__ import annotations
 __all__ = [
     "forget_orphaned_scenes",
     "newest_versions",
-    "remove_scenes_naming",
     "restore_revived_scenes",
 ]
 
@@ -33,7 +29,6 @@ from everos.memory.models import FORGOTTEN_MARK, Scene
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
     EpisodeStore,
-    MemoryRef,
     SceneStore,
     Scope,
     Stored,
@@ -106,13 +101,3 @@ async def restore_revived_scenes(
         if revived:
             await scenes.clear_deprecations(scope, [v.ref.entry_id for v in revived])
     return revived
-
-
-async def remove_scenes_naming(
-    scenes: SceneStore, scope: Scope, episode_ids: Collection[str]
-) -> list[MemoryRef]:
-    """Remove every scene version that names one of ``episode_ids``."""
-    if not episode_ids:
-        return []
-    async with scenes_lock(scope):
-        return await scenes.remove_naming(scope, episode_ids)

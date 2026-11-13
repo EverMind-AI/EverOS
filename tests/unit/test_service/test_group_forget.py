@@ -6,16 +6,17 @@ write the member-in-group profiles and the group profile, and the cascade
 projects everything into the index; then a message is forgotten. What these
 pin:
 
-- a message forgotten by its sender re-extracts its segment, and its text is
-  nowhere afterwards: not in any markdown file under the memory root, not in
-  an index row, not in a search result for any member, not in a member
-  profile, not in a group-profile item -- the stale items written again from
-  their remaining sources by the next update;
+- a message forgotten by its sender re-extracts its segment, and nothing a
+  read can reach holds its text afterwards: no current markdown entry, no
+  live index row, no search, get or history answer for any member, no member
+  profile, no group-profile item -- the stale items written again from their
+  remaining sources by the next update. The versions that held it stay in
+  markdown, marked (a forget marks, it removes nothing);
 - ``dry_run`` reports exactly what the real run then touches;
 - another member forgetting someone else's message is 403; an owner or an
   admin may forget any message; a former member and a stranger are 403;
-- undo puts the previous versions back exactly (markdown and what search
-  returns);
+- undo brings the previous versions back (what the reads see, and the
+  profiles exactly);
 - a member who leaves stays visible to the others: leaving is not a forget;
 - a member, a session, records and a picture are forgotten along the same
   rules, and a group-scoped delete is an owner's or admin's forget.
@@ -37,8 +38,8 @@ from everos.core.errors import ConflictError, ForbiddenError, NotFoundError
 from everos.memory.models import Cluster, Scene
 from everos.memory.ports import NoSourceCheck
 from everos.memory.strategies import STRATEGY_SPECS
-from everos.service import GetRequest, GroupForgetTarget, SearchRequest
-from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave
+from everos.service import ForgetTarget, GetRequest, SearchRequest
+from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, live_markdown
 
 T0 = 1_772_323_200_000
 SECRET = "ZEBRA4417"
@@ -240,14 +241,48 @@ def _markdown(world: GroupWorld) -> dict[str, str]:
 
 
 async def _index_rows(world: GroupWorld) -> str:
+    """The live index rows: those a forget or a newer version retired keep
+    their text, marked, and no read with a scope predicate reaches them."""
     rows: list[str] = []
     for repo in world.storage.repos.all():
         try:
             found = await repo.scan()
         except Exception:  # a table nothing was ever written to
             continue
-        rows += [json.dumps(r.model_dump(mode="json"), default=str) for r in found]
+        rows += [
+            json.dumps(r.model_dump(mode="json"), default=str)
+            for r in found
+            if getattr(r, "deprecated_by", None) is None
+        ]
     return "\n".join(rows)
+
+
+async def _histories(world: GroupWorld, asker: str, *ids: str) -> str:
+    """Every version a member may read of every live record, and of ``ids``."""
+    listed = await world.memory.get(
+        GetRequest(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id=asker,
+            memory_type="episode",
+        )
+    )
+    records = [*ids, *(e.id for e in listed.data.episodes)]
+    blobs: list[str] = []
+    for record_id in dict.fromkeys(records):
+        try:
+            found = await world.memory.memory_history(
+                app_id=APP,
+                project_id=PROJECT,
+                record_id=record_id,
+                group_id="trip",
+                asker_id=asker,
+            )
+        except NotFoundError:
+            continue
+        blobs.append(json.dumps([v.content for v in found.versions]))
+    return "\n".join(blobs)
 
 
 async def _search_text(world: GroupWorld, asker: str) -> str:
@@ -290,14 +325,14 @@ async def _gets(world: GroupWorld, asker: str) -> str:
     return "\n".join(blobs)
 
 
-def _message(*message_ids: str) -> GroupForgetTarget:
-    return GroupForgetTarget(
+def _message(*message_ids: str) -> ForgetTarget:
+    return ForgetTarget(
         kind="message", session_id="s_trip", message_ids=tuple(message_ids)
     )
 
 
 async def _forget(
-    world: GroupWorld, asker: str, target: GroupForgetTarget, **kw: Any
+    world: GroupWorld, asker: str, target: ForgetTarget, **kw: Any
 ) -> Any:
     return await world.memory.forget_in_group(
         app_id=APP,
@@ -319,9 +354,9 @@ def _plan_view(result: Any) -> dict[str, Any]:
         "images": result.images,
         "scenes": result.scenes,
         "rewritten_scenes": result.rewritten_scenes,
-        "member_profiles": result.member_profiles,
-        "member_profile_items": len(result.member_profile_items),
-        "stale_member_profile_items": len(result.stale_member_profile_items),
+        "member_profiles": result.profiles,
+        "member_profile_items": len(result.profile_items),
+        "stale_member_profile_items": len(result.stale_profile_items),
         "group_profile_items": result.group_profile_items,
         "stale_group_profile_items": result.stale_group_profile_items,
     }
@@ -353,17 +388,19 @@ async def test_a_message_forgotten_by_its_sender_is_nowhere_afterwards(
     assert real.rewritten == 1 and len(real.episodes) == 1
     assert len(real.new_episodes) == 1
     assert real.group_profile_items and real.stale_group_profile_items
-    assert real.stale_member_profile_items  # Betty and Chen spoke in the segment
+    assert real.stale_profile_items  # Betty and Chen spoke in the segment
     # The next update writes the stale items again from what is left.
     await _flush(world)
 
-    after = _markdown(world)
-    leaks = [path for path, text in after.items() if SECRET in text]
+    leaks = [p for p, text in live_markdown(world.root.root).items() if SECRET in text]
     assert leaks == []
+    # Marked, not removed: the old versions keep it, out of every read.
+    assert any(SECRET in text for text in _markdown(world).values())
     assert SECRET not in await _index_rows(world)
     for asker in ("u_chen", "u_evan", "u_betty", "u_dan"):
         assert SECRET not in await _search_text(world, asker), asker
         assert SECRET not in await _gets(world, asker), asker
+        assert SECRET not in await _histories(world, asker, *real.episodes), asker
     # What was not forgotten is still remembered, rewritten.
     assert "LISBONVENUE" in await _search_text(world, "u_dan")
     betty = await world.stores.profile.read(world.scope("trip"), "u_betty")
@@ -378,7 +415,7 @@ async def test_a_message_forgotten_by_its_sender_is_nowhere_afterwards(
 async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
     world = chat.world
     before = _markdown(world)
-    episodes_before = {p: t for p, t in before.items() if "/episodes/" in p}
+    episodes_before = _live_bodies(world, "/episodes/")
     profiles_before = {
         m: await world.stores.profile.read(world.scope("trip"), m)
         for m in ("u_betty", "u_chen", "u_dan")
@@ -397,11 +434,12 @@ async def test_undo_restores_the_previous_versions(chat: _Chat) -> None:
     await world.project()
 
     assert undone.applied
-    assert set(undone.episodes) == set(result.episodes)
-    assert set(undone.withdrawn) == set(result.new_episodes)
+    # The version the forget replaced is written again, as the newest.
+    assert len(undone.episodes) == len(result.episodes)
+    assert not set(undone.episodes) & set(result.episodes)
+    assert set(undone.retired) == set(result.new_episodes)
     after = _markdown(world)
-    for path, text in episodes_before.items():
-        assert _entries(after[path]) == _entries(text), path
+    assert _live_bodies(world, "/episodes/") == episodes_before
     profile_before = {p: t for p, t in before.items() if "/profile/group_profile" in p}
     for path, text in profile_before.items():
         assert set(_entries(text).items()) <= set(_entries(after[path]).items())
@@ -427,6 +465,16 @@ def _entries(text: str) -> dict[str, str]:
     return dict(found)
 
 
+def _live_bodies(world: GroupWorld, kind: str) -> list[str]:
+    """What the reads see of one kind's entries, without their ids."""
+    return sorted(
+        body.split("\n", 1)[1]
+        for path, text in live_markdown(world.root.root).items()
+        if kind in path
+        for body in _entries(text).values()
+    )
+
+
 async def test_another_members_message_is_refused_and_a_manager_may_forget_it(
     chat: _Chat,
 ) -> None:
@@ -437,7 +485,7 @@ async def test_another_members_message_is_refused_and_a_manager_may_forget_it(
         await _forget(world, "u_dan", _message("m-2", "m-4"))  # one is his own
     with pytest.raises(ForbiddenError):  # a whole session is the managers'
         await _forget(
-            world, "u_betty", GroupForgetTarget(kind="session", session_id="s_trip")
+            world, "u_betty", ForgetTarget(kind="session", session_id="s_trip")
         )
     for stranger in ("u_gone", "u_zoe"):
         with pytest.raises(ForbiddenError):
@@ -505,7 +553,7 @@ async def test_a_member_forgets_all_their_messages_and_their_profile(
     chat: _Chat,
 ) -> None:
     world = chat.world
-    target = GroupForgetTarget(kind="member", member_id="u_betty")
+    target = ForgetTarget(kind="member", member_id="u_betty")
     with pytest.raises(ForbiddenError):
         await _forget(world, "u_dan", target, dry_run=True)
     dry = await _forget(world, "u_betty", target, dry_run=True)
@@ -514,7 +562,7 @@ async def test_a_member_forgets_all_their_messages_and_their_profile(
 
     assert _plan_view(real) == _plan_view(dry)
     assert set(real.messages) == {("s_trip", "m-1"), ("s_trip", "m-3")}
-    assert real.member_profiles == ("u_betty",)
+    assert real.profiles == ("u_betty",)
     assert await world.stores.profile.read(world.scope("trip"), "u_betty") is None
     for asker in ("u_chen", "u_dan"):
         blob = await _search_text(world, asker) + await _gets(world, asker)
@@ -523,7 +571,7 @@ async def test_a_member_forgets_all_their_messages_and_their_profile(
 
 async def test_a_session_is_forgotten_by_a_manager_only(chat: _Chat) -> None:
     world = chat.world
-    target = GroupForgetTarget(kind="session", session_id="s_trip")
+    target = ForgetTarget(kind="session", session_id="s_trip")
     with pytest.raises(ForbiddenError):
         await _forget(world, "u_betty", target, dry_run=True)
     result = await _forget(world, "u_evan", target)
@@ -543,7 +591,7 @@ async def test_a_record_is_forgotten_and_absent_from_every_read(chat: _Chat) -> 
     )
     items = await world.stores.group_profile.items(world.scope("trip"))
     decision = next(i for i in items if i.item.kind == "decision")
-    target = GroupForgetTarget(
+    target = ForgetTarget(
         kind="record", record_ids=(episode.ref.id, decision.ref.entry_id)
     )
     with pytest.raises(ForbiddenError):  # rests on others' messages too
@@ -699,7 +747,7 @@ async def test_a_scene_holding_a_rewritten_episode_is_narrated_again(
     await world.project()
 
     assert len(result.scenes) == 1 and result.rewritten_scenes == 1
-    assert not [p for p, t in _markdown(world).items() if SECRET in t]
+    assert not [p for p, t in live_markdown(world.root.root).items() if SECRET in t]
     listed = await world.memory.get(
         GetRequest(
             app_id=APP,

@@ -33,15 +33,14 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.config import Settings
+from everos.memory.access import Identity
 from everos.memory.models import FORGOTTEN_MARK, Episode, Scene
 from everos.memory.ports import MemoryRef, NoSourceCheck, Scope, Stored
 from everos.memory.strategies import UPDATE_USER_SCENES_SPEC
-from everos.service import GetRequest, MemoryChanges, SearchRequest
+from everos.service import ForgetTarget, GetRequest, MemoryChanges, SearchRequest
 from everos.service.memory._delete import DeleteAlias
 from everos.service.memory._extraction import ExtractionSupervisor
-from everos.service.memory._forget_session import SessionForgetManager
-from everos.service.memory._undo import UndoManager
-from everos.service.memory._user_forget import UserForgetManager
+from everos.service.memory._forget import ForgetManager
 from tests.fakes import make_stores
 from tests.helpers.groups import APP, PROJECT, GroupWorld, png
 
@@ -297,21 +296,40 @@ async def _world() -> tuple[Any, list[str], Stored[Scene]]:
     return stores, ids, scene
 
 
+def _engine(stores: Any, eraser: Any) -> ForgetManager:
+    return ForgetManager(
+        stores=stores,
+        indexes=None,
+        eraser=eraser,
+        pipeline=None,
+        scenes=None,
+        extractions=ExtractionSupervisor(),
+        session_wait_seconds=1.0,
+    )
+
+
 async def test_forgetting_follows_the_sources_and_undo_brings_it_back() -> None:
     stores, _ids, scene = await _world()
     eraser = _Eraser()
-    forget = SessionForgetManager(stores=stores, images=stores.images, eraser=eraser)
-    undo = UndoManager(stores=stores, images=stores.images, eraser=eraser)
+    engine = _engine(stores, eraser)
 
-    first = await forget.forget_session(scope=_SCOPE, session_id="s1")
-    assert first.scenes == [] and stores.scene.current(_SCOPE) == [scene]
+    async def forget(session_id: str) -> Any:
+        return await engine.forget(
+            scope=_SCOPE,
+            identity=Identity(),
+            target=ForgetTarget(kind="session", session_id=session_id),
+            dry_run=False,
+        )
 
-    second = await forget.forget_session(scope=_SCOPE, session_id="s2")
-    assert second.scenes == [scene.ref.entry_id]
+    first = await forget("s1")
+    assert first.scenes == () and stores.scene.current(_SCOPE) == [scene]
+
+    second = await forget("s2")
+    assert second.scenes == (scene.ref.id,)
     assert stores.scene.superseded == {scene.ref.entry_id: FORGOTTEN_MARK}
     assert scene.ref in eraser.erased[-1]["episode"]  # its row goes at once
 
-    restored = await undo.undo_session(scope=_SCOPE, session_id="s2")
+    restored = await engine.undo_session(scope=_SCOPE, session_id="s2")
     assert restored.applied
     assert stores.scene.superseded == {}
     assert ("scene", {scene.ref.md_path}) in eraser.requeued
@@ -322,17 +340,7 @@ async def test_deleting_the_conversations_forgets_the_scene_and_undo_restores_it
 ):
     stores, ids, scene = await _world()
     eraser = _Eraser()
-    forgetter = UserForgetManager(
-        stores=stores,
-        eraser=eraser,
-        pictures=None,
-        sessions=SessionForgetManager(
-            stores=stores, images=stores.images, eraser=eraser
-        ),
-        undoer=UndoManager(stores=stores, images=stores.images, eraser=eraser),
-        extractions=ExtractionSupervisor(),
-        session_wait_seconds=1.0,
-    )
+    forgetter = _engine(stores, eraser)
     deleter = DeleteAlias(stores=stores, forgetter=forgetter)
 
     deleted = await deleter.delete_by_ids(
@@ -348,5 +356,7 @@ async def test_deleting_the_conversations_forgets_the_scene_and_undo_restores_it
     assert scene.ref in eraser.erased[-1]["episode"]
 
     (forget_id,) = deleted
-    undone = await forgetter.undo(scope=_SCOPE, forget_id=forget_id)
+    undone = await forgetter.undo(
+        scope=_SCOPE, identity=Identity(), forget_id=forget_id
+    )
     assert undone.applied and stores.scene.superseded == {}

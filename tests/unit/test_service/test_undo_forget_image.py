@@ -19,10 +19,13 @@ from __future__ import annotations
 import datetime as _dt
 
 from everos.component.images import ImageLimits
+from everos.memory.access import Identity
+from everos.memory.models import FORGOTTEN_MARK as FORGET_REASON
 from everos.memory.models import Episode, ImageMemory, Profile
 from everos.memory.ports import MemoryRef, Scope, Stored
-from everos.service.memory._forget import FORGET_REASON, ForgetManager
-from everos.service.memory._undo import UndoManager
+from everos.service import ForgetResult, ForgetTarget, UndoResult
+from everos.service.memory._extraction import ExtractionSupervisor
+from everos.service.memory._forget import ForgetManager
 from tests.fakes import make_indexes, make_stores
 
 _TS = int(_dt.datetime(2026, 5, 14, 10, tzinfo=_dt.UTC).timestamp() * 1000)
@@ -129,11 +132,34 @@ def _manager(images=(), episodes=(), *, profile: Profile | None = None):
         image_memory=_ImageIndex(*images), episode=_EpisodeIndex(*episodes)
     )
     eraser = _Eraser()
-    forget = ForgetManager(
-        stores=stores, indexes=indexes, images=stores.images, eraser=eraser
+    engine = ForgetManager(
+        stores=stores,
+        indexes=indexes,
+        eraser=eraser,
+        pipeline=None,
+        scenes=None,
+        extractions=ExtractionSupervisor(),
+        session_wait_seconds=1.0,
     )
-    undo = UndoManager(stores=stores, images=stores.images, eraser=eraser)
-    return forget, undo, stores, eraser
+    return _Pictures(engine), _Pictures(engine), stores, eraser
+
+
+class _Pictures:
+    """A picture's forget and its undo by target, through the one engine."""
+
+    def __init__(self, engine: ForgetManager) -> None:
+        self._engine = engine
+
+    async def forget_image(self, *, scope: Scope, image_id: str) -> ForgetResult:
+        return await self._engine.forget(
+            scope=scope,
+            identity=Identity(),
+            target=ForgetTarget(kind="image", image_id=image_id),
+            dry_run=False,
+        )
+
+    async def undo_image(self, *, scope: Scope, image_id: str) -> UndoResult:
+        return await self._engine.undo_picture(scope=scope, image_id=image_id)
 
 
 async def test_the_picture_and_its_memories_come_back() -> None:
@@ -147,7 +173,7 @@ async def test_the_picture_and_its_memories_come_back() -> None:
 
     assert result.applied
     assert _IMAGE_ID not in stores.images.forgotten
-    assert result.image_memories == 1
+    assert len(result.image_memories) == 1
     assert [(p.entry_id, p.name) for p in result.pictures] == [("im_1", "IMG_2231.jpg")]
     marks = stores.image_memory.deprecated[_picture("im_1").ref.md_path]
     assert marks == {}
@@ -158,7 +184,7 @@ async def test_the_pre_forget_episode_text_is_current_again() -> None:
     forget, undo, stores, _ = _manager(images=(_picture("im_1"),), episodes=(old,))
 
     forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
-    rewritten_id = forgotten.episodes[0]
+    rewritten_id = forgotten.new_episodes[0].removeprefix("u1_")
     await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
 
     # The forget's rewrite is superseded by the version the undo appended.
@@ -206,12 +232,12 @@ async def test_a_profile_item_the_picture_established_comes_back() -> None:
     forget, undo, stores, _ = _manager(images=(_picture("im_1"),), profile=profile)
 
     forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
-    assert forgotten.profiles == 1
+    assert forgotten.profile_item_count == 1
     assert stores.profile.profiles[(_scope(), "u1")].explicit_info == []
 
     result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
 
-    assert result.profiles == 1
+    assert result.profile_item_count == 1
     kept = stores.profile.profiles[(_scope(), "u1")].explicit_info
     assert [item.description for item in kept] == ["Has a cat named Biscuit"]
     assert kept[0].observed_at == _TS
@@ -235,14 +261,14 @@ async def test_a_replaced_value_the_picture_established_goes_and_comes_back() ->
     forget, undo, stores, _ = _manager(images=(_picture("im_1"),), profile=profile)
 
     forgotten = await forget.forget_image(scope=_scope(), image_id=_IMAGE_ID)
-    assert forgotten.profiles == 0  # no item went; a replaced value did
+    assert forgotten.profile_item_count == 0  # no item went; a replaced value did
     after = stores.profile.profiles[(_scope(), "u1")]
     assert after.history == []
     assert [item.description for item in after.explicit_info] == ["Has a dog named Rex"]
 
     result = await undo.undo_image(scope=_scope(), image_id=_IMAGE_ID)
 
-    assert result.profiles == 0
+    assert result.profile_item_count == 0
     back = stores.profile.profiles[(_scope(), "u1")]
     assert [entry["description"] for entry in back.history] == [
         "Has a cat named Biscuit"
@@ -258,7 +284,7 @@ async def test_a_second_undo_restores_nothing() -> None:
 
     assert again.applied is False
     assert again.forget_id == ""
-    assert again.image_memories == 1  # still current, and reported as such
+    assert len(again.pictures) == 1  # still current, and reported as such
 
 
 async def test_undoing_a_picture_never_forgotten_is_a_no_op() -> None:

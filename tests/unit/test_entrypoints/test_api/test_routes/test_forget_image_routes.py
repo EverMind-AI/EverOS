@@ -20,8 +20,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
-from everos.service.memory import ForgetResult, RevisionResult, UndoResult
-from everos.service.memory._forget import ForgottenPicture
+from everos.service import ForgetResult, ForgetTarget, ForgottenPicture, UndoResult
+from everos.service.memory import RevisionResult
 from tests.fakes import InMemoryImageStore, StubMemoryService, make_application
 
 _IMAGE_ID = "a1" * 32
@@ -31,17 +31,18 @@ _IMAGE_ID = "a1" * 32
 def memory() -> StubMemoryService:
     stub = StubMemoryService()
     stub.forget_image.return_value = ForgetResult(
-        image_id=_IMAGE_ID,
-        image_memories=1,
-        episodes=["ep_20261107_00000002"],
-        profiles=0,
-        pictures=[
+        forget_id="fg_0123456789abcdef",
+        dry_run=False,
+        target=ForgetTarget(kind="image", image_id=_IMAGE_ID),
+        image_memories=("me_im_20261107_00000001",),
+        new_episodes=("me_ep_20261107_00000002",),
+        pictures=(
             ForgottenPicture(
                 entry_id="im_20261107_00000001",
                 image_id=_IMAGE_ID,
                 name="IMG_2231.jpg",
-            )
-        ],
+            ),
+        ),
     )
     return stub
 
@@ -149,12 +150,10 @@ async def test_an_unknown_variant_is_rejected(
 def undo_memory() -> StubMemoryService:
     stub = StubMemoryService()
     stub.undo_forget_image.return_value = UndoResult(
-        image_id=_IMAGE_ID,
         forget_id="fg_0123456789abcdef",
         applied=True,
-        image_memories=1,
-        episodes=("ep_20261107_00000004",),
-        profiles=1,
+        episodes=("me_ep_20261107_00000004",),
+        profile_item_count=1,
         pictures=(
             ForgottenPicture(
                 entry_id="im_20261107_00000001",

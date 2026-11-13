@@ -26,16 +26,14 @@ from httpx import ASGITransport, AsyncClient
 from everos.core.errors import ForgottenMemoryError, VersionConflictError
 from everos.entrypoints.api.app import create_app
 from everos.service import (
-    GroupForgetResult,
-    GroupUndoResult,
+    ForgetResult,
+    ForgetTarget,
     MemoryHistory,
     MemoryVersion,
+    UndoResult,
     UpdateResult,
-    UserForgetResult,
-    UserForgetTarget,
-    UserUndoResult,
 )
-from everos.service.memory import DeleteResult, ForgetResult, UndoResult
+from everos.service.memory import DeleteResult
 from tests.fakes import StubMemoryService, make_application
 
 _HASH = "ab" * 32
@@ -77,38 +75,31 @@ def memory() -> StubMemoryService:
             ),
         ),
     )
-    stub.forget.side_effect = lambda **kw: UserForgetResult(
+    stub.forget.side_effect = lambda **kw: ForgetResult(
         forget_id="" if kw["dry_run"] else _FORGET_ID,
         dry_run=kw["dry_run"],
         target=kw["target"],
         episodes=("amy_ep_20261112_0001",),
     )
-    stub.undo_forget.return_value = UserUndoResult(
+    stub.undo_forget.return_value = UndoResult(
         forget_id=_FORGET_ID,
         applied=True,
-        target=UserForgetTarget(kind="owner"),
+        target=ForgetTarget(kind="owner"),
         episodes=("amy_ep_20261112_0001",),
-        profile_items=2,
+        profile_item_count=2,
     )
-    stub.forget_in_group.side_effect = lambda **kw: GroupForgetResult(
+    stub.forget_in_group.side_effect = lambda **kw: ForgetResult(
         forget_id="" if kw["dry_run"] else _FORGET_ID,
         dry_run=kw["dry_run"],
         target=kw["target"],
     )
     stub.forget_image.return_value = ForgetResult(
-        image_id=_HASH, image_memories=0, episodes=(), profiles=0
+        forget_id=_FORGET_ID,
+        dry_run=False,
+        target=ForgetTarget(kind="image", image_id=_HASH),
     )
-    stub.undo_forget_image.return_value = UndoResult(
-        image_id=_HASH,
-        forget_id="",
-        applied=False,
-        image_memories=0,
-        episodes=(),
-        profiles=0,
-    )
-    stub.undo_group_forget.return_value = GroupUndoResult(
-        forget_id=_FORGET_ID, applied=True
-    )
+    stub.undo_forget_image.return_value = UndoResult(forget_id="", applied=False)
+    stub.undo_group_forget.return_value = UndoResult(forget_id=_FORGET_ID, applied=True)
     stub.delete.return_value = DeleteResult(
         filters=["session_id"], count=3, forget_ids=(_FORGET_ID,)
     )
@@ -244,13 +235,13 @@ async def test_a_history_read_names_exactly_one_owner(
     [
         (
             {"kind": "record", "record_ids": ["amy_ep_1", "pi_00"]},
-            UserForgetTarget(kind="record", record_ids=("amy_ep_1", "pi_00")),
+            ForgetTarget(kind="record", record_ids=("amy_ep_1", "pi_00")),
         ),
         (
             {"kind": "session", "session_id": "s1"},
-            UserForgetTarget(kind="session", session_id="s1"),
+            ForgetTarget(kind="session", session_id="s1"),
         ),
-        ({"kind": "owner"}, UserForgetTarget(kind="owner")),
+        ({"kind": "owner"}, ForgetTarget(kind="owner")),
         (
             {
                 "kind": "condition",
@@ -258,7 +249,7 @@ async def test_a_history_read_names_exactly_one_owner(
                 "start": 10,
                 "end": 20,
             },
-            UserForgetTarget(
+            ForgetTarget(
                 kind="condition",
                 memory_types=("episode", "profile"),
                 start=10,
@@ -267,7 +258,7 @@ async def test_a_history_read_names_exactly_one_owner(
         ),
         (
             {"kind": "image", "image_id": _HASH},
-            UserForgetTarget(kind="image", image_id=_HASH),
+            ForgetTarget(kind="image", image_id=_HASH),
         ),
     ],
 )
@@ -275,7 +266,7 @@ async def test_a_users_forget_is_a_dry_run_by_default(
     client: AsyncClient,
     memory: StubMemoryService,
     target: dict[str, Any],
-    expected: UserForgetTarget,
+    expected: ForgetTarget,
 ) -> None:
     response = await client.post(
         "/api/v2/memory/forget", json={"user_id": "amy", "target": target}

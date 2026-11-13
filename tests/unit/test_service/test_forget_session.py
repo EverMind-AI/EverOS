@@ -3,7 +3,7 @@
 What these pin:
 
 - Every episode and picture memory that came from one session is marked
-  forgotten, through the same forget log a picture forget writes.
+  forgotten, through the one forget engine and its log.
 - A picture *file* is taken out of circulation only when this session held its
   last live reference; a picture that also arrived in another conversation
   stays.
@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from everos.memory.access import Identity
+from everos.memory.models import FORGOTTEN_MARK as FORGET_REASON
 from everos.memory.models import (
     Episode,
     ExplicitInfoItem,
@@ -25,9 +27,10 @@ from everos.memory.models import (
     Profile,
 )
 from everos.memory.ports import MemoryRef, Scope, SessionKey, Stored
-from everos.service.memory._forget import FORGET_REASON
-from everos.service.memory._forget_session import SessionForgetManager
-from everos.service.memory._undo import UndoManager
+from everos.service import ForgetResult, ForgetTarget, UndoResult
+from everos.service.memory._extraction import ExtractionSupervisor
+from everos.service.memory._forget import ForgetManager
+from everos.service.memory._forget_log import named_in, removed_in
 from tests.fakes import make_stores
 
 _TS = int(_dt.datetime(2026, 5, 14, 10, tzinfo=_dt.UTC).timestamp() * 1000)
@@ -113,9 +116,37 @@ def _manager(*stored):
         if isinstance(row.item, ImageMemory):
             stores.images.images[row.item.image_id] = (b"bytes", "png")
     eraser = _Eraser()
-    forget = SessionForgetManager(stores=stores, images=stores.images, eraser=eraser)
-    undo = UndoManager(stores=stores, images=stores.images, eraser=eraser)
-    return forget, undo, stores, eraser
+    engine = ForgetManager(
+        stores=stores,
+        indexes=None,
+        eraser=eraser,
+        pipeline=None,
+        scenes=None,
+        extractions=ExtractionSupervisor(),
+        session_wait_seconds=1.0,
+    )
+    return _Forget(engine), _Undo(engine), stores, eraser
+
+
+class _Forget:
+    def __init__(self, engine: ForgetManager) -> None:
+        self._engine = engine
+
+    async def forget_session(self, *, scope: Scope, session_id: str) -> ForgetResult:
+        return await self._engine.forget(
+            scope=scope,
+            identity=Identity(),
+            target=ForgetTarget(kind="session", session_id=session_id),
+            dry_run=False,
+        )
+
+
+class _Undo:
+    def __init__(self, engine: ForgetManager) -> None:
+        self._engine = engine
+
+    async def undo_session(self, *, scope: Scope, session_id: str) -> UndoResult:
+        return await self._engine.undo_session(scope=scope, session_id=session_id)
 
 
 async def test_the_sessions_episodes_and_pictures_are_marked() -> None:
@@ -128,8 +159,8 @@ async def test_the_sessions_episodes_and_pictures_are_marked() -> None:
 
     result = await forget.forget_session(scope=_scope(), session_id="s1")
 
-    assert result.episodes == ["ep_1"]
-    assert result.image_memories == 1
+    assert result.episodes == ("u1_ep_1",)
+    assert len(result.image_memories) == 1
     assert stores.episode.deprecated[_episode("ep_1").ref.md_path] == {
         "ep_1": FORGET_REASON
     }
@@ -152,7 +183,7 @@ async def test_a_file_goes_only_when_the_last_reference_does() -> None:
 
     result = await forget.forget_session(scope=_scope(), session_id="s1")
 
-    assert result.images == [_IMAGE_B]
+    assert result.images == (_IMAGE_B,)
     assert _IMAGE_B in stores.images.forgotten
     assert _IMAGE_A not in stores.images.forgotten
 
@@ -177,7 +208,7 @@ async def test_the_forget_is_recorded_in_the_log() -> None:
     assert entry.target == "session"
     assert entry.target_id == "s1"
     assert entry.forget_id == result.forget_id
-    assert entry.episode_ids == (("ep_1", ""),)
+    assert named_in(entry).episodes == {"ep_1"}
 
 
 async def test_index_rows_are_erased_with_their_owner_prefixed_key() -> None:
@@ -200,8 +231,8 @@ async def test_undo_brings_the_conversation_back() -> None:
     result = await undo.undo_session(scope=_scope(), session_id="s1")
 
     assert result.applied
-    assert result.episodes == ("ep_1",)
-    assert result.image_memories == 1
+    assert result.episodes == ("u1_ep_1",)
+    assert len(result.image_memories) == 1
     assert result.images == (_IMAGE_A,)
     assert _IMAGE_A not in stores.images.forgotten
     assert stores.episode.deprecated[_episode("ep_1").ref.md_path] == {}
@@ -285,10 +316,14 @@ async def test_a_forgotten_conversation_takes_the_items_resting_on_it_alone() ->
 
     result = await forget.forget_session(scope=_scope(), session_id="s1")
 
-    assert result.profiles == 1
+    assert result.profile_item_count == 1
     assert _facts(stores) == ["Works in Python", "Likes tea"]
-    ((bucket, item),) = stores.forget_log.entries[-1].removed_profile_items
-    assert (bucket, item["description"]) == ("explicit_info", "Lives in Paris")
+    (removed,) = removed_in(stores.forget_log.entries[-1])
+    assert (removed.bucket, removed.item["description"]) == (
+        "explicit_info",
+        "Lives in Paris",
+    )
+    assert removed.position == 0  # its place, for the undo
 
 
 async def test_the_summary_goes_with_an_item_and_comes_back_with_the_undo() -> None:
@@ -303,7 +338,7 @@ async def test_the_summary_goes_with_an_item_and_comes_back_with_the_undo() -> N
     assert stores.profile.profiles[(_scope(), "u1")].summary == ""
 
     result = await undo.undo_session(scope=_scope(), session_id="s1")
-    assert result.profiles == 1
+    assert result.profile_item_count == 1
     assert stores.profile.profiles[(_scope(), "u1")].summary == "Lives in Paris"
 
 
@@ -316,7 +351,7 @@ async def test_an_item_goes_with_the_last_conversation_it_rests_on() -> None:
     first = await forget.forget_session(scope=_scope(), session_id="s1")
     second = await forget.forget_session(scope=_scope(), session_id="s2")
 
-    assert (first.profiles, second.profiles) == (0, 1)
+    assert (first.profile_item_count, second.profile_item_count) == (0, 1)
     assert _facts(stores) == []
 
 
@@ -343,11 +378,11 @@ async def test_undo_brings_back_the_items_and_what_a_later_forget_took() -> None
     result = await undo.undo_session(scope=_scope(), session_id="s1")
 
     # "Works in Python" went with s2's forget, but rests on s1 too.
-    assert result.profiles == 2
+    assert result.profile_item_count == 2
     assert sorted(_facts(stores)) == ["Lives in Paris", "Works in Python"]
     history = stores.profile.profiles[(_scope(), "u1")].history
     assert [entry["description"] for entry in history] == ["Lived in Lyon"]
 
     again = await undo.undo_session(scope=_scope(), session_id="s2")
-    assert again.applied and again.profiles == 0  # nothing doubled
+    assert again.applied and again.profile_item_count == 0  # nothing doubled
     assert sorted(_facts(stores)) == ["Lives in Paris", "Works in Python"]

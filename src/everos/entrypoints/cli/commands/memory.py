@@ -7,9 +7,10 @@ A thin layer over the same service functions the HTTP API calls
 - ``memory history ID`` -- every version of one memory, current first;
 - ``memory update ID`` -- write a person's new version (held unless
   ``--release``);
-- ``memory forget`` -- by records, a conversation, everything, a kind and a
-  time range, or a picture (a group: records, a session, a member's messages,
-  a picture). A dry run unless ``--apply``, as the API's default;
+- ``memory forget`` -- by records, a conversation or messages of it,
+  everything, a kind and a time range, or a picture (a group: records, a
+  session or messages of it, a member's messages, a picture). A dry run
+  unless ``--apply``, as the API's default;
 - ``memory undo FORGET_ID`` -- undo one forget by the id it answered.
 
 A user's memory is named by ``--user``; a group's by ``--group`` and
@@ -47,10 +48,9 @@ from everos.entrypoints.cli._process import (
     with_log_stream,
 )
 from everos.service import (
-    GroupForgetTarget,
+    ForgetTarget,
     MemoryChanges,
     MemoryService,
-    UserForgetTarget,
     build_application,
 )
 
@@ -169,6 +169,13 @@ def forget(
     session: Annotated[
         str | None, typer.Option("--session", help="A conversation.")
     ] = None,
+    message: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--message",
+            help="A message of the --session conversation, by id (repeatable).",
+        ),
+    ] = None,
     owner: Annotated[
         bool, typer.Option("--owner", help="Everything of the user.")
     ] = False,
@@ -215,75 +222,63 @@ def forget(
     ]
     if sum(chosen) != 1:
         raise typer.BadParameter(
-            "name one target: --record, --session, --owner, --types, --image "
-            "or (a group) --member"
+            "name one target: --record, --session (with --message for messages), "
+            "--owner, --types, --image or (a group) --member"
         )
-    settings = _settings(root, verbose)
-    if group is not None:
-        if owner or types is not None:
-            raise typer.BadParameter("a group forget takes no --owner or --types")
-        group_target = GroupForgetTarget(
-            kind="record"
-            if record
-            else "session"
-            if session is not None
-            else "member"
-            if member is not None
-            else "image",
-            record_ids=tuple(record or ()),
-            session_id=session,
-            member_id=member,
-            image_id=image,
-        )
-
-        async def run_group(memory: MemoryService) -> object:
-            return await memory.forget_in_group(
-                app_id=app_id,
-                project_id=project_id,
-                group_id=group,
-                asker_id=asker,
-                target=group_target,
-                reason=reason,
-                dry_run=not apply,
-            )
-
-        _print(asyncio.run(_run(settings, run_group, exclusive=apply)))
-        return
-    if member is not None:
+    if group is not None and (owner or types is not None):
+        raise typer.BadParameter("a group forget takes no --owner or --types")
+    if group is None and member is not None:
         raise typer.BadParameter("--member is a group's target")
-    user_target = UserForgetTarget(
+    target = ForgetTarget(
         kind="record"
         if record
+        else "message"
+        if message
         else "session"
         if session is not None
         else "owner"
         if owner
         else "condition"
         if types is not None
+        else "member"
+        if member is not None
         else "image",
         record_ids=tuple(record or ()),
         session_id=session,
+        message_ids=tuple(message or ()),
+        member_id=member,
         image_id=image,
         memory_types=tuple(t.strip() for t in (types or "").split(",") if t.strip()),  # type: ignore[arg-type]
         start=start,
         end=end,
     )
-    if user_target.kind == "condition" and start is None and end is None:
+    if target.kind == "condition" and start is None and end is None:
         raise typer.BadParameter("--types needs --start, --end or both")
-    assert user is not None
+    settings = _settings(root, verbose)
 
-    async def run_user(memory: MemoryService) -> object:
+    async def run(memory: MemoryService) -> object:
+        if group is not None:
+            return await memory.forget_in_group(
+                app_id=app_id,
+                project_id=project_id,
+                group_id=group,
+                asker_id=asker,
+                target=target,
+                reason=reason,
+                dry_run=not apply,
+            )
+        assert user is not None
         return await memory.forget(
             app_id=app_id,
             project_id=project_id,
             user_id=user,
             asker_id=asker,
-            target=user_target,
+            target=target,
             reason=reason,
             dry_run=not apply,
         )
 
-    _print(asyncio.run(_run(settings, run_user, exclusive=apply)))
+    _print(asyncio.run(_run(settings, run, exclusive=apply)))
 
 
 @app.command("undo")

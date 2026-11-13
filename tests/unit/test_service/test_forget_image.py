@@ -10,7 +10,7 @@ What these pin — each one is a way a forget silently fails:
 - Every episode whose body referred to the picture is written again without
   the reference, and the new version supersedes the old one — while the old
   version stays in markdown, because "what did I say before" must stay
-  answerable.
+  answerable. A text edit: no model is called.
 """
 
 from __future__ import annotations
@@ -18,9 +18,13 @@ from __future__ import annotations
 import datetime as _dt
 
 from everos.component.images import ImageLimits
+from everos.memory.access import Identity
+from everos.memory.models import FORGOTTEN_MARK as FORGET_REASON
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import MemoryRef, Scope, SearchHit, Stored
-from everos.service.memory._forget import FORGET_REASON, ForgetManager
+from everos.service import ForgetResult, ForgetTarget
+from everos.service.memory._extraction import ExtractionSupervisor
+from everos.service.memory._forget import ForgetManager
 from tests.fakes import make_indexes, make_stores
 
 _TS = int(_dt.datetime(2026, 5, 14, 10, tzinfo=_dt.UTC).timestamp() * 1000)
@@ -112,18 +116,45 @@ class _EpisodeIndex:
         return [SearchHit(stored=row, score=None) for row in self.rows][:limit]
 
 
+class _Pictures:
+    """A picture's forget through the one engine."""
+
+    def __init__(self, engine: ForgetManager) -> None:
+        self._engine = engine
+
+    async def forget_image(self, *, scope: Scope, image_id: str) -> ForgetResult:
+        return await self._engine.forget(
+            scope=scope,
+            identity=Identity(),
+            target=ForgetTarget(kind="image", image_id=image_id),
+            dry_run=False,
+        )
+
+
 def _manager(
     *, images: tuple = (), episodes: tuple = ()
-) -> tuple[ForgetManager, object, object, _Eraser]:
+) -> tuple[_Pictures, object, object, _Eraser]:
     stores = make_stores()
+    stores.image_memory.records.extend(images)
+    stores.episode.records.extend(episodes)
     indexes = make_indexes(
         image_memory=_ImageIndex(*images), episode=_EpisodeIndex(*episodes)
     )
     eraser = _Eraser()
-    manager = ForgetManager(
-        stores=stores, indexes=indexes, images=stores.images, eraser=eraser
+    engine = ForgetManager(
+        stores=stores,
+        indexes=indexes,
+        eraser=eraser,
+        pipeline=None,
+        scenes=None,
+        extractions=ExtractionSupervisor(),
+        session_wait_seconds=1.0,
     )
-    return manager, stores, indexes, eraser
+    return _Pictures(engine), stores, indexes, eraser
+
+
+def _entry(record_id: str) -> str:
+    return record_id.removeprefix("u1_")
 
 
 async def test_every_occurrence_is_marked_forgotten() -> None:
@@ -132,7 +163,7 @@ async def test_every_occurrence_is_marked_forgotten() -> None:
 
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
-    assert result.image_memories == 2
+    assert len(result.image_memories) == 2
     marks = stores.image_memory.deprecated[first.ref.md_path]
     assert marks == {"im_1": FORGET_REASON, "im_2": FORGET_REASON}
 
@@ -164,8 +195,8 @@ async def test_an_episode_referring_to_the_picture_is_rewritten_without_it() -> 
 
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
-    assert len(result.episodes) == 1
-    new_entry = result.episodes[0]
+    assert len(result.new_episodes) == 1
+    new_entry = _entry(result.new_episodes[0])
     written = [s for s in stores.episode.records if s.ref.entry_id == new_entry]
     assert len(written) == 1
     body = written[0].item.episode
@@ -182,7 +213,7 @@ async def test_the_old_episode_version_is_superseded_not_deleted() -> None:
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
     marks = stores.episode.deprecated[old.ref.md_path]
-    assert marks[old.ref.entry_id] == result.episodes[0]
+    assert marks[old.ref.entry_id] == _entry(result.new_episodes[0])
     # Both versions are in markdown: the superseded one and its replacement.
     assert len(stores.episode.records) >= 1
 
@@ -193,8 +224,8 @@ async def test_an_episode_that_does_not_mention_the_picture_is_left_alone() -> N
 
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
-    assert result.episodes == []
-    assert not stores.episode.deprecated
+    assert result.episodes == ()
+    assert not any(stores.episode.deprecated.values())
 
 
 async def test_forgetting_an_unknown_picture_is_a_no_op() -> None:
@@ -202,9 +233,9 @@ async def test_forgetting_an_unknown_picture_is_a_no_op() -> None:
 
     result = await manager.forget_image(scope=_scope(), image_id="f" * 64)
 
-    assert result.image_memories == 0
-    assert result.episodes == []
-    assert eraser.erased == [{"image_memory": []}]
+    assert result.image_memories == ()
+    assert result.episodes == ()
+    assert eraser.erased == []
     assert stores.image_memory.records == []
 
 
@@ -234,7 +265,9 @@ async def test_the_rewritten_episode_no_longer_refers_to_the_picture() -> None:
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
     written = [
-        s for s in stores.episode.records if s.ref.entry_id == result.episodes[0]
+        s
+        for s in stores.episode.records
+        if s.ref.entry_id == _entry(result.new_episodes[0])
     ]
     assert written[0].item.image_ids == ["0" * 64]
 
@@ -250,6 +283,8 @@ async def test_the_rewritten_body_has_no_gap_before_its_punctuation() -> None:
     result = await manager.forget_image(scope=_scope(), image_id=_IMAGE_ID)
 
     written = [
-        s for s in stores.episode.records if s.ref.entry_id == result.episodes[0]
+        s
+        for s in stores.episode.records
+        if s.ref.entry_id == _entry(result.new_episodes[0])
     ]
     assert written[0].item.episode == "she described the signboard."

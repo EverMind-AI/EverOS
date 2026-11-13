@@ -40,7 +40,7 @@ from everos.memory.models import (
     Scene,
 )
 from everos.memory.ports import NoSourceCheck, Scope
-from everos.service import MemoryChanges, SearchRequest, UserForgetTarget
+from everos.service import ForgetTarget, MemoryChanges, SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld
 
 T0 = 1_772_323_200_000
@@ -128,7 +128,7 @@ async def _forget(world: GroupWorld, dry_run: bool = False, **target: object) ->
         app_id=APP,
         project_id=PROJECT,
         user_id="amy",
-        target=UserForgetTarget(**target),  # type: ignore[arg-type]
+        target=ForgetTarget(**target),  # type: ignore[arg-type]
         dry_run=dry_run,
     )
 
@@ -376,7 +376,7 @@ async def test_a_record_forget_dry_run_then_real_then_undo(tmp_path: Path) -> No
             app_id=APP, project_id=PROJECT, user_id="amy", forget_id=done.forget_id
         )
         assert undone.applied and undone.episodes == (gone,)
-        assert undone.profile_items == 1
+        assert undone.profile_item_count == 1
         profile = await world.stores.profile.read(_amy(world))
         assert profile is not None
         assert profile.summary == "Amy lives in Lyon and has a cat."

@@ -780,28 +780,37 @@ class AccessPolicy:
         message by message against the asker's windows. A personal
         read never sees a group session's buffer, and sees another session's
         only when its owner took part in it -- a buffered message of theirs,
-        or memory of theirs from that session (``owner_has_memory``).
+        or memory of theirs from that session (``owner_has_memory``). A
+        forgotten message is seen by neither.
         """
         bound = await self._groups.binding(session)
         if scope.is_group:
             view = scope.group(bound) if bound is not None else None
             if view is None:
                 return []
-            forgotten = (
-                await self._forgotten.forgotten(session)
-                if self._forgotten is not None
-                else frozenset()
-            )
             return [
                 m
-                for m in messages
-                if (m.client_message_id or m.message_id) not in forgotten
-                and any(
+                for m in await self._remembered(session, messages)
+                if any(
                     w.contains_point(to_timestamp_ms(m.timestamp)) for w in view.windows
                 )
             ]
         if bound is not None:
             return []
+        messages = await self._remembered(session, messages)
         if any(m.sender_id == scope.owner_id for m in messages):
             return list(messages)
         return list(messages) if messages and await owner_has_memory() else []
+
+    async def _remembered(
+        self, session: SessionKey, messages: Sequence[CanonicalMessage]
+    ) -> list[CanonicalMessage]:
+        """``messages`` without the ones a live forget names."""
+        if not messages or self._forgotten is None:
+            return list(messages)
+        forgotten = await self._forgotten.forgotten(session)
+        return [
+            m
+            for m in messages
+            if (m.client_message_id or m.message_id) not in forgotten
+        ]

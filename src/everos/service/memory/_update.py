@@ -66,6 +66,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import NO_SOURCE_CHECK, Scope, Stored
 
+from ._forget_log import Logs
 from ._records import (
     RecordKind,
     entry_id_of,
@@ -482,16 +483,7 @@ class UpdateManager:
 
     async def _forgotten_item(self, scope: Scope, item_id: str) -> bool:
         """Whether a live forget of the user took the item out of ``user.md``."""
-        for entry in await self._stores.forget_log.live_entries(
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            owner_type=scope.owner_type,
-        ):
-            for _bucket, item in entry.removed_profile_items:
-                if item.get("item_id") == item_id:
-                    return True
-        return False
+        return item_id in await Logs(self._stores).forgotten_items(scope)
 
     async def _member_holding(self, scope: Scope, item_id: str) -> str | None:
         """The member whose profile in the group holds ``item_id`` (or held it)."""

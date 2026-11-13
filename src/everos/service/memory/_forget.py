@@ -1,491 +1,487 @@
-"""Forgetting one picture: the use case behind ``POST /memory/forget``.
+"""Forgetting: the use case behind ``POST /memory/forget`` and its undo.
 
-A picture is not one memory — it is a file, one or more memories written about
-it, their index rows, and the episode text that referred to it by id.
-Forgetting it has to reach all four, or the content survives somewhere:
+One engine for a user's memory and a group's (docs/api.md; docs/group-memory.md,
+sections 5.5 and 9.4): the target is planned first (:mod:`._forget_plan`,
+reads only) and a dry run answers with the plan; a real run carries out
+exactly that plan (:mod:`._forget_apply`), logs it in one format
+(:mod:`._forget_log`) and answers with its ``forget_id``, which the undo takes
+(:mod:`._forget_undo`). A forget **marks**: nothing leaves markdown, every
+version it reaches is marked forgotten or superseded by one written without
+what was forgotten, and its index row goes at once.
 
-1. **The file** keeps its bytes but gains ``forgotten_at`` (SQLite). It is not
-   unlinked: a forget is reversible, and undoing it must not need a restore.
-2. **Every memory written about it** is marked forgotten — a ``deprecated_by``
-   marker pointing at the forget, the same append-only mechanism the cascade
-   already turns into the index row's status.
-3. **The index rows** are erased through the fence, so the cascade cannot write
-   them back and the picture stops competing for retrieval immediately rather
-   than one scan interval later.
-4. **What referred to it** is re-extracted without it. An episode whose body
-   says ``[IMAGE: <id>]`` is written again as a new version whose body drops
-   that reference, and the new version supersedes the old one. The old version
-   is **not** deleted: the store keeps superseded memories so "what did I say
-   before" stays answerable, and the forget marks are what keep them out of a
-   default result.
+The run, in order:
 
-Why re-extraction is deterministic here, with no model call: the picture's
-contribution to an episode body is a *reference*, not prose. The picture
-prompt forbids restating a picture's description in the body (the picture has
-its own memory for that), so removing the reference is a text edit that needs
-no model — and a model call would risk rewriting facts the user never asked to
-change, which is exactly what a forget must not do.
+1. a group's target messages are recorded in ``message_forget`` first, so
+   every reader that starts afterwards skips them -- re-extraction, the
+   profiles' next updates, a buffer read;
+2. the conversations the target touches settle: a cut in progress finishes
+   (its lock; 503 past ``session_wait_seconds``) and the extractions running
+   for them end; the plan is then made again, so nothing they wrote escapes it;
+3. every model call (re-extraction of a segment that keeps text, a group
+   scene narrated again) is made before anything is written; a failure here
+   leaves the memory as it was;
+4. the writes, then the profiles and the log entry; a failure part-way
+   reverses what the run did, or -- when that fails too -- logs the run as an
+   incomplete forget that its undo can finish.
 
-A user's scene narrative is written from those episode bodies, so it can carry
-the reference too: a scene whose current version names the picture gets the
-same text edit as a new version (docs/scenes.md). Its members keep their ids;
-a read follows each to the version the forget wrote.
+Who may: a user's memory is changed by its owner (the caller checks); inside
+a group the asker must be a current member allowed to forget what the target
+rests on (:func:`~everos.memory.access.authorize_forget`). One forget, undo or
+update of one owner at a time (:func:`~everos.memory.forget_lock`).
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+__all__ = ["ForgetManager"]
 
-from everos.core.observability.logging import get_logger
-from everos.memory import profile_lock, scenes_lock
-from everos.memory.extract.pipeline import profile_items
-from everos.memory.extract.scene import newest_versions
-from everos.memory.models import Episode, Scene
-from everos.memory.ports import (
-    Filter,
-    MemoryRef,
-    Scope,
-    Stored,
-    all_of,
-    eq,
-    is_null,
-    ne,
+import uuid
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
+
+from everos.core.errors import (
+    ForbiddenError,
+    InvalidInputError,
+    NotFoundError,
+    SessionBusyError,
 )
+from everos.core.locks import LOCKS, session_key
+from everos.core.observability.logging import get_logger
+from everos.memory import forget_lock
+from everos.memory.access import Identity, authorize_forget
+from everos.memory.ports import ForgetEntry, Scope
 
-from ._forget_common import removed_item_ids
+from ._forget_apply import Applied, ForgetWriter, Reextraction, applied_record
+from ._forget_models import ForgetResult, ForgetTarget, ForgottenPicture, UndoResult
+from ._forget_plan import ForgetPlan, ForgetPlanner
+from ._forget_undo import Undoer
+from ._records import memory_id
 
 if TYPE_CHECKING:
     from everos.memory.deps import Indexes, Stores
-    from everos.memory.ports import IndexEraser
-    from everos.memory.ports.images import ImageStore
+    from everos.memory.extract.scene import SceneNarrator
+    from everos.memory.ports import GroupRecord, IndexEraser
+
+    from ._extraction import ExtractionSupervisor
 
 logger = get_logger("everos.service.memory")
 
-FORGET_REASON = "forgotten"
-"""The ``deprecated_by`` marker a forget writes.
-
-Deliberately not the entry id of a successor: a superseding *memory* and a
-*forget* are different states, and collapsing them would make "what replaced
-this" unanswerable for a forgotten picture.
-"""
-
-_EPISODE_SCAN_CAP = 5_000
-"""Episodes one forget reads to find the ones referring to the picture.
-
-A cap rather than the whole history: an owner with a very long history should
-not make one forget call unbounded. Entries past it keep their reference and
-the caller sees fewer rewritten episodes than the picture had.
-"""
-
-_OCCURRENCE_CAP = 1_000
-"""Picture memories one forget marks. One picture is normally one to a handful."""
-
-
-@dataclass(frozen=True)
-class ForgottenPicture:
-    """One picture memory a forget (or its undo) touched.
-
-    Returned so a caller can see *which* memories the picture had, not just
-    how many: a harness mapping a memory back to its dataset entry needs the
-    occurrence's own identity and the name it arrived under.
-
-    Attributes:
-        entry_id: ``im_<YYYYMMDD>_<NNNN>`` — this occurrence's id in markdown.
-        image_id: The file, by content hash.
-        name: The client's file name for this arrival, ``""`` when it sent none.
-    """
-
-    entry_id: str
-    image_id: str
-    name: str
-
-
-@dataclass(frozen=True)
-class ForgetResult:
-    """What one forget touched.
-
-    Attributes:
-        image_id: The picture, by content hash.
-        image_memories: How many picture memories were marked forgotten.
-        episodes: Entry ids of the episode versions written without the
-            picture. The superseded versions are still on disk.
-        profiles: How many profile items were removed because this picture
-            alone established them. ``user.md`` is one document, so what a
-            forget reports is items, not versions.
-        pictures: One entry per picture memory touched, in entry order.
-        forget_id: The forget log entry this call wrote (``fg_<hex>``), or
-            ``""`` when the log store is not configured. An explicit undo can
-            name it; the default undo finds it by target.
-        replaced_episodes: Entry ids of the episode versions the rewrites
-            replaced, in the order of ``episodes``.
-        scenes: Entry ids of the scene versions written without the picture.
-        replaced_scenes: Entry ids of the scene versions they replaced.
-        profile_items: Ids of the profile items and replaced values taken out.
-    """
-
-    image_id: str
-    image_memories: int
-    episodes: Sequence[str]
-    profiles: int
-    pictures: Sequence[ForgottenPicture] = ()
-    forget_id: str = ""
-    replaced_episodes: Sequence[str] = ()
-    scenes: Sequence[str] = ()
-    replaced_scenes: Sequence[str] = ()
-    profile_items: Sequence[str] = ()
+_SETTLE_SECONDS = 120.0
+"""How long a forget waits for the running extractions of its conversations."""
 
 
 class ForgetManager:
-    """Marks a picture and everything that referred to it as forgotten.
+    """Forgets in a user's or a group's memory, their dry runs and their undos.
 
     Args:
-        stores: Write-side stores (markdown is the truth).
-        indexes: Read-side indexes; used to find what refers to the picture.
-        images: The picture files, whose metadata row records the forget.
-        eraser: Removes the index rows at once instead of waiting for the
-            cascade, and fences them against it writing them back.
+        stores: Markdown and system state.
+        indexes: The read side (whether another owner still refers to a
+            picture); ``None`` answers it from the owner's own files.
+        eraser: Erases the index rows of what a forget takes out of default
+            reads; hands what an undo puts back to the cascade.
+        pipeline: The conversation pipeline's re-extraction; ``None`` refuses
+            a forget that needs it.
+        scenes: Writes a group's changed scene again; ``None`` marks it
+            forgotten instead.
+        extractions: The memorize extractions a forget waits for.
+        session_wait_seconds: How long a forget waits for a busy
+            conversation's lock before answering 503.
     """
 
     def __init__(
         self,
         *,
         stores: Stores,
-        indexes: Indexes,
-        images: ImageStore,
+        indexes: Indexes | None,
         eraser: IndexEraser,
+        pipeline: Reextraction | None,
+        scenes: SceneNarrator | None,
+        extractions: ExtractionSupervisor,
+        session_wait_seconds: float,
     ) -> None:
         self._stores = stores
-        self._indexes = indexes
-        self._images = images
-        self._eraser = eraser
+        self._extractions = extractions
+        self._wait = session_wait_seconds
+        self._has_pipeline = pipeline is not None
+        self._planner = ForgetPlanner(
+            stores=stores,
+            indexes=indexes,
+            scene_members=scenes.min_members if scenes is not None else None,
+        )
+        self._writer = ForgetWriter(
+            stores=stores, eraser=eraser, pipeline=pipeline, scenes=scenes
+        )
+        self._undoer = Undoer(stores=stores, eraser=eraser)
 
-    async def forget_image(
+    # ── forget ───────────────────────────────────────────────────────────
+
+    async def forget(
         self,
         *,
         scope: Scope,
-        image_id: str,
+        identity: Identity,
+        target: ForgetTarget,
         reason: str | None = None,
-        requested_by: str | None = None,
+        dry_run: bool = True,
+        strict: bool = True,
     ) -> ForgetResult:
-        """Forget ``image_id`` for ``scope``'s owner.
+        """Forget ``target`` in ``scope``'s memory (or plan it, ``dry_run``).
 
-        Steps run in the order the module docstring lists, and each is safe to
-        repeat: the marks are idempotent and a re-written version is a new
-        entry, so a retry after a crash finishes the job rather than doubling
-        it.
+        ``strict`` answers a record id that names nothing with 404; the
+        delete-by-id alias passes ``False`` and skips it.
+
+        Raises:
+            InvalidInputError: No asker inside a group; a record id of no
+                kind of the owner's.
+            ForbiddenError: Not a current member, or not allowed this target.
+            NotFoundError: The target names nothing the owner holds.
+            SessionBusyError: A conversation of the forget stays busy (503).
         """
-        occurrences = await self._indexes.image_memory.find(
-            _by_image(scope, image_id), limit=_OCCURRENCE_CAP
+        group = scope.owner_type == "group"
+        if group and identity.asker_id is None:
+            raise InvalidInputError("asker_id is required for a group forget")
+        async with forget_lock(scope):
+            record = await self._member_record(scope, identity) if group else None
+            plan = await self._planner.plan(scope, target, record, strict=strict)
+            if record is not None:
+                authorize_forget(record.roster, identity.asker_id, sources=plan.sources)
+            if dry_run:
+                return plan_result(plan, forget_id="", dry_run=True)
+            if plan.reextracts and not self._has_pipeline:
+                raise InvalidInputError("re-extraction is not available")
+            forget_id = _mint_forget_id()
+            already = dict(plan.already)
+            await self._record_messages(plan, forget_id)
+            try:
+                if plan.sessions:
+                    await self._settle(scope, plan.sessions)
+                    plan = await self._planner.plan(
+                        scope,
+                        target,
+                        record,
+                        already=already if plan.messages else None,
+                        strict=strict,
+                    )
+                    await self._record_messages(plan, forget_id)
+                prepared = await self._writer.prepare(plan)
+            except BaseException:
+                await self._stores.message_forget.undo(forget_id)
+                raise
+            applied = Applied()
+            try:
+                await self._writer.write(plan, prepared, applied)
+                async with self._writer.profile_guard(plan):
+                    await self._writer.profiles(plan, applied)
+                    await self._log(plan, applied, forget_id, reason, identity)
+            except BaseException:
+                await self._roll_back(plan, applied, forget_id)
+                raise
+        result = plan_result(plan, forget_id=forget_id, dry_run=False, applied=applied)
+        logger.info(
+            "memory.forgotten",
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_type=scope.owner_type,
+            owner_id=scope.owner_id,
+            forget_id=forget_id,
+            target=target.kind,
+            messages=len(result.messages),
+            episodes=len(result.episodes),
+            rewritten=result.rewritten,
+            image_memories=len(result.image_memories),
+            images=len(result.images),
+            scenes=len(result.scenes),
+            profile_items=len(result.profile_items) + len(result.stale_profile_items),
+            group_items=len(result.group_profile_items)
+            + len(result.stale_group_profile_items),
+            reason=reason,
         )
-        await self._mark_memories(scope, [hit.stored for hit in occurrences])
-        await self._images.forget(image_id)
-        await self._eraser.erase(
-            scope, {"image_memory": [hit.stored.ref for hit in occurrences]}
+        return result
+
+    async def _log(
+        self,
+        plan: ForgetPlan,
+        applied: Applied,
+        forget_id: str,
+        reason: str | None,
+        identity: Identity,
+    ) -> None:
+        scope = plan.scope
+        await self._stores.forget_log.record(
+            target=plan.target.kind,
+            target_id=plan.target.label(scope.owner_id),
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+            reason=reason,
+            requested_by=identity.asker_id,
+            undo=applied_record(plan, applied),
+            forget_id=forget_id,
         )
 
-        referring = await self._referring_episodes(scope, image_id)
-        written = await self._rewrite_episodes(scope, referring, image_id)
-        scenes = await self._rewrite_scenes(scope, image_id)
-        # The profile lock is held until the log says "forgotten": an update
-        # waiting on it then leaves the picture out, and none in flight writes
-        # back what this takes out.
-        async with profile_lock(scope):
-            profile_removed = await self._forget_profile(scope, image_id)
-            entry = await self._stores.forget_log.record(
-                target="image",
-                target_id=image_id,
+    async def _roll_back(
+        self, plan: ForgetPlan, applied: Applied, forget_id: str
+    ) -> None:
+        """Reverse a run that failed part-way, or keep what an undo needs.
+
+        When the reversal fails too, the run is logged under its id as an
+        incomplete forget, so ``/memory/forget/undo`` can finish the job.
+        """
+        scope = plan.scope
+        record = applied_record(plan, applied)
+        entry = ForgetEntry(
+            forget_id=forget_id,
+            target=plan.target.kind,
+            target_id=plan.target.label(scope.owner_id),
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+            undo={**record, "segments": []},
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+        )
+        try:
+            await self._undoer.undo(scope, entry)
+        except Exception:
+            logger.exception("memory.forget_rollback_failed", forget_id=forget_id)
+            await self._stores.forget_log.record(
+                target=plan.target.kind,
+                target_id=plan.target.label(scope.owner_id),
                 app_id=scope.app_id,
                 project_id=scope.project_id,
                 owner_id=scope.owner_id,
                 owner_type=scope.owner_type,
-                reason=reason,
-                requested_by=requested_by,
-                entry_ids=tuple(hit.stored.ref.entry_id for hit in occurrences),
-                episode_ids=tuple(
-                    (stored.ref.entry_id, ref.entry_id)
-                    for stored, ref in zip(referring, written, strict=False)
-                ),
-                removed_profile_items=profile_removed,
+                reason="incomplete forget",
+                undo=record,
+                forget_id=forget_id,
             )
-        profiles = sum(
-            1 for bucket, _ in profile_removed if bucket in profile_items.BUCKETS
-        )
 
-        logger.info(
-            "memory.images.forgotten",
-            image_id=image_id,
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            occurrences=len(occurrences),
-            episodes=len(written),
-            scenes=len(scenes),
-            profiles=profiles,
-            reason=reason,
-        )
-        return ForgetResult(
-            image_id=image_id,
-            image_memories=len(occurrences),
-            episodes=[ref.entry_id for ref in written],
-            profiles=profiles,
-            pictures=[
+    async def _record_messages(self, plan: ForgetPlan, forget_id: str) -> None:
+        for session, ids in plan.messages.items():
+            await self._stores.message_forget.record(session, ids, forget_id=forget_id)
+
+    async def _member_record(self, scope: Scope, identity: Identity) -> GroupRecord:
+        """The group, for a current member; a stranger is refused before anything."""
+        record = await self._stores.groups.get(scope)
+        if record is None or not record.roster.is_current_member(
+            identity.asker_id or ""
+        ):
+            raise ForbiddenError(
+                f"the asker is not a current member of group {scope.owner_id!r}"
+            )
+        return record
+
+    async def _settle(self, scope: Scope, sessions: list[str]) -> None:
+        """Let a cut in progress finish, then wait for the conversations'
+        extractions."""
+        for session_id in sessions:
+            key = session_key(scope.app_id, scope.project_id, session_id)
+            try:
+                async with LOCKS.hold("session", key, max_wait=self._wait):
+                    pass
+            except TimeoutError:
+                raise SessionBusyError(
+                    "a conversation of the forget is being memorized; nothing was "
+                    "forgotten, retry later"
+                ) from None
+        left = await self._extractions.settle(sessions, _SETTLE_SECONDS)
+        if left:
+            logger.warning("memory.forget_extractions_running", running=left)
+
+    # ── undo ─────────────────────────────────────────────────────────────
+
+    async def undo(
+        self, *, scope: Scope, identity: Identity, forget_id: str
+    ) -> UndoResult:
+        """Reverse the forget ``forget_id`` of ``scope``'s owner.
+
+        Inside a group the undo takes the forget's own authorisation.
+
+        Raises:
+            InvalidInputError: No asker inside a group.
+            ForbiddenError: Not allowed the forget it reverses.
+            NotFoundError: The owner has no forget of that id.
+            ConflictError: A later change replaced what this forget wrote.
+        """
+        group = scope.owner_type == "group"
+        if group and identity.asker_id is None:
+            raise InvalidInputError("asker_id is required for a group undo")
+        async with forget_lock(scope):
+            record = await self._member_record(scope, identity) if group else None
+            entry = await self._stores.forget_log.get(forget_id)
+            if (
+                entry is None
+                or entry.owner_type != scope.owner_type
+                or entry.owner_id != scope.owner_id
+                or entry.app_id != scope.app_id
+                or entry.project_id != scope.project_id
+                or (group and entry.undo is None)
+            ):
+                where = "in the group" if group else f"of user {scope.owner_id!r}"
+                raise NotFoundError(f"no forget {forget_id!r} {where}")
+            if record is not None:
+                authorize_forget(
+                    record.roster,
+                    identity.asker_id,
+                    sources=(entry.undo or {}).get("sources") or [],
+                )
+            return await self._undoer.undo(scope, entry)
+
+    async def undo_picture(self, *, scope: Scope, image_id: str) -> UndoResult:
+        """Undo the newest live forget of one picture of a user (the legacy
+        undo body).
+
+        A picture that was never forgotten is not an error: the answer says
+        nothing was undone and names the occurrences that are current, which
+        is what a caller retrying an undo after a timeout needs to see; the
+        file's status is cleared all the same (a forget whose log write
+        failed leaves it set).
+        """
+        undone = await self._undo_latest(scope, "image", image_id)
+        if undone is not None:
+            return undone
+        await self._stores.images.restore(image_id)
+        current = [
+            row
+            for row in await self._stores.image_memory.read_by_image(scope, image_id)
+            if row.item.superseded_by is None
+        ]
+        return UndoResult(
+            forget_id="",
+            applied=False,
+            pictures=tuple(
                 ForgottenPicture(
-                    entry_id=hit.stored.ref.entry_id,
-                    image_id=image_id,
-                    name=getattr(hit.stored.item, "name", "") or "",
+                    entry_id=row.ref.entry_id, image_id=image_id, name=row.item.name
                 )
-                for hit in occurrences
-            ],
-            forget_id=entry.forget_id,
-            replaced_episodes=[stored.ref.entry_id for stored in referring],
-            scenes=[ref.entry_id for _, ref in scenes],
-            replaced_scenes=[old.ref.entry_id for old, _ in scenes],
-            profile_items=removed_item_ids(profile_removed),
+                for row in current
+            ),
         )
 
-    # ── steps ──────────────────────────────────────────────────────────────
+    async def undo_session(self, *, scope: Scope, session_id: str) -> UndoResult:
+        """Undo the newest live forget of one conversation of a user (the
+        legacy undo body); ``applied`` is false when there is none."""
+        undone = await self._undo_latest(scope, "session", session_id)
+        return undone or UndoResult(forget_id="", applied=False)
 
-    async def _mark_memories(
-        self, scope: Scope, memories: Sequence[Stored[object]]
-    ) -> int:
-        """Set ``deprecated_by`` on every picture memory about ``image_id``.
-
-        The marker is always :data:`FORGET_REASON`, never the caller's free-text
-        reason: ``deprecated_by`` answers "what replaced this", and a reason
-        string in that column would be indistinguishable from a successor's
-        entry id — the reader would look for an entry that does not exist. The
-        caller's reason belongs in the log line, where it is.
-
-        One call for all occurrences: the store groups them by file, so a day
-        with ten pictures in it costs one rewrite rather than ten.
-        """
-        entries = [(stored.ref.md_path, stored.ref.entry_id) for stored in memories]
-        if not entries:
-            return 0
-        await self._stores.image_memory.deprecate(
-            scope,
-            entries=entries,
-            replaced_by=FORGET_REASON,
-            only_if=_always,
-        )
-        return len(entries)
-
-    async def _forget_profile(
-        self, scope: Scope, image_id: str
-    ) -> tuple[tuple[str, dict[str, object]], ...]:
-        """Take what rested on this picture alone out of ``user.md``.
-
-        A profile item records the pictures that established it. The item goes
-        only when every one of them is forgotten (see
-        :func:`profile_items.forget_images`); a fact a photo and a sentence
-        both established keeps the sentence's ground and stays. An item with no
-        picture source is never touched, which is why a forget cannot quietly
-        erase a text-derived fact. A replaced value in the profile's history
-        goes by the same rule, so the picture surfaces from neither.
-
-        The document is rewritten in place. What makes the removal reversible
-        is the forget log, which keeps every removed item and replaced value
-        for the undo to merge back -- so the list is logged here at info level
-        and the caller's own response carries the item count.
-        """
-        existing = await self._stores.profile.read(scope)
-        next_profile, removed, count = profile_items.forget_images(existing, [image_id])
-        if not removed or next_profile is None:
-            return ()
-        await self._stores.profile.write(scope, next_profile)
-        logger.info(
-            "memory.images.profile_forgotten",
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            image_id=image_id,
-            removed=count,
-            history=sum(1 for bucket, _ in removed if bucket == "history"),
-            buckets=[bucket for bucket, _ in removed],
-        )
-        return tuple(removed)
-
-    async def _referring_episodes(
-        self, scope: Scope, image_id: str
-    ) -> list[Stored[Episode]]:
-        """The owner's current episodes whose body references ``image_id``.
-
-        The index has no full-text predicate for "mentions this id", so the
-        owner's current episodes are read and filtered in process. That is
-        linear in the owner's episode count, which is what the scan cap bounds.
-        """
-        hits = await self._indexes.episode.find(
-            _current(scope), limit=_EPISODE_SCAN_CAP
-        )
-        # Match on the *id*, not on one spelling of the reference: the episode
-        # call writes ``(img-1: <id>)`` for a picture it read, and a body may
-        # keep the conversation's ``[IMAGE: <id>]``; both are the same
-        # picture. The hash is 64 hex
-        # characters of an identity, so a substring hit is a reference, not a
-        # coincidence.
-        return [
-            hit.stored
-            for hit in hits
-            if image_id in hit.stored.item.episode
-            or image_id in hit.stored.item.summary
-        ]
-
-    async def _rewrite_episodes(
-        self, scope: Scope, referring: Sequence[Stored[Episode]], image_id: str
-    ) -> list[MemoryRef]:
-        """Write one superseding version per referring episode, without the picture.
-
-        The old version stays in markdown and its index row stays too -- marked
-        ``deprecated_by`` the new entry -- because the store keeps superseded
-        memories on purpose. What changes is which one a default search returns.
-        """
-        rewrites = [
-            stored.item.model_copy(
-                update={
-                    "episode": _strip_reference(stored.item.episode, image_id),
-                    "summary": _strip_reference(stored.item.summary, image_id),
-                    # The reference list follows the body: a version that no
-                    # longer names the picture must not claim to refer to it,
-                    # or a reader would try to resolve a picture the episode
-                    # was deliberately rewritten without.
-                    "image_ids": [
-                        kept for kept in stored.item.image_ids if kept != image_id
-                    ],
-                }
+    async def _undo_latest(
+        self, scope: Scope, target: Literal["image", "session"], target_id: str
+    ) -> UndoResult | None:
+        async with forget_lock(scope):
+            entry = await self._stores.forget_log.latest_live(
+                target=target,
+                target_id=target_id,
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=scope.owner_id,
+                owner_type=scope.owner_type,
             )
-            for stored in referring
-        ]
-        if not rewrites:
-            return []
-        refs = await self._stores.episode.append_many(scope, rewrites, only_if=_always)
-        # One deprecation call per old entry: each old version is superseded by
-        # its own new one, not by a single shared entry, so the chain of
-        # versions stays readable.
-        for stored, ref in zip(referring, refs, strict=True):
-            await self._stores.episode.deprecate(
-                scope,
-                entries=[(stored.ref.md_path, stored.ref.entry_id)],
-                replaced_by=ref.entry_id,
-                only_if=_always,
+            if entry is None:
+                return None
+            return await self._undoer.undo(scope, entry)
+
+
+def plan_result(
+    plan: ForgetPlan,
+    *,
+    forget_id: str,
+    dry_run: bool,
+    applied: Applied | None = None,
+) -> ForgetResult:
+    """What a forget answers: the plan, and what the run wrote."""
+    scope = plan.scope
+
+    def rows(entry_ids: Iterable[str]) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(memory_id(scope, e) for e in entry_ids))
+
+    if plan.is_group:
+        scenes = [v.ref.entry_id for e in plan.scenes for v in e.versions]
+    else:
+        scenes = [e.current.ref.entry_id for e in plan.scenes if e.current]
+        scenes += (
+            [row[1] for row in applied.orphaned]
+            if applied is not None
+            else [s.ref.entry_id for s in plan.orphaned]
+        )
+    items, stale, count = _profile_answer(plan, applied)
+    written = applied.written if applied is not None else {}
+    return ForgetResult(
+        forget_id=forget_id,
+        dry_run=dry_run,
+        target=plan.target,
+        messages=tuple(
+            (session.session_id, message_id)
+            for session, ids in plan.messages.items()
+            for message_id in ids
+        ),
+        episodes=rows(
+            [
+                *(r.old.ref.entry_id for r in plan.rewrites),
+                *(e.ref.entry_id for e in plan.episodes),
+            ]
+        ),
+        new_episodes=rows(row[3] for row in written.get("episode", [])),
+        rewritten=len(plan.rewrites)
+        if applied is None
+        else len(written.get("episode", [])),
+        image_memories=rows(m.ref.entry_id for m in plan.image_memories),
+        pictures=tuple(
+            ForgottenPicture(
+                entry_id=m.ref.entry_id,
+                image_id=m.item.image_id,
+                name=m.item.name or "",
             )
-        return refs
-
-    async def _rewrite_scenes(
-        self, scope: Scope, image_id: str
-    ) -> list[tuple[Stored[Scene], MemoryRef]]:
-        """A new version, without the picture, of each scene that names it.
-
-        Only a user's current versions: a superseded or forgotten one is out
-        of every default read already. The edit is the episodes' own, under
-        the owner's scene lock, so a scene update in flight finishes first.
-        Returns each replaced version with the new one's ref.
-        """
-        if scope.owner_type != "user":
-            return []
-        written: list[tuple[Stored[Scene], MemoryRef]] = []
-        async with scenes_lock(scope):
-            for version, mark in await newest_versions(self._stores.scene, scope):
-                scene = version.item
-                if mark is not None or (
-                    image_id not in scene.narrative and image_id not in scene.summary
-                ):
-                    continue
-                ref = await self._stores.scene.append(
-                    scope,
-                    scene.model_copy(
-                        update={
-                            "version": scene.version + 1,
-                            "narrative": _strip_reference(scene.narrative, image_id),
-                            "summary": _strip_reference(scene.summary, image_id),
-                        }
-                    ),
-                    supersedes=version,
-                    only_if=_always,
-                )
-                if ref is not None:
-                    written.append((version, ref))
-        return written
-
-
-def _strip_reference(text: str, image_id: str) -> str:
-    """Remove every reference to ``image_id`` and the empty brackets it leaves.
-
-    The two spellings in use are ``(img-1: <id>)`` from the picture extractor
-    and ``[IMAGE: <id>]`` from a text-only render. Stripping only the id would
-    leave ``(img-1: )`` or ``[IMAGE: ]`` inside a sentence, so each shape is
-    removed whole, outermost first.
-    """
-    if image_id not in text:
-        return text
-    cleaned = text.replace(f"[IMAGE: {image_id}]", "")
-    for span in _parenthesised(text):
-        if image_id in span:
-            cleaned = cleaned.replace(span, "")
-    # A reference that stood alone in its own parentheses leaves ``()``; drop
-    # the empty pair and the space that separated it, so the sentence reads as
-    # if the picture were never named. The same pass closes up the space the
-    # removed reference left before the punctuation that followed it
-    # ("the signboard ." -> "the signboard."), which is otherwise visible to
-    # anyone reading the rewritten episode.
-    spaced = " ".join(cleaned.replace("()", "").split())
-    return _before_punctuation.sub(r"\1", spaced)
-
-
-_before_punctuation = re.compile(r"\s+([.,;:!?])")
-"""A space immediately before sentence punctuation, left by a removal."""
-
-
-def _parenthesised(text: str) -> list[str]:
-    """Every ``(...)`` span in ``text``, outermost and balanced.
-
-    A plain scan, not a regular expression: references nest nothing today, but
-    a description may itself contain parentheses, and a greedy match would eat
-    from the first ``(`` in the paragraph to the reference's ``)``.
-    """
-    spans: list[str] = []
-    depth = 0
-    start = 0
-    for index, char in enumerate(text):
-        if char == "(":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == ")" and depth:
-            depth -= 1
-            if depth == 0:
-                spans.append(text[start : index + 1])
-    return spans
-
-
-async def _always() -> bool:
-    """``only_if`` for a write with no deletable source: the forget is the source."""
-    return True
-
-
-def _by_image(scope: Scope, image_id: str) -> Filter:
-    """The owner's picture memories about one file."""
-    return all_of(
-        eq("owner_id", scope.owner_id),
-        eq("app_id", scope.app_id),
-        eq("project_id", scope.project_id),
-        eq("image_id", image_id),
+            for m in plan.image_memories
+        ),
+        images=tuple(plan.files),
+        scenes=rows(scenes),
+        new_scenes=rows(row[3] for row in written.get("scene", [])),
+        rewritten_scenes=sum(
+            1 for e in plan.scenes if e.members or (e.image_id and e.current)
+        )
+        if applied is None
+        else len(written.get("scene", [])),
+        profiles=tuple(plan.members_removed),
+        profile_items=items,
+        profile_item_count=count,
+        stale_profile_items=stale,
+        group_profile_items=rows(s.ref.entry_id for s in plan.group_forgotten),
+        stale_group_profile_items=rows(s.ref.entry_id for s in plan.group_stale),
     )
 
 
-def _current(scope: Scope) -> Filter:
-    """The owner's live episodes, across every session.
+def _profile_answer(
+    plan: ForgetPlan, applied: Applied | None
+) -> tuple[tuple[str, ...], tuple[str, ...], int]:
+    """``(forgotten ids, stale ids, items)`` of the profile edits.
 
-    Scene versions share the episode table; they are rewritten as scenes
-    (:meth:`ForgetManager._rewrite_scenes`), never as episodes.
+    A user's answer names every value taken out of ``user.md``, items and
+    replaced values; a group's names the forgotten items (and the replaced
+    values a record target named) apart from the stale ones.
     """
-    return all_of(
-        eq("owner_id", scope.owner_id),
-        eq("owner_type", scope.owner_type),
-        eq("app_id", scope.app_id),
-        eq("project_id", scope.project_id),
-        is_null("deprecated_by"),
-        ne("parent_type", "scene"),
-    )
+    forgotten: list[str] = []
+    stale: list[str] = []
+    count = 0
+    if applied is not None:
+        for change in applied.profiles:
+            count += len(change["items"])
+            if plan.is_group:
+                forgotten += change.get("forgotten") or []
+                stale += change.get("stale") or []
+                continue
+            values = [item for _b, _n, item in change["items"]]
+            values += [entry for _n, entry in change["history"]]
+            forgotten += [
+                str(v["item_id"]) for v in values if isinstance(v.get("item_id"), str)
+            ]
+    else:
+        for edit in plan.profiles:
+            count += len(edit.items)
+            forgotten += edit.forgotten
+            stale += edit.stale
+            if not plan.is_group:
+                forgotten += edit.history_ids
+    return tuple(dict.fromkeys(forgotten)), tuple(dict.fromkeys(stale)), count
+
+
+def _mint_forget_id() -> str:
+    """A new forget's id (``fg_<16 hex>``), minted before anything is recorded."""
+    return f"fg_{uuid.uuid4().hex[:16]}"

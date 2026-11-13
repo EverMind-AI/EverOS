@@ -17,14 +17,15 @@ is remembered in exactly one space (docs/group-memory.md, D3):
   code sets the attribution (``sender_ids`` / ``subject_ids`` / ``origin``)
   and the segment's span, which every read compares with the asker's
   membership windows. A picture memory is dated by the message that carried
-  it and attributed to its poster (section 7.3). A message forgotten while it
-  waited in the buffer is not read (section 9.4); a forget of a segment
-  already extracted re-runs the same call through
-  :meth:`ConversationPipeline.reextract` and writes nothing itself.
+  it and attributed to its poster (section 7.3).
 * **A user's own** -- a one-to-one conversation (one person and the
   assistant): the episode goes under ``users/<sender>/``, the prompt is
   everalgo's episode prompt byte for byte and the conversation alone, and
   the picture memories are dated by the segment (section 10).
+
+In either space a message forgotten while it waited in the buffer is not read
+(section 9.4), and a forget of a segment already extracted re-runs the same
+call through :meth:`ConversationPipeline.reextract`, which writes nothing.
 
 Every cell is extracted by one call (:mod:`.episode`) and one prompt: the
 episode and, when the cell carries pictures, one record per picture, in a
@@ -159,8 +160,8 @@ class ConversationPipeline:
             ``image_store``.
         image_limits: ``[images]`` — the size a picture is scaled to before the
             model sees it.
-        message_forget: Which messages of a group's segments are forgotten; a
-            group cell is extracted without them. ``None`` reads every message.
+        message_forget: Which messages of a session are forgotten; a cell is
+            extracted without them. ``None`` reads every message.
     """
 
     def __init__(
@@ -232,7 +233,11 @@ class ConversationPipeline:
                     owner_type="user",
                 )
             )
-            cell = prepared.cell
+            # A message its owner forgot while it waited in the buffer is not
+            # read either; a cell that lost every text message to it is left.
+            cell = await self._readable(prepared.memcell_id, prepared.cell)
+            if cell is not prepared.cell and not _has_text(cell):
+                return CellOutcome(message_count=message_count)
         found = await self._extract_segment(
             space, session, prepared.memcell_id, cell, senders=prepared.sender_ids
         )
@@ -247,17 +252,25 @@ class ConversationPipeline:
         )
 
     async def reextract(
-        self, *, scope: Scope, session_id: str, memcell_id: str, cell: MemCell
+        self,
+        *,
+        scope: Scope,
+        session_id: str,
+        memcell_id: str,
+        cell: MemCell,
+        senders: Sequence[str] = (),
     ) -> Episode | None:
-        """A group segment's episode, extracted again from ``cell``; not written.
+        """A segment's episode, extracted again from ``cell``; not written.
 
-        The call :meth:`run_cell` makes in a group -- speaker labels, the
-        roster block, the conversation's language, the pictures ``cell``
-        still carries -- over a segment a forget changed: ``cell`` is the
+        The call :meth:`run_cell` makes in the segment's space -- a group's
+        (speaker labels, the roster block) or a user's own (the one-to-one
+        call) -- in the conversation's language, with the pictures ``cell``
+        still carries, over a segment a forget changed: ``cell`` is the
         stored segment without what was forgotten
-        (:func:`~everos.memory.groups.without_forgotten`). The pictures'
-        descriptions the call returns again are dropped: their memories were
-        never made of the forgotten message.
+        (:func:`~everos.memory.groups.without_forgotten`). ``senders`` are a
+        user's episode's senders, which it keeps. The pictures' descriptions
+        the call returns again are dropped: their memories were never made
+        of the forgotten message.
 
         Returns:
             The new episode version, or ``None`` when ``cell`` holds no text
@@ -265,9 +278,15 @@ class ConversationPipeline:
         """
         if not _has_text(cell):
             return None
-        space = await self._group_space(scope, cell)
+        space = (
+            await self._group_space(scope, cell)
+            if scope.owner_type == "group"
+            else _Space(scope=scope)
+        )
         session = SessionKey(scope.app_id, scope.project_id, session_id)
-        found = await self._extract_segment(space, session, memcell_id, cell)
+        found = await self._extract_segment(
+            space, session, memcell_id, cell, senders=senders
+        )
         return found.episode
 
     async def _group_space(self, scope: Scope, cell: MemCell) -> _Space:
@@ -282,7 +301,8 @@ class ConversationPipeline:
         return _Space(scope=scope, group=record.group, roster=record.roster)
 
     async def _readable(self, memcell_id: str, cell: MemCell) -> MemCell:
-        """A group cell without the messages a live forget names."""
+        """A cell without the messages a live forget names (``cell`` itself
+        when none is)."""
         if self._message_forget is None:
             return cell
         forgotten = await self._message_forget.forgotten_in_segments([memcell_id])

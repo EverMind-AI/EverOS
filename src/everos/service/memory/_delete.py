@@ -30,16 +30,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
+from everos.memory.access import Identity
 from everos.memory.ports import Scope
 
-from ._user_forget import UserForgetManager, UserForgetResult, UserForgetTarget
+from ._forget_models import ForgetResult, ForgetTarget
 
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
 
+    from ._forget import ForgetManager
+
 logger = get_logger("everos.service.memory")
 
 _MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
+
+_NOBODY = Identity(asker_id=None)
+"""A delete names no asker: the forget log records none."""
 
 
 @dataclass(frozen=True)
@@ -63,10 +69,10 @@ class DeleteAlias:
 
     Args:
         stores: Where the owners of a conversation are found.
-        forgetter: The user's forget, which does the work.
+        forgetter: The forget engine, which does the work.
     """
 
-    def __init__(self, *, stores: Stores, forgetter: UserForgetManager) -> None:
+    def __init__(self, *, stores: Stores, forgetter: ForgetManager) -> None:
         self._stores = stores
         self._forgetter = forgetter
 
@@ -102,13 +108,17 @@ class DeleteAlias:
             ]
             filters = ["user_id"] if session_id is None else ["user_id", "session_id"]
         target = (
-            UserForgetTarget(kind="owner")
+            ForgetTarget(kind="owner")
             if session_id is None
-            else UserForgetTarget(kind="session", session_id=session_id)
+            else ForgetTarget(kind="session", session_id=session_id)
         )
         done = [
             await self._forgetter.forget(
-                scope=scope, target=target, reason="delete", dry_run=False
+                scope=scope,
+                identity=_NOBODY,
+                target=target,
+                reason="delete",
+                dry_run=False,
             )
             for scope in owners
         ]
@@ -158,7 +168,8 @@ class DeleteAlias:
                     owner_id=owner_id,
                     owner_type="user",
                 ),
-                target=UserForgetTarget(kind="record", record_ids=tuple(entry_ids)),
+                identity=_NOBODY,
+                target=ForgetTarget(kind="record", record_ids=tuple(entry_ids)),
                 reason=reason_code or "delete",
                 dry_run=False,
                 strict=False,
@@ -174,7 +185,7 @@ class DeleteAlias:
         return tuple(forget_ids)
 
 
-def _count(result: UserForgetResult) -> int:
+def _count(result: ForgetResult) -> int:
     """Memories one forget took out of default reads."""
     return (
         len(result.episodes)

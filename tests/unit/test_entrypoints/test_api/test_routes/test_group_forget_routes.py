@@ -27,8 +27,8 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.service import GroupForgetResult, GroupForgetTarget, GroupUndoResult
-from everos.service.memory import DeleteResult, ForgetResult
+from everos.service import ForgetResult, ForgetTarget, UndoResult
+from everos.service.memory import DeleteResult
 from tests.fakes import StubMemoryService, make_application
 
 _HASH = "ab" * 32
@@ -37,7 +37,7 @@ _HASH = "ab" * 32
 @pytest.fixture
 def memory() -> StubMemoryService:
     stub = StubMemoryService()
-    stub.forget_in_group.side_effect = lambda **kw: GroupForgetResult(
+    stub.forget_in_group.side_effect = lambda **kw: ForgetResult(
         forget_id="" if kw["dry_run"] else "fg_0123456789abcdef",
         dry_run=kw["dry_run"],
         target=kw["target"],
@@ -46,11 +46,11 @@ def memory() -> StubMemoryService:
         rewritten=1,
         new_episodes=() if kw["dry_run"] else ("trip_gep_20261111_00000002",),
     )
-    stub.undo_group_forget.return_value = GroupUndoResult(
+    stub.undo_group_forget.return_value = UndoResult(
         forget_id="fg_0123456789abcdef",
         applied=True,
         episodes=("trip_gep_20261111_00000001",),
-        withdrawn=("trip_gep_20261111_00000002",),
+        retired=("trip_gep_20261111_00000002",),
     )
     return stub
 
@@ -71,27 +71,23 @@ def _body(target: dict[str, Any], **extra: Any) -> dict[str, Any]:
     [
         (
             {"kind": "message", "session_id": "s1", "message_ids": ["m-1", "m-2"]},
-            GroupForgetTarget(
-                kind="message", session_id="s1", message_ids=("m-1", "m-2")
-            ),
+            ForgetTarget(kind="message", session_id="s1", message_ids=("m-1", "m-2")),
         ),
         (
             {"kind": "member", "member_id": "u_betty"},
-            GroupForgetTarget(kind="member", member_id="u_betty"),
+            ForgetTarget(kind="member", member_id="u_betty"),
         ),
         (
             {"kind": "session", "session_id": "s1"},
-            GroupForgetTarget(kind="session", session_id="s1"),
+            ForgetTarget(kind="session", session_id="s1"),
         ),
         (
             {"kind": "record", "record_ids": ["trip_gep_20261111_00000001"]},
-            GroupForgetTarget(
-                kind="record", record_ids=("trip_gep_20261111_00000001",)
-            ),
+            ForgetTarget(kind="record", record_ids=("trip_gep_20261111_00000001",)),
         ),
         (
             {"kind": "image", "image_id": _HASH},
-            GroupForgetTarget(kind="image", image_id=_HASH),
+            ForgetTarget(kind="image", image_id=_HASH),
         ),
     ],
 )
@@ -99,7 +95,7 @@ async def test_every_target_reaches_the_group_forget(
     client: AsyncClient,
     memory: StubMemoryService,
     target: dict[str, Any],
-    expected: GroupForgetTarget,
+    expected: ForgetTarget,
 ) -> None:
     response = await client.post(
         "/api/v2/memory/forget",
@@ -144,7 +140,9 @@ async def test_a_personal_body_is_still_the_picture_forget(
     client: AsyncClient, memory: StubMemoryService
 ) -> None:
     memory.forget_image.return_value = ForgetResult(
-        image_id=_HASH, image_memories=0, episodes=[], profiles=0
+        forget_id="fg_0123456789abcdef",
+        dry_run=False,
+        target=ForgetTarget(kind="image", image_id=_HASH),
     )
     response = await client.post(
         "/api/v2/memory/forget", json={"user_id": "me", "image_id": _HASH}
@@ -219,10 +217,10 @@ async def test_a_group_delete_answers_with_its_forget(
 ) -> None:
     memory.delete_in_group.return_value = (
         DeleteResult(filters=["group_id", "session_id"], count=3),
-        GroupForgetResult(
+        ForgetResult(
             forget_id="fg_0123456789abcdef",
             dry_run=False,
-            target=GroupForgetTarget(kind="session", session_id="s1"),
+            target=ForgetTarget(kind="session", session_id="s1"),
         ),
     )
     response = await client.post(

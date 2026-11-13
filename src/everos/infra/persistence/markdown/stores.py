@@ -277,44 +277,20 @@ class _DailyLogStore[T]:
                     found.append((md_path, entry, marks.get(entry.id)))
         return found
 
-    # ── Deletion ──────────────────────────────────────────────────────────
+    # ── Marks ─────────────────────────────────────────────────────────────
 
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id`` from every file of this kind.
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the entry they retire."""
+        return await _deprecations(self._root.root / md_path)
 
-        The caller deleted the session's memcells first. Taking the owner lock
-        once then waits out every write that passed its source check before
-        that; any later one finds its memcell gone. So the files can be
-        scanned without the lock, and each match is re-read and rewritten
-        under it. An entry matches on its parsed ``session_id`` field, never
-        on a text prefix (``s1`` does not match ``s10``).
-        """
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            pass
-        needle = f"**session_id**: {session_id}"
-        removed: list[MemoryRef] = []
-        for path in await self._files_mentioning(scope, needle):
-            removed += await self._rewrite(
-                scope,
-                path,
-                lambda e: e.as_structured().inline.get("session_id") == session_id,
-            )
-        return removed
-
-    async def _rewrite(
-        self, scope: Scope, path: Path, drop: Callable[[Entry], bool]
-    ) -> list[MemoryRef]:
-        """Remove the selected entries of one file under the owner lock."""
-        key = owner_lock(scope)
-        async with LOCKS.hold("owner", key):
-            removed = await self._writer_for(scope).remove_entries(path, drop)
-            if removed:
-                LOCKS.bump_delete_count(key)
-        md_path = _relative(self._root, path)
-        return [
-            MemoryRef(id=f"{scope.owner_id}_{eid}", entry_id=eid, md_path=md_path)
-            for eid in removed
-        ]
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from every file's ``deprecated_entries`` of this kind."""
+        wanted = set(keys)
+        for path in await self._daily_files(scope):
+            if not (await _deprecations(path)).keys() & wanted:
+                continue
+            async with LOCKS.hold("owner", owner_lock(scope)):
+                await self._writer_for(scope).drop_deprecations(path, wanted)
 
     async def entries_for_session(
         self, scope: Scope, session_id: str
@@ -524,31 +500,6 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             item=_episode_from_entry(entry, owner_id=scope.owner_id),
         )
 
-    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
-        """Remove these entries; each file is rewritten under the owner lock."""
-        by_path: dict[Path, set[str]] = defaultdict(set)
-        for entry_id in entry_ids:
-            path = self._path_of(scope, entry_id)
-            if path is not None:
-                by_path[path].add(entry_id)
-        removed: list[MemoryRef] = []
-        for path, ids in sorted(by_path.items()):
-            removed += await self._rewrite(scope, path, lambda e, ids=ids: e.id in ids)
-        return removed
-
-    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
-        """One file's supersession marks, keyed by the entry they retire."""
-        return await _deprecations(self._root.root / md_path)
-
-    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
-        """Drop ``keys`` from every episode file's ``deprecated_entries``."""
-        wanted = set(keys)
-        for path in await self._daily_files(scope):
-            if not (await _deprecations(path)).keys() & wanted:
-                continue
-            async with LOCKS.hold("owner", owner_lock(scope)):
-                await self._writer_for(scope).drop_deprecations(path, wanted)
-
     async def _entries(self, scope: Scope, entry_ids: Collection[str]) -> list[Entry]:
         return [entry for _, entry in await self._entries_with_paths(scope, entry_ids)]
 
@@ -629,26 +580,6 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
         return await self._deprecate(
             scope, entries=entries, replaced_by=replaced_by, only_if=only_if
         )
-
-    async def undeprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        """Drop the supersession marks of ``(md_path, entry_id)`` pairs."""
-        by_file: dict[str, set[str]] = defaultdict(set)
-        for md_path, entry_id in entries:
-            by_file[md_path].add(entry_id)
-        async with LOCKS.hold("owner", owner_lock(scope)):
-            if not await self._sources_alive(scope, only_if, len(entries)):
-                return False
-            for md_path, keys in by_file.items():
-                await self._writer_for(scope).drop_deprecations(
-                    self._root.root / md_path, keys
-                )
-        return True
 
     async def entries_for_session(
         self, scope: Scope, session_id: str
@@ -814,10 +745,6 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                 )
             )
         return found
-
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Drop the owner's picture memories of one session from markdown."""
-        return await super().remove_session(scope, session_id)
 
 
 class MarkdownProfileStore:
@@ -1069,41 +996,6 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
         return await self._deprecate(
             scope, entries=entries, replaced_by=replaced_by, only_if=only_if
         )
-
-    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
-        """One file's marks, keyed by the version they retire."""
-        return await _deprecations(self._root.root / md_path)
-
-    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
-        """Drop ``keys`` from every scene file's ``deprecated_entries``."""
-        wanted = set(keys)
-        for path in await self._daily_files(scope):
-            if not (await _deprecations(path)).keys() & wanted:
-                continue
-            async with LOCKS.hold("owner", owner_lock(scope)):
-                await self._writer_for(scope).drop_deprecations(path, wanted)
-
-    async def remove_naming(
-        self, scope: Scope, episode_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        """Remove every version whose ``member_ids`` include one of ``episode_ids``.
-
-        Only the files that mention one of the ids are rewritten, each under
-        the owner lock; an entry matches on its parsed member list, never on
-        a text prefix.
-        """
-        wanted = set(episode_ids)
-        if not wanted:
-            return []
-
-        def names_one(entry: Entry) -> bool:
-            members = _list_field(entry.as_structured().inline.get("member_ids"))
-            return bool(wanted.intersection(members))
-
-        removed: list[MemoryRef] = []
-        for path in await self._files_mentioning(scope, *sorted(wanted)):
-            removed += await self._rewrite(scope, path, names_one)
-        return removed
 
 
 class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):

@@ -6,11 +6,10 @@ with one narrative written over them, ending on where things stand
 is one capped call each time episodes join the scene (``chat.scene_update``,
 :mod:`.prompt`, made through :class:`SceneNarrator`); what it reads is each
 member's current version (:mod:`.members`); a version's span, attribution
-and origin come from its members (:mod:`.version`); a user's forget, its undo
-and a deletion reach the scene through its episodes (:mod:`.forget`), and a
-forget inside a group writes the scene again through the same narrator. The
-prompt lives in EverOS until an everalgo operator takes over the same
-registry id.
+and origin come from its members (:mod:`.version`); a user's forget and its
+undo reach the scene through its episodes (:mod:`.forget`), and a forget
+inside a group writes the scene again through the same narrator. The prompt
+lives in EverOS until an everalgo operator takes over the same registry id.
 
 External usage::
 
@@ -21,7 +20,6 @@ from __future__ import annotations
 
 from .forget import forget_orphaned_scenes as forget_orphaned_scenes
 from .forget import newest_versions as newest_versions
-from .forget import remove_scenes_naming as remove_scenes_naming
 from .forget import restore_revived_scenes as restore_revived_scenes
 from .members import alive_members as alive_members
 from .members import current_versions as current_versions
@@ -51,7 +49,6 @@ __all__ = [
     "forget_orphaned_scenes",
     "narrative_char_cap",
     "newest_versions",
-    "remove_scenes_naming",
     "reply_token_cap",
     "restore_revived_scenes",
     "scene_cluster_kind",

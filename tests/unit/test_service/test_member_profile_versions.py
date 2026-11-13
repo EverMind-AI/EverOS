@@ -29,7 +29,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.memory.strategies import UPDATE_MEMBER_PROFILES_SPEC
-from everos.service import GetRequest, GroupForgetTarget, SearchRequest
+from everos.service import ForgetTarget, GetRequest, SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join
 
 T0 = 1_772_323_200_000
@@ -183,7 +183,7 @@ async def test_a_member_who_joined_later_sees_no_version(world: GroupWorld) -> N
 async def test_a_forgotten_value_is_never_shown_as_previous(
     world: GroupWorld,
 ) -> None:
-    async def forget(target: GroupForgetTarget) -> Any:
+    async def forget(target: ForgetTarget) -> Any:
         result = await world.memory.forget_in_group(
             app_id=APP,
             project_id=PROJECT,
@@ -205,9 +205,7 @@ async def test_a_forgotten_value_is_never_shown_as_previous(
         await world.project()
 
     # The message that stated the old value.
-    message = GroupForgetTarget(
-        kind="message", session_id="s_trip", message_ids=("m-1",)
-    )
+    message = ForgetTarget(kind="message", session_id="s_trip", message_ids=("m-1",))
     result = await forget(message)
     item = await _betty(world, "u_chen")
     assert item["description"] == "Lives in Berlin"
@@ -220,8 +218,8 @@ async def test_a_forgotten_value_is_never_shown_as_previous(
 
     # The old value by its own id, as a read lists it. The message stays.
     old_id = (await _betty(world, "u_chen"))["previous"][0]["item_id"]
-    result = await forget(GroupForgetTarget(kind="record", record_ids=(old_id,)))
-    assert result.member_profile_items == (old_id,)
+    result = await forget(ForgetTarget(kind="record", record_ids=(old_id,)))
+    assert result.profile_items == (old_id,)
     assert "previous" not in await _betty(world, "u_chen")
     assert "Paris" not in await _search(world, "u_chen", "profiles")
     assert "I live in Paris" in await _search(world, "u_chen")

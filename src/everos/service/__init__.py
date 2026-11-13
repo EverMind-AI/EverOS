@@ -35,9 +35,9 @@ from .bootstrap import build_providers as build_providers
 from .bootstrap import configure_process as configure_process
 from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import FlushResult as FlushResult
-from .memory import GroupForgetResult as GroupForgetResult
-from .memory import GroupForgetTarget as GroupForgetTarget
-from .memory import GroupUndoResult as GroupUndoResult
+from .memory import ForgetResult as ForgetResult
+from .memory import ForgetTarget as ForgetTarget
+from .memory import ForgottenPicture as ForgottenPicture
 from .memory import GroupUpsertResult as GroupUpsertResult
 from .memory import GroupView as GroupView
 from .memory import MemorizeResult as MemorizeResult
@@ -54,10 +54,8 @@ from .memory import RosterChangeResult as RosterChangeResult
 from .memory import RosterEventInput as RosterEventInput
 from .memory import TaskItem as TaskItem
 from .memory import TaskPage as TaskPage
+from .memory import UndoResult as UndoResult
 from .memory import UpdateResult as UpdateResult
-from .memory import UserForgetResult as UserForgetResult
-from .memory import UserForgetTarget as UserForgetTarget
-from .memory import UserUndoResult as UserUndoResult
 from .ops import BACKFILL_PHASES as BACKFILL_PHASES
 from .ops import BackfillDeps as BackfillDeps
 from .ops import BackfillOutcome as BackfillOutcome
@@ -91,12 +89,12 @@ __all__ = [
     "CascadeHealthReport",
     "CascadeStatus",
     "FlushResult",
+    "ForgetResult",
+    "ForgetTarget",
+    "ForgottenPicture",
     "GetRequest",
     "GetResponse",
-    "GroupForgetResult",
-    "GroupForgetTarget",
     "GroupProfileEntry",
-    "GroupUndoResult",
     "GroupUpsertResult",
     "GroupView",
     "HealthReport",
@@ -124,10 +122,8 @@ __all__ = [
     "SearchResponse",
     "TaskItem",
     "TaskPage",
+    "UndoResult",
     "UpdateResult",
-    "UserForgetResult",
-    "UserForgetTarget",
-    "UserUndoResult",
     "VectorsPhaseResult",
     "build_application",
     "build_providers",

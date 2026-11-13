@@ -32,9 +32,9 @@ from httpx import ASGITransport, AsyncClient
 from everos.core.errors import ForbiddenError
 from everos.entrypoints.api.app import create_app
 from everos.memory.strategies import STRATEGY_SPECS
-from everos.service import GroupForgetTarget
+from everos.service import ForgetTarget
 from tests.fakes import make_application
-from tests.helpers.groups import APP, PROJECT, GroupWorld, join, png
+from tests.helpers.groups import APP, PROJECT, GroupWorld, join, live_markdown, png
 
 T0 = 1_772_323_200_000
 WORDS = ("PETSPLEASE", "BISCUITCAT", "TABBYPHOTO")
@@ -161,14 +161,11 @@ async def _bytes_status(client: AsyncClient, image_id: str, asker: str) -> int:
 
 
 async def _markdown(world: GroupWorld) -> str:
-    return "\n".join(
-        p.read_text("utf-8")
-        for p in world.root.root.rglob("*.md")
-        if not p.relative_to(world.root.root).parts[0].startswith(".")
-    )
+    """The markdown a read can reach: marked entries left out."""
+    return "\n".join(live_markdown(world.root.root).values())
 
 
-async def _forget(world: GroupWorld, asker: str, target: GroupForgetTarget) -> Any:
+async def _forget(world: GroupWorld, asker: str, target: ForgetTarget) -> Any:
     return await world.memory.forget_in_group(
         app_id=APP, project_id=PROJECT, group_id="trip", asker_id=asker, target=target
     )
@@ -181,7 +178,7 @@ async def test_a_picture_is_forgotten_by_its_poster_and_comes_back_on_undo(
     before = await _markdown(w)
     assert WORDS[2] in before  # the picture memory and Betty's item
     assert await _bytes_status(client, image_id, "u_dan") == 200
-    target = GroupForgetTarget(kind="image", image_id=image_id)
+    target = ForgetTarget(kind="image", image_id=image_id)
     with pytest.raises(ForbiddenError):
         await _forget(w, "u_dan", target)
 
@@ -190,7 +187,7 @@ async def test_a_picture_is_forgotten_by_its_poster_and_comes_back_on_undo(
 
     assert len(result.image_memories) == 1 and result.images == (image_id,)
     assert result.rewritten == 1  # the episode, without the picture
-    assert len(result.member_profile_items) == 1  # Betty's item read off it
+    assert len(result.profile_items) == 1  # Betty's item read off it
     after = await _markdown(w)
     assert WORDS[2] not in after and image_id not in after
     assert WORDS[1] in after  # Betty's words stay: only the picture went
@@ -216,7 +213,7 @@ async def test_the_message_that_carried_a_picture_takes_it_along(
     result = await _forget(
         w,
         "u_betty",
-        GroupForgetTarget(kind="message", session_id="s_trip", message_ids=("m-2",)),
+        ForgetTarget(kind="message", session_id="s_trip", message_ids=("m-2",)),
     )
     await w.project()
 

@@ -20,12 +20,13 @@ Usage::
 
 from __future__ import annotations
 
-__all__ = ["GroupWorld", "join", "leave"]
+__all__ = ["GroupWorld", "join", "leave", "live_markdown"]
 
 import base64
 import contextlib
 import io
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,7 @@ from everos.infra.cascade import DeleteFence, FencedIndexEraser
 from everos.infra.cascade.registry import match_kind
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
+from everos.infra.persistence.markdown._base.frontmatter import parse_frontmatter
 from everos.memory.deps import MemoryDeps, Stores
 from everos.memory.models import (
     Episode,
@@ -469,6 +471,29 @@ def _markdown(root: Path) -> list[Path]:
         for p in root.rglob("*.md")
         if not p.relative_to(root).parts[0].startswith(".")
     )
+
+
+def live_markdown(root: Path) -> dict[str, str]:
+    """Every markdown file as a read can reach it, by root-relative path.
+
+    A daily log without the entries its ``deprecated_entries`` mark (forgotten,
+    or replaced by a newer version); a document whole. A forget marks rather
+    than removes, so this -- not the files' bytes -- is what must not hold
+    what was forgotten.
+    """
+    live: dict[str, str] = {}
+    for path in _markdown(root):
+        meta, body = parse_frontmatter(path.read_text("utf-8"))
+        for entry_id in meta.get("deprecated_entries") or {}:
+            name = re.escape(str(entry_id))
+            body = re.sub(
+                rf"<!-- entry:{name} -->.*?<!-- /entry:{name} -->\n?",
+                "",
+                body,
+                flags=re.S,
+            )
+        live[path.relative_to(root).as_posix()] = body
+    return live
 
 
 def b64(data: bytes) -> str:

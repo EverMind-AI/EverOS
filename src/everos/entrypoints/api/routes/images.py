@@ -59,14 +59,7 @@ from everos.entrypoints.api.schemas import (
     UserUndoForgetRequest,
     UserUndoForgetResponseData,
 )
-from everos.service import (
-    GroupForgetResult,
-    GroupForgetTarget,
-    GroupUndoResult,
-    UserForgetResult,
-    UserForgetTarget,
-    UserUndoResult,
-)
+from everos.service import ForgetResult, ForgetTarget, ForgottenPicture, UndoResult
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -129,7 +122,7 @@ async def forget(
             user_id=req.user_id,
             asker_id=req.asker_id,
             asserted_asker=asker_header,
-            target=_user_target(req),
+            target=_target(req),
             reason=req.reason,
             dry_run=req.dry_run,
         )
@@ -162,18 +155,11 @@ async def forget(
     return SuccessEnvelope(
         request_id=request_id,
         data=ForgetImageResponseData(
-            image_id=result.image_id,
-            image_memories=result.image_memories,
-            episodes=list(result.episodes),
-            profiles=result.profiles,
-            pictures=[
-                ForgottenPictureData(
-                    entry_id=picture.entry_id,
-                    image_id=picture.image_id,
-                    name=picture.name,
-                )
-                for picture in result.pictures
-            ],
+            image_id=req.image_id,
+            image_memories=len(result.image_memories),
+            episodes=_entry_ids(req.user_id, result.new_episodes),
+            profiles=result.profile_item_count,
+            pictures=_pictures(result.pictures),
         ),
     )
 
@@ -218,12 +204,12 @@ async def forget_session(
     return SuccessEnvelope(
         request_id=request_id,
         data=ForgetSessionResponseData(
-            session_id=result.session_id,
+            session_id=req.session_id,
             forget_id=result.forget_id,
-            episodes=list(result.episodes),
-            image_memories=result.image_memories,
+            episodes=_entry_ids(req.user_id, result.episodes),
+            image_memories=len(result.image_memories),
             images=list(result.images),
-            profiles=result.profiles,
+            profiles=result.profile_item_count,
         ),
     )
 
@@ -246,13 +232,13 @@ async def undo_forget_session(
     return SuccessEnvelope(
         request_id=request_id,
         data=UndoForgetSessionResponseData(
-            session_id=result.session_id,
+            session_id=req.session_id,
             forget_id=result.forget_id,
             applied=result.applied,
-            episodes=list(result.episodes),
-            image_memories=result.image_memories,
+            episodes=sorted(_entry_ids(req.user_id, result.episodes)),
+            image_memories=len(result.image_memories),
             images=list(result.images),
-            profiles=result.profiles,
+            profiles=result.profile_item_count,
         ),
     )
 
@@ -376,20 +362,13 @@ async def undo_forget(
     return SuccessEnvelope(
         request_id=request_id,
         data=UndoForgetResponseData(
-            image_id=result.image_id,
+            image_id=req.image_id,
             forget_id=result.forget_id,
             applied=result.applied,
-            image_memories=result.image_memories,
-            episodes=list(result.episodes),
-            profiles=result.profiles,
-            pictures=[
-                ForgottenPictureData(
-                    entry_id=picture.entry_id,
-                    image_id=picture.image_id,
-                    name=picture.name,
-                )
-                for picture in result.pictures
-            ],
+            image_memories=len(result.pictures),
+            episodes=_entry_ids(req.user_id, result.episodes),
+            profiles=result.profile_item_count,
+            pictures=_pictures(result.pictures),
         ),
     )
 
@@ -451,30 +430,43 @@ def _copy_media_type(data: bytes) -> str:
     return "image/png" if data.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
 
 
-def _user_target(req: UserForgetRequest) -> UserForgetTarget:
+def _target(req: UserForgetRequest | GroupForgetRequest) -> ForgetTarget:
     """The request's target as the service takes it."""
-    data = req.target.model_dump()
-    return UserForgetTarget(
-        kind=data["kind"],
-        record_ids=tuple(data.get("record_ids") or ()),
-        session_id=data.get("session_id"),
-        image_id=data.get("image_id"),
-        memory_types=tuple(data.get("memory_types") or ()),
-        start=data.get("start"),
-        end=data.get("end"),
-    )
+    return ForgetTarget.from_json(req.target.model_dump())
 
 
-def _user_forget_data(user_id: str, result: UserForgetResult) -> UserForgetResponseData:
+def _shown_target(target: ForgetTarget | None) -> dict[str, object] | None:
+    """A target as an answer shows it: the fields its kind sets."""
+    if target is None:
+        return None
+    return {
+        key: value
+        for key, value in target.to_json().items()
+        if value not in (None, [], ())
+    }
+
+
+def _entry_ids(owner_id: str, record_ids: tuple[str, ...]) -> list[str]:
+    """Record ids (``<owner>_<entry>``) as the entry ids a legacy body answers."""
+    prefix = f"{owner_id}_"
+    return [r[len(prefix) :] if r.startswith(prefix) else r for r in record_ids]
+
+
+def _pictures(pictures: tuple[ForgottenPicture, ...]) -> list[ForgottenPictureData]:
+    return [
+        ForgottenPictureData(
+            entry_id=picture.entry_id, image_id=picture.image_id, name=picture.name
+        )
+        for picture in pictures
+    ]
+
+
+def _user_forget_data(user_id: str, result: ForgetResult) -> UserForgetResponseData:
     return UserForgetResponseData(
         forget_id=result.forget_id,
         dry_run=result.dry_run,
         user_id=user_id,
-        target={
-            key: value
-            for key, value in result.target.to_json().items()
-            if value not in (None, [], ())
-        },
+        target=_shown_target(result.target) or {},
         episodes=list(result.episodes),
         new_episodes=list(result.new_episodes),
         image_memories=list(result.image_memories),
@@ -485,51 +477,26 @@ def _user_forget_data(user_id: str, result: UserForgetResult) -> UserForgetRespo
     )
 
 
-def _user_undo_data(user_id: str, result: UserUndoResult) -> UserUndoForgetResponseData:
+def _user_undo_data(user_id: str, result: UndoResult) -> UserUndoForgetResponseData:
     return UserUndoForgetResponseData(
         forget_id=result.forget_id,
         applied=result.applied,
         user_id=user_id,
-        target={
-            key: value
-            for key, value in result.target.to_json().items()
-            if value not in (None, [], ())
-        }
-        if result.target is not None
-        else None,
+        target=_shown_target(result.target),
         episodes=list(result.episodes),
         image_memories=list(result.image_memories),
         images=list(result.images),
         scenes=list(result.scenes),
-        profile_items=result.profile_items,
+        profile_items=result.profile_item_count,
     )
 
 
-def _target(req: GroupForgetRequest) -> GroupForgetTarget:
-    """The request's target as the service takes it."""
-    data = req.target.model_dump()
-    return GroupForgetTarget(
-        kind=data["kind"],
-        session_id=data.get("session_id"),
-        message_ids=tuple(data.get("message_ids") or ()),
-        member_id=data.get("member_id"),
-        record_ids=tuple(data.get("record_ids") or ()),
-        image_id=data.get("image_id"),
-    )
-
-
-def _group_forget_data(
-    group_id: str, result: GroupForgetResult
-) -> GroupForgetResponseData:
+def _group_forget_data(group_id: str, result: ForgetResult) -> GroupForgetResponseData:
     return GroupForgetResponseData(
         forget_id=result.forget_id,
         dry_run=result.dry_run,
         group_id=group_id,
-        target={
-            key: value
-            for key, value in vars(result.target).items()
-            if value not in (None, ())
-        },
+        target=_shown_target(result.target) or {},
         messages=[
             ForgottenMessageData(session_id=session_id, message_id=message_id)
             for session_id, message_id in result.messages
@@ -542,17 +509,15 @@ def _group_forget_data(
         scenes=list(result.scenes),
         rewritten_scenes=result.rewritten_scenes,
         new_scenes=list(result.new_scenes),
-        member_profiles=list(result.member_profiles),
-        member_profile_items=list(result.member_profile_items),
-        stale_member_profile_items=list(result.stale_member_profile_items),
+        member_profiles=list(result.profiles),
+        member_profile_items=list(result.profile_items),
+        stale_member_profile_items=list(result.stale_profile_items),
         group_profile_items=list(result.group_profile_items),
         stale_group_profile_items=list(result.stale_group_profile_items),
     )
 
 
-def _group_undo_data(
-    group_id: str, result: GroupUndoResult
-) -> GroupUndoForgetResponseData:
+def _group_undo_data(group_id: str, result: UndoResult) -> GroupUndoForgetResponseData:
     return GroupUndoForgetResponseData(
         forget_id=result.forget_id,
         applied=result.applied,
@@ -565,8 +530,8 @@ def _group_undo_data(
         image_memories=list(result.image_memories),
         images=list(result.images),
         scenes=list(result.scenes),
-        member_profiles=list(result.member_profiles),
-        member_profile_items=list(result.member_profile_items),
+        member_profiles=list(result.profiles),
+        member_profile_items=list(result.profile_items),
         group_profile_items=list(result.group_profile_items),
-        withdrawn=list(result.withdrawn),
+        withdrawn=list(result.retired),
     )

@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 import datetime as dt
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol, final, runtime_checkable
 
@@ -196,18 +196,6 @@ class EpisodeStore(Protocol):
         """The episodes of ``entry_ids`` still in md (no lock)."""
         ...
 
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id``; their refs.
-
-        Takes the owner lock once first (a barrier), then rewrites each file
-        under it. The caller deletes the session's memcells before.
-        """
-        ...
-
-    async def remove(self, scope: Scope, entry_ids: Collection[str]) -> list[MemoryRef]:
-        """Remove these entries, each file under the owner lock; their refs."""
-        ...
-
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from the owner's ``deprecated_entries`` marks."""
         ...
@@ -241,16 +229,15 @@ class EpisodeStore(Protocol):
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
-        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
-        version out of markdown rather than marking it, so what a forgotten
-        message said is nowhere under the memory root; the forget keeps the
-        :class:`Withdrawal` for its undo. An entry whose mark named a removed
-        one is current again.
+        Only the undo of a group forget logged when forgets took records out
+        of markdown uses it: it takes out the versions that forget wrote. An
+        entry whose mark named a removed one is current again.
         """
         ...
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
-        """Put a withdrawal's entries back under their ids, marks included."""
+        """Put a withdrawal's entries back under their ids, marks included
+        (the undo of a group forget logged when forgets took records out)."""
         ...
 
 
@@ -295,22 +282,6 @@ class ImageMemoryStore(Protocol):
         """Retire ordered ``(md_path, entry_id)`` references in favor of one entry."""
         ...
 
-    async def undeprecate(
-        self,
-        scope: Scope,
-        *,
-        entries: Sequence[tuple[str, str]],
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> bool:
-        """Drop the retirement marks of ``(md_path, entry_id)``, making them current.
-
-        The inverse of :meth:`deprecate`, and the one edit a supersession mark
-        ever gets: undo-of-a-forget re-writes the memory as a new entry and
-        clears the mark of the version it restores, so the chain of versions
-        keeps saying which one is current.
-        """
-        ...
-
     async def read_by_image(
         self, scope: Scope, image_id: str, *, limit: int = 1_000
     ) -> list[Stored[ImageMemory]]:
@@ -333,10 +304,6 @@ class ImageMemoryStore(Protocol):
         """
         ...
 
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's picture memories that came from one session."""
-        ...
-
     async def read_for_segments(
         self, scope: Scope, memcell_ids: Collection[str]
     ) -> list[Stored[ImageMemory]]:
@@ -354,19 +321,17 @@ class ImageMemoryStore(Protocol):
         and ``status`` ``forgotten`` for the forget marker)."""
         ...
 
-    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
-        """Take entries out of the owner's files, keeping their exact text.
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the entry they retire."""
+        ...
 
-        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
-        version out of markdown rather than marking it, so what a forgotten
-        message said is nowhere under the memory root; the forget keeps the
-        :class:`Withdrawal` for its undo. An entry whose mark named a removed
-        one is current again.
-        """
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from the owner's marks (an undo of a forget)."""
         ...
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
-        """Put a withdrawal's entries back under their ids, marks included."""
+        """Put a withdrawal's entries back under their ids, marks included
+        (the undo of a group forget logged when forgets took records out)."""
         ...
 
 
@@ -451,25 +416,18 @@ class SceneStore(Protocol):
         """Drop ``keys`` from the owner's marks (an undo of a forget)."""
         ...
 
-    async def remove_naming(
-        self, scope: Scope, episode_ids: Collection[str]
-    ) -> list[MemoryRef]:
-        """Remove every version whose members include one of ``episode_ids``."""
-        ...
-
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
-        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
-        version out of markdown rather than marking it, so what a forgotten
-        message said is nowhere under the memory root; the forget keeps the
-        :class:`Withdrawal` for its undo. An entry whose mark named a removed
-        one is current again.
+        Only the undo of a group forget logged when forgets took records out
+        of markdown uses it: it takes out the versions that forget wrote. An
+        entry whose mark named a removed one is current again.
         """
         ...
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
-        """Put a withdrawal's entries back under their ids, marks included."""
+        """Put a withdrawal's entries back under their ids, marks included
+        (the undo of a group forget logged when forgets took records out)."""
         ...
 
 
@@ -540,19 +498,17 @@ class GroupProfileStore(Protocol):
         """Replace the queued segments and their failure record (none by default)."""
         ...
 
-    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
-        """Take entries out of the owner's files, keeping their exact text.
+    async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:
+        """One file's marks, keyed by the entry they retire."""
+        ...
 
-        A forget inside a group (docs/group-memory.md, 9.4) takes a forgotten
-        version out of markdown rather than marking it, so what a forgotten
-        message said is nowhere under the memory root; the forget keeps the
-        :class:`Withdrawal` for its undo. An entry whose mark named a removed
-        one is current again.
-        """
+    async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
+        """Drop ``keys`` from the owner's marks (an undo of a forget)."""
         ...
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:
-        """Put a withdrawal's entries back under their ids, marks included."""
+        """Put a withdrawal's entries back under their ids, marks included
+        (the undo of a group forget logged when forgets took records out)."""
         ...
 
 

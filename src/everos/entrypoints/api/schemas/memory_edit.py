@@ -154,6 +154,19 @@ class UserSessionTarget(BaseModel):
     session_id: SessionId = Field(min_length=1, max_length=128)
 
 
+class UserMessageTarget(BaseModel):
+    """Messages of one of the user's conversations, by id: each segment that
+    held one is remembered again without it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["message"]
+    session_id: SessionId = Field(min_length=1, max_length=128)
+    message_ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        min_length=1, max_length=100
+    )
+
+
 class UserOwnerTarget(BaseModel):
     """Everything of the user: episodes, pictures, scenes, the whole profile."""
 
@@ -199,6 +212,7 @@ class UserImageTarget(BaseModel):
 UserTarget = Annotated[
     UserRecordTarget
     | UserSessionTarget
+    | UserMessageTarget
     | UserOwnerTarget
     | UserConditionTarget
     | UserImageTarget,

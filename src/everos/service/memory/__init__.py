@@ -23,10 +23,8 @@ __all__ = [
     "ExtractionSupervisor",
     "FlushResult",
     "ForgetResult",
+    "ForgetTarget",
     "ForgottenPicture",
-    "GroupForgetResult",
-    "GroupForgetTarget",
-    "GroupUndoResult",
     "GroupUpsertResult",
     "GroupView",
     "MemorizeResult",
@@ -42,15 +40,10 @@ __all__ = [
     "RevisionResult",
     "RosterChangeResult",
     "RosterEventInput",
-    "SessionForgetResult",
-    "SessionUndoResult",
     "TaskItem",
     "TaskPage",
     "UndoResult",
     "UpdateResult",
-    "UserForgetResult",
-    "UserForgetTarget",
-    "UserUndoResult",
     "to_task_item",
 ]
 
@@ -83,14 +76,11 @@ from ._delete import DeleteAlias
 from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._forget import ForgetManager
-from ._forget import ForgetResult as ForgetResult
-from ._forget import ForgottenPicture as ForgottenPicture
-from ._forget_session import SessionForgetManager
-from ._forget_session import SessionForgetResult as SessionForgetResult
-from ._group_forget import GroupForgetManager, GroupReextraction
-from ._group_forget import GroupForgetResult as GroupForgetResult
-from ._group_forget import GroupForgetTarget as GroupForgetTarget
-from ._group_forget import GroupUndoResult as GroupUndoResult
+from ._forget_apply import Reextraction
+from ._forget_models import ForgetResult as ForgetResult
+from ._forget_models import ForgetTarget as ForgetTarget
+from ._forget_models import ForgottenPicture as ForgottenPicture
+from ._forget_models import UndoResult as UndoResult
 from ._groups import GroupUpsertResult as GroupUpsertResult
 from ._groups import GroupUseCases
 from ._groups import GroupView as GroupView
@@ -115,16 +105,9 @@ from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
 from ._revise import RevisionManager
 from ._revise import RevisionResult as RevisionResult
-from ._undo import SessionUndoResult as SessionUndoResult
-from ._undo import UndoManager
-from ._undo import UndoResult as UndoResult
 from ._update import MemoryChanges as MemoryChanges
 from ._update import UpdateManager
 from ._update import UpdateResult as UpdateResult
-from ._user_forget import UserForgetManager
-from ._user_forget import UserForgetResult as UserForgetResult
-from ._user_forget import UserForgetTarget as UserForgetTarget
-from ._user_forget import UserUndoResult as UserUndoResult
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -169,7 +152,7 @@ class MemoryService:
             ``[multimodal]`` is not configured.
         stores: Write-side stores (session buffer, memcells, memorize inbox).
         conversation_pipeline: The conversation track, run on every cell: one
-            episode per cell in its session's space; a forget inside a group
+            episode per cell in its session's space; a message forget
             re-extracts with it.
         bus: Where each cell's events are published.
         search_manager: Answers :meth:`search`.
@@ -177,7 +160,7 @@ class MemoryService:
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
         scene_narrator: Writes a group's scene again when a forget changed
-            its episodes; ``None`` writes none.
+            its episodes; ``None`` marks it forgotten instead.
     """
 
     def __init__(
@@ -210,50 +193,26 @@ class MemoryService:
         self._raw_file_builder = raw_file_builder
         self._image_limits = image_limits or _image_limits_from(settings)
         clock = lambda: to_timestamp_ms(get_utc_now())  # noqa: E731
-        # A user's forgets, by every target, and their undos (docs/api.md).
-        # Forgetting a picture has to find what referred to it, which is an
-        # index lookup, so it needs the read side as well as the write side;
-        # an undo needs none: what a forget changed is in the log and in
-        # markdown.
-        self._user_forgetter = UserForgetManager(
-            stores=stores,
-            eraser=index_eraser,
-            pictures=ForgetManager(
-                stores=stores,
-                indexes=indexes,
-                images=stores.images,
-                eraser=index_eraser,
-            )
-            if indexes is not None
-            else None,
-            sessions=SessionForgetManager(
-                stores=stores, images=stores.images, eraser=index_eraser
-            ),
-            undoer=UndoManager(
-                stores=stores, images=stores.images, eraser=index_eraser
-            ),
-            extractions=self._extractions,
-            session_wait_seconds=settings.memorize.delete_wait_seconds,
-        )
-        # 2.0 has no hard delete: /memory/delete and /delete_by_ids forget.
-        self._deleter = DeleteAlias(stores=stores, forgetter=self._user_forgetter)
-        self._updater = UpdateManager(stores=stores, eraser=index_eraser, clock=clock)
-        self._reviser = RevisionManager(stores=stores, updater=self._updater)
-        self._history = HistoryReader(stores=stores, access=self._access)
-        # Forget inside a group (docs/group-memory.md, 9.4): re-extraction
-        # runs the pipeline's own episode call of a group, and a changed scene
-        # the scene strategy's narrative call.
-        self._group_forgetter = GroupForgetManager(
+        # Forgets and their undos, a user's and a group's: one engine
+        # (docs/api.md; docs/group-memory.md, 9.4). A message forget
+        # re-extracts with the pipeline's own episode call, and a group's
+        # changed scene is narrated again with the scene strategy's call.
+        self._forgetter = ForgetManager(
             stores=stores,
             indexes=indexes,
             eraser=index_eraser,
             pipeline=conversation_pipeline
-            if isinstance(conversation_pipeline, GroupReextraction)
+            if isinstance(conversation_pipeline, Reextraction)
             else None,
             scenes=scene_narrator,
             extractions=self._extractions,
             session_wait_seconds=settings.memorize.delete_wait_seconds,
         )
+        # 2.0 has no hard delete: /memory/delete and /delete_by_ids forget.
+        self._deleter = DeleteAlias(stores=stores, forgetter=self._forgetter)
+        self._updater = UpdateManager(stores=stores, eraser=index_eraser, clock=clock)
+        self._reviser = RevisionManager(stores=stores, updater=self._updater)
+        self._history = HistoryReader(stores=stores, access=self._access)
         self._memorizer = Memorizer(
             settings=settings,
             boundary=boundary,
@@ -423,11 +382,11 @@ class MemoryService:
         project_id: str,
         group_id: str,
         asker_id: str | None,
-        target: GroupForgetTarget,
+        target: ForgetTarget,
         reason: str | None = None,
         dry_run: bool = False,
         asserted_asker: str | None = None,
-    ) -> GroupForgetResult:
+    ) -> ForgetResult:
         """Forget messages, a member, a session, records or a picture of a group.
 
         docs/group-memory.md, sections 5.5 and 9.4: the target travels to
@@ -443,7 +402,7 @@ class MemoryService:
             InvalidInputError: No asker.
         """
         return await self._run_to_completion(
-            self._group_forgetter.forget(
+            self._forgetter.forget(
                 scope=_group_scope(app_id, project_id, group_id),
                 identity=resolve_identity(header=asserted_asker, body_asker=asker_id),
                 target=target,
@@ -462,16 +421,16 @@ class MemoryService:
         asker_id: str | None,
         forget_id: str,
         asserted_asker: str | None = None,
-    ) -> GroupUndoResult:
+    ) -> UndoResult:
         """Undo one forget of a group by its id, with the forget's authorisation.
 
         Raises:
             ForbiddenError: Not a current member, or not allowed the forget.
             NotFoundError: No forget of this group has that id.
-            ConflictError: A later forget rewrote what this one wrote.
+            ConflictError: A later change replaced what this one wrote.
         """
         return await self._run_to_completion(
-            self._group_forgetter.undo(
+            self._forgetter.undo(
                 scope=_group_scope(app_id, project_id, group_id),
                 identity=resolve_identity(header=asserted_asker, body_asker=asker_id),
                 forget_id=forget_id,
@@ -491,7 +450,7 @@ class MemoryService:
         session_id: str | None,
         member_id: str | None,
         asserted_asker: str | None = None,
-    ) -> tuple[DeleteResult, GroupForgetResult]:
+    ) -> tuple[DeleteResult, ForgetResult]:
         """``/delete`` with a group scope: an owner's or admin's forget.
 
         docs/group-memory.md, section 15: in Step 2 a group-scoped delete is
@@ -510,9 +469,9 @@ class MemoryService:
         if identity.asker_id is None:
             raise InvalidInputError("asker_id is required for a group-scoped delete")
         target = (
-            GroupForgetTarget(kind="session", session_id=session_id)
+            ForgetTarget(kind="session", session_id=session_id)
             if session_id is not None
-            else GroupForgetTarget(kind="member", member_id=member_id)
+            else ForgetTarget(kind="member", member_id=member_id)
         )
         forgotten = await self._run_to_completion(
             self._delete_in_group(
@@ -524,11 +483,11 @@ class MemoryService:
             len(forgotten.episodes)
             + len(forgotten.image_memories)
             + len(forgotten.scenes)
-            + len(forgotten.member_profile_items)
-            + len(forgotten.stale_member_profile_items)
+            + len(forgotten.profile_items)
+            + len(forgotten.stale_profile_items)
             + len(forgotten.group_profile_items)
             + len(forgotten.stale_group_profile_items)
-            + len(forgotten.member_profiles)
+            + len(forgotten.profiles)
         )
         filters = ["group_id", "session_id" if session_id is not None else "user_id"]
         logger.info(
@@ -543,8 +502,8 @@ class MemoryService:
         return DeleteResult(filters=filters, count=count), forgotten
 
     async def _delete_in_group(
-        self, scope: Scope, identity: Identity, target: GroupForgetTarget
-    ) -> GroupForgetResult:
+        self, scope: Scope, identity: Identity, target: ForgetTarget
+    ) -> ForgetResult:
         """The owner/admin check, then the forget; one supervised step."""
         record = await self._stores.groups.get(scope)
         if record is None:
@@ -552,8 +511,12 @@ class MemoryService:
                 f"the asker is not a current member of group {scope.owner_id!r}"
             )
         authorize_manage(record.roster, identity.asker_id)
-        return await self._group_forgetter.forget(
-            scope=scope, identity=identity, target=target, reason="delete"
+        return await self._forgetter.forget(
+            scope=scope,
+            identity=identity,
+            target=target,
+            reason="delete",
+            dry_run=False,
         )
 
     async def _run_to_completion[T](
@@ -738,30 +701,32 @@ class MemoryService:
         app_id: str,
         project_id: str,
         user_id: str,
-        target: UserForgetTarget,
+        target: ForgetTarget,
         reason: str | None = None,
         dry_run: bool = True,
         asker_id: str | None = None,
         asserted_asker: str | None = None,
-    ) -> UserForgetResult:
-        """Forget in one user's memory by records, a conversation, everything,
-        a condition or a picture (``/memory/forget``); a dry run by default.
+    ) -> ForgetResult:
+        """Forget in one user's memory by records, a conversation, messages,
+        everything, a condition or a picture (``/memory/forget``); a dry run
+        by default.
 
         Raises:
             InvalidInputError: A record id of no kind of a user's.
             ForbiddenError: Someone else's personal memory.
-            NotFoundError: A record id that names nothing.
+            NotFoundError: A record id, a conversation or a message that names
+                nothing of the user's.
             SessionBusyError: The conversation stays busy.
         """
         scope, identity = _edit_scope(
             app_id, project_id, user_id, None, asker_id, asserted_asker
         )
         return await self._run_to_completion(
-            self._user_forgetter.forget(
+            self._forgetter.forget(
                 scope=scope,
+                identity=identity,
                 target=target,
                 reason=reason,
-                requested_by=identity.asker_id,
                 dry_run=dry_run,
             ),
             label="memory_forget",
@@ -776,18 +741,19 @@ class MemoryService:
         forget_id: str,
         asker_id: str | None = None,
         asserted_asker: str | None = None,
-    ) -> UserUndoResult:
+    ) -> UndoResult:
         """Undo one forget of a user by its id (``/memory/forget/undo``).
 
         Raises:
             ForbiddenError: Someone else's personal memory.
             NotFoundError: The user has no forget of that id.
+            ConflictError: A later change replaced what this forget wrote.
         """
-        scope, _ = _edit_scope(
+        scope, identity = _edit_scope(
             app_id, project_id, user_id, None, asker_id, asserted_asker
         )
         return await self._run_to_completion(
-            self._user_forgetter.undo(scope=scope, forget_id=forget_id),
+            self._forgetter.undo(scope=scope, identity=identity, forget_id=forget_id),
             label="memory_forget_undo",
         )
 
@@ -804,26 +770,19 @@ class MemoryService:
         """Forget one picture for one user (the picture body of ``/forget``).
 
         A thin alias of :meth:`forget` with an ``image`` target, run at once:
-        the picture's memories are marked forgotten, its index row is erased,
-        its original is taken out of circulation, and every episode (and
-        scene) whose text referred to it is written again without that
-        reference. Nothing is deleted.
-
-        Raises:
-            RuntimeError: The service was built without read-side indexes, so
-                there is no way to find what referred to the picture.
+        the picture's memories are marked forgotten, its index rows erased,
+        its original taken out of circulation when nothing else refers to it,
+        and every episode and scene whose text named it written again without
+        the reference. Nothing is deleted.
         """
-        scope, identity = _edit_scope(
-            app_id, project_id, user_id, None, None, asserted_asker
-        )
-        return await self._run_to_completion(
-            self._user_forgetter.forget_picture(
-                scope=scope,
-                image_id=image_id,
-                reason=reason,
-                requested_by=identity.asker_id,
-            ),
-            label="memory_forget_image",
+        return await self.forget(
+            app_id=app_id,
+            project_id=project_id,
+            user_id=user_id,
+            target=ForgetTarget(kind="image", image_id=image_id),
+            reason=reason,
+            dry_run=False,
+            asserted_asker=asserted_asker,
         )
 
     async def undo_forget_image(
@@ -843,7 +802,7 @@ class MemoryService:
         """
         scope, _ = _edit_scope(app_id, project_id, user_id, None, None, asserted_asker)
         return await self._run_to_completion(
-            self._user_forgetter.undo_picture(scope=scope, image_id=image_id),
+            self._forgetter.undo_picture(scope=scope, image_id=image_id),
             label="memory_forget_undo",
         )
 
@@ -894,7 +853,7 @@ class MemoryService:
         session_id: str,
         reason: str | None = None,
         asserted_asker: str | None = None,
-    ) -> SessionForgetResult:
+    ) -> ForgetResult:
         """Forget everything one conversation established for one user.
 
         A thin alias of :meth:`forget` with a ``session`` target, run at once.
@@ -905,17 +864,14 @@ class MemoryService:
         Raises:
             SessionBusyError: The conversation stays busy.
         """
-        scope, identity = _edit_scope(
-            app_id, project_id, user_id, None, None, asserted_asker
-        )
-        return await self._run_to_completion(
-            self._user_forgetter.forget_conversation(
-                scope=scope,
-                session_id=session_id,
-                reason=reason,
-                requested_by=identity.asker_id,
-            ),
-            label="memory_forget_session",
+        return await self.forget(
+            app_id=app_id,
+            project_id=project_id,
+            user_id=user_id,
+            target=ForgetTarget(kind="session", session_id=session_id),
+            reason=reason,
+            dry_run=False,
+            asserted_asker=asserted_asker,
         )
 
     async def undo_forget_session(
@@ -926,11 +882,11 @@ class MemoryService:
         user_id: str,
         session_id: str,
         asserted_asker: str | None = None,
-    ) -> SessionUndoResult:
+    ) -> UndoResult:
         """Undo the newest forget of one conversation for one user."""
         scope, _ = _edit_scope(app_id, project_id, user_id, None, None, asserted_asker)
         return await self._run_to_completion(
-            self._user_forgetter.undo_conversation(scope=scope, session_id=session_id),
+            self._forgetter.undo_session(scope=scope, session_id=session_id),
             label="memory_forget_undo",
         )
 

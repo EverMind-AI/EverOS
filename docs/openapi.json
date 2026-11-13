@@ -9354,6 +9354,9 @@
                 "$ref": "#/components/schemas/UserSessionTarget"
               },
               {
+                "$ref": "#/components/schemas/UserMessageTarget"
+              },
+              {
                 "$ref": "#/components/schemas/UserOwnerTarget"
               },
               {
@@ -9369,6 +9372,7 @@
               "mapping": {
                 "condition": "#/components/schemas/UserConditionTarget",
                 "image": "#/components/schemas/UserImageTarget",
+                "message": "#/components/schemas/UserMessageTarget",
                 "owner": "#/components/schemas/UserOwnerTarget",
                 "record": "#/components/schemas/UserRecordTarget",
                 "session": "#/components/schemas/UserSessionTarget"
@@ -9504,6 +9508,41 @@
         ],
         "title": "UserImageTarget",
         "description": "One picture by content hash: its memories, and the references to it."
+      },
+      "UserMessageTarget": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "message",
+            "title": "Kind"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "message_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Message Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "session_id",
+          "message_ids"
+        ],
+        "title": "UserMessageTarget",
+        "description": "Messages of one of the user's conversations, by id: each segment that\nheld one is remembered again without it."
       },
       "UserOwnerTarget": {
         "properties": {

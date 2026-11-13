@@ -33,14 +33,11 @@ drops the summary too -- it is written over every item, so it may repeat the
 forgotten one. The next update writes it again from the items that remain
 (everalgo derives it on every update), and an undo puts it back while no
 update has. A picture forget takes what rests on forgotten pictures alone in
-either space (:func:`rests_on_pictures`). Which segments a forget reaches
-differs by space: a one-to-one forget takes what every segment of which is
-forgotten (:func:`forget_segments`), a forget inside a group what no segment
-of the member's own words supports any more (the group forget's plan). The
-undo follows what each kept: a one-to-one forget logged its items without
-their places, so they come back by description, at the end
-(:func:`restore_items`); a group's logged their places, so they come back by
-id, where they were (:func:`put_back`).
+either space (:func:`rests_on_pictures`); which segments a forget reaches is
+the forget's rule (``everos.service.memory._forget_plan``). An undo puts each
+value back by id, where it was (:func:`put_back`); a one-to-one forget logged
+before places were kept puts its items back by description, at the end
+(:func:`restore_items`).
 
 A person changes an item through ``POST /memory/update`` (:func:`edit_item`):
 a new value is a new item linked to the old one, as a model's is, and carries
@@ -63,9 +60,6 @@ __all__ = [
     "bounded_history",
     "edit_item",
     "find_item",
-    "forget_images",
-    "forget_items",
-    "forget_segments",
     "item_source_images",
     "keep_held",
     "mint_item_id",
@@ -395,30 +389,6 @@ def bounded_history(
     return kept[:limit]
 
 
-def forget_images(
-    existing: Profile | None, image_ids: Sequence[str]
-) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
-    """Drop every item and replaced value that rests on forgotten pictures alone.
-
-    An item records the pictures it was read from. Forgetting one of them
-    retires the item only when **every** picture behind it is gone: a fact two
-    photos established between them survives forgetting either one, and an
-    item with no picture source (a text-derived one) is never touched. A
-    replaced value in the profile's history goes by the same rule, so what the
-    picture showed surfaces from neither.
-
-    Returns:
-        ``(profile, removed, count)`` -- the profile to write back (``None``
-        when the owner had none), the removed ``(bucket, entry)`` pairs for an
-        undo (bucket ``history`` for a replaced value), and how many items
-        went.
-    """
-    if existing is None:
-        return None, [], 0
-    gone = set(image_ids)
-    return _without(existing, lambda entry: not rests_on_pictures(entry, gone))
-
-
 def rests_on_pictures(
     entry: BaseModel | Mapping[str, Any], pictures: Collection[str]
 ) -> bool:
@@ -487,18 +457,22 @@ def take_out(
 def put_back(profile: Profile, taken: Taken) -> tuple[Profile, list[str]]:
     """What :func:`take_out` took, back in its place; and the items' ids.
 
-    An item comes back where it was unless the profile holds its id again; a
-    replaced value comes back at its position in the history; the summary
-    comes back while the profile has none (an update since has written one
-    over the items it had).
+    An item comes back where it was unless the profile holds it again -- by
+    its id, or by its description when it has none (stored before items had
+    ids); a replaced value comes back at its position in the history; the
+    summary comes back while the profile has none (an update since has written
+    one over the items it had). An item without an id is named ``""``.
     """
-    present = {
-        (i.model_extra or {}).get("item_id")
-        for i in (*profile.explicit_info, *profile.implicit_traits)
-    }
+    held = (*profile.explicit_info, *profile.implicit_traits)
+    present = {(i.model_extra or {}).get("item_id") for i in held} - {None}
+    described = {normalised(i.description) for i in held if i.description}
     back: dict[str, list[tuple[int, _Item]]] = {bucket: [] for bucket in BUCKETS}
     for bucket, n, data in taken.items:
-        if data.get("item_id") in present:
+        item_id = data.get("item_id")
+        if item_id:
+            if item_id in present:
+                continue
+        elif normalised(str(data.get("description") or "")) in described:
             continue
         model = ImplicitTraitItem if bucket == "implicit_traits" else ExplicitInfoItem
         back[bucket].append((n, model.model_validate(data)))
@@ -530,60 +504,6 @@ def _in_place[T](items: Sequence[T], placed: Sequence[tuple[int, T]]) -> list[T]
     for n, item in sorted(placed, key=lambda pair: pair[0]):
         out.insert(min(n, len(out)), item)
     return out
-
-
-def _without(
-    existing: Profile, survives: Callable[[BaseModel | Mapping[str, Any]], bool]
-) -> tuple[Profile, list[tuple[str, dict[str, Any]]], int]:
-    """``existing`` without the items and replaced values ``survives`` refuses.
-
-    :func:`take_out`, in the one-to-one forget log's form: ``(bucket, item)``
-    pairs, then ``("history", entry)``, then the dropped summary under
-    :data:`SUMMARY`, all without their places.
-    """
-    kept, taken = take_out(
-        existing,
-        item=lambda i: not survives(i),
-        entry=lambda _n, e: not survives(e),
-    )
-    removed: list[tuple[str, dict[str, Any]]] = [
-        (bucket, item) for bucket, _n, item in taken.items
-    ]
-    removed += [("history", entry) for _n, entry in taken.history]
-    if taken.summary:
-        removed.append((SUMMARY, {"summary": taken.summary}))
-    return kept, removed, len(taken.items)
-
-
-def forget_segments(
-    existing: Profile | None,
-    segments: Collection[str],
-    *,
-    already: Collection[str] = (),
-) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
-    """Drop every item and replaced value that no remembered segment supports.
-
-    ``segments`` are the forgotten conversation's, ``already`` those of the
-    owner's earlier forgets no undo reversed. An entry goes when every segment
-    it rests on is among them and at least one is among ``segments``: what an
-    earlier forget left standing is that forget's to take. An entry with no
-    recorded segments (stored before entries had them) is never touched, nor
-    is one a remembered segment still supports.
-
-    Returns:
-        ``(profile, removed, count)`` as :func:`forget_images` returns them.
-    """
-    if existing is None:
-        return None, [], 0
-    these, gone = set(segments), {*segments, *already}
-
-    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
-        extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
-        raw = extra.get("source_memcell_ids")
-        sources = {str(s) for s in raw} if isinstance(raw, list) else set()
-        return not sources or not sources <= gone or not sources & these
-
-    return _without(existing, survives)
 
 
 def already_read(profile: Profile | None, memcell_id: str) -> bool:
@@ -819,25 +739,6 @@ def edit_item(
                 new_id,
             )
     raise KeyError(item_id)
-
-
-def forget_items(
-    existing: Profile | None, item_ids: Collection[str]
-) -> tuple[Profile | None, list[tuple[str, dict[str, Any]]], int]:
-    """Drop the items and replaced values named by ``item_ids`` (a forget by id).
-
-    Returns:
-        ``(profile, removed, count)`` as :func:`forget_images` returns them.
-    """
-    if existing is None:
-        return None, [], 0
-    wanted = set(item_ids)
-
-    def survives(entry: BaseModel | Mapping[str, Any]) -> bool:
-        extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
-        return extra.get("item_id") not in wanted
-
-    return _without(existing, survives)
 
 
 def _history_key(entry: Mapping[str, Any]) -> tuple[str, str, object]:

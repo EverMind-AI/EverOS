@@ -19,7 +19,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.app import create_app
-from everos.service.memory import SessionForgetResult, SessionUndoResult
+from everos.service import ForgetResult, ForgetTarget, UndoResult
 from tests.fakes import StubMemoryService, make_application
 
 _IMAGE_ID = "a1" * 32
@@ -28,19 +28,19 @@ _IMAGE_ID = "a1" * 32
 @pytest.fixture
 def memory() -> StubMemoryService:
     stub = StubMemoryService()
-    stub.forget_session.return_value = SessionForgetResult(
-        session_id="s1",
-        episodes=["ep_20261107_00000001"],
-        image_memories=1,
-        images=[_IMAGE_ID],
+    stub.forget_session.return_value = ForgetResult(
         forget_id="fg_0123456789abcdef",
+        dry_run=False,
+        target=ForgetTarget(kind="session", session_id="s1"),
+        episodes=("me_ep_20261107_00000001",),
+        image_memories=("me_im_20261107_00000001",),
+        images=(_IMAGE_ID,),
     )
-    stub.undo_forget_session.return_value = SessionUndoResult(
-        session_id="s1",
+    stub.undo_forget_session.return_value = UndoResult(
         forget_id="fg_0123456789abcdef",
         applied=True,
-        episodes=("ep_20261107_00000001",),
-        image_memories=1,
+        episodes=("me_ep_20261107_00000001",),
+        image_memories=("me_im_20261107_00000001",),
         images=(_IMAGE_ID,),
     )
     return stub
