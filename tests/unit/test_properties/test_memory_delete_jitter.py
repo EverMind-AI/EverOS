@@ -55,7 +55,7 @@ from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.control import currently_in_test_context
@@ -862,6 +862,13 @@ async def _check(world: _World) -> None:
     seed=st.integers(0, 2**16),
     crash=st.one_of(st.none(), st.floats(0.001, 0.02)),
     disk_full_at=st.one_of(st.none(), st.integers(1, 3)),
+)
+@example(  # an interleaving a review run reported as failing; kept on every run
+    first=[("cluster", "u2"), ("del_id", "u2"), ("reflect", "u2"), ("skill",)],
+    second=[("add", "s1", ("u1",)), ("facts", "u1")],
+    seed=0,
+    crash=None,
+    disk_full_at=None,
 )
 def test_deletions_and_writers_keep_their_invariants(
     first: list[tuple[Any, ...]],
