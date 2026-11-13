@@ -1445,7 +1445,9 @@ A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
 | `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference |
 
 A forget **follows the sources**: a scene none of whose episodes is alive any
-more is forgotten; a picture file no live memory of the user refers to is
+more is forgotten, and one that keeps a live episode keeps its narrative,
+which may still say what a forgotten episode or message said (forget the
+scene by its id to drop it; a group's scene is written again); a picture file no live memory of the user refers to is
 taken out of circulation (the bytes stay); a profile item, or a replaced
 value, goes once every segment it rests on is forgotten (or every picture it
 was read off). A profile that loses an item loses its summary too, which is
