@@ -874,6 +874,14 @@ class Group(BaseModel):
         created_by: Member id of the creator; ``None`` for an implicit group.
         extra: Stored, never interpreted.
         history_visible_from: See :data:`HistoryVisibleFrom`.
+        deliverer_id: The identity the gateway asserts for the group's key:
+            the one program that forwards the group's chat (section 5.1).
+            While it is set, only it adds to the group's sessions or
+            flushes them, and it holds every right of an owner, reading the
+            whole history (section 9.1). It is no member: it has no
+            interval, is never listed and never reaches a prompt. ``None``
+            (the default, and always for an implicit group): anyone may
+            deliver, as before.
     """
 
     group_id: str
@@ -883,6 +891,7 @@ class Group(BaseModel):
     created_by: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
     history_visible_from: HistoryVisibleFrom = "join"
+    deliverer_id: str | None = None
 
 
 class RosterEvent(BaseModel):
@@ -1017,9 +1026,15 @@ class Roster(BaseModel):
 
     Built from :func:`fold_roster`; holds no events, so it cannot answer "the
     roster at time t" for the descriptive fields -- only who was a member when.
+
+    ``deliverer_id`` is the group's deliverer (:attr:`Group.deliverer_id`),
+    which every :class:`~everos.memory.ports.GroupRecord` copies here so that
+    the access checks, which all read the roster, see it. It is no member:
+    no interval, never in :meth:`current_members`.
     """
 
     intervals: list[MembershipInterval] = Field(default_factory=list)
+    deliverer_id: str | None = None
 
     def current(self, member_id: str) -> MembershipInterval | None:
         """The member's open interval, or ``None`` when they are not in the group."""

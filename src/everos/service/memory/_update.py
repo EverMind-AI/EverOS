@@ -53,7 +53,7 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.memory import forget_lock, profile_lock, scenes_lock
-from everos.memory.access import authorize_edit
+from everos.memory.access import admits, authorize_edit
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.scene import scene_cluster_kind
 from everos.memory.models import (
@@ -207,9 +207,7 @@ class UpdateManager:
                 raise InvalidInputError("asker_id is required to change a group record")
             async with forget_lock(scope):
                 record = await self._stores.groups.get(scope)
-                if record is None or not record.roster.is_current_member(
-                    identity.asker_id
-                ):
+                if record is None or not admits(record.roster, identity.asker_id):
                     raise ForbiddenError(
                         f"the asker is not a current member of group {scope.owner_id!r}"
                     )

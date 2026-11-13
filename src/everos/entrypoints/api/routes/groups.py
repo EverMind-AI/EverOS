@@ -58,6 +58,7 @@ def _group(view: GroupView) -> GroupDTO:
         history_visible_from=view.history_visible_from,
         extra=dict(view.extra),
         roster=[MemberIntervalDTO(**interval) for interval in view.roster],
+        deliverer_id=view.deliverer_id,
     )
 
 
@@ -69,9 +70,10 @@ async def upsert_group(
     request_id: RequestIdDep,
     asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[GroupUpsertResponseData]:
-    """Create the group, or update its meta (owners and admins).
+    """Create the group, or update its meta (owners, admins, the deliverer).
 
     A new group whose roster names no owner gets the asker as its owner.
+    ``deliverer_id`` names the group's deliverer; ``null`` clears it.
     """
     result = await app.memory.upsert_group(
         app_id=req.app_id,
@@ -85,6 +87,9 @@ async def upsert_group(
         history_visible_from=req.history_visible_from,
         extra=req.extra,
         roster=_events(req.roster),
+        deliverer_id=req.deliverer_id,
+        clear_deliverer="deliverer_id" in req.model_fields_set
+        and req.deliverer_id is None,
     )
     return SuccessEnvelope(
         request_id=request_id,

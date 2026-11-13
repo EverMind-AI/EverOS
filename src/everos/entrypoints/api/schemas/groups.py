@@ -29,6 +29,9 @@ MemberId = Annotated[
     PathSafeId, Field(min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET)
 ]
 AskerId = Annotated[str, Field(min_length=1, max_length=128)]
+DelivererId = Annotated[
+    str, AfterValidator(one_trimmed_line), Field(min_length=1, max_length=128)
+]
 
 
 class RosterEventDTO(BaseModel):
@@ -80,6 +83,16 @@ class GroupUpsertRequest(_GroupScope):
     history_visible_from: Literal["join", "creation"] | None = None
     extra: dict[str, Any] | None = None
     roster: list[RosterEventDTO] = Field(default_factory=list, max_length=500)
+    deliverer_id: DelivererId | None = Field(
+        default=None,
+        description=(
+            "The identity the gateway asserts for the group's key: the one "
+            "program that forwards the group's chat. Once set, only it may "
+            "add messages to the group's sessions or flush them, and it holds "
+            "every right of an owner. Left out: unchanged; null: cleared. Set "
+            "and cleared by owners, admins and the deliverer itself."
+        ),
+    )
 
 
 class RosterChangeRequest(_GroupScope):
@@ -117,6 +130,10 @@ class GroupDTO(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
     roster: list[MemberIntervalDTO] = Field(
         description="Current members; every interval with include_history=true."
+    )
+    deliverer_id: str | None = Field(
+        default=None,
+        description="The group's deliverer, or null when anyone may deliver.",
     )
 
 

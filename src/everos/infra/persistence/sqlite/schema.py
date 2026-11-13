@@ -32,6 +32,7 @@ logger = get_logger(__name__)
 
 _ADDED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "forget_log": ("requested_by", "undo_json"),
+    "group_meta": ("deliverer_id",),
     "image_original": ("forgotten_at",),
     "unprocessed_buffer": ("client_message_id",),
 }

@@ -47,7 +47,7 @@ from everos.core.errors import (
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.memory import forget_lock
-from everos.memory.access import Identity, authorize_forget
+from everos.memory.access import Identity, admits, authorize_forget
 from everos.memory.ports import ForgetEntry, Scope
 
 from ._forget_apply import Applied, ForgetWriter, Reextraction, applied_record
@@ -260,11 +260,10 @@ class ForgetManager:
             await self._stores.message_forget.record(session, ids, forget_id=forget_id)
 
     async def _member_record(self, scope: Scope, identity: Identity) -> GroupRecord:
-        """The group, for a current member; a stranger is refused before anything."""
+        """The group, for a current member or its deliverer; a stranger is
+        refused before anything."""
         record = await self._stores.groups.get(scope)
-        if record is None or not record.roster.is_current_member(
-            identity.asker_id or ""
-        ):
+        if record is None or not admits(record.roster, identity.asker_id):
             raise ForbiddenError(
                 f"the asker is not a current member of group {scope.owner_id!r}"
             )

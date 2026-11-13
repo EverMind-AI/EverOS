@@ -157,7 +157,9 @@ class SearchRequest(BaseModel):
     header carries it. With ``user_id`` it is optional and must equal it."""
     audience: Literal["asker", "group"] = "asker"
     """``asker`` (default): the asker's own view. ``group``: only what every
-    current member can see -- for a reply posted to the whole group."""
+    current member can see -- for a reply posted to the whole group. A
+    group's deliverer that names none reads as ``group``; ``asker`` gives it
+    the whole history."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB

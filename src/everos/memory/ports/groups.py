@@ -38,13 +38,22 @@ class GroupRecord:
 
     Attributes:
         group: The meta.
-        roster: Every membership interval, open and closed.
+        roster: Every membership interval, open and closed, and the group's
+            deliverer, which the record copies from the meta whatever store
+            built it (the access checks read it there).
         sessions: Sessions bound to the group, in binding order.
     """
 
     group: Group
     roster: Roster
     sessions: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.roster.deliverer_id != self.group.deliverer_id:
+            roster = self.roster.model_copy(
+                update={"deliverer_id": self.group.deliverer_id}
+            )
+            object.__setattr__(self, "roster", roster)
 
 
 @runtime_checkable

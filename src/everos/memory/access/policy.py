@@ -36,7 +36,13 @@ Rules the implementation must keep (section 9.1):
 * an owner or admin role grants roster management and forgetting, never extra
   reading; a member may forget only what rests on their own messages;
 * a forgotten message is absent from every read of a session's buffer, as it
-  is from every record a forget rewrote.
+  is from every record a forget rewrote;
+* a group's deliverer (:func:`is_deliverer`, section 5.1) is its superadmin:
+  every right of an owner, the whole history to read, and alone to deliver
+  (:func:`authorize_delivery`) -- never a member, so never one of the
+  ``audience = group`` intersection; its search without an ``audience``
+  reads as ``group``. One rule, consulted by every ``authorize_*`` function
+  and by :meth:`AccessPolicy.read_scope`.
 """
 
 from __future__ import annotations
@@ -48,10 +54,13 @@ __all__ = [
     "ReadScope",
     "ScopeRequest",
     "Window",
+    "admits",
+    "authorize_delivery",
     "authorize_forget",
     "authorize_manage",
     "authorize_roster_change",
     "intersect_windows",
+    "is_deliverer",
     "owner_predicate",
     "visible",
     "visible_profile",
@@ -170,7 +179,10 @@ class ScopeRequest:
     project_id: str = "default"
     user_id: str | None = None
     group_ids: tuple[str, ...] = ()
-    audience: Audience = "asker"
+    audience: Audience | None = "asker"
+    """``None``: the asker's default, what a search that names no audience
+    asks for -- ``group`` for a group's deliverer (:func:`is_deliverer`),
+    ``asker`` for anyone else."""
     project_scope: bool = False
     """Every group of ``project_id`` the asker currently belongs to, as one
     pool (section 8.7); ``group_ids`` is then resolved by the policy."""
@@ -295,16 +307,24 @@ def _member_windows(group: Group, roster: Roster, member_id: str) -> tuple[Windo
 def _view_of(record: GroupRecord, asker: str, audience: Audience) -> GroupView:
     """One group of a read scope: the asker's windows in it, cut by ``audience``.
 
-    ``audience = group`` keeps only the time every current member can see.
+    The group's deliverer reads the whole history. ``audience = group`` keeps
+    only the time every current member can see; the deliverer is never one
+    of them, even when it is a member too.
     """
-    windows = _member_windows(record.group, record.roster, asker)
+    roster = record.roster
+    windows = (
+        (Window(start=None, end=None),)
+        if is_deliverer(roster, asker)
+        else _member_windows(record.group, roster, asker)
+    )
     if audience == "group":
-        for member in record.roster.current_members():
+        for member in roster.current_members():
+            if is_deliverer(roster, member.member_id):
+                continue
             windows = intersect_windows(
-                windows,
-                _member_windows(record.group, record.roster, member.member_id),
+                windows, _member_windows(record.group, roster, member.member_id)
             )
-    return GroupView(group=record.group, roster=record.roster, windows=windows)
+    return GroupView(group=record.group, roster=roster, windows=windows)
 
 
 def _group_read_scope(
@@ -452,17 +472,62 @@ def _versions_shown[ItemT: (ExplicitInfoItem, ImplicitTraitItem)](
     return type(item).model_validate(data)
 
 
+def is_deliverer(roster: Roster, asker_id: str | None) -> bool:
+    """Whether ``asker_id`` is the group's deliverer: its superadmin.
+
+    The one rule behind what the deliverer may do in its own group
+    (docs/group-memory.md, sections 5.1 and 9.1). Every ``authorize_*``
+    function lets it do what an owner may: change the meta (its own key
+    included) and the roster, backdated events too, forget, undo, edit and
+    delete. A read scope gives it the whole history, with no window; its
+    search without an ``audience`` reads as ``audience = group``, so a reply
+    it posts into the group shows only what every current member can see.
+    Only it may deliver (:func:`authorize_delivery`). It is no member:
+    never a current member and never one of an audience.
+    """
+    return asker_id is not None and asker_id == roster.deliverer_id
+
+
+def admits(roster: Roster, asker_id: str | None) -> bool:
+    """Whether ``asker_id`` may act in the group at all: a current member, or
+    the group's deliverer. Everyone else is a stranger to it (403)."""
+    if asker_id is None:
+        return False
+    return roster.is_current_member(asker_id) or is_deliverer(roster, asker_id)
+
+
+def authorize_delivery(roster: Roster, asker_id: str | None, *, group_id: str) -> None:
+    """Raise unless ``asker_id`` may add to the group's sessions or flush them.
+
+    Anyone may while the group has no deliverer; once it has one, only the
+    deliverer -- the one program that forwards the group's chat under the
+    group's key (section 5.1).
+
+    Raises:
+        ForbiddenError: The group has a deliverer and the asker is not it.
+    """
+    if roster.deliverer_id is None or is_deliverer(roster, asker_id):
+        return
+    raise ForbiddenError(
+        f"only the deliverer of group {group_id!r} may add messages to its "
+        "sessions or flush them"
+    )
+
+
 def authorize_manage(roster: Roster, asker_id: str | None) -> None:
     """Raise unless ``asker_id`` may change the group's meta or roster.
 
-    Owners and admins may. A group with no current owner or admin at all (one
-    created implicitly by a batch without an asker) is managed by any current
-    member, so that it is not locked against every change.
+    Owners and admins may, and the group's deliverer. A group with no current
+    owner or admin at all (one created implicitly by a batch without an
+    asker) is managed by any current member, so that it is not locked
+    against every change.
 
     Raises:
         ForbiddenError: The asker is not a current member, or holds no
             manager role in a group that has managers.
     """
+    if is_deliverer(roster, asker_id):
+        return
     current = roster.current(asker_id) if asker_id else None
     if current is None:
         raise ForbiddenError("the asker is not a current member of the group")
@@ -476,13 +541,16 @@ def authorize_roster_change(
 ) -> None:
     """Raise unless ``asker_id`` may append ``events`` (section 5.1).
 
-    Owners and admins may send any event; any member may send ``leave`` for
-    themselves, but not backdated -- an event earlier than the newest one in
-    the roster is a replay of history, which only managers may write.
+    Owners and admins may send any event, as may the group's deliverer (it
+    mirrors the chat platform's membership); any member may send ``leave``
+    for themselves, but not backdated -- an event earlier than the newest one
+    in the roster is a replay of history, which only managers may write.
 
     Raises:
         ForbiddenError: The asker may not send one of the events.
     """
+    if is_deliverer(roster, asker_id):
+        return
     current = roster.current(asker_id) if asker_id else None
     if current is None:
         raise ForbiddenError("the asker is not a current member of the group")
@@ -509,13 +577,16 @@ def authorize_edit(
     """Raise unless ``asker_id`` may change a group record resting on ``sources``.
 
     The forget rule (:func:`authorize_forget`) applied to ``POST
-    /memory/update``: owners and admins may change any record of the group; a
-    member, a record resting on their own messages alone.
+    /memory/update``: owners, admins and the group's deliverer may change any
+    record of the group; a member, a record resting on their own messages
+    alone.
 
     Raises:
         ForbiddenError: The asker is not a current member, or the record
             rests on someone else's messages.
     """
+    if is_deliverer(roster, asker_id):
+        return
     current = roster.current(asker_id) if asker_id else None
     if current is None:
         raise ForbiddenError("the asker is not a current member of the group")
@@ -535,16 +606,18 @@ def authorize_forget(
 
     ``sources`` are the members whose messages the target is made of: the
     senders of the messages, the member of a member target, the speakers a
-    record rests on, the posters of a picture. Owners and admins may forget
-    anything in the group -- and, as for roster changes, any current member
-    of a group that has no owner or admin at all. Anyone else may forget a
-    target only when it rests on their own messages alone; a target with no
-    sources (a whole session) is the managers'.
+    record rests on, the posters of a picture. Owners, admins and the group's
+    deliverer may forget anything in the group -- and, as for roster changes,
+    any current member of a group that has no owner or admin at all. Anyone
+    else may forget a target only when it rests on their own messages alone;
+    a target with no sources (a whole session) is the managers'.
 
     Raises:
         ForbiddenError: The asker is not a current member, or the target
             rests on someone else's messages.
     """
+    if is_deliverer(roster, asker_id):
+        return
     current = roster.current(asker_id) if asker_id else None
     if current is None:
         raise ForbiddenError("the asker is not a current member of the group")
@@ -713,10 +786,16 @@ class AccessPolicy:
     async def _group_scope(
         self, identity: Identity, request: ScopeRequest
     ) -> ReadScope:
+        """The groups' read scope, for a current member of each (or its deliverer).
+
+        An ``audience`` left to the asker's default (``None``) is ``group``
+        when the asker is the deliverer of a group of the scope, ``asker``
+        otherwise.
+        """
         asker = identity.asker_id
         if asker is None:
             raise InvalidInputError("asker_id is required for a group scope")
-        views: list[GroupView] = []
+        records: list[GroupRecord] = []
         for group_id in dict.fromkeys(request.group_ids):
             record = await self._groups.get(
                 Scope(
@@ -726,13 +805,19 @@ class AccessPolicy:
                     owner_type="group",
                 )
             )
-            if record is None or not record.roster.is_current_member(asker):
+            if record is None or not admits(record.roster, asker):
                 raise ForbiddenError(
                     f"the asker is not a current member of group {group_id!r}"
                 )
-            views.append(_view_of(record, asker, request.audience))
+            records.append(record)
+        audience: Audience = request.audience or (
+            "group"
+            if any(is_deliverer(record.roster, asker) for record in records)
+            else "asker"
+        )
+        views = [_view_of(record, asker, audience) for record in records]
         return _group_read_scope(
-            request.app_id, request.project_id, asker, request.audience, views
+            request.app_id, request.project_id, asker, audience, views
         )
 
     async def picture_visible(

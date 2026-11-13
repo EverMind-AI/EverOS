@@ -404,6 +404,8 @@ class SearchManager:
     async def _read_scope(
         self, req: SearchRequest, asserted_asker: str | None
     ) -> ReadScope:
+        """The access policy's scope; an ``audience`` the request does not
+        name is the asker's default (``group`` for a group's deliverer)."""
         return await self._access.read_scope(
             resolve_identity(header=asserted_asker, body_asker=req.asker_id),
             ScopeRequest(
@@ -411,7 +413,7 @@ class SearchManager:
                 project_id=req.project_id,
                 user_id=req.user_id,
                 group_ids=req.scope_group_ids,
-                audience=req.audience,
+                audience=req.audience if "audience" in req.model_fields_set else None,
                 project_scope=req.project_scope,
             ),
         )

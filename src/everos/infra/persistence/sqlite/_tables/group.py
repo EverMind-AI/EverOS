@@ -34,6 +34,9 @@ class GroupMeta(BaseTable, table=True):
     """Epoch ms the group was created (its first message for an implicit one)."""
     created_by: str | None = None
     history_visible_from: str = "join"
+    deliverer_id: str | None = None
+    """The group's deliverer (``group.md``'s ``deliverer_id``); ``NULL`` for
+    none. Added after the first release (``schema._ADDED_COLUMNS``)."""
     extra_json: str = "{}"
     md_path: str
 

@@ -12,7 +12,8 @@ the one the write produced (docs/group-memory.md, section 14, task 1).
     type: group
     group_id: <group_id>
     track: group
-    name / description / created_at / created_by / history_visible_from / extra
+    name / description / created_at / created_by / history_visible_from
+    deliverer_id (only once one was set; null after it is cleared) / extra
     sessions: [{session_id, bound_at}]
     entry_count: <n>
     ---
@@ -124,9 +125,18 @@ def event_from_entry(entry: Entry) -> RosterEvent:
 
 
 def group_frontmatter(
-    group: Group, *, sessions: Sequence[Mapping[str, Any]]
+    group: Group,
+    *,
+    sessions: Sequence[Mapping[str, Any]],
+    previous: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The frontmatter ``group.md`` carries for ``group`` and its sessions."""
+    """The frontmatter ``group.md`` carries for ``group`` and its sessions.
+
+    The writer merges it into the file's frontmatter, so a key it leaves out
+    keeps its old value. ``deliverer_id`` is written while one is set, and
+    as ``null`` when the file had one (``previous``) and it was cleared; a
+    group that never had one has no such key.
+    """
     meta: dict[str, Any] = {
         "id": f"group_{group.group_id}",
         "type": "group",
@@ -140,6 +150,8 @@ def group_frontmatter(
     if group.created_by is not None:
         meta["created_by"] = group.created_by
     meta["history_visible_from"] = group.history_visible_from
+    if group.deliverer_id is not None or (previous or {}).get("deliverer_id"):
+        meta["deliverer_id"] = group.deliverer_id
     if group.extra:
         meta["extra"] = dict(group.extra)
     meta["sessions"] = [dict(s) for s in sessions]
@@ -161,6 +173,7 @@ def group_from_frontmatter(meta: Mapping[str, Any], *, group_id: str) -> Group:
         created_by=meta.get("created_by"),
         extra=dict(extra) if isinstance(extra, dict) else {},
         history_visible_from=meta.get("history_visible_from") or "join",
+        deliverer_id=meta.get("deliverer_id") or None,
     )
 
 
@@ -195,6 +208,7 @@ def mirror_rows(
         group_created_at=group.created_at,
         created_by=group.created_by,
         history_visible_from=group.history_visible_from,
+        deliverer_id=group.deliverer_id,
         extra_json=json.dumps(group.extra, ensure_ascii=False, sort_keys=True),
         md_path=md_path,
     )
@@ -244,6 +258,7 @@ def record_from_rows(
         created_by=meta.created_by,
         extra=extra if isinstance(extra, dict) else {},
         history_visible_from=cast(Any, meta.history_visible_from),
+        deliverer_id=meta.deliverer_id,
     )
     intervals = [
         MembershipInterval(

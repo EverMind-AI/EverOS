@@ -36,7 +36,7 @@ from everos.core.errors import (
 from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
-from everos.memory.access import authorize_manage, authorize_roster_change
+from everos.memory.access import admits, authorize_manage, authorize_roster_change
 from everos.memory.models import (
     Group,
     HistoryVisibleFrom,
@@ -53,13 +53,19 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class GroupMetaUpdate:
-    """Meta fields a ``PUT /groups/{id}`` sets; ``None`` keeps the stored value."""
+    """Meta fields a ``PUT /groups/{id}`` sets; ``None`` keeps the stored value.
+
+    ``deliverer_id`` sets the group's deliverer; ``clear_deliverer`` removes
+    it (a ``null`` sent for the field), which ``None`` alone cannot say.
+    """
 
     name: str | None = None
     description: str | None = None
     created_at: int | None = None
     extra: dict[str, Any] | None = None
     history_visible_from: HistoryVisibleFrom | None = None
+    deliverer_id: str | None = None
+    clear_deliverer: bool = False
 
 
 @dataclass(frozen=True)
@@ -202,7 +208,7 @@ class RosterManager:
         return self._store
 
     async def read(self, scope: Scope, *, asker_id: str | None) -> GroupRecord:
-        """The group, for a current member (``GET /groups/{id}``).
+        """The group, for a current member or its deliverer (``GET /groups/{id}``).
 
         Raises:
             InvalidInputError: No asker.
@@ -212,7 +218,7 @@ class RosterManager:
         if asker_id is None:
             raise InvalidInputError("asker_id is required to read a group")
         record = await self._store.get(scope)
-        if record is None or not record.roster.is_current_member(asker_id):
+        if record is None or not admits(record.roster, asker_id):
             raise ForbiddenError("the asker is not a current member of the group")
         return record
 
@@ -227,7 +233,8 @@ class RosterManager:
         """Create the group, or update its meta and append ``roster``.
 
         A new group's roster that names no owner makes the asker its owner.
-        An existing group's meta and roster are changed by an owner or admin.
+        An existing group's meta and roster are changed by an owner or admin,
+        or by the group's deliverer -- its deliverer too (a new key).
 
         Raises:
             InvalidInputError: No asker, or an implicit group's id.
@@ -251,6 +258,7 @@ class RosterManager:
                     created_by=asker_id,
                     extra=dict(meta.extra or {}),
                     history_visible_from=meta.history_visible_from or "join",
+                    deliverer_id=meta.deliverer_id,
                 )
                 events = _with_owner(roster, asker_id, at=created_at, source="api")
                 record = await self._store.save(scope, group=group, events=events)
@@ -268,6 +276,10 @@ class RosterManager:
                 )
                 if value is not None
             }
+            if meta.clear_deliverer:
+                changes["deliverer_id"] = None
+            elif meta.deliverer_id is not None:
+                changes["deliverer_id"] = meta.deliverer_id
             group = existing.group.model_copy(update=changes)
             record = await self._store.save(scope, group=group, events=list(roster))
             return RosterChange(record=record, applied=len(roster))

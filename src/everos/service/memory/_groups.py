@@ -68,6 +68,7 @@ class GroupView:
     history_visible_from: str
     extra: dict[str, Any] = field(default_factory=dict)
     roster: list[dict[str, Any]] = field(default_factory=list)
+    deliverer_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ def group_view(
         history_visible_from=group.history_visible_from,
         extra=dict(group.extra),
         roster=[interval.model_dump() for interval in intervals],
+        deliverer_id=group.deliverer_id,
     )
 
 
@@ -161,7 +163,11 @@ class GroupUseCases:
         history_visible_from: str | None,
         extra: dict[str, Any] | None,
         roster: Sequence[RosterEventInput],
+        deliverer_id: str | None = None,
+        clear_deliverer: bool = False,
     ) -> GroupUpsertResult:
+        """Create the group or update its meta; ``deliverer_id`` sets the
+        group's deliverer and ``clear_deliverer`` removes it (section 5.1)."""
         identity = resolve_identity(header=asserted_asker, body_asker=asker_id)
         scope = _scope(app_id, project_id, group_id)
         events = to_events(roster, source="api", now=self._clock())
@@ -171,6 +177,8 @@ class GroupUseCases:
             created_at=created_at,
             extra=extra,
             history_visible_from=history_visible_from,  # type: ignore[arg-type]
+            deliverer_id=deliverer_id,
+            clear_deliverer=clear_deliverer,
         )
 
         async def apply() -> RosterChange:

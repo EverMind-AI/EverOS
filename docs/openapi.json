@@ -189,7 +189,7 @@
           "groups"
         ],
         "summary": "Upsert Group",
-        "description": "Create the group, or update its meta (owners and admins).\n\nA new group whose roster names no owner gets the asker as its owner.",
+        "description": "Create the group, or update its meta (owners, admins, the deliverer).\n\nA new group whose roster names no owner gets the asker as its owner.\n``deliverer_id`` names the group's deliverer; ``null`` clears it.",
         "operationId": "upsert_group_api_v1_groups__group_id__put",
         "parameters": [
           {
@@ -1783,7 +1783,7 @@
           "groups"
         ],
         "summary": "Upsert Group",
-        "description": "Create the group, or update its meta (owners and admins).\n\nA new group whose roster names no owner gets the asker as its owner.",
+        "description": "Create the group, or update its meta (owners, admins, the deliverer).\n\nA new group whose roster names no owner gets the asker as its owner.\n``deliverer_id`` names the group's deliverer; ``null`` clears it.",
         "operationId": "upsert_group_api_v2_groups__group_id__put",
         "parameters": [
           {
@@ -5015,6 +5015,18 @@
             "type": "array",
             "title": "Roster",
             "description": "Current members; every interval with include_history=true."
+          },
+          "deliverer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverer Id",
+            "description": "The group's deliverer, or null when anyone may deliver."
           }
         },
         "type": "object",
@@ -5761,6 +5773,20 @@
             "type": "array",
             "maxItems": 500,
             "title": "Roster"
+          },
+          "deliverer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverer Id",
+            "description": "The identity the gateway asserts for the group's key: the one program that forwards the group's chat. Once set, only it may add messages to the group's sessions or flush them, and it holds every right of an owner. Left out: unchanged; null: cleared. Set and cleared by owners, admins and the deliverer itself."
           }
         },
         "additionalProperties": false,

@@ -76,7 +76,11 @@ class GroupRosterStore:
             intervals = fold_roster([*old_events, *events])
             await self._writer.append(
                 path,
-                frontmatter=group_frontmatter(group, sessions=sessions),
+                frontmatter=group_frontmatter(
+                    group,
+                    sessions=sessions,
+                    previous=existing[0] if existing else None,
+                ),
                 entries=[(event_date(e), event_inline(e)) for e in events],
             )
             meta, members, bindings = mirror_rows(
