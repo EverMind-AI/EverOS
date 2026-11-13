@@ -320,6 +320,30 @@ async def test_an_undo_sent_again_finishes_the_one_cut_short(
         assert await world.stores.forget_log.staged() == []
 
 
+async def test_an_undo_left_undoing_is_resumed_by_its_own_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the owner's next access could not finish it, the undo sent again
+    finishes it itself: the copy written before the stop is taken as written
+    (a fresh undo would follow it as a later change and answer 409)."""
+    async with open_world(tmp_path, ForgetModel()) as world:
+        kite, done = await _picture_forget(world)
+        _stop(monkeypatch, Undoer, "_unmark")
+        with pytest.raises(_Stop):
+            await undo(world, done.forget_id)
+        monkeypatch.undo()
+
+        async def unsettled(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {}
+
+        monkeypatch.setattr(ForgetManager, "_recover", unsettled)
+        again = await undo(world, done.forget_id)
+        assert again.applied
+        assert await live(world) == [f"A kite (img-1: {kite}) flew."]
+        texts = [t for t, _ in await _entries(world)]
+        assert texts.count(f"A kite (img-1: {kite}) flew.") == 2  # original + copy
+
+
 async def test_a_group_forget_stopped_after_its_message_marks_releases_them(
     tmp_path: Path,
 ) -> None:

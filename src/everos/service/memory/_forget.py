@@ -63,7 +63,7 @@ from ._forget_apply import Applied, ForgetWriter, Reextraction, applied_record
 from ._forget_models import ForgetResult, ForgetTarget, ForgottenPicture, UndoResult
 from ._forget_plan import ForgetPlan, ForgetPlanner
 from ._forget_rollback import Rollback
-from ._forget_undo import Undoer
+from ._forget_undo import Undoer, UndoMode
 from ._records import memory_id
 
 if TYPE_CHECKING:
@@ -385,7 +385,7 @@ class ForgetManager:
                 )
             if forget_id in finished:  # an undo of it cut short, finished now
                 return finished[forget_id]
-            return await self._undoer.undo(scope, entry)
+            return await self._undoer.undo(scope, entry, mode=_mode(entry))
 
     async def undo_picture(self, *, scope: Scope, image_id: str) -> UndoResult:
         """Undo the newest live forget of one picture of a user (the legacy
@@ -438,7 +438,7 @@ class ForgetManager:
             )
             if entry is None:
                 return None
-            return await self._undoer.undo(scope, entry)
+            return await self._undoer.undo(scope, entry, mode=_mode(entry))
 
 
 def plan_result(
@@ -545,6 +545,11 @@ def _profile_answer(
             else:
                 forgotten += edit.stale + edit.history_ids
     return tuple(dict.fromkeys(forgotten)), tuple(dict.fromkeys(stale)), count
+
+
+def _mode(entry: ForgetEntry) -> UndoMode:
+    """An undo of a forget whose last undo was cut short finishes that one."""
+    return "resume" if entry.stage == UNDOING else "undo"
 
 
 def _mint_forget_id() -> str:

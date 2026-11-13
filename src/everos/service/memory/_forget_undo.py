@@ -46,7 +46,7 @@ The same steps reverse a forget that did not complete (``roll_back``, from
 
 from __future__ import annotations
 
-__all__ = ["Undoer"]
+__all__ = ["UndoMode", "Undoer"]
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
