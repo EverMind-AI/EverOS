@@ -192,12 +192,7 @@ async def test_concurrent_adds_same_session_no_message_loss(
 async def test_concurrent_adds_serial_when_locked(
     memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
-    """Same as above but explicitly stress with 4 concurrent batches.
-
-    Two people take turns, so the session is their implicit group whichever
-    batch runs first; a third person would be refused (docs/group-memory.md,
-    section 7.9), which is not what this test is about.
-    """
+    """Same as above but explicitly stress with 4 concurrent batches."""
     await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     session_id = "s_stress"
@@ -206,7 +201,7 @@ async def test_concurrent_adds_serial_when_locked(
     batch_size = 3
     batches = [
         [
-            _msg(b * 10 + i, f"u{b % 2}", 1_700_000_000_000 + (b * 10 + i) * 1000)
+            _msg(b * 10 + i, f"u{b}", 1_700_000_000_000 + (b * 10 + i) * 1000)
             for i in range(batch_size)
         ]
         for b in range(n_batches)
