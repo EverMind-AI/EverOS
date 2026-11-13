@@ -1372,8 +1372,7 @@ updates leave it as it is.
 - An episode and a picture memory are not rewritten by a model after they are
   written, so their hold only marks whose text it is. A **forget** reaches a
   held version like any other: a picture forget writes the version again
-  without the picture's reference, a forget inside a group re-extracts the
-  segment.
+  without the picture's reference, a message forget re-extracts the segment.
 
 `hold: false` alone releases a held version: a new version with the same text
 for an episode, a picture memory or a scene (nothing in a daily log is edited
@@ -1421,10 +1420,11 @@ version that replaced it); `supersedes`; `edited_by` / `edited_at` / `held`
 episodes; times there in epoch ms); `content`. `current` is `null` when the
 memory is forgotten or its value was retired.
 
-Read from markdown, never from the index. On `user.md` a value a live forget
-took out is listed `forgotten`. Inside a group only the versions inside the
-asker's membership windows are listed, and a record with none answers `404`;
-what a group forget took out is gone from the files and from the history.
+Read from markdown, never from the index. A user's own history lists the
+user's forgotten versions as `forgotten` (and a value a live forget took out
+of `user.md`). Inside a group only the versions inside the asker's membership
+windows are listed, and none a live forget marked or replaced -- they may say
+what was forgotten -- so a record with none answers `404`.
 
 ### POST /api/v2/memory/forget
 
@@ -1439,6 +1439,7 @@ A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
 |---|---|---|
 | `record` | `record_ids` (1..100) | the records by id, of any kind: an episode, a picture memory (its current version), a scene (its current version, and its cluster, so it does not grow back), a profile item or a replaced value |
 | `session` | `session_id` | the conversation's current episodes and picture memories |
+| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations, by the id a segment or the buffer holds: each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, and a buffered one is never read |
 | `owner` | — | every current episode, picture memory and scene of the user, and the whole profile: items, replaced values, summary |
 | `condition` | `memory_types` (`episode`, `image_memory`, `scene`, `profile`), `start` and/or `end` (epoch ms, `[start, end)`) | the memories of those kinds whose time falls in the range (a profile item by when it was observed) |
 | `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference |
@@ -1452,10 +1453,12 @@ written over every item and may repeat it: the next profile update writes it
 again from the items left, and the undo puts it back while none has (a
 member's profile in a group does the same). A forget marks and erases the
 index rows at once: nothing leaves markdown, and the forgotten versions stay
-readable through `/memory/history`. Every forget is recorded in the forget log (`system.db`)
-with what it marked, who asked and why. A conversation sent again after its
-forget (or continued) is new material: its new memories are not forgotten,
-and the profile reads them.
+readable through the user's `/memory/history`. Every forget is recorded in
+the forget log (`system.db`) with what it marked or wrote and what it took
+out of profile documents, each value with its place, who asked and why. A
+conversation sent again after its forget (or continued) is new material: its
+new memories are not forgotten, and the profile reads them (a `message`
+target forgets those message ids for good, until its undo).
 
 ```json
 {
@@ -1478,8 +1481,11 @@ and the profile reads them.
 A group's body (`group_id`, `asker_id`, `target` of kind `message`,
 `member`, `session`, `record` or `image`, `reason`, `dry_run`) forgets
 inside the group ([group-memory.md](group-memory.md), section 5.5), also a dry
-run by default. The picture body of 1.x (`user_id` + `image_id`, no
-`target`) is a user's `image` target run at once.
+run by default; two people's implicit group takes the same body. One engine
+serves both: a forget marks (in a group too), a picture's forget is a text
+edit with no model call, and a message's re-extracts the segments that keep
+text. The picture body of 1.x (`user_id` + `image_id`, no `target`) is a
+user's `image` target run at once.
 
 `404` for a record id that names nothing; `503` `SESSION_BUSY` when a
 conversation it touches stays busy (nothing was forgotten).
@@ -1487,12 +1493,22 @@ conversation it touches stays busy (nothing was forgotten).
 ### POST /api/v2/memory/forget/undo
 
 Undoes one forget: `user_id` + `forget_id` (any target of the user), or
-`group_id` + `asker_id` + `forget_id`. Exactly what that forget marked comes
-back, and what other live forgets took because of it (a profile item resting
-on its segments); an entry another live forget also names stays forgotten
-until that one is undone too. `applied: false` when it was undone already.
-The picture body (`user_id` + `image_id`) undoes the picture's newest forget,
-and `/forget/session/undo` the conversation's newest.
+`group_id` + `asker_id` + `forget_id` (the forget's own authorisation). The
+marks it wrote go back to what they were; a version it wrote in place of
+another (a text edit, a re-extracted episode, a scene narrated again) is
+superseded by the version it replaced, written again as the newest -- nothing
+in a daily log is removed. Profile values come back in their places, by id
+(a forget logged before places were kept puts them back by description), and
+so do the values other live forgets took because of it (a profile item
+resting on its segments); an entry another live forget also marked stays
+forgotten until that one is undone too.
+
+**Order.** `409` `CONFLICT` while a version this forget wrote is no longer
+current -- a later forget, undo or edit replaced it: undo that later forget
+first. Forgets of different records undo in any order. `applied: false` when
+it was undone already. The picture body (`user_id` + `image_id`) undoes the
+picture's newest forget, and `/forget/session/undo` the conversation's
+newest.
 
 ### POST /api/v2/memory/delete
 

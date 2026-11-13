@@ -423,7 +423,8 @@ caller sees what a forget touches before it runs). Group targets (Step 2):
 
 The response returns `forget_id` and what was touched. Undo takes the
 `forget_id` and the same authorisation. `/memory/delete` with a group scope is
-owner/admin only and applies the same propagation, removing instead of marking.
+owner/admin only and applies the same propagation: a forget, marked and
+reversible.
 Leaving a group is not a forget: a member's messages stay visible to the
 others.
 
@@ -1212,7 +1213,7 @@ was forgotten to everything derived from it (Step 2):
 | A member's messages | As above for each of them; the member-in-group profile of that member is forgotten. |
 | A session or segment | Its episodes and picture memories are forgotten; derived records follow the source rule below. |
 | A record | That record is forgotten; derived records follow the source rule. |
-| A picture | Its group picture memories are forgotten and referring episodes re-extracted without it; the file stays while another live memory (any owner) refers to it. |
+| A picture | Its group picture memories are forgotten, and each episode and scene that names it gets a version without the reference (a text edit, no model call); the file stays while another live memory (any owner) refers to it. |
 
 **Source rule** for derived records (scenes, member-in-group profile items,
 group-profile items): forgotten when all of their sources are forgotten;
@@ -1222,9 +1223,24 @@ messages; the memcell payload keeps them so undo can restore them. A member's
 profile that loses an item loses its summary too (it is written over every
 item): the next update writes it again from the items left, as on `user.md`.
 
-Undo restores the marks and makes the previous versions current again, and a
-dropped summary while no update has written a new one. Delete (owner/admin)
-runs the same propagation: it is a forget, soft and reversible.
+Undo restores the marks and writes the previous versions again as the newest
+(a daily log only grows), puts the profile items back in their places and a
+dropped summary while no update has written a new one; it is refused (409)
+while a later forget or edit replaced a version the forget wrote. Delete
+(owner/admin) runs the same propagation: it is a forget, soft and reversible.
+
+One engine serves a user's memory and a group's (2026-11-13): plan (a dry
+run) → apply → one log format → undo by `forget_id`. A forget marks in a
+group too -- the versions that held what was forgotten stay in markdown,
+marked, and their index rows keep their text with `deprecated_by` set -- so
+privacy rests on the reads: every search and get filters on `deprecated_by`,
+the decider sees only what a search may, the buffer and every reader of a
+segment skip forgotten messages (`message_forget`), and a group's
+`/memory/history` leaves out every version a live forget marked or replaced.
+What stays removal, and why: a member target deletes the member's profile
+*document* in the group (kept whole in the log for the undo), because an
+emptied document would still say who the member was, when, and which of
+their segments wait for an update.
 
 ---
 
@@ -1529,7 +1545,7 @@ Ordered; each task lists its acceptance tests.
     - Superseding a decision appends the new item; the old one indexes as superseded and both read through history.
     - Dissent moves from open to resolved; no topic is ever deleted; the batch and idle triggers fire.
 12. **Forget and delete in groups.**
-    - A message forgotten by its sender re-extracts its segment, and its text appears nowhere afterwards: not in markdown, index rows, search results, profiles or constraints.
+    - A message forgotten by its sender re-extracts its segment, and no read reaches its text afterwards: not a current markdown entry, a live index row, a search or history answer, a profile or a constraint (2026-11-13: marked, not removed).
     - Another member's attempt is 403; an owner or admin may forget any message; undo restores the previous versions.
     - A member who leaves stays visible to the others; `dry_run` counts match the real run.
 13. **Relational expansion.**
@@ -1758,21 +1774,27 @@ Step 2 differs from the text above in these places:
   tokens (about 4%); there is still one call per batch.
 - **Message ids.** A group batch's `messages[].message_id` is the message's
   id in its segment; without one the generated id stays.
-- **Forget (task 12).** Superseded and forgotten versions are taken out of
-  markdown and the index, not marked, and kept byte for byte in the forget
-  log (`forget_log.undo_json`) so that undo restores them under their own
-  ids; they are therefore absent from history reads. Profile items that may
-  quote a forgotten message are removed at once and rewritten from their
-  remaining segments by the next update (absent until then, not marked
-  stale). Targets: `message`, `member`, `session`, `record` (episode,
-  picture memory, scene, group-profile or member-profile item ids), `image`;
-  there is no separate segment target. A group without owner or admin lets
-  any current member forget; managers may forget records outside their own
-  windows. Undo is last in, first out (409 while a later forget holds what
-  this one wrote). A group-scoped delete is an owner's or admin's forget of a
-  session or of a member's messages. Not scrubbed: the memcell payload (by
-  design), the scheduler's event log, and older LanceDB table versions until
-  the cascade prunes them.
+- **Forget (task 12).** Profile items that may quote a forgotten message are
+  removed at once and rewritten from their remaining segments by the next
+  update (absent until then, not marked stale). Targets: `message`,
+  `member`, `session`, `record` (episode, picture memory, scene,
+  group-profile or member-profile item ids), `image`; there is no separate
+  segment target. A group without owner or admin lets any current member
+  forget; managers may forget records outside their own windows. A
+  group-scoped delete is an owner's or admin's forget of a session or of a
+  member's messages. Not scrubbed: the memcell payload (by design), the
+  scheduler's event log, and older LanceDB table versions until the cascade
+  prunes them.
+  - *Until 2026-11-12* a group forget took superseded and forgotten versions
+    out of markdown and the index and kept them in `forget_log.undo_json`,
+    so that undo restored them under their own ids, and re-extracted the
+    episodes a forgotten picture's segments held. *Since 2026-11-13* one
+    engine serves users and groups: a group forget marks (the versions stay
+    in markdown, their rows carry `deprecated_by`, and a group's history
+    leaves out what a live forget marked or replaced), a picture forget is a
+    text edit with no model call, and undo writes the replaced versions
+    again as the newest (refused, 409, while a later change replaced what
+    the forget wrote). A forget logged before still undoes the old way.
 - **Expansion.** Only group scopes expand. A core scene leads to its
   episodes; an episode's scene is not looked up (scene membership is not
   indexed). A linked record scores 0 and reaches the final injection only if
@@ -1835,8 +1857,9 @@ Step 2 differs from the text above in these places:
      and every reader drops the forgotten messages from it.
   3. In a group with no owner or admin, any current member may forget;
      managers may forget records outside their own windows.
-  4. Undo stays last in, first out: undoing a forget while a later forget
-     holds what it wrote answers 409.
+  4. Undo stays last in, first out where forgets overlap: undoing a forget
+     while a later forget holds what it wrote answers 409 (since 2026-11-13
+     also when an edit replaced it, for a user's memory as for a group's).
   5. The verifier stays strict: a message cited under the wrong segment,
      even one of the same session, is dropped (`unknown_message`).
 

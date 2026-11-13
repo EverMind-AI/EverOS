@@ -34,18 +34,19 @@ DeepInfra, so those two keys are all it needs. Scenes are off by default
 `curl -s http://127.0.0.1:$PORT/health` answers 200 within a few seconds.
 Its `cascade.pending` is the number of markdown changes not yet in the index.
 Before reading the index, poll it once a second until it reads 0 on two
-consecutive samples (`docs/api.md`, and `wait_converged` in
-`tests/acceptance/memory_delete/observe.py`): a single 0 can come between a
-markdown write and its projection being queued. A server that exits instead: the last
+consecutive samples (`docs/api.md`, eventual consistency): a single 0 can come
+between a markdown write and its projection being queued. A server that exits instead: the last
 lines of `$ROOT.log` (usually a missing key).
 
 ## 3. Drive it
 
-- **HTTP**: `POST /api/v2/memory/add`, `/flush`, `/delete`
-  (`user_id` / `session_id`), `/delete_by_ids`
-  (`{"memory_type": "episode", "memory_ids": ["<owner>_<entry_id>"]}`),
-  `/memory/search` (multi-round retrieval, `method: "llm_multiround"`, the
-  only method; it calls the `[decider]` model), `/memory/get`.
+- **HTTP**: `POST /api/v2/memory/add`, `/flush`, `/memory/forget` (a dry run
+  unless `"dry_run": false`; a real one answers its `forget_id`) and
+  `/memory/forget/undo`, the aliases `/delete` (`user_id` / `session_id`) and
+  `/delete_by_ids` (`{"memory_type": "episode", "memory_ids":
+  ["<owner>_<entry_id>"]}`), which forget too, `/memory/search` (multi-round
+  retrieval, `method: "llm_multiround"`, the only method; it calls the
+  `[decider]` model), `/memory/get`, `GET /memory/history`.
 - **Claude Code, the way users do it**: run everos-mcp against your port and
   start Claude Code with only that server, in a tmux socket of your own
   (`tmux -L <name>`), sending keys and reading the pane:
@@ -61,25 +62,19 @@ lines of `$ROOT.log` (usually a missing key).
   `claude --mcp-config <that file> --strict-mcp-config`. A turn is finished
   when the pane shows its completion line (`... for Ns · done`), not when
   some `for Ns` appears (the thinking line has one too).
-- **Racing a background task**: `make acceptance` (needs the two keys; the
-  Milvus cases need docker) starts servers behind a local proxy that can hold
-  one model call (`tests/acceptance/memory_delete/proxy.py`), so a deletion
-  can land while an extraction is in flight. Check that
-  the held call is still the only one of its kind when the deletion answers:
-  a model call that times out retries past the hold.
 
 ## 4. Read the outcome where it lives
 
 | Fact | Read it from |
 |---|---|
-| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `images/`, `scenes/`, `user.md`; a group's under `groups/<id>/` (`tests/acceptance/memory_delete/observe.py` `md_entries` parses them) |
+| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `images/`, `scenes/`, `user.md`; a group's under `groups/<id>/`. A forget marks rather than removes: an entry is live only while its file's `deprecated_entries` does not name it (`live_markdown` in `tests/helpers/groups.py` reads a file that way) |
 | Session, cluster, queue state | `$ROOT/.index/sqlite/system.db` (`memcell`, `cluster`, `cluster_member`, `memorize_inbox`, ...); OME runs in `ome.db` beside it |
-| Index rows | LanceDB under `$ROOT/.index/lancedb/` (`observe.py` `lance_ids`); on Milvus read with `consistency_level="Strong"`, or you may see rows from before a deletion |
+| Index rows | LanceDB under `$ROOT/.index/lancedb/`; a forgotten or replaced entry keeps its row with `deprecated_by` set, and no read reaches it. On Milvus read with `consistency_level="Strong"`, or you may see rows from before a forget |
 | Lock waits and holds | `GET /metrics`: `everos_lock_wait_seconds`, `everos_lock_hold_seconds` (label `kind`: `session`, `owner`, `partition:<strategy>`); compare before/after deltas |
 | What the server complained about | `$ROOT.log`; it is coloured, so strip ANSI codes before grepping (`perl -pe 's/\e\[[0-9;]*m//g'`), or `[error` matches nothing |
 
-A search that finds nothing is not proof of a deletion: read the markdown
-and the index directly.
+A search that finds nothing is not proof of a forget: read the markdown and
+the index directly.
 
 ## 5. Tear down
 
@@ -101,7 +96,6 @@ One row per feature a task has walked on a real server.
 
 | Feature | Reach it | Drive it | End state that proves it works |
 |---|---|---|---|
-| Forget a conversation from Claude Code | everos-mcp `forget_session` (Section 3) | ask the model to remember a sentence (`add_memory`, wait true), then "forget this conversation" | no entry with that `session_id` in the markdown, no `.md` file contains the sentence, `search_memory` finds nothing |
-| Delete a session (`session_id` only) | `POST /api/v2/memory/delete {"session_id": ...}` | while its episode extraction is held at the proxy | 200; the session's `memcell` rows gone; no entry of the session appears in the markdown after the hold is released |
-| Delete a whole user | `POST /api/v2/memory/delete {"user_id": ...}` | after seeding several kinds | 200 with `count`; only today's empty day files remain (they keep the id counters), `user.md` gone, the owner's `cluster` rows and index rows gone; `..` and `a/../b` answer 422 |
-| Deletion latency | `tests/acceptance/memory_delete/test_t18_1_tb11_1_perf.py`, alone on the machine | a year of day files per user | each deletion <= 1 s; owner-lock holds of all session deletions p99 <= 20 ms, none over 100 ms |
+| Forget a conversation from Claude Code | everos-mcp `forget_session` (Section 3) | ask the model to remember a sentence (`add_memory`, wait true), then "forget this conversation" | every entry with that `session_id` is marked `forgotten` in its file's `deprecated_entries`, no live entry holds the sentence, `search_memory` finds nothing; `/memory/forget/undo` with the answer's `forget_id` brings it back |
+| Delete a session (`session_id` only) | `POST /api/v2/memory/delete {"session_id": ...}` | after seeding the session | 200 with the forgets' `forget_ids`; the session's entries marked `forgotten`, its index rows `deprecated_by` set, nothing of it in a search; the undo clears the marks |
+| Delete a whole user | `POST /api/v2/memory/delete {"user_id": ...}` | after seeding several kinds | 200 with `count` and a `forget_id`; every current entry marked `forgotten`, `user.md` emptied (its values kept in the forget log); `..` and `a/../b` answer 422 |

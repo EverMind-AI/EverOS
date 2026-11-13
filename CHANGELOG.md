@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Memory deletion.** Two endpoints aligned with the Cloud API, and the
 machinery that keeps a deleted memory from coming back.
 
+### Changed
+
+- **One forget and undo engine for a user's memory and a group's.** Every
+  forget is planned (a dry run answers the plan), applied, logged in one
+  format and undone by its `forget_id`, whatever the owner or the target.
+  A group forget now **marks** instead of taking records out of markdown: the
+  versions that held what was forgotten stay, marked, their index rows keep
+  `deprecated_by`, and a group's `/memory/history` leaves out every version a
+  live forget marked or replaced (the reads stay as they were: no search,
+  listing, decider input or history shows the forgotten text). A **picture**
+  forget is a text edit everywhere -- the episodes and scenes that name the
+  picture get a version without the reference -- with no model call: a group
+  picture forget no longer re-extracts its segments (one episode call per
+  segment, plus one scene call per changed scene with group scenes on, saved).
+  A user may forget **messages** of their own conversation (`target.kind:
+  "message"`, CLI `--message`): the segments that keep text are extracted
+  again, a buffered message is never read. **Undo** clears the marks the
+  forget wrote and writes the versions it replaced again as the newest (no
+  record is reinstated under its old id any more), puts profile items back
+  in their places by id (a forget logged before places were kept puts them
+  back by description, as before), and is refused (`409`) while a later
+  forget, undo or edit replaced a version the forget wrote: undo that one
+  first. A text-edited version now keeps every field of the version it
+  replaces (it used to lose its `language`). Forgets logged before still undo
+  ([docs/api.md](docs/api.md#post-apiv2memoryforget),
+  [docs/group-memory.md](docs/group-memory.md#94-forget-and-delete-propagation)).
+
+### Removed
+
+- **Hard-delete storage nothing called any more**: the stores'
+  `remove_session`, `remove`, `remove_naming` and `undeprecate`, the writer's
+  `remove_entries`, `OwnerDirStore.delete` (the start-up sweep of an earlier
+  build's deletion trash stays), and the profile helpers the two old forget
+  engines used (`forget_images`, `forget_segments`, `forget_items`).
+
 ### Added
 
 - **A personal search can cover the user's groups (`include_groups`, off by

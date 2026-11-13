@@ -132,9 +132,11 @@ everos memory forget --group trip --asker u_chen --member u_dan --apply
 everos memory undo fg_0123456789abcdef --user amy
 ```
 
-Targets: `--record ID` (repeatable), `--session`, `--owner` (everything of
-the user), `--types` with `--start` / `--end` (epoch ms), `--image HASH`;
-a group's: `--record`, `--session`, `--member`, `--image`. `history` only
+Targets: `--record ID` (repeatable), `--session`, `--session` with
+`--message ID` (repeatable: messages of the conversation), `--owner`
+(everything of the user), `--types` with `--start` / `--end` (epoch ms),
+`--image HASH`; a group's: `--record`, `--session` (with `--message` for
+messages), `--member`, `--image`. `history` only
 reads and runs beside a server; `update`, `forget --apply` and `undo` write
 and need the memory root to themselves, as `cascade sync` does: while a
 server holds it they exit with code 3 -- use the HTTP API then. An error the

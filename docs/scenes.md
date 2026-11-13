@@ -113,8 +113,13 @@ Forgetting follows the sources (EverOS 2.0 has no hard delete):
   version is never superseded, so its mark stays for the undo.
 - **A picture forget** writes a scene whose narrative names the picture
   again without the reference (a text edit, no model call), like the
-  episodes that named it -- a held version too. A member episode that was
-  rewritten counts as its new version.
+  episodes that named it -- a held version too, and a group's scene as a
+  user's. A member episode that was rewritten counts as its new version.
+- **A group's scene** that loses or changes an episode in a forget is
+  narrated again over the episodes it keeps (one capped call), or marked
+  forgotten below `min_members`: its narrative may say what was forgotten,
+  and other members read it. Its undo writes the version it replaced again,
+  as the newest (the version number keeps rising).
 - **`/memory/delete`** is a forget of the same scope.
 
 ## Cost
