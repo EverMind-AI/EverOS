@@ -73,7 +73,13 @@ from everos.service import (
 )
 from everos.service.bootstrap import build_replay_engine
 
-from .deps import bundled_instructions, make_stores, unscripted_llm
+from .deps import (
+    bundled_instructions,
+    default_profile_batcher,
+    llm_clients,
+    make_stores,
+    unscripted_llm,
+)
 from .sources import unused_raw_file_builder
 from .storage import make_storage
 from .stores import UnusedPort
@@ -470,14 +476,14 @@ def make_knowledge_service(
 def make_providers(**overrides: Any) -> Providers:
     """Providers for ``build_application`` without touching settings.
 
-    ``llm`` defaults to one that fails the test if called, and ``decider``
-    to ``llm`` (as ``[decider]`` falls back to ``[llm]``); every optional
-    provider is unconfigured. Keyword arguments replace single providers.
+    ``llm`` serves every task (the single-model deployment) and defaults to
+    one that fails the test if called; ``llms`` (see :func:`llm_clients`)
+    gives tasks their own and wins over ``llm``. Every optional provider is
+    unconfigured. Other keyword arguments replace single providers.
     """
     llm = overrides.pop("llm", None) or unscripted_llm()
     fields: dict[str, Any] = {
-        "llm": llm,
-        "decider": llm,
+        "llms": llm_clients(llm),
         "multimodal_llm": None,
         "embedding": None,
         "rerank": None,
@@ -501,8 +507,10 @@ def make_backfill_deps(
     ``cascade``, ...).
     """
     storage = make_storage(root if root is not None else MemoryRoot.resolve())
+    llm = llm or unscripted_llm()
     deps = MemoryDeps(
-        llm=llm or unscripted_llm(),
+        llms=llm_clients(llm or unscripted_llm()),
+        profile_batcher=default_profile_batcher(),
         embedding=embedding,
         stores=build_stores(storage.root, storage.sqlite),
         indexes=build_indexes(storage.index),

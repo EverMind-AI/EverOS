@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, tzinfo
+
 __all__ = [
     "bundled_instructions",
+    "default_profile_batcher",
+    "llm_clients",
     "make_deps",
     "make_indexes",
     "make_stores",
@@ -11,16 +15,19 @@ __all__ = [
     "unscripted_llm",
 ]
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
 from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
+from everos.config.settings import ProfileSettings
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.deps import Indexes, MemoryDeps, Stores
+from everos.memory.deps import Indexes, LLMClients, MemoryDeps, Stores
 from everos.memory.models import Episode, MemCell
 from everos.memory.ports import Scope
+from everos.memory.profile_batcher import ProfileBatcher
 
 from .embedding import FakeEmbeddingProvider
 from .indexes import (
@@ -40,6 +47,7 @@ from .stores import (
     InMemoryMemcellStore,
     InMemoryProfileStore,
     InMemoryReflectionReportStore,
+    InMemorySenderNameStore,
     UnusedPort,
 )
 
@@ -52,6 +60,11 @@ def bundled_instructions() -> CustomInstructions:
     return CustomInstructions(_CONFIG_ROOT)
 
 
+def default_profile_batcher() -> ProfileBatcher:
+    """A fresh batcher with the configured default per-call cap."""
+    return ProfileBatcher(ProfileSettings().max_episodes_per_call)
+
+
 def unscripted_llm() -> FakeLLMClient:
     """An LLM that fails the test if anything calls it."""
 
@@ -59,6 +72,21 @@ def unscripted_llm() -> FakeLLMClient:
         raise AssertionError("unexpected LLM call")
 
     return FakeLLMClient(handler=_refuse)
+
+
+def llm_clients(llm: Any = None, **per_task: Any) -> LLMClients:
+    """``llm`` for every task, except the tasks named in ``per_task``.
+
+    ``llm_clients(fake)`` is the single-model deployment and
+    ``llm_clients(fake, profile=other)`` points one task elsewhere. Without
+    ``llm`` every task gets a refusing client of its own, so a test can tell
+    which task's client a consumer was handed.
+    """
+    tasks = {
+        field.name: llm if llm is not None else unscripted_llm()
+        for field in dataclasses.fields(LLMClients)
+    }
+    return LLMClients(**{**tasks, **per_task})
 
 
 def make_stores(**overrides: Any) -> Stores:
@@ -77,6 +105,7 @@ def make_stores(**overrides: Any) -> Stores:
         "reflection_report": InMemoryReflectionReportStore(),
         "owner_dir": UnusedPort("owner_dir"),
         "session_purge": UnusedPort("session_purge"),
+        "sender_name": InMemorySenderNameStore(),
     }
     return Stores(**{**fields, **overrides})
 
@@ -97,26 +126,35 @@ def make_indexes(**overrides: Any) -> Indexes:
 def make_deps(
     *,
     llm: Any = _DEFAULT,
+    llms: LLMClients | None = None,
+    profile_batcher: ProfileBatcher | None = None,
     embedding: Any = _DEFAULT,
     stores: Stores | None = None,
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
     case_judge: CaseJudge | None = None,
+    tz: tzinfo = UTC,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
-    ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
-    :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
-    unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
-    gate) unless given.
+    ``llm`` serves every task; without it each task gets its own LLM that
+    refuses every call. ``llms`` (see :func:`llm_clients`) gives tasks clients
+    of their own and wins over ``llm``. ``embedding`` defaults to a
+    :class:`FakeEmbeddingProvider`; pass ``None`` to model an unconfigured
+    provider. ``profile_batcher`` defaults to one with the default per-call
+    cap. ``case_judge`` stays ``None`` (no agent-case gate) unless given.
     """
+    if llms is None:
+        llms = llm_clients(None if llm is _DEFAULT else llm)
     return MemoryDeps(
-        llm=unscripted_llm() if llm is _DEFAULT else llm,
+        llms=llms,
+        profile_batcher=profile_batcher or default_profile_batcher(),
         embedding=FakeEmbeddingProvider() if embedding is _DEFAULT else embedding,
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
         case_judge=case_judge,
+        tz=tz,
     )
 
 

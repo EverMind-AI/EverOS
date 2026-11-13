@@ -62,6 +62,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from everalgo.boundary import BoundaryDetector
 from everalgo.llm import LLMOutputError
 from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, settings
@@ -95,6 +96,7 @@ from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from tests.fakes import (
     UNUSABLE_REPLY,
+    InMemorySenderNameStore,
     boundary_reply,
     bundled_instructions,
     unused_raw_file_builder,
@@ -143,10 +145,10 @@ class BoundaryMachine(RuleBasedStateMachine):
             self.buffer_repo, SessionCutRepo(session_factory=self.factory)
         )
         self.boundary = BoundaryDetection(
-            llm=FakeLLMClient(handler=self._reply),
+            detector=BoundaryDetector(llm=FakeLLMClient(handler=self._reply)),
             instructions=bundled_instructions(),
             session_buffer=self.session_buffer,
-            limits=NO_FORCED_CUTS,
+            settings=NO_FORCED_CUTS,
         )
         # the model
         self.accepted: dict[str, dict[str, Any]] = {}  # id -> message
@@ -279,7 +281,10 @@ class BoundaryMachine(RuleBasedStateMachine):
             ],
         }
         ingested = await ingest.process(
-            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+            payload,
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+            sender_names=InMemorySenderNameStore(),
         )
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:
@@ -504,12 +509,13 @@ def test_machine_catches_a_lost_tail_message() -> None:
     the conservation invariant must trip."""
     machine = BoundaryMachine()
     try:
-        real = detection_mod.slice_tail
+        real = detection_mod.apply_cuts
 
-        def lossy(merged: Any, tail: Any) -> Any:
-            return real(merged, tail)[:-1]
+        def lossy(rows: Any, items: Any, cuts: Any) -> Any:
+            cut = real(rows, items, cuts)
+            return cut._replace(tail=cut.tail[:-1])
 
-        with mock.patch.object(detection_mod, "slice_tail", lossy):
+        with mock.patch.object(detection_mod, "apply_cuts", lossy):
             machine.add("s1", [("user", "a"), ("user", "b")], False, (0.5, 1, 0))
         with pytest.raises(AssertionError):
             machine.buffer_table_matches_model()

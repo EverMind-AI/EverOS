@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
+from everalgo.boundary import BoundaryDetector
 
 from everos.component.llm import LLMCaseJudge, LLMNotConfiguredError
 from everos.config import OmeSettings, Settings, load_settings
@@ -157,7 +159,8 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     assert isinstance(memorizer._bus, OmeEventBus)
     assert memorizer._bus._engine is application._engine
     assert memory._search_manager._llm is llm
-    assert memorizer._boundary._llm is llm
+    assert isinstance(memorizer._boundary._detector, BoundaryDetector)
+    assert memorizer._boundary._detector._llm is llm
     assert memorizer._boundary._session_buffer is memory._search_manager._session_buffer
     assert memorizer._extractions is memory._extractions
 
@@ -175,6 +178,23 @@ def test_the_case_judge_exists_only_with_the_gate_on(
 
 def _with(settings: Settings, **sections: object) -> Settings:
     return settings.model_copy(update=sections)
+
+
+def test_the_configured_zone_reaches_every_model_facing_consumer(
+    settings: Settings,
+) -> None:
+    """``[memory] timezone`` builds one zone that extraction and search share."""
+    zoned = _with(
+        settings, memory=settings.memory.model_copy(update={"timezone": "Asia/Tokyo"})
+    )
+    application = _build(zoned)
+    memory = application.memory
+    memorizer = memory._memorizer
+    zone = memorizer._boundary._tz
+
+    assert zone == ZoneInfo("Asia/Tokyo")
+    assert memorizer._user_pipeline._tz is zone
+    assert memory._search_manager._tz is zone
 
 
 @pytest.mark.parametrize("enabled", [True, False])

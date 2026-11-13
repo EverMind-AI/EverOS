@@ -17,6 +17,7 @@ from .memcell import Memcell as Memcell
 from .memorize_inbox import MemorizeInbox as MemorizeInbox
 from .purge_job import PurgeJob as PurgeJob
 from .reflection_report import ReflectionReport as ReflectionReport
+from .sender_name import SenderName as SenderName
 from .unprocessed_buffer import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "MemorizeInbox",
     "PurgeJob",
     "ReflectionReport",
+    "SenderName",
     "UnprocessedBuffer",
 ]

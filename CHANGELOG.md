@@ -19,13 +19,352 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the purge is dropped, and the purge waits for work in flight before
   it deletes a second time. New `[purge]` settings bound a job's running
   time. See `docs/api.md`.
+- **`[boundary_detection] strategy`**: `batch` (the default) cuts the whole
+  buffer in one model call per add; `step` asks once per message whether it
+  starts a new episode, as the EverAlgo LoCoMo reference run does (chat
+  messages only, so use it with `[memorize] mode = "chat"`).
+- **`[tokenizer] name`**: choose the keyword (BM25) tokenizer. `jieba` stays
+  the default; `nltk` reproduces the EverAlgo LoCoMo harness pipeline token for
+  token (English only; install with `pip install "everos[nltk]"` plus
+  `python -m nltk.downloader punkt_tab stopwords`). The LoCoMo benchmark config
+  selects `nltk`, and the benchmark's ingest identity now records the tokenizer,
+  so a store indexed with another one is not resumed. Changing `name` on an
+  existing store requires `everos cascade rebuild`.
+- **Per-task LLM sections, `[llm.<task>]`.** `[llm]` alone still runs
+  everything; any of twelve tasks -- `boundary`, `episode`, `summary`,
+  `atomic_fact`, `foresight`, `profile`, `reflection`, `agent_case`,
+  `agent_skill`, `knowledge`, `search`, `decider` -- can override any `[llm]`
+  field for itself (`EVEROS_LLM__<TASK>__<FIELD>` in the environment). Each
+  field is inherited from `[llm]` on its own; `extra` is replaced whole, never
+  merged. Tasks that resolve to the same settings share one client; the decider
+  always has its own. `everos config show` prints what each task resolves to and
+  where each field came from, and the server logs the same at startup
+  (`llm.task.resolved`). See `docs/configuration.md`.
+- **`[llm] temperature`, `max_tokens` and `sdk_max_retries`** (also per task).
+  `temperature` and `max_tokens` are sent only when a call names none -- agentic
+  search keeps its own temperatures -- and, unset, the request carries neither,
+  as before.
+- **A sender keeps the name it was last given.** Ingestion records the latest
+  non-blank `sender_name` of every `(app_id, project_id, sender_id)` in a new
+  `sender_name` table of `system.db`, and gives it to that sender's later
+  messages that arrive without one (blank names count as absent; names are
+  stripped). One person is then labelled the same way in every memcell,
+  episode narrative and profile. Deleting a whole user or agent forgets its
+  name; deleting a session does not.
+- **`[profile] max_episodes_per_call`** (default 10): how many episodes one
+  profile extraction call folds; see the profile entry under Changed. The
+  profile's LLM is `[llm.profile]`; a reasoning model with thinking on, at its
+  default effort, and a longer `timeout_seconds` (240) are recommended there;
+  see `docs/configuration.md`.
+- **Benchmark reports give a `Re-judged` score beside `Accuracy`.** With a gold
+  audit, JUDGE grades the answers to the questions it disputes once more, against
+  the audit's corrected answers, with the same judge model, number of runs and
+  majority vote; nothing is searched or answered again, and the rows go to
+  `conv<N>/rejudge_<method>.jsonl` (resumable, so `--stages judge` fills them in
+  for a run judged earlier). `report.txt`, `report.json` and the terminal summary
+  show both scores, overall and per category; until every disputed question is
+  re-judged the report gives no `Re-judged` number and says how many are missing.
+  LoCoMo reads [dial481/locomo-audit](https://github.com/dial481/locomo-audit)
+  `errors.json` (99 of 1,540 questions; `WRONG_CITATION` entries keep their gold)
+  through the new `gold_audit_path` setting; a missing file leaves the run going
+  and the report saying it was not re-judged, and the benchmarks without an audit
+  say so on the `Re-judged` line.
+- **`bash benchmarks/download_data.sh <benchmark>`** fetches exactly the files each
+  adapter reads to the path its config expects -- including LoCoMo's gold audit,
+  pinned to a commit, LongMemEval's extension-less upstream file and SubtleMemory's
+  nested personas -- and runs the EverMemBench conversion. Running it again
+  finishes an interrupted download.
+- **A preflight in `benchmarks/run.py`** lists every missing dataset and key before
+  any server starts, and refuses to start ADD when a started server's `/health`
+  lacks a provider the retrieval method needs. Requirements follow the method, as
+  EverOS's own search does: `keyword` runs on the LLM key alone, the vector-based
+  methods need embedding, and `agentic` (LoCoMo's) needs rerank too. A missing
+  provider is reported before ADD pays for extraction. The decider keeps its own
+  startup probe.
+- **Benchmark `flush_scope`**: `"session"` (the default, unchanged in every shipped
+  config) flushes each dataset session apart; `"conversation"` sends a whole
+  conversation as one EverOS session flushed once at its end, as the EverAlgo
+  reference harness did. Refused for datasets whose sessions carry their own ids.
+- **`benchmarks/configs/locomo-step.toml`** (`DATASET=locomo-step`): LoCoMo with
+  step boundary detection and prompt-only replies on every EverOS call, the
+  configuration behind LoCoMo's published number. It is `locomo.toml` with
+  those two server settings changed. The reply
+  format (`EVEROS_LLM__RESPONSE_FORMAT_MODE`) is now part of the ingest
+  identity, so a store built under one format is not reused under another.
+
+### Changed
+
+- **everalgo moves to the 2026-11 line**: `everalgo-core 0.7.0`,
+  `everalgo-boundary 0.5.0`, and the release candidates
+  `everalgo-user-memory 0.9.0rc8`, `everalgo-agent-memory 0.6.0rc4` and
+  `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
+  `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
+  `everalgo-user-memory` is the 2026-11-12 `0.9.0rc8`, which checks every
+  profile item against the episode narratives and keeps a do-not-record list
+  (the next two entries). `0.9.0rc6` and `0.9.0rc7` are skipped: under the
+  default strict reply format, rc6's profile reply schemas were refused by
+  OpenAI, and rc7's profile calls now and then stalled until `max_tokens`.
+- **Boundary detection replies are short.** Each boundary call's `reasoning`
+  is one sentence of at most 25 words, on both strategies, so a call returns
+  much sooner: on qwen3-4b-instruct-2507 the median batch reply fell from 299
+  to 38–78 output tokens, and on gpt-4.1-mini from 108 to 31–39. The prompts
+  now ask whether a message starts a new episode, and the batch reply names
+  the start labels, which keeps where a small model cuts. On LoCoMo
+  (gpt-4.1-mini, three runs each) the batch score did not change measurably
+  (−0.15 points re-judged, 95% CI [−0.87, +0.52]), with about a quarter fewer,
+  longer memcells; `strategy = "step"` with prompt-only boundary replies
+  scored 94.03% re-judged.
+- **Profile items must be grounded in what was said, and new profiles add no
+  `implicit_traits`.** Every item the model writes carries a quote that has to
+  be found in that batch's episode narratives, or the item is dropped. An
+  item claiming a habit, preference or other standing pattern is written only
+  when its quote shows it is regular; otherwise it waits until a later
+  conversation shows it again. No new `implicit_traits` item is created --
+  what a person says about their own values and habits becomes an
+  `explicit_info` item -- while traits already stored are kept and can still
+  be updated or removed. A matter the user asks not to be recorded stays out
+  of the profile from then on, and an item carrying an identification or
+  account number (12 or more digits) is dropped. A do-not-record request is
+  kept only with a quote found in the narratives, and the user can withdraw
+  it, whole or in part.
+- **`user.md` keeps the extractor's `do_not_record` and `pending` lists** in
+  its frontmatter: the matters the user asked not to be recorded, and the
+  patterns waiting for a second occurrence. They are the extractor's own
+  state: each profile update passes them back to everalgo and stores the
+  lists it returns. They are written only when non-empty, so existing files
+  read and write unchanged; they are not indexed, are never returned by
+  `/get` or `/search`, and go with `user.md` when the user is deleted.
+- **Episode summaries are written by the model.** Each cell's summary comes
+  from a second call made at the same time as the episode call
+  (`EpisodeSummarizer.asummarize_memcell`, reading the same conversation),
+  instead of the episode's first 200 characters. The summary is display-only:
+  when its call fails, the episode keeps the first 200 characters and is
+  written as before. A cell now costs two extraction calls instead of one.
+- **`[memory] timezone` now also sets the zone the model sees message times
+  in.** Boundary detection, episode and summary extraction, atomic facts,
+  foresight, the profile and agentic search show every time in that zone with
+  its offset (`2024-03-11 00:00 UTC+08:00 (Monday)`), so relative dates resolve
+  against the user's own calendar. With the default `UTC` the requests are
+  unchanged.
+- Boundary detection runs on everalgo's `BoundaryDetector`, whose two paths
+  return `Cuts`. `hard_token_limit` / `hard_msg_limit` keep their defaults and
+  apply to `batch` only; `step` uses everalgo's own step limits. A tail the
+  model judged complete is no longer closed early: the uncut tail waits for
+  the next batch or the flush.
+- **The decider's LLM is `[llm.decider]`; the LLM keys of `[decider]` are
+  deprecated.** `[decider]` keeps the multi-round loop tuning. Its `model`,
+  `api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`,
+  `sdk_max_retries`, `response_format_mode` and `invalid_reply_retries` (and
+  `EVEROS_DECIDER__*`) still apply, with a startup warning; `[llm.decider]` wins
+  when both set a field. Unset, `timeout_seconds` (60), `sdk_max_retries` (0)
+  and `invalid_reply_retries` (1) keep the decider's own defaults rather than
+  `[llm]`'s.
+- **The decider has no output cap of its own.** Its replies used to stop at 512
+  tokens; it now inherits `[llm].max_tokens` like every task, so a decider that
+  thinks before it answers has room to. Set `[llm.decider] max_tokens` to cap it.
+- **The decider inherits `extra` and `response_format_mode` from `[llm]` field by
+  field.** They used to follow whichever section named the model, so pointing
+  the decider at another model dropped `[llm].extra` -- re-enabling thinking on a
+  Qwen gateway configured to turn it off. A decider on a gateway that rejects
+  `[llm].extra` now sets its own `extra` (even `{}`), which replaces it. A
+  `[decider].extra` that only added keys to `[llm].extra` now replaces it too.
+- **`[llm]` rejects unknown keys.** A mistyped field or task name under `[llm]`
+  or `[llm.<task>]` -- including an `EVEROS_LLM__*` variable -- fails startup
+  with the valid names, where it used to be ignored. Other sections are
+  unchanged. Settings validation errors no longer echo the offending input, so a
+  mistyped `api_key` line is not printed with its key.
+- **`MemoryDeps.llm` is now `MemoryDeps.llms`** (one client per task, an
+  `LLMClients`), `UserMemoryPipeline` takes `episode_llm` and `summary_llm`,
+  and `Providers.llm` / `Providers.decider` became `Providers.llms`. In
+  `everos.component.llm`, `resolve_llm_config`, `resolve_decider_config` and
+  `DeciderClientConfig` gave way to `resolve_llm_task(s)`, `llm_client_config`
+  and `build_llm_task_providers`.
+- **The user profile is built from episodes.** Every pipeline
+  `EpisodeExtracted` now folds its episode's narrative into its owner's
+  `user.md` through everalgo's `ProfileExtractor.aextract_from_episodes`,
+  instead of re-reading raw memcells selected through the owner's clusters
+  (with an embedding provider) or through the episode index (without one).
+  The same call folds that owner's newer episodes still waiting in the
+  episode index, up to `[profile] max_episodes_per_call`, and their own runs
+  then end without a call, so a burst for one owner (a bulk import) drains in
+  a fraction of the calls instead of queueing one slow call per episode past
+  the OME run timeout. The profile no longer depends on clustering, and an
+  episode is no longer sent to the profile again on a later run (a crash can
+  still repeat one). The event now carries
+  `owner_name` — the label the owner's chat lines had (`sender_name`, else
+  `sender_id`) — and the profile finds the owner in the narrative by it; an
+  episode whose narrative does not name them is skipped with a
+  `profile_episode_skipped` warning. `ProfileClusterUpdated` is removed:
+  `trigger_profile_clustering` still clusters episodes for agentic search and
+  Reflection, and no longer emits an event.
+- **The benchmark's decider probe and run record follow `[llm.decider]`.**
+  `benchmarks/run.py` starts its servers with `EVEROS_LLM__DECIDER__MODEL` /
+  `__BASE_URL` / `__API_KEY` instead of the deprecated `EVEROS_DECIDER__*`, and
+  `evermembench.toml` sets `EVEROS_LLM__DECIDER__TIMEOUT_SECONDS`. Before the
+  first question of an `llm_multiround` run, the decider is resolved by EverOS's
+  own `resolve_llm_task`, in a child process under the servers' environment,
+  and asked once through the provider built from it -- the decider's own model,
+  endpoint, `extra`, output cap, temperature, timeout and SDK retries, with a
+  strict `json_schema` reply format -- where the harness used to rebuild the
+  precedence itself and send a request of its own. `run_spec.json` records the
+  decider that resolution names, with every effective field (output cap,
+  timeout, `extra` and the rest; `extra`'s header and query values masked) and
+  the section each came from, and the backbone entry no longer picks up
+  `EVEROS_LLM__<TASK>__*` variables.
+
+- **The LoCoMo benchmark runs the EverAlgo reference setup, and its docs work
+  as written.** `benchmarks/configs/locomo.toml` searches with `agentic` at
+  `top_k = 10`, judges every answer 3 times (majority vote), ingests in `chat`
+  mode, extracts at temperature 0.3 / `max_tokens` 16384 with 1024-dimensional
+  embeddings and a 0.7 clustering threshold, and files every message under the
+  queried speaker (`message_owner = "eval_owner"`, new, part of the ingest
+  identity). It also turns off the user-profile strategy its answers never read:
+  the new `[ome_strategies]` table is written as each started server's
+  `ome.toml`, the one place EverOS reads strategy switches from (also part of
+  the ingest identity). A LoCoMo turn that shares an image now reaches the
+  extractor with the image's caption in front of its text, worded as the
+  EverAlgo loader writes it (910 of 5,882 turns; the text alone was sent
+  before), and the ingest identity carries a `message_format` version so a
+  store built from the old text is not reused. `benchmarks/.env.example` no longer points embedding at a local
+  server and asks for the reranker key agentic search cannot run without.
+- **The benchmark ingest identity covers more of what shapes a store.** It now
+  records the messages ingested per conversation (a `--smoke` or `--max-messages`
+  cap), `flush_scope`, and the server settings that change what is stored --
+  `EVEROS_BOUNDARY_DETECTION__STRATEGY`, `EVEROS_CLUSTERING__THRESHOLD`,
+  `EVEROS_CLUSTERING__TIME_WINDOW_DAYS`, `EVEROS_EMBEDDING__DIM`,
+  `EVEROS_EMBEDDING__DIMENSIONS`, `EVEROS_MEMORIZE__MODE`,
+  `EVEROS_LLM__TEMPERATURE` and `EVEROS_LLM__MAX_TOKENS`, read like the keyword
+  tokenizer (the config's `[retrieval_env]` first, then the environment). A
+  results directory built under other values refuses to resume, so a 50-message
+  smoke store is no longer scored as a full one. `run_spec.json` records `smoke`
+  and `max_messages`.
+- **`--smoke` means conversation 0**, both through `run.py` (it took 0 and 1) and
+  through `reproduce.sh` (it passed `--conv all`, so `--smoke` alone trimmed and
+  ingested every conversation); `reproduce.sh` now leaves the default to `run.py`,
+  names smoke runs `<dataset>_smoke`, and says so when `.venv` is missing.
+- **`report.txt` flags what it measured**: a `Scope:` line marks a smoke or trimmed
+  run as not comparable to published results, and `Decider model:` names the
+  decider `run_spec.json` records (model, endpoint and the section the model came
+  from), or that the run's methods use none.
+- **LoCoMo's published results are measured on this release and re-judged.**
+  `benchmarks/README.md` gives every LoCoMo figure graded against the gold
+  audit's corrected answers for the 99 questions it disputes (marked \*), best
+  of three full runs per config: 94.61% with `locomo-step` (step, prompt-only
+  replies) and 94.35% with the default `locomo` (batch, strict), both `agentic`.
+  `llm_multiround`, `hybrid`, `vector` and `keyword` are scored on those runs'
+  stores; both LoCoMo configs run the `llm_multiround` decider with thinking off. A "Batch or step" section, and its counterpart under
+  `[boundary_detection]` in `docs/configuration.md`, set out the choice: the
+  defaults (batch, strict) ingest about five times faster with every reply held
+  to its schema; step with prompt-only replies scores higher, within LoCoMo's
+  run-to-run spread, and handles chat messages only. The guide also shows how to
+  score another retrieval method on stores a run already built. These figures
+  replace 94.42%.
+- **Benchmark docs**: `benchmarks/README.md` (and its Chinese mirror) is a
+  step-by-step guide with a quick start, a check per step, which keys each
+  retrieval method needs, a troubleshooting table and the two scores;
+  `benchmarks/.env.example` opens with a `REQUIRED` block. The root READMEs gain a
+  "Recommended models" table (`[llm.decider]` for the decider) and link the guide,
+  as do `docs/index.md` and `CLAUDE.md`.
+
+### Removed
+
+- **`EpisodeIndex.count`** and the repositories' `count_by_owner` (LanceDB
+  and Milvus): only the old profile throttle used it.
 
 ### Fixed
 
-- Profile extraction includes the triggering conversation before its episode
-  is indexed, while retaining indexed history. Queued cluster events check
-  that their triggering episode is still a member. Session deletion now
-  removes stale cluster members, including when retrying a partial deletion.
+- **Benchmark runs started together no longer share servers.** `GET /health`
+  now reports `pid`, and `run.py` uses a server only when the answer comes from
+  the process it started; a start that loses a port race moves to another port
+  block and starts clean.
+- **`llm_multiround` runs stop at a decider fallback.** A conversation with a
+  round where every decider attempt failed is stopped right after SEARCH, before
+  its answers are paid for, since such a round measures a different method. The configs'
+  decider comments say which method uses the decider and where to serve it, and
+  `reproduce.sh` no longer names a decider that has no endpoint.
+
+- Deleting a session also removes its episodes from their clusters' members,
+  and a retry after a partial deletion finishes that cleanup (#591). The
+  profile-source guards of #591 are superseded here: the profile is built
+  from episodes read back from markdown, not from cluster members.
+
+- **A benchmark ADD no longer dies waiting for extraction.** OME empties a
+  succeeded run's `event_payload` (since #555), and `run.py`'s readiness check
+  raised `malformed JSON` on it, failing every conversation once one
+  extraction had finished. Emptied rows now skip the payload filter and still
+  count as finished. The "no decider endpoint" notice, which called an agentic
+  run "not comparable", is printed only for runs that use `llm_multiround`.
+- `benchmarks/run.py` run directly (without `reproduce.sh`) loaded
+  `benchmarks/.env` only after expanding the config, so `BENCH_DECIDER_*`,
+  `BENCH_DATA_*` and `BENCH_EVAL_ROOT` set there were ignored; a `--methods` value
+  was applied after the method check, so a misspelt one was never refused.
+- A stage-only rerun (no ADD) after a multi-server ADD failed with
+  "--everos-root is required": it looked for `store/`, while a fleet builds
+  `store_s0` .. `store_s<N-1>`. The run now prints the stores it actually uses.
+- A SubtleMemory data path one level above the personas failed every conversation
+  with `conv_index 0 out of range (have 0)`; it now names the expected layout and
+  the download command.
+- `python -m benchmarks.adapters.evermembench` ran its conversion twice and wrote
+  its output file twice.
+
+- The language an episode is detected in, which its atomic facts and a new
+  user's profile are then written in, is Chinese, Japanese or English. Every
+  other script and every Latin text read as English: an English episode that
+  used words such as "die", "Los Angeles" or "café" twice was read as German
+  or Spanish, and its atomic facts were written in that language.
+
+### Upgrade
+
+```bash
+pip install --upgrade everos
+# uv needs the flag for the pinned pre-release algorithm packages; without it
+# uv keeps the installed version and still reports success:
+uv pip install --upgrade --prerelease=allow everos
+```
+
+(`'everos[multimodal]'` or `'everos[milvus]'` if you installed those extras.)
+Check the version afterwards with `pip show everos` or the `version` field of
+`GET /health`.
+
+Stop the old server normally (not `kill -9`) so it finishes its queued
+background runs, and check that its log has no `ome_stop_drain_timeout`. Then
+start the new version on the same memory root. Nothing has to be migrated or
+rebuilt: the first start adds the `sender_name` table to `system.db`, and
+Markdown (including `user.md`), the index, the OME jobstore, the memorize queue
+and conversations left open are used as they are. The keyword tokenizer stays
+`jieba`; `everos cascade rebuild` is needed only if you later change
+`[tokenizer] name`.
+
+| If you | Then |
+|---|---|
+| have a key under `[llm]` that EverOS does not define, or an `EVEROS_LLM__*` variable that names none (such as `EVEROS_LLM__SEARCH_TIMEOUT_SECONDS`) | remove or correct it: startup now fails and lists the valid fields and tasks |
+| set the decider's LLM under `[decider]` (`model`, `api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`, `sdk_max_retries`, `response_format_mode`, `invalid_reply_retries`) or through `EVEROS_DECIDER__*` | move those keys to `[llm.decider]` (`EVEROS_LLM__DECIDER__*`); until then they still apply, with the startup warning `llm.decider.deprecated_section` |
+| run the decider on another model or gateway | it now takes `extra` and `response_format_mode` from `[llm]` unless `[llm.decider]` sets them; if that gateway rejects `[llm].extra`, set `extra = {}` under `[llm.decider]` |
+| want the decider's replies capped as before | set `[llm.decider] max_tokens = 512`; the decider has no cap of its own any more |
+| turned the user profile off by disabling `trigger_profile_clustering` | disable `extract_user_profile` in `ome.toml` instead; the profile no longer depends on clustering |
+| build `Providers` or `MemoryDeps` in Python, or import `resolve_llm_config`, `resolve_decider_config`, `DeciderClientConfig` or `ProfileClusterUpdated` | pass `llms` (an `LLMClients`) and use `resolve_llm_task`, `llm_client_config` and `build_llm_task_providers` |
+
+Profile updates now start from `EpisodeExtracted`. A profile run still queued
+under `ProfileClusterUpdated` when the old server stopped is not resumed; after
+a forced stop the new server logs one `TypeError` (`did not resolve to an Event
+subclass`) for each such run and carries on. An owner's profile catches up on
+their next episode: that run also folds the episodes newer than the stored
+profile, oldest first, up to `[profile] max_episodes_per_call` episodes in all
+(default 10, the new one included). Older episodes beyond that are not folded
+later, so if profile extraction was off or behind before the upgrade, raise
+`max_episodes_per_call` before those owners' next conversations arrive.
+
+Extraction output changes with this release, with no action needed: each
+memcell costs two extraction calls (the episode and its summary); a new profile
+item must quote the conversation and no new `implicit_traits` are added
+(stored ones are kept); `user.md` carries `do_not_record` and `pending` only
+when they are non-empty; text in a language other than Chinese, Japanese or
+English is read as English, so its atomic facts and new profiles are written in
+English (a stored profile keeps its language); and with a non-UTC
+`[memory] timezone` the model sees message times in that zone.
+
+Upgrading from 1.5.x: apply the 1.6.0 upgrade notes as well; the steps above
+come after them unchanged.
 
 ## [1.6.0] - 2026-11-11
 

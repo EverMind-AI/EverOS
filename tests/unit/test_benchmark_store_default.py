@@ -42,7 +42,9 @@ def test_add_defaults_the_store_into_the_results_dir() -> None:
 def test_stage_only_run_reuses_that_same_location() -> None:
     """Re-running answer/judge should find the store ADD left, without being told."""
     block = SRC[SRC.index("_default_store = _res_root") :][:1200]
-    assert "elif _default_store.exists()" in block
+    assert "_default_store.exists()" in block
+    # A fleet's ADD leaves `store_s<i>` beside it, not `store` itself.
+    assert '_res_root.glob(f"{_default_store.name}_s*")' in block
 
 
 def test_a_stage_only_run_with_no_store_anywhere_is_an_error() -> None:

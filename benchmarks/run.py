@@ -32,15 +32,19 @@ import time
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import adapters
 import openai
 import requests
 from adapters._profile import with_profile_block
+from adapters.base import question_key
 from dotenv import load_dotenv
+
+from everos.config import LLMTask
 
 # Both this file's own directory and the repo root go on sys.path. The repo root is
 # for `python -m benchmarks.run`; the file's own directory is what makes a standalone
@@ -64,6 +68,15 @@ from config import (  # noqa: E402
     ingest_identity,
     read_identity,
     unresolved,
+)
+from preflight import (  # noqa: E402
+    blocking_problems,
+    format_problems,
+    format_unready,
+    ready_line,
+    required_capabilities,
+    runs_server_stages,
+    servers_lacking,
 )
 from tqdm import tqdm as _tqdm  # noqa: E402
 
@@ -428,6 +441,135 @@ def server_env_for(
     return env
 
 
+@dataclass(frozen=True)
+class ServerModels:
+    """The LLMs a run points its EverOS servers at.
+
+    A blank field adds nothing, so the server keeps whatever its own configuration
+    says for it.
+
+    Attributes:
+        backbone_model: ``[llm] model``, which every task inherits.
+        backbone_base_url: ``[llm] base_url``.
+        backbone_api_key: ``[llm] api_key``.
+        decider_model: ``[llm.decider] model``.
+        decider_base_url: ``[llm.decider] base_url``.
+        decider_api_key: ``[llm.decider] api_key``.
+    """
+
+    backbone_model: str = ""
+    backbone_base_url: str = ""
+    backbone_api_key: str = field(default="", repr=False)
+    decider_model: str = ""
+    decider_base_url: str = ""
+    decider_api_key: str = field(default="", repr=False)
+
+    def env(self) -> dict[str, str]:
+        """The non-blank fields, under the variable names EverOS reads them from."""
+        values = {
+            "EVEROS_LLM__MODEL": self.backbone_model,
+            "EVEROS_LLM__BASE_URL": self.backbone_base_url,
+            "EVEROS_LLM__API_KEY": self.backbone_api_key,
+            "EVEROS_LLM__DECIDER__MODEL": self.decider_model,
+            "EVEROS_LLM__DECIDER__BASE_URL": self.decider_base_url,
+            "EVEROS_LLM__DECIDER__API_KEY": self.decider_api_key,
+        }
+        return {name: value for name, value in values.items() if value}
+
+
+def server_launch_env(
+    base: Mapping[str, str],
+    root: str | Path,
+    models: ServerModels,
+    extra: Mapping[str, str],
+    *,
+    trace_file: Path | None = None,
+) -> dict[str, str]:
+    """The complete environment one EverOS server of this run is launched with.
+
+    The fleet starts its servers with it and the decider probe resolves the decider
+    under it, so the probe vouches for the configuration the servers actually run.
+
+    Args:
+        base: The inherited environment, normally ``os.environ``.
+        root: The server's ``EVEROS_ROOT``.
+        models: The LLMs the run points the server at.
+        extra: Applied last, over everything else (see :func:`server_env_for`).
+        trace_file: Where the server writes its retrieval trace; ``None`` adds
+            nothing. The probe passes none: no setting reads it.
+
+    Returns:
+        A new mapping; ``base`` is left untouched.
+    """
+    env = {**base, "EVEROS_ROOT": str(root)}
+    if trace_file is not None:
+        env["EVEROS_LLMMR_TRACE_DUMP"] = str(trace_file)
+    env.update(models.env())
+    env.update({str(k): str(v) for k, v in extra.items()})
+    return env
+
+
+def write_ome_strategies(
+    root: Path, strategies: Mapping[str, Mapping[str, Any]]
+) -> None:
+    """Write ``strategies`` as ``<root>/ome.toml``, the file OME reads overrides from.
+
+    The whole file is replaced, so a rerun on the same root never carries an older
+    run's switches. Values are TOML scalars; a mapping value (a ``gate``) becomes a
+    ``[strategies.<name>.<key>]`` sub-table.
+    """
+    lines = ["# Written by benchmarks/run.py from the config's [ome_strategies]."]
+    for name, fields in strategies.items():
+        lines.append(f"\n[strategies.{name}]")
+        tables = {k: v for k, v in fields.items() if isinstance(v, Mapping)}
+        lines += [
+            f"{key} = {_toml_scalar(value)}"
+            for key, value in fields.items()
+            if key not in tables
+        ]
+        for key, table in tables.items():
+            lines.append(f"\n[strategies.{name}.{key}]")
+            lines += [f"{k} = {_toml_scalar(v)}" for k, v in table.items()]
+    (root / "ome.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _toml_scalar(value: object) -> str:
+    """``value`` as a TOML scalar: a JSON string literal is a TOML basic string."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise TypeError(f"ome.toml takes scalars and gate tables, got {value!r}")
+
+
+def _first_root(roots: Sequence[str] | str) -> Path:
+    """The first ``--everos-root`` path, with ``~`` expanded."""
+    return Path(roots if isinstance(roots, str) else roots[0]).expanduser()
+
+
+def _store_roots(base: Path, servers: int) -> list[Path]:
+    """Each server's store: `base` itself for one server, `<base>_s<i>` for a fleet.
+
+    EverOS runs one process per store (the OME queue lock is exclusive), so a fleet is N
+    independent instances on N stores, with the conversations sharded across them by
+    index -- not one deployment scaled out.
+    """
+    if servers <= 1:
+        return [base]
+    return [base.parent / f"{base.name}_s{i}" for i in range(servers)]
+
+
+def _print_stores(roots: Sequence[Path], *, reusing: bool) -> None:
+    """Where this run's stores are, so they can be found and deleted afterwards."""
+    if len(roots) == 1:
+        where = str(roots[0])
+    else:
+        where = f"{roots[0]} .. {roots[-1].name} ({len(roots)} stores, one per server)"
+    print(f"store    {'reusing ' if reusing else ''}{where}", flush=True)
+
+
 def _server_roots_for(
     base_urls: Sequence[str] | str, roots: Sequence[str] | str
 ) -> list[str]:
@@ -469,6 +611,18 @@ def _looks_like_bind_failure(log_tail: str) -> bool:
     return any(m in tail for m in _BIND_FAILURE_MARKERS)
 
 
+def _read_health(url: str) -> dict[str, Any]:
+    """``url``'s ``/health`` payload.
+
+    Raises:
+        OSError: Nothing answered, or not with HTTP 2xx (``URLError``, its
+            ``HTTPError`` and timeouts are ``OSError`` subclasses).
+        ValueError: The answer was not JSON.
+    """
+    with urllib.request.urlopen(f"{url}/health", timeout=5) as resp:
+        return json.loads(resp.read())
+
+
 class _PortRaceLostError(RuntimeError):
     """A child exited before readiness, which on this path means it lost a bind race."""
 
@@ -481,6 +635,16 @@ class _ServerFleet:
     `everos server start`, then a matching list of --base-url and --everos-root -- leaks
     an implementation detail into the interface and is easy to get subtly wrong (a
     mismatched pair silently polls the wrong store). `--servers N` is the whole knob.
+
+    Args:
+        n: Number of servers; more than one gives each a ``<root>_s<i>`` root.
+        base_root: The store root, or the base the shard roots are named after.
+        first_port: Where the search for free ports starts.
+        models: The LLMs every server is pointed at; ``None`` adds none.
+        extra_env: Applied over everything else in each server's environment.
+        trace_dir: Where each server writes its retrieval trace; ``None`` for none.
+        ome_strategies: Strategy overrides written as each root's ``ome.toml``
+            (:func:`write_ome_strategies`); empty leaves the file as ``init`` wrote it.
     """
 
     def __init__(
@@ -488,22 +652,14 @@ class _ServerFleet:
         n: int,
         base_root: Path,
         first_port: int,
-        backbone_model: str = "",
-        backbone_base_url: str = "",
-        backbone_api_key: str = "",
-        decider_model: str = "",
-        decider_base_url: str = "",
-        decider_api_key: str = "",
-        extra_env: dict[str, str] | None = None,
+        models: ServerModels | None = None,
+        extra_env: Mapping[str, str] | None = None,
         trace_dir: Path | None = None,
+        ome_strategies: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
-        self.decider_model = decider_model
-        self.decider_base_url = decider_base_url
-        self.decider_api_key = decider_api_key
-        self.backbone_model = backbone_model
-        self.backbone_base_url = backbone_base_url
-        self.backbone_api_key = backbone_api_key
+        self.models = models or ServerModels()
         self.extra_env = dict(extra_env or {})
+        self.ome_strategies = dict(ome_strategies or {})
         self.trace_dir = trace_dir
         self.procs: list[subprocess.Popen] = []
         self.urls: list[str] = []
@@ -570,22 +726,18 @@ class _ServerFleet:
                     f"({e}); retrying at {base + (attempt + 1) * 149}"
                 )
                 self.stop()
-                self.procs.clear()
-                self.urls.clear()
-                self.roots.clear()
         raise RuntimeError(
             f"could not claim a free port block after {attempts} attempts from {base}"
         )
 
     def _start_once(self) -> None:
+        # One attempt's servers, built from empty: the four lists pair up by index,
+        # and a lost race's leftovers in any one of them (it was `logs`) misaligned
+        # every later zip of them.
+        self.procs, self.urls, self.roots, self.logs = [], [], [], []
         exe = Path(sys.executable).parent / "everos"
         port = self._first_port
-        for i in range(self.n):
-            root = (
-                self._base_root
-                if self.n == 1
-                else self._base_root.parent / f"{self._base_root.name}_s{i}"
-            )
+        for root in _store_roots(self._base_root, self.n):
             root.mkdir(parents=True, exist_ok=True)
             if not (root / "everos.toml").exists():
                 subprocess.run(
@@ -593,39 +745,20 @@ class _ServerFleet:
                     check=True,
                     capture_output=True,
                 )
+            if self.ome_strategies:
+                write_ome_strategies(root, self.ome_strategies)
             port, _held = self._free_port(port)
             # Released immediately before the child binds it. Every other run's probe
             # has seen it occupied up to this point.
             _held.close()
             log = root / "server.log"
-            srv_env = {**os.environ, "EVEROS_ROOT": str(root)}
-            # The retrieval trace is what every bad-case attribution reads, and a run
-            # without it cannot be attributed afterwards -- which is why the reference
-            # launchers all export it. It takes a path, so it cannot live in a config
-            # file as a flag; it is derived per server here instead. An operator who
-            # sets it themselves keeps their own value.
-            if self.trace_dir is not None and not os.environ.get(
-                "EVEROS_LLMMR_TRACE_DUMP"
-            ):
-                self.trace_dir.mkdir(parents=True, exist_ok=True)
-                srv_env["EVEROS_LLMMR_TRACE_DUMP"] = str(
-                    self.trace_dir / f"trace_port{port}.jsonl"
-                )
-            if self.backbone_model:
-                srv_env["EVEROS_LLM__MODEL"] = self.backbone_model
-            if self.backbone_base_url:
-                srv_env["EVEROS_LLM__BASE_URL"] = self.backbone_base_url
-            # EVEROS_DECIDER__* is a separate section: extraction keeps [llm], while the
-            # multi-round retrieval decider runs this model instead.
-            if self.decider_model:
-                srv_env["EVEROS_DECIDER__MODEL"] = self.decider_model
-            if self.decider_base_url:
-                srv_env["EVEROS_DECIDER__BASE_URL"] = self.decider_base_url
-            if self.decider_api_key:
-                srv_env["EVEROS_DECIDER__API_KEY"] = self.decider_api_key
-            if self.backbone_api_key:
-                srv_env["EVEROS_LLM__API_KEY"] = self.backbone_api_key
-            srv_env.update({k: str(v) for k, v in self.extra_env.items()})
+            srv_env = server_launch_env(
+                os.environ,
+                root,
+                self.models,
+                self.extra_env,
+                trace_file=self._trace_file(port),
+            )
             self.procs.append(
                 subprocess.Popen(
                     [str(exe), "server", "start", "--port", str(port)],
@@ -643,6 +776,21 @@ class _ServerFleet:
             port += 1
         self._await_ready()
 
+    def _trace_file(self, port: int) -> Path | None:
+        """The retrieval trace file of the server on ``port``, its directory created.
+
+        The retrieval trace is what every bad-case attribution reads, and a run
+        without it cannot be attributed afterwards -- which is why the reference
+        launchers all export it. It takes a path, so it cannot live in a config file
+        as a flag; it is derived per server here instead. ``None`` when tracing is
+        off, or when the operator set ``EVEROS_LLMMR_TRACE_DUMP`` themselves: the
+        inherited value then stands.
+        """
+        if self.trace_dir is None or os.environ.get("EVEROS_LLMMR_TRACE_DUMP"):
+            return None
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
+        return self.trace_dir / f"trace_port{port}.jsonl"
+
     def _log_tail(self, url: str, lines: int = 12) -> str:
         """Last few lines the dead child wrote, for the failure message."""
         try:
@@ -652,15 +800,22 @@ class _ServerFleet:
             return "(no server log)"
 
     def _await_ready(self, timeout_s: float = 180.0) -> None:
-        import urllib.error
-        import urllib.request
+        """Wait until every server this run started answers ``/health`` itself.
 
+        An answer only counts when its ``pid`` is the child's: a launch that lost
+        the port to another one is answered by the other launch's server (its own
+        child dies at bind only after startup, seconds later), and taking that
+        answer as ready silently sent this run's writes into the other run's stores.
+
+        Raises:
+            _PortRaceLostError: Another process holds one of the ports, or a child
+                died failing to bind; ``start`` moves to another port block.
+            RuntimeError: A child exited for its own reason, or the fleet was not
+                ready within ``timeout_s``.
+        """
         deadline = time.time() + timeout_s
         pending = set(self.urls)
         while pending and time.time() < deadline:
-            # A child that has exited cannot be the thing answering, so its port now
-            # belongs to somebody else. `/health` carries no store identity, so this is
-            # the check that tells "my server is up" from "some server is up".
             dead = [
                 (u, pr.returncode)
                 for u, pr in zip(self.urls, self.procs, strict=False)
@@ -691,13 +846,19 @@ class _ServerFleet:
                 raise _PortRaceLostError(
                     f"server process(es) exited before becoming ready: {dead}"
                 )
-            for url in sorted(pending):
+            for url, proc in zip(self.urls, self.procs, strict=True):
+                if url not in pending:
+                    continue
                 try:
-                    with urllib.request.urlopen(f"{url}/health", timeout=5) as r:
-                        if r.status == 200:
-                            pending.discard(url)
-                except (urllib.error.URLError, OSError, TimeoutError):
-                    pass
+                    answered_by = _read_health(url).get("pid")
+                except (OSError, ValueError):
+                    continue
+                if answered_by != proc.pid:
+                    raise _PortRaceLostError(
+                        f"{url} is answered by process {answered_by}, not by the "
+                        f"server this run started (pid {proc.pid})"
+                    )
+                pending.discard(url)
             if pending:
                 time.sleep(2.0)
         if pending:
@@ -708,6 +869,60 @@ class _ServerFleet:
                 " -- see server.log under each root"
             )
         print(f"  Started {self.n} server(s): {', '.join(self.urls)}", flush=True)
+
+    def health(self) -> dict[str, dict[str, Any]]:
+        """Each server's ``/health`` payload, keyed by URL.
+
+        Raises:
+            SystemExit: When a server that passed the readiness check no longer
+                answers, or another process answers in its place; the message
+                names its log.
+        """
+        payloads: dict[str, dict[str, Any]] = {}
+        for url, log, proc in zip(self.urls, self.logs, self.procs, strict=True):
+            try:
+                payload = _read_health(url)
+            except (OSError, ValueError) as exc:
+                raise SystemExit(
+                    f"Not started -- nothing has been spent yet. {url} stopped "
+                    f"answering /health after it started ({exc}); its log: {log}"
+                ) from exc
+            if payload.get("pid") != proc.pid:
+                raise SystemExit(
+                    f"Not started -- nothing has been spent yet. {url} is answered "
+                    f"by process {payload.get('pid')}, not by the server this run "
+                    f"started (pid {proc.pid}); its log: {log}"
+                )
+            payloads[url] = payload
+        return payloads
+
+    def assert_capabilities(self, capabilities: Sequence[str]) -> None:
+        """Refuse to go on when a server lacks a capability the run's methods need.
+
+        EverOS starts without embedding or rerank (both are optional there), so an
+        empty key or an unreachable endpoint used to pass every check: ADD then paid
+        for extraction and the search stage failed with HTTP 422.
+
+        Args:
+            capabilities: ``/health`` capability names, e.g. ``["embed"]``.
+
+        Raises:
+            SystemExit: When any server lacks one; the message names each server's
+                log.
+        """
+        if not capabilities:
+            return
+        health = self.health()
+        lacking = {cap: servers_lacking(health, cap) for cap in capabilities}
+        lacking = {cap: urls for cap, urls in lacking.items() if urls}
+        if lacking:
+            raise SystemExit(
+                format_unready(
+                    lacking, logs=dict(zip(self.urls, self.logs, strict=True))
+                )
+            )
+        for cap in capabilities:
+            print(ready_line(cap, len(health)), flush=True)
 
     def stop(self) -> None:
         for proc in self.procs:
@@ -892,6 +1107,21 @@ def _poll_cascade(db_path: Path, conv_pattern: str) -> tuple[int, int]:
     return total or 0, pending or 0
 
 
+def _counting_emptied_payloads(ome_filter: str) -> str:
+    """``ome_filter`` on the rows whose payload is JSON; an emptied row matches.
+
+    OME empties ``event_payload`` once a run succeeds, and ``json_extract`` raises
+    ``malformed JSON`` on the empty string, so every ADD died in this readiness wait
+    once a run had succeeded. An emptied row can only be a success; with one store per
+    conversation, as the shipped configs run, it is this conversation's, so it still
+    counts toward the total the failure share is taken of.
+    """
+    return (
+        f"CASE WHEN json_valid(event_payload) THEN ({ome_filter}) "
+        "ELSE event_payload = '' END"
+    )
+
+
 def _poll_ome(
     ome_db_path: Path,
     since: str,
@@ -1000,6 +1230,7 @@ def _wait_ready(
             f"AND json_extract(event_payload, '$.session_id') IN ({placeholders})"
         )
         ome_params = (app_id, project_id, *session_ids)
+    ome_filter = _counting_emptied_payloads(ome_filter)
 
     deadline = time.time() + timeout_s
     stable_count = 0
@@ -1129,6 +1360,21 @@ def load_conversation_via_adapter(
     return sessions, qa_list, speaker_a, speaker_b, owner
 
 
+def _message_text(msg: dict) -> str:
+    """A LoCoMo turn as text, with a shared image described in front of what was said.
+
+    910 of LoCoMo's 5,882 turns share an image, and only its ``blip_caption`` says what
+    is in it; dropping the caption drops facts some questions ask about. The wording is
+    the everalgo benchmark loader's (``datasets/locomo/loader.py``), so both harnesses
+    feed the extractor the same text.
+    """
+    text = msg.get("text", "")
+    if msg.get("img_url"):
+        caption = msg.get("blip_caption", "an image")
+        text = f"[{msg['speaker']} shared an image: {caption}] {text}"
+    return text
+
+
 def load_conversation(
     data_path: str, conv_index: int
 ) -> tuple[list[dict], list[dict], str, str]:
@@ -1167,13 +1413,14 @@ def load_conversation(
             if isinstance(session_msgs, list):
                 msgs: list[dict] = []
                 for i, msg in enumerate(session_msgs):
-                    if not msg.get("text"):
-                        continue  # skip image-only messages
+                    text = _message_text(msg)
+                    if not text:
+                        continue
                     msgs.append(
                         {
                             "dia_id": msg["dia_id"],
                             "speaker": msg["speaker"],
-                            "text": msg["text"],
+                            "text": text,
                             "timestamp_ms": base_ts_ms + i * 30000,
                         }
                     )
@@ -1317,7 +1564,7 @@ def _finalize_jsonl(path: Path, model_cls: type) -> list:
 
 
 # =============================================================================
-# Add phase -- one everos session_id per LoCoMo session, flush after each
+# Add phase -- one everos session_id per flush_scope unit, flush after each
 # =============================================================================
 
 
@@ -1367,6 +1614,56 @@ def _post_with_retry(
     )
 
 
+def _sender_id_rule(
+    config: BenchmarkConfig, adapter: object
+) -> Callable[[int, str], str] | None:
+    """The ``sender_id_of`` ADD files messages by; ``None`` files all under owner."""
+    if config.message_owner == "eval_owner":
+        return None
+    return getattr(adapter, "sender_id_of", None)
+
+
+def _flush_units(
+    sessions: list[dict],
+    conv_index: int,
+    flush_scope: Literal["session", "conversation"],
+) -> list[tuple[str, list[dict]]]:
+    """The everos sessions a conversation is sent as, each flushed once at its end.
+
+    ``"session"`` keeps every dataset session apart. ``"conversation"`` sends the whole
+    conversation as one session flushed once, as the EverAlgo reference did, so a
+    memcell may span two dataset sessions. That unit has no per-session id, so it is
+    refused for sessions that carry their own: gold mapping and readiness are keyed on
+    those ids.
+
+    Raises:
+        ValueError: ``"conversation"`` over sessions that carry their own ids.
+    """
+    if flush_scope == "session":
+        # The store's session id has to match what the adapter's gold_of() resolves to.
+        # Hardcoding locomo_conv{i}_s{n} silently mislabels every other benchmark's
+        # sessions -- the ingest succeeds and every gold lookup then misses.
+        return [
+            (
+                sess.get("session_id")
+                or f"locomo_conv{conv_index}_s{sess['session_idx']}",
+                sess["messages"],
+            )
+            for sess in sessions
+        ]
+    if any(sess.get("session_id") for sess in sessions):
+        raise ValueError(
+            "flush_scope = 'conversation' is for datasets without their own session "
+            "ids; these sessions carry ids that gold mapping and readiness rely on"
+        )
+    return [
+        (
+            f"locomo_conv{conv_index}",
+            [msg for sess in sessions for msg in sess["messages"]],
+        )
+    ]
+
+
 def run_add_phase(
     client: EverosClient,
     sessions: list[dict],
@@ -1378,8 +1675,9 @@ def run_add_phase(
     project_id: str,
     pbar: _tqdm | None = None,
     sender_id_of: Callable[[int, str], str] | None = None,
+    flush_scope: Literal["session", "conversation"] = "session",
 ) -> dict[str, int]:
-    """Send each session to its own everos session_id and flush.
+    """Send the conversation to everos, flushing once per ``flush_scope`` unit.
 
     ``sender_id_of`` is the benchmark's message-ownership rule. Without one every
     message is filed under the queried owner, which is what the single-owner benchmarks
@@ -1392,13 +1690,7 @@ def run_add_phase(
     """
     failed_add_batches = 0
     failed_flush_sessions = 0
-    for sess in sessions:
-        # The store's session id has to match what the adapter's gold_of() resolves to.
-        # Hardcoding locomo_conv{i}_s{n} silently mislabels every other benchmark's
-        # sessions -- the ingest succeeds and every gold lookup then misses.
-        session_id = (
-            sess.get("session_id") or f"locomo_conv{conv_index}_s{sess['session_idx']}"
-        )
+    for session_id, messages in _flush_units(sessions, conv_index, flush_scope):
         api_messages: list[dict] = [
             {
                 "sender_id": (
@@ -1411,7 +1703,7 @@ def run_add_phase(
                 "timestamp": msg["timestamp_ms"],
                 "content": [{"type": "text", "text": msg["text"]}],
             }
-            for msg in sess["messages"]
+            for msg in messages
         ]
 
         batches = [
@@ -1455,7 +1747,7 @@ def run_add_phase(
                 f"  [flush-skipped] session_id={session_id} -- continuing to the next"
             )
         if pbar:
-            pbar.update(len(sess["messages"]))
+            pbar.update(len(messages))
 
     if failed_add_batches or failed_flush_sessions:
         _tqdm.write(
@@ -2303,6 +2595,74 @@ def run_evaluate_phase(
     """Read answer JSONL, judge answers, write judge JSONL."""
     answer_results = _read_jsonl(answer_path, AnswerResult, strict=False)
     _guard_stale_stage_file(answer_path, answer_results, config)
+    return _judge_rows(
+        answer_results,
+        conv_dir / f"judge_{method_label}.jsonl",
+        judge_client,
+        config,
+        judge_runs,
+        pbar=pbar,
+    )
+
+
+def run_rejudge_phase(
+    answer_path: Path,
+    corrections: Mapping[tuple[int, str], str],
+    judge_client: LLMClientPool,
+    config: BenchmarkConfig,
+    *,
+    judge_runs: int,
+    conv_dir: Path,
+    conv_index: int,
+    method_label: str,
+) -> list[JudgeResult]:
+    """Judge the disputed questions' answers again, against the audit's gold.
+
+    Only the gold changes: the answers are the ones JUDGE has just graded, and the
+    judge, its runs and the majority vote are JUDGE's own, so the re-judged score can
+    only differ from the original where the audit corrected a gold answer. Writes
+    ``rejudge_<method>.jsonl``, one row per disputed question, resumable like JUDGE.
+
+    Args:
+        answer_path: This conversation's answer JSONL for the method.
+        corrections: :func:`question_key` -> the audit's corrected answer.
+        judge_client: The judge stage's client.
+        config: The run's configuration.
+        judge_runs: Judge runs per question, as JUDGE used.
+        conv_dir: The conversation's results directory.
+        conv_index: The conversation, the first half of every ``question_key``.
+        method_label: The search method the answers came from.
+
+    Returns:
+        The re-judged rows; empty when none of this conversation's questions is
+        disputed.
+    """
+    disputed = [
+        ar.model_copy(update={"golden_answer": corrections[key]})
+        for ar in _read_jsonl(answer_path, AnswerResult, strict=False)
+        if (key := question_key(conv_index, ar.question)) in corrections
+    ]
+    if not disputed:
+        return []
+    return _judge_rows(
+        disputed,
+        conv_dir / f"rejudge_{method_label}.jsonl",
+        judge_client,
+        config,
+        judge_runs,
+    )
+
+
+def _judge_rows(
+    rows: Sequence[AnswerResult],
+    out_path: Path,
+    judge_client: LLMClientPool,
+    config: BenchmarkConfig,
+    judge_runs: int,
+    *,
+    pbar: _tqdm | None = None,
+) -> list[JudgeResult]:
+    """Judge ``rows`` into ``out_path``, skipping the rows it already holds."""
 
     def _worker(_pos: int, ar: AnswerResult) -> JudgeResult:
         return _evaluate_one(
@@ -2314,13 +2674,15 @@ def run_evaluate_phase(
             config=config,
         )
 
-    out_path = conv_dir / f"judge_{method_label}.jsonl"
     # Resume + incremental write, same reason as the search stage: a stage that only
     # persists on completion throws away everything it finished when it is interrupted.
     _done = _done_keys(out_path)
-    _todo = [r for r in answer_results if str(getattr(r, "index", None)) not in _done]
+    _todo = [r for r in rows if str(getattr(r, "index", None)) not in _done]
     if _done:
-        print(f"  [resume] judge: {len(_done)} done, {len(_todo)} to go", flush=True)
+        print(
+            f"  [resume] {out_path.stem}: {len(_done)} done, {len(_todo)} to go",
+            flush=True,
+        )
         if pbar is not None:
             pbar.update(len(_done))
 
@@ -2347,6 +2709,124 @@ def _pct(n: int, total: int) -> str:
     return f"{n / total * 100:.1f}%"
 
 
+def _accuracy_stats(scored: Sequence[JudgeResult], judge_runs: int) -> dict[str, Any]:
+    """Majority-vote and per-judge-run accuracy, overall and per category.
+
+    One definition serves both the original score and the re-judged one, so the two
+    can only differ by the verdicts they count.
+    """
+    total = len(scored)
+    correct = sum(1 for r in scored if r.is_correct)
+    cat_stats: dict[int | str, dict[str, int]] = {}
+    for r in scored:
+        if r.category is None:
+            continue
+        cs = cat_stats.setdefault(r.category, {"correct": 0, "total": 0})
+        cs["total"] += 1
+        cs["correct"] += int(r.is_correct)
+    per_run_correct = [0] * judge_runs
+    per_run_total = 0
+    for r in scored:
+        if len(r.judgments) >= judge_runs:
+            per_run_total += 1
+            for ri in range(judge_runs):
+                per_run_correct[ri] += int(r.judgments[ri])
+    per_run_accuracies = (
+        [c / per_run_total for c in per_run_correct] if per_run_total > 0 else []
+    )
+    return {
+        "total": total,
+        "correct": correct,
+        # MICRO accuracy: sum(correct) / sum(total) over every graded question, so a
+        # category's weight is its question count. Not the macro mean of the
+        # per-category columns, which is a different statistic and is what the guide
+        # used to claim this was; `category_stats` below is reported, never averaged
+        # in. Pinned by tests/unit/test_benchmark_headline_definition.py so a change
+        # of definition has to be deliberate.
+        "accuracy": round(correct / total, 4) if total else 0,
+        "mean_accuracy": round(statistics.mean(per_run_accuracies), 4)
+        if per_run_accuracies
+        else 0,
+        "per_run_accuracies": [round(a, 4) for a in per_run_accuracies],
+        "category_stats": {
+            str(k): {"correct": v["correct"], "total": v["total"]}
+            for k, v in sorted(cat_stats.items(), key=lambda kv: str(kv[0]))
+        },
+    }
+
+
+def _gold_audit(
+    config: BenchmarkConfig,
+) -> tuple[dict[tuple[int, str], str] | None, str]:
+    """This benchmark's gold-audit corrections, and a note for the report.
+
+    Returns ``(None, why)`` whenever there is nothing to re-judge against, so the
+    report can say why instead of leaving the second score out silently. A missing
+    file is such a case, not an error: the audit is downloaded separately.
+
+    Raises:
+        ValueError: The audit file is not in the form the adapter reads.
+    """
+    path = config.gold_audit_path
+    if not path:
+        return None, "no gold audit exists for this benchmark"
+    reader = getattr(adapters.get(config.adapter or "locomo"), "gold_corrections", None)
+    if reader is None:
+        return None, f"the {config.adapter} adapter cannot read a gold audit"
+    if not Path(path).is_file():
+        return None, (
+            f"not re-judged: gold audit not found at {path}; fetch it with "
+            f"`bash benchmarks/download_data.sh {config.adapter}`"
+        )
+    return reader(path), f"against the corrected answers in {path}"
+
+
+def _rejudged_stats(
+    judged: Sequence[tuple[int, JudgeResult]],
+    rejudged: Mapping[tuple[int, int], JudgeResult],
+    config: BenchmarkConfig,
+    judge_runs: int,
+) -> tuple[dict[str, Any] | None, str]:
+    """The score with every question the gold audit disputes graded by its re-judging.
+
+    Args:
+        judged: ``(conversation, row)`` for every JUDGE row.
+        rejudged: ``(conversation, index)`` -> that question's re-judged row.
+        config: The run's configuration; names the audit.
+        judge_runs: Judge runs per question, for the per-run accuracies.
+
+    Returns:
+        The statistics of :func:`_accuracy_stats` plus ``rejudged``, the number of
+        disputed questions, and a note for the report; ``None`` with the reason when
+        there is no complete re-judged score -- a partial one would read as finished.
+    """
+    corrections, note = _gold_audit(config)
+    if corrections is None:
+        return None, note
+    rows: list[JudgeResult] = []
+    disputed = missing = 0
+    for conv, row in judged:
+        key = question_key(conv, row.question)
+        if key not in corrections:
+            rows.append(row)
+            continue
+        disputed += 1
+        new = rejudged.get((conv, row.index))
+        # Matched on the text as well: an index only means the same question within
+        # the same question list.
+        if new is None or question_key(conv, new.question) != key:
+            missing += 1
+            continue
+        rows.append(new)
+    if missing:
+        return None, (
+            f"{missing} of {disputed} disputed question(s) not re-judged yet; "
+            "rerun the judge stage (--stages judge) to finish"
+        )
+    scored = [r for r in rows if not r.judge_failed]
+    return {**_accuracy_stats(scored, judge_runs), "rejudged": disputed}, note
+
+
 def _collect_method_summary(
     method: str,
     output_dir: Path,
@@ -2357,6 +2837,8 @@ def _collect_method_summary(
     all_search: list[SearchResult] = []
     all_answer: list[AnswerResult] = []
     all_judge: list[JudgeResult] = []
+    judged: list[tuple[int, JudgeResult]] = []
+    rejudged: dict[tuple[int, int], JudgeResult] = {}
     conv_accuracy: dict[int, dict[str, int]] = {}
 
     for conv_idx in conversations:
@@ -2364,14 +2846,19 @@ def _collect_method_summary(
         search_p = conv_dir / f"search_{method}.jsonl"
         answer_p = conv_dir / f"answer_{method}.jsonl"
         judge_p = conv_dir / f"judge_{method}.jsonl"
+        rejudge_p = conv_dir / f"rejudge_{method}.jsonl"
 
         if search_p.exists():
             all_search.extend(_read_jsonl(search_p, SearchResult, strict=False))
         if answer_p.exists():
             all_answer.extend(_read_jsonl(answer_p, AnswerResult, strict=False))
+        if rejudge_p.exists():
+            for r in _read_jsonl(rejudge_p, JudgeResult, strict=False):
+                rejudged[(conv_idx, r.index)] = r
         if judge_p.exists():
             conv_judges = _read_jsonl(judge_p, JudgeResult, strict=False)
             all_judge.extend(conv_judges)
+            judged.extend((conv_idx, r) for r in conv_judges)
             # A row the benchmark's own protocol excludes leaves both halves of the
             # ratio. Only LongMemEval sets this, and the count is reported below,
             # because excluding rows can only ever raise the number.
@@ -2388,44 +2875,19 @@ def _collect_method_summary(
     # counted separately so an exclusion can never pass as a clean run.
     excluded = [r for r in all_judge if r.judge_failed]
     scored = [r for r in all_judge if not r.judge_failed]
-    total = len(scored)
-    correct = sum(1 for r in scored if r.is_correct)
     if excluded:
         print(
             f"  [report] {len(excluded)} question(s) left the denominator: the judge "
             f"returned no readable verdict and this benchmark excludes such rows"
         )
 
-    cat_stats: dict[int | str, dict[str, int]] = {}
-    for r in scored:
-        cat = r.category
-        if cat is None:
-            continue
-        if cat not in cat_stats:
-            cat_stats[cat] = {"correct": 0, "total": 0}
-        cat_stats[cat]["total"] += 1
-        if r.is_correct:
-            cat_stats[cat]["correct"] += 1
-
     actual_judge_runs = max(
         (len(r.judgments) for r in scored if r.judgments), default=config.judge_runs
     )
-
-    per_run_correct = [0] * actual_judge_runs
-    per_run_total = 0
-    for r in scored:
-        if len(r.judgments) >= actual_judge_runs:
-            per_run_total += 1
-            for ri in range(actual_judge_runs):
-                if r.judgments[ri]:
-                    per_run_correct[ri] += 1
-    per_run_accuracies = (
-        [c / per_run_total for c in per_run_correct] if per_run_total > 0 else []
-    )
-
-    mean_accuracy = (
-        round(statistics.mean(per_run_accuracies), 4) if per_run_accuracies else 0
-    )
+    original = _accuracy_stats(scored, actual_judge_runs)
+    total, correct = original["total"], original["correct"]
+    per_run_accuracies = original["per_run_accuracies"]
+    mean_accuracy = original["mean_accuracy"]
     overall_accuracy = correct / total if total else 0
     all_candidates = [*per_run_accuracies, mean_accuracy, overall_accuracy]
     max_accuracy = round(max(all_candidates), 4) if all_candidates else 0
@@ -2459,24 +2921,23 @@ def _collect_method_summary(
         if r.judgments and all(j == r.judgments[0] for j in r.judgments)
     )
 
+    # The re-judged score sits beside the original, never in place of it: the original
+    # is the number every published result uses.
+    rejudged_summary, rejudged_note = _rejudged_stats(
+        judged, rejudged, config, actual_judge_runs
+    )
+
     return {
         "method": method,
         "total": total,
         "correct": correct,
-        # MICRO accuracy: sum(correct) / sum(total) over every graded question, so a
-        # category's weight is its question count. Not the macro mean of the
-        # per-category columns, which is a different statistic and is what the guide
-        # used to claim this was; `category_stats` below is reported, never averaged
-        # in. Pinned by tests/unit/test_benchmark_headline_definition.py so a change
-        # of definition has to be deliberate.
-        "accuracy": round(correct / total, 4) if total else 0,
+        "accuracy": original["accuracy"],
         "mean_accuracy": mean_accuracy,
         "max_accuracy": max_accuracy,
-        "per_run_accuracies": [round(a, 4) for a in per_run_accuracies],
-        "category_stats": {
-            str(k): {"correct": v["correct"], "total": v["total"]}
-            for k, v in sorted(cat_stats.items(), key=lambda kv: str(kv[0]))
-        },
+        "per_run_accuracies": per_run_accuracies,
+        "category_stats": original["category_stats"],
+        "rejudged": rejudged_summary,
+        "rejudged_note": rejudged_note,
         "per_conversation": {
             str(k): {"correct": v["correct"], "total": v["total"]}
             for k, v in sorted(conv_accuracy.items())
@@ -2526,6 +2987,51 @@ def _collect_method_summary(
     }
 
 
+def _scope_line(run_spec: Mapping[str, Any]) -> str:
+    """What part of the benchmark the run ingested; ``""`` for all of it."""
+    cap = run_spec.get("max_messages", 0)
+    if run_spec.get("smoke"):
+        return (
+            f"SMOKE -- first {cap} messages and sampled questions per conversation; "
+            "not comparable to published results"
+        )
+    if cap:
+        return (
+            f"first {cap} messages per conversation; not comparable to published "
+            "results"
+        )
+    return ""
+
+
+def _decider_line(config: BenchmarkConfig, run_spec: Mapping[str, Any]) -> str:
+    """The decider as ``run_spec.json`` records it: model, endpoint, model's section."""
+    if _MULTIROUND_METHOD not in config.parsed_methods:
+        return f"not used by {config.methods}"
+    decider = next(
+        (s for s in run_spec.get("serving", []) if s.get("role") == "decider"), None
+    )
+    if decider is None:
+        return "not recorded in run_spec.json"
+    source = (decider.get("extra", {}).get("sources") or {}).get("model", "")
+    line = f"{decider['model']} @ {decider.get('endpoint') or '(no endpoint)'}"
+    if source == "llm":
+        return f"{line} -- the [llm] model; no separate decider was configured"
+    return f"{line} (model from [{source}])" if source else line
+
+
+def _rejudged_line(s: Mapping[str, Any], judge_runs: int) -> str:
+    """The ``Re-judged`` headline, or why there is none."""
+    rv = s.get("rejudged")
+    note = s.get("rejudged_note", "not computed")
+    if not rv:
+        return f"unavailable -- {note}"
+    return (
+        f"{_pct(rv['correct'], rv['total'])} ({rv['correct']}/{rv['total']}, "
+        f"majority of {judge_runs}; mean {rv['mean_accuracy'] * 100:.1f}%) -- "
+        f"{rv['rejudged']} disputed question(s) re-judged {note}"
+    )
+
+
 def _write_report_txt(
     txt_path: Path,
     all_summaries: dict[str, dict[str, Any]],
@@ -2550,6 +3056,10 @@ def _write_report_txt(
         f.write(f"  EverOS version: {run_spec.get('everos_version', 'N/A')}\n")
         f.write(f"  Python:         {run_spec.get('python_version', 'N/A')}\n")
         f.write(f"  Conversations:  {conversations}\n")
+        # Up front: report.txt is read alone, and a trimmed score looks like a result.
+        _scope = _scope_line(run_spec)
+        if _scope:
+            f.write(f"  Scope:          {_scope}\n")
         _missing = sorted(
             set(conversations)
             - {
@@ -2572,6 +3082,7 @@ def _write_report_txt(
         f.write(f"  Stages:         {run_spec.get('stages', 'N/A')}\n\n")
 
         f.write("Configuration\n")
+        f.write(f"  Decider model:  {_decider_line(config, run_spec)}\n")
         f.write(f"  Answer model:   {config.answer_model}\n")
         f.write(f"  Judge model:    {config.judge_model}\n")
         f.write(f"  Judge runs:     {config.judge_runs} (config)\n")
@@ -2592,10 +3103,12 @@ def _write_report_txt(
             )
             f.write(
                 f"  Mean accuracy:    {s['mean_accuracy'] * 100:.1f}% "
-                f"(avg across {jr} judge runs)\n\n"
+                f"(avg across {jr} judge runs)\n"
             )
+            f.write(f"  Re-judged:        {_rejudged_line(s, jr)}\n\n")
 
             f.write("  Per category:\n")
+            rejudged_cats = (s.get("rejudged") or {}).get("category_stats", {})
             # LoCoMo numbers its categories; every other benchmark names them. The int()
             # here crashed the whole report on 'single-session-user' AFTER search,
             # answer and judge had all completed -- the numbers were computed and then
@@ -2604,10 +3117,18 @@ def _write_report_txt(
                 s["category_stats"].items(), key=lambda kv: str(kv[0])
             ):
                 label = _category_label(config, cat_key)
+                counts = f"({cs['correct']}/{cs['total']})"
+                rejudged_part = ""
+                rc = rejudged_cats.get(cat_key)
+                if rc:
+                    counts = f"{counts:<11s}"
+                    rejudged_part = (
+                        f" re-judged {_pct(rc['correct'], rc['total']):>6s} "
+                        f"({rc['correct']}/{rc['total']})"
+                    )
                 f.write(
                     f"    {cat_key}. {label:<14s} "
-                    f"{_pct(cs['correct'], cs['total']):>6s} "
-                    f"({cs['correct']}/{cs['total']})\n"
+                    f"{_pct(cs['correct'], cs['total']):>6s} {counts}{rejudged_part}\n"
                 )
 
             f.write("\n  Per conversation:\n")
@@ -2677,6 +3198,15 @@ def _print_terminal_summary(
         print(f"  Accuracy:{maj:>7s} ({s['correct']}/{s['total']}, majority of {jr})")
         if jr > 1:
             print(f"  Mean:    {s['mean_accuracy'] * 100:.1f}% (avg of {jr} runs)")
+        rv = s.get("rejudged")
+        if rv:
+            print(
+                f"  Re-judged:{_pct(rv['correct'], rv['total']):>7s} "
+                f"({rv['correct']}/{rv['total']}) -- {rv['rejudged']} disputed "
+                "question(s) re-judged against the gold audit"
+            )
+        else:
+            print(f"  Re-judged: unavailable -- {s.get('rejudged_note', '')}")
         # Rows an API failure forced to WRONG. They stay in the denominator, matching
         # the reference, so the count has to be visible or the run reads as clean.
         if _ANSWER_FAILURES or _JUDGE_FAILURES:
@@ -2684,13 +3214,18 @@ def _print_terminal_summary(
                 f"  DEGRADED: {len(_ANSWER_FAILURES)} answer + "
                 f"{len(_JUDGE_FAILURES)} judge failure(s) graded WRONG"
             )
+        rejudged_cats = (rv or {}).get("category_stats", {})
         for cat_key, cs in sorted(
             s["category_stats"].items(), key=lambda kv: str(kv[0])
         ):
             label = _category_label(config, cat_key)
             acc = _pct(cs["correct"], cs["total"])
             n, t = cs["correct"], cs["total"]
-            print(f"    {cat_key}. {label:<14s} {acc:>6s} ({n}/{t})")
+            rc = rejudged_cats.get(cat_key)
+            rejudged_part = (
+                f"  re-judged {_pct(rc['correct'], rc['total']):>6s}" if rc else ""
+            )
+            print(f"    {cat_key}. {label:<14s} {acc:>6s} ({n}/{t}){rejudged_part}")
         ss, ans, js = s["search"], s["answer"], s["judge"]
         total_tokens = ans["total_tokens"] + js["total_tokens"]
         print(f"  Search: avg {ss['avg_latency_s']}s, p50 {ss['p50_latency_s']}s")
@@ -2820,14 +3355,27 @@ def _results_root(args: argparse.Namespace, config: BenchmarkConfig) -> str:
 _results_root._warned = False  # type: ignore[attr-defined]
 
 
-def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
-    """Snapshot which endpoint served each role, read from the environment.
+_TASK_ENV_PREFIXES = tuple(f"EVEROS_LLM__{task.value.upper()}__" for task in LLMTask)
+"""``EVEROS_LLM__<TASK>__*`` set one task's ``[llm.<task>]``, not the ``[llm]`` every
+task inherits, so they are not the backbone's."""
+
+_LLMMR_KNOBS = ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS")
+"""These decide whether a served decider behaves like the one in production; omitting
+them from a launch script silently changes what was measured."""
+
+
+def _serving_from_env(
+    config: BenchmarkConfig, decider: DeciderProbe | None
+) -> list[ServingSpec]:
+    """Snapshot which endpoint served each role.
 
     Only what this process can actually observe: the answer / judge endpoints it calls
-    itself, and the EverOS-side providers it was told about via ``EVEROS_*``. The
-    retrieval server's own launch argv is not visible from here -- that is why the
-    record keeps ``endpoint`` and ``model`` for remote roles and leaves ``launch_argv``
-    empty rather than guessing.
+    itself, the EverOS-side providers it was told about via ``EVEROS_*``, and the
+    decider as EverOS resolves it under the servers' environment (``decider``, from
+    :func:`_resolve_decider`; ``None`` when the run calls no decider). The retrieval
+    server's own launch argv is not visible from here -- that is why the record keeps
+    ``endpoint`` and ``model`` for remote roles and leaves ``launch_argv`` empty rather
+    than guessing.
     """
     roles: list[ServingSpec] = []
     roles.append(
@@ -2849,35 +3397,33 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
             extra={"runs": config.judge_runs, "temperature": config.judge_temperature},
         )
     )
-    # "backbone+decider", not "decider": EverOS has a single [llm] setting, so the same
-    # model extracted every memory in the store AND made every retrieval decision.
-    # Labelling it "decider" alone hid the extraction half, and which backbone built a
-    # store is not recoverable from the store later. Config first, environment only as a
-    # fallback. Reading the environment alone recorded whatever `benchmarks/.env`
-    # happened to hold, while the servers were started with the config's value -- so a
-    # run that really used gpt-4.1-mini was filed as deepseek. The point of this record
-    # is that someone else can reproduce the number from it.
-    for role, prefix, cfg_model, cfg_url in (
-        ("backbone", "EVEROS_LLM__", config.backbone_model, config.backbone_base_url),
-        ("decider", "EVEROS_DECIDER__", config.decider_model, config.decider_base_url),
-    ):
-        model = cfg_model or os.environ.get(f"{prefix}MODEL", "")
-        endpoint = cfg_url or os.environ.get(f"{prefix}BASE_URL", "")
-        if not model and not endpoint:
-            continue
+    # Config first, environment only as a fallback. Reading the environment alone
+    # recorded whatever `benchmarks/.env` happened to hold, while the servers were
+    # started with the config's value -- so a run that really used gpt-4.1-mini was
+    # filed as deepseek. The point of this record is that someone else can reproduce
+    # the number from it.
+    model = config.backbone_model or os.environ.get("EVEROS_LLM__MODEL", "")
+    endpoint = config.backbone_base_url or os.environ.get("EVEROS_LLM__BASE_URL", "")
+    if model or endpoint:
         extra = {
-            k[len(prefix) :].lower(): v
-            for k, v in os.environ.items()
-            if k.startswith(prefix)
-            and not k.endswith("API_KEY")
-            and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
+            **_section_settings("EVEROS_LLM__", skip=_TASK_ENV_PREFIXES),
+            **_llmmr_knobs(config),
         }
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
-            v = config.retrieval_env.get(k) or os.environ.get(k)
-            if v is not None:
-                extra[k.lower()] = v
         roles.append(
-            ServingSpec(role=role, model=model, endpoint=endpoint, extra=extra)
+            ServingSpec(role="backbone", model=model, endpoint=endpoint, extra=extra)
+        )
+    if decider is not None:
+        roles.append(
+            ServingSpec(
+                role="decider",
+                model=decider.model,
+                endpoint=decider.base_url,
+                extra={
+                    "settings": dict(decider.settings),
+                    "sources": dict(decider.sources),
+                    **_llmmr_knobs(config),
+                },
+            )
         )
 
     for role, prefix in (
@@ -2888,74 +3434,43 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
         endpoint = os.environ.get(f"{prefix}BASE_URL", "")
         if not model and not endpoint:
             continue
-        extra = {
-            k[len(prefix) :].lower(): v
-            for k, v in os.environ.items()
-            if k.startswith(prefix)
-            and not k.endswith("API_KEY")
-            and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
-        }
-        # These two decide whether a served decider behaves like the one in production;
-        # omitting them from a launch script silently changes what was measured.
-        for k in ("EVEROS_LLMMR_DECIDER_FULL_TEXT", "EVEROS_LLMMR_MAX_ROUNDS"):
-            if role == "decider" and k in os.environ:
-                extra[k.lower()] = os.environ[k]
         roles.append(
             ServingSpec(
                 role=role,
                 model=model,
                 endpoint=endpoint,
                 local="127.0.0.1" in endpoint or "localhost" in endpoint,
-                extra=extra,
+                extra=_section_settings(prefix),
             )
         )
     return roles
 
 
-_DECIDER_MAX_TOKENS_DEFAULT = 512
-"""Mirrors ``DeciderSettings.max_tokens``. Duplicated rather than imported because this
-harness drives EverOS as a server over HTTP and does not import it; a drift here shows
-up as a probe that caps differently from the run it vouches for."""
+def _section_settings(prefix: str, *, skip: Sequence[str] = ()) -> dict[str, str]:
+    """``prefix``'s variables other than model, endpoint and key, by field name.
 
-
-def _decider_max_tokens(config: BenchmarkConfig) -> int:
-    """The reply cap the servers' decider will send, from the config or the environment.
-
-    Read from the same two places as ``_decider_extra`` for the same reason: the launch
-    scripts export one and ``retrieval_env`` carries the other, and the servers take
-    whichever is set.
+    Args:
+        prefix: The section's variable prefix, e.g. ``EVEROS_RERANK__``.
+        skip: Prefixes of variables that belong to another section.
     """
-    raw = config.retrieval_env.get("EVEROS_DECIDER__MAX_TOKENS") or os.environ.get(
-        "EVEROS_DECIDER__MAX_TOKENS", ""
-    )
-    try:
-        return int(raw)
-    except ValueError:
-        return _DECIDER_MAX_TOKENS_DEFAULT
+    return {
+        k[len(prefix) :].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith(prefix)
+        and not k.startswith(tuple(skip))
+        and not k.endswith("API_KEY")
+        and k not in (f"{prefix}MODEL", f"{prefix}BASE_URL")
+    }
 
 
-def _decider_extra(config: BenchmarkConfig) -> dict[str, Any]:
-    """``EVEROS_DECIDER__EXTRA`` as request kwargs, from the config or the environment.
-
-    The launch scripts export it and the config's ``retrieval_env`` also carries it, and
-    the servers read whichever is set -- so the probe has to look in both, or it vouches
-    for a request nobody makes.
-    """
-    raw = config.retrieval_env.get("EVEROS_DECIDER__EXTRA") or os.environ.get(
-        "EVEROS_DECIDER__EXTRA", ""
-    )
-    if not raw.strip():
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        # Worth saying out loud: the servers ignore it too, so the run would quietly
-        # become a thinking-on run.
-        print(
-            f"  WARNING: EVEROS_DECIDER__EXTRA is not valid JSON, ignoring: {raw[:60]}"
-        )
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+def _llmmr_knobs(config: BenchmarkConfig) -> dict[str, str]:
+    """The :data:`_LLMMR_KNOBS` the run sets, from its config or the environment."""
+    knobs: dict[str, str] = {}
+    for name in _LLMMR_KNOBS:
+        value = config.retrieval_env.get(name) or os.environ.get(name)
+        if value is not None:
+            knobs[name.lower()] = value
+    return knobs
 
 
 class DeciderUnreachableError(RuntimeError):
@@ -3031,118 +3546,182 @@ def _assert_clean_decider_trace(output_dir: Path, methods: Sequence[str]) -> Non
         )
 
 
-def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
-    """``(model, base_url, api_key)`` the servers' decider will actually use.
+def _assert_no_decider_fallback(trace_dir: Path, owner_id: str) -> None:
+    """Stop one conversation after SEARCH when any of its decider rounds fell back.
 
-    The same ``[decider]`` -> ``[llm]`` fallback
-    ``everos.component.llm.resolve_decider_config`` applies, expressed against the
-    fields this harness pushes into the servers it starts (see
-    ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
-    ``backbone_*`` becomes ``EVEROS_LLM__*``, and anything unset falls through to this
-    process's own environment).
+    The report refuses a degraded multi-round run anyway
+    (:func:`_assert_clean_decider_trace`); checking each conversation here, before
+    ANSWER, keeps the run from paying for answers and judgements that report will
+    throw away. The startup probe cannot catch this: its one short request can
+    succeed where the real decisions, with every candidate shown, fail.
 
-    Re-deriving the rule rather than sharing it is what the probe used to do, and it
-    got the rule wrong: it required a decider model *and* an explicit decider URL, so
-    the perfectly valid config that names only ``[decider].model`` and inherits the
-    endpoint was never probed at all -- the one shape the check exists for.
+    Raises:
+        DeciderTraceValidationError: The owner's trace has a ``decider_failed``
+            round; the message points at the server log's reason.
     """
-    model = (
-        config.decider_model
-        or config.backbone_model
-        or config.retrieval_env.get("EVEROS_LLM__MODEL")
-        or os.environ.get("EVEROS_LLM__MODEL", "")
-    )
-    base_url = (
-        config.decider_base_url
-        or config.backbone_base_url
-        or config.retrieval_env.get("EVEROS_LLM__BASE_URL")
-        or os.environ.get("EVEROS_LLM__BASE_URL", "")
-    )
-    api_key = (
-        config.decider_api_key
-        or config.backbone_api_key
-        or config.retrieval_env.get("EVEROS_LLM__API_KEY")
-        or os.environ.get("EVEROS_LLM__API_KEY", "")
-    )
-    return model, base_url, api_key
+    failed = 0
+    for path in sorted(trace_dir.glob("trace*.jsonl")):
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("dataset") == owner_id and record.get("decider_failed"):
+                    failed += 1
+    if failed:
+        raise DeciderTraceValidationError(
+            f"{owner_id}: {failed} llm_multiround round(s) fell back to a fixed core "
+            "after every decider attempt failed; not answering or judging this "
+            "conversation. The server log's `llm_multiround_decider_error` lines "
+            "say why."
+        )
 
 
-def _assert_decider_answers(config: BenchmarkConfig) -> None:
-    """One real call to the configured decider, asserting it returns content.
+_DECIDER_PROBE = Path(__file__).resolve().with_name("decider_probe.py")
+
+_NO_CONTENT_REASONS = frozenset({"cut_short", "no_content", "invalid_reply"})
+"""How a reasoning decider that spends its output cap thinking fails the probe."""
+
+
+class DeciderProbe(NamedTuple):
+    """The decider as the run's EverOS servers resolve it, and whether it answered.
+
+    Reported by ``decider_probe.py``, which runs EverOS's own ``resolve_llm_task``
+    and provider in a child process, so nothing here re-derives a precedence rule.
+
+    Attributes:
+        model: The model the decider names.
+        base_url: Its endpoint; empty when none resolves.
+        host: ``base_url``'s host name, for messages.
+        settings: Every other effective field but the key -- output cap, timeout,
+            ``extra`` and the rest -- with ``extra``'s header and query values masked.
+        sources: Field -> the section that supplied it: ``"llm.decider"``,
+            ``"decider"`` (deprecated), ``"llm"`` or ``"default"``.
+        outcome: ``"resolved"`` (no request sent), ``"answered"``, ``"failed"`` or
+            ``"not_configured"``.
+        reason: The ``LLMCallError`` reason of a failed request; empty otherwise.
+        error: What went wrong, with the key masked; empty otherwise.
+    """
+
+    model: str
+    base_url: str
+    host: str
+    settings: dict[str, Any]
+    sources: dict[str, str]
+    outcome: str
+    reason: str
+    error: str
+
+
+def _resolve_decider(
+    config: BenchmarkConfig, server_env: Mapping[str, str], *, ask: bool
+) -> DeciderProbe | None:
+    """The decider the run's servers use, asked one question first when ``ask``.
+
+    EverOS resolves it, in a child process under ``server_env`` -- the environment the
+    servers are launched with (:func:`server_launch_env`) -- so the probe and the
+    record follow the precedence the servers apply, and this process's own environment
+    is left alone.
+
+    Runs that use no multi-round route make no decider calls, so they are neither
+    probed nor recorded; probing them would fail a hybrid run over an endpoint it never
+    touches. Whether a run has a decider does not depend on ``ask``: the read identity
+    is computed from this resolution on every invocation, and a ``--stages judge``
+    resume must see the same decider as the run that searched.
+
+    Args:
+        config: The run's configuration; only its methods are read.
+        server_env: The environment the servers are launched with.
+        ask: Send the decider one request, and stop the run unless it answers.
+
+    Returns:
+        The resolution, or ``None`` when the run calls no decider.
+
+    Raises:
+        DeciderUnreachableError: ``ask`` and the decider did not answer, or the probe
+            produced no report.
+    """
+    if _MULTIROUND_METHOD not in config.parsed_methods:
+        return None
+    probe = _run_decider_probe(server_env, ask=ask)
+    if ask:
+        _assert_decider_answers(probe)
+    return probe
+
+
+def _run_decider_probe(env: Mapping[str, str], *, ask: bool) -> DeciderProbe:
+    """Run ``decider_probe.py`` under ``env`` and read its one-line report.
+
+    ``-P`` keeps this directory off the child's import path, as it is off the
+    servers': its ``config.py`` would otherwise shadow any top-level ``config``.
+
+    Raises:
+        DeciderUnreachableError: The child exited without a report.
+    """
+    command = [sys.executable, "-P", str(_DECIDER_PROBE)]
+    if not ask:
+        command.append("--resolve-only")
+    proc = subprocess.run(
+        command, env=dict(env), capture_output=True, text=True, check=False
+    )
+    try:
+        return DeciderProbe(**json.loads(proc.stdout))
+    except (json.JSONDecodeError, TypeError) as err:
+        last_line = (proc.stderr.strip().splitlines() or ["(no output)"])[-1]
+        raise DeciderUnreachableError(
+            f"decider probe exited {proc.returncode} without a report: "
+            f"{_keys_masked(last_line, env)}"
+        ) from err
+
+
+def _keys_masked(text: str, env: Mapping[str, str]) -> str:
+    """``text`` with the value of every ``*API_KEY`` variable in ``env`` masked."""
+    for name, value in env.items():
+        if name.endswith("API_KEY") and value:
+            text = text.replace(value, "***")
+    return text
+
+
+def _assert_decider_answers(probe: DeciderProbe) -> None:
+    """Accept a decider that answered the probe; refuse one that did not.
 
     Checked by content and not by `/v1/models` or `/health`: a gateway answers both for
     models it will refuse to serve, and the failure this exists to catch is exactly that
     -- a valid endpoint plus a model name it does not host. A reachability check would
-    have passed while every completion 404'd.
+    have passed while every completion 404'd. The request is the decider's own -- same
+    client configuration, same strict reply format -- because every difference between
+    the probe and the real call is a way for the check to be wrong about what it
+    vouches for.
 
-    Gated on whether a decider runs at all, not on whether two config fields happen to
-    be set together. It used to require an explicit decider model *and* an explicit
-    decider URL, which skipped the valid config that names only ``[decider].model`` and
-    inherits the endpoint from the backbone -- and that is the shape the check exists
-    for, since an inherited endpoint that does not serve the named model fails on the
-    first question rather than at startup. Runs that use no multi-round route make no
-    decider calls, so they are still not probed; probing them would fail a hybrid run
-    over an endpoint it never touches.
-
-    When a decider runs but nothing resolves, this says so rather than returning
+    When EverOS resolves no usable endpoint or key, this says so rather than returning
     quietly: a fail-fast promise that silently declines to check is the same silence it
     was added to remove.
+
+    Raises:
+        DeciderUnreachableError: The decider did not answer with a valid reply.
     """
-    if _MULTIROUND_METHOD not in config.parsed_methods:
+    where = f"{probe.model} @ {probe.host or '(no endpoint)'}"
+    if probe.outcome == "answered":
+        print(f"  Decider LLM: {where} -> answered")
         return
-    model, base_url, api_key = resolve_decider_endpoint(config)
-    if not (model and base_url):
+    if probe.outcome == "not_configured":
         print(
-            "  Decider LLM: NOT PROBED -- no model and endpoint could be resolved "
-            "from [decider], the backbone, or EVEROS_LLM__*. A decider that cannot "
-            "answer degrades silently into a fixed top-3 core."
+            "  Decider LLM: NOT PROBED (a decider that cannot answer degrades "
+            f"silently into a fixed top-3 core): {probe.error}"
         )
         return
-    key = api_key or "EMPTY"
-    client = openai.OpenAI(api_key=key, base_url=base_url, timeout=60.0, max_retries=0)
-    where = f"{model} @ {base_url}"
-    # The same EVEROS_DECIDER__EXTRA the servers are launched with. Without it the probe
-    # is not the request the decider makes: on a qwen checkpoint served with
-    # --reasoning-parser, a probe missing enable_thinking=false spends its whole budget
-    # in reasoning_content and returns empty content -- so the probe fails a decider
-    # that would have worked. A check that is not the real call is worse than none.
-    extra = _decider_extra(config)
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Reply with the single word: ready"}],
-            # The decider's own cap, because the decider now sends one. It did not when
-            # this probe was written -- `LLMRoundDecider.__call__` passed the messages
-            # and nothing else -- and an uncapped probe was correct then: a cap made it
-            # reject working setups, where a thinking model spent a small budget on
-            # reasoning tokens and returned empty content while the real, uncapped call
-            # succeeded. Now that the real call is capped, an uncapped probe has the
-            # same defect pointing the other way, and would vouch for a run that cannot
-            # answer inside its own budget. Every difference between this request and
-            # the real one is a way for the check to be wrong about what it vouches for.
-            max_tokens=_decider_max_tokens(config),
-            temperature=0.0,
-            **extra,
-        )
-    except Exception as err:
-        raise DeciderUnreachableError(f"decider {where} did not answer: {err}") from err
-    msg = resp.choices[0].message if resp.choices else None
-    content = (getattr(msg, "content", None) or "") if msg else ""
-    if not content.strip():
-        # Separate "said nothing" from "thought instead of answering": the second has a
-        # specific fix, and the decider's own parser treats both as a failed attempt.
-        thought = getattr(msg, "reasoning_content", None) if msg else None
-        why = (
-            "answered in reasoning_content only -- thinking is still on"
-            if thought
-            else "returned an empty completion"
-        )
-        raise DeciderUnreachableError(
-            f"decider {where} produced no usable content: {why}. Set "
-            'EVEROS_DECIDER__EXTRA=\'{"extra_body": {"chat_template_kwargs": '
-            '{"enable_thinking": false}}}\''
-        )
-    print(f"  Decider LLM: {where} -> {content.strip()[:40]!r}")
+    hint = (
+        ". A model that thinks before it answers fails this way when its output cap "
+        "runs out first; leave EVEROS_LLM__DECIDER__MAX_TOKENS unset or raise it"
+        if probe.reason in _NO_CONTENT_REASONS
+        else ""
+    )
+    raise DeciderUnreachableError(
+        f"decider {where} did not answer: {probe.error}{hint}"
+    )
 
 
 def _collect_packages() -> dict[str, str]:
@@ -3173,13 +3752,14 @@ def _ingest_identity_for_marker(
     conversation nested function, which has no access to the `serving` list assembled at
     startup, and reaching for it there is what has repeatedly produced UnboundLocalError
     after ADD had already finished. Data and adapter are the two that make a marker
-    describe a different store; the backbone is still checked at the directory level by
-    `_check_resume_identity`.
+    describe a different store; the backbone and the keyword tokenizer are still checked
+    at the directory level by `_check_resume_identity`. Markers compare as whole dicts,
+    so a key added here would mark every existing marker stale and re-ingest it.
     """
     return {
         k: v
         for k, v in ingest_identity(config, benchmark).items()
-        if k != "extraction_backbone"
+        if k in ("data_digest", "adapter")
     }
 
 
@@ -3264,6 +3844,14 @@ def _check_resume_identity(
     return notes
 
 
+_SMOKE_MESSAGES = 50
+
+
+def _message_cap(args: argparse.Namespace) -> int:
+    """Messages ingested per conversation; 0 means all of them."""
+    return args.max_messages or (_SMOKE_MESSAGES if args.smoke else 0)
+
+
 def _write_run_spec(
     output_dir: Path,
     run_name: str,
@@ -3275,6 +3863,8 @@ def _write_run_spec(
     serving: list[ServingSpec] | None = None,
     ingest_id: dict[str, str] | None = None,
     read_id: dict[str, str] | None = None,
+    smoke: bool = False,
+    max_messages: int = 0,
 ) -> None:
     """Write reproducibility snapshot to run_spec.json."""
     serving = list(serving or [])
@@ -3303,6 +3893,8 @@ def _write_run_spec(
         serving=serving,
         ingest_identity=dict(ingest_id or {}),
         read_identity=dict(read_id or {}),
+        smoke=smoke,
+        max_messages=max_messages,
     )
     (output_dir / "run_spec.json").write_text(
         spec.model_dump_json(indent=2), encoding="utf-8"
@@ -3364,8 +3956,13 @@ def run_conversation(
     data_path: str,
     position: int | None = None,
     output_dir: Path,
+    gold_corrections: Mapping[tuple[int, str], str] | None = None,
 ) -> _tqdm:
-    """Run the full pipeline for a single conversation."""
+    """Run the full pipeline for a single conversation.
+
+    ``gold_corrections`` is the benchmark's gold audit (:func:`_gold_audit`); with it,
+    JUDGE also re-judges the disputed questions against the corrected answers.
+    """
     conv_dir = output_dir / f"conv{conv_index}"
     # ADD is the one stage that cannot be replayed cheaply -- it re-extracts every
     # session through the LLM -- and it was also the one stage with no resume: any
@@ -3446,7 +4043,7 @@ def run_conversation(
     # calls, and INIT is the cheap path -- the dominant term (re-sending a matured
     # profile on every UPDATE) does not exist until the profile has grown, so a smoke
     # run measures a cost the real run never pays.
-    msg_cap = args.max_messages or (50 if args.smoke else 0)
+    msg_cap = _message_cap(args)
     if msg_cap:
         trimmed: list[dict] = []
         msg_count = 0
@@ -3556,7 +4153,8 @@ def run_conversation(
             app_id=app_id,
             project_id=project_id,
             pbar=pbar,
-            sender_id_of=getattr(_adapter, "sender_id_of", None),
+            sender_id_of=_sender_id_rule(config, _adapter),
+            flush_scope=config.flush_scope,
         )
         pbar.reset(total=0)
         pbar.set_description_str(
@@ -3631,6 +4229,8 @@ def run_conversation(
                 pbar=pbar,
                 qa_meta_keys=qa_meta_keys_for(config),
             )
+            if method == _MULTIROUND_METHOD:
+                _assert_no_decider_fallback(conv_dir.parent / "traces", owner_id)
 
         if "answer" in stages:
             search_path = conv_dir / f"search_{method}.jsonl"
@@ -3666,6 +4266,17 @@ def run_conversation(
                 method_label=method,
                 pbar=pbar,
             )
+            if gold_corrections:
+                run_rejudge_phase(
+                    answer_path,
+                    gold_corrections,
+                    judge_client,
+                    config,
+                    judge_runs=judge_runs,
+                    conv_dir=conv_dir,
+                    conv_index=conv_index,
+                    method_label=method,
+                )
 
     pbar.bar_format = "{desc}"
     pbar.set_description_str(f"{label:<6s} {total_stages}/{total_stages} done")
@@ -3869,7 +4480,7 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     p.add_argument(
         "--smoke",
         action="store_true",
-        help="Smoke: 2 convs, 50 msgs, 10 QA, judge_runs=1",
+        help="Smoke: conversation 0 unless --conv, 50 msgs, 10 QA, judge_runs=1",
     )
     p.add_argument(
         "--max-messages",
@@ -3941,7 +4552,11 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
         )
     args.run_name = args.run_name or args.benchmark_name
 
+    # Before the config: its ${BENCH_*} references expand from this file.
+    load_dotenv(Path(__file__).parent / ".env")
     config = BenchmarkConfig.from_toml(args.config or args.benchmark_name)
+    if args.methods:
+        config = config.model_copy(update={"methods": args.methods})
 
     # The store lives with the results that came out of it, unless told otherwise.
     #
@@ -3960,12 +4575,12 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     _res_root = Path(_results_root(args, config)) / args.run_name
     _default_store = _res_root / "store"
     if not args.everos_root:
-        if "add" in args.stages:
+        # A fleet built `store_s<i>` beside it, not `store` itself.
+        _built = _default_store.exists() or (
+            next(_res_root.glob(f"{_default_store.name}_s*"), None) is not None
+        )
+        if "add" in args.stages or _built:
             args.everos_root = [str(_default_store)]
-            print(f"store    {_default_store} (default: lives with the results)")
-        elif _default_store.exists():
-            args.everos_root = [str(_default_store)]
-            print(f"store    reusing {_default_store}")
         else:
             p.error(
                 f"--everos-root is required for a run without ADD when "
@@ -3980,7 +4595,7 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     supported = ("keyword", "vector", "hybrid", "agentic", "llm_multiround")
     bad = [m for m in config.parsed_methods if m not in supported]
     if bad:
-        p.error(f"unsupported method(s) in config.toml: {bad}; supported: {supported}")
+        p.error(f"unsupported method(s): {bad}; supported: {supported}")
 
     # Resolve --conv against the config: `all` and bare ranges both need the declared
     # conversation count, which only the config knows.
@@ -3991,7 +4606,7 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     # --conv without saying so: `--conv 0 --smoke` ran two conversations and reported
     # 20 questions, and the only way to notice was to count the rows.
     if args.smoke and not _conv_given:
-        args.conv = [0, 1]
+        args.conv = [0]
 
     # Model overrides exist so a re-run under a different backbone does not need a whole
     # duplicate TOML: the four `config.repro_*.toml` files differed from their originals
@@ -4024,14 +4639,17 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
     # experiment that never ran.
     if unresolved(config.decider_model) or unresolved(config.decider_base_url):
         _named = config.decider_model if not unresolved(config.decider_model) else ""
-        print(
-            "decider  no endpoint for "
-            + (f"{_named}" if _named else "the configured decider")
-            + " (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.\n"
-            "         ⚠ This is NOT the published configuration -- the published "
-            "numbers were\n         produced with a separate decider, so this run "
-            "is not comparable to them."
-        )
+        # Said only where a decider runs: an agentic run calls none, and the warning
+        # that its numbers are "not comparable" was false there.
+        if _MULTIROUND_METHOD in config.parsed_methods:
+            print(
+                "decider  no endpoint for "
+                + (f"{_named}" if _named else "the configured decider")
+                + " (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.\n"
+                "         ⚠ This is NOT the published configuration -- the published "
+                "numbers were\n         produced with a separate decider, so this run "
+                "is not comparable to them."
+            )
         config = config.model_copy(
             update={"decider_model": "", "decider_base_url": "", "decider_api_key": ""}
         )
@@ -4171,22 +4789,13 @@ def _guard_stale_store(args, config: BenchmarkConfig) -> None:
     non-empty store is exactly that case -- the store outlived the results it was built
     with -- and resuming silently would produce a number nobody can interpret.
     """
-    base = Path(
-        args.everos_root[0] if isinstance(args.everos_root, list) else args.everos_root
-    ).expanduser()
     # `_ServerFleet` uses the base root itself when it starts exactly one server and
     # only appends `_s<i>` for a fleet, so deriving the suffix unconditionally made this
     # guard inspect directories that do not exist -- it passed on a populated store
     # whenever `--servers 1`. And `--servers` is clamped to the conversation count, so
     # resuming a single conversation both landed on a different root and switched the
     # guard off.
-    roots = (
-        [base]
-        if args.servers == 1
-        else [base.parent / f"{base.name}_s{i}" for i in range(args.servers)]
-        if args.servers > 0
-        else [base]
-    )
+    roots = _store_roots(_first_root(args.everos_root), args.servers)
     populated = [
         r for r in roots if r.is_dir() and next(r.rglob("*.md"), None) is not None
     ]
@@ -4215,12 +4824,6 @@ def main() -> None:
         a == "--base-url" or a.startswith("--base-url=") for a in sys.argv[1:]
     )
 
-    # Before the fleet: the servers inherit this process's environment, and their
-    # backbone/embedding credentials live in that file.
-    load_dotenv(Path(__file__).parent / ".env")
-
-    if args.methods:
-        config = config.model_copy(update={"methods": args.methods})
     if args.servers < 0:
         # An explicit --base-url means the caller is pointing at servers they manage,
         # with stores that already hold data. Starting a fleet then would silently
@@ -4254,12 +4857,8 @@ def main() -> None:
     # A populated base root with unpopulated shards is unambiguous -- the caller means
     # "read this store" -- so serve it with one server and say so.
     if args.servers > 1 and args.everos_root:
-        _base = Path(
-            args.everos_root[0]
-            if isinstance(args.everos_root, list)
-            else args.everos_root
-        ).expanduser()
-        _shards = [_base.parent / f"{_base.name}_s{i}" for i in range(args.servers)]
+        _base = _first_root(args.everos_root)
+        _shards = _store_roots(_base, args.servers)
         _base_has_md = _base.is_dir() and next(_base.rglob("*.md"), None) is not None
         _shards_have_md = any(
             r.is_dir() and next(r.rglob("*.md"), None) is not None for r in _shards
@@ -4273,12 +4872,14 @@ def main() -> None:
             )
             args.servers = 1
 
-    # Derive both from the run name when unset, so several benchmarks can run at once
-    # from bare commands. A shared default root made four concurrent lanes ingest into
-    # ONE store, and a shared first port made them race for the same free port while
-    # probing.
-    if not args.everos_root:
-        args.everos_root = [str(Path("~/.everos_bench").expanduser() / args.run_name)]
+    # parse_args has already put the store under the run's results directory. The first
+    # port derives from the run name when unset, so several benchmarks can run at once:
+    # a shared first port made concurrent lanes race for the same free port.
+    if args.servers > 0:
+        _print_stores(
+            _store_roots(_first_root(args.everos_root), args.servers),
+            reusing="add" not in args.stages,
+        )
     if not args.first_port:
         # Stable per run name rather than random: a relaunch reuses its own ports
         # instead of colliding with a lane that is still up.
@@ -4287,28 +4888,44 @@ def main() -> None:
             + (int(hashlib.sha256(args.run_name.encode()).hexdigest(), 16) % 40) * 10
         )
 
+    models = ServerModels(
+        backbone_model=args.backbone_model or config.backbone_model,
+        backbone_base_url=args.backbone_base_url or config.backbone_base_url,
+        backbone_api_key=config.backbone_api_key,
+        decider_model=config.decider_model,
+        decider_base_url=config.decider_base_url,
+        decider_api_key=config.decider_api_key,
+    )
+    server_extra_env = server_env_for(args.stages, config.retrieval_env)
+    _problems = blocking_problems(
+        os.environ,
+        benchmark=args.benchmark,
+        data_path=args.data_path,
+        stages=args.stages,
+        methods=config.parsed_methods,
+        starts_servers=args.servers > 0,
+        server_env=server_launch_env(
+            os.environ, _first_root(args.everos_root), models, server_extra_env
+        ),
+    )
+    if _problems:
+        raise SystemExit(
+            format_problems(_problems, env_file=Path(__file__).parent / ".env")
+        )
+    print("  Preflight: data and keys ready", flush=True)
+
     if "add" in args.stages:
         _guard_stale_store(args, config)
 
     fleet: _ServerFleet | None = None
     if args.servers > 0:
-        base = Path(
-            args.everos_root[0]
-            if isinstance(args.everos_root, list)
-            else args.everos_root
-        ).expanduser()
-        backbone = args.backbone_model or config.backbone_model
         fleet = _ServerFleet(
             args.servers,
-            base,
+            _first_root(args.everos_root),
             first_port=args.first_port,
-            backbone_model=backbone,
-            backbone_base_url=args.backbone_base_url or config.backbone_base_url,
-            backbone_api_key=config.backbone_api_key,
-            decider_model=config.decider_model,
-            decider_base_url=config.decider_base_url,
-            decider_api_key=config.decider_api_key,
-            extra_env=server_env_for(args.stages, config.retrieval_env),
+            models=models,
+            extra_env=server_extra_env,
+            ome_strategies=config.ome_strategies,
             # None disables retrieval tracing inside the fleet; see
             # BenchmarkConfig.trace.
             trace_dir=(
@@ -4320,6 +4937,12 @@ def main() -> None:
         fleet.start()
         args.base_url = fleet.urls
         args.everos_root = fleet.roots
+    # The first server's environment, built the way the fleet builds it. Servers this
+    # run attached to were launched by someone else; for them this is the closest view
+    # available: their --everos-root, plus what this run would have exported.
+    server_env = server_launch_env(
+        os.environ, _first_root(args.everos_root), models, server_extra_env
+    )
     try:
         # `finally` alone only covers a clean exit or an exception. A SIGTERM -- which
         # is how a lane gets stopped from the outside -- kills the process without
@@ -4334,27 +4957,20 @@ def main() -> None:
             # Not the main thread, or a platform that will not allow it.
             with contextlib.suppress(ValueError, OSError):
                 signal.signal(_sig, _term)
-        _main_inner(args, config)
+        if fleet is not None and runs_server_stages(args.stages):
+            fleet.assert_capabilities(required_capabilities(config.parsed_methods))
+        _main_inner(args, config, server_env)
     finally:
         if fleet is not None:
             fleet.stop()
 
 
-def _main_inner(args, config) -> None:
-
-    load_dotenv(Path(__file__).parent / ".env")
-
+def _main_inner(args, config, server_env: Mapping[str, str]) -> None:
+    # Both keys were checked by blocking_problems() before any server started.
     answer_api_keys = _split_keys(os.getenv("ANSWER_API_KEY", ""))
     answer_base_url = os.getenv("ANSWER_BASE_URL", "https://api.openai.com/v1")
     judge_api_keys = _split_keys(os.getenv("JUDGE_API_KEY", ""))
     judge_base_url = os.getenv("JUDGE_BASE_URL", "https://api.openai.com/v1")
-
-    if not answer_api_keys:
-        print("ERROR: ANSWER_API_KEY not set in benchmarks/.env")
-        sys.exit(1)
-    if not judge_api_keys:
-        print("ERROR: JUDGE_API_KEY not set in benchmarks/.env")
-        sys.exit(1)
 
     answer_client = LLMClientPool(
         answer_api_keys,
@@ -4378,8 +4994,14 @@ def _main_inner(args, config) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     _bench = getattr(args, "benchmark", "locomo")
-    _serving = _serving_from_env(config)
-    _ingest_id = ingest_identity(config, _bench, _serving)
+    # Before anything is recorded or asked: the record names the decider the servers
+    # resolve, and a decider that cannot answer degrades silently into a fixed top-3
+    # core while the run still produces a full report.
+    _decider = _resolve_decider(config, server_env, ask="search" in args.stages)
+    _serving = _serving_from_env(config, _decider)
+    _ingest_id = ingest_identity(
+        config, _bench, _serving, message_cap=_message_cap(args)
+    )
     _read_id = read_identity(config, _serving)
     # Before the write, not after: _write_run_spec overwrites the spec recording what
     # the rows already in this directory were produced with.
@@ -4400,6 +5022,8 @@ def _main_inner(args, config) -> None:
         serving=_serving,
         ingest_id=_ingest_id,
         read_id=_read_id,
+        smoke=args.smoke,
+        max_messages=_message_cap(args),
     )
 
     print(
@@ -4410,14 +5034,18 @@ def _main_inner(args, config) -> None:
         f"  Judge  LLM: {config.judge_model} @ {judge_base_url}"
         f" ({judge_client.key_count} keys)"
     )
-    # Before any question is asked: a decider that cannot answer degrades silently into
-    # a fixed top-3 core, and the run still produces a full report.
-    if "search" in args.stages:
-        _assert_decider_answers(config)
     print(f"  Search mode: {config.methods}")
     print(f"  Conversations: {args.conv}")
     print(f"  Stages: {args.stages}")
     print(f"  Output: {output_dir}")
+    _corrections: dict[tuple[int, str], str] | None = None
+    if "judge" in args.stages:
+        _corrections, _audit_note = _gold_audit(config)
+        print(
+            f"  Re-judge: {len(_corrections)} disputed question(s) {_audit_note}"
+            if _corrections is not None
+            else f"  Re-judge: none -- {_audit_note}"
+        )
 
     conv_positions = {ci: pos for pos, ci in enumerate(args.conv)}
 
@@ -4436,6 +5064,7 @@ def _main_inner(args, config) -> None:
                 data_path=args.data_path,
                 output_dir=output_dir,
                 position=conv_positions[conv_index],
+                gold_corrections=_corrections,
             )
             conv_pbars[conv_index] = pbar
             return True

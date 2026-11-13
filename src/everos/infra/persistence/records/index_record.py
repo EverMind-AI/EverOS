@@ -25,7 +25,7 @@ class IndexRecordMeta:
     Each declared column must already exist as a ``str`` (or
     ``str | None``) field on the schema. Tokens are assumed to be
     **app-layer pre-tokenised** (space-joined) so segmentation is owned by
-    the app layer (:class:`JiebaTokenizer`), which also owns stop-word
+    the app-layer tokenizer (``[tokenizer]``), which also owns stop-word
     filtering. The per-backend index knobs (tokenizer, stemming) live with
     each backend, never here."""
 

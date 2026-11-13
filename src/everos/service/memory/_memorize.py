@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from everos.memory import IngestResult
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
-    from everos.memory.ports import EventBus
+    from everos.memory.ports import EventBus, SenderNameStore
 
 logger = get_logger("everos.service.memory")
 
@@ -77,6 +77,8 @@ class Memorizer:
         bus: Where each cell's events are published.
         extractions: Keeps extractions alive past a cancelled request.
         raw_file_builder: Host file hydration capability for ingestion.
+        sender_names: The latest name each sender went by, read and kept
+            current by ingestion.
     """
 
     def __init__(
@@ -90,10 +92,12 @@ class Memorizer:
         bus: EventBus,
         extractions: ExtractionSupervisor,
         raw_file_builder: RawFileBuilder,
+        sender_names: SenderNameStore,
         purge_marks: PurgeMarks | None = None,
     ) -> None:
         self._purge_marks = purge_marks
         self._raw_file_builder = raw_file_builder
+        self._sender_names = sender_names
         self._settings = settings
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
@@ -224,6 +228,7 @@ class Memorizer:
             payload,
             multimodal_llm=self._multimodal_llm,
             raw_file_builder=self._raw_file_builder,
+            sender_names=self._sender_names,
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested, mode=mode)

@@ -368,7 +368,7 @@ Do not add process-wide accessors for business services or providers.
 
 | Package | Protocol | Implementations | Factory |
 |---|---|---|---|
-| `llm` | `everalgo.llm.LLMClient` | `OpenAIProvider` | `build_llm_provider(resolve_*_config(settings), observer=observer_for(settings))` |
+| `llm` | `everalgo.llm.LLMClient` | `OpenAIProvider` | per task: `build_llm_task_providers({t: llm_client_config(r) for t, r in resolve_llm_tasks(settings).items()}, observer=...)`; multimodal: `build_llm_provider(resolve_multimodal_config(settings), observer=...)` |
 | `embedding` | `EmbeddingProvider` | `OpenAIEmbeddingProvider` | `build_embedding_provider(settings.embedding)` |
 | `rerank` | `RerankProvider` | DeepInfra / vLLM / DashScope providers | `build_rerank_provider(settings.rerank)` |
 | `parser` | everalgo parser entry | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
@@ -382,11 +382,12 @@ passed explicitly; deliberate live configuration needs an explicit source and
 compatibility rules for existing environment overrides.
 
 A factory raises when its section is missing or wrong
-(`LLMNotConfiguredError` / `ValueError`). The extraction LLM is required:
-`build_providers` lets its `LLMNotConfiguredError` propagate, so neither the
-server nor a CLI command that builds the application gets past assembly
-without `[llm]`, and nothing downstream of the bootstrap types the LLM (or
-the decider, which falls back to `[llm]`) as optional. For embedding, rerank
+(`LLMNotConfiguredError` / `ValueError`). Every task's LLM is required (one
+client per task in `LLMClients`, each `[llm]` with that task's `[llm.<task>]`
+laid over it): `build_providers` lets its `LLMNotConfiguredError` propagate, so
+neither the server nor a CLI command that builds the application gets past
+assembly without `[llm]`, and nothing downstream of the bootstrap types an LLM
+as optional. For embedding, rerank
 and multimodal the bootstrap turns the error into `None` with a warning, and
 the `None` is the whole "not configured" signal: search refuses with a 422,
 cascade writes rows without vectors, knowledge uploads refuse, and parsing a

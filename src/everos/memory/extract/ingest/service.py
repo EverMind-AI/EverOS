@@ -37,11 +37,13 @@ from everos.memory.extract.parser import (
 
 from .id_gen import gen_message_id
 from .multimodal import coerce_items, derive_text
+from .sender_names import resolve_sender_names, sender_name_of
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
     from everos.component.parser import RawFileBuilder
+    from everos.memory.ports import SenderNameStore
 
 
 async def process(
@@ -49,19 +51,27 @@ async def process(
     *,
     multimodal_llm: LLMClient | None,
     raw_file_builder: RawFileBuilder,
+    sender_names: SenderNameStore,
 ) -> IngestResult:
     """Normalise the raw add payload into an :class:`IngestResult`.
+
+    A message sent without ``sender_name`` is named the way its sender last
+    named themselves (see :mod:`.sender_names`).
 
     Args:
         payload: The raw add payload.
         multimodal_llm: Parses non-text content items; ``None`` when
             ``[multimodal]`` is not configured.
         raw_file_builder: Host input hydration, passed to each unparsed item.
+        sender_names: The latest name each sender went by in this space.
     """
     session_id: str = payload["session_id"]
     app_id: str = payload.get("app_id") or "default"
     project_id: str = payload.get("project_id") or "default"
     raw_messages: list[dict[str, Any]] = payload["messages"]
+    names = await resolve_sender_names(
+        raw_messages, app_id=app_id, project_id=project_id, store=sender_names
+    )
 
     canonical: list[CanonicalMessage] = []
     non_text_total = 0
@@ -87,7 +97,7 @@ async def process(
                 message_id=message_id,
                 session_id=session_id,
                 sender_id=m["sender_id"],
-                sender_name=m.get("sender_name"),
+                sender_name=sender_name_of(m, names),
                 role=m["role"],
                 timestamp=ts,
                 content_items=content_items,

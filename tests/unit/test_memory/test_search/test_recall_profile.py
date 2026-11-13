@@ -17,7 +17,10 @@ from everos.infra.persistence.index.adapters import ProfileIndexAdapter
 from everos.infra.persistence.lancedb import (
     UserProfile,
 )
+from everos.memory.models import Profile
+from everos.memory.ports import MemoryRef, Scope, Stored
 from everos.memory.search.recall.profile import ProfileRecaller
+from tests.fakes import InMemoryProfileIndex
 from tests.fakes.storage import Storage
 
 
@@ -169,3 +172,36 @@ async def test_fetch_isolates_by_project(storage: Storage) -> None:
         )
         == []
     )
+
+
+async def test_everalgos_lists_never_reach_profile_data() -> None:
+    """``do_not_record`` / ``pending`` are program state: even a profile that
+    carries them is shaped into the four public keys only."""
+    scope = Scope(
+        app_id="default", project_id="default", owner_id="u_alice", owner_type="user"
+    )
+    index = InMemoryProfileIndex()
+    index.rows[scope] = Stored(
+        ref=MemoryRef(
+            id="u_alice", entry_id="u_alice", md_path="users/u_alice/user.md"
+        ),
+        scope=scope,
+        item=Profile(
+            owner_id="u_alice",
+            summary="s",
+            timestamp=1,
+            do_not_record=[{"topic": "budget", "evidence": "e", "observed_at": 1}],
+            pending=[{"description": "d", "bucket": "explicit_info", "observed_at": 1}],
+        ),
+    )
+
+    (item,) = await ProfileRecaller(index).fetch(
+        "u_alice", app_id="default", project_id="default"
+    )
+
+    assert set(item.profile_data) == {
+        "summary",
+        "explicit_info",
+        "implicit_traits",
+        "profile_timestamp_ms",
+    }

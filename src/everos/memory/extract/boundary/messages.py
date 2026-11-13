@@ -9,19 +9,19 @@ from __future__ import annotations
 
 __all__ = [
     "Mode",
-    "close_complete_tail",
+    "Segmentation",
+    "apply_cuts",
     "filter_for_mode",
     "merge_dedupe_sort",
-    "slice_tail",
-    "split_message_ids",
     "to_conversation_item",
     "unique_senders",
 ]
 
 from collections.abc import Sequence
-from typing import Literal
+from itertools import pairwise
+from typing import Literal, NamedTuple
 
-from everalgo.boundary import DetectionResult
+from everalgo.boundary import Cuts, to_memcells
 from everalgo.types import (
     ChatMessage,
     ConversationItem,
@@ -59,42 +59,44 @@ def merge_dedupe_sort(
     return sorted(seen.values(), key=lambda m: (m.timestamp, m.message_id))
 
 
-def close_complete_tail(result: DetectionResult, *, is_final: bool) -> DetectionResult:
-    """Close the uncut tail into a last cell when the model judged it complete.
+class Segmentation(NamedTuple):
+    """Rows cut into memcells, the parallel lists indexed by cell.
 
-    Only an explicit ``tail_complete is True`` closes it: ``None`` means no
-    model judged the tail, and a final call has already closed it upstream.
-    The cell takes the tail's last timestamp, as everalgo's own cells do, so
-    it orders after its siblings.
+    Attributes:
+        cells: The closed memcells, in order.
+        message_ids: The ids of the rows each cell holds.
+        tail: The rows left for the next call. It may begin inside the last
+            cell, and the rows they share are in both.
     """
-    if is_final or result.tail_complete is not True or not result.tail:
-        return result
-    tail_cell = MemCell(items=list(result.tail), timestamp=result.tail[-1].timestamp)
-    return result._replace(cells=[*result.cells, tail_cell], tail=[])
+
+    cells: list[MemCell]
+    message_ids: list[list[str]]
+    tail: list[CanonicalMessage]
 
 
-def slice_tail(
-    merged: Sequence[CanonicalMessage], tail: Sequence[ConversationItem]
-) -> list[CanonicalMessage]:
-    """The rows behind ``tail``, which the algorithm returns as a trailing slice."""
-    return list(merged[len(merged) - len(tail) :]) if tail else []
+def apply_cuts(
+    rows: Sequence[CanonicalMessage],
+    items: Sequence[ConversationItem],
+    cuts: Cuts,
+) -> Segmentation:
+    """Slice ``rows`` by the ``cuts`` everalgo returned for ``items``.
 
+    ``items`` is what the boundary operator was handed, ``items[i]`` being
+    ``rows[i]`` mapped, so every cut is a position in both lists: a cell's
+    message ids are the ids of the rows at its positions, tool rows included.
 
-def split_message_ids(
-    merged: Sequence[CanonicalMessage], cells: Sequence[MemCell]
-) -> list[list[str]]:
-    """Each cell's message ids, walking ``merged`` in step with the cells' items.
-
-    Rows and items correspond 1:1 and in order, so cell ``i`` holds the next
-    ``len(cells[i].items)`` rows.
+    Raises:
+        ValueError: ``cuts`` does not fit ``items`` (everalgo's
+            ``InvalidInputError``): it was returned for another input.
     """
-    result: list[list[str]] = []
-    start = 0
-    for cell in cells:
-        end = start + len(cell.items)
-        result.append([m.message_id for m in merged[start:end]])
-        start = end
-    return result
+    return Segmentation(
+        cells=to_memcells(items, cuts),
+        message_ids=[
+            [row.message_id for row in rows[start:end]]
+            for start, end in pairwise([0, *cuts.ends])
+        ],
+        tail=list(rows[cuts.tail_start :]),
+    )
 
 
 def unique_senders(cell: MemCell) -> list[str]:
@@ -118,7 +120,8 @@ def to_conversation_item(message: CanonicalMessage) -> ConversationItem:
        any text rides along as its ``content``.
     3. ``role`` ``"user"`` or ``"assistant"`` -> :class:`ChatMessage`.
 
-    The mapping is 1:1 so boundary cells can be traced back to message ids.
+    The mapping is 1:1, so a cut everalgo places in the items is a position
+    in the rows as well (:func:`apply_cuts`).
 
     Raises:
         ValueError: An orphan tool row or an unexpected role; mapping it to

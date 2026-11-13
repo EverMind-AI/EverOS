@@ -24,7 +24,7 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
 ## Run
 
 ```bash
-# Chat mode — boundary uses everalgo.boundary.adetect_boundaries
+# Chat mode — boundary uses everalgo.boundary.BoundaryDetector.adetect_batch
 EVEROS_MEMORIZE__MODE=chat uv run python scripts/e2e_memorize/run.py \
     --fixture scripts/e2e_memorize/fixtures/chat_session.json \
     --expected-mode chat

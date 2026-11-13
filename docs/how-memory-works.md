@@ -224,7 +224,8 @@ and write their markdown when ready:
   `[agent_memory] case_gate_enabled`, an LLM judgement of whether the work
   was completed correctly decides instead
 - `extract_agent_skill` — clusters related cases into a named skill
-- `trigger_profile_clustering` — triggers user profile clustering
+- `trigger_profile_clustering` — groups a user's episodes into topic clusters,
+  which agentic search and Reflection read
 - `trigger_skill_clustering` — triggers agent skill clustering
 - `reflect_episodes` (cron, default off) — offline memory consolidation.
   Merges fragmented episodes within a cluster into a single coherent

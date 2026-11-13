@@ -5,8 +5,8 @@ between its upsert and its emit, or retried after the emit failed. The
 runner's docstring makes that the strategy's problem: "strategy bodies must
 be safe to re-execute with the same payload". For the two clustering
 strategies that means a replayed episode (or case) must not be folded into
-its cluster a second time -- ``count`` is what ``extract_user_profile``
-gates on, and the centroid would be re-weighted.
+its cluster a second time -- ``count`` would drift and the centroid would
+be re-weighted.
 
 For every generated sequence of events, with replays drawn in, against the
 real repository on a temp SQLite file and the real geometry merge (the

@@ -125,6 +125,7 @@ class MemoryService:
             bus=bus,
             extractions=self._extractions,
             raw_file_builder=raw_file_builder,
+            sender_names=stores.sender_name,
             purge_marks=purge_marks,
         )
         queue_cfg = settings.memorize.async_queue

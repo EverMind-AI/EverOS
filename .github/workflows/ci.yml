@@ -86,6 +86,10 @@ jobs:
       - name: Install dependencies (frozen)
         run: uv sync --frozen
 
+      # Same as `make install-deps`: the NLTK data the nltk tokenizer reads.
+      - name: Install NLTK data
+        run: uv run --frozen python -m nltk.downloader -q -e -d .venv/nltk_data punkt_tab stopwords
+
       - name: Unit tests
         # Name the active test and dump all Python thread stacks after ten
         # minutes in one test; the job timeout above is the hard stop.

@@ -3,7 +3,8 @@
 Public API:
     from everos.config import (
         Settings, MemorySettings, SqliteSettings, LanceDBSettings,
-        LLMSettings, EmbeddingSettings, RerankSettings,
+        LLMSettings, LLMClientSettings, LLMTaskSettings, LLMTask,
+        LLM_TASK_DEFAULTS, EmbeddingSettings, RerankSettings,
         BoundaryDetectionSettings, CascadeSettings, OmeSettings,
         load_settings, resolve_root, missing_config_error,
     )
@@ -13,13 +14,18 @@ loader / merger / env reader).
 """
 
 from .hints import missing_config_error as missing_config_error
+from .settings import LLM_TASK_DEFAULTS as LLM_TASK_DEFAULTS
 from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
+from .settings import DeciderSettings as DeciderSettings
 from .settings import EmbeddingSettings as EmbeddingSettings
 from .settings import IndexSettings as IndexSettings
 from .settings import LanceDBSettings as LanceDBSettings
+from .settings import LLMClientSettings as LLMClientSettings
 from .settings import LLMSettings as LLMSettings
+from .settings import LLMTask as LLMTask
+from .settings import LLMTaskSettings as LLMTaskSettings
 from .settings import LoggingSettings as LoggingSettings
 from .settings import MemorizeSettings as MemorizeSettings
 from .settings import MemorySettings as MemorySettings
@@ -30,15 +36,21 @@ from .settings import PurgeSettings as PurgeSettings
 from .settings import RerankSettings as RerankSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
+from .settings import TokenizerSettings as TokenizerSettings
 from .settings import load_settings as load_settings
 from .settings import resolve_root as resolve_root
 
 __all__ = [
+    "LLM_TASK_DEFAULTS",
     "AsyncQueueSettings",
     "BoundaryDetectionSettings",
+    "DeciderSettings",
     "EmbeddingSettings",
     "IndexSettings",
+    "LLMClientSettings",
     "LLMSettings",
+    "LLMTask",
+    "LLMTaskSettings",
     "LanceDBSettings",
     "LoggingSettings",
     "MemorizeSettings",
@@ -50,6 +62,7 @@ __all__ = [
     "RerankSettings",
     "Settings",
     "SqliteSettings",
+    "TokenizerSettings",
     "load_settings",
     "missing_config_error",
     "resolve_root",

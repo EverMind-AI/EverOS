@@ -427,7 +427,7 @@ async def test_add_flush_search_get_on_canned_agent_track(
         assert [c["task_intent"] for c in found["agent_cases"]] == [case["task_intent"]]
         assert [s["name"] for s in found["agent_skills"]] == [skill["name"]]
 
-    assert calls.count("_BatchReply") == 2  # the add and the flush
+    assert calls.count("Reply") == 2  # the add and the flush
     assert calls.count("_CaseFilterReply") == 1
     assert calls.count("_CaseCompressReply") == 1
     assert calls.count("_SkillExtractReply") == 1

@@ -144,6 +144,21 @@ def test_index_milvus_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.milvus.consistency_level == "Strong"
 
 
+def test_tokenizer_defaults_to_jieba() -> None:
+    assert load_settings().tokenizer.name == "jieba"
+
+
+def test_tokenizer_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EVEROS_TOKENIZER__NAME", "nltk")
+    assert Settings().tokenizer.name == "nltk"
+
+
+def test_unknown_tokenizer_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EVEROS_TOKENIZER__NAME", "spacy")
+    with pytest.raises(ValueError, match="tokenizer"):
+        Settings()
+
+
 def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """No --root, no EVEROS_ROOT → ~/.everos."""
     monkeypatch.delenv("EVEROS_ROOT", raising=False)

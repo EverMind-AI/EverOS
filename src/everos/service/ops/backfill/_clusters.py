@@ -198,9 +198,7 @@ async def run_clusters_phase(
 
     Episode rows carrying ``parent_type == "cluster"`` are Reflection's
     merged episodes (``orchestrator._write_merged_episode``), not source
-    pipeline events, and are excluded — mirrors the same
-    ``parent_type == "memcell"`` filter idiom used by
-    ``extract_user_profile._select_via_cluster``. Synthesizing an event
+    pipeline events, and are excluded. Synthesizing an event
     for one would carry a bogus ``memcell_id`` (actually a cluster id)
     and defeat ``trigger_profile_clustering``'s own
     ``applies_to=lambda e: e.source == "pipeline"`` exclusion of

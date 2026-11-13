@@ -18,7 +18,7 @@ from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import user_cluster_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
+from everos.memory.events import EpisodeExtracted
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import mint_cluster_id
 from everos.memory.ports import ClusterStore, Event, Immediate, Scope, StrategySpec
@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 async def trigger_profile_clustering(
     event: EpisodeExtracted, deps: MemoryDeps
 ) -> list[Event]:
-    """Fold the episode into its owner's clusters and announce the cluster."""
+    """Fold the episode into its owner's clusters."""
     # Body-guard: without an embedding provider (Tier 1) the episode
     # cannot be vectorised, so the strategy silently no-ops — no work, no
     # owner lock, no OME retry pressure. Tier upgrades require a server
@@ -95,11 +95,9 @@ async def trigger_profile_clustering(
         ]
 
         # OME delivers at least once: a replay of this event (a crash after
-        # the upsert, a retry after the emit failed) must not fold the episode
-        # in a second time -- the cluster's count and centroid would drift
-        # and extract_user_profile's gate reads that count. An episode already
-        # among the owner's members is left where it is; the downstream event
-        # is still returned so a run lost with the crash is not lost for good.
+        # the upsert) must not fold the episode in a second time -- the
+        # cluster's count and centroid would drift. An episode already among
+        # the owner's members is left where it is.
         existing_ids = {c.id for c in existing}
         already = next(
             (c for c in existing if event.episode_entry_id in c.members), None
@@ -126,18 +124,7 @@ async def trigger_profile_clustering(
         replayed=already is not None,
         cluster_count=to_save.count,
     )
-    # 6. Announce the cluster → downstream extract_user_profile.
-    return [
-        ProfileClusterUpdated(
-            memcell_id=event.memcell_id,
-            episode_entry_id=event.episode_entry_id,
-            cluster_id=to_save.id,
-            owner_id=event.owner_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
-            language=event.language,
-        )
-    ]
+    return []
 
 
 async def _sources_alive(
@@ -191,7 +178,6 @@ TRIGGER_PROFILE_CLUSTERING_SPEC = StrategySpec(
     name="trigger_profile_clustering",
     fn=trigger_profile_clustering,
     trigger=Immediate(on=[EpisodeExtracted]),
-    emits=frozenset({ProfileClusterUpdated}),
     applies_to=lambda e, _deps: e.source == "pipeline",
     max_retries=2,
 )

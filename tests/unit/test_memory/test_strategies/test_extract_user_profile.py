@@ -1,30 +1,38 @@
-"""Tests for :func:`extract_user_profile` (cluster path).
+"""Tests for :func:`extract_user_profile`.
 
-The strategy reads the profile and clusters from their stores, resolves
-memcells through the episode index and the memcell store, and runs
-``ProfileExtractor`` (patched). In-memory doubles from :mod:`tests.fakes`
-stand in for every port, so the assertions are on what was stored.
+The strategy reads the event's episode back from md and its memcell from the
+memcell store, adds the owner's waiting episodes the index holds, and runs
+``ProfileExtractor.aextract_from_episodes`` (patched) once on them all.
+In-memory doubles from :mod:`tests.fakes` stand in for every port, so the
+assertions are on what was passed, stored and marked.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import structlog.testing
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Profile as AlgoProfile
+from everalgo.utils import InvalidInputError as AlgoInvalidInputError
 
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import ProfileClusterUpdated
-from everos.memory.models import Cluster, Episode, Profile
+from everos.memory.events import EpisodeExtracted
+from everos.memory.models import Episode, EpisodeParentType, Profile
 from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.profile_batcher import ProfileBatcher
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
-from tests.fakes import make_deps
+from tests.fakes import llm_clients, make_deps
 
 _EXTRACTOR = "everos.memory.strategies.extract_user_profile.ProfileExtractor"
+_TS = 1_700_000_001_000
 
 
 @pytest.fixture(autouse=True)
@@ -42,56 +50,20 @@ def _event(
     *,
     owner_id: str = "u_alice",
     memcell_id: str = "mc_aaaaaaaaaaa1",
-    cluster_id: str = "cl_user00000001",
+    episode_entry_id: str = "ep_20260101_0001",
+    owner_name: str | None = "Alice",
+    source: str = "pipeline",
     language: str | None = None,
-) -> ProfileClusterUpdated:
-    return ProfileClusterUpdated(
+) -> EpisodeExtracted:
+    return EpisodeExtracted(
         memcell_id=memcell_id,
-        cluster_id=cluster_id,
+        episode_entry_id=episode_entry_id,
+        episode_text="as carried on the event",
+        episode_timestamp_ms=_TS,
         owner_id=owner_id,
+        owner_name=owner_name,
+        source=source,
         language=language,
-    )
-
-
-def _cluster(*, cluster_id: str, members: list[str], last_ts: int) -> Cluster:
-    return Cluster(
-        id=cluster_id,
-        centroid=(0.0,) * 8,
-        count=len(members),
-        last_ts=last_ts,
-        members=members,
-    )
-
-
-def _indexed_episode(scope: Scope, entry_id: str, memcell_id: str) -> Stored[Episode]:
-    return Stored(
-        ref=MemoryRef(
-            id=f"{scope.owner_id}_{entry_id}", entry_id=entry_id, md_path="ep.md"
-        ),
-        scope=scope,
-        item=Episode(
-            owner_id=scope.owner_id,
-            episode="...",
-            summary="",
-            timestamp=1_700_000_000_000,
-            parent_id=memcell_id,
-            parent_type="memcell",
-        ),
-    )
-
-
-def _memcell(memcell_id: str, *, sender_id: str, ts_ms: int) -> MemCell:
-    return MemCell(
-        items=[
-            ChatMessage(
-                id=f"{memcell_id}_m1",
-                role="user",
-                content=f"hi from {sender_id}",
-                timestamp=ts_ms,
-                sender_id=sender_id,
-            ),
-        ],
-        timestamp=ts_ms,
     )
 
 
@@ -99,111 +71,462 @@ def _seed(
     deps: MemoryDeps,
     scope: Scope,
     *,
-    cluster_id: str,
-    entry_id: str,
-    memcell_id: str,
-    last_ts: int,
+    entry_id: str = "ep_20260101_0001",
+    memcell_id: str = "mc_aaaaaaaaaaa1",
+    narrative: str = "Alice plans a trip to Kyoto.",
+    timestamp: int = _TS,
 ) -> None:
-    """One cluster → one indexed episode → one stored memcell."""
-    deps.stores.cluster.seed(
+    """The owner's copy of an episode in md, and its memcell."""
+    deps.stores.episode.seed(
         scope,
-        "user_memory",
-        _cluster(cluster_id=cluster_id, members=[entry_id], last_ts=last_ts),
+        entry_id,
+        Episode(
+            owner_id=scope.owner_id,
+            episode=narrative,
+            summary="Kyoto trip",
+            subject="Trip",
+            timestamp=timestamp,
+            parent_id=memcell_id,
+        ),
     )
-    deps.indexes.episode.seed(_indexed_episode(scope, entry_id, memcell_id))
-    deps.stores.memcell.seed(
-        memcell_id, _memcell(memcell_id, sender_id=scope.owner_id, ts_ms=last_ts)
+    line = ChatMessage(
+        id=f"{memcell_id}_m0",
+        role="user",
+        content="hi",
+        timestamp=timestamp,
+        sender_id=scope.owner_id,
+    )
+    deps.stores.memcell.seed(memcell_id, MemCell(items=[line], timestamp=timestamp))
+
+
+@contextmanager
+def _extractor(**mock: object) -> Iterator[AsyncMock]:
+    """Patch ``aextract_from_episodes`` with an ``AsyncMock`` configured by ``mock``."""
+    extract = AsyncMock(**mock)
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = extract
+        yield extract
+
+
+def _algo_profile(owner_id: str = "u_alice", **fields: object) -> AlgoProfile:
+    return AlgoProfile.model_validate(
+        {"owner_id": owner_id, "summary": "next", "timestamp": _TS, **fields}
     )
 
 
 def test_spec() -> None:
     spec = EXTRACT_USER_PROFILE_SPEC
     assert spec.name == "extract_user_profile"
-    assert ProfileClusterUpdated in spec.trigger.on
+    assert spec.trigger.on == [EpisodeExtracted]
     assert spec.emits == frozenset()
     assert spec.max_retries == 2
 
 
-async def test_init_mode_writes_profile_when_no_existing() -> None:
-    """No prior profile → ProfileExtractor invoked without ``old_profile``."""
+@pytest.mark.parametrize(
+    ("source", "applies"), [("pipeline", True), ("reflection", False)]
+)
+def test_only_pipeline_episodes_are_profiled(source: str, applies: bool) -> None:
+    assert (
+        EXTRACT_USER_PROFILE_SPEC.applies_to(_event(source=source), make_deps())
+        is applies
+    )
+
+
+async def test_init_extracts_from_the_episode_read_back_from_md() -> None:
+    """No prior profile: the stored narrative is passed, not the event's copy."""
     deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_001_000,
+    _seed(deps, _scope())
+    new_profile = _algo_profile(
+        summary="Alice is a traveller.",
+        explicit_info=[{"description": "plans a trip to Kyoto"}],
+        implicit_traits=[{"description": "adventurous"}],
     )
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "Alice is a hiker.",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [{"description": "lives in tokyo"}],
-            "implicit_traits": [{"description": "adventurous"}],
-        }
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+    with _extractor(return_value=new_profile) as extract:
         events = await extract_user_profile(_event(), deps)
 
     assert events == []
-    # INIT mode — old_profile is None.
-    extractor_call = extractor_cls.return_value.aextract.call_args
-    assert extractor_call.kwargs["old_profile"] is None
-    assert extractor_call.kwargs["sender_id"] == "u_alice"
-    assert [mc.timestamp for mc in extractor_call.args[0]] == [1_700_000_001_000]
-
-    # The freshly extracted profile is stored under the owner's scope.
+    (episodes,), kwargs = extract.call_args
+    assert [(e.episode, e.timestamp) for e in episodes] == [
+        ("Alice plans a trip to Kyoto.", _TS)
+    ]
+    assert kwargs["owner_id"] == "u_alice"
+    assert kwargs["owner_name"] == "Alice"
+    assert kwargs["old_profile"] is None
     stored = deps.stores.profile.profiles[_scope()]
-    assert stored.summary == "Alice is a hiker."
-    assert stored.timestamp == 1_700_000_001_000
-    assert [i.description for i in stored.explicit_info] == ["lives in tokyo"]
+    assert stored.summary == "Alice is a traveller."
+    assert [i.description for i in stored.explicit_info] == ["plans a trip to Kyoto"]
     assert [i.description for i in stored.implicit_traits] == ["adventurous"]
 
 
-async def test_update_mode_rehydrates_old_profile() -> None:
-    """Existing profile → algo Profile rehydrated and passed as old_profile."""
+async def test_the_extractor_runs_on_the_profile_llm() -> None:
+    profile_llm = object()
+    deps = make_deps(llms=llm_clients(profile=profile_llm))
+    _seed(deps, _scope())
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = AsyncMock(
+            return_value=_algo_profile()
+        )
+        await extract_user_profile(_event(), deps)
+
+    assert deps.llms.episode is not profile_llm
+    extractor_cls.assert_called_once_with(llm=profile_llm)
+
+
+async def test_update_rehydrates_the_stored_profile() -> None:
     deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
+    _seed(deps, _scope())
     deps.stores.profile.profiles[_scope()] = Profile(
         owner_id="u_alice",
         summary="prior summary",
-        timestamp=1_700_000_000_000,
+        timestamp=_TS - 1,
         explicit_info=["prior fact"],
-        implicit_traits=["prior trait"],
     )
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "updated summary",
-            "timestamp": 1_700_000_002_000,
-            "explicit_info": [
-                {"description": "prior fact"},
-                {"description": "new fact"},
-            ],
-            "implicit_traits": [{"description": "prior trait"}],
-        }
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+    with _extractor(return_value=_algo_profile(summary="updated summary")) as extract:
         await extract_user_profile(_event(), deps)
 
-    # UPDATE mode — old_profile is the rehydrated algo type carrying prior fields.
-    old = extractor_cls.return_value.aextract.call_args.kwargs["old_profile"]
+    old = extract.call_args.kwargs["old_profile"]
     assert isinstance(old, AlgoProfile)
-    assert old.summary == "prior summary"
-    assert old.timestamp == 1_700_000_000_000
+    assert (old.summary, old.timestamp) == ("prior summary", _TS - 1)
     assert [i.description for i in old.explicit_info] == ["prior fact"]
     assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
+
+
+async def test_the_extractor_keeps_its_item_checks_and_trait_defaults() -> None:
+    """Production never turns the quote / pending checks off, nor lets new
+    traits in: ``ProfileExtractor`` is built with its defaults."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = AsyncMock(
+            return_value=_algo_profile()
+        )
+        await extract_user_profile(_event(), deps)
+
+    kwargs = extractor_cls.call_args.kwargs
+    assert "item_checks" not in kwargs
+    assert "new_traits" not in kwargs
+
+
+# ── everalgo's lists: do_not_record and pending ride with the profile ────
+
+_DO_NOT_RECORD = [
+    {"topic": "travel budget", "evidence": "asked not to record it", "observed_at": 1}
+]
+_PENDING = [
+    {
+        "description": "Swims before work.",
+        "category": "habit",
+        "evidence": "went swimming before work",
+        "bucket": "explicit_info",
+        "observed_at": 1,
+    }
+]
+
+
+def _stored_with_lists() -> Profile:
+    return Profile(
+        owner_id="u_alice",
+        summary="prior",
+        timestamp=_TS - 1,
+        do_not_record=_DO_NOT_RECORD,
+        pending=_PENDING,
+    )
+
+
+async def test_the_stored_lists_reach_everalgo_as_extras() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    deps.stores.profile.profiles[_scope()] = _stored_with_lists()
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    old = extract.call_args.kwargs["old_profile"]
+    assert old.model_extra == {"do_not_record": _DO_NOT_RECORD, "pending": _PENDING}
+
+
+async def test_the_returned_lists_are_stored() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    returned = _algo_profile(do_not_record=_DO_NOT_RECORD, pending=_PENDING)
+    with _extractor(return_value=returned):
+        await extract_user_profile(_event(), deps)
+
+    stored = deps.stores.profile.profiles[_scope()]
+    assert (stored.do_not_record, stored.pending) == (_DO_NOT_RECORD, _PENDING)
+
+
+async def test_a_returned_empty_pending_list_replaces_the_stored_one() -> None:
+    """Every entry confirmed or expired: keeping the old list would let a
+    written item be confirmed a second time."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    deps.stores.profile.profiles[_scope()] = _stored_with_lists()
+    returned = _algo_profile(do_not_record=_DO_NOT_RECORD, pending=[])
+    with _extractor(return_value=returned):
+        await extract_user_profile(_event(), deps)
+
+    stored = deps.stores.profile.profiles[_scope()]
+    assert (stored.do_not_record, stored.pending) == (_DO_NOT_RECORD, [])
+
+
+# ── waiting episodes: folded along, then skipped by their own runs ──────
+
+
+def _seed_indexed(
+    deps: MemoryDeps,
+    scope: Scope,
+    entry_id: str,
+    *,
+    timestamp: int,
+    in_md: bool = True,
+    parent_type: EpisodeParentType = "memcell",
+) -> None:
+    """An owner's episode the index holds; its md copy and memcell unless not."""
+    memcell_id = f"mc_{entry_id}"
+    narrative = f"Alice wrote {entry_id}."
+    if in_md:
+        _seed(
+            deps,
+            scope,
+            entry_id=entry_id,
+            memcell_id=memcell_id,
+            narrative=narrative,
+            timestamp=timestamp,
+        )
+    ref = MemoryRef(
+        id=f"{scope.owner_id}_{entry_id}",
+        entry_id=entry_id,
+        md_path=f"users/{scope.owner_id}/episodes/2026-01-01.md",
+    )
+    episode = Episode(
+        owner_id=scope.owner_id,
+        episode=narrative,
+        summary="",
+        timestamp=timestamp,
+        parent_id=memcell_id,
+        parent_type=parent_type,
+    )
+    deps.indexes.episode.seed(Stored(ref=ref, scope=scope, item=episode))
+
+
+def _own_event(entry_id: str) -> EpisodeExtracted:
+    return _event(episode_entry_id=entry_id, memcell_id=f"mc_{entry_id}")
+
+
+def _passed(extract: AsyncMock) -> list[str]:
+    """The narratives of the last call, oldest first."""
+    (episodes,), _ = extract.call_args
+    return [e.episode for e in sorted(episodes, key=lambda e: e.timestamp)]
+
+
+async def test_waiting_episodes_ride_along_and_their_runs_make_no_call() -> None:
+    deps = make_deps()
+    _seed_indexed(deps, _scope(), "ep_own", timestamp=_TS)
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    _seed_indexed(deps, _scope(), "ep_w2", timestamp=_TS + 2)
+    with _extractor(return_value=_algo_profile(timestamp=_TS + 2)) as extract:
+        await extract_user_profile(_own_event("ep_own"), deps)
+        await extract_user_profile(_own_event("ep_w1"), deps)
+        await extract_user_profile(_own_event("ep_w2"), deps)
+
+    assert extract.call_count == 1
+    assert _passed(extract) == [
+        "Alice wrote ep_own.",
+        "Alice wrote ep_w1.",
+        "Alice wrote ep_w2.",
+    ]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_the_oldest_waiting_episodes_fill_the_cap() -> None:
+    deps = make_deps(profile_batcher=ProfileBatcher(3))
+    _seed(deps, _scope(), entry_id="ep_own", memcell_id="mc_ep_own")
+    for entry_id, offset in [("ep_d", 4), ("ep_a", 1), ("ep_c", 3), ("ep_b", 2)]:
+        _seed_indexed(deps, _scope(), entry_id, timestamp=_TS + offset)
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_own_event("ep_own"), deps)
+
+    assert _passed(extract) == [
+        "Alice plans a trip to Kyoto.",
+        "Alice wrote ep_a.",
+        "Alice wrote ep_b.",
+    ]
+
+
+async def test_a_cap_of_one_folds_the_events_episode_alone() -> None:
+    deps = make_deps(profile_batcher=ProfileBatcher(1))
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_an_episode_older_than_the_profile_is_left_to_its_own_run() -> None:
+    deps = make_deps()
+    _seed(deps, _scope(), timestamp=_TS + 10)
+    deps.stores.profile.profiles[_scope()] = Profile(
+        owner_id="u_alice", summary="prior", timestamp=_TS + 5
+    )
+    _seed_indexed(deps, _scope(), "ep_late", timestamp=_TS + 1)
+    _seed_indexed(deps, _scope(), "ep_new", timestamp=_TS + 20)
+    with _extractor(return_value=_algo_profile(timestamp=_TS + 20)) as extract:
+        await extract_user_profile(_event(), deps)
+        assert _passed(extract) == [
+            "Alice plans a trip to Kyoto.",
+            "Alice wrote ep_new.",
+        ]
+        await extract_user_profile(_own_event("ep_late"), deps)
+
+    assert extract.call_count == 2
+    assert _passed(extract) == ["Alice wrote ep_late."]
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        pytest.param({"in_md": False}, id="gone-from-md"),
+        pytest.param({"parent_type": "cluster"}, id="reflection-merged"),
+    ],
+)
+async def test_an_unfoldable_index_row_is_left_out(missing: dict[str, object]) -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_x", timestamp=_TS + 1, **missing)  # type: ignore[arg-type]
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_x")
+
+
+async def test_a_waiting_episode_whose_memcell_is_gone_is_left_out() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_x", timestamp=_TS + 1)
+    del deps.stores.memcell.cells["mc_ep_x"]
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+
+
+async def test_an_episode_folded_ahead_is_not_folded_again() -> None:
+    """Its own run has not come yet; another run must not send it twice."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    deps.profile_batcher.mark(_scope(), ["ep_w1"])
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(), deps)
+
+    assert _passed(extract) == ["Alice plans a trip to Kyoto."]
+
+
+async def test_a_failed_call_marks_nothing() -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    with (
+        _extractor(side_effect=RuntimeError("gateway down")),
+        pytest.raises(RuntimeError),
+    ):
+        await extract_user_profile(_event(), deps)
+
+    assert not deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+async def test_a_refused_batch_still_marks_its_waiting_episodes() -> None:
+    """A retry would read the same narratives, so their runs need not call."""
+    deps = make_deps()
+    _seed(deps, _scope())
+    _seed_indexed(deps, _scope(), "ep_w1", timestamp=_TS + 1)
+    refusal = AlgoInvalidInputError("no episode narrative mentions 'Alice'")
+    with _extractor(side_effect=refusal):
+        await extract_user_profile(_event(), deps)
+
+    assert deps.stores.profile.writes == []
+    assert deps.profile_batcher.is_marked(_scope(), "ep_w1")
+
+
+# ── owner_name: the label the event carries ──────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("carried", "expected"),
+    [
+        pytest.param("Alice", "Alice", id="event-label"),
+        pytest.param(None, "u_alice", id="no-label-falls-back-to-id"),
+    ],
+)
+async def test_owner_name_is_the_label_on_the_event(
+    carried: str | None, expected: str
+) -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    with _extractor(return_value=_algo_profile()) as extract:
+        await extract_user_profile(_event(owner_name=carried), deps)
+
+    assert extract.call_args.kwargs["owner_name"] == expected
+
+
+async def test_each_owner_copy_of_one_narrative_updates_only_its_profile() -> None:
+    """One memcell with two user senders: two episode copies, two profiles."""
+    deps = make_deps()
+    narrative = "Alice and Bob plan a trip to Kyoto."
+    for owner, entry in (("u_alice", "ep_a"), ("u_bob", "ep_b")):
+        _seed(deps, _scope(owner), entry_id=entry, narrative=narrative)
+
+    async def extract(_episodes, *, owner_id, owner_name, **_kwargs):
+        return _algo_profile(owner_id, summary=f"profile of {owner_name}")
+
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_episodes = extract
+        await extract_user_profile(_event(episode_entry_id="ep_a"), deps)
+        await extract_user_profile(
+            _event(owner_id="u_bob", episode_entry_id="ep_b", owner_name="Bob"), deps
+        )
+
+    profiles = deps.stores.profile.profiles
+    assert profiles[_scope("u_alice")].summary == "profile of Alice"
+    assert profiles[_scope("u_bob")].summary == "profile of Bob"
+
+
+# ── skips ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("gone", ["episode", "memcell"])
+async def test_a_deleted_source_is_not_profiled(gone: str) -> None:
+    deps = make_deps()
+    _seed(deps, _scope())
+    if gone == "episode":
+        deps.stores.episode.records.clear()
+    else:
+        deps.stores.memcell.cells.clear()
+    with _extractor() as extract:
+        assert await extract_user_profile(_event(), deps) == []
+
+    extract.assert_not_called()
+    assert deps.stores.profile.writes == []
+
+
+async def test_a_narrative_the_extractor_refuses_is_skipped() -> None:
+    """``owner_name`` absent from the narrative: logged, nothing written, no retry."""
+    deps = make_deps()
+    _seed(deps, _scope(), narrative="The user asked about the weather.")
+    refusal = AlgoInvalidInputError("no episode narrative mentions 'Alice'")
+    with (
+        _extractor(side_effect=refusal),
+        structlog.testing.capture_logs() as logs,
+    ):
+        assert await extract_user_profile(_event(), deps) == []
+
+    assert deps.stores.profile.writes == []
+    assert [e["event"] for e in logs if e["log_level"] == "warning"] == [
+        "profile_episode_skipped"
+    ]
 
 
 # ── primary language (frozen once known) ─────────────────────────────────
@@ -223,84 +546,37 @@ async def test_profile_language_is_frozen_once_known(
 ) -> None:
     """``stored``: ``None`` = no profile yet, ``""`` = one with no language."""
     deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
+    _seed(deps, _scope())
     if stored is not None:
         deps.stores.profile.profiles[_scope()] = Profile(
             owner_id="u_alice",
             summary="prior",
-            timestamp=1_700_000_000_000,
+            timestamp=_TS - 1,
             primary_language=stored or None,
         )
-    new_profile = AlgoProfile.model_validate(
-        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+    with _extractor(return_value=_algo_profile()) as extract:
         await extract_user_profile(_event(language=event_language), deps)
 
-    call = extractor_cls.return_value.aextract.call_args
-    assert call.kwargs["output_language"] == expected
+    assert extract.call_args.kwargs["output_language"] == expected
     assert deps.stores.profile.profiles[_scope()].primary_language == expected
 
 
 async def test_primary_language_does_not_reach_the_algo_profile() -> None:
     """The frozen language is passed as ``output_language``, not as profile data."""
     deps = make_deps()
-    _seed(
-        deps,
-        _scope(),
-        cluster_id="cl_user00000001",
-        entry_id="ep_20260101_0001",
-        memcell_id="mc_aaaaaaaaaaa1",
-        last_ts=1_700_000_002_000,
-    )
+    _seed(deps, _scope())
     deps.stores.profile.profiles[_scope()] = Profile(
         owner_id="u_alice",
         summary="prior",
-        timestamp=1_700_000_000_000,
+        timestamp=_TS - 1,
         primary_language="English",
     )
-    new_profile = AlgoProfile.model_validate(
-        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+    with _extractor(return_value=_algo_profile()) as extract:
         await extract_user_profile(_event(), deps)
 
-    old = extractor_cls.return_value.aextract.call_args.kwargs["old_profile"]
-    assert "primary_language" not in old.model_dump()
-
-
-async def test_skips_when_no_members() -> None:
-    """An empty target cluster set (no fresh clusters) → no extractor call."""
-    # Existing profile timestamp newer than every cluster's last_ts → no
-    # target_cluster matches `last_ts > last_profile_ts`, and the current
-    # cluster_id names a cluster that does not exist, so nothing is selected.
-    deps = make_deps()
-    deps.stores.cluster.seed(
-        _scope(),
-        "user_memory",
-        _cluster(
-            cluster_id="cl_other000001",
-            members=["ep_other00000"],
-            last_ts=1_600_000_000_000,
-        ),
+    assert (
+        "primary_language" not in extract.call_args.kwargs["old_profile"].model_dump()
     )
-    deps.stores.profile.profiles[_scope()] = Profile(
-        owner_id="u_alice", summary="prior", timestamp=1_900_000_000_000
-    )
-    with patch(_EXTRACTOR) as extractor_cls:
-        await extract_user_profile(_event(cluster_id="cl_unknown00000"), deps)
-
-    extractor_cls.assert_not_called()
-    assert deps.stores.profile.writes == []
 
 
 # ── partition lock (owner_id-level serialisation) ────────────────────────
@@ -310,34 +586,22 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
     """Drive two extract_user_profile runs and record entry/exit order."""
     log: list[str] = []
 
-    async def slow_aextract(_memcells, *, sender_id, **_kwargs):
-        log.append(f"enter:{sender_id}")
+    async def slow_extract(_episodes, *, owner_id, **_kwargs):
+        log.append(f"enter:{owner_id}")
         await asyncio.sleep(0.01)
-        log.append(f"leave:{sender_id}")
-        return AlgoProfile(
-            owner_id=sender_id,
-            summary="summary",
-            timestamp=1_700_000_000_000,
-            explicit_info=[],
-            implicit_traits=[],
-        )
+        log.append(f"leave:{owner_id}")
+        return _algo_profile(owner_id)
 
     deps = make_deps()
+    events = []
     for owner, tag in ((owner_a, "a"), (owner_b, "b")):
-        _seed(
-            deps,
-            _scope(owner),
-            cluster_id=f"cl_{tag}",
-            entry_id=f"ep_{tag}",
-            memcell_id=f"mc_{tag}",
-            last_ts=1_700_000_000_000,
+        _seed(deps, _scope(owner), entry_id=f"ep_{tag}", memcell_id=f"mc_{tag}")
+        events.append(
+            _event(owner_id=owner, episode_entry_id=f"ep_{tag}", memcell_id=f"mc_{tag}")
         )
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = slow_aextract
-        await asyncio.gather(
-            extract_user_profile(_event(owner_id=owner_a, cluster_id="cl_a"), deps),
-            extract_user_profile(_event(owner_id=owner_b, cluster_id="cl_b"), deps),
-        )
+        extractor_cls.return_value.aextract_from_episodes = slow_extract
+        await asyncio.gather(*(extract_user_profile(e, deps) for e in events))
     return log
 
 
@@ -361,41 +625,34 @@ async def test_partition_lock_keeps_same_owner_in_different_spaces_independent(
     entered = 0
     both_entered = asyncio.Event()
 
-    async def extract(_memcells, *, sender_id, **_kwargs):
+    async def extract(_episodes, *, owner_id, **_kwargs):
         nonlocal entered
         entered += 1
         if entered == 2:
             both_entered.set()
         await both_entered.wait()
-        return AlgoProfile(
-            owner_id=sender_id,
-            summary="summary",
-            timestamp=1_700_000_000_000,
-            explicit_info=[],
-            implicit_traits=[],
-        )
+        return _algo_profile(owner_id)
 
     deps = make_deps()
     scopes = [_scope(), replace(_scope(), **{field: "other"})]
-    events = []
-    for i, scope in enumerate(scopes):
-        cluster = f"cl_{i}"
-        _seed(
-            deps,
-            scope,
-            cluster_id=cluster,
-            entry_id=f"ep_{i}",
-            memcell_id=f"mc_{i}",
-            last_ts=1_700_000_000_000,
-        )
-        events.append(
-            _event(cluster_id=cluster).model_copy(update={field: getattr(scope, field)})
-        )
+    for scope in scopes:
+        _seed(deps, scope)
+    events = [_event().model_copy(update={field: getattr(s, field)}) for s in scopes]
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = extract
+        extractor_cls.return_value.aextract_from_episodes = extract
         async with asyncio.timeout(2):
-            await asyncio.gather(
-                *(extract_user_profile(event, deps) for event in events)
-            )
+            await asyncio.gather(*(extract_user_profile(e, deps) for e in events))
     assert len(deps.stores.profile.writes) == 2
     assert all([await deps.stores.profile.read(scope) is not None for scope in scopes])
+
+
+async def test_the_profile_sees_times_in_the_configured_zone() -> None:
+    zone = timezone(timedelta(hours=8))
+    deps = make_deps(tz=zone)
+    _seed(deps, _scope())
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor = extractor_cls.return_value
+        extractor.aextract_from_episodes = AsyncMock(return_value=_algo_profile())
+        await extract_user_profile(_event(), deps)
+
+    assert extractor.aextract_from_episodes.call_args.kwargs["tz"] is zone

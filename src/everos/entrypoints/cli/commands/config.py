@@ -1,13 +1,27 @@
-"""``everos config show`` — display effective configuration."""
+"""``everos config show`` — display effective configuration.
+
+The ``[llm.<task>]`` sections are not dumped raw: each task is shown as it
+resolves -- model, endpoint host and the section every field came from -- the
+same view the server logs at startup.
+"""
 
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import typer
 
+from everos.config import LLMTask
 from everos.config.settings import resolve_root
 from everos.entrypoints.cli._process import configure_interactive
+from everos.service import describe_llm_tasks
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from everos.service import LLMTaskResolution
 
 app = typer.Typer(
     name="config",
@@ -93,9 +107,44 @@ def show(
         if section is None:
             continue
         typer.secho(f"[{section_name}]", bold=True)
-        for field_name, value in section.model_dump().items():
-            display = str(value)
-            if field_name in _SECRET_FIELDS and value:
-                display = _mask(str(value))
-            typer.echo(f"  {field_name} = {display}")
+        for field_name, value in _shown_fields(section_name, section).items():
+            typer.echo(f"  {field_name} = {_display(field_name, value)}")
         typer.echo()
+
+    _echo_llm_tasks(describe_llm_tasks(settings))
+
+
+def _display(field_name: str, value: object) -> str:
+    """A field's value as printed, secrets masked."""
+    if field_name in _SECRET_FIELDS and value:
+        return _mask(str(value))
+    return str(value)
+
+
+def _shown_fields(section_name: str, section: BaseModel) -> dict[str, Any]:
+    """A section's fields as printed; ``[llm]``'s task sections print resolved."""
+    exclude = {task.value for task in LLMTask} if section_name == "llm" else None
+    return section.model_dump(exclude=exclude)
+
+
+def _echo_llm_tasks(resolutions: Sequence[LLMTaskResolution]) -> None:
+    """Print each task's model and host, and its fields grouped by source."""
+    typer.secho("[llm tasks]", bold=True)
+    typer.echo("  # each field comes from llm.<task>, llm, decider or default")
+    for resolution in resolutions:
+        typer.echo(
+            f"  {resolution.task}: model = {resolution.settings.model}, "
+            f"host = {resolution.host or '(none)'}"
+        )
+        by_source: dict[str, list[str]] = {}
+        for field_name, source in resolution.sources.items():
+            value = getattr(resolution.settings, field_name)
+            shown = f"{field_name}={_display(field_name, value)}"
+            by_source.setdefault(source, []).append(shown)
+        for source, fields in by_source.items():
+            typer.echo(f"    {source}: {', '.join(fields)}")
+    if any(resolution.deprecated_fields for resolution in resolutions):
+        typer.echo(
+            "  # the LLM keys of [decider] are deprecated: move them to [llm.decider]"
+        )
+    typer.echo()

@@ -4,7 +4,9 @@ Each script under ``tests/fakes/llm_scripts/user_track`` is fed to the real
 everalgo operator through ``user_track_llm``; a script that drifted from the
 operator's strict reply model fails here instead of deep inside an
 integration test. Every operator also has its empty (or blank) script,
-which exercises the path where it yields nothing.
+which exercises the path where it yields nothing. The profile scripts run
+with the extractor's item checks on, against the canned episode narrative
+their quotes are copied from.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from everalgo.boundary import adetect_boundaries
+from everalgo.boundary import BoundaryDetector, Cuts
 from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
@@ -53,25 +55,26 @@ _MESSAGES = [
     ),
 ]
 _CELL = MemCell(items=list(_MESSAGES), timestamp=_TS + 2)
+_EPISODE = AlgoEpisode(
+    owner_id="u_alice",
+    episode=json.loads(user_track_script("episode"))["content"],
+    summary="Alice plans a quiet Kyoto stay.",
+    timestamp=_TS + 2,
+)
 
 
 @pytest.mark.parametrize(
-    ("script", "is_final", "cell_sizes", "tail"),
+    ("script", "is_final", "cuts"),
     [
-        ("boundary", True, [3], 0),
-        ("boundary", False, [], 3),
-        ("boundary_empty", False, [], 3),
-        ("boundary_split", False, [2], 1),
+        ("boundary", True, Cuts(ends=[3], tail_start=3)),
+        ("boundary", False, Cuts(ends=[], tail_start=0)),
+        ("boundary_empty", False, Cuts(ends=[], tail_start=0)),
+        ("boundary_split", False, Cuts(ends=[2], tail_start=2)),
     ],
 )
-async def test_boundary_scripts(
-    script: str, is_final: bool, cell_sizes: list[int], tail: int
-) -> None:
-    result = await adetect_boundaries(
-        _MESSAGES, llm=user_track_llm(boundary=script), is_final=is_final
-    )
-    assert [len(c.items) for c in result.cells] == cell_sizes
-    assert len(result.tail) == tail
+async def test_boundary_scripts(script: str, is_final: bool, cuts: Cuts) -> None:
+    detector = BoundaryDetector(llm=user_track_llm(boundary=script))
+    assert await detector.adetect_batch(_MESSAGES, is_final=is_final) == cuts
 
 
 async def test_episode_script() -> None:
@@ -79,11 +82,7 @@ async def test_episode_script() -> None:
         _CELL, sender_id=None
     )
     want = json.loads(user_track_script("episode"))
-    assert (episode.episode, episode.summary, episode.subject) == (
-        want["content"],
-        want["summary"],
-        want["title"],
-    )
+    assert (episode.episode, episode.subject) == (want["content"], want["title"])
 
 
 async def test_blank_episode_script_is_unusable() -> None:
@@ -104,17 +103,41 @@ async def test_atomic_fact_scripts(script: str, count: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("script", "explicit", "implicit"),
-    [("profile_init", 2, 1), ("profile_init_empty", 0, 0)],
+    ("script", "counts"),
+    [
+        # The trait is a pattern seen once: it waits on ``pending``, and no new
+        # trait is written by default.
+        (
+            "profile_init",
+            {
+                "explicit_info": 2,
+                "implicit_traits": 0,
+                "pending": 1,
+                "do_not_record": 1,
+            },
+        ),
+        (
+            "profile_init_empty",
+            {
+                "explicit_info": 0,
+                "implicit_traits": 0,
+                "pending": 0,
+                "do_not_record": 0,
+            },
+        ),
+    ],
 )
-async def test_profile_init_scripts(script: str, explicit: int, implicit: int) -> None:
-    profile = await ProfileExtractor(llm=user_track_llm(profile_init=script)).aextract(
-        [_CELL], sender_id="u_alice"
-    )
-    assert (len(profile.explicit_info), len(profile.implicit_traits)) == (
-        explicit,
-        implicit,
-    )
+async def test_profile_init_scripts(script: str, counts: dict[str, int]) -> None:
+    profile = await ProfileExtractor(
+        llm=user_track_llm(profile_init=script)
+    ).aextract_from_episodes([_EPISODE], owner_id="u_alice", owner_name="Alice")
+    extra = profile.model_extra or {}
+    assert {
+        "explicit_info": len(profile.explicit_info),
+        "implicit_traits": len(profile.implicit_traits),
+        "pending": len(extra.get("pending", [])),
+        "do_not_record": len(extra.get("do_not_record", [])),
+    } == counts
 
 
 @pytest.mark.parametrize(
@@ -129,7 +152,9 @@ async def test_profile_update_scripts(script: str, explicit: int) -> None:
     )
     profile = await ProfileExtractor(
         llm=user_track_llm(profile_update=script)
-    ).aextract([_CELL], sender_id="u_alice", old_profile=old)
+    ).aextract_from_episodes(
+        [_EPISODE], owner_id="u_alice", owner_name="Alice", old_profile=old
+    )
     assert len(profile.explicit_info) == explicit
 
 

@@ -26,9 +26,11 @@ help:
 	@echo "  clean         Remove caches"
 
 # Sync deps from uv.lock; CI calls this directly. --frozen means "lock is the
-# source of truth — fail rather than update it".
+# source of truth — fail rather than update it". Then fetch the NLTK data the
+# nltk tokenizer reads, into the venv where NLTK looks for it.
 install-deps:
 	uv sync --frozen
+	uv run --frozen python -m nltk.downloader -q -e -d .venv/nltk_data punkt_tab stopwords
 
 # One-stop dev setup: deps + pre-commit hooks (both pre-commit and commit-msg
 # stages — gitlint runs on commit-msg).

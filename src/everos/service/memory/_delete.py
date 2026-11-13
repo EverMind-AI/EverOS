@@ -10,8 +10,8 @@ from it, then their index rows.
   memcells name loses that session's entries.
 * ``user_id`` / ``agent_id`` with ``session_id`` -- that owner's entries of
   the session; the conversation stays.
-* ``user_id`` / ``agent_id`` alone -- the owner's whole directory, its
-  clusters and (for a user) its Reflection reports.
+* ``user_id`` / ``agent_id`` alone -- the owner's whole directory, the name
+  it went by, its clusters and (for a user) its Reflection reports.
 
 ``POST /memory/delete_by_ids`` deletes single episodes by memory id, with
 what was merged into them, their facts, and their cluster membership (see
@@ -212,7 +212,7 @@ class Deleter:
         return removed
 
     async def _owner(self, scope: Scope) -> int:
-        """Delete the owner's directory, clusters and reports; the count."""
+        """Delete the owner's directory, name, clusters and reports; the count."""
         stores = self._stores
         try:
             deletion = await stores.owner_dir.delete(scope)
@@ -220,6 +220,9 @@ class Deleter:
             raise  # refused before anything moved
         except Exception as exc:
             raise DeletionIncompleteError(str(exc)) from exc
+        await _incomplete(
+            stores.sender_name.delete(scope.app_id, scope.project_id, scope.owner_id)
+        )
         if scope.owner_type == "user":
             async with user_cluster_lock(
                 scope.app_id, scope.project_id, scope.owner_id

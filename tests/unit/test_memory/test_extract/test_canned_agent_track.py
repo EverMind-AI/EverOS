@@ -19,7 +19,7 @@ from everalgo.agent_memory import (
     AgentSkillExtractor,
     CaseSkipReason,
 )
-from everalgo.boundary import adetect_boundaries
+from everalgo.boundary import BoundaryDetector, Cuts
 from everalgo.clustering import Cluster, acluster_by_llm
 from everalgo.types import AgentCase
 
@@ -37,12 +37,14 @@ _CASE = AgentCase(
 
 async def test_boundary_scripts_cut_the_trajectory_on_flush_only() -> None:
     items = agent_trajectory().items
-    final = await adetect_boundaries(items, llm=agent_track_llm(), is_final=True)
-    held = await adetect_boundaries(
-        items, llm=agent_track_llm(boundary="boundary_empty"), is_final=False
+    final = await BoundaryDetector(llm=agent_track_llm()).adetect_batch(
+        items, is_final=True
     )
-    assert [len(c.items) for c in final.cells] == [len(items)]
-    assert (held.cells, len(held.tail)) == ([], len(items))
+    held = await BoundaryDetector(
+        llm=agent_track_llm(boundary="boundary_empty")
+    ).adetect_batch(items, is_final=False)
+    assert final == Cuts(ends=[len(items)], tail_start=len(items))
+    assert held == Cuts(ends=[], tail_start=0)
 
 
 async def test_case_scripts_yield_the_compressed_case() -> None:

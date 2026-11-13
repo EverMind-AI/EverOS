@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from datetime import UTC
 from typing import Any
 from unittest.mock import patch
 
@@ -137,8 +138,10 @@ async def test_search_agent_cases_agentic_calls_aagentic_retrieve_with_benchmark
         refinement_strategy: str,
         multi_query_count: int,
         rrf_k: int,
+        tz: Any,
     ) -> tuple[list[Candidate], AgenticDecision]:
         captured.update(
+            tz=tz,
             top_n=top_n,
             round1_top_n=round1_top_n,
             round1_rerank_top_n=round1_rerank_top_n,
@@ -169,6 +172,7 @@ async def test_search_agent_cases_agentic_calls_aagentic_retrieve_with_benchmark
     assert captured["multi_query_count"] == 3
     assert captured["rrf_k"] == 60
     assert captured["refinement_strategy"] == "multi_query"
+    assert captured["tz"] is UTC
 
 
 async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmark_params() -> (  # noqa: E501
@@ -191,8 +195,10 @@ async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmar
         refinement_strategy: str,
         multi_query_count: int,
         rrf_k: int,
+        tz: Any,
     ) -> tuple[list[Candidate], AgenticDecision]:
         captured.update(
+            tz=tz,
             top_n=top_n,
             round1_top_n=round1_top_n,
             round1_rerank_top_n=round1_rerank_top_n,
@@ -223,6 +229,7 @@ async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmar
     assert captured["multi_query_count"] == 3
     assert captured["rrf_k"] == 60
     assert captured["refinement_strategy"] == "multi_query"
+    assert captured["tz"] is UTC
 
 
 async def test_agentic_dense_recall_honours_radius() -> None:

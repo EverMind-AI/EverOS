@@ -7,6 +7,7 @@ are wired correctly, plus a shaping test to verify id remapping.
 from __future__ import annotations
 
 import json
+from datetime import UTC, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -123,8 +124,10 @@ async def test_agentic_search_wires_benchmark_hyperparams(
         refinement_strategy: str,
         multi_query_count: int,
         rrf_k: int,
+        tz: Any,
     ) -> tuple[list[Candidate], AgenticDecision]:
         captured.update(
+            tz=tz,
             top_n=top_n,
             round1_top_n=round1_top_n,
             round1_rerank_top_n=round1_rerank_top_n,
@@ -165,6 +168,41 @@ async def test_agentic_search_wires_benchmark_hyperparams(
     assert captured["rrf_k"] == 40
     assert captured["refinement_strategy"] == "multi_query"
     assert captured["has_round2"] is True
+    assert captured["tz"] is UTC
+
+
+async def test_agentic_search_shows_dates_in_the_given_zone(
+    ep_recaller: EpisodeRecaller,
+    fact_recaller: AtomicFactRecaller,
+    clusters: list[Cluster],
+) -> None:
+    """The sufficiency prompt renders candidate dates in the zone passed in."""
+    zone = timezone(timedelta(hours=8))
+    seen: list[Any] = []
+
+    async def fake_aagentic(query: str, **kwargs: Any) -> Any:
+        seen.append(kwargs["tz"])
+        return [], AgenticDecision(is_multi_round=False)
+
+    async def fake_embed(q: str) -> list[float]:
+        return [0.1, 0.2, 0.3, 0.4]
+
+    with patch("everos.memory.search.agentic.aagentic_retrieve", fake_aagentic):
+        await search_episodes_agentic(
+            "What did Alice eat?",
+            owner_id="alice",
+            where="owner_id = 'alice' AND owner_type = 'user'",
+            episode_recaller=ep_recaller,
+            atomic_fact_recaller=fact_recaller,
+            cluster_store=_StubClusterStore(clusters),
+            embed_query_fn=fake_embed,
+            reranker=_StubReranker(),
+            llm=FakeLLMClient(responses=[]),
+            top_k=10,
+            tz=zone,
+        )
+
+    assert seen == [zone]
 
 
 async def test_agentic_search_loads_user_memory_clusters(

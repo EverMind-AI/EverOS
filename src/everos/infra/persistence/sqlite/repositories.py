@@ -16,6 +16,7 @@ from ._repos import (
     PurgeJobRepo,
     ReflectionReportRepo,
     ScopePurgeRepo,
+    SenderNameRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
@@ -35,6 +36,7 @@ class SqliteRepos:
     memorize_inbox: MemorizeInboxRepo
     purge_job: PurgeJobRepo
     reflection_report: ReflectionReportRepo
+    sender_name: SenderNameRepo
     scope_purge: ScopePurgeRepo
     session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
@@ -53,6 +55,7 @@ class SqliteRepos:
             memorize_inbox=MemorizeInboxRepo(factory),
             purge_job=PurgeJobRepo(factory),
             reflection_report=ReflectionReportRepo(factory),
+            sender_name=SenderNameRepo(factory),
             scope_purge=ScopePurgeRepo(factory),
             session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),

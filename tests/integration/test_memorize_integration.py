@@ -79,24 +79,12 @@ async def memorize_env(
 
     started: dict[str, Any] = {"application": None}
 
-    async def _setup(
-        *,
-        mode: str = "chat",
-        fake_llm: FakeLLMClient,
-        hard_token_limit: int = 65536,
-        hard_msg_limit: int = 500,
-    ) -> None:
+    async def _setup(*, mode: str = "chat", fake_llm: FakeLLMClient) -> None:
         # Provide a non-None API key + base_url so the configured LLM resolves;
         # the application is then built over the fake instead.
         monkeypatch.setenv("EVEROS_MEMORIZE__MODE", mode)
         monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
         monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
-        monkeypatch.setenv(
-            "EVEROS_BOUNDARY_DETECTION__HARD_TOKEN_LIMIT", str(hard_token_limit)
-        )
-        monkeypatch.setenv(
-            "EVEROS_BOUNDARY_DETECTION__HARD_MSG_LIMIT", str(hard_msg_limit)
-        )
         from everos.config import load_settings
 
         load_settings.cache_clear()
@@ -417,59 +405,6 @@ async def test_duplicate_message_id_dedup_across_adds(
     ids = json.loads(rows[0]["message_ids_json"])
     assert len(ids) == 2  # not 4 — dedup worked
     assert len(set(ids)) == 2  # unique
-
-
-# ---------------------------------------------------------------------------
-# Hard-limit cases (2)
-# ---------------------------------------------------------------------------
-
-
-async def test_hard_msg_limit_force_split(
-    tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
-) -> None:
-    """Exceeding ``hard_msg_limit`` triggers a force-split before the LLM call."""
-    fake = memorize_llm([[]])  # LLM call after force-split
-    # hard_msg_limit=3 → batch of 5 msgs forces ~1 split before LLM.
-    await memorize_env(
-        mode="chat", fake_llm=fake, hard_msg_limit=3, hard_token_limit=10_000
-    )
-
-    msgs = [
-        _user(f"u{i}", 1_700_000_000_000 + i * 1000, sender="u_alice")
-        if i % 2 == 0
-        else _assistant(f"a{i}", 1_700_000_000_000 + i * 1000)
-        for i in range(5)
-    ]
-    result = await memorize(
-        {"session_id": "test_hardmsg", "messages": msgs}, is_final=True
-    )
-    assert result.status == "extracted"
-    rows = _memcell_rows(tmp_path)
-    # Force-split + LLM final → at least 2 cells (force + remaining).
-    assert len(rows) >= 2
-
-
-async def test_hard_token_limit_force_split(
-    tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
-) -> None:
-    """Exceeding ``hard_token_limit`` triggers a force-split (token-based)."""
-    fake = memorize_llm([[]])
-    # Very small token budget → even tiny content triggers force-split.
-    await memorize_env(
-        mode="chat", fake_llm=fake, hard_msg_limit=500, hard_token_limit=20
-    )
-
-    msgs = [
-        _user("a" * 200, 1_700_000_000_000, sender="u_alice"),
-        _assistant("b" * 200, 1_700_000_001_000),
-        _user("c" * 200, 1_700_000_002_000, sender="u_alice"),
-        _assistant("d" * 200, 1_700_000_003_000),
-    ]
-    result = await memorize(
-        {"session_id": "test_hardtok", "messages": msgs}, is_final=True
-    )
-    assert result.status == "extracted"
-    assert len(_memcell_rows(tmp_path)) >= 2
 
 
 # ---------------------------------------------------------------------------

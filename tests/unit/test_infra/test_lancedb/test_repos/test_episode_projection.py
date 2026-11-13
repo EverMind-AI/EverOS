@@ -1,10 +1,9 @@
-"""Round-3 hygiene tests for :class:`_EpisodeRepo`.
+"""Hygiene tests for :class:`_EpisodeRepo`'s ``list_by_owner_after_ts``.
 
-Pins three contracts introduced by round-3 review finding #9:
+Pins three contracts:
 
-- ``list_by_owner_after_ts`` and ``count_by_owner`` both exclude
-  ``deprecated_by IS NOT NULL`` rows — matches the filter idiom used
-  by the search filter compiler and the reflection read paths.
+- It excludes ``deprecated_by IS NOT NULL`` rows — matches the filter
+  idiom used by the search filter compiler and the reflection read paths.
 - ``list_by_owner_after_ts(columns=[...])`` returns raw dicts instead
   of full ``Episode`` objects, letting callers project only the
   fields they need (the vector columns are 1024-D and would otherwise
@@ -103,29 +102,6 @@ async def test_list_after_ts_excludes_deprecated_rows(
 
     assert len(result) == 2
     assert {ep.entry_id for ep in result} == {"live_1", "live_2"}  # type: ignore[union-attr]
-
-
-async def test_count_by_owner_excludes_deprecated_rows(
-    episode_repo: _EpisodeRepo,
-) -> None:
-    """The Tier-1 profile-throttle count must ignore Reflection-superseded
-    rows — matches ``list_by_owner_after_ts`` so the throttle rate keeps
-    pace with the surface the strategy actually operates on."""
-    await episode_repo.add(
-        [
-            _episode(entry_id="live_1", timestamp_ms=1000),
-            _episode(entry_id="live_2", timestamp_ms=2000),
-            _episode(
-                entry_id="dep",
-                timestamp_ms=3000,
-                deprecated_by="cluster_x",
-            ),
-        ]
-    )
-
-    count = await episode_repo.count_by_owner("u1", parent_type="memcell")
-
-    assert count == 2
 
 
 # ── column projection ─────────────────────────────────────────────────────

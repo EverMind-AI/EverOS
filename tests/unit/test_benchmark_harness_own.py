@@ -218,6 +218,38 @@ def test_poll_ome_on_a_missing_db_is_not_a_failure(tmp_path: Path) -> None:
     )
 
 
+def test_the_readiness_filter_survives_the_payloads_ome_empties(tmp_path: Path) -> None:
+    """OME empties a succeeded run's payload; ``json_extract`` raised on the empty one.
+
+    Every ADD died in its readiness wait with ``malformed JSON`` once one run had
+    succeeded. The emptied success still counts; a row of another app does not.
+    """
+    db = tmp_path / "ome.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE run_record (event_id TEXT, strategy_name TEXT, status TEXT, "
+        "attempt INTEGER, max_retries_snapshot INTEGER, started_at TEXT, "
+        "event_payload TEXT)"
+    )
+    mine = json.dumps({"app_id": "a"})
+    other = json.dumps({"app_id": "b"})
+    for event_id, status, payload in (
+        ("e1", "success", ""),
+        ("e2", "running", mine),
+        ("e3", "running", other),
+    ):
+        conn.execute(
+            "INSERT INTO run_record VALUES (?,?,?,?,?,?,?)",
+            (event_id, "episode", status, 0, 2, "2026-01-01T00:00:00", payload),
+        )
+    conn.commit()
+    conn.close()
+    ome_filter = run_mod._counting_emptied_payloads(
+        "json_extract(event_payload, '$.app_id') = ?"
+    )
+    assert run_mod._poll_ome(db, _SINCE, ome_filter, ("a",)) == (2, 1, 0)
+
+
 # ---------------------------------------------------------------------------
 # Conversation selection
 # ---------------------------------------------------------------------------

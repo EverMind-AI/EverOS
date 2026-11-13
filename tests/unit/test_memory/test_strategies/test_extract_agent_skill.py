@@ -49,6 +49,7 @@ from everos.memory.strategies.extract_agent_skill import (
 from tests.fakes import (
     agent_track_llm,
     agent_track_script,
+    llm_clients,
     make_deps,
     make_indexes,
     make_stores,
@@ -422,7 +423,8 @@ async def test_extracts_and_persists_with_cluster_id_stamped() -> None:
 
 
 async def test_writes_the_skill_the_model_adds() -> None:
-    deps = make_deps(llm=agent_track_llm())
+    # Only the agent_skill task can answer: any other task's client refuses.
+    deps = make_deps(llms=llm_clients(agent_skill=agent_track_llm()))
     _seed_cluster(deps)
 
     await extract_agent_skill(_event(quality_score=0.8), deps)

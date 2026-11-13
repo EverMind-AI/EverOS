@@ -11,7 +11,8 @@
 # `null` (omitted in TOML) means "use the Pydantic default declared in code".
 
 [memory]
-# Effective timezone for date buckets and timestamps. Drives
+# Effective timezone for date buckets and timestamps, and the zone message
+# times are shown to the model in (extraction and agentic search). Drives
 # core.utils.datetime; this is the SOLE source — OS `TZ` is not
 # read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
 timezone = "UTC"
@@ -59,6 +60,13 @@ cache_size_kb = 2048
 # Rebuildable vector/BM25 index. Markdown remains the source of truth.
 backend = "lancedb"
 
+[tokenizer]
+# Keyword (BM25) tokenizer shared by indexing and search; changing it requires
+# rebuilding the index (`everos cascade rebuild`). "jieba" handles mixed Chinese /
+# English text. "nltk" reproduces the EverAlgo LoCoMo harness, is English only and
+# needs `pip install "everos[nltk]"` plus `python -m nltk.downloader punkt_tab stopwords`.
+name = "jieba"
+
 [milvus]
 # Remote Milvus Server or Zilliz Cloud only; Milvus Lite paths are unsupported.
 uri = ""
@@ -68,6 +76,7 @@ consistency_level = "Session"
 collection_prefix = "everos"
 
 [llm]
+# The LLM every task uses; configuring this section alone runs everything.
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
 # Or set the field directly in this file (<root>/everos.toml).
@@ -83,33 +92,49 @@ base_url = "https://openrouter.ai/api/v1"
 # Deadline of one request in seconds. Raise it for slow self-hosted endpoints;
 # one extraction call may take up to (invalid_reply_retries + 1) x this.
 # timeout_seconds = 60.0
+# Sent only when a call names none (agentic search keeps its own temperatures);
+# left unset, the request carries neither.
+# temperature = 0.3
+# max_tokens = 16384
+# Transport retries inside the OpenAI SDK; unset keeps the SDK default.
+# sdk_max_retries = 2
 
-# LLM for the multi-round retrieval decider. Separate from [llm] because the jobs
-# differ: [llm] extracts memories during ingestion, this one decides -- inside the search
-# request, round by round -- which episodes are core and what to query next. An empty
-# model falls back to [llm], which is how every store built before this section existed
-# was scored. api_key / base_url are also inherited from [llm] when left blank, so
-# pointing the decider at another hosted model needs only `model`; set base_url to run it
-# on a local vLLM / SGLang endpoint instead.
-[decider]
-# LLM for the multi-round retrieval decider, when it differs from [llm]. Left
-# empty the decider runs [llm]'s model, which is what a single-model deployment
-# wants. Override via env: EVEROS_DECIDER__MODEL / __API_KEY / __BASE_URL /
-# __TIMEOUT_SECONDS / __EXTRA.
+# Per-task overrides. Each [llm.<task>] takes any [llm] field for that task only;
+# every field it leaves unset comes from [llm] (extra is replaced whole, never
+# merged). Tasks: boundary, episode, summary, atomic_fact, foresight, profile,
+# reflection, agent_case, agent_skill, knowledge, search, decider. An unknown task
+# or field fails startup. Env: EVEROS_LLM__<TASK>__<FIELD>, e.g.
+# EVEROS_LLM__BOUNDARY__MODEL. `everos config show` prints what each task resolves to.
 #
+# [llm.boundary]
+# model = "openai/gpt-4.1-nano"
+#
+# [llm.profile]                  # recommended: a reasoning model, thinking on
+# model = "<a reasoning model>"
+# timeout_seconds = 240.0
+# The everalgo profile evaluation ran claude-haiku-5-5 with thinking on at its
+# default effort: about 28s median and 41s p90 per call, against about 3s for a
+# flash-lite model, so it needs a longer deadline than [llm]'s 60s. How thinking
+# is switched on depends on the gateway; nest its field under extra_body in extra.
+#
+# The multi-round retrieval decider runs inside a search request, so the fields it
+# leaves unset among timeout_seconds (60), sdk_max_retries (0) and
+# invalid_reply_retries (1) take these values of its own instead of [llm]'s.
 # ⚠ model and base_url must move together. Renaming the model while leaving the
 # endpoint pointed at a server that does not host it returns 404 on every call,
 # and the retrieval loop does NOT fail on that -- it falls back to a fixed
 # top-ranked core and reports a complete result. See the fallback note in
 # everos.memory.search.llm_multiround.
-model = ""
-api_key = ""
-base_url = ""
-# See [llm]. response_format_mode follows the model: with `model` empty it is
-# inherited from [llm] along with it.
-# response_format_mode = "json_schema"
-# invalid_reply_retries = 1
+# [llm.decider]
+# model = "openai/gpt-4.1-mini"
 
+[decider]
+# The decider's LLM is [llm.decider]. The model / api_key / base_url /
+# timeout_seconds / extra / max_tokens / sdk_max_retries / response_format_mode /
+# invalid_reply_retries keys this section used to take (and EVEROS_DECIDER__<KEY>)
+# are still read but deprecated: [llm.decider] wins when both set a field, and
+# startup logs a warning.
+#
 # Multi-round loop tuning. Every one of these is a real field, so `everos config`
 # prints it and a TOML can set it; the legacy EVEROS_LLMMR_* env names still take
 # precedence when exported, so launch scripts keep working unchanged.
@@ -125,6 +150,14 @@ retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 full_text = false              # true = decider reads full episode text, not summary
 fallback_core = 3              # core size when every decider attempt fails
+
+[profile]
+# User-profile extraction; its LLM is [llm.profile].
+# Most episodes one extraction call folds, the triggering one included. A run
+# also folds the owner's newer episodes still waiting, so a backlog drains in
+# about 1/N of the calls. 1 = one per call.
+# Override via EVEROS_PROFILE__MAX_EPISODES_PER_CALL.
+max_episodes_per_call = 10
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
@@ -181,8 +214,13 @@ batch_size      = 10
 max_concurrent  = 5
 
 [boundary_detection]
-# Passed through to ``everalgo.boundary.adetect_boundaries``: leading cells
-# are cut without the model until the rest fits under both limits.
+# "batch": one model call per add cuts the whole buffer.
+# "step":  one model call per message decides whether it starts a new episode
+#          (the EverAlgo LoCoMo reference). Chat messages only; use it with
+#          [memorize] mode = "chat".
+strategy = "batch"
+# batch only: leading cells are cut without the model until the rest fits under
+# both limits. step keeps everalgo's own step limits.
 hard_token_limit = 65536
 hard_msg_limit = 500
 

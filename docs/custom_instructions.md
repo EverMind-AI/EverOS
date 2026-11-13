@@ -16,7 +16,7 @@ the schema it has to produce.
 
 | File | Operator | Where it is appended |
 |---|---|---|
-| `boundary_detection.yaml` | `everalgo.boundary.adetect_boundaries` | last block of the system message |
+| `boundary_detection.yaml` | `BoundaryDetector.adetect_batch` / `adetect_step` | last block of the system message |
 | `episode_extract.yaml` | `EpisodeExtractor.aextract` | last block of the system message |
 | `profile_extract.yaml` | `ProfileExtractor.aextract` (every INIT / UPDATE / COMPACT / REGROUP call) | additional-requirements section before the data |
 | `reflect.yaml` | `EpisodeReflector.areflect` | last block of the system message |

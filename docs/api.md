@@ -292,7 +292,10 @@ extraction but it is not used as an indexing key).
 **`sender_name`** — Optional human-readable display name. Lets the LLM
 use a real name during extraction without changing the indexing key.
 For example, set `sender_id: "u_42"` (stable internal id) and
-`sender_name: "Alice"` (what the LLM sees).
+`sender_name: "Alice"` (what the LLM sees). A sender keeps the last
+non-blank name it was given in the same `app_id` / `project_id`: a later
+message from that `sender_id` without one is stored under that name.
+Deleting the whole user or agent forgets it.
 
 **`role`** — Speaker role; one of:
 - `"user"` — content originates from a human (or human-acting client).
@@ -983,7 +986,7 @@ query within this episode (already nested, no separate call needed).
 | `session_id` | `string` | The `session_id` whose messages produced this episode |
 | `timestamp` | `string` | ISO-8601 with timezone offset; default `UTC` renders as `Z`, non-UTC defaults render as `±HH:MM` — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
-| `summary` | `string` | Short summary (~200 chars), suitable for list-view rendering |
+| `summary` | `string` | Short display summary (1-3 sentences) the model writes from the same conversation as the episode; the episode's first 200 characters when that call failed. Suitable for list-view rendering |
 | `subject` | `string` | One-line subject / title |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
@@ -1075,7 +1078,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 | `project_id` | `string` | Scope where the buffered message lives |
 | `session_id` | `string` | Matches the requested `filters.session_id` |
 | `sender_id` | `string` | Original sender id from `/add` |
-| `sender_name` | `string \| null` | Original sender name; `null` if not provided |
+| `sender_name` | `string \| null` | Sender name as stored: the one sent, else the sender's last known name; `null` if it was never given |
 | `role` | `"user" \| "assistant" \| "tool"` | Original role |
 | `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#messageitem)) |
 | `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |

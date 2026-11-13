@@ -274,7 +274,7 @@ class LLMRoundDecider:
         last_error = ""
         for attempt in range(tune.retries + 1):
             try:
-                raw, reply = await self._ask(prompt, tune)
+                raw, reply = await self._ask(prompt)
                 break
             except Exception as err:
                 # Any failure degrades this round to the deterministic fallback
@@ -312,13 +312,12 @@ class LLMRoundDecider:
         ]
         return RoundDecision(stop=not queries, queries=queries, core=core, raw=raw)
 
-    async def _ask(
-        self, prompt: str, tune: DeciderSettings
-    ) -> tuple[str, _DecisionReply]:
+    async def _ask(self, prompt: str) -> tuple[str, _DecisionReply]:
         """One decider call: the raw reply text and its validated form.
 
-        ``max_tokens`` and ``extra`` come from ``[decider]``, not from the
-        client's defaults. ``extra`` is where a Qwen endpoint gets
+        The reply cap and ``extra`` are the decider client's own
+        (``[llm.decider]``, built by the application), so nothing is passed per
+        call that would override them. ``extra`` is where a Qwen endpoint gets
         ``chat_template_kwargs.enable_thinking=false``: left on, an un-finetuned
         decider spends the whole deadline reasoning and the round is lost to a
         timeout (39.3% of rounds on Qwen3.5-0.8B).
@@ -329,8 +328,6 @@ class LLMRoundDecider:
         text = await self._llm.achat(
             [LLMMessage(role="user", content=prompt)],
             response_format=_DecisionReply,
-            max_tokens=tune.max_tokens,
-            **tune.extra,
         )
         return text, parse_reply(
             _DecisionReply, text, operator="llm_multiround decider"

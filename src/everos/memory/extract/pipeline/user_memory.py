@@ -6,6 +6,12 @@ Cells / memcell_ids / message_id-mapping / sender lists are produced by
 user-perspective output of one cell: Episode md, plus the
 ``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
 
+Each cell costs two model calls made at once: the episode
+(``EpisodeExtractor.aextract``) and its display summary
+(``EpisodeSummarizer.asummarize_memcell``), both read from the cell. The
+summary is cosmetic: when its call fails, the episode keeps extraction's own
+summary, the content's first 200 characters, and the cell goes on.
+
 ``MemoryService.add`` runs it cell by cell alongside
 :class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``) and
 publishes each cell's events as soon as the cell is done.
@@ -13,12 +19,15 @@ publishes each cell's events as soon as the cell is done.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor
+from everalgo.user_memory import EpisodeExtractor, EpisodeSummarizer
 
+from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
@@ -31,6 +40,8 @@ from everos.memory.ports import EpisodeStore, Event, MemcellStore, MemoryRef, Sc
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
+logger = get_logger(__name__)
+
 
 class UserMemoryPipeline:
     """Per-sender Episode extraction, one pre-cut MemCell at a time.
@@ -40,7 +51,9 @@ class UserMemoryPipeline:
         memcell_store: Whether the cell still exists when its episodes are
             written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
-        llm_client: LLM for extraction.
+        episode_llm: LLM for the episode extraction.
+        summary_llm: LLM for the display summary.
+        tz: The zone message times are shown to the model in.
     """
 
     def __init__(
@@ -48,12 +61,17 @@ class UserMemoryPipeline:
         episode_store: EpisodeStore,
         memcell_store: MemcellStore,
         instructions: CustomInstructions,
-        llm_client: LLMClient,
+        *,
+        episode_llm: LLMClient,
+        summary_llm: LLMClient,
+        tz: tzinfo = UTC,
     ) -> None:
-        self._ep_ext = EpisodeExtractor(llm=llm_client)
+        self._ep_ext = EpisodeExtractor(llm=episode_llm)
+        self._summarizer = EpisodeSummarizer(llm=summary_llm)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
         self._instructions = instructions
+        self._tz = tz
 
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
@@ -102,6 +120,7 @@ class UserMemoryPipeline:
                         episode_text=ep.episode,
                         episode_timestamp_ms=ep.timestamp,
                         owner_id=ep.owner_id,
+                        owner_name=_sender_label(cell, sender_id),
                         session_id=ingested.session_id,
                         app_id=ingested.app_id,
                         project_id=ingested.project_id,
@@ -121,9 +140,21 @@ class UserMemoryPipeline:
         """One whole-cell episode, shared by every user sender of the cell.
 
         ``sender_id=None`` binds the episode to no user; the fan-out to one
-        copy per sender happens in markdown only, so a cell costs one call.
-        An unusable reply is tried again by :func:`retry_llm_output`.
+        copy per sender happens in markdown only, so a cell costs one episode
+        call, made at once with its summary call. An unusable reply is tried
+        again by :func:`retry_llm_output`.
         """
+        algo_ep, summary = await asyncio.gather(
+            self._extract_episode(ingested, prepared),
+            self._summarize(ingested, prepared),
+        )
+        if summary is None:
+            return algo_ep
+        return algo_ep.model_copy(update={"summary": summary})
+
+    async def _extract_episode(
+        self, ingested: IngestResult, prepared: PreparedCell
+    ) -> AlgoEpisode:
         extractor = self._ep_ext
         custom_instructions = self._instructions.load("episode_extract")
 
@@ -132,6 +163,7 @@ class UserMemoryPipeline:
                 prepared.cell,
                 sender_id=None,
                 custom_instructions=custom_instructions,
+                tz=self._tz,
             )
 
         with memory_span(
@@ -150,6 +182,37 @@ class UserMemoryPipeline:
             )
             capture_output(extract_span, algo_ep.episode)
         return algo_ep
+
+    async def _summarize(
+        self, ingested: IngestResult, prepared: PreparedCell
+    ) -> str | None:
+        """The model's display summary of the cell, or ``None`` when it failed.
+
+        ``None`` keeps extraction's own summary. Any failure is caught: the
+        summary is display-only and must never cost the cell its episode.
+        """
+        summarizer = self._summarizer
+
+        async def attempt() -> str:
+            return await summarizer.asummarize_memcell(prepared.cell, tz=self._tz)
+
+        with memory_span(
+            "everos.extract.summary",
+            observation_type="generation",
+            session_id=ingested.session_id,
+            metadata={"memcell_id": prepared.memcell_id},
+        ):
+            try:
+                return await retry_llm_output(
+                    attempt, operator="episode_summary", memcell_id=prepared.memcell_id
+                )
+            except Exception as exc:  # display-only: fall back, never fail the cell
+                logger.warning(
+                    "episode_summary_fallback",
+                    memcell_id=prepared.memcell_id,
+                    error_type=type(exc).__name__,
+                )
+                return None
 
     async def _persist(
         self, ingested: IngestResult, ep: Episode, memcell_id: str
@@ -209,3 +272,16 @@ def _unique_user_senders(cell: AlgoMemCell) -> list[str]:
         if sid and sid not in senders:
             senders.append(sid)
     return senders
+
+
+def _sender_label(cell: AlgoMemCell, sender_id: str) -> str:
+    """How the episode operator labelled the sender's lines.
+
+    Each chat line is rendered under its ``sender_name``, else its
+    ``sender_id``; ingestion gives every line of one sender the same name.
+    """
+    for item in cell.items:
+        name = getattr(item, "sender_name", None)
+        if getattr(item, "sender_id", None) == sender_id and name and name.strip():
+            return name.strip()
+    return sender_id

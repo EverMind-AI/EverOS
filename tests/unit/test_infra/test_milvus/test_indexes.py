@@ -24,6 +24,7 @@ from everos.infra.persistence.milvus import MilvusRepoBase
 from everos.infra.persistence.records import Episode as EpisodeRow
 from everos.memory.models import Episode
 from everos.memory.ports import EpisodeIndex, Scope
+from everos.memory.ports.query import Filter, all_of, eq, gt, is_null
 
 _USER = Scope(app_id="default", project_id="default", owner_id="u1", owner_type="user")
 
@@ -62,6 +63,35 @@ def test_each_index_is_bound_to_the_milvus_repository(
     assert _bound(indexes.profile) is repos.user_profile
     assert _bound(indexes.knowledge_topic) is repos.knowledge_topic
     assert isinstance(indexes.episode, EpisodeIndex)
+
+
+async def test_list_after_asks_for_the_owners_live_rows_after_the_instant(
+    milvus_index: DerivedIndex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    after_ms = 1_747_216_800_000
+    predicates: list[Filter] = []
+
+    async def scan_raw(predicate: Filter, **_: Any) -> list[Any]:
+        predicates.append(predicate)
+        return []
+
+    monkeypatch.setattr(milvus_index.repositories.episode, "_scan_raw", scan_raw)
+
+    found = await build_indexes(milvus_index).episode.list_after(
+        _USER, after_ms, parent_type="memcell"
+    )
+
+    assert found == []
+    assert predicates == [
+        all_of(
+            eq("owner_id", "u1"),
+            gt("timestamp", dt.datetime(2025, 5, 14, 10, tzinfo=dt.UTC)),
+            eq("parent_type", "memcell"),
+            eq("app_id", "default"),
+            eq("project_id", "default"),
+            is_null("deprecated_by"),
+        )
+    ]
 
 
 async def test_rows_come_back_as_domain_episodes(

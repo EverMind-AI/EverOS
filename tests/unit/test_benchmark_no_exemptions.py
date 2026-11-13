@@ -158,7 +158,17 @@ def test_the_everos_version_is_readable_and_lands_in_the_manifest() -> None:
 
 
 def test_the_serving_specs_describe_every_configured_role() -> None:
-    specs = run_mod._serving_from_env(BenchmarkConfig.from_toml("locomo"))
+    decider = run_mod.DeciderProbe(
+        model="qwen3.6-27B",
+        base_url="http://127.0.0.1:9360/v1",
+        host="127.0.0.1",
+        settings={"max_tokens": 512},
+        sources={"model": "llm.decider"},
+        outcome="resolved",
+        reason="",
+        error="",
+    )
+    specs = run_mod._serving_from_env(BenchmarkConfig.from_toml("locomo"), decider)
     roles = {s.role for s in specs}
     assert "embedding" in roles or "decider" in roles, f"roles: {sorted(roles)}"
     for s in specs:

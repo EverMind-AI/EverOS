@@ -76,7 +76,7 @@ everos init --root /data/everos
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps. Validated against `zoneinfo.ZoneInfo`. |
+| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps, and the zone message times are shown to the model in during extraction (boundary detection, episode, summary, atomic facts, foresight, profile) and agentic search. Validated against `zoneinfo.ZoneInfo`. |
 
 ### `[api]`
 
@@ -114,6 +114,28 @@ truth regardless of backend.
 |---|---|---|---|
 | `backend` | string | `"lancedb"` | Index implementation: `lancedb` or `milvus`. |
 
+### `[tokenizer]`
+
+The keyword (BM25) tokenizer. Indexing and search share one instance, because
+the stored token columns only match queries tokenized the same way: changing
+`name` requires rebuilding the index (`everos cascade rebuild`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | `"jieba"` | `jieba`: mixed Chinese / English text. `nltk`: the keyword pipeline of the EverAlgo LoCoMo harness (lowercase, NLTK `word_tokenize`, alphabetic tokens of two or more characters, NLTK English stopwords, Porter stemming); English only, and digits never become tokens. |
+
+`nltk` needs the optional package and its data, and downloads nothing at
+runtime; a missing piece stops startup with the command that installs it:
+
+```bash
+pip install "everos[nltk]"
+python -m nltk.downloader punkt_tab stopwords
+```
+
+The LanceDB keyword index lowercases, Snowball-stems and ASCII-folds tokens on
+both the indexed and the query side, so on that backend `nltk` tokens are
+stemmed a second time; matching stays symmetric.
+
 ### `[milvus]`
 
 Used only when `index.backend = "milvus"`. Install the optional client with
@@ -138,6 +160,146 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
 | `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
+| `extra` | table | `{}` | No | Provider-specific request fields merged into every call. Non-standard fields must sit under `extra_body` (the OpenAI SDK rejects unknown top-level names). |
+| `temperature` | float | unset | No | Sent only when a call names none; unset, the request carries no temperature. A default, never an override: agentic search keeps the temperatures it sets per call. |
+| `max_tokens` | int | unset | No | Output cap sent only when a call names none; unset, the request carries none. A reasoning model bills its thinking against it. |
+| `sdk_max_retries` | int | unset | No | Transport retries inside the OpenAI SDK; unset keeps the SDK default. They multiply with `invalid_reply_retries`. |
+
+`[llm]` is the only LLM section you need: every task below uses it unless its
+own section says otherwise. `[llm]` and its task sections reject unknown keys
+-- a typo fails startup with the list of valid names, instead of being ignored
+while the task quietly keeps `[llm]`'s model.
+
+### `[llm.<task>]`
+
+Each place EverOS calls an LLM is a *task*. An optional `[llm.<task>]` section
+sets any `[llm]` field for that one task.
+
+**Inheritance, one rule:** each field is decided on its own. A field the task
+section sets is used; a field it leaves out comes from `[llm]`. So a section
+that names only `model` keeps `[llm]`'s endpoint, key and `extra`. `extra` is
+one value: written, it replaces `[llm].extra` whole -- never merged key by key,
+because a key meant for one gateway can be rejected by another, and a merge
+would carry it across silently. A blank `model`, `api_key` or `base_url`
+inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
+
+| Task | What it calls the model for |
+|---|---|
+| `boundary` | Cutting a session's messages into memcells (user and agent tracks) |
+| `episode` | Extracting each memcell's episode |
+| `summary` | The episode's display summary, a separate call made beside `episode` |
+| `atomic_fact` | Atomic-fact extraction |
+| `foresight` | Foresight extraction |
+| `profile` | User-profile extraction |
+| `reflection` | Episode reflection |
+| `agent_case` | Agent-case extraction, and the case gate when `[agent_memory] case_gate_enabled` |
+| `agent_skill` | Agent-skill extraction and skill clustering |
+| `knowledge` | Topic extraction from uploaded knowledge documents |
+| `search` | Search-time calls: agentic retrieval and the LLM rerank lane |
+| `decider` | The multi-round retrieval decider (`llm_multiround`) |
+
+The task names are a stable interface. Environment variables nest one more
+level: `EVEROS_LLM__<TASK>__<FIELD>`, e.g. `EVEROS_LLM__BOUNDARY__MODEL`.
+`everos config show` prints what every task resolves to -- model, endpoint host
+and the section each field came from -- and the server logs the same at
+startup (`llm.task.resolved`; the key is never printed).
+
+**The decider's own defaults.** The decider runs inside a search request, so
+the time and retry budget of one round is bounded by the caller waiting on it,
+not by `[llm]`'s background-extraction values. These three fields, when
+`[llm.decider]` leaves them unset, take the decider's own values instead of
+`[llm]`'s:
+
+| Field | Decider default | Why |
+|---|---|---|
+| `timeout_seconds` | `60.0` | A slow extraction endpoint must not stretch every search round. |
+| `sdk_max_retries` | `0` | `[decider] retries` already retries; SDK retries would multiply with it. |
+| `invalid_reply_retries` | `1` | A raised `[llm]` value does not carry over: `[decider] retries` already covers an unusable reply. |
+
+Every other decider field inherits `[llm]` like any task. The decider always
+gets a client of its own; tasks that resolve to the same settings share one.
+
+**Deprecated: the LLM keys of `[decider]`.** `[decider]` keeps the multi-round
+loop tuning (`max_rounds`, `seed_topk`, ...). Its former LLM keys -- `model`,
+`api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`,
+`sdk_max_retries`, `response_format_mode`, `invalid_reply_retries`, and their
+`EVEROS_DECIDER__*` variables -- are still read: each one set applies to the
+decider unless `[llm.decider]` sets the same field, and startup logs a
+deprecation warning. Move them to `[llm.decider]` (`EVEROS_LLM__DECIDER__*`).
+
+#### Recipes
+
+One model for everything -- configure `[llm]` only:
+
+```toml
+[llm]
+model = "openai/gpt-4.1-mini"
+api_key = "sk-..."
+base_url = "https://openrouter.ai/api/v1"
+```
+
+A cheaper model for boundary detection, the strong one for everything else:
+
+```toml
+[llm]
+model = "openai/gpt-4.1-mini"
+api_key = "sk-..."
+base_url = "https://openrouter.ai/api/v1"
+
+[llm.boundary]
+model = "openai/gpt-4.1-nano"
+```
+
+A reasoning model for the profile (recommended). The everalgo profile
+evaluation ran `claude-haiku-5-5` with thinking on at its default effort, at
+about 28s median and 41s p90 per call, so give it a longer deadline than
+`[llm]`'s 60s; switch thinking on through `extra` as your gateway names it and
+leave the effort at the gateway's default:
+
+```toml
+[llm.profile]
+model = "<a reasoning model>"
+timeout_seconds = 240.0
+```
+
+Keep private extraction on a local endpoint (the section names its own
+endpoint and key; nothing else changes):
+
+```toml
+[llm.profile]
+model = "qwen3-32b"
+base_url = "http://localhost:8000/v1"
+api_key = "local"
+
+[llm.atomic_fact]
+model = "qwen3-32b"
+base_url = "http://localhost:8000/v1"
+api_key = "local"
+```
+
+Force a request field on every task -- set it once in `[llm]`; each task
+inherits it unless it writes its own `extra`, which replaces it:
+
+```toml
+[llm]
+extra = { extra_body = { chat_template_kwargs = { enable_thinking = false } } }
+
+[llm.search]                       # another gateway, which rejects that field
+model = "gpt-4.1-mini"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."
+extra = {}
+```
+
+### `[profile]`
+
+User-profile extraction: how many episodes one call folds. Its LLM is `[llm.profile]` (see the recipes above).
+
+Episodes are folded one owner at a time. A run folds the episode that triggered it together with that owner's newer episodes still waiting (up to `max_episodes_per_call` in all), and the runs of those episodes then end without a call. A burst of episodes for one owner, such as a bulk import, therefore drains in about `1 / max_episodes_per_call` of the calls, and runs queued behind a slow model stay within `[ome] run_timeout_seconds`.
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. |
 
 ### `[multimodal]`
 
@@ -244,8 +406,32 @@ unaffected: nothing is probed, compared, or recorded.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `hard_token_limit` | int | `65536` | Max tokens before forced boundary. |
-| `hard_msg_limit` | int | `500` | Max messages before forced boundary. |
+| `strategy` | string | `"batch"` | `batch`: one model call per add cuts the whole buffer. `step`: one model call per message decides whether it starts a new episode; chat messages only, so use it with `[memorize] mode = "chat"`. |
+| `hard_token_limit` | int | `65536` | `batch` only: max tokens before a forced boundary. |
+| `hard_msg_limit` | int | `500` | `batch` only: max messages before a forced boundary. |
+
+`step` keeps everalgo's own step limits; every other cutting parameter is
+everalgo's `BoundaryDetector` default.
+
+**Choosing a strategy.** `batch` is faster; `step` scored higher on LoCoMo. Keep
+`batch` unless slower ingest is worth it for chat memory:
+
+| | `batch` (default) | `step` |
+|---|---|---|
+| Boundary calls | one per add (544 for all of LoCoMo) | one per message (about 5,250 for LoCoMo) |
+| LoCoMo ingest, 10 servers | about 4 minutes | about 17–22 minutes |
+| Episodes stored for LoCoMo | about 320 | about 550, each shorter |
+| Agent conversations (tool calls) | supported | chat messages only |
+| LoCoMo `agentic`, best of three runs | 94.35%\* | 94.61%\* |
+
+The two scores are within LoCoMo's run-to-run spread of about one point. They
+were measured with the reply format of each benchmark config: `batch` with the
+default `[llm] response_format_mode = "json_schema"`, which keeps every reply to
+its schema, and `step` with `"prompt_only"` for every call
+([benchmarks/README.md](../benchmarks/README.md#batch-or-step)).
+
+\* Graded against the corrected answers of the LoCoMo gold audit for the 99
+questions it disputes.
 
 ### `[memorize]`
 
@@ -406,6 +592,7 @@ Examples:
 | TOML | Environment Variable |
 |---|---|
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
+| `[llm.boundary] model = "openai/gpt-4.1-nano"` | `EVEROS_LLM__BOUNDARY__MODEL=openai/gpt-4.1-nano` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
 

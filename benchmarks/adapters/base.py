@@ -87,6 +87,17 @@ class DatasetAdapter(Protocol):
         ...
 
 
+def question_key(conv_index: int, question: str) -> tuple[int, str]:
+    """Identify a question by its conversation and its text, whitespace and case folded.
+
+    This is how a gold audit's entries are matched to graded rows. Positions do not
+    work: an audit numbers questions in the dataset's own list, while the harness drops
+    LoCoMo's category 5 wherever it sits, so the two indices drift apart. The text is
+    what both sides share.
+    """
+    return conv_index, " ".join(str(question).split()).lower()
+
+
 def normalize_speaker(name: str) -> str:
     """Make a speaker usable as a `sender_id`.
 

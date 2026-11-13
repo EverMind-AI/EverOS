@@ -1,5 +1,4 @@
 {
   "reasoning": "The first two messages settle one topic; the third opens another.",
-  "boundaries": [2],
-  "tail_complete": false
+  "boundaries": [2]
 }

@@ -13,6 +13,7 @@ __all__ = [
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteReflectionReportStore",
+    "SqliteSenderNameStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
 ]
@@ -44,6 +45,7 @@ from ._repos import (
     MemcellRepo,
     MemorizeInboxRepo,
     ReflectionReportRepo,
+    SenderNameRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
@@ -570,3 +572,31 @@ def _report_to_row(report: ReflectionReport) -> ReflectionReportRow:
         merged_entry_id=report.merged_entry_id,
         deprecated_fact_count=report.deprecated_fact_count,
     )
+
+
+class SqliteSenderNameStore:
+    """The latest display name of each sender, in the ``sender_name`` table.
+
+    Args:
+        repo: Repository over the ``sender_name`` table.
+    """
+
+    def __init__(self, repo: SenderNameRepo) -> None:
+        self._repo = repo
+
+    async def get_many(
+        self, app_id: str, project_id: str, sender_ids: Collection[str]
+    ) -> Mapping[str, str]:
+        return await self._repo.get_many(
+            app_id=app_id, project_id=project_id, sender_ids=sender_ids
+        )
+
+    async def upsert_many(
+        self, app_id: str, project_id: str, names: Mapping[str, str]
+    ) -> None:
+        await self._repo.upsert_many(app_id=app_id, project_id=project_id, names=names)
+
+    async def delete(self, app_id: str, project_id: str, sender_id: str) -> None:
+        await self._repo.delete_one(
+            app_id=app_id, project_id=project_id, sender_id=sender_id
+        )

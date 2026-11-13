@@ -15,13 +15,14 @@ cascade_timeout = 7200                  # seconds to wait for extraction to drai
 backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
 backbone_base_url = ""                  # empty = OpenRouter
 decider_model = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
-                                        # model, which is the single-model setup that
-                                        # works with no extra configuration. Our
-                                        # published numbers used qwen3.6-27B here; set
-                                        # BENCH_DECIDER_MODEL + BENCH_DECIDER_BASE_URL
-                                        # together to reproduce them -- a model name
-                                        # without its endpoint 404s on every call and
-                                        # the loop falls back silently.
+                                        # llm_multiround only: the decider behind the
+                                        # published number.
+                                        # Serve it yourself (OpenAI-compatible) and set
+                                        # BENCH_DECIDER_BASE_URL (+ _API_KEY) to it.
+                                        # Without an endpoint the extraction model
+                                        # decides and the run warns that it is not the
+                                        # published setup; a decider that does not
+                                        # answer stops the run before it starts.
 decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
 decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
 # --- SEARCH ----------------------------------------------------------------

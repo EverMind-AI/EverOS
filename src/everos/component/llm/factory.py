@@ -1,12 +1,18 @@
-"""Build :class:`OpenAIProvider` instances from settings, one per LLM role.
+"""Build :class:`OpenAIProvider` instances from settings.
 
-Three roles share one construction path: extraction (``[llm]``), the
-multi-round retrieval decider (``[decider]``, falling back to ``[llm]``) and
-multimodal parsing (``[multimodal]``). ``resolve_*_config`` turns a section
-into an :class:`LLMClientConfig` -- raising :class:`LLMNotConfiguredError`
-when the key or base URL is missing -- and :func:`build_llm_provider` turns
-that into a provider. The application bootstrap decides what a missing role
-means.
+Every place the application calls an LLM is a task
+(:class:`~everos.config.LLMTask`) whose client is ``[llm]`` with that task's
+``[llm.<task>]`` section laid over it. :func:`resolve_llm_task` is the one
+place that merge happens: each field is taken from the first section that sets
+it -- the task's own section, then (decider only) the deprecated ``[decider]``
+fields, then the task's own defaults (:data:`~everos.config.LLM_TASK_DEFAULTS`),
+then ``[llm]`` -- and the section that supplied it is recorded, for the
+startup log and ``everos config show``. ``extra`` is one value, never merged
+key by key. :func:`llm_client_config` checks the result is usable, raising
+:class:`LLMNotConfiguredError` when the key or base URL is missing, and
+:func:`build_llm_task_providers` builds one provider per distinct
+configuration. Multimodal parsing has its own section, read by
+:func:`resolve_multimodal_config`.
 
 With ``[observability] enabled`` each provider reports its completions to a
 :class:`TracingObserver` (see :func:`observer_for`); otherwise to a
@@ -16,25 +22,57 @@ With ``[observability] enabled`` each provider reports its completions to a
 from __future__ import annotations
 
 __all__ = [
-    "DeciderClientConfig",
     "LLMClientConfig",
     "LLMNotConfiguredError",
+    "LLMTaskResolution",
     "build_llm_provider",
+    "build_llm_task_providers",
+    "llm_client_config",
     "observer_for",
-    "resolve_decider_config",
-    "resolve_llm_config",
+    "resolve_llm_task",
+    "resolve_llm_tasks",
     "resolve_multimodal_config",
 ]
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
+from urllib.parse import urlsplit
 
-from everos.config import Settings, missing_config_error
+from pydantic import BaseModel
+
+from everos.config import (
+    LLM_TASK_DEFAULTS,
+    DeciderSettings,
+    LLMClientSettings,
+    LLMTask,
+    Settings,
+    missing_config_error,
+)
 from everos.core.errors import LLMNotConfiguredError
 
 from ._tracing_observer import TracingObserver
 from .observer import LLMCallObserver, NullObserver
 from .openai_provider import OpenAIProvider, ResponseFormatMode
+
+_DEFAULT_SOURCE: Final = "default"
+_LEGACY_DECIDER_SOURCE: Final = "decider"
+
+_DEDICATED_TASKS: Final = frozenset({LLMTask.DECIDER})
+"""Tasks that always get a provider of their own, even when their resolved
+configuration matches another task's.
+
+The decider runs inside a search request with its own SDK retry count; a
+provider fixes that count at construction, so sharing one would hand the
+decider's retry budget to extraction or the reverse."""
+
+_LEGACY_DECIDER_FIELDS: Final = tuple(
+    name
+    for name in LLMClientSettings.model_fields
+    if name in DeciderSettings.model_fields
+)
+"""The LLM fields the deprecated ``[decider]`` section still carries."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +88,8 @@ class LLMClientConfig:
         extra: Request fields merged into every call.
         response_format_mode: How the reply format is requested.
         invalid_reply_retries: Extra attempts after an unusable reply.
+        temperature: Sent when a call names none; ``None`` leaves it out.
+        max_tokens: Sent when a call names none; ``None`` leaves it out.
     """
 
     model: str
@@ -60,6 +100,124 @@ class LLMClientConfig:
     extra: dict[str, Any] = field(default_factory=dict)
     response_format_mode: ResponseFormatMode = "json_schema"
     invalid_reply_retries: int = 1
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class LLMTaskResolution:
+    """One task's effective LLM settings and the section each field came from.
+
+    Attributes:
+        task: The task resolved.
+        settings: Every field's effective value.
+        sources: Field name -> the section that supplied it: ``"llm.<task>"``,
+            ``"decider"`` (deprecated section, decider only), ``"llm"`` or
+            ``"default"``.
+    """
+
+    task: LLMTask
+    settings: LLMClientSettings
+    sources: Mapping[str, str]
+
+    @property
+    def host(self) -> str | None:
+        """The endpoint's host name; ``None`` when no base URL is set."""
+        if not self.settings.base_url:
+            return None
+        return urlsplit(self.settings.base_url).hostname
+
+    @property
+    def deprecated_fields(self) -> tuple[str, ...]:
+        """The fields taken from the deprecated ``[decider]`` section."""
+        return tuple(
+            name
+            for name, source in self.sources.items()
+            if source == _LEGACY_DECIDER_SOURCE
+        )
+
+
+def resolve_llm_task(settings: Settings, task: LLMTask) -> LLMTaskResolution:
+    """Merge ``[llm]`` and ``task``'s sections into the task's effective settings.
+
+    No credential check: a resolution of an unconfigured deployment is still
+    worth showing. :func:`llm_client_config` checks.
+    """
+    layers = _layers(settings, task)
+    values: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    for name in LLMClientSettings.model_fields:
+        sources[name], values[name] = next(
+            (source, layer[name]) for source, layer in layers if name in layer
+        )
+    return LLMTaskResolution(
+        task=task,
+        settings=LLMClientSettings(**values),
+        sources=MappingProxyType(sources),
+    )
+
+
+def resolve_llm_tasks(settings: Settings) -> dict[LLMTask, LLMTaskResolution]:
+    """:func:`resolve_llm_task` for every task, in :class:`LLMTask` order."""
+    return {task: resolve_llm_task(settings, task) for task in LLMTask}
+
+
+def _layers(settings: Settings, task: LLMTask) -> list[tuple[str, Mapping[str, Any]]]:
+    """``task``'s field sources, highest priority first; the last sets every field."""
+    base = settings.llm
+    names = LLMClientSettings.model_fields
+    everything = {name: getattr(base, name) for name in names}
+    layers: list[tuple[str, Mapping[str, Any]]] = [
+        (f"llm.{task}", _values_set(getattr(base, task.value), names))
+    ]
+    if task is LLMTask.DECIDER:
+        layers.append(
+            (
+                _LEGACY_DECIDER_SOURCE,
+                _values_set(settings.decider, _LEGACY_DECIDER_FIELDS),
+            )
+        )
+    layers += [
+        (_DEFAULT_SOURCE, LLM_TASK_DEFAULTS.get(task, {})),
+        ("llm", {k: v for k, v in everything.items() if k in base.model_fields_set}),
+        (_DEFAULT_SOURCE, everything),
+    ]
+    return layers
+
+
+def _values_set(section: BaseModel, names: Iterable[str]) -> dict[str, Any]:
+    """The fields among ``names`` that ``section`` sets; ``None`` means unset."""
+    values = {name: getattr(section, name) for name in names}
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def llm_client_config(resolution: LLMTaskResolution) -> LLMClientConfig:
+    """Turn a resolution into a buildable configuration.
+
+    Raises:
+        LLMNotConfiguredError: The resolved key or base URL is empty; the
+            message names the task and the ``[llm]`` section.
+    """
+    cfg = resolution.settings
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else ""
+    if not api_key or not cfg.base_url:
+        raise LLMNotConfiguredError(
+            missing_config_error(
+                f"LLM api_key and base_url (task {resolution.task})", "llm"
+            )
+        )
+    return LLMClientConfig(
+        model=cfg.model,
+        api_key=api_key,
+        base_url=cfg.base_url,
+        timeout=cfg.timeout_seconds,
+        max_retries=cfg.sdk_max_retries,
+        extra=dict(cfg.extra),
+        response_format_mode=cfg.response_format_mode,
+        invalid_reply_retries=cfg.invalid_reply_retries,
+        temperature=cfg.temperature,
+        max_tokens=cfg.max_tokens,
+    )
 
 
 def build_llm_provider(
@@ -79,6 +237,8 @@ def build_llm_provider(
         api_key=config.api_key,
         base_url=config.base_url,
         timeout=config.timeout,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
         max_retries=config.max_retries,
         extra=config.extra,
         response_format_mode=config.response_format_mode,
@@ -87,94 +247,35 @@ def build_llm_provider(
     )
 
 
-@dataclass(frozen=True)
-class DeciderClientConfig(LLMClientConfig):
-    """What the decider actually talks to, after ``[decider]`` -> ``[llm]`` inheritance.
+def build_llm_task_providers(
+    configs: Mapping[LLMTask, LLMClientConfig],
+    *,
+    observer: LLMCallObserver | None = None,
+) -> dict[LLMTask, OpenAIProvider]:
+    """One provider per task; tasks with equal configurations share one.
 
-    One resolution, two consumers: the application bootstrap builds the client
-    from it, and a caller that wants to *check* the decider before using it (the
-    benchmark harness probes it before the first question) must ask the same question
-    the same way. Re-deriving the rule at the check site is how a config that runs fine
-    -- ``[decider].model`` set, endpoint inherited from ``[llm]`` -- ended up skipping
-    the probe entirely, which is the one case the probe exists for.
+    Sharing keeps a single-model deployment on one connection pool, as before
+    tasks existed. The decider always gets its own (see ``_DEDICATED_TASKS``).
 
-    Attributes:
-        inherits_model: True when ``[decider]`` names no model and the main
-            ``[llm]`` model decides.
+    Args:
+        configs: Each task's buildable configuration.
+        observer: Receives every provider's completions.
+
+    Returns:
+        The provider for each task in ``configs``.
     """
-
-    inherits_model: bool = False
-
-
-def resolve_decider_config(settings: Settings) -> DeciderClientConfig:
-    """Resolve the decider's effective client settings.
-
-    ``model``, ``api_key`` and ``base_url`` each fall back to ``[llm]`` -- so pointing
-    the decider at another hosted model needs only ``[decider].model``, and a config
-    that predates the section keeps the main model as its decider. ``timeout``,
-    ``max_retries`` and ``invalid_reply_retries`` always come from ``[decider]``: they
-    bound one round inside a live search, which is a different deadline from a
-    background extraction's.
-
-    The decider is always its own provider instance, even when every field is
-    inherited from ``[llm]``. Sharing the extraction provider looks equivalent
-    and is not: the SDK's own ``max_retries`` is fixed at construction, so a
-    shared client cannot have the decider's ``sdk_max_retries`` applied to it,
-    and the SDK retries then multiply with the decider's own. Four decider
-    attempts times three SDK requests against a 60s deadline is the 728s round
-    that this exists to stop.
-
-    Raises:
-        LLMNotConfiguredError: When neither section yields a usable key and base URL.
-    """
-    cfg, llm_cfg = settings.decider, settings.llm
-    api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
-    api_key = api_key or (
-        llm_cfg.api_key.get_secret_value() if llm_cfg.api_key is not None else None
-    )
-    base_url = cfg.base_url or llm_cfg.base_url
-    model = cfg.model or llm_cfg.model
-    if not api_key or not base_url:
-        raise LLMNotConfiguredError(
-            missing_config_error("decider api_key and base_url", "decider")
-        )
-    # `extra` is endpoint vocabulary and `response_format_mode` a model capability,
-    # so both travel with whichever section supplied the model: a decider on its own
-    # gateway must not inherit a field that gateway rejects, and a decider inheriting
-    # `[llm]` must not lose the field that endpoint requires -- dropping `[llm].extra`
-    # there would silently re-enable thinking on a Qwen deployment that configured it
-    # off once, for both roles.
-    model_section = cfg if cfg.model else llm_cfg
-    return DeciderClientConfig(
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        timeout=cfg.timeout_seconds,
-        max_retries=cfg.sdk_max_retries,
-        extra=dict(model_section.extra),
-        response_format_mode=model_section.response_format_mode,
-        invalid_reply_retries=cfg.invalid_reply_retries,
-        inherits_model=not cfg.model,
-    )
-
-
-def resolve_llm_config(settings: Settings) -> LLMClientConfig:
-    """Resolve ``[llm]``; raise :class:`LLMNotConfiguredError` if unusable."""
-    cfg = settings.llm
-    api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
-    if not api_key or not cfg.base_url:
-        raise LLMNotConfiguredError(
-            missing_config_error("LLM api_key and base_url", "llm")
-        )
-    return LLMClientConfig(
-        model=cfg.model,
-        api_key=api_key,
-        base_url=cfg.base_url,
-        timeout=cfg.timeout_seconds,
-        extra=dict(cfg.extra),
-        response_format_mode=cfg.response_format_mode,
-        invalid_reply_retries=cfg.invalid_reply_retries,
-    )
+    shared: list[tuple[LLMClientConfig, OpenAIProvider]] = []
+    providers: dict[LLMTask, OpenAIProvider] = {}
+    for task, config in configs.items():
+        if task in _DEDICATED_TASKS:
+            providers[task] = build_llm_provider(config, observer=observer)
+            continue
+        provider = next((p for c, p in shared if c == config), None)
+        if provider is None:
+            provider = build_llm_provider(config, observer=observer)
+            shared.append((config, provider))
+        providers[task] = provider
+    return providers
 
 
 def resolve_multimodal_config(settings: Settings) -> LLMClientConfig:

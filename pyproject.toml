@@ -95,17 +95,18 @@ dependencies = [
     # Algorithm library (everalgo monorepo, published on PyPI).
     #
     # All eight everalgo packages (including the four transitive ones) ship on one
-    # contract line -- currently the 2026-10-13 line, built on everalgo-core
-    # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
-    # one another, so a fresh `pip install everos` would otherwise mix lines
-    # the suite has never run together. Pin every one with `==` and raise them
-    # together, with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-user-memory==0.9.0rc4",
-    "everalgo-agent-memory==0.6.0rc3",
-    "everalgo-rank==0.5.0rc3",
+    # contract line -- currently the 2026-11-13 line (everalgo-core 0.7.0),
+    # still on the `LLMClient.achat` contract of everalgo-core 0.6.0. The
+    # packages declare loose ranges on one another, so a fresh
+    # `pip install everos` would otherwise mix lines the suite has never run
+    # together. Pin every one with `==` and raise them together, with a run of
+    # the release smoke against a PyPI-resolved install.
+    "everalgo-user-memory==0.9.0rc8",
+    "everalgo-agent-memory==0.6.0rc4",
+    "everalgo-rank==0.5.0rc5",
     "everalgo-knowledge==0.3.0rc2",
-    "everalgo-boundary==0.4.1",
-    "everalgo-core==0.6.0",
+    "everalgo-boundary==0.5.0",
+    "everalgo-core==0.7.0",
     "everalgo-clustering==0.3.0rc2",
     "everalgo-parser==0.3.0rc2",
 ]
@@ -119,6 +120,10 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
 ]
 milvus = ["pymilvus>=3.0.0"]
+# NLTK keyword tokenizer (`[tokenizer] name = "nltk"`). Pinned to the release the
+# EverAlgo LoCoMo harness used: tokens change across NLTK releases, and the
+# indexed side and the query side must produce the same ones.
+nltk = ["nltk==3.9.4"]
 
 [project.urls]
 Homepage = "https://evermind.ai"
@@ -560,5 +565,7 @@ dev = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
     "pymilvus>=3.0.0",
+    # The NLTK tokenizer tests must run, not skip, so the [nltk] extra is present too.
+    "nltk==3.9.4",
     "hypothesis>=6.100",
 ]

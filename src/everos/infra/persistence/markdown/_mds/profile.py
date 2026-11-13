@@ -5,9 +5,12 @@ Path: ``users/<user_id>/user.md``.
 Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
 two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
 (``explicit_info`` / ``implicit_traits``). ``profile_timestamp_ms``
-mirrors :attr:`everalgo.types.Profile.timestamp` so the
-``extract_user_profile`` strategy can compare per-user freshness against
-cluster ``last_ts`` without re-parsing the body.
+mirrors :attr:`everalgo.types.Profile.timestamp`.
+
+``do_not_record`` and ``pending`` are the extractor's own state, kept here so
+the next extraction reads them back. They are left out of the file while
+empty, so a profile without them reads and writes as before, and they never
+reach the derived index or the API.
 """
 
 from __future__ import annotations
@@ -39,13 +42,23 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     """Algo-side ``implicit_traits`` bucket (LLM-inferred preferences)."""
 
     profile_timestamp_ms: int = 0
-    """Algo-emitted profile timestamp (ms epoch); equals the timestamp of
-    the most recent MemCell that fed into the synthesis. Compared with
-    :attr:`everos.infra.persistence.sqlite.Cluster.last_ts_ms` to decide
-    whether a cluster is fresh enough to drive a profile re-extraction."""
+    """Algo-emitted profile timestamp (ms epoch): the timestamp of the
+    newest episode that fed into the synthesis."""
 
     primary_language: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     """The ``OutputLanguage`` value the profile is frozen to; left out of the
     file while unknown, and absent from profiles written before it."""
+
+    do_not_record: list[dict[str, Any]] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    """The extractor's do-not-record list, verbatim: the matters the user
+    asked not to be recorded."""
+
+    pending: list[dict[str, Any]] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    """The extractor's pending list, verbatim: pattern items waiting for a
+    later conversation to repeat them."""

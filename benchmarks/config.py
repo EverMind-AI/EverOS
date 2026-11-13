@@ -8,6 +8,7 @@ reference so that numbers are directly comparable.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tomllib
@@ -31,6 +32,13 @@ def unresolved(value: str) -> bool:
 
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+_TOKENIZER_ENV = "EVEROS_TOKENIZER__NAME"
+"""The server variable naming the keyword tokenizer; see :func:`ingest_identity`."""
+
+MESSAGE_FORMAT = "2"
+"""Version of the text the harness sends for a dataset turn; part of the ingest
+identity. Bump it whenever that text changes. 2: a LoCoMo turn sharing an image
+carries the image's caption in front of what was said."""
 
 
 def _expand_env(value: Any) -> Any:
@@ -88,11 +96,25 @@ class BenchmarkConfig(BaseModel):
     # --- EverOS server ---
     cascade_timeout: int = 7200
     batch_size: int = 25
+    flush_scope: Literal["session", "conversation"] = "session"
+    """How much of a conversation goes into one everos session, flushed once at its
+    end: each dataset session apart, or the whole conversation as the EverAlgo
+    reference sent it. Changes where memcells may be cut, so it is part of the ingest
+    identity. ``"conversation"`` is refused for datasets whose sessions carry their own
+    ids (gold mapping and readiness are keyed on them), and per-session retrieval
+    metrics mean nothing under it."""
 
     # --- Search ---
     methods: str = "agentic"
     top_k: int = 10
     eval_owner: Literal["speaker_a", "speaker_b"] = "speaker_a"
+    message_owner: Literal["sender", "eval_owner"] = "sender"
+    """Who each ADD message is filed under: its sender, by the adapter's
+    ``sender_id_of`` (LoCoMo: each speaker's own partition), or the queried owner for
+    every message, one pool per conversation as the EverAlgo reference kept it. Under
+    ``"sender"`` a memcell where only the other speaker talks never reaches the queried
+    partition. Changes what that partition holds, so it is part of the ingest identity.
+    Adapters without ``sender_id_of`` file under the queried owner either way."""
     adapter: str = "locomo"
     """Which dataset adapter drives the run: locomo | longmemeval | evermembench |
     subtlememory. The adapter owns everything that differs between benchmarks -- how
@@ -102,16 +124,23 @@ class BenchmarkConfig(BaseModel):
     """Dataset location. Empty keeps the CLI default; datasets are NOT vendored into
     this
     repository (LongMemEval alone is 278 MB)."""
+    gold_audit_path: str = ""
+    """A third-party audit of the dataset's gold answers, read by the adapter's
+    ``gold_corrections``. When the file exists, JUDGE judges the disputed questions'
+    answers again against the audit's corrected answers, and the report gives that
+    ``Re-judged`` score beside the original one; empty means this benchmark has no
+    audit. Like the datasets it is downloaded, not vendored -- LoCoMo's audit shares the
+    dataset's CC BY-NC licence."""
     conversations: int = 10
     """How many conversation units the benchmark has."""
     servers: int = 1
     """How many EverOS servers `--servers` starts when the flag is not given explicitly.
 
-    ADD is serial within a conversation -- one flush per session, one extraction per
-    flush -- so the only parallelism is across conversations, and run.py clamps this to
-    the number of conversations being run. The server is not the constraint: it waits on
-    remote extraction
-    calls, so the useful setting follows the dataset's shape, not the machine's."""
+    ADD is serial within a conversation -- one flush per ``flush_scope`` unit, one
+    extraction per flush -- so the only parallelism is across conversations, and
+    run.py clamps this to the number of conversations being run. The server is not the
+    constraint: it waits on remote extraction calls, so the useful setting follows the
+    dataset's shape, not the machine's."""
     app_id: str = "default"
     project_id: str = "default"
     """Store partition keys -- the values written INTO the index, not the directory
@@ -177,8 +206,11 @@ class BenchmarkConfig(BaseModel):
     whether the decider completed normally or fell back after an error."""
 
     retrieval_env: dict[str, str] = Field(default_factory=dict)
-    """Retrieval knobs pushed into the servers this harness starts, as EVEROS_*
-    variables.
+    """Settings pushed into the servers this harness starts, as EVEROS_* variables.
+
+    Mostly retrieval knobs, but the servers ingest too: the variables named in
+    :data:`INGEST_SERVER_SETTINGS` change what is stored and are part of the ingest
+    identity.
 
     The multi-round route reads twelve `EVEROS_LLMMR_*` settings straight from the
     process environment (round cap, seed/sub-query top-k, RRF k, patience, decider
@@ -189,6 +221,16 @@ class BenchmarkConfig(BaseModel):
 
     Ignored when attaching with --base-url: those servers read their environment at
     startup, so their values are already fixed."""
+
+    ome_strategies: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Per-strategy OME overrides, ``{name: {"enabled": False, ...}}``, written as each
+    started server's ``<root>/ome.toml`` -- EverOS reads strategy switches from that
+    file only, so an environment variable cannot turn one off.
+
+    For strategies whose output the benchmark never reads, such as the user profile on
+    a run that answers without it: what they cost is time, LLM calls and failed runs
+    that stop a conversation. Part of the ingest identity, since a strategy that does
+    write what is searched changes the store. Ignored with --base-url."""
 
     backbone_base_url: str = ""
     """Endpoint for the backbone. Empty keeps whatever the environment already has.
@@ -486,6 +528,11 @@ class RunSpec(BaseModel):
     """What must match for existing search/answer/judge rows to be reusable -- see
     :func:`read_identity`. Separate from the ingest identity because most of what
     changes between runs does not touch the store."""
+    smoke: bool = False
+    """A `--smoke` run: trimmed ingest and up to 10 sampled questions per conversation;
+    the report flags it on its front page."""
+    max_messages: int = 0
+    """Messages ingested per conversation; 0 means all of them."""
 
 
 # =============================================================================
@@ -534,16 +581,49 @@ def _file_digest(path: str) -> str:
     return h.hexdigest()[:32]
 
 
+INGEST_SERVER_SETTINGS: dict[str, str] = {
+    "boundary_strategy": "EVEROS_BOUNDARY_DETECTION__STRATEGY",
+    "clustering_threshold": "EVEROS_CLUSTERING__THRESHOLD",
+    "clustering_time_window_days": "EVEROS_CLUSTERING__TIME_WINDOW_DAYS",
+    "embedding_dim": "EVEROS_EMBEDDING__DIM",
+    "embedding_dimensions": "EVEROS_EMBEDDING__DIMENSIONS",
+    "memorize_mode": "EVEROS_MEMORIZE__MODE",
+    "llm_temperature": "EVEROS_LLM__TEMPERATURE",
+    "llm_max_tokens": "EVEROS_LLM__MAX_TOKENS",
+    "llm_response_format_mode": "EVEROS_LLM__RESPONSE_FORMAT_MODE",
+}
+"""Server settings that change what ingestion stores: identity key -> EVEROS_* variable.
+
+The boundary strategy decides where memcells are cut, the memorize mode which pipelines
+run, the extraction model's temperature, output cap and reply format what each memory
+says, clustering which cluster every episode joins, and the embedding settings every
+stored vector, so a store built under other values cannot serve this run."""
+
+
+def _server_setting(config: BenchmarkConfig, variable: str) -> str:
+    """A server variable as the run sets it: ``retrieval_env`` first, then this
+    process's environment; ``""`` when neither does, i.e. the server's own default."""
+    return config.retrieval_env.get(variable) or os.environ.get(variable, "")
+
+
 def ingest_identity(
     config: BenchmarkConfig,
     benchmark: str,
     serving: Sequence[ServingSpec] = (),
+    *,
+    message_cap: int = 0,
 ) -> dict[str, str]:
     """What must match for an already-ingested store to be reusable.
 
-    Only three things can make stored memories wrong for the current run: different
-    source data, a different adapter reading it, or a different model writing the
-    memories. Everything else is a read-time concern.
+    The stored memories are wrong for the current run when any of these differ: the
+    source data, the adapter reading it, the model writing the memories, the number of
+    messages ingested per conversation (``message_cap``, 0 = all; a smoke store holds
+    only the first 50), how the turns are worded (``message_format``) and filed
+    (``message_owner``) and flushed (``flush_scope``), the OME strategies that run,
+    and the server settings that shape what is stored (:data:`INGEST_SERVER_SETTINGS`).
+    The store's keyword index is wrong under a different tokenizer: the one that wrote
+    its token columns must be the one the query side uses (``"default"`` when the run
+    leaves ``EVEROS_TOKENIZER__NAME`` unset). Everything else is a read-time concern.
 
     Two things measured to be irrelevant are deliberately EXCLUDED, and excluding them
     is the point of having two identities at all:
@@ -562,6 +642,16 @@ def ingest_identity(
         "data_digest": _file_digest(config.data_path),
         "adapter": f"{benchmark}/{config.adapter}",
         "extraction_backbone": backbone,
+        "keyword_tokenizer": _server_setting(config, _TOKENIZER_ENV) or "default",
+        "message_owner": config.message_owner,
+        "ome_strategies": json.dumps(config.ome_strategies, sort_keys=True),
+        "message_format": MESSAGE_FORMAT,
+        "message_cap": str(message_cap),
+        "flush_scope": config.flush_scope,
+        **{
+            key: _server_setting(config, variable)
+            for key, variable in INGEST_SERVER_SETTINGS.items()
+        },
     }
 
 

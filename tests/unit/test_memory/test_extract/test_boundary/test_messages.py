@@ -5,10 +5,9 @@ from __future__ import annotations
 import datetime as _dt
 
 import pytest
-from everalgo.boundary import DetectionResult
+from everalgo.boundary import Cuts
 from everalgo.types import (
     ChatMessage,
-    ConversationItem,
     MemCell,
     ToolCallRequest,
     ToolCallResult,
@@ -16,11 +15,9 @@ from everalgo.types import (
 
 from everos.memory import CanonicalMessage, ToolCall
 from everos.memory.extract.boundary.messages import (
-    close_complete_tail,
+    apply_cuts,
     filter_for_mode,
     merge_dedupe_sort,
-    slice_tail,
-    split_message_ids,
     to_conversation_item,
     unique_senders,
 )
@@ -99,106 +96,77 @@ def test_merge_sorts_by_timestamp_then_id() -> None:
     assert [m.message_id for m in merged] == ["m_c", "m_a", "m_b"]
 
 
-# ── slice_tail ───────────────────────────────────────────────────────────
+# ── apply_cuts ───────────────────────────────────────────────────────────
 
 
-def test_slice_tail_zero_returns_empty() -> None:
-    merged = [_msg(f"m{i}", "user") for i in range(3)]
-    assert slice_tail(merged, []) == []
+def _rows(n: int) -> list[CanonicalMessage]:
+    return [_msg(f"m{i}", "user", ts_seconds=100 + i) for i in range(n)]
 
 
-def test_slice_tail_returns_trailing_n() -> None:
-    merged = [_msg(f"m{i}", "user", ts_seconds=100 + i) for i in range(5)]
-    tail = [object()] * 2  # only length matters
-    out = slice_tail(merged, tail)  # type: ignore[arg-type]
-    assert [m.message_id for m in out] == ["m3", "m4"]
+def _ids(rows: list[CanonicalMessage]) -> list[str]:
+    return [m.message_id for m in rows]
 
 
-# ── close_complete_tail ──────────────────────────────────────────────
+def test_apply_cuts_slices_cells_ids_and_tail_by_position() -> None:
+    rows = _rows(5)
+    items = [to_conversation_item(m) for m in rows]
+
+    out = apply_cuts(rows, items, Cuts(ends=[2, 4], tail_start=4))
+
+    assert out.message_ids == [["m0", "m1"], ["m2", "m3"]]
+    assert [cell.items for cell in out.cells] == [items[0:2], items[2:4]]
+    assert [cell.timestamp for cell in out.cells] == [101_000, 103_000]
+    assert _ids(out.tail) == ["m4"]
 
 
-def _items(*ts_seconds: int) -> list[ConversationItem]:
-    return [
-        to_conversation_item(_msg(f"m{t}", "user", ts_seconds=t)) for t in ts_seconds
+def test_apply_cuts_maps_tool_rows_by_position_too() -> None:
+    """A tool call request carries no id; its position still names its row."""
+    call = ToolCall(id="tc1", function={"name": "f", "arguments": "{}"})
+    rows = [
+        _msg("u1", "user", ts_seconds=100),
+        _msg("call", "assistant", ts_seconds=101, tool_calls=[call]),
+        _msg("result", "tool", ts_seconds=102, tool_call_id="tc1"),
+        _msg("a1", "assistant", ts_seconds=103),
+        _msg("u2", "user", ts_seconds=104),
     ]
+    items = [to_conversation_item(m) for m in rows]
+
+    out = apply_cuts(rows, items, Cuts(ends=[4], tail_start=4))
+
+    assert out.message_ids == [["u1", "call", "result", "a1"]]
+    assert _ids(out.tail) == ["u2"]
 
 
-def test_close_complete_tail_true_appends_the_tail_as_last_cell() -> None:
-    first = MemCell(items=_items(100), timestamp=100_000)
-    tail = _items(200, 300)
-    result = DetectionResult(cells=[first], tail=tail, tail_complete=True)
+def test_apply_cuts_keeps_the_rows_the_last_cell_and_the_tail_share() -> None:
+    rows = _rows(4)
+    items = [to_conversation_item(m) for m in rows]
 
-    closed = close_complete_tail(result, is_final=False)
+    out = apply_cuts(rows, items, Cuts(ends=[3], tail_start=2))
 
-    assert closed.tail == []
-    assert len(closed.cells) == 2
-    assert closed.cells[0] is first
-    assert closed.cells[1].items == tail
-    assert closed.cells[1].timestamp == 300_000  # the last item's, not the first's
+    assert out.message_ids == [["m0", "m1", "m2"]]
+    assert _ids(out.tail) == ["m2", "m3"]
 
 
-@pytest.mark.parametrize("verdict", [False, None])
-def test_close_complete_tail_keeps_an_unjudged_or_open_tail(
-    verdict: bool | None,
-) -> None:
-    result = DetectionResult(cells=[], tail=_items(100, 200), tail_complete=verdict)
+def test_apply_cuts_without_a_cut_keeps_every_row() -> None:
+    rows = _rows(3)
+    items = [to_conversation_item(m) for m in rows]
 
-    assert close_complete_tail(result, is_final=False) is result
+    out = apply_cuts(rows, items, Cuts(ends=[], tail_start=0))
 
-
-def test_close_complete_tail_leaves_a_final_call_alone() -> None:
-    cell = MemCell(items=_items(100, 200), timestamp=200_000)
-    result = DetectionResult(cells=[cell], tail=[], tail_complete=True)
-
-    assert close_complete_tail(result, is_final=True) is result
+    assert (out.cells, out.message_ids, out.tail) == ([], [], rows)
 
 
-# ── split_message_ids ──────────────────────────────────────────────
-
-
-def test_split_message_ids_consumes_left_to_right() -> None:
-    from everalgo.types import MemCell
-
-    merged = [_msg(f"m{i}", "user", ts_seconds=100 + i) for i in range(5)]
-    cells = [
-        MemCell(
-            items=[
-                ChatMessage(
-                    id="x",
-                    role="user",
-                    sender_id="u",
-                    sender_name="u",
-                    content="",
-                    timestamp=0,
-                )
-                for _ in range(2)
-            ],
-            timestamp=0,
-        ),
-        MemCell(
-            items=[
-                ChatMessage(
-                    id="x",
-                    role="user",
-                    sender_id="u",
-                    sender_name="u",
-                    content="",
-                    timestamp=0,
-                )
-                for _ in range(3)
-            ],
-            timestamp=0,
-        ),
-    ]
-    result = split_message_ids(merged, cells)
-    assert result == [["m0", "m1"], ["m2", "m3", "m4"]]
+def test_apply_cuts_refuses_cuts_returned_for_another_input() -> None:
+    rows = _rows(2)
+    items = [to_conversation_item(m) for m in rows]
+    with pytest.raises(ValueError, match=r"cuts\.ends"):
+        apply_cuts(rows, items, Cuts(ends=[3], tail_start=3))
 
 
 # ── unique_senders ──────────────────────────────────────────────────
 
 
 def test_unique_senders_preserves_first_occurrence_order() -> None:
-    from everalgo.types import MemCell
 
     cell = MemCell(
         items=[
@@ -233,7 +201,6 @@ def test_unique_senders_preserves_first_occurrence_order() -> None:
 
 
 def test_unique_senders_handles_tool_result_without_sender() -> None:
-    from everalgo.types import MemCell
 
     cell = MemCell(
         items=[

@@ -371,3 +371,21 @@ async def test_owner_delete_removes_clusters_reports_and_profile_rows(
     assert await stores.cluster.list_for_owner(_user("u1"), "user_memory") == []
     assert await stores.reflection_report.reflected_cluster_ids(_user("u1")) == set()
     assert eraser.owners == [(_user("u1"), ["user_profile"])]
+
+
+async def test_only_a_whole_owner_deletion_forgets_the_name_it_went_by(
+    stores: Stores, eraser: _RecordingEraser
+) -> None:
+    await _seed(stores, "s1")
+    await stores.sender_name.upsert_many("a", "p", {"u1": "Alice", "u2": "Bob"})
+    deleter = _deleter(stores, eraser)
+
+    await _delete(deleter, user_id="u1", session_id="s1")
+    await _delete(deleter, session_id="s1")
+    assert await stores.sender_name.get_many("a", "p", ["u1", "u2"]) == {
+        "u1": "Alice",
+        "u2": "Bob",
+    }
+
+    await _delete(deleter, user_id="u1")
+    assert await stores.sender_name.get_many("a", "p", ["u1", "u2"]) == {"u2": "Bob"}

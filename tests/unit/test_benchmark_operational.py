@@ -10,6 +10,7 @@ reachable with the code as written and is exercised here.
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -484,6 +485,141 @@ def test_the_fleet_gives_up_after_enough_lost_races(
         fleet.start(attempts=3)
     assert len(tried) == 3
     assert len(set(tried)) == 3, f"blocks repeated: {tried}"
+
+
+class _Live:
+    """A child that is still running, as ``subprocess.Popen`` reports one."""
+
+    returncode = None
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def poll(self) -> None:
+        return None
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+def _fleet_answered_by(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    child_pid: int,
+    answering_pid: int,
+) -> run_mod._ServerFleet:
+    """A one-server fleet whose child is alive while ``answering_pid`` answers."""
+    root = tmp_path / "store"
+    root.mkdir()
+    fleet = run_mod._ServerFleet(1, root, first_port=0)
+    fleet.urls = ["http://127.0.0.1:9999"]
+    fleet.procs = [_Live(child_pid)]  # type: ignore[list-item]
+    fleet.logs = [root / "server.log"]
+    monkeypatch.setattr(
+        run_mod, "_read_health", lambda url: {"status": "ok", "pid": answering_pid}
+    )
+    return fleet
+
+
+def test_readiness_refuses_an_answer_from_a_server_this_run_did_not_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child is still alive, so only the answer's ``pid`` can tell.
+
+    Observed 2026-11-12: three LoCoMo runs launched together, two picked ports
+    9798-9807. The loser's children were still starting -- EverOS binds only after
+    startup -- while the winner's servers already answered, so the loser read them
+    as its own and sent its whole ADD stage into the winner's stores.
+    """
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=222)
+
+    with pytest.raises(
+        run_mod._PortRaceLostError, match="not by the server this run started"
+    ):
+        fleet._await_ready(timeout_s=1.0)
+
+
+def test_readiness_accepts_the_server_this_run_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=111)
+
+    fleet._await_ready(timeout_s=1.0)
+
+
+def test_a_start_that_lost_a_race_keeps_one_log_per_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every list the fleet keeps per server still pairs up after a retry.
+
+    Observed 2026-11-13: two of six LoCoMo runs lost a port block, retried, started,
+    then crashed in the capability check with ``zip() argument 2 is longer than
+    argument 1`` -- the retry had cleared the processes, URLs and roots but kept the
+    lost attempt's logs.
+    """
+    root = tmp_path / "store"
+    root.mkdir()
+    monkeypatch.setattr(run_mod.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(run_mod.subprocess, "Popen", lambda *a, **k: _Live(111))
+    attempts: list[int] = []
+
+    def _ready(self: run_mod._ServerFleet, timeout_s: float = 180.0) -> None:
+        attempts.append(self._first_port)
+        if len(attempts) == 1:
+            raise run_mod._PortRaceLostError("lost the first block")
+
+    monkeypatch.setattr(run_mod._ServerFleet, "_await_ready", _ready)
+    fleet = run_mod._ServerFleet(2, root, first_port=19400)
+    monkeypatch.setattr(fleet, "stop", lambda: None)
+
+    fleet.start()
+
+    assert len(attempts) == 2
+    assert len(fleet.procs) == len(fleet.urls) == len(fleet.roots) == 2
+    assert len(fleet.logs) == 2
+
+
+def test_a_conversation_whose_decider_fell_back_stops_before_answering(
+    tmp_path: Path,
+) -> None:
+    """The report refuses a degraded multi-round run; this stops paying for it sooner.
+
+    Observed 2026-11-13: a thinking decider spent its 512-token cap before it
+    answered, one question in six fell back to a fixed core, and the run went on to
+    answer and judge every question of a report it would then refuse.
+    """
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    rounds = [
+        {"dataset": "a_conv0", "round_idx": 0, "decider_failed": True},
+        {"dataset": "b_conv1", "round_idx": 0},
+    ]
+    (trace_dir / "trace_port9400.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rounds) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(
+        run_mod.DeciderTraceValidationError, match="1 llm_multiround round"
+    ) as exc:
+        run_mod._assert_no_decider_fallback(trace_dir, "a_conv0")
+    assert "llm_multiround_decider_error" in str(exc.value)
+
+    run_mod._assert_no_decider_fallback(trace_dir, "b_conv1")
+
+
+def test_a_server_replaced_after_startup_stops_the_run_before_it_spends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The capability check reads ``/health`` again; it refuses a foreign answer too."""
+    fleet = _fleet_answered_by(tmp_path, monkeypatch, child_pid=111, answering_pid=222)
+
+    with pytest.raises(SystemExit, match="not by the server this run started"):
+        fleet.health()
 
 
 # ---------------------------------------------------------------------------

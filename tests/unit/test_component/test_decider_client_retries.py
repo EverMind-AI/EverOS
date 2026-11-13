@@ -14,7 +14,9 @@ declared and documented and reached nothing. Two gaps, both invisible:
 
 So the assertions here go all the way down to ``AsyncOpenAI.max_retries`` on both paths.
 Asserting that the settings field exists, or that some config object carries it, is what
-let the original change look done.
+let the original change look done. The decider's LLM is now ``[llm.decider]``; the
+deprecated ``[decider]`` spelling (``EVEROS_DECIDER__*``) is what most of these set,
+because that is what the launch scripts still export.
 """
 
 from __future__ import annotations
@@ -25,12 +27,14 @@ import pytest
 from pydantic import ValidationError
 
 from everos.component.llm import (
-    DeciderClientConfig,
+    LLMClientConfig,
     LLMNotConfiguredError,
+    LLMTaskResolution,
     build_llm_provider,
-    resolve_decider_config,
+    llm_client_config,
+    resolve_llm_task,
 )
-from everos.config import load_settings
+from everos.config import LLMTask, LLMTaskSettings, load_settings
 from everos.config.settings import DeciderSettings
 from everos.service import Providers, build_providers
 
@@ -57,12 +61,16 @@ def _providers() -> Providers:
     return build_providers(load_settings())
 
 
+def _decider() -> LLMTaskResolution:
+    return resolve_llm_task(load_settings(), LLMTask.DECIDER)
+
+
 def test_an_explicit_decider_model_turns_the_sdk_retries_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("EVEROS_DECIDER__MODEL", "qwen3.6-27b")
     load_settings.cache_clear()
-    assert _sdk_of(_providers().decider).max_retries == 0
+    assert _sdk_of(_providers().llms.decider).max_retries == 0
 
 
 def test_an_inherited_decider_config_turns_the_sdk_retries_off() -> None:
@@ -71,9 +79,9 @@ def test_an_inherited_decider_config_turns_the_sdk_retries_off() -> None:
     This is the configuration every store built before ``[decider]`` existed runs
     under, so it is the one that mattered most and the one that could not work.
     """
-    providers = _providers()
-    assert _sdk_of(providers.decider).max_retries == 0
-    assert providers.decider is not providers.llm
+    llms = _providers().llms
+    assert _sdk_of(llms.decider).max_retries == 0
+    assert llms.decider is not llms.search
 
 
 def test_a_configured_count_is_what_the_sdk_gets(
@@ -82,12 +90,18 @@ def test_a_configured_count_is_what_the_sdk_gets(
     """Not hardcoded to zero somewhere along the way."""
     monkeypatch.setenv("EVEROS_DECIDER__SDK_MAX_RETRIES", "4")
     load_settings.cache_clear()
-    assert _sdk_of(_providers().decider).max_retries == 4
+    assert _sdk_of(_providers().llms.decider).max_retries == 4
+
+
+def test_the_new_section_sets_the_count_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EVEROS_LLM__DECIDER__SDK_MAX_RETRIES", "5")
+    load_settings.cache_clear()
+    assert _sdk_of(_providers().llms.decider).max_retries == 5
 
 
 def test_none_leaves_the_sdk_default_alone() -> None:
     """The documented opt-out: say nothing and the SDK behaves as it always did."""
-    config = DeciderClientConfig(
+    config = LLMClientConfig(
         model="m",
         api_key="k",
         base_url="http://gw.invalid/v1",
@@ -101,6 +115,8 @@ def test_a_negative_retry_count_is_rejected() -> None:
     """The SDK reads it as a count, so a negative value is a typo, not "fewer"."""
     with pytest.raises(ValidationError):
         DeciderSettings(sdk_max_retries=-1)
+    with pytest.raises(ValidationError):
+        LLMTaskSettings(sdk_max_retries=-1)
 
 
 def test_the_decider_deadline_reaches_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,10 +124,23 @@ def test_the_decider_deadline_reaches_the_sdk(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("EVEROS_LLM__TIMEOUT_SECONDS", "300")
     monkeypatch.setenv("EVEROS_DECIDER__TIMEOUT_SECONDS", "20")
     load_settings.cache_clear()
-    assert _sdk_of(_providers().decider).timeout == 20.0
+    assert _sdk_of(_providers().llms.decider).timeout == 20.0
 
 
-# ── `extra` travels with whichever section supplied the endpoint ──────────────
+def test_the_decider_keeps_its_own_deadline_when_llm_raises_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow extraction endpoint must not stretch every search round with it."""
+    monkeypatch.setenv("EVEROS_LLM__TIMEOUT_SECONDS", "300")
+    load_settings.cache_clear()
+    llms = _providers().llms
+    assert (_sdk_of(llms.decider).timeout, _sdk_of(llms.episode).timeout) == (
+        60.0,
+        300.0,
+    )
+
+
+# ── `extra` is inherited from [llm] field by field ───────────────────────────
 
 
 def test_inheriting_the_endpoint_keeps_its_provider_fields(
@@ -125,18 +154,32 @@ def test_inheriting_the_endpoint_keeps_its_provider_fields(
     """
     monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
     load_settings.cache_clear()
-    assert resolve_decider_config(load_settings()).extra == NO_THINK_PARSED
+    assert _decider().settings.extra == NO_THINK_PARSED
 
 
-def test_its_own_endpoint_does_not_inherit_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``extra`` is endpoint vocabulary; another gateway rejects unknown names."""
+def test_renaming_the_model_alone_keeps_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only ``model`` changes; the endpoint, and so its vocabulary, is inherited.
+
+    Before tasks, ``extra`` followed whichever section named the model, so this
+    config silently dropped ``[llm].extra`` -- thinking back on for the decider.
+    """
     monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
-    monkeypatch.setenv("EVEROS_DECIDER__MODEL", "gpt-4.1-mini")
-    monkeypatch.setenv("EVEROS_DECIDER__BASE_URL", "http://other.invalid/v1")
+    monkeypatch.setenv("EVEROS_DECIDER__MODEL", "qwen3.6-27b")
     load_settings.cache_clear()
-    assert resolve_decider_config(load_settings()).extra == {}
+    assert _decider().settings.extra == NO_THINK_PARSED
+
+
+def test_its_own_endpoint_replaces_them_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Another gateway rejects unknown names, so it says what it needs instead.
+
+    Replaced, never merged: a key-by-key merge would carry the first gateway's
+    vocabulary to the second one.
+    """
+    monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
+    monkeypatch.setenv("EVEROS_LLM__DECIDER__BASE_URL", "http://other.invalid/v1")
+    monkeypatch.setenv("EVEROS_LLM__DECIDER__EXTRA", '{"top_p": 0.9}')
+    load_settings.cache_clear()
+    assert _decider().settings.extra == {"top_p": 0.9}
 
 
 def test_the_model_falls_back_to_the_main_section(
@@ -144,8 +187,11 @@ def test_the_model_falls_back_to_the_main_section(
 ) -> None:
     monkeypatch.setenv("EVEROS_LLM__MODEL", "backbone-model")
     load_settings.cache_clear()
-    cfg = resolve_decider_config(load_settings())
-    assert (cfg.model, cfg.inherits_model) == ("backbone-model", True)
+    decider = _decider()
+    assert (decider.settings.model, decider.sources["model"]) == (
+        "backbone-model",
+        "llm",
+    )
 
 
 def test_no_credentials_anywhere_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +199,7 @@ def test_no_credentials_anywhere_is_an_error(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("EVEROS_LLM__BASE_URL", raising=False)
     load_settings.cache_clear()
     with pytest.raises(LLMNotConfiguredError):
-        resolve_decider_config(load_settings())
+        llm_client_config(_decider())
 
 
 # ── and the fields the decider sends per call ────────────────────────────────

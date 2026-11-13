@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -351,6 +351,11 @@ class Profile(BaseModel):
     An item given as a bare sentence (how early profiles were stored) is the
     item with only its ``description``. Constructing a profile is strict;
     reading one back from storage goes through :meth:`from_stored`.
+
+    ``do_not_record`` and ``pending`` are everalgo's own state, kept with the
+    profile so the next extraction can read them back: everos stores them as
+    everalgo returns them, never parses them, and never shows them to the end
+    user.
     """
 
     owner_id: str
@@ -361,6 +366,13 @@ class Profile(BaseModel):
     primary_language: str | None = None
     """The ``OutputLanguage`` value the profile is written in, frozen by the
     first extraction that knew it and never changed automatically after."""
+    do_not_record: list[dict[str, Any]] = Field(default_factory=list)
+    """The matters the owner asked not to be recorded, each
+    ``{"topic", "evidence", "observed_at"}``, oldest first."""
+    pending: list[dict[str, Any]] = Field(default_factory=list)
+    """The pattern items waiting for a later batch to repeat them, each the
+    item's fields plus ``bucket`` and ``observed_at``. The list an extraction
+    returns replaces this one, an empty list included."""
 
     @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod
@@ -379,13 +391,16 @@ class Profile(BaseModel):
         explicit_info: Sequence[object],
         implicit_traits: Sequence[object],
         primary_language: str | None = None,
+        do_not_record: Sequence[Mapping[str, Any]] = (),
+        pending: Sequence[Mapping[str, Any]] = (),
     ) -> Profile:
         """A stored profile, without the items that are no longer items.
 
         Early profiles could hold an item with no ``description``; one bad
         item must not fail every read of its profile, nor reach everalgo on
         the next update. Each such item is dropped with a
-        ``profile_entry_dropped`` warning.
+        ``profile_entry_dropped`` warning. ``do_not_record`` and ``pending``
+        are taken as stored.
         """
         return cls(
             owner_id=owner_id,
@@ -396,6 +411,8 @@ class Profile(BaseModel):
                 ImplicitTraitItem, implicit_traits, owner_id
             ),
             primary_language=primary_language,
+            do_not_record=list(do_not_record),
+            pending=list(pending),
         )
 
 

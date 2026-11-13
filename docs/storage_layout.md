@@ -184,6 +184,32 @@ class EpisodeDailyFrontmatter(DailyLogPathMixin, UserScopedFrontmatter):
     last_appended_at: dt.datetime | None = None
 ```
 
+### `user.md` fields
+
+`users/<user_id>/user.md` carries the whole profile in its frontmatter
+([`UserProfileFrontmatter`](../src/everos/infra/persistence/markdown/_mds/profile.py));
+the body repeats `summary` for human readers.
+
+| Field | Holds | Indexed and returned by `/get` / `/search` |
+|---|---|---|
+| `summary` | free-form summary of the user | yes |
+| `explicit_info` | facts the user stated, each `{description, category, evidence, observed_at}` | yes |
+| `implicit_traits` | inferred patterns, each `{description, trait, basis, observed_at}`; new profiles add none, stored ones are kept | yes |
+| `profile_timestamp_ms` | the newest observation folded into the profile (ms epoch) | yes |
+| `primary_language` | the language the profile is frozen to; absent while unknown | no |
+| `do_not_record` | the matters the user asked not to be recorded, each `{topic, observed_at}` plus an optional `except` list of parts allowed again | no |
+| `pending` | pattern items waiting for a later conversation to repeat them: the item's fields plus `bucket` and `observed_at` | no |
+
+`do_not_record` and `pending` are the extractor's own state
+(`everalgo-user-memory` returns them as extras of its `Profile`). EverOS
+stores them verbatim, passes them back on the next extraction, and replaces
+them with the lists that extraction returns, so an empty `pending` clears
+the stored one. They are written only when non-empty, so a profile without
+them keeps the file shape it had before the fields existed, and they never
+reach the derived index or the API. They live in `user.md` because they
+belong to the profile: kept there, they need no table of their own and are
+removed with the file when the owner is deleted.
+
 ## 4. Entry-id encoding
 
 Inside daily-log files each entry is bracketed by HTML-comment markers
@@ -220,7 +246,7 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
 │   └── system.db          state / audit / cascade queue + buffer / LSN
 │                           (system tables: md_change_state, memcell,
 │                            unprocessed_buffer, conversation_status, cluster, memorize_inbox,
-│                            purge_job)
+│                            sender_name, purge_job)
 ├── lancedb/
 │   └── <kind>.lance/      default derived index backend
 ```
@@ -229,8 +255,9 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
   holds only system / coordination tables — `md_change_state` (cascade
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
   `conversation_status`, `cluster`, `knowledge`, `reflection_report`, `memorize_inbox` (the `async_mode` queue),
-  `purge_job` (purge jobs; each row's scope and confirm time is the
-  tombstone stale background work is checked against, so it is kept) — **not**
+  `sender_name` (the latest display name of each sender), `purge_job` (purge
+  jobs; each row's scope and confirm time is the tombstone stale background work
+  is checked against, so it is kept) — **not**
   per-kind business rows. `reflection_report` is the audit trail for
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -67,7 +68,7 @@ async def test_extracts_from_episode_text_and_writes_under_event_owner() -> None
         events = await extract_atomic_facts(_event(), deps)
 
     # Exactly one LLM call with the episode text.
-    extractor_cls.assert_called_once_with(llm=deps.llm)
+    extractor_cls.assert_called_once_with(llm=deps.llms.atomic_fact)
     call = extractor_cls.return_value.aextract_from_text.call_args
     assert call.args[0] == "alice likes hiking and lives in tokyo"
     assert call.kwargs["timestamp"] == 1_700_000_000_000
@@ -175,3 +176,12 @@ async def test_fact_dropped_when_episode_gone() -> None:
 
     assert out.fact_entry_ids == []
     assert deps.stores.atomic_fact.records == []  # type: ignore[attr-defined]
+
+
+async def test_facts_see_times_in_the_configured_zone() -> None:
+    zone = timezone(timedelta(hours=8))
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_text = AsyncMock(return_value=[])
+        await extract_atomic_facts(_event(), make_deps(tz=zone))
+
+    assert extractor_cls.return_value.aextract_from_text.call_args.kwargs["tz"] is zone

@@ -67,10 +67,9 @@ async def ensure_fts_indexes(
       ``language="English"`` (tantivy default). CJK tokens have no
       stemmer and pass through untouched.
     - ``remove_stop_words=False`` — **stop-word removal is owned by
-      the app-layer** (:class:`JiebaTokenizer`), which already drops
-      both Chinese and English stop-words before tokens reach the
-      FTS index. Keeping FTS-side filtering off avoids double-
-      filtering and a divided source of truth.
+      the app-layer tokenizer** (``[tokenizer]``), which already drops
+      stop-words before tokens reach the FTS index. Keeping FTS-side
+      filtering off avoids double-filtering and a divided source of truth.
     - ``ascii_folding=True`` — strips diacritics (é→e) on Latin
       characters; no-op on CJK.
     - ``with_position=False`` — everos does OR-mode BM25 recall

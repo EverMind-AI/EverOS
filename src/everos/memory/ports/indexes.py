@@ -72,8 +72,6 @@ class EpisodeIndex(Protocol):
         self, where: Filter, page: Page
     ) -> PageResult[Stored[Episode]]: ...
 
-    async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int: ...
-
     async def list_after(
         self,
         scope: Scope,
@@ -82,7 +80,11 @@ class EpisodeIndex(Protocol):
         parent_type: EpisodeParentType,
         limit: int | None = None,
     ) -> list[Stored[Episode]]:
-        """Episodes newer than ``after_ts`` (epoch milliseconds)."""
+        """The owner's live episodes observed after ``after_ts`` (epoch ms).
+
+        Ascending by timestamp. ``limit`` caps how many rows are read, not
+        which: the capped set is not guaranteed to be the oldest or newest.
+        """
         ...
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]: ...

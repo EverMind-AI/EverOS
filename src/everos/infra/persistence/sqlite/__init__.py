@@ -67,6 +67,7 @@ from .stores import SqliteClusterStore as SqliteClusterStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteReflectionReportStore as SqliteReflectionReportStore
+from .stores import SqliteSenderNameStore as SqliteSenderNameStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
 
@@ -106,6 +107,7 @@ __all__ = [
     "SqliteMemorizeInboxStore",
     "SqliteReflectionReportStore",
     "SqliteRepos",
+    "SqliteSenderNameStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
     "TopicUpsertPayload",

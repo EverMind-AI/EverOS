@@ -42,8 +42,8 @@
 # [strategies.trigger_profile_clustering]
 # enabled = true
 
-# User-profile extraction (runs after clustering trigger fires). Set
-# enabled = false to skip in evaluation runs.
+# User-profile extraction (fires on each EpisodeExtracted event). Set
+# enabled = false to turn the profile off or to skip it in evaluation runs.
 # [strategies.extract_user_profile]
 # enabled = true
 

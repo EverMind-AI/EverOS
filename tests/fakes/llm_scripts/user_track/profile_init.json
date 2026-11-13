@@ -1,21 +1,36 @@
 {
   "explicit_info": [
     {
-      "evidence": "Alice: I'm planning a trip to Kyoto at the end of April.",
+      "evidence": "2026-04-02: said she is planning a trip to Kyoto in late April 2026.",
       "description": "Plans a trip to Kyoto in late April 2026.",
-      "category": "travel"
+      "category": "travel",
+      "pattern": false,
+      "quote": "she is planning a trip to Kyoto in late April 2026",
+      "regular": ""
     },
     {
-      "evidence": "Alice: I'd rather stay in a ryokan than a hotel.",
+      "evidence": "2026-04-02: said she always prefers a traditional ryokan over a hotel.",
       "description": "Prefers a traditional ryokan over a hotel.",
-      "category": "travel"
+      "category": "travel",
+      "pattern": true,
+      "quote": "she always prefers staying in a traditional ryokan over a hotel",
+      "regular": "always"
     }
   ],
   "implicit_traits": [
     {
-      "basis": "Asks for quiet areas and traditional lodging.",
+      "basis": "2026-04-02: asked for quiet areas and a traditional ryokan.",
       "description": "Values quiet, traditional settings when travelling.",
-      "trait": "travel style"
+      "trait": "travel style",
+      "pattern": true,
+      "quote": "asked for quiet areas near the Philosopher's Path",
+      "regular": ""
+    }
+  ],
+  "do_not_record": [
+    {
+      "topic": "travel budget",
+      "quote": "asked the assistant not to keep a record of her travel budget"
     }
   ]
 }

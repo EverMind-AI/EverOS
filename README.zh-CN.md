@@ -106,7 +106,7 @@ EverOS 为下列 Agent 与工作流平台提供持久记忆，并已内置于 Ra
 
 ## 快速开始
 
-> 国内默认使用一个阿里云百炼 DashScope API Key，即可启动 EverOS、写入
+> 国内推荐使用一个阿里云百炼 DashScope API Key，即可启动 EverOS、写入
 > 持久化记忆，并使用完整的文本检索能力。
 
 ### 前置条件
@@ -149,7 +149,8 @@ everos init
 `~/.everos/everos.toml`，配置下面的百炼 provider。
 
 在[百炼控制台](https://bailian.console.aliyun.com/)创建一个华北 2（北京）地域的
-DashScope API Key，并把同一个 Key 复用到三个文本 provider：
+DashScope API Key，并把同一个 Key 复用到三个文本 provider。下面是推荐的百炼模型，
+也可以换成任意 OpenAI 兼容模型：
 
 ```toml
 [llm]
@@ -264,6 +265,22 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 > 并执行真实的 add / flush / search 流程。它使用 hybrid search，上面的完整百炼
 > 配置可以直接运行。
 
+### 推荐模型
+
+除了上面推荐的百炼模型，下表是 `everos init` 生成的 `everos.toml` 里预填的模型（decider
+除外），都可以换成任意 OpenAI 兼容模型：
+
+| 角色 | 配置段 | 推荐模型 |
+| --- | --- | --- |
+| 记忆抽取 | `[llm]` | `openai/gpt-4.1-mini` |
+| `llm_multiround` 检索的决策模型（decider） | `[llm.decider]` | `qwen3.6-27B` 或 `deepseek/deepseek-v4-flash-0731`；留空时由 `[llm]` 的模型决策 |
+| Embedding | `[embedding]` | `Qwen/Qwen3-Embedding-4B` |
+| Rerank | `[rerank]` | `Qwen/Qwen3-Reranker-4B` |
+| 多模态解析 | `[multimodal]` | `google/gemini-3.8-flash` |
+
+其中抽取模型和 decider 就是我们已发表 benchmark 指标所用的模型；每个 benchmark 各角色用的
+是哪个模型、怎么复现，见 [benchmarks/README.zh.md](benchmarks/README.zh.md)。
+
 ### 可选：摄取多模态文件
 
 如果要通过 `/api/v2/memory/add` 的 `content` items 摄取非文本内容
@@ -274,8 +291,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
 这会为 parser 增加通过 cairosvg 提供 SVG 支持的 `[svg]` bundle；
-基础 parser 已由知识摄取依赖。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
-OpenRouter 使用的 `google/gemini-3.8-flash`。
+基础 parser 已由知识摄取依赖。在 `everos.toml` 的 `[multimodal]` 中完成配置；配置里已预填推荐模型，
+即通过 OpenRouter 使用的 `google/gemini-3.8-flash`。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
 `soffice`（LibreOffice 的 headless renderer），先把 `.doc` / `.docx` /
@@ -665,6 +682,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 - [docs/everos-demo.md](docs/everos-demo.md) - Demo 范围与 TUI 源码布局
 - [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、LanceDB 与 recall flow
 - [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
+- [benchmarks/README.zh.md](benchmarks/README.zh.md) - 运行 LoCoMo、LongMemEval、EverMemBench 和 SubtleMemory：数据、key、冒烟测试、已发表结果
 - [docs/engineering.md](docs/engineering.md) - 贡献者工程参考:构建、测试、CI 与规范
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 迁移说明
 - [CHANGELOG.md](CHANGELOG.md) - 发布记录

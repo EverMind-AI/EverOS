@@ -19,6 +19,7 @@ from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
 from .purge_job import PurgeJobRepo as PurgeJobRepo
 from .reflection_report import ReflectionReportRepo as ReflectionReportRepo
 from .scope_purge import ScopePurgeRepo as ScopePurgeRepo
+from .sender_name import SenderNameRepo as SenderNameRepo
 from .session_cut import SessionCutRepo as SessionCutRepo
 from .session_purge import SessionPurgeRepo as SessionPurgeRepo
 from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
@@ -37,6 +38,7 @@ __all__ = [
     "QueueSummary",
     "ReflectionReportRepo",
     "ScopePurgeRepo",
+    "SenderNameRepo",
     "SessionCutRepo",
     "SessionPurgeRepo",
     "TopicUpsertPayload",

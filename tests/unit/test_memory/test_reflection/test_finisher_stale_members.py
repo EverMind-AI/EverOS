@@ -5,8 +5,7 @@ episode, and only then folds the sources into it. Profile clustering may add
 an episode to the same cluster in between. Before #563 the finisher wrote
 ``count=1`` and the merged episode's vector as the centroid regardless, so
 the new member stayed in ``members`` but neither ``count`` nor ``centroid``
-nor ``last_ts`` described it, and ``extract_user_profile``'s gate (a sum of
-``count``) undercounted.
+nor ``last_ts`` described it.
 
 Real SQLite cluster store, real ``trigger_profile_clustering`` and real
 ``ReflectionFinisher``; the interleaving is forced instead of raced. The
@@ -307,7 +306,7 @@ async def test_reflection_waits_for_clustering_read_to_write(
             assert owner_lock in LOCKS.held(clustering_task)
             release_clustering.set()
             events, report = await asyncio.gather(clustering_task, finisher_task)
-            assert len(events) == 1
+            assert events == []
             assert report is not None
     finally:
         release_clustering.set()

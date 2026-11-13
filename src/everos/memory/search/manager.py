@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
@@ -177,6 +178,7 @@ class SearchManager:
         search_tokenizer: Tokenizer | None = None,
         tuning_source: Callable[[], DeciderSettings],
         trace_path_source: Callable[[], str | None],
+        tz: tzinfo = UTC,
     ) -> None:
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
@@ -190,10 +192,12 @@ class SearchManager:
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
-        # Multi-round retrieval runs its own client: [decider] falls back to [llm]
-        # field by field, but never shares the extraction client's SDK retries.
+        # Multi-round retrieval runs its own client ([llm.decider]): it inherits
+        # [llm] field by field but never shares another task's SDK retries.
         self._decider_llm = decider_client
         self._search_tokenizer = search_tokenizer
+        # The zone the agentic sufficiency prompt shows candidate dates in.
+        self._tz = tz
 
     # ── Public entry ────────────────────────────────────────────────
 
@@ -385,6 +389,7 @@ class SearchManager:
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
                 radius=_effective_radius(req),
+                tz=self._tz,
             )
 
         if req.method == SearchMethod.LLM_MULTIROUND:
@@ -474,6 +479,7 @@ class SearchManager:
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
                 radius=_effective_radius(req),
+                tz=self._tz,
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_case")
         enable_rerank = _effective_llm_rerank(req)
@@ -534,6 +540,7 @@ class SearchManager:
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
                 radius=_effective_radius(req),
+                tz=self._tz,
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_skill")
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)

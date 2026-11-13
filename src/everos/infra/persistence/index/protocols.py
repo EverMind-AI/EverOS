@@ -184,15 +184,6 @@ class IndexRepository(Protocol[T]):
 class EpisodeIndexRepository(IndexRepository[T], Protocol[T]):
     """Episode-only reads every backend must also provide."""
 
-    async def count_by_owner(
-        self,
-        owner_id: str,
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        parent_type: str | None = None,
-    ) -> int: ...
-
     async def list_by_owner_after_ts(
         self,
         *,

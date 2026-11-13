@@ -5,27 +5,37 @@ the user-memory pipeline and, in agent mode, the agent-memory pipeline. It
 also owns the ``memcell`` ledger: each cell gets exactly one row, whatever
 the mode, and both pipelines reference that row's ``memcell_id``.
 
-Both modes run :func:`everalgo.boundary.adetect_boundaries` over one buffer
-track. Chat mode first drops tool rows; agent mode keeps them, and the
-algorithm keeps them in the cells without showing them to the model.
+Where to cut is the injected :class:`BoundaryOperator`'s decision (everalgo's
+``BoundaryDetector``); this module only hands it the rows as conversation
+items and slices the rows by the ``Cuts`` it returns, so a cell's message ids
+are the ids at its positions (:func:`~.messages.apply_cuts`). Two strategies
+(``settings.boundary_detection.strategy``), over one buffer track either way:
+
+- ``batch`` hands the whole buffer to ``adetect_batch`` once per call. Chat
+  mode first drops tool rows; agent mode keeps them, and the operator keeps
+  them in the cells without showing them to the model.
+- ``step`` hands ``adetect_step`` the history already judged plus one fresh
+  message, once per message; the next history starts at the returned
+  ``tail_start``. Chat messages only.
+
 Switching mode needs a fresh process (``settings.memorize.mode``).
 """
 
 from __future__ import annotations
 
-__all__ = ["BoundaryDetection", "BoundaryOutcome", "Status"]
+__all__ = ["BoundaryDetection", "BoundaryOperator", "BoundaryOutcome", "Status"]
 
 import asyncio
 import uuid
 from collections.abc import Sequence
-from typing import Literal, NamedTuple
+from datetime import UTC, tzinfo
+from typing import Literal, NamedTuple, Protocol
 
-from everalgo.boundary import DetectionResult, adetect_boundaries
-from everalgo.llm import LLMClient, LLMOutputError
-from everalgo.types import MemCell
+from everalgo.boundary import Cuts
+from everalgo.llm import LLMOutputError
+from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 from everos.config import BoundaryDetectionSettings
-from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
@@ -35,17 +45,14 @@ from everos.memory.ports import SessionBufferStore, SessionKey
 
 from .messages import (
     Mode,
-    close_complete_tail,
+    Segmentation,
+    apply_cuts,
     filter_for_mode,
     merge_dedupe_sort,
-    slice_tail,
-    split_message_ids,
     to_conversation_item,
     unique_senders,
 )
 from .quarantine import SessionQuarantine
-
-logger = get_logger(__name__)
 
 type Status = Literal["accumulated", "extracted", "skipped"]
 
@@ -67,9 +74,6 @@ class BoundaryOutcome(NamedTuple):
             messages wait in the buffer, ``skipped`` when there was nothing
             to do or no model to ask.
         message_count: Fresh rows this call contributed (after the mode filter).
-        tail_complete: The model's verdict that the uncut tail is already a
-            complete episode; ``None`` when no model judged it. ``True`` on a
-            non-final call has already closed the tail into the last cell.
     """
 
     cells: list[MemCell]
@@ -78,37 +82,71 @@ class BoundaryOutcome(NamedTuple):
     per_cell_all_senders: list[list[str]]
     status: Status
     message_count: int
-    tail_complete: bool | None = None
+
+
+class BoundaryOperator(Protocol):
+    """Where to cut a list of conversation items: everalgo's ``BoundaryDetector``.
+
+    Both methods return ``Cuts`` over the list they were handed. Only the batch
+    path's hard limits are passed; every other parameter is the operator's own
+    default.
+    """
+
+    async def adetect_batch(
+        self,
+        items: Sequence[ConversationItem],
+        *,
+        is_final: bool,
+        custom_instructions: str | None,
+        tz: tzinfo,
+        hard_token_limit: int,
+        hard_message_limit: int,
+    ) -> Cuts:
+        """Every cut in one window; ``is_final`` closes the trailing segment too."""
+        ...
+
+    async def adetect_step(
+        self,
+        items: Sequence[ChatMessage],
+        *,
+        custom_instructions: str | None,
+        tz: tzinfo,
+    ) -> Cuts:
+        """Whether the last item starts a new segment after the ones before it."""
+        ...
 
 
 class BoundaryDetection:
     """Cut a session's buffered messages into memcells.
 
     Args:
-        llm: Boundary-detection model; ``None`` leaves messages buffered.
+        detector: Places the cuts.
         instructions: Custom instructions for the boundary operator.
         session_buffer: The per-session buffer of uncut messages; it also
             records the memcells cut from it.
-        limits: Token / message counts past which cells are cut without the
-            model.
+        settings: Which strategy cuts the buffer, and the batch path's hard
+            limits.
         attempt_timeout: Seconds one model attempt may take; ``None`` for no
             bound. It runs before any write, so a timeout changes nothing.
+        tz: The zone message times are shown to the model in.
     """
 
     def __init__(
         self,
         *,
-        llm: LLMClient,
+        detector: BoundaryOperator,
         instructions: CustomInstructions,
         session_buffer: SessionBufferStore,
-        limits: BoundaryDetectionSettings,
+        settings: BoundaryDetectionSettings,
         attempt_timeout: float | None = None,
+        tz: tzinfo = UTC,
     ) -> None:
-        self._llm = llm
+        self._detector = detector
         self._instructions = instructions
         self._session_buffer = session_buffer
-        self._limits = limits
+        self._settings = settings
         self._attempt_timeout = attempt_timeout
+        self._tz = tz
         self._quarantine = SessionQuarantine(session_buffer)
 
     async def buffer(self, ingested: IngestResult, *, mode: Mode) -> BoundaryOutcome:
@@ -129,8 +167,8 @@ class BoundaryDetection:
     ) -> BoundaryOutcome:
         """Cut the buffer plus fresh messages into cells and keep the tail.
 
-        A tail the model judges complete is closed into a last cell at once;
-        one it does not waits for the next batch or the flush.
+        The uncut tail stays buffered until a later batch cuts it or the flush
+        closes it.
 
         Args:
             ingested: This call's messages.
@@ -141,7 +179,9 @@ class BoundaryDetection:
             LLMOutputError: Every attempt got an unusable reply (below the
                 quarantine limit); nothing was written.
             ValueError: A message the operator refuses or a row that maps to
-                no conversation item (below the quarantine limit); not retried.
+                no conversation item -- under ``step`` also a tool row or a
+                message older than the buffer (below the quarantine limit); not
+                retried.
             SessionBufferQuarantinedError: This failure reached the limit and
                 the buffer was set aside.
             TimeoutError: A model attempt ran past ``attempt_timeout``.
@@ -161,30 +201,12 @@ class BoundaryDetection:
         result = await self._segment_or_quarantine(
             session, merged, buffered=buffered, mode=mode, is_final=is_final
         )
-        result = self._close_complete_tail(session, result, is_final=is_final)
         if not result.cells:
             await self._keep_buffered(session, merged)
-            return _empty_outcome(
-                "accumulated",
-                message_count=len(fresh),
-                tail_complete=result.tail_complete,
-            )
+            return _empty_outcome("accumulated", message_count=len(fresh))
         return await self._commit_cells(
-            session, merged, result, mode=mode, message_count=len(fresh)
+            session, result, mode=mode, message_count=len(fresh)
         )
-
-    @staticmethod
-    def _close_complete_tail(
-        session: SessionKey, result: DetectionResult, *, is_final: bool
-    ) -> DetectionResult:
-        closed = close_complete_tail(result, is_final=is_final)
-        if closed is not result:
-            logger.info(
-                "boundary_tail_closed",
-                session_id=session.session_id,
-                items=len(result.tail),
-            )
-        return closed
 
     async def _segment_or_quarantine(
         self,
@@ -194,7 +216,7 @@ class BoundaryDetection:
         buffered: Sequence[CanonicalMessage],
         mode: Mode,
         is_final: bool,
-    ) -> DetectionResult:
+    ) -> Segmentation:
         """Segment ``merged``, counting a poisoned outcome towards the quarantine.
 
         Three outcomes say the session's input itself is bad and the next
@@ -205,7 +227,12 @@ class BoundaryDetection:
         other error is infrastructure and propagates uncounted.
         """
         try:
-            result = await self._segment(merged, mode=mode, is_final=is_final)
+            if self._settings.strategy == "step":
+                result = await self._segment_step(
+                    merged, buffered=buffered, mode=mode, is_final=is_final
+                )
+            else:
+                result = await self._segment_batch(merged, mode=mode, is_final=is_final)
         except (LLMOutputError, ValueError):
             buffered_ids = {m.message_id for m in buffered}
             unsaved = [m for m in merged if m.message_id not in buffered_ids]
@@ -214,35 +241,94 @@ class BoundaryDetection:
         self._quarantine.reset(session)
         return result
 
-    async def _segment(
+    async def _segment_batch(
         self, merged: list[CanonicalMessage], *, mode: Mode, is_final: bool
-    ) -> DetectionResult:
-        """One bounded-retry boundary call; each attempt has its own deadline."""
-        llm = self._llm
+    ) -> Segmentation:
+        """One bounded-retry batch call; each attempt has its own deadline."""
         items = [to_conversation_item(m) for m in merged]
         custom_instructions = self._instructions.load("boundary_detection")
 
-        async def attempt() -> DetectionResult:
+        async def attempt() -> Cuts:
             async with asyncio.timeout(self._attempt_timeout):
-                return await adetect_boundaries(
+                return await self._detector.adetect_batch(
                     items,
-                    llm=llm,
                     is_final=is_final,
                     custom_instructions=custom_instructions,
-                    hard_token_limit=self._limits.hard_token_limit,
-                    hard_msg_limit=self._limits.hard_msg_limit,
+                    tz=self._tz,
+                    hard_token_limit=self._settings.hard_token_limit,
+                    hard_message_limit=self._settings.hard_msg_limit,
                 )
 
         # A generation span, so the call's token usage is costed (a span-typed
         # observation's usage is dropped).
+        with memory_span("everos.memcell.boundary", observation_type="generation"):
+            cuts = await retry_llm_output(attempt, operator="boundary", mode=mode)
+        return apply_cuts(merged, items, cuts)
+
+    async def _segment_step(
+        self,
+        merged: list[CanonicalMessage],
+        *,
+        buffered: Sequence[CanonicalMessage],
+        mode: Mode,
+        is_final: bool,
+    ) -> Segmentation:
+        """Judge each fresh message against the history before it, in arrival order.
+
+        The buffer is the history already judged, so the fresh rows must all
+        sort after it. Each judgement hands the operator ``merged[start:end]``,
+        the history plus the one fresh message, and moves ``start`` to the
+        ``tail_start`` it returns. A flush closes whatever history is left.
+        Nothing is written here: a failure on any message leaves the whole
+        call unapplied, as for ``batch``.
+
+        Raises:
+            ValueError: A fresh message sorts before the buffered history, or
+                a row is not a chat message.
+        """
+        held = len(buffered)
+        if [m.message_id for m in merged[:held]] != [m.message_id for m in buffered]:
+            raise ValueError(
+                "step boundary detection: a fresh message is older than the "
+                "buffered history"
+            )
+        items = [_chat_item(m) for m in merged]
+        custom_instructions = self._instructions.load("boundary_detection")
+        closed: list[Segmentation] = []
+        start = 0
+        for end in range(held + 1, len(merged) + 1):
+            cuts = await self._judge_step(
+                items[start:end], mode=mode, custom_instructions=custom_instructions
+            )
+            closed.append(apply_cuts(merged[start:end], items[start:end], cuts))
+            start += cuts.tail_start
+        if is_final and start < len(merged):
+            closed.append(_close_all(merged[start:], items[start:]))
+            start = len(merged)
+        return _joined(closed, tail=merged[start:])
+
+    async def _judge_step(
+        self,
+        items: Sequence[ChatMessage],
+        *,
+        mode: Mode,
+        custom_instructions: str | None,
+    ) -> Cuts:
+        """One bounded-retry step call; each attempt has its own deadline."""
+
+        async def attempt() -> Cuts:
+            async with asyncio.timeout(self._attempt_timeout):
+                return await self._detector.adetect_step(
+                    items, custom_instructions=custom_instructions, tz=self._tz
+                )
+
         with memory_span("everos.memcell.boundary", observation_type="generation"):
             return await retry_llm_output(attempt, operator="boundary", mode=mode)
 
     async def _commit_cells(
         self,
         session: SessionKey,
-        merged: list[CanonicalMessage],
-        result: DetectionResult,
+        result: Segmentation,
         *,
         mode: Mode,
         message_count: int,
@@ -250,7 +336,6 @@ class BoundaryDetection:
         """Record one memcell row per cell and keep only the tail buffered,
         in one transaction: a failure leaves the buffer as it was."""
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
-        message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
         raw_type = _RAW_TYPE_BY_MODE[mode]
         last_cell_ts = max(cell.timestamp for cell in result.cells)
@@ -265,20 +350,19 @@ class BoundaryDetection:
                     sender_ids=cell_senders,
                 )
                 for memcell_id, cell, ids, cell_senders in zip(
-                    memcell_ids, result.cells, message_ids, senders, strict=True
+                    memcell_ids, result.cells, result.message_ids, senders, strict=True
                 )
             ],
-            tail=slice_tail(merged, result.tail),
+            tail=result.tail,
             last_memcell_ts=from_timestamp(last_cell_ts) if last_cell_ts else None,
         )
         return BoundaryOutcome(
-            cells=list(result.cells),
+            cells=result.cells,
             memcell_ids=memcell_ids,
-            per_cell_message_ids=message_ids,
+            per_cell_message_ids=result.message_ids,
             per_cell_all_senders=senders,
             status="extracted",
             message_count=message_count,
-            tail_complete=result.tail_complete,
         )
 
     async def _keep_buffered(
@@ -297,13 +381,44 @@ def _session_of(ingested: IngestResult) -> SessionKey:
     )
 
 
+def _chat_item(message: CanonicalMessage) -> ChatMessage:
+    """The row as the chat item ``adetect_step`` takes.
+
+    Raises:
+        ValueError: The row maps to a tool item, which ``step`` cannot judge.
+    """
+    item = to_conversation_item(message)
+    if not isinstance(item, ChatMessage):
+        raise ValueError(
+            "step boundary detection handles chat messages only: "
+            f"message_id={message.message_id!r} is a {type(item).__name__}"
+        )
+    return item
+
+
+def _close_all(
+    rows: Sequence[CanonicalMessage], items: Sequence[ChatMessage]
+) -> Segmentation:
+    """The flush under ``step``: the whole remaining history as one last cell."""
+    return apply_cuts(rows, items, Cuts(ends=[len(rows)], tail_start=len(rows)))
+
+
+def _joined(
+    parts: Sequence[Segmentation], *, tail: Sequence[CanonicalMessage]
+) -> Segmentation:
+    """The cells of consecutive ``parts`` in order, with ``tail`` left buffered."""
+    return Segmentation(
+        cells=[cell for part in parts for cell in part.cells],
+        message_ids=[ids for part in parts for ids in part.message_ids],
+        tail=list(tail),
+    )
+
+
 def _mint_memcell_id() -> str:
     return f"mc_{uuid.uuid4().hex[:12]}"
 
 
-def _empty_outcome(
-    status: Status, *, message_count: int, tail_complete: bool | None = None
-) -> BoundaryOutcome:
+def _empty_outcome(status: Status, *, message_count: int) -> BoundaryOutcome:
     return BoundaryOutcome(
         cells=[],
         memcell_ids=[],
@@ -311,5 +426,4 @@ def _empty_outcome(
         per_cell_all_senders=[],
         status=status,
         message_count=message_count,
-        tail_complete=tail_complete,
     )

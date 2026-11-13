@@ -1,16 +1,20 @@
 """``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
 
-The episode operator is real (everalgo ``EpisodeExtractor``); the model
-answers from the user-track canned scripts.
+The episode and summary operators are real (everalgo ``EpisodeExtractor`` and
+``EpisodeSummarizer``); the model answers from the user-track canned scripts.
+The summary call runs beside the episode call; when it fails, the episode keeps
+extraction's own summary, the content's first 200 characters.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from everalgo.llm import LLMOutputError
+from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 
 from everos.memory import IngestResult
@@ -27,6 +31,7 @@ from tests.fakes import (
 from tests.fakes.stores import InMemoryEpisodeStore, InMemoryMemcellStore
 
 _EPISODE = json.loads(user_track_script("episode"))
+_SUMMARY = json.loads(user_track_script("episode_summary"))["summary"]
 
 _REF = MemoryRef(
     id="u1_ep_20260517_00000001",
@@ -69,7 +74,8 @@ def _pipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
         memcell_store=memcells,
         instructions=bundled_instructions(),
-        llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
+        episode_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
+        summary_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
 
 
@@ -117,7 +123,7 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert (extracted.owner_id, extracted.session_id) == ("u1", "s1")
     assert extracted.source == "pipeline"
     (written,) = [call.args[1] for call in episode_store.append.await_args_list]
-    assert written.summary == _EPISODE["summary"]
+    assert written.summary == _SUMMARY
     assert written.subject == _EPISODE["title"]
     assert written.parent_id == "mc_a"
 
@@ -148,6 +154,7 @@ async def test_episode_and_event_carry_the_detected_language(
 
 
 async def test_one_call_fans_out_to_every_user_sender() -> None:
+    """One episode call and one summary call per cell, whatever the senders."""
     llm = user_track_llm()
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
@@ -158,7 +165,7 @@ async def test_one_call_fans_out_to_every_user_sender() -> None:
 
     owners = [e.owner_id for e in outcome.events if isinstance(e, EpisodeExtracted)]
     assert owners == ["u1", "u2"]
-    assert llm.call_count == 1
+    assert sorted(_requested(llm)) == ["_EpisodeReply", "_SummaryReply"]
 
 
 async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:
@@ -170,8 +177,66 @@ async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:
     with pytest.raises(LLMOutputError):
         await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1"))
 
-    assert llm.call_count == OUTPUT_ATTEMPTS
+    assert _requested(llm).count("_EpisodeReply") == OUTPUT_ATTEMPTS
     episode_store.append.assert_not_awaited()
+
+
+async def test_an_unusable_summary_falls_back_to_extractions_own() -> None:
+    """Retried, then the episode keeps the content's first 200 characters."""
+    llm = user_track_llm(episode_summary="episode_summary_blank")
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    outcome = await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1"))
+
+    assert outcome.md_paths == [_REF.md_path]
+    assert _requested(llm).count("_SummaryReply") == OUTPUT_ATTEMPTS
+    (written,) = [call.args[1] for call in episode_store.append.await_args_list]
+    assert written.summary == _EPISODE["content"][:200]
+    assert written.episode == _EPISODE["content"]
+
+
+async def test_a_failing_summary_call_never_fails_the_cell() -> None:
+    """A client error on the summary call is not retried; the cell goes on."""
+    episode = user_track_script("episode")
+
+    def _answer(_messages: object, *, response_format: type, **_kwargs: object) -> str:
+        if response_format.__name__ == "_SummaryReply":
+            raise TimeoutError("summary endpoint timed out")
+        return episode
+
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    outcome = await _pipeline(FakeLLMClient(handler=_answer), episode_store).run_cell(
+        _INGESTED, _prepared("u1")
+    )
+
+    assert outcome.md_paths == [_REF.md_path]
+    (written,) = [call.args[1] for call in episode_store.append.await_args_list]
+    assert written.summary == _EPISODE["content"][:200]
+
+
+def _requested(llm: FakeLLMClient) -> list[str]:
+    """The reply model each call asked for, in call order."""
+    return [call.response_format.__name__ for call in llm.calls]
+
+
+async def test_episode_and_summary_each_call_their_own_client() -> None:
+    """``[llm.episode]`` and ``[llm.summary]`` can name different models."""
+    episode_llm, summary_llm = user_track_llm(), user_track_llm()
+    pipeline = UserMemoryPipeline(
+        episode_store=_recording_store(),
+        memcell_store=_alive_memcells(),
+        instructions=bundled_instructions(),
+        episode_llm=episode_llm,
+        summary_llm=summary_llm,
+    )
+
+    await pipeline.run_cell(_INGESTED, _prepared("u1"))
+
+    assert _requested(episode_llm) == ["_EpisodeReply"]
+    assert _requested(summary_llm) == ["_SummaryReply"]
 
 
 async def test_run_emits_extract_and_persist_spans() -> None:
@@ -272,3 +337,57 @@ async def test_episode_written_when_memcell_exists() -> None:
 
     assert len(episodes.records) == 1
     assert [type(e) for e in outcome.events] == [UserPipelineStarted, EpisodeExtracted]
+
+
+async def test_episode_and_summary_requests_show_times_in_the_configured_zone() -> None:
+    """Both calls over the cell render its message times in the pipeline's zone."""
+    llm = user_track_llm()
+    pipeline = UserMemoryPipeline(
+        episode_store=_recording_store(),
+        memcell_store=_alive_memcells(),
+        instructions=bundled_instructions(),
+        episode_llm=llm,
+        summary_llm=llm,
+        tz=timezone(timedelta(hours=8)),
+    )
+
+    await pipeline.run_cell(_INGESTED, _prepared("u1"))
+
+    users = {c.response_format.__name__: str(c.messages[-1].content) for c in llm.calls}
+    assert "UTC+08:00" in users["_EpisodeReply"]
+    assert "UTC+08:00" in users["_SummaryReply"]
+
+
+def _recording_store() -> MagicMock:
+    store = MagicMock()
+    store.append = AsyncMock(return_value=_REF)
+    return store
+
+
+def _alive_memcells() -> InMemoryMemcellStore:
+    memcells = InMemoryMemcellStore()
+    memcells.seed("mc_a", _prepared().cell)
+    return memcells
+
+
+async def test_each_owner_event_carries_the_label_of_that_owners_lines() -> None:
+    """``sender_name`` (stripped) when a line carries one, else the sender id."""
+    cell = MemCell(
+        items=[
+            _message("user", "u1").model_copy(update={"sender_name": " Alice "}),
+            _message("user", "u2"),
+            _message("user", "u3").model_copy(update={"sender_name": "  "}),
+            _message("assistant", "bot").model_copy(update={"sender_name": "Kai"}),
+        ],
+        timestamp=1_700_000_000_000,
+    )
+    prepared = PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1", "u2"])
+
+    outcome = await _pipeline(user_track_llm()).run_cell(_INGESTED, prepared)
+
+    labels = {
+        e.owner_id: e.owner_name
+        for e in outcome.events
+        if isinstance(e, EpisodeExtracted)
+    }
+    assert labels == {"u1": "Alice", "u2": "u2", "u3": "u3"}

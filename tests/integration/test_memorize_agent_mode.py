@@ -30,6 +30,7 @@ from everalgo.testing import FakeLLMClient
 
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence import MemoryRoot
+from everos.memory.extract.ingest.id_gen import gen_message_id
 from everos.service import (
     MemorizeResult,
     build_application,
@@ -200,6 +201,59 @@ async def test_agent_mode_preserves_tool_items(
     ids = json.loads(rows[0]["message_ids_json"])
     # All four preserved in agent mode (chat mode would have 2).
     assert len(ids) == 4
+
+
+def _tool_round(call_id: str, ts: int) -> list[dict[str, Any]]:
+    """An assistant tool call and its result: two rows the model never sees."""
+    call = {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": "x", "arguments": "{}"},
+    }
+    return [
+        _msg(
+            "assistant",
+            "calling tool",
+            sender_id="assistant",
+            timestamp=ts,
+            tool_calls=[call],
+        ),
+        _msg(
+            "tool", "result", sender_id="tool", timestamp=ts + 1, tool_call_id=call_id
+        ),
+    ]
+
+
+async def test_agent_mode_cut_files_each_tool_row_with_its_segment(
+    tmp_path: Path, memorize_env: Callable[..., Any]
+) -> None:
+    """A cut inside a trajectory files every row, tool rows included, by position.
+
+    The model sees only the four chat messages and answers ``[2]`` (the second
+    user turn starts a new segment); the operator moves that cut in front of
+    the user turn, so each tool round stays with the turn it followed.
+    """
+    fake = memorize_llm([[2]])
+    await memorize_env(mode="agent", fake_llm=fake)
+    base = 1_700_000_000_000
+    messages = [
+        _user("debug this", base),
+        *_tool_round("c1", base + 1_000),
+        _assistant("found it", base + 3_000),
+        _user("and the other one?", base + 4_000),
+        *_tool_round("c2", base + 5_000),
+        _assistant("fixed too", base + 7_000),
+    ]
+    session = "test_agent_cut"
+
+    result = await memorize(
+        {"session_id": session, "messages": messages}, is_final=True
+    )
+
+    assert result.status == "extracted"
+    ids = [gen_message_id(session, m["timestamp"], i) for i, m in enumerate(messages)]
+    cells = [json.loads(row["message_ids_json"]) for row in _memcell_rows(tmp_path)]
+    assert cells == [ids[:4], ids[4:]]
 
 
 async def test_agent_mode_dispatch_no_double_insert(
