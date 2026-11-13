@@ -87,7 +87,11 @@ def _build_with_embedding(settings: Settings) -> Application:
     real embed batch -- the phase bodies scan an empty backlog and return
     before touching the provider.
     """
-    providers = make_providers(embedding=FakeEmbeddingProvider())
+    # As wide as the configured column: the startup probe asks this embedder,
+    # and a narrower one is refused (issue #434).
+    providers = make_providers(
+        embedding=FakeEmbeddingProvider(dim=settings.embedding.dim)
+    )
     return build_application(settings, providers=providers)
 
 

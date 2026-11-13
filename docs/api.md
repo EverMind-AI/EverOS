@@ -69,7 +69,10 @@ stops the watcher; calling it twice is safe, and it returns a bare status body
 `/health`: `capabilities.embed` reports whether the embedding service
 answered a dimension probe **when the process started**, not whether it is
 reachable now -- a service that recovers later keeps reading `false` until
-the next restart. There is no `capabilities.llm`: the server does not start
+the next restart. An application given its providers (an embedder built by
+the caller, as tests and embedders of EverOS do) is probed through the one it
+was given, not through a client of the `[embedding]` settings. There is no
+`capabilities.llm`: the server does not start
 without an extraction LLM, so a running server always has one.
 `capabilities.decider` and the `decider` block name the multi-round decider
 (`model`, `base_url` without credentials) and say whether it answered one

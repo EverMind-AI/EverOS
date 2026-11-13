@@ -14,8 +14,10 @@ for the current configuration -- is already caught by each backend's own
 schema verification, which runs just before this.
 
 :class:`EmbeddingProvenance` is built once by the application bootstrap
-from the embedding settings and whether a provider was configured; it keeps
-the width its probe measured for ``/health``. The backend is passed to
+from the embedding settings and whether a provider was configured -- and, when
+the application was given its providers rather than building them from the
+settings, the provider it embeds with, which the probe then asks; it keeps the
+width its probe measured for ``/health``. The backend is passed to
 :meth:`~EmbeddingProvenance.verify` rather than looked up, which also lets a
 test hand over a stub store.
 """
@@ -24,12 +26,16 @@ from __future__ import annotations
 
 __all__ = ["PROBE_TEXT", "EmbeddingProvenance", "ProvenanceStore"]
 
-from typing import Protocol
+import asyncio
+from typing import TYPE_CHECKING, Protocol
 
 from everos.component.embedding import build_embedding_provider
 from everos.config import EmbeddingSettings
 from everos.core.errors import EmbeddingProvenanceError
 from everos.core.observability.logging import get_logger
+
+if TYPE_CHECKING:
+    from everos.component.embedding import EmbeddingProvider
 
 logger = get_logger(__name__)
 
@@ -83,11 +89,24 @@ class EmbeddingProvenance:
         configured: Whether the application has an embedding provider. No
             provider means a keyword-only deployment, which has nothing to
             check.
+        probe: The provider the probe asks: the one the application was
+            given, which is what it embeds with. ``None`` asks a client built
+            from ``settings`` for the probe alone (short budget, no retries,
+            nothing cut off) -- the provider an application builds from the
+            same settings. A given provider cuts its vectors to its own
+            width, so a model wider than the column reads as that width.
     """
 
-    def __init__(self, settings: EmbeddingSettings, *, configured: bool) -> None:
+    def __init__(
+        self,
+        settings: EmbeddingSettings,
+        *,
+        configured: bool,
+        probe: EmbeddingProvider | None = None,
+    ) -> None:
         self._settings = settings
         self._configured = configured
+        self._given = probe
         self._last_probe: int | None = None
 
     @property
@@ -113,8 +132,10 @@ class EmbeddingProvenance:
             update={"timeout_seconds": _PROBE_TIMEOUT_SECONDS, "max_retries": 0}
         )
         try:
-            provider = build_embedding_provider(settings, dim=_PROBE_DIM)
-            return len(await provider.embed(PROBE_TEXT))
+            provider = self._given or build_embedding_provider(settings, dim=_PROBE_DIM)
+            # The budget holds for a given provider too, whatever its retries.
+            async with asyncio.timeout(_PROBE_TIMEOUT_SECONDS):
+                return len(await provider.embed(PROBE_TEXT))
         except (
             Exception
         ) as exc:  # ponytail: narrowing means enumerating two SDKs' errors

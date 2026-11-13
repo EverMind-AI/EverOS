@@ -1139,6 +1139,11 @@ machinery that keeps a deleted memory from coming back.
   the batch, and no retry at once (the back-off is unchanged) -- and
   `/health` counts it in a new `ome` block, with every other strategy run
   that failed with no retry left since start.
+- **`/health` reads the embedder an application was given.** The startup
+  embedding probe built its own client from the `[embedding]` settings, so an
+  application given its providers read `capabilities.embed: false` with a
+  working embedder; the probe now asks the one it was given.
+
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's

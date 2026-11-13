@@ -36,6 +36,7 @@ from tests.fakes import (
     make_providers,
     unscripted_llm,
 )
+from tests.helpers.faults import provision_root
 
 # Interrupted whole-owner deletions are finished right after the schema
 # exists, before the cascade or the OME engine can write anything; forgets a
@@ -93,6 +94,26 @@ def test_settings_without_optional_providers_build_two_facades_without_disk(
     assert snapshot.embedding is False
     assert snapshot.index_backend == settings.index.backend
     assert not (tmp_path / "root").exists(), "building must not write anything"
+
+
+async def test_health_reports_the_embedder_the_application_was_given(
+    settings: Settings,
+) -> None:
+    """Given providers are what the application embeds with: the startup probe
+    asks the given embedder -- the settings name no embedding endpoint here --
+    so ``/health`` reads ``embed`` true, and a run that fails with no retry
+    left is counted in its ``ome`` block."""
+    embedder = FakeEmbeddingProvider(dim=settings.embedding.dim)
+    application = _build(settings, embedding=embedder)
+    provision_root(application._root.root)
+    try:
+        await application.start()
+        report = await application.ops.health()
+    finally:
+        await application.aclose()
+
+    assert report.providers.embed is True
+    assert report.ome is not None and report.ome.failed_runs == 0
 
 
 def _with_level(settings: Settings, level: str) -> Settings:

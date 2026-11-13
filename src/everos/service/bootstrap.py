@@ -339,6 +339,7 @@ def build_application(
             configures no extraction LLM.
     """
     configure_process(settings)
+    given = providers is not None
     providers = providers or build_providers(settings)
     tokenizer = build_tokenizer()
     root = MemoryRoot(resolve_root())
@@ -372,7 +373,11 @@ def build_application(
         ledger=sqlite.md_change_state,
         index=index,
         provenance=EmbeddingProvenance(
-            settings.embedding, configured=providers.embedding is not None
+            settings.embedding,
+            configured=providers.embedding is not None,
+            # Given providers are what the application embeds with: the
+            # startup probe (and /health's ``embed``) asks the one it was given.
+            probe=providers.embedding if given else None,
         ),
         store_version=StoreVersion(root),
     )

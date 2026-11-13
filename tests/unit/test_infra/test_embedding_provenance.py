@@ -14,6 +14,7 @@ table.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -338,3 +339,54 @@ def test_the_probe_does_not_inherit_the_write_budget(
     asyncio.run(provenance.probe_dimension())
     assert captured["retries"] == 0
     assert captured["timeout"] < 30.0
+
+
+# ── the provider the application was given ─────────────────────────────────
+
+
+class _Given:
+    """An embedder handed to the application (the settings name another)."""
+
+    def __init__(self, width: int, *, hang: bool = False) -> None:
+        self.dim = width
+        self.hang = hang
+        self.asked: list[str] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.asked.append(text)
+        if self.hang:
+            await asyncio.sleep(3600)
+        return [0.0] * self.dim
+
+
+async def test_the_probe_asks_the_provider_the_application_was_given() -> None:
+    """The settings point nowhere (127.0.0.1:1): only the given provider can
+    answer, and /health's ``embed`` follows what it said."""
+    load_settings.cache_clear()
+    given = _Given(load_settings().embedding.dim)
+    provenance = EmbeddingProvenance(
+        load_settings().embedding,
+        configured=True,
+        probe=given,  # type: ignore[arg-type]
+    )
+
+    await provenance.verify(_Store(None))
+
+    assert given.asked == [_provenance.PROBE_TEXT]
+    assert provenance.last_probe == load_settings().embedding.dim
+
+
+async def test_a_given_provider_that_hangs_is_cut_at_the_probe_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_provenance, "_PROBE_TIMEOUT_SECONDS", 0.05)
+    load_settings.cache_clear()
+    provenance = EmbeddingProvenance(
+        load_settings().embedding,
+        configured=True,
+        probe=_Given(8, hang=True),  # type: ignore[arg-type]
+    )
+
+    await provenance.verify(_Store(None))
+
+    assert provenance.last_probe is None
