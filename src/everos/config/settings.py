@@ -40,6 +40,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SecretStr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -1665,5 +1666,35 @@ def load_settings() -> Settings:
     something explicitly clears the cache (``load_settings.cache_clear()``).
     Tests that monkeypatch environment variables must call
     ``cache_clear`` after each mutation to pick the new env up.
+
+    Raises:
+        UnknownConfigKeyError: A key no section declares.
+        InvalidConfigError: A value no setting accepts, or an ``everos.toml``
+            that is not TOML; the message names each key and where it was set,
+            never its value.
     """
-    return Settings()
+    # Deferred: everos.core.errors imports everos.config.
+    from everos.core.errors import InvalidConfigError
+
+    try:
+        return Settings()
+    except ValidationError as exc:
+        raise InvalidConfigError(_invalid_message(exc)) from None
+    except tomllib.TOMLDecodeError as exc:
+        raise InvalidConfigError(
+            f"{resolve_root() / 'everos.toml'} is not valid TOML: {exc}"
+        ) from None
+
+
+def _invalid_message(exc: ValidationError) -> str:
+    """One line per bad value: the key, where it came from, what is wrong."""
+    lines = ["Invalid configuration values:"]
+    for error in exc.errors(include_url=False, include_input=False):
+        path = tuple(str(part) for part in error["loc"])
+        label = _label(path, table=False) if path else "(settings)"
+        source = f" (from {_source_of(path)})" if path else ""
+        lines.append(f"  {label}{source}: {error['msg']}")
+    lines.append(
+        "Correct them; `everos config show` prints the effective configuration."
+    )
+    return "\n".join(lines)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 import typer
+from pydantic import BaseModel
 
 from everos.config.settings import resolve_root
 from everos.entrypoints.cli._process import (
@@ -32,29 +33,36 @@ def _config_callback(
     configure_interactive(verbose=verbose)
 
 
-_SECRET_FIELDS = {"api_key"}
-
-_SECTION_NAMES = (
-    "memory",
-    "api",
-    "sqlite",
-    "lancedb",
-    "llm",
-    "multimodal",
-    "embedding",
-    "boundary_detection",
-    "memorize",
-    "clustering",
-    "search",
-    "logging",
-)
-
-
 def _mask(value: str) -> str:
     """Mask a secret value, keeping first/last 4 chars if long enough."""
     if len(value) <= 8:
         return "****"
     return value[:4] + "****" + value[-4:]
+
+
+def _shown(name: str, value: object) -> str:
+    """A value as printed: a secret masked, never echoed."""
+    if hasattr(value, "get_secret_value"):  # a SecretStr
+        secret = value.get_secret_value()  # type: ignore[attr-defined]
+        return _mask(secret) if secret else ""
+    if name.endswith("_key") and isinstance(value, str) and value:
+        return _mask(value)
+    return str(value)
+
+
+def _echo_section(label: str, section: BaseModel) -> None:
+    """``[label]`` with its keys, then each sub-table as ``[label.sub]``."""
+    tables: list[tuple[str, BaseModel]] = []
+    typer.secho(f"[{label}]", bold=True)
+    for name in type(section).model_fields:
+        value = getattr(section, name)
+        if isinstance(value, BaseModel):
+            tables.append((f"{label}.{name}", value))
+            continue
+        typer.echo(f"  {name} = {_shown(name, value)}")
+    typer.echo()
+    for sub_label, sub in tables:
+        _echo_section(sub_label, sub)
 
 
 @app.command("show")
@@ -89,14 +97,6 @@ def show(
     load_settings.cache_clear()
     settings = load_settings_or_exit()
 
-    for section_name in _SECTION_NAMES:
-        section = getattr(settings, section_name, None)
-        if section is None:
-            continue
-        typer.secho(f"[{section_name}]", bold=True)
-        for field_name, value in section.model_dump().items():
-            display = str(value)
-            if field_name in _SECRET_FIELDS and value:
-                display = _mask(str(value))
-            typer.echo(f"  {field_name} = {display}")
-        typer.echo()
+    # Every section, in the order Settings declares them; secrets masked.
+    for section_name in type(settings).model_fields:
+        _echo_section(section_name, getattr(settings, section_name))

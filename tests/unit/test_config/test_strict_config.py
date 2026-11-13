@@ -172,3 +172,72 @@ def test_the_cli_prints_the_reason_and_exits_3(
     assert "EVEROS_DECIDER__MAX_ROUND" in result.output
     assert "did you mean [decider] max_rounds" in result.output
     load_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("env", "toml", "named"),
+    [
+        ({"EVEROS_API__PORT": "abc"}, "", "[api] port (from EVEROS_API__PORT)"),
+        ({}, '[memory]\ntimezone = "Mars/Olympus"\n', "[memory] timezone (from "),
+        ({}, "[search]\npast_trigger_words_en = ['(']\n", "past_trigger_words_en"),
+        ({}, "[llm\nmodel = 1\n", "is not valid TOML"),
+        (
+            {"EVEROS_LLM__API_KEY": "sk-very-secret-value"},
+            "[llm]\ntimeout_seconds = -5\n",
+            "[llm] timeout_seconds",
+        ),
+    ],
+)
+def test_a_bad_value_exits_3_with_the_key_and_no_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env: dict[str, str],
+    toml: str,
+    named: str,
+) -> None:
+    from typer.testing import CliRunner
+
+    from everos.config import load_settings
+    from everos.core.errors import InvalidConfigError
+    from everos.entrypoints.cli.main import app
+
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    if toml:
+        _root(tmp_path, toml)
+    load_settings.cache_clear()
+    with pytest.raises(InvalidConfigError) as refused:
+        load_settings()
+    assert named in str(refused.value)
+    assert "sk-very-secret-value" not in str(refused.value)
+
+    load_settings.cache_clear()
+    result = CliRunner().invoke(app, ["config", "show", "--root", str(tmp_path)])
+    assert result.exit_code == 3
+    assert named in result.output
+    assert "Traceback" not in result.output
+    load_settings.cache_clear()
+
+
+def test_config_show_prints_every_section_with_secrets_masked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from typer.testing import CliRunner
+
+    from everos.config import load_settings
+    from everos.entrypoints.cli.main import app
+
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", "sk-very-secret-value")
+    monkeypatch.setenv("EVEROS_OBSERVABILITY__LANGFUSE_SECRET_KEY", "lf-secret-value")
+    load_settings.cache_clear()
+    result = CliRunner().invoke(app, ["config", "show", "--root", str(tmp_path)])
+    load_settings.cache_clear()
+
+    assert result.exit_code == 0
+    shown = {
+        line.strip("[]") for line in result.output.splitlines() if line.startswith("[")
+    }
+    assert set(Settings.model_fields) <= shown
+    assert "memorize.async_queue" in shown
+    assert "sk-very-secret-value" not in result.output
+    assert "lf-secret-value" not in result.output

@@ -308,6 +308,17 @@ class UnknownConfigKeyError(ConfigurationError):
     """
 
 
+class InvalidConfigError(ConfigurationError):
+    """The configuration holds a value no setting accepts, or a file that is
+    not TOML.
+
+    Raised while settings load, for every bad value at once, each with the
+    key, the file or ``EVEROS_*`` variable it came from and what is wrong --
+    never the value itself, which may be a secret. Before, the load raised a
+    validation error with a traceback.
+    """
+
+
 class StoreVersionError(ConfigurationError):
     """The memory root was built by another EverOS major than this one.
 

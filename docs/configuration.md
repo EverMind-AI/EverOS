@@ -69,6 +69,18 @@ chose. Variables that name no section (`EVEROS_ROOT`, `EVEROS_DISABLE_OME`,
 Inside a free-form field (`[llm] extra`, `[decider] extra`,
 `[observability] headers`) any key is accepted.
 
+A value no setting accepts (a port that is not a number, an unknown timezone,
+a past-trigger pattern that is not a regular expression) and an `everos.toml`
+that is not TOML fail the load the same way: every bad value at once, with its
+key, where it was set and what is wrong -- never the value itself, which may
+be a secret -- and exit code `3`, no traceback:
+
+```text
+Invalid configuration values:
+  [api] port (from EVEROS_API__PORT): Input should be a valid integer, unable to parse string as an integer
+  [memory] timezone (from /root/.everos/everos.toml): Value error, invalid timezone: 'Mars/Olympus'
+```
+
 A few keys EverOS itself once wrote are accepted, ignored, and logged once as
 `config_key_ignored` with the reason; delete them wherever they appear. A
 whole section is ignored the same way, every key in it, so an `everos.toml`
@@ -136,6 +148,11 @@ everos init --root /data/everos
 | `busy_timeout_ms` | int | `5000` | PRAGMA busy_timeout in milliseconds. |
 | `journal_size_limit_bytes` | int | `67108864` | PRAGMA journal_size_limit (~64 MB). |
 | `cache_size_kb` | int | `2048` | PRAGMA cache_size in KB (per connection). |
+| `pool_size` | int | `5` | Connections the pool keeps open. |
+| `max_overflow` | int | `10` | Extra connections allowed above `pool_size` under load. |
+| `pool_timeout_seconds` | float | `30.0` | How long a caller waits for a free connection before failing, so a connection that is never returned cannot turn every later caller into a silent hang. |
+| `pool_recycle_seconds` | int | `1800` | A connection older than this is closed and reopened on its next checkout; `-1` disables. |
+| `pool_pre_ping` | bool | `true` | Check a pooled connection is alive before handing it out (one round trip per checkout). |
 
 ### `[lancedb]`
 
@@ -144,6 +161,8 @@ everos init --root /data/everos
 | `read_consistency_seconds` | float \| null | `null` | Read consistency interval. `null` = no check, `0` = strict, `>0` = eventual. |
 | `max_concurrent_queries` | int | `32` | Search queries (keyword, vector, filtered scan) one process runs on LanceDB at once; the rest wait for a slot. Bounds the files a burst of searches holds open and the result conversion it puts on the event loop. Metrics: `everos_lancedb_query_wait_seconds`, `everos_lancedb_queries_in_flight`. |
 | `index_cache_size_bytes` | int | `16777216` | Upper bound on LanceDB index cache (16 MB default). |
+| `metadata_cache_size_bytes` | int | `1048576` | Upper bound on LanceDB's metadata cache (1 MB). |
+| `vector_index_min_rows` | int | `2000` | Rows with a vector a table needs before its vector columns get an ANN index; below it a brute-force scan is cheaper. |
 
 ### `[index]`
 
@@ -180,15 +199,43 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
 | `temperature` | float | `0.0` | No | Sampling temperature of every extraction call that sets none of its own, so the same conversation cuts the same memcells. `"none"` leaves the field out of the request, for an endpoint that rejects it. |
 | `retry_temperature` | float | `0.3` | No | Temperature of a retry after an unusable reply, used only when above the first attempt's; at 0.0 the identical request tends to reproduce the identical bad reply. `"none"` resends the request unchanged. |
+| `extra` | table | `{}` | No | Provider-specific request fields merged into every extraction call (for example `{chat_template_kwargs = {enable_thinking = false}}` for a reasoning model behind an OpenAI-compatible endpoint). |
 
 ### `[decider]`
 
-The model and the loop of multi-round search. Every field is listed, with a
-comment, in the shipped `config/default.toml`; this table covers the ones that
-decide what a search returns rather than how the decider is called.
+The model and the loop of multi-round search. Every field is also listed,
+with a comment, in the shipped `config/default.toml`. An empty `model`,
+`api_key` or `base_url` each falls back to `[llm]`'s. The legacy
+`EVEROS_LLMMR_*` variables, when set, still win over the loop fields.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
+| `model` | string | `""` | No | The decider's model; empty uses `[llm]`'s. |
+| `api_key` | string | — | No | Its API key; empty uses `[llm]`'s. |
+| `base_url` | string | — | No | Its endpoint (OpenAI-compatible); empty uses `[llm]`'s, so a decider model served elsewhere needs its `base_url` (and key) set with it. |
+| `timeout_seconds` | float | `60.0` | No | Deadline of one decider round's request; it runs inside a search request. |
+| `extra` | table | `{}` | No | Provider-specific request fields for the decider, as `[llm] extra` (for a Qwen endpoint: `{chat_template_kwargs = {enable_thinking = false}}`). |
+| `max_tokens` | int | `512` | No | Output cap of one decider reply: the reply is one JSON object of a few dozen tokens, so this is a guard against a model that does not stop. |
+| `temperature` | float | `0.0` | No | Sampling temperature of every decider call; `"none"` leaves it out of the request. |
+| `sdk_max_retries` | int | `0` | No | Retries inside the OpenAI SDK; `0` because `retries` retries at this layer and the two multiply. |
+| `response_format_mode` | string | `"prompt_only"` | No | How the reply format is requested; never inherited from `[llm]`. `prompt_only` is how the decider policy was trained and evaluated. |
+| `max_rounds` | int | `3` | No | Hard cap on retrieval rounds; each round is one decider call plus one recall per sub-query. |
+| `seed_topk` | int | `50` | No | Candidates the original question contributes in the first round. |
+| `subq_topk` | int | `20` | No | Candidates each sub-query contributes in a later round. |
+| `max_subqueries` | int | `3` | No | Sub-queries the decider may issue per round. |
+| `rrf_k` | int | `60` | No | RRF constant fusing each sub-query's keyword and vector lists. |
+| `no_new_core_patience` | int | `1` | No | Stop after this many consecutive rounds that add no new core item. |
+| `per_subquery_guarantee` | int | `1` | No | Top non-core candidates of each sub-query kept in the result, so every facet keeps a slot. |
+| `retries` | int | `3` | No | Retries of a decider round after a transient failure (an unusable reply is one failed attempt) before the round falls back to a fixed core. |
+| `retry_backoff_seconds` | float | `0.5` | No | Delay before the first retry, doubled per attempt. |
+| `core_overflow` | bool | `false` | No | Let the core exceed `top_k` (the behaviour before 2026-08-06); off keeps the `top_k` contract. |
+| `fallback_core` | int | `3` | No | Core size a round falls back to when every decider attempt fails; the result lists it in `data.degraded`. |
+| `fit_to_window` | bool | `true` | No | Render a round prompt the endpoint rejects as too long again, smaller. Off, such a prompt fails every attempt and the round falls back. |
+| `salvage_truncated_core` | bool | `true` | No | Keep the core indices of a reply that was cut short. Off, such a reply fails to parse and the round falls back. |
+| `image_candidates_per_round` | int | `0` | No | Pictures the decider may look at per round, highest-ranked first; `0` shows none (a decider not trained on pictures). |
+| `image_detail` | string | `"low"` | No | `detail` hint on each picture part: `low`, `high` or `auto`. |
+| `image_thumbnail_edge` | int | `448` | No | Long side of the decider's copy of a picture, px: the thumbnail a search result's `thumbnail_path` names and `GET /memory/images/{id}?variant=thumbnail` serves. |
+| `image_quality` | int | `85` | No | JPEG quality of the decider's copy. |
 | `core_order` | string | `"score"` | No | Order of the decider's core at the front of the result. `score`: each item's best RRF score over the sub-queries that showed it, highest first. `round`: the round in which the decider first kept the item, earliest first, then that score. Items that tie keep the order the decider kept them in. With more core than `top_k`, the cap keeps the head of this order, so it also decides which core items are returned. No model call either way. |
 
 `round` stops a later round's item, recalled high by its own narrow
@@ -198,6 +245,24 @@ it raised hit@1 on HotpotQA / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 / 0.29 /
 0.89 points with the RL-tuned 27B decider and by 0.03 / 0.63 / 0.66 / 0.06
 with its base model. It stays opt-in until its effect on answer accuracy is
 measured.
+
+### `[vision_embedding]`
+
+The picture's own embedding endpoint: an OpenAI-protocol `/embeddings` that
+accepts chat-style input (a picture travels as an `image_url` part) and applies
+the model's input recipe. Empty `model`: no picture vectors (text-only).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | — | Picture embedding model (for example `Qwen3-VL-Embedding-8B`); unset disables picture vectors. |
+| `api_key` | string | — | API key. |
+| `base_url` | string | — | Endpoint URL. |
+| `dim` | int | `4096` | Width of the `visual_vector` column (Qwen3-VL-Embedding-8B's native width; 2B is 2048). A longer vector is cut to it client-side. |
+| `timeout_seconds` | float | `60.0` | Request timeout. |
+| `max_retries` | int | `3` | Retry count on failure. |
+| `batch_size` | int | `8` | Pictures per batch request. |
+| `max_concurrent` | int | `4` | Max parallel batch requests from write paths. |
+| `query_max_concurrent` | int | `16` | Separate budget for interactive query embeds, as on `[embedding]`. |
 
 ### `[multimodal]`
 
@@ -209,6 +274,8 @@ measured.
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
 | `file_uri_allow_dirs` | list[string] | `[]` | No | Allowlisted base dirs for `file://` URIs. Empty = allow any readable file. |
 | `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
+| `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested; as `[llm] response_format_mode`. |
+| `invalid_reply_retries` | int | `1` | No | Extra attempts after an unusable reply; as `[llm] invalid_reply_retries`. |
 
 ### `[images]`
 
@@ -439,6 +506,9 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
 | `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
+| `group_profile` | bool | `true` | Keep each group's profile (section 7.5): topics, decisions, dissent and roles, one model call per batch of segments. |
+| `group_profile_batch` | int | `5` | A batch is read after this many new segments of the group. |
+| `group_profile_idle_seconds` | int | `600` | Or after the group has had no new segment for this long; and at every flush of the group. |
 
 ### `[search]`
 
@@ -562,6 +632,26 @@ once, when the server starts.
 |---|---|---|---|
 | `identity_header` | str \| null | unset | The header a gateway in front of EverOS sets to the asker's id ([group-memory.md](group-memory.md), section 9.2). When set, the asker is read from it, a request whose body `asker_id` differs is refused with 403, and so is a request that does not carry the header (or carries it empty) on every memory, group and project route. Unset: the body's `asker_id` is the asker. EverOS itself has no authentication. |
 
+### `[observability]`
+
+OpenTelemetry tracing export, off by default: with `enabled` a tracer is built
+at startup and OTLP/HTTP spans go to `endpoint` (any OTLP backend). The
+`langfuse_*` keys are only for pushing recall scores to Langfuse.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Export spans. |
+| `exporter` | string | `"otlp_http"` | `otlp_http`, or `none` (nothing exported). |
+| `endpoint` | string | `""` | OTLP/HTTP endpoint. |
+| `headers` | table | `{}` | Headers sent with every export (for example an authorization header). |
+| `service_name` | string | `"everos"` | The `service.name` resource attribute. |
+| `sample_rate` | float | `1.0` | Share of traces sampled, 0 to 1. |
+| `capture_content` | bool | `false` | Record prompt and output text on spans (and memory-root-relative markdown paths). Off keeps content out of traces. |
+| `langfuse_public_key` | string | — | Langfuse public key, for recall scores. |
+| `langfuse_secret_key` | string | — | Langfuse secret key, for recall scores. |
+| `langfuse_host` | string | — | Langfuse host, for recall scores. |
+| `emit_recall_scores` | bool | `true` | Push recall-quality scores to Langfuse when its keys are set. |
+
 ### `[logging]`
 
 | Field | Type | Default | Description |
@@ -581,8 +671,9 @@ everos config show --root /data/everos
 This prints:
 - The resolved root directory
 - Which config files were found
-- All settings sections with their effective values
-- API keys are masked in output
+- Every settings section with its effective values (a sub-table as its own
+  `[section.sub]` block, such as `[memorize.async_queue]`)
+- Secrets (API keys, the Langfuse keys, the Milvus token) masked
 
 ### First start downloads the token-counting encoding
 

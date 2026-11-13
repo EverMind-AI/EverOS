@@ -1027,6 +1027,18 @@ machinery that keeps a deleted memory from coming back.
   makes a boundary call). Messages with one timestamp keep the order they
   arrived in; before, the id's index ordered them. A one-to-one `message`
   forget names a message by this id ([docs/api.md](docs/api.md#messageitem)).
+- **A bad configuration value exits `3` with the key, not a traceback.** A
+  value no setting accepts, an unknown timezone, a past-trigger pattern that
+  is not a regular expression and an `everos.toml` that is not TOML raised a
+  validation error with a traceback and exit code `1`. They now fail the load
+  as an unknown key does: every bad value at once, with its key, where it was
+  set and what is wrong (never the value), and exit code `3`.
+- **`everos config show` prints every section.** It printed 12 of the 24
+  sections (no `[decider]`, `[groups]`, `[images]`, `[access]`, ...); it now
+  prints them all, sub-tables included, secrets masked, and
+  [docs/configuration.md](docs/configuration.md) documents every key (60 were
+  missing, `[decider]`, `[observability]` and `[vision_embedding]` among
+  them; a unit test now fails on an undocumented key).
 - **A `### ` line or an entry marker in a memory's text no longer cuts it
   short.** The entry reader split sections on any line starting with `### `
   and entries on any close marker, so an episode whose text held `### Day 2`
