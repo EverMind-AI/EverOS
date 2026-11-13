@@ -1,26 +1,30 @@
-"""Segments whose extraction failed, extracted again by their session's next call.
+"""Segments whose extraction did not finish, extracted again by a later call.
 
 A segment's memcell is committed, and its messages leave the buffer, before
 its episode call runs. When that call fails (a provider's 5xx or timeout, an
-unusable reply on every attempt) nothing else would ever extract it: the
-buffer is empty, a group's ledger holds its messages, and a re-send is a
-duplicate. So the failure is recorded on the memcell row
+unusable reply on every attempt), or the process dies before the episode is
+written, nothing else would ever extract it: the buffer is empty, and a group's
+ledger holds its messages. So every memcell row is cut marked "to extract"
+(``MemcellRecord.to_extract``); the mark is cleared when its extraction
+succeeds and counts a failure when it fails
 (:meth:`~everos.memory.ports.MemcellStore.record_extraction_failure`), and the
-session's next add or flush extracts the segment again:
+session's next add or flush -- in this process or after a restart -- extracts
+a marked segment again:
 
-* **Never twice at once.** A segment is claimed under its session's lock and
-  held by one call until that call's attempt ends; a segment whose first
-  extraction is still running has no failure recorded, so no call claims it.
+* **Never twice at once.** A segment is held by the call that cut it, or the
+  call that claimed it under its session's lock, until that call's attempt
+  ends; no other call takes a held segment.
 * **Never twice over.** A retry skips every owner whose episode of the segment
-  is already written (a failure after a first copy's write), and a re-send of
-  the segment's messages while it waits is a duplicate
-  (:func:`held_positions`, by the ids
-  :func:`~everos.memory.extract.ingest.gen_message_id` gives them; a group's
-  ledger holds them too), so it is never cut into a second segment.
-* **Bounded.** An add retries a segment once :data:`RETRY_AFTER_MS` passed
-  since its last failure, a flush at once; after
-  :data:`MAX_EXTRACTION_FAILURES` failures it is left, marked, and logged
-  (``memorize_cell_extraction_abandoned``).
+  is already written (a failure after a first copy's write). A message the
+  client sends again while its segment waits is that segment's retry, not a
+  new message: it is not taken again (:func:`resent_positions`) -- nor counted
+  in ``duplicates`` -- and the segment is extracted again in that call, so it
+  is never cut into a second segment.
+* **Bounded.** An add retries a segment it does not carry once
+  :data:`RETRY_AFTER_MS` passed since its last failure (or its cut), a flush
+  at once; after :data:`MAX_EXTRACTION_FAILURES` failures it is left, marked,
+  and logged (``memorize_cell_extraction_abandoned``), and its messages are
+  then new again.
 * **Forgotten stays forgotten.** A segment is not extracted while a forget of
   its conversation stands -- or, for a user's, a forget of everything or by
   condition, or for a group's, a member forget: they were recorded without
@@ -35,10 +39,10 @@ __all__ = [
     "MAX_EXTRACTION_FAILURES",
     "RETRY_AFTER_MS",
     "SegmentRetries",
-    "held_positions",
+    "resent_positions",
 ]
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
@@ -56,17 +60,18 @@ MAX_EXTRACTION_FAILURES = 3
 """Failed extractions after which a segment is no longer tried again."""
 
 RETRY_AFTER_MS = 30_000
-"""How long after a failure an add tries the segment again; a flush does not
-wait. A provider that is down fails every attempt, and a chat's adds come
-seconds apart: the wait keeps one outage from using up every attempt."""
+"""How long after a failure (or the cut, before any) an add that does not send
+the segment's messages again tries it again; a flush does not wait. A provider
+that is down fails every attempt, and a chat's adds come seconds apart: the
+wait keeps one outage from using up every attempt."""
 
 
 class SegmentRetries:
-    """The failed segments of each session, claimed by one call at a time.
+    """The marked segments of each session, held by one call at a time.
 
     Args:
-        memcells: Where failures are recorded; ``None`` records and retries
-            nothing (a build without the memcell store).
+        memcells: Where the marks are kept; ``None`` retries nothing (a build
+            without the memcell store).
         forget_log: What a retry checks for a forget that stands over the
             segment; ``None`` checks nothing.
     """
@@ -76,49 +81,72 @@ class SegmentRetries:
     ) -> None:
         self._memcells = memcells
         self._forget_log = forget_log
-        self._claimed: set[str] = set()
+        self._held: set[str] = set()
 
-    async def pending(self, session: SessionKey) -> list[FailedSegment]:
-        """The session's failed segments still to extract: under
-        :data:`MAX_EXTRACTION_FAILURES`, and no standing forget over them.
+    def hold(self, memcell_ids: Iterable[str]) -> None:
+        """Hold segments a call just cut, under the session's lock, until
+        their extraction ends (:meth:`release`)."""
+        self._held.update(memcell_ids)
 
-        Read under the session's lock. A re-send of one of their messages is
-        a duplicate (:func:`held_positions`); the due ones are :meth:`claim` ed.
+    def release(self, memcell_ids: Iterable[str]) -> None:
+        """Drop a call's hold on these segments."""
+        self._held.difference_update(memcell_ids)
+
+    async def pending(
+        self, session: SessionKey
+    ) -> tuple[list[FailedSegment], list[FailedSegment]]:
+        """The session's marked segments still to extract -- under
+        :data:`MAX_EXTRACTION_FAILURES`, and no standing forget over those no
+        call holds -- and, of those, the ones no call held when the read
+        began: only those may be claimed.
+
+        A held segment's extraction may end while the marks are read -- its
+        mark cleared, its hold dropped -- and the read still return it; taking
+        it then would extract it twice. Read under the session's lock: a
+        re-send of a pending segment's messages is its retry
+        (:func:`resent_positions`), and :meth:`claim` takes the due ones.
         """
         if self._memcells is None:
-            return []
+            return [], []
+        held = set(self._held)
         found: list[FailedSegment] = []
         for segment in await self._memcells.failed_segments(session):
             if segment.failures >= MAX_EXTRACTION_FAILURES:
                 continue
-            if await self._held_by_forget(session, segment):
+            if segment.memcell_id not in held and await self._forgotten(
+                session, segment
+            ):
                 continue
             found.append(segment)
-        return found
+        return found, [s for s in found if s.memcell_id not in held]
 
     def claim(
-        self, pending: Sequence[FailedSegment], *, is_final: bool
+        self,
+        unheld: Sequence[FailedSegment],
+        *,
+        is_final: bool,
+        resent: Collection[str] = (),
     ) -> list[FailedSegment]:
-        """The ``pending`` segments due now, held by the caller.
+        """The ``unheld`` segments (:meth:`pending`) due now, held by the caller.
 
-        A flush takes every one, an add those whose last failure is
-        :data:`RETRY_AFTER_MS` old; a segment another call holds is left to
-        it. The caller extracts them and then :meth:`release` s them,
-        whatever happened.
+        A flush takes every one, an add the ones whose messages it sent again
+        (``resent``, memcell ids) and those whose last failure (or cut) is
+        :data:`RETRY_AFTER_MS` old. The caller extracts them and then
+        :meth:`release` s them, whatever happened.
         """
         now = to_timestamp_ms(get_utc_now())
         due = [
             segment
-            for segment in pending
-            if segment.memcell_id not in self._claimed
-            and (is_final or now - segment.failed_at_ms >= RETRY_AFTER_MS)
+            for segment in unheld
+            if segment.memcell_id not in self._held
+            and (
+                is_final
+                or segment.memcell_id in resent
+                or now - segment.failed_at_ms >= RETRY_AFTER_MS
+            )
         ]
-        self._claimed.update(segment.memcell_id for segment in due)
+        self.hold(segment.memcell_id for segment in due)
         return due
-
-    def release(self, segments: Sequence[FailedSegment]) -> None:
-        """Drop the caller's hold on ``segments``."""
-        self._claimed.difference_update(segment.memcell_id for segment in segments)
 
     async def failed(
         self,
@@ -164,14 +192,21 @@ class SegmentRetries:
                 failures=failures,
             )
 
-    async def extracted(self, segment: FailedSegment) -> None:
-        """The segment is extracted: clear its failure."""
-        if self._memcells is not None:
-            await self._memcells.clear_extraction_failure(segment.memcell_id)
+    async def extracted(self, memcell_id: str) -> None:
+        """The segment is extracted: clear its mark. Never raises (a mark
+        left behind costs one retry that finds every copy written)."""
+        if self._memcells is None:
+            return
+        try:
+            await self._memcells.clear_extraction_failure(memcell_id)
+        except Exception as exc:
+            logger.warning(
+                "memorize_cell_mark_not_cleared",
+                memcell_id=memcell_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
-    async def _held_by_forget(
-        self, session: SessionKey, segment: FailedSegment
-    ) -> bool:
+    async def _forgotten(self, session: SessionKey, segment: FailedSegment) -> bool:
         """Whether a forget that stands covers the segment (see the module doc)."""
         if self._forget_log is None:
             return False
@@ -204,13 +239,17 @@ class SegmentRetries:
         return False
 
 
-def held_positions(
+def resent_positions(
     ids: Sequence[str], pending: Sequence[FailedSegment]
-) -> frozenset[int]:
+) -> tuple[frozenset[int], set[str]]:
     """The positions of a batch (by generated ``ids``) whose message a pending
-    segment holds: sent again while the segment waits for its retry."""
-    held = {mid for segment in pending for mid in segment.message_ids}
-    return frozenset(i for i, mid in enumerate(ids) if mid in held)
+    segment holds -- sent again while the segment waits -- and those
+    segments' memcell ids."""
+    owner = {
+        mid: segment.memcell_id for segment in pending for mid in segment.message_ids
+    }
+    positions = frozenset(i for i, mid in enumerate(ids) if mid in owner)
+    return positions, {owner[ids[i]] for i in positions}
 
 
 def _covers(

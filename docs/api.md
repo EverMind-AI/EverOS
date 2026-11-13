@@ -344,10 +344,11 @@ the buffered ones are listed with it by a session-filtered search
 
 **A message sent again.** A message the session still buffers, sent again
 (the same sender, timestamp and content), is one message: it is skipped and
-counted in the answer's `duplicates`. So is a message of a segment whose
-extraction failed and that waits to be extracted again (see
-[Failure](#asynchronous-mode)). A message of a segment that was extracted is
-taken again (a group skips it: see [Groups](#groups)).
+counted in the answer's `duplicates`. A message of a segment whose extraction
+did not finish (it failed, or the process died) is that segment's retry: it
+is not taken again, nor counted, and the segment is extracted in that call
+(see [Failure](#asynchronous-mode)). A message of a segment that was
+extracted is taken again (a group skips it: see [Groups](#groups)).
 
 **`content`** — The message body.
 - A bare **string** is shorthand for a single text content item.
@@ -820,18 +821,22 @@ There is no automatic retry of a batch by default (`max_attempts = 1`),
 because the memorize pipeline is not atomic: boundary detection writes the
 memcell and consumes the session buffer before extraction runs. A failure
 before that point (the common one: the boundary LLM call failed) leaves
-nothing behind, and re-sending the batch is safe. A failure after it (the
-episode call failed) leaves the memcell without its episode, **marked**: the
-session's next `/add` or `/flush` extracts that segment again -- a flush at
-once, an add once 30 seconds have passed since the failure (a provider that
-is down fails every attempt) -- up to three attempts in all, after which it
-is left and logged (`memorize_cell_extraction_abandoned`). A retry that fails
-again never fails the call that made it; one that succeeds makes that call
-answer `extracted`. Re-sending the batch meanwhile is safe: its messages are
-held by the waiting segment and skipped (`duplicates`), never cut into a
-second one. A segment whose conversation was forgotten (or deleted) is not
-extracted while that forget stands, and its messages are not held, so the
-conversation sent again after a delete is taken. A deferred add never
+nothing behind, and re-sending the batch is safe. Every memcell is written
+**marked** until its extraction succeeds, so one whose episode call failed --
+or whose process died before the episode was written -- keeps the mark, and
+the session's next `/add` or `/flush` (in this process or after a restart)
+extracts that segment again: a flush at once; an add that sends any of its
+messages again at once (that re-send is the segment's retry: those messages
+are not taken again, nor counted in `duplicates`); any other add once 30
+seconds have passed since the failure (a provider that is down fails every
+attempt). After three failed attempts a segment is left and logged
+(`memorize_cell_extraction_abandoned`), and its messages are new again. A
+retry that fails again never fails the call that made it; one that succeeds
+makes that call answer `extracted`. A segment is extracted once: one call
+holds it at a time, and an owner whose copy was written before a failure is
+not written again. A segment whose conversation was forgotten (or deleted) is
+not extracted while that forget stands, and its messages are new again, so
+the conversation sent again after a delete is taken. A deferred add never
 retries (it makes no model call). `last_error` does not say which step
 failed. The server never re-drives a failed batch and deletes its row with
 the others after seven days. Synchronous calls have the same property; they
@@ -1824,8 +1829,9 @@ and a queued batch logs them (`memorize.duplicates_skipped`). A retry is safe:
 a batch's messages count as held once it is stored; a batch that failed
 before (its boundary call) is taken in full, and a segment whose extraction
 failed is extracted again by the session's next add or flush (see Failure in
-[Asynchronous mode](#asynchronous-mode)), so its re-sent messages are
-skipped. A `/memory/delete` of a
+[Asynchronous mode](#asynchronous-mode)) -- a re-send of its messages is that
+retry, so they are taken once and not counted as duplicates. A
+`/memory/delete` of a
 session releases its messages, so the conversation sent again is taken as
 before. Explicit groups and implicit groups of three or more people; never a
 session of one or two people. A sender who is not a member joins at their first

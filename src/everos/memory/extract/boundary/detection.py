@@ -207,6 +207,7 @@ class BoundaryDetection:
             message_count=len(fresh),
             held=held,
             arrival=merged,
+            group_id=ingested.group_id,
         )
         return outcome._replace(duplicates=duplicates)
 
@@ -300,11 +301,16 @@ class BoundaryDetection:
         message_count: int,
         held: Sequence[CanonicalMessage] = (),
         arrival: Sequence[CanonicalMessage] = (),
+        group_id: str | None = None,
     ) -> BoundaryOutcome:
         """Record one memcell row per cell and keep only the tail buffered,
         in one transaction: a failure leaves the buffer as it was. ``held``
         (forgotten rows) stays buffered beside the tail, both in the order of
-        ``arrival`` (the whole merged buffer)."""
+        ``arrival`` (the whole merged buffer). Each row is marked to be
+        extracted (``MemcellRecord.to_extract``) until its extraction
+        succeeds, with the group it was cut in (``group_id``) and its
+        pictures' names, so a cell whose extraction never finishes is
+        extracted again."""
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
@@ -319,9 +325,12 @@ class BoundaryDetection:
                     raw_type=_RAW_TYPE,
                     message_ids=ids,
                     sender_ids=cell_senders,
+                    to_extract=True,
+                    group_id=group_id,
+                    picture_names=cell_names,
                 )
-                for memcell_id, cell, ids, cell_senders in zip(
-                    memcell_ids, result.cells, message_ids, senders, strict=True
+                for memcell_id, cell, ids, cell_senders, cell_names in zip(
+                    memcell_ids, result.cells, message_ids, senders, names, strict=True
                 )
             ],
             tail=_in_arrival_order([*slice_tail(merged, result.tail), *held], arrival),

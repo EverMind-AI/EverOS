@@ -299,9 +299,12 @@ async def test_searches_during_writes_all_answer(tmp_path: Path) -> None:
 async def test_profile_updates_racing_each_other_keep_every_fact(
     tmp_path: Path,
 ) -> None:
-    """OME runs one profile update per episode; many at once must not lose one
-    another's items (the profile document is read, changed and written)."""
-    async with FaultServer.open(tmp_path / "root") as srv:
+    """OME runs profile updates as episodes arrive; many at once must not lose
+    one another's items (the profile document is read, changed and written).
+    ``[profile] update_every = 1``: an update per episode, the most racing
+    updates (the default reads five segments at once, and a flush the rest)."""
+    env = {"EVEROS_PROFILE__UPDATE_EVERY": "1"}
+    async with FaultServer.open(tmp_path / "root", env=env) as srv:
         srv.upstream.cut_on_add = True
         srv.upstream.delay["_ProfileUpdateReply"] = 0.2
         results = await asyncio.gather(
@@ -318,7 +321,10 @@ async def test_profile_updates_racing_each_other_keep_every_fact(
 
 
 async def test_a_forget_during_profile_updates(tmp_path: Path) -> None:
-    async with FaultServer.open(tmp_path / "root") as srv:
+    # An update per episode (``[profile] update_every = 1``), so the updates
+    # race the forget; the default queues them for the fifth segment or a flush.
+    env = {"EVEROS_PROFILE__UPDATE_EVERY": "1"}
+    async with FaultServer.open(tmp_path / "root", env=env) as srv:
         srv.upstream.cut_on_add = True
         srv.upstream.delay["_ProfileUpdateReply"] = 0.3
         resp, gone = await srv.say("s0", "u1", "G", 1, fact=True)

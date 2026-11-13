@@ -833,6 +833,13 @@ class MemcellRecord(BaseModel):
         raw_type: Source shape of the slice (``Conversation``).
         message_ids: Ids of the buffered messages the slice consumed.
         sender_ids: Distinct senders in the slice, first-seen order.
+        to_extract: The slice is cut to be extracted: its row is marked until
+            the extraction succeeds, so one that never finishes (a failure, a
+            crash) is extracted again by the session's next add or flush.
+        group_id: The group the slice was cut in (a retry extracts it there);
+            ``None`` for a one-to-one slice.
+        picture_names: ``image_id -> client file name`` of its pictures,
+            which the slice's text does not keep.
     """
 
     memcell_id: str
@@ -840,6 +847,9 @@ class MemcellRecord(BaseModel):
     raw_type: str
     message_ids: list[str]
     sender_ids: list[str]
+    to_extract: bool = False
+    group_id: str | None = None
+    picture_names: dict[str, str] = Field(default_factory=dict)
 
 
 class MemorizeTask(BaseModel):

@@ -434,9 +434,9 @@ copy. A message is a **duplicate** when its group already holds it:
   batch that failed before that (its boundary call) recorded nothing, and its
   retry is taken in full. A segment whose extraction failed is stored and
   marked, and the session's next add or flush extracts it again
-  ([api.md, Failure](api.md#asynchronous-mode)), so its messages are held and
-  a retry of the batch skips them: the segment is extracted once, never cut
-  twice. Two batches of one group that carry the same message at the same
+  ([api.md, Failure](api.md#asynchronous-mode)); a retry of the batch is that
+  segment's retry, in that call, and its messages are not counted as
+  duplicates: the segment is extracted once, never cut twice. Two batches of one group that carry the same message at the same
   time store it once: the second waits for the first.
 - **Where.** Explicit groups and implicit groups of three or more people.
   Never a session of one or two people without `group_id`, which is no

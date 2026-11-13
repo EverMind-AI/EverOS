@@ -28,7 +28,7 @@ from typing import Any, cast
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
+from everos.core.utils.datetime import from_timestamp_ms, get_utc_now, to_timestamp_ms
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,
@@ -505,6 +505,20 @@ def _record_to_row(record: MemcellRecord, session: SessionKey) -> Memcell:
         sender_ids_json=json.dumps(record.sender_ids),
         payload_json=record.cell.model_dump_json(),
         timestamp=from_timestamp_ms(record.cell.timestamp),
+        extraction_retry=_to_extract(record) if record.to_extract else None,
+    )
+
+
+def _to_extract(record: MemcellRecord) -> str:
+    """The mark of a row cut to be extracted: no failure yet, since now."""
+    return json.dumps(
+        {
+            "failures": 0,
+            "failed_at_ms": to_timestamp_ms(get_utc_now()),
+            "group_id": record.group_id,
+            "picture_names": dict(record.picture_names),
+        },
+        sort_keys=True,
     )
 
 
@@ -517,7 +531,7 @@ def _failed_segment(row: Memcell) -> FailedSegment:
         message_ids=tuple(json.loads(row.message_ids_json)),
         group_id=retry.get("group_id"),
         picture_names=dict(retry.get("picture_names") or {}),
-        failures=int(retry.get("failures") or 1),
+        failures=int(retry.get("failures") or 0),
         failed_at_ms=int(retry.get("failed_at_ms") or 0),
     )
 

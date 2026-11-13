@@ -18,10 +18,12 @@ from typing import Any
 
 import pytest
 from everalgo.testing import FakeLLMClient
+from everalgo.types import ChatMessage, MemCell
 from pydantic import ValidationError
 
 from everos.core.utils.datetime import MAX_EPOCH_MS, to_timestamp_ms
 from everos.entrypoints.api.schemas.memorize import MessageItemDTO
+from everos.memory.models import MemcellRecord
 from everos.memory.ports import Scope
 from everos.service.memory._retry import MAX_EXTRACTION_FAILURES
 from tests.helpers.groups import APP, PROJECT, GroupWorld
@@ -174,11 +176,6 @@ async def test_a_failed_segment_is_extracted_by_the_next_flush_once(
         assert await _buffered(world, "s") == []
         assert await _episodes(world, "amy") == []
 
-        # The client sends the batch again: it waits for the segment's retry.
-        resent = await _add(world, "s", *said)
-        assert (resent.duplicates, resent.status) == (2, "accumulated")
-        assert await _buffered(world, "s") == []
-
         model.calls.clear()
         assert (await _flush(world, "s")).status == "extracted"
         assert model.calls == ["EpisodeReply"]
@@ -189,6 +186,30 @@ async def test_a_failed_segment_is_extracted_by_the_next_flush_once(
         assert (await _flush(world, "s")).status == "no_extraction"
         assert model.calls == []
         assert await world.stores.memcell.failed_segments(world.session("s")) == []
+
+
+async def test_a_resend_of_a_failed_segment_is_its_retry(tmp_path: Path) -> None:
+    """The documented recovery -- send the batch again -- extracts the segment
+    in that call, once: its messages are not taken again, nor duplicates."""
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        said = [
+            _message("amy", T0, "My door code is 4417"),
+            _message("bot", T0 + 1, "Noted.", role="assistant"),
+        ]
+        await _add(world, "s", *said)
+        model.fail_episode = 10
+        with pytest.raises(RuntimeError, match="episode model down"):
+            await _flush(world, "s")
+        model.fail_episode = 0
+        model.calls.clear()
+        resent = await _add(world, "s", *said)
+        assert (resent.duplicates, resent.status) == (0, "extracted")
+        assert model.calls == ["EpisodeReply"]
+        assert await _buffered(world, "s") == []
+        assert len(await _episodes(world, "amy")) == 1
+        assert (await _flush(world, "s")).status == "no_extraction"
+        assert len(await _episodes(world, "amy")) == 1
 
 
 async def test_an_add_waits_before_it_retries_a_flush_does_not(
@@ -247,3 +268,41 @@ async def test_a_forget_of_the_conversation_holds_the_retry(tmp_path: Path) -> N
         # Its messages are not held: sent again after the delete, they are new.
         again = await _add(world, "s", _message("amy", T0, "My door code is 4417"))
         assert again.duplicates == 0
+
+
+async def test_a_segment_cut_before_a_crash_is_extracted_after_it(
+    tmp_path: Path,
+) -> None:
+    """Every memcell is cut marked "to extract": one whose extraction never ran
+    (the process died after the cut) is extracted by the session's next call."""
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        text = "My door code is 4417"
+        cell = MemCell(
+            items=[
+                ChatMessage(
+                    id="m1", role="user", content=text, sender_id="amy", timestamp=T0
+                )
+            ],
+            timestamp=T0,
+        )
+        await world.stores.session_buffer.cut(
+            world.session("s"),
+            [
+                MemcellRecord(
+                    memcell_id="mc_crash",
+                    cell=cell,
+                    raw_type="Conversation",
+                    message_ids=["m1"],
+                    sender_ids=["amy"],
+                    to_extract=True,
+                )
+            ],
+            tail=[],
+            last_memcell_ts=None,
+        )
+        assert (await _flush(world, "s")).status == "extracted"
+        assert model.calls == ["EpisodeReply"]
+        assert [e.item.episode for e, _ in await _episodes(world, "amy")] == ["C"]
+        assert (await _flush(world, "s")).status == "no_extraction"
+        assert model.calls == ["EpisodeReply"]

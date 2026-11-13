@@ -85,16 +85,6 @@ async def test_one_failed_episode_call_is_absorbed(tmp_path: Path, fault: str) -
 PERSISTENT = ["timeout", "503", "malformed", "null"]
 """Every attempt fails: the provider gives up and the service sees the error."""
 
-ORPHANED_CELL = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "extraction is not re-driven: a failed episode call leaves its memcell "
-        "without an episode and the buffer consumed, so a retried flush finds "
-        "nothing (docs/api.md, async queue 'Failure'; service/memory/"
-        "_extraction.py). Extraction retry is being reworked in EverOS-fixingest."
-    ),
-)
-
 
 @pytest.mark.parametrize("fault", PERSISTENT)
 async def test_a_failed_episode_call_is_reported_and_a_resend_recovers(
@@ -116,11 +106,11 @@ async def test_a_failed_episode_call_is_reported_and_a_resend_recovers(
         await _clean(srv)
 
 
-@ORPHANED_CELL
 async def test_a_failed_episode_call_is_extracted_by_the_retried_flush(
     tmp_path: Path,
 ) -> None:
-    """A client that only retries the flush that failed loses the segment."""
+    """A client that only retries the flush that failed: the segment is
+    extracted then, once (it stayed marked)."""
     async with FaultServer.open(tmp_path / "root") as srv:
         srv.upstream.down.add("EpisodeReply")
         resp, sent = await srv.say("s1", "u1", "A")
@@ -244,15 +234,6 @@ async def test_a_picture_call_that_keeps_failing_and_a_resend(tmp_path: Path) ->
 # ── the profile and group-profile calls (OME) ───────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a profile update that failed is dead-lettered and never re-driven; the "
-        "next update reads only its own segment, so the failed window's facts "
-        "never reach the profile (memory/strategies/extract_user_profile.py). "
-        "Profile cadence is being reworked in EverOS-fixingest."
-    ),
-)
 async def test_a_failed_profile_update_is_reported_and_caught_up(
     tmp_path: Path,
 ) -> None:

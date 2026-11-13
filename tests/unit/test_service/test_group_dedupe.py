@@ -215,8 +215,8 @@ async def test_a_failed_batch_records_nothing(tmp_path: Path) -> None:
 async def test_a_segment_whose_extraction_failed_is_extracted_once_again(
     tmp_path: Path,
 ) -> None:
-    """The segment is stored and marked: its re-send is a duplicate, and the
-    session's next flush extracts it -- once."""
+    """The segment is stored and marked: the client's re-send is its retry --
+    extracted then, once, never cut into a second segment."""
     model = _Model()
     async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
         await _trip(world)
@@ -229,8 +229,7 @@ async def test_a_segment_whose_extraction_failed_is_extracted_once_again(
             await _add(world, batch, defer=False)
         model.fail_episode = 0
         resent = await _add(world, batch, defer=False)
-        assert (resent.duplicates, resent.status) == (1, "accumulated")
-        assert (await _flush(world, "s1")).status == "extracted"
+        assert (resent.duplicates, resent.status) == (0, "extracted")
         assert await _held_texts(world, "s1") == ["fly Friday"]
         episodes = await world.stores.episode.read_all(world.scope("trip"))
         assert len(episodes) == 1

@@ -118,15 +118,6 @@ async def test_killed_between_the_markdown_write_and_the_index_write(
     assert staging_files(root) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a memcell committed before the crash is never extracted after it: "
-        "nothing re-drives a cell without an episode, and the buffer it came "
-        "from is consumed (service/memory/_memorize.py, _extraction.py). "
-        "Extraction retry is being reworked in EverOS-fixingest."
-    ),
-)
 async def test_killed_between_the_memcell_and_the_episode(
     tmp_path: Path, servers: list[ChildServer]
 ) -> None:

@@ -1048,26 +1048,32 @@ machinery that keeps a deleted memory from coming back.
   logged. Such a line, and a marker anywhere in a value, are now written
   behind one more backslash and read back without it; existing entries read
   unchanged ([docs/storage_layout.md](docs/storage_layout.md#4-entry-id-encoding)).
-- **A segment whose extraction failed is extracted again, once.** Its
+- **A segment whose extraction did not finish is extracted again, once.** Its
   memcell was committed and its messages left the buffer before the episode
-  call ran; when that call failed (a provider's 5xx or timeout), nothing ever
-  extracted the segment again: a flush found an empty buffer, and in a group
-  the client's re-send was skipped as duplicates -- the segment was lost for
-  good. The failure is now recorded on the memcell row (`extraction_retry`, a
-  column added to `memcell`), and the session's next `/add` or `/flush`
-  extracts the segment again: a flush at once, an add once 30 seconds have
-  passed since the failure, up to three attempts, after which it is left and
-  logged (`memorize_cell_extraction_abandoned`). A retry that fails again
-  never fails the call that made it; one that succeeds makes it answer
-  `extracted`. One call holds a segment at a time, an owner whose copy was
-  written before the failure is not written again, and the messages of a
-  waiting segment are held: a re-send skips them (`duplicates`) instead of
-  cutting a second segment, so a group's ledger records a batch's keys once
-  it is stored. A segment is not extracted while a forget of its
-  conversation (a user's: or of everything, or by condition; a group's: or of
-  a member) stands, and its messages are then not held, so a conversation
-  sent again after its delete is taken
-  ([docs/api.md](docs/api.md#asynchronous-mode)).
+  call ran; when that call failed (a provider's 5xx or timeout), or the
+  process died before the episode was written, nothing ever extracted the
+  segment again: a flush found an empty buffer, a restart did nothing, and in
+  a group the client's re-send was skipped as duplicates -- the segment was
+  lost for good. Every memcell is now written marked (`extraction_retry`, a
+  column added to `memcell`) until its extraction succeeds, and the session's
+  next `/add` or `/flush` -- in the same process or after a restart --
+  extracts a marked segment again: a flush at once, an add that sends any of
+  its messages again at once (the re-send is the segment's retry: its
+  messages are not taken again, nor counted as duplicates), any other add
+  once 30 seconds have passed since the failure; up to three attempts, after
+  which it is left and logged (`memorize_cell_extraction_abandoned`). A retry
+  that fails again never fails the call that made it; one that succeeds makes
+  it answer `extracted`. One call holds a segment at a time and an owner
+  whose copy was written before a failure is not written again, so a segment
+  is extracted once; a group's ledger records a batch's keys once it is
+  stored. A segment is not extracted while a forget of its conversation (a
+  user's: or of everything, or by condition; a group's: or of a member)
+  stands, and its messages are then new again, so a conversation sent again
+  after its delete is taken ([docs/api.md](docs/api.md#asynchronous-mode)).
+  The fault suite's three strict expected failures for this (a failed episode
+  call, a crash between the memcell and the episode, a failed profile
+  update) now pass; its `episode_write` pause point wraps the write every
+  extraction makes (`_append_many`), so the crash test stops where it says.
 - **A millisecond timestamp before 2001-09-09 no longer answers `500`.** The
   add API read every value below `10^12` as seconds, so `978307200000`
   (2001-01-01 in ms) landed in year ~33,000 and raised. A value below `10^10`

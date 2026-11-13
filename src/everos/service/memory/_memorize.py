@@ -76,7 +76,7 @@ from everos.memory.ports import Scope, SessionKey
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._groups import to_events
 from everos.service.memory._models import MemorizeResult
-from everos.service.memory._retry import SegmentRetries, held_positions
+from everos.service.memory._retry import SegmentRetries, resent_positions
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -423,6 +423,7 @@ class Memorizer:
             )
             closed = await self._boundary.detect(empty, is_final=True)
             if closed.cells:
+                self._retries.hold(closed.memcell_ids)
                 cut.append((empty, closed))
         return cut
 
@@ -436,17 +437,18 @@ class Memorizer:
         is_final: bool,
         retries: Sequence[FailedSegment] = (),
     ) -> MemorizeResult:
-        """Extract the session's failed segments again, then the batch's own
+        """Extract the session's waiting segments again, then the batch's own
         cells, then those cut from the group's others.
 
         The batch's messages are recorded as held once it is stored and its
-        own cells extracted (``claim``). A cell whose extraction failed is
-        stored and marked, and the session's next add or flush extracts it
-        again, so its messages are recorded as held then too: a re-send of
-        the batch is a duplicate, never a second segment. Only a cancelled
-        extraction (shutdown) records nothing, and a re-send is taken in
-        full, as before the ledger.
+        own cells extracted (``claim``). A cell whose extraction failed stays
+        marked, and the session's next add or flush extracts it again (a
+        re-send of its messages is that retry), so its messages are recorded
+        as held then too: never a second segment. Only a cancelled extraction
+        (shutdown) records nothing; its cells stay marked for the next call
+        after the restart.
         """
+        elsewhere_cells = [mid for _, b in elsewhere for mid in b.memcell_ids]
         try:
             retried = await self._extract_retries(payload, retries)
             result = (
@@ -455,23 +457,28 @@ class Memorizer:
                 else await self._extract(payload, *prepared)
             )
         except Exception:
+            self._retries.release(elsewhere_cells)
             await self._settle(claim, payload)
             raise
         except BaseException:
+            self._retries.release(elsewhere_cells)
             if claim is not None:
                 claim.release()
             raise
         if retried and result.status == "accumulated":
             result = result.model_copy(update={"status": "extracted"})
         await self._settle(claim, payload)
-        for ingested, closed in elsewhere:
-            await self._extract(
-                flush_payload(
-                    ingested.session_id, ingested.app_id, ingested.project_id
-                ),
-                ingested,
-                [closed],
-            )
+        try:
+            for ingested, closed in elsewhere:
+                await self._extract(
+                    flush_payload(
+                        ingested.session_id, ingested.app_id, ingested.project_id
+                    ),
+                    ingested,
+                    [closed],
+                )
+        finally:
+            self._retries.release(elsewhere_cells)
         await self._announce_flush(payload, is_final=is_final)
         return result
 
@@ -533,7 +540,8 @@ class Memorizer:
         once the batch's own cells are extracted -- and the session's failed
         segments this call extracts again (:mod:`._retry`; none for a
         deferred add, which makes no model call). A message such a segment
-        holds is a duplicate: the segment's retry extracts it.
+        holds is not taken again, nor counted as a duplicate: the batch is
+        that segment's retry, due at once.
         """
         session = SessionKey(
             app_id=payload.get("app_id") or "default",
@@ -557,23 +565,28 @@ class Memorizer:
             )
             claim = await self._claim(payload, session, group_id)
         try:
-            pending = await self._retries.pending(session)
-            skip = claim.duplicates if claim is not None else frozenset()
+            pending, unheld = await self._retries.pending(session)
+            resent: frozenset[int] = frozenset()
+            resent_cells: set[str] = set()
             if pending and payload.get("messages"):
-                skip |= held_positions(generated_ids(payload), pending)
+                resent, resent_cells = resent_positions(generated_ids(payload), pending)
             stored = await self._store(
                 payload,
                 cut_first,
                 is_final=is_final,
                 defer_extraction=defer_extraction,
-                skip=skip,
+                skip=(claim.duplicates if claim is not None else frozenset()) | resent,
+                resent=resent,
             )
         except BaseException:
             if claim is not None:
                 claim.release()
             raise
+        if not isinstance(stored, MemorizeResult):
+            # Held until their extraction ends: no other call retries them.
+            self._retries.hold(mid for b in stored[1] for mid in b.memcell_ids)
         retries = (
-            self._retries.claim(pending, is_final=is_final)
+            self._retries.claim(unheld, is_final=is_final, resent=resent_cells)
             if is_final or not defer_extraction
             else []
         )
@@ -587,8 +600,13 @@ class Memorizer:
         is_final: bool,
         defer_extraction: bool,
         skip: frozenset[int] = frozenset(),
+        resent: frozenset[int] = frozenset(),
     ) -> MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]]:
-        """Ingest the batch (but the messages at ``skip``) and run its boundary."""
+        """Ingest the batch (but the messages at ``skip``) and run its boundary.
+
+        ``resent`` (within ``skip``) are messages of a segment waiting to be
+        extracted again: that segment's retry, not duplicates.
+        """
         ingested = await ingest_process(
             payload,
             multimodal_llm=self._multimodal_llm,
@@ -597,6 +615,10 @@ class Memorizer:
             vision=self._vision,
             skip=skip,
         )
+        if resent:
+            ingested = ingested.model_copy(
+                update={"skipped_count": ingested.skipped_count - len(resent)}
+            )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested)
             ingested = _held_too(ingested, buffered)
@@ -839,13 +861,21 @@ class Memorizer:
                 held, app_id=app_id, project_id=project_id, own=None, others=sessions
             )
             cut = await self._cut_buffers(app_id, project_id, locked)
-            result = await change()
-        for ingested, closed in cut:
-            await self._extract(
-                flush_payload(ingested.session_id, app_id, project_id),
-                ingested,
-                [closed],
-            )
+            try:
+                result = await change()
+            except BaseException:
+                # Not extracted here: marked, a later call extracts them.
+                self._retries.release(mid for _, b in cut for mid in b.memcell_ids)
+                raise
+        try:
+            for ingested, closed in cut:
+                await self._extract(
+                    flush_payload(ingested.session_id, app_id, project_id),
+                    ingested,
+                    [closed],
+                )
+        finally:
+            self._retries.release(mid for _, b in cut for mid in b.memcell_ids)
         return result
 
     async def _extract_retries(
@@ -867,7 +897,7 @@ class Memorizer:
             for segment in retries:
                 extracted = await self._extract_again(session, segment) or extracted
         finally:
-            self._retries.release(retries)
+            self._retries.release(segment.memcell_id for segment in retries)
         return extracted
 
     async def _extract_again(self, session: SessionKey, segment: FailedSegment) -> bool:
@@ -906,8 +936,8 @@ class Memorizer:
             memcell_id=segment.memcell_id,
             failures=segment.failures,
         )
+        await self._retries.extracted(segment.memcell_id)
         try:
-            await self._retries.extracted(segment)
             await self._bus.publish(outcome.events)
         except Exception as exc:
             logger.error(
@@ -948,28 +978,32 @@ class Memorizer:
                 boundary.memcell_ids, boundary.per_cell_message_ids, strict=True
             )
         }
-        for prepared in cells:
-            results = await asyncio.gather(
-                *(p.run_cell(ingested, prepared) for p in pipelines.values()),
-                return_exceptions=True,
-            )
-            for track, result in zip(pipelines, results, strict=True):
-                if isinstance(result, BaseException):
-                    _log_cell_failure(ingested, prepared, track, result)
-                    first_error = first_error or result
-                    if isinstance(result, Exception):
-                        await self._retries.failed(
-                            memcell_id=prepared.memcell_id,
-                            cell=prepared.cell,
-                            sender_ids=prepared.sender_ids,
-                            message_ids=message_ids.get(prepared.memcell_id, ()),
-                            group_id=ingested.group_id,
-                            picture_names=prepared.picture_names,
-                            failures=1,
-                        )
-                    continue
-                outcomes[track].append(result)
-                await self._bus.publish(result.events)
+        try:
+            for prepared in cells:
+                results = await asyncio.gather(
+                    *(p.run_cell(ingested, prepared) for p in pipelines.values()),
+                    return_exceptions=True,
+                )
+                for track, result in zip(pipelines, results, strict=True):
+                    if isinstance(result, BaseException):
+                        _log_cell_failure(ingested, prepared, track, result)
+                        first_error = first_error or result
+                        if isinstance(result, Exception):
+                            await self._retries.failed(
+                                memcell_id=prepared.memcell_id,
+                                cell=prepared.cell,
+                                sender_ids=prepared.sender_ids,
+                                message_ids=message_ids.get(prepared.memcell_id, ()),
+                                group_id=ingested.group_id,
+                                picture_names=prepared.picture_names,
+                                failures=1,
+                            )
+                        continue
+                    await self._retries.extracted(prepared.memcell_id)
+                    outcomes[track].append(result)
+                    await self._bus.publish(result.events)
+        finally:
+            self._retries.release(c.memcell_id for c in cells)
         if first_error is not None:
             raise first_error
 

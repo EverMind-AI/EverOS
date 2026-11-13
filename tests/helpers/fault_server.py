@@ -79,7 +79,10 @@ def install_pause(point: str, marker: Path) -> None:
     elif point == "episode_write":
         from everos.infra.persistence.markdown import MarkdownEpisodeStore
 
-        _before(MarkdownEpisodeStore, "append_many", marker)
+        # Every episode write goes through ``_append_many`` (``append`` too,
+        # which is what an extraction calls): wrapping ``append_many`` alone
+        # never stopped an extraction.
+        _before(MarkdownEpisodeStore, "_append_many", marker)
     elif point == "forget_log":
         from everos.service.memory._forget_apply import ForgetWriter
 

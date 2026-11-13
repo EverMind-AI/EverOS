@@ -15,8 +15,8 @@ Rules the implementation keeps:
 * a key is recorded (:meth:`Claim.commit`) once its batch is stored: a batch
   that fails before (its boundary call) records nothing, so its retry is taken
   in full; a cell whose extraction failed is stored, marked and extracted
-  again by its session's next add or flush, so its keys are recorded and a
-  retry of the batch skips its messages;
+  again by its session's next add or flush, so its keys are recorded, and a
+  retry of the batch in that session is the cell's retry;
 * a forget never removes a key: a forgotten message sent again stays
   forgotten, whichever session it comes back in;
 * a ``/memory/delete`` of a session (a forget of the whole session whose
