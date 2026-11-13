@@ -280,6 +280,28 @@ _INLINE_RE = re.compile(
 # H3 line: ``### Title``.
 _H3_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 
+# What a value written into an entry must not look like: a line that starts
+# a section (``###`` and a space, or ``###`` alone) and an entry marker. Each
+# is written behind one more backslash than it carries, and read back without
+# it, so any text round-trips (:func:`_escape` / :func:`_unescape`).
+_H3_LINE_ESCAPE = re.compile(r"^(\\*)(###)(?=\s|$)", re.MULTILINE)
+_H3_LINE_UNESCAPE = re.compile(r"^\\(\\*###)(?=\s|$)", re.MULTILINE)
+_MARKER_ESCAPE = re.compile(r"(<!--\s*)(\\*)(/?entry:)")
+_MARKER_UNESCAPE = re.compile(r"(<!--\s*)\\(\\*/?entry:)")
+
+
+def _escape(text: str) -> str:
+    """``text`` as an entry stores it: no line of it opens a section and no
+    marker in it opens or closes an entry (one backslash more in front)."""
+    text = _H3_LINE_ESCAPE.sub(r"\1\\\2", text)
+    return _MARKER_ESCAPE.sub(r"\1\\\2\3", text)
+
+
+def _unescape(text: str) -> str:
+    """The text :func:`_escape` was given back."""
+    text = _H3_LINE_UNESCAPE.sub(r"\1", text)
+    return _MARKER_UNESCAPE.sub(r"\1\2", text)
+
 
 @dataclass(frozen=True)
 class StructuredEntry(Entry):
@@ -316,7 +338,11 @@ def render_structured_entry(
             ``str()``.
         sections: ``{title: body}`` rendered as ``### Title`` plus the
             body text. Title is verbatim; body's trailing whitespace is
-            stripped.
+            stripped. A body line that would open a section (``### ...``) and
+            an entry marker inside any value are written behind one more
+            backslash and read back without it
+            (:func:`parse_structured_entry`), so no text can end its section
+            or its entry early.
 
     Returns:
         The rendered string, no trailing newline (the caller — typically
@@ -327,16 +353,16 @@ def render_structured_entry(
     lines: list[str] = []
 
     if header:
-        lines.append(f"## {header}")
+        lines.append(f"## {_escape(header)}")
         lines.append("")
 
     for key, value in inline.items():
-        lines.append(f"**{key}**: {_render_value(value)}")
+        lines.append(f"**{key}**: {_escape(_render_value(value))}")
 
     for title, body in sections.items():
         lines.append("")
         lines.append(f"### {title}")
-        lines.append(body.rstrip())
+        lines.append(_escape(body.rstrip()))
 
     return "\n".join(lines)
 
@@ -370,15 +396,15 @@ def parse_structured_entry(
     for i in range(1, len(parts), 2):
         title = parts[i].strip()
         content = parts[i + 1] if i + 1 < len(parts) else ""
-        sections_dict[title] = content.strip("\n").rstrip()
+        sections_dict[title] = _unescape(content.strip("\n").rstrip())
 
     header: str | None = None
     h2 = _H2_RE.search(head)
     if h2:
-        header = h2.group(1).strip()
+        header = _unescape(h2.group(1).strip())
 
     inline_dict: dict[str, str] = {
-        m.group("key").strip(): m.group("value").strip()
+        m.group("key").strip(): _unescape(m.group("value").strip())
         for m in _INLINE_RE.finditer(head)
     }
 

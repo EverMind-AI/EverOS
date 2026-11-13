@@ -1007,6 +1007,15 @@ machinery that keeps a deleted memory from coming back.
   makes a boundary call). Messages with one timestamp keep the order they
   arrived in; before, the id's index ordered them. A one-to-one `message`
   forget names a message by this id ([docs/api.md](docs/api.md#messageitem)).
+- **A `### ` line or an entry marker in a memory's text no longer cuts it
+  short.** The entry reader split sections on any line starting with `### `
+  and entries on any close marker, so an episode whose text held `### Day 2`
+  (or a summary with a heading, or a quoted `<!-- /entry:... -->`) kept its
+  full text in markdown while the index, `/memory/history` and every later
+  rewrite (update, forget, undo) read only the part before it, with nothing
+  logged. Such a line, and a marker anywhere in a value, are now written
+  behind one more backslash and read back without it; existing entries read
+  unchanged ([docs/storage_layout.md](docs/storage_layout.md#4-entry-id-encoding)).
 - **A segment whose extraction failed is extracted again, once.** Its
   memcell was committed and its messages left the buffer before the episode
   call ran; when that call failed (a provider's 5xx or timeout), nothing ever

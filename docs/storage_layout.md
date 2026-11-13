@@ -175,6 +175,16 @@ e.g. `ep_20260601_00000001`:
 Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/infra/persistence/markdown/_base/entries.py)
 (`EntryId.parse / format / next_for`).
 
+Inside an entry, `**key**: value` lines are its fields and each `### Title`
+line opens a section that runs to the next one. A memory's own text never
+looks like either: a line of it that starts with `###` and a space (or is
+`###` alone), and an entry marker inside it (`<!-- entry:` or
+`<!-- /entry:`), are written behind one more backslash than they carry
+(`\### Day 2`, `<!-- \/entry:...`) and read back without it, so any text --
+an episode with a `### Day 2` heading, a summary that quotes a marker --
+round-trips whole. Entries written before this rule hold no such escape and
+read as they always did.
+
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
 > appear across two different `user_id`s (each user has its own daily file).
 > Cross-table joins must therefore key on **`(app_id, project_id, owner_id, entry_id)`**
