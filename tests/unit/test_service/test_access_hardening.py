@@ -15,6 +15,8 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
   deliverer still backdate, and a time-ordered import joins as before;
 - ``audience = group`` intersects the windows of current people only: an
   assistant's implicit join hides nothing;
+- a group with no owner or admin is managed by its deliverer alone (a member
+  may still leave), and by the managers the deliverer adds;
 - with ``[access] identity_header`` set, a request without the header is
   refused.
 """
@@ -31,6 +33,7 @@ from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
+from everos.core.errors import ForbiddenError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import Episode
 from everos.memory.ports import NoSourceCheck
@@ -418,6 +421,110 @@ async def test_an_assistants_implicit_join_hides_nothing_from_audience_group(
     await world.project()
     read = await world.memory.search(_search("trip", "u_chen", audience="group"))
     assert "mk_before" not in _said(read)
+
+
+# -- B-3: a group without managers is managed by its deliverer -------------
+
+
+async def _club(world: GroupWorld) -> None:
+    """``club``: created by a batch without an asker (no owner, no admin)."""
+    await _add(
+        world,
+        "s_club",
+        _message("u1", T0 + 1000, "mk_early private"),
+        _message("u2", T0 + 2000, "mk_early ok"),
+        group_id="club",
+    )
+    await _add(world, "s_club", _message("u3", T0 + 9000, "hi"), group_id="club")
+
+
+async def test_a_member_of_a_group_without_managers_cannot_lift_their_window(
+    world: GroupWorld, client: AsyncClient
+) -> None:
+    await _club(world)
+    assert await _joined_at(world, "u3", "club") == T0 + 9000
+    put = {"project_id": PROJECT, "asker_id": "u3"}
+    for request in (
+        ("PUT", "/api/v2/groups/club", {**put, "history_visible_from": "creation"}),
+        ("PUT", "/api/v2/groups/club", {**put, "deliverer_id": "u3"}),
+        (
+            "POST",
+            "/api/v2/groups/club/roster",
+            {
+                **put,
+                "events": [
+                    {"op": "update", "member_id": "u3", "role": "owner", "at": T0},
+                    {"op": "join", "member_id": "u3_alt", "at": T0},
+                ],
+            },
+        ),
+        (
+            "POST",
+            "/api/v2/memory/delete",
+            {**put, "group_id": "club", "session_id": "s_club"},
+        ),
+    ):
+        method, path, body = request
+        answer = await client.request(method, path, json=body)
+        assert answer.status_code == 403, (path, answer.text)
+        assert "only its deliverer" in answer.json()["error"]["message"]
+    read = await world.memory.search(
+        _search("club", "u3", filters={"session_id": "s_club"})
+    )
+    assert "mk_early" not in _said(read)
+    # A member may still leave.
+    left = await client.post(
+        "/api/v2/groups/club/roster",
+        json={**put, "events": [{"op": "leave", "member_id": "u3", "at": T0 + 9500}]},
+    )
+    assert left.status_code == 200, left.text
+
+
+async def test_the_deliverer_manages_a_group_without_managers(
+    world: GroupWorld,
+) -> None:
+    """The owner leaves; the deliverer adds an admin, who manages from then on."""
+    await _managed_group(world)
+    await world.memory.change_roster(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id="trip",
+        asker_id="u_chen",
+        asserted_asker=None,
+        events=[world.roster_input(op="leave", member_id="u_chen", at=T0 + 100)],
+    )
+    with pytest.raises(ForbiddenError, match="only its deliverer"):
+        await _visible_from_creation(world, "u_betty")
+    await world.memory.change_roster(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id="trip",
+        asker_id=BOT,
+        asserted_asker=None,
+        events=[
+            world.roster_input(
+                op="update", member_id="u_betty", role="admin", at=T0 + 200
+            )
+        ],
+    )
+    changed = await _visible_from_creation(world, "u_betty")
+    assert changed.group.history_visible_from == "creation"
+
+
+async def _visible_from_creation(world: GroupWorld, asker: str) -> Any:
+    return await world.memory.upsert_group(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id="trip",
+        asker_id=asker,
+        asserted_asker=None,
+        name=None,
+        description=None,
+        created_at=None,
+        history_visible_from="creation",
+        extra=None,
+        roster=[],
+    )
 
 
 # -- B-5: a gateway's server serves no request without its header ---------

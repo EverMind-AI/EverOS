@@ -44,6 +44,8 @@ Rules the implementation must keep (section 9.1):
   (an assistant member is no audience);
 * an owner or admin role grants roster management and forgetting, never extra
   reading; a member may forget only what rests on their own messages;
+* a group with no owner or admin is managed by its deliverer alone (a member
+  may still leave): a member never lifts their own window;
 * a forgotten message is absent from every read of a session's buffer, as it
   is from every record a forget rewrote;
 * a group's deliverer (:func:`is_deliverer`, section 5.1) is its superadmin:
@@ -557,22 +559,21 @@ def authorize_manage(roster: Roster, asker_id: str | None) -> None:
     """Raise unless ``asker_id`` may change the group's meta or roster.
 
     Owners and admins may, and the group's deliverer. A group with no current
-    owner or admin at all (one created implicitly by a batch without an
-    asker) is managed by any current member, so that it is not locked
-    against every change.
+    owner or admin (one created by a batch without an asker) is managed by
+    its deliverer alone: a member could otherwise lift their own window --
+    open the history to every member, name themselves deliverer, or promote
+    themselves and backdate a join. Its deliverer, or a manager the deliverer
+    adds, manages it from then on.
 
     Raises:
         ForbiddenError: The asker is not a current member, or holds no
-            manager role in a group that has managers.
+            manager role.
     """
-    if is_deliverer(roster, asker_id):
+    if may_backdate(roster, asker_id):
         return
-    current = roster.current(asker_id) if asker_id else None
-    if current is None:
+    if (roster.current(asker_id) if asker_id else None) is None:
         raise ForbiddenError("the asker is not a current member of the group")
-    if current.role in MANAGER_ROLES or not roster.has_managers():
-        return
-    raise ForbiddenError("only an owner or admin may manage the group")
+    raise ForbiddenError(_manager_refusal(roster, "manage the group"))
 
 
 def authorize_roster_change(
@@ -583,18 +584,17 @@ def authorize_roster_change(
     Owners and admins may send any event, as may the group's deliverer (it
     mirrors the chat platform's membership); any member may send ``leave``
     for themselves, but not backdated -- an event earlier than the newest one
-    in the roster is a replay of history, which only managers may write.
+    in the roster is a replay of history, which only managers may write. In a
+    group with no owner or admin that is all a member may send: the rest is
+    its deliverer's (:func:`authorize_manage`).
 
     Raises:
         ForbiddenError: The asker may not send one of the events.
     """
-    if is_deliverer(roster, asker_id):
+    if may_backdate(roster, asker_id):
         return
-    current = roster.current(asker_id) if asker_id else None
-    if current is None:
+    if (roster.current(asker_id) if asker_id else None) is None:
         raise ForbiddenError("the asker is not a current member of the group")
-    if current.role in MANAGER_ROLES or not roster.has_managers():
-        return
     newest = max(
         (
             t
@@ -607,7 +607,17 @@ def authorize_roster_change(
     for event in events:
         if event.op == "leave" and event.member_id == asker_id and event.at >= newest:
             continue
-        raise ForbiddenError("only an owner or admin may change the roster")
+        raise ForbiddenError(_manager_refusal(roster, "change the roster"))
+
+
+def _manager_refusal(roster: Roster, action: str) -> str:
+    """The refusal of a member who is not a manager, naming who may ``action``."""
+    if roster.has_managers():
+        return f"only an owner or admin may {action}"
+    return (
+        f"the group has no owner or admin: only its deliverer may {action} "
+        "(a member may leave)"
+    )
 
 
 def authorize_edit(
