@@ -137,7 +137,8 @@ core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
 # Order of the core at the front of the result, which with more core than top_k
 # also decides which core items are kept: "score" = best RRF score over the
 # sub-queries; "round" = the round the decider kept the item in, earlier first,
-# then that score.
+# then that score. "round" ranks better on open-domain QA but answered
+# EverMemBench worse (2026-11-13), so "score" stays the default.
 core_order = "score"
 fallback_core = 3              # core size when every decider attempt fails
 fit_to_window = true           # re-render a prompt rejected as too long

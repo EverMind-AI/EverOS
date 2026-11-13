@@ -88,8 +88,13 @@ machinery that keeps a deleted memory from coming back.
   since the cap keeps its head. Replayed offline on the 2026-11-10 searches,
   `round` raised hit@1 on HotpotQA / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 /
   0.29 / 0.89 points for the RL-tuned 27B decider and by 0.03 / 0.63 / 0.66 /
-  0.06 for its base model; its effect on answer accuracy is not measured yet,
-  so it is opt-in (`EVEROS_DECIDER__CORE_ORDER=round`). No model call, no
+  0.06 for its base model. Answer accuracy with the base decider, re-answered
+  on every question whose returned core changes (2,781 questions, 12 memory
+  sets, same answer and judge models): no set improved significantly
+  (LoCoMo +0.13, LongMemEval +0.40, SubtleMemory +0.59 points) and
+  EverMemBench fell (pooled -1.04 points, p 0.07; t4 -3.04, p 0.04), so
+  `score` stays the default and `round` is opt-in for ranking-oriented use
+  (`EVEROS_DECIDER__CORE_ORDER=round`). No model call, no
   change to the decider's input; with the default, requests, results and
   traces are byte-identical to before
   ([docs/configuration.md](docs/configuration.md#decider)).
