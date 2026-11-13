@@ -24,7 +24,7 @@ Subclass usage::
 from __future__ import annotations
 
 import datetime as _dt
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -37,7 +37,6 @@ from everos.core.utils.datetime import (
     today_with_timezone,
 )
 from everos.infra.persistence.markdown._base.entries import (
-    Entry,
     EntryId,
     render_structured_entry,
     split_entries,
@@ -245,45 +244,13 @@ class BaseDailyWriter:
             )
             return eid
 
-    async def remove_entries(
-        self, path: Path, drop: Callable[[Entry], bool]
-    ) -> list[str]:
-        """Rewrite ``path`` without the entries ``drop`` selects; return their ids.
-
-        Under the file's lock, atomically. ``entry_count`` is kept at least
-        the highest sequence the file held before, and a file left with no
-        entries stays (its frontmatter carries the count): the next append
-        must not reuse a removed id. A missing file removes nothing; an
-        entry ``drop`` raises on (an unparsable, hand-edited one) is kept.
-        """
-        async with self._writer.locked(path):
-            try:
-                raw = await MarkdownReader.read_text(path)
-            except FileNotFoundError:
-                return []
-            meta, body = parse_frontmatter(raw)
-            entries = split_entries(body)
-            gone = [entry for entry in entries if _selected(drop, entry)]
-            if not gone:
-                return []
-            highest = max((_seq(entry.id) for entry in entries), default=0)
-            count = meta.get("entry_count", 0)
-            if not isinstance(count, int) or isinstance(count, bool):
-                count = 0
-            meta["entry_count"] = max(count, highest)
-            for entry in reversed(gone):  # offsets stay valid back to front
-                end = entry.end + (body[entry.end : entry.end + 1] == "\n")
-                body = body[: entry.start] + body[end:]
-            await self._writer.write_markdown(path, frontmatter=meta, body=body)
-            return [entry.id for entry in gone]
-
     async def take_entries(
         self, path: Path, entry_ids: Collection[str]
     ) -> list[tuple[str, str, str | None]]:
         """Remove ``entry_ids`` from ``path``; each as ``(id, body, mark)``.
 
-        :meth:`remove_entries` that hands back what it removed, so the caller
-        can keep it elsewhere and :meth:`put_back` it later: ``body`` is the
+        Hands back what it removed, so the caller can keep it elsewhere and
+        :meth:`put_back` it later: ``body`` is the
         text between the entry's markers exactly as the file held it, and
         ``mark`` the entry's own ``deprecated_entries`` value (dropped from the
         frontmatter with it). ``entry_count`` never falls, so no later append
@@ -571,13 +538,6 @@ def _insert_block(body: str, entry_id: str, entry_body: str) -> str:
     if body and not body.endswith("\n"):
         body += "\n"
     return body + block
-
-
-def _selected(drop: Callable[[Entry], bool], entry: Entry) -> bool:
-    try:
-        return drop(entry)
-    except Exception:  # a hand-edited entry that does not parse stays
-        return False
 
 
 def _seq(entry_id: str) -> int:

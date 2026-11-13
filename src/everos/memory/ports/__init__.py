@@ -70,7 +70,6 @@ from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import NoSourceCheck as NoSourceCheck
-from .stores import OwnerDirDeletion as OwnerDirDeletion
 from .stores import OwnerDirStore as OwnerDirStore
 from .stores import PendingBatch as PendingBatch
 from .stores import ProfileStore as ProfileStore
@@ -126,7 +125,6 @@ __all__ = [
     "MemoryRef",
     "MessageForgetStore",
     "NoSourceCheck",
-    "OwnerDirDeletion",
     "OwnerDirStore",
     "OwnerType",
     "Page",

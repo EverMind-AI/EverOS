@@ -18,7 +18,6 @@ __all__ = [
     "MemcellStore",
     "MemorizeInboxStore",
     "NoSourceCheck",
-    "OwnerDirDeletion",
     "OwnerDirStore",
     "ProfileStore",
     "SceneStore",
@@ -515,27 +514,10 @@ class GroupProfileStore(Protocol):
 # ── Owner directories ────────────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class OwnerDirDeletion:
-    """What deleting one owner's directory removed.
-
-    Attributes:
-        refs: The daily-log entries, by index table (``episode``,
-            ``image_memory``).
-        count: Entries, plus one for ``user.md``.
-    """
-
-    refs: Mapping[str, Sequence[MemoryRef]]
-    count: int
-
-
 @runtime_checkable
 class OwnerDirStore(Protocol):
-    """Whole owner directories: deletion and its crash recovery."""
-
-    async def delete(self, scope: Scope) -> OwnerDirDeletion:
-        """Remove the owner's directory, keeping today's id counters."""
-        ...
+    """Whole owner directories: who holds a conversation, and the trash of a
+    whole-owner deletion an earlier build left half done (2.0 deletes none)."""
 
     async def sweep_trash(self) -> int:
         """Finish deletions a crash interrupted; how many it finished."""

@@ -1,15 +1,15 @@
-"""Deleting one memory owner's whole directory.
+"""Owner directories: who holds a conversation, and an old deletion's trash.
 
-The directory is moved, in one rename under the owner's lock, into a
-per-deletion trash folder ``<root>/.tmp/delete-<random>/`` next to a
-``scope.json`` naming the owner. Still under the lock, today's daily-log
-files are put back empty, carrying their id counters: entries are only ever
-appended to today's file, and the next one must not reuse a deleted id.
-Then the lock is released, the trash is read (what was removed) and removed.
+EverOS 2.0 deletes no owner directory (a delete is a forget). Two things stay:
 
-A crash can stop this between any two steps. :meth:`sweep_trash` (run at
-startup, before anything writes) finishes every trash folder it finds: puts
-today's counters back where they are missing and removes the folder.
+* :meth:`MarkdownOwnerDirStore.owners_with_session` -- the users whose memory
+  holds a conversation, which a delete by ``session_id`` alone forgets in;
+* :meth:`MarkdownOwnerDirStore.sweep_trash` (run at startup, before anything
+  writes) finishes a whole-owner deletion an earlier build left half done: it
+  had moved the directory into ``<root>/.tmp/delete-<random>/`` next to a
+  ``scope.json`` naming the owner. Today's daily-log files go back empty,
+  carrying their id counters (the next entry must not reuse a deleted id),
+  and the trash folder is removed.
 """
 
 from __future__ import annotations
@@ -18,22 +18,19 @@ __all__ = ["MarkdownOwnerDirStore"]
 
 import json
 import shutil
-import uuid
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import anyio
 
 from everos.core.errors import PathTraversalError
-from everos.core.failpoints import failpoint
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence.memory_root import MemoryRoot
-from everos.memory.ports import MemoryRef, OwnerDirDeletion, Scope
+from everos.memory.ports import Scope
 
 from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
-from ._mds import UserProfileFrontmatter
 from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
@@ -44,9 +41,6 @@ from .stores import owner_lock
 
 logger = get_logger(__name__)
 
-_TABLE_OF = {"scene": "episode"}
-"""The index table of a daily-log kind whose rows live in another kind's
-table (a user's scene versions are rows of the episode table)."""
 _TRASH_PREFIX = "delete-"
 _MANIFEST = "scope.json"
 _MOVED = "owner"
@@ -61,8 +55,6 @@ class MarkdownOwnerDirStore:
 
     def __init__(self, root: MemoryRoot) -> None:
         self._root = root
-        self._emptying: set[Path] = set()
-        """Trash folders a deletion is inventorying and removing right now."""
         self._md = MarkdownWriter(root)
         self._logs: dict[str, dict[str, BaseDailyWriter]] = {
             "user": {
@@ -71,62 +63,6 @@ class MarkdownOwnerDirStore:
                 "scene": SceneWriter(root),
             },
         }
-
-    async def delete(self, scope: Scope) -> OwnerDirDeletion:
-        owner_dir = self._owner_dir(scope)
-        key = owner_lock(scope)
-        trash = self._root.tmp_dir / f"{_TRASH_PREFIX}{uuid.uuid4().hex}"
-        async with LOCKS.hold("owner", key):
-            # An attempt that failed after its rename left the directory in
-            # the trash: this one, the same request again, finishes it.
-            moved = [
-                t
-                for t, held in self._trash_folders()
-                if held == scope and t not in self._emptying
-            ]
-            for earlier in moved:
-                await self._keep_today_counters(scope, earlier / _MOVED)
-            if await anyio.Path(owner_dir).is_dir():
-                await self._move(scope, owner_dir, trash)
-                moved.append(trash)
-            if not moved:
-                return OwnerDirDeletion(refs={}, count=0)
-            LOCKS.bump_delete_count(key)
-            self._emptying.update(moved)
-        return await self._empty(scope, moved)
-
-    async def _move(self, scope: Scope, owner_dir: Path, trash: Path) -> None:
-        """Move the owner's directory into ``trash``; today's counters stay."""
-        await anyio.Path(trash).mkdir(parents=True)
-        await anyio.Path(trash / _MANIFEST).write_text(
-            json.dumps(
-                {
-                    "app_id": scope.app_id,
-                    "project_id": scope.project_id,
-                    "owner_type": scope.owner_type,
-                    "owner_id": scope.owner_id,
-                }
-            ),
-            encoding="utf-8",
-        )
-        await anyio.Path(owner_dir).rename(trash / _MOVED)
-        failpoint("delete_owner.after_rename")
-        await self._keep_today_counters(scope, trash / _MOVED)
-        failpoint("delete_owner.after_restore")
-
-    async def _empty(self, scope: Scope, moved: Sequence[Path]) -> OwnerDirDeletion:
-        """Inventory the trash folders, then remove them."""
-        try:
-            parts = [await self._inventory(scope, t / _MOVED) for t in moved]
-            for trash in moved:
-                await anyio.to_thread.run_sync(shutil.rmtree, trash)
-        finally:
-            self._emptying.difference_update(moved)
-        refs: dict[str, list[MemoryRef]] = {}
-        for part in parts:
-            for table, found in part.refs.items():
-                refs.setdefault(table, []).extend(found)
-        return OwnerDirDeletion(refs=refs, count=sum(p.count for p in parts))
 
     def _trash_folders(self) -> list[tuple[Path, Scope | None]]:
         """Every trash folder with the owner it holds (``None``: nothing moved)."""
@@ -189,9 +125,7 @@ class MarkdownOwnerDirStore:
     def _base(self, owner_type: str, app_id: str, project_id: str) -> Path:
         if owner_type == "user":
             return self._root.users_dir(app_id, project_id)
-        # A group's directory is never deleted wholesale: group deletion is a
-        # propagated forget (docs/group-memory.md, section 9.4), not a rename.
-        raise ValueError(f"no owner directory deletion for {owner_type!r} owners")
+        raise ValueError(f"no owner directory for {owner_type!r} owners")
 
     def _owner_dir(self, scope: Scope) -> Path:
         """The owner's directory; refuses one that resolves anywhere else.
@@ -258,34 +192,6 @@ class MarkdownOwnerDirStore:
             }
             frontmatter["entry_count"] = count
             await self._md.write_markdown(live, frontmatter=frontmatter, body="")
-
-    async def _inventory(self, scope: Scope, moved: Path) -> OwnerDirDeletion:
-        """What the moved directory held, with refs at their old paths."""
-        owner_dir = self._owner_dir(scope)
-        refs: dict[str, list[MemoryRef]] = {}
-        count = 0
-        for kind, writer in self._logs[scope.owner_type].items():
-            folder = writer.path_for(
-                scope.owner_id, app_id=scope.app_id, project_id=scope.project_id
-            ).parent.relative_to(owner_dir)
-            found: list[MemoryRef] = []
-            for path in sorted((moved / folder).glob("*.md")):
-                md_path = (owner_dir / path.relative_to(moved)).relative_to(
-                    self._root.root
-                )
-                for entry in (await MarkdownReader.read(path)).entries:
-                    found.append(
-                        MemoryRef(
-                            id=f"{scope.owner_id}_{entry.id}",
-                            entry_id=entry.id,
-                            md_path=md_path.as_posix(),
-                        )
-                    )
-            refs.setdefault(_TABLE_OF.get(kind, kind), []).extend(found)
-            count += len(found)
-        if (moved / UserProfileFrontmatter.PROFILE_FILENAME).is_file():
-            count += 1
-        return OwnerDirDeletion(refs=refs, count=count)
 
 
 def _counter(raw: object, entries: Sequence[Entry]) -> int:
