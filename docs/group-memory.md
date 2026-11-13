@@ -66,7 +66,7 @@ marks the places where 2.0 replaces an EverMemOS design.
 | D11 | Relational expansion follows stored links (scene, decision chain, subjects), not the request's wording, and keeps the decider's candidate format. | New. |
 | D12 | Search returns a constraint block (subject, scope, status, source quote) built first from write-time verified items. | New. |
 | D13 | Forget and delete travel along sources; forgetting a message re-extracts the segment without it. | Adapted from the 2.0 picture forget. |
-| D14 | Without `group_id` a one-person conversation runs the existing one-to-one path unchanged; a session of two or more people is their implicit group (section 7.9, amended 2026-11-12). | Adapted: EverMemOS used an `assistant` scene for one-to-one chats. |
+| D14 | Without `group_id` a conversation of one or two people runs the existing one-to-one path unchanged -- one extraction per segment, a copy in each person's own memory, a personal profile update per person; a session of three or more people is their implicit group (section 7.9; amended 2026-11-12, when two people became a group, and 2026-11-13, when they stopped being one). | Adapted: EverMemOS used an `assistant` scene for one-to-one chats. |
 | D15 | Step 1 adds no prompt text; Step 2's two new prompts live in EverOS's prompt registry for 2.0 and move to everalgo afterwards. | Adapted: EverMemOS kept its group prompts in-tree. |
 | D16 | Stores that ingested a group under one user are rebuilt from raw conversations, not converted. | n/a |
 | D17 | Profile items read from a picture go to the picture's poster only, on every path. | n/a (fixes a 2.0 development-line leak). |
@@ -416,7 +416,8 @@ copy. A message is a **duplicate** when its group already holds it:
   retry is taken in full. Two batches of one group that carry the same
   message at the same time store it once: the second waits for the first.
 - **Where.** Explicit groups and implicit groups of three or more people.
-  Never a one-to-one session: its path is unchanged
+  Never a session of one or two people without `group_id`, which is no
+  group: its path is unchanged
   ([Section 10](#10-one-to-one-conversations-stay-unchanged)).
 - **Cost.** One indexed `system.db` read per group batch (the `group_message`
   ledger, [Section 6.2](#62-sqlite)), one write once it is stored; no model
@@ -723,6 +724,7 @@ new is embedded.
 | 2.0 stores built before group support | Open as before. SQLite gains the new tables and nullable columns at startup; LanceDB gains the new columns in one versioned step of `migrate_table_schemas` (`src/everos/infra/persistence/lancedb/backend.py:257`), fail-loud, with `everos cascade rebuild` as recovery. Existing rows read `subject_ids = []`, `origin = null`, `source_start = source_end = timestamp`. The step is table schema version 4 (`_TABLE_SCHEMA_VERSION`). Milvus has no such step yet: a Milvus store reports schema drift and needs `everos cascade rebuild`. |
 | 2.0 stores built before the deliverer and the dedupe ledger | Open as before, without a rebuild: startup adds `group_meta.deliverer_id` (every group reads as having none) and creates `group_message`. The ledger starts empty: a message a group took before it is not known as held, so the same message sent again later is taken once more; everything taken from then on is deduplicated. |
 | Stores where a whole group chat was ingested under one user id (for example benchmark stores built with one owner per conversation) | Not converted. The per-sender copies and cross-owner items cannot be split back reliably, and a converter would have to guess membership. Rebuild from the raw conversations with `group_id`. |
+| Stores written between 2026-11-12 and 2026-11-13, when two people talking without `group_id` were an implicit group | Not converted. A session already bound to two people's implicit group stays that group's (later batches go to it, D18); every other session of two people gets a copy per person. Rebuild from the raw conversations for per-person copies throughout. |
 
 The cascade's owner resolution must learn `groups/` (owner type `group`, id from
 the `group_id` frontmatter field) before any group file is written; today it
@@ -734,8 +736,8 @@ would index such a file as a user ([Section 2](#2-the-code-today)).
 
 ### 7.1 Flow
 
-For a batch with `group_id` -- or a batch whose session holds two or more
-people, which is their implicit group ([Section 7.9](#79-implicit-groups-two-people-are-a-group-too))
+For a batch with `group_id` -- or a batch whose session holds three or more
+people, which is their implicit group ([Section 7.9](#79-implicit-groups-three-or-more-people))
 -- the 2.0 write steps run as follows:
 
 1. **Receive.** Validate; bind the session to the group (409 on conflict);
@@ -963,10 +965,11 @@ personal state. The state only affects ranking; it never returns content.
 ### 7.8 Cost
 
 Per segment with `s` distinct human senders (the left column is what a session
-of several people without `group_id` cost until 2026-11-12; such a session now
-takes the group path, as its implicit group):
+without `group_id` costs: one or two people, `s <= 2`, each keeping a copy, as
+before 2026-11-12 and again since 2026-11-13; the right column is a declared
+group's, and an implicit group's of three or more people):
 
-| Work | Per-sender copies (until 2026-11-12) | Group path |
+| Work | Per-sender copies (one or two people) | Group path |
 |---|---|---|
 | Episode extraction calls | 1 | 1 |
 | Episode entries, index rows | `s` | 1 |
@@ -979,24 +982,27 @@ takes the group path, as its implicit group):
 The [GroupAssistBench](#131-groupassistbench) cost probe measures the real
 numbers per message before any full build.
 
-### 7.9 Implicit groups: two people are a group too
+### 7.9 Implicit groups: three or more people
 
-Decided 2026-11-12. A session sent without `group_id` whose messages come from
-two or more people is not a one-to-one conversation, so it is not remembered as
-one. Until then its segments were extracted once and written once per human
-sender, each person owning a full copy (and a profile update per sender per
-segment); now the session is the implicit group of its people and takes the
-group path of [Section 7.1](#71-flow) unchanged.
+Decided 2026-11-12, amended 2026-11-13. A session sent without `group_id`
+whose messages come from three or more people is not a conversation of one
+or two people, so it is not remembered as one: it is the implicit group of
+its people and takes the group path of [Section 7.1](#71-flow) unchanged.
+From 2026-11-12 to 2026-11-13 two people were a group too; two people are
+not a group any more: each keeps a copy of every segment in their own
+memory, from one extraction call, with a personal profile update per person
+-- the one-to-one path of [Section 10](#10-one-to-one-conversations-stay-unchanged),
+as before 2026-11-12.
 
 - **When.** The people are the role `user` senders of the batch and of the
-  session's open buffer together. Two or more, for a session not bound to a
+  session's open buffer together. Three or more, for a session not bound to a
   group, make it their implicit group under the session lock, before anything
-  of the batch is written. One person, with or without the assistant, stays
-  one-to-one ([Section 10](#10-one-to-one-conversations-stay-unchanged)).
+  of the batch is written. One or two people, with or without the assistant,
+  stay on the one-to-one path.
 - **Id.** `implicit_` followed by 32 hex digits of the SHA-256 of the sorted,
   distinct people's ids joined by newlines: path-safe, fixed length, and the
-  same for every session between the same people, so two people share one
-  group across their conversations. The prefix is reserved: `/memory/add`
+  same for every session between the same people, so the same people share
+  one group across their conversations. The prefix is reserved: `/memory/add`
   with such a `group_id`, `PUT /groups/{id}` and `POST /groups/{id}/roster`
   on one answer 422. Reads, forgets and updates address it by its id like any
   group's.
@@ -1008,18 +1014,28 @@ group path of [Section 7.1](#71-flow) unchanged.
   `sender_name`). The group has no owner or admin, so, as in any group without
   managers ([Section 9.1](#91-rules)), each member may forget anything in it.
 - **The session.** It is bound to the group (D18) like a declared group's;
-  later batches inherit the binding. When a second person arrives in a
-  session that was one-to-one, the open buffer is not cut: what it holds goes
-  with the group (a streaming client's first message would otherwise become
-  a one-message personal episode); segments already cut stay the first
-  person's own.
-- **A third person later.** The people are the group's identity, so a batch
-  in which a person who is not a member speaks into a session bound to an
-  implicit group is refused with 409 before anything is written. The client
-  sends the new conversation as a new session, which is the implicit group of
-  its own people, or names a `group_id`. Admitting the newcomer into the
-  pair's group would show them every later conversation of the pair (the id
-  maps the pair's next session to the same group); moving the session to the
+  later batches inherit the binding.
+- **A third person joining two people.** A session of two people is not
+  bound to anything, so a third person who speaks in it is admitted by the
+  rule above: once the batch and the open buffer hold the three of them, the
+  session becomes their group from that batch on. The open buffer is not cut
+  and goes with the group (a streaming client's messages would otherwise
+  become a sliver of a personal episode); segments already cut stay the two
+  people's own copies, which the newcomer never reads. A third person who
+  speaks while the buffer holds only one of the two makes a segment of two
+  people, a copy each, until the three of them meet in the buffer. Decided
+  2026-11-13, rather than refusing the third person (409, a new session for
+  the three): a two-person session is no group whose people the newcomer
+  would change, a streaming three-person chat sends its third speaker into a
+  session of two, and this is the rule a one-person session followed when a
+  second person made it a group.
+- **A newcomer to a group.** The people are an implicit group's identity, so
+  a batch in which a person who is not a member speaks into a session bound
+  to an implicit group is refused with 409 before anything is written. The
+  client sends the new conversation as a new session, which is the implicit
+  group of its own people, or names a `group_id`. Admitting the newcomer
+  would show them every later conversation of the group (the id maps the
+  same people's next session to the same group); moving the session to the
   new group would split one session across two groups, which the
   session-keyed forget, message-forget and buffer reads do not support
   ([Section 9.4](#94-forget-and-delete-propagation)). An assistant first seen
@@ -1027,17 +1043,22 @@ group path of [Section 7.1](#71-flow) unchanged.
 - **What follows.** One episode per segment under `groups/<id>/`, the members'
   profiles in the group from each member's own segments, the group profile and
   the group's scenes ([Sections 7.2-7.7](#72-group-episode)). The personal
-  profile is no longer fed by such sessions: group content never feeds
-  personal memory. A person reads the group as a member: a group search with
+  profile is not fed by such sessions: group content never feeds personal
+  memory. A person reads the group as a member: a group search with
   `asker_id`, or their personal search with `include_groups`
-  ([Section 8.8](#88-a-personal-search-over-the-users-groups)).
-- **Cost.** Per segment of a two-person session, the write side goes from
-  one extraction call plus two profile updates (one per person) to one
-  extraction call, `2 / member_profile_every` member-profile updates and
+  ([Section 8.8](#88-a-personal-search-over-the-users-groups)). Two people
+  read their conversation from their own memory: a plain personal search or
+  get, no `include_groups` needed.
+- **Cost.** Per segment of a two-person session: one extraction call and two
+  personal profile updates (one per person), the cost before 2026-11-12;
+  from 2026-11-12 to 2026-11-13 it was one extraction call,
+  `2 / member_profile_every` member-profile updates and
   `1 / group_profile_batch` group-profile updates, amortised, plus one at each
-  flush. The read side is unchanged for a one-person conversation; a person
-  reading the pair's memory with `include_groups` pays the reads of
-  [Section 8.8](#88-a-personal-search-over-the-users-groups) (no model call).
+  flush. A session of three or more people pays the group path of
+  [Section 7.8](#78-cost). The read side of a one-person conversation is
+  unchanged; a person reading a group of three or more with `include_groups`
+  pays the reads of [Section 8.8](#88-a-personal-search-over-the-users-groups)
+  (no model call).
 
 ---
 
@@ -1373,6 +1394,13 @@ What stays removal, and why: a member target deletes the member's profile
 emptied document would still say who the member was, when, and which of
 their segments wait for an update.
 
+Two people without `group_id` are no group (D14): each person's forget acts
+on their own copies -- a session, a record, a picture, a time range or
+everything -- and leaves the other person's untouched. A user's `message`
+target is refused there (422): both copies are read from one buffer and one
+set of segments, so forgetting a message would change the other person's
+memory too.
+
 ---
 
 ## 10. One-to-one conversations stay unchanged
@@ -1380,10 +1408,14 @@ their segments wait for an update.
 - A batch without `group_id`, for a session that is not bound to a group and
   holds one person (with or without the assistant), runs today's path: same
   extraction, same files under `users/<sender>/`, same index rows.
-- A batch without `group_id` whose session holds two or more people is their
-  implicit group ([Section 7.9](#79-implicit-groups-two-people-are-a-group-too),
-  2026-11-12): one episode per segment under `groups/`, read by its people as
-  members. The per-sender copies of such a session are gone.
+- Two people without `group_id` run the same path: one extraction per
+  segment, a copy of it -- episode, picture memories, event -- under each
+  person's `users/<sender>/`, and a personal profile update per person (D14,
+  amended 2026-11-13; from 2026-11-12 to 2026-11-13 such a session was their
+  implicit group).
+- A batch without `group_id` whose session holds three or more people is their
+  implicit group ([Section 7.9](#79-implicit-groups-three-or-more-people)):
+  one episode per segment under `groups/`, read by its people as members.
 - Search, get and forget with `user_id` behave as today; `asker_id` is optional
   and defaults to the owner. `include_groups` ([Section 8.8](#88-a-personal-search-over-the-users-groups))
   is off unless a request sets it; without it the request, the response and
@@ -1398,8 +1430,9 @@ their segments wait for an update.
   (a LongMemEval-shaped chat and a picture chat) produce byte-identical
   markdown and identical index rows before and after the change, and the full
   LongMemEval runs score the same within run-to-run noise. The golden's LoCoMo
-  excerpt (two people) pins their implicit group instead; LoCoMo, two speakers
-  per conversation, is re-measured on it.
+  excerpt (two people) pins the per-sender copies again (2026-11-13; it pinned
+  their implicit group from 2026-11-12): LoCoMo, two speakers per
+  conversation, is read from each speaker's own memory as before.
 
 ---
 
@@ -1906,10 +1939,10 @@ Step 2 differs from the text above in these places:
 - **Message ids.** A group batch's `messages[].message_id` is the message's
   id in its segment; without one the generated id stays. A group batch
   names `group_id`, arrives in a session bound to a group, or brings the
-  session to two or more people (their implicit group); a batch of one
-  person's session keeps the generated id (`m_<session_id>_<epoch ms>_<index
-  in the batch>`) whatever it sends. A message forget names the id the
-  memory holds (2026-11-13).
+  session to three or more people (their implicit group); a batch of one or
+  two people's session keeps the generated id (`m_<session_id>_<epoch
+  ms>_<index in the batch>`) whatever it sends. A message forget names the
+  id the memory holds (2026-11-13).
 - **Forget (task 12).** Profile items that may quote a forgotten message are
   removed at once and rewritten from their remaining segments by the next
   update (absent until then, not marked stale). Targets: `message`,
@@ -2005,8 +2038,9 @@ Step 2 differs from the text above in these places:
   every segment, in its session's space: a group's (declared or implicit:
   roster block, speaker labels, attribution, forgotten messages left out,
   pictures dated by their message and attributed to their poster, and the
-  re-extraction a forget runs) or one person's own (the one-to-one prompt and
-  records, byte for byte). The language block, the extraction call, picture
+  re-extraction a forget runs) or each person's own (the one-to-one prompt and
+  records, byte for byte; two people without `group_id` get a copy each from
+  the one call, 2026-11-13). The language block, the extraction call, picture
   persistence and episode persistence are one code path.
 - **One event.** `EpisodeExtracted` carries `owner_type`, and for a group the
   human `speaker_ids` and the `group_key` the idle trigger buckets on;

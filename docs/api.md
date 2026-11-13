@@ -1442,7 +1442,7 @@ A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
 |---|---|---|
 | `record` | `record_ids` (1..100) | the records by id, of any kind: an episode, a picture memory (its current version), a scene (its current version, and its cluster, so it does not grow back), a profile item or a replaced value |
 | `session` | `session_id` | the conversation's current episodes and picture memories |
-| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations (one bound to no group), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<index in its batch, 3 digits>`, not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, and a buffered one is never read |
+| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations with the assistant (one bound to no group, with no other person in it: in two people's conversation it answers `422`, as forgetting a message would change the other person's copy too), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<index in its batch, 3 digits>`, not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, and a buffered one is never read |
 | `owner` | — | every current episode, picture memory and scene of the user, and the whole profile: items, replaced values, summary |
 | `condition` | `memory_types` (`episode`, `image_memory`, `scene`, `profile`), `start` and/or `end` (epoch ms, `[start, end)`) | the memories of those kinds whose time falls in the range (a profile item by when it was observed) |
 | `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference |
@@ -1486,7 +1486,7 @@ target forgets those message ids for good, until its undo).
 A group's body (`group_id`, `asker_id`, `target` of kind `message`,
 `member`, `session`, `record` or `image`, `reason`, `dry_run`) forgets
 inside the group ([group-memory.md](group-memory.md), section 5.5), also a dry
-run by default; two people's implicit group takes the same body. One engine
+run by default; an implicit group takes the same body. One engine
 serves both: a forget marks (in a group too), a picture's forget is a text
 edit with no model call, and a message's re-extracts the segments that keep
 text. The picture body of 1.x (`user_id` + `image_id`, no `target`) is a
@@ -1683,16 +1683,20 @@ a batch's messages count as held once it is stored and its own segments
 extracted, so a failed batch's retry is taken in full. A `/memory/delete` of a
 session releases its messages, so the conversation sent again is taken as
 before. Explicit groups and implicit groups of three or more people; never a
-one-to-one session. A sender who is not a member joins at their first
+session of one or two people. A sender who is not a member joins at their first
 message (`[groups] implicit_join`); an unknown group is created
 (`[groups] implicit_create`). Group messages never become per-sender personal
-memory. A batch without `group_id` whose session holds two or more people
-(role `user` senders) is their implicit group: `implicit_<hash>`, the same for
-every session between the same people, created with them (and the assistant)
-as members and history visible from creation; a person who first speaks in
-such a session later is `409`, and a client never names an `implicit_` group
-on `/memory/add`, `PUT /groups/{id}` or the roster route (`422`). See
-[group-memory.md, section 7.9](group-memory.md#79-implicit-groups-two-people-are-a-group-too).
+memory. A batch without `group_id` whose session holds three or more people
+(role `user` senders, in the batch and the open buffer) is their implicit
+group: `implicit_<hash>`, the same for every session between the same people,
+created with them (and the assistant) as members and history visible from
+creation; a person who first speaks in such a session later is `409`, and a
+client never names an `implicit_` group on `/memory/add`, `PUT /groups/{id}`
+or the roster route (`422`). Two people without `group_id` are no group: each
+keeps a copy of every segment in their own memory, as one person does, and a
+third person who joins their session makes it the three's group from that
+batch on (earlier segments stay the two people's copies). See
+[group-memory.md, section 7.9](group-memory.md#79-implicit-groups-three-or-more-people).
 
 `/memory/search` and `/memory/get` take `group_id` or `group_ids` (one pool)
 with `asker_id` and `audience` (`asker`, default; `group`: only what every

@@ -12,6 +12,23 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **Implicit groups start at three people; two people keep their own
+  copies.** A session sent without `group_id` becomes the implicit group of
+  its people (`implicit_<hash>`, the same for every session between the same
+  people) once three or more people -- the role `user` senders of the batch
+  and the open buffer -- talk in it. One or two people stay on the one-to-one
+  path: one extraction call per segment, a copy of it (episode, picture
+  memories, event) in each person's own memory and a personal profile update
+  per person, read with a plain personal search or get (from 2026-11-12 to
+  2026-11-13 two people were an implicit group). A third person who joins two
+  people's session makes it the three's group from the batch in which the
+  three meet in the open buffer; the earlier segments stay the two people's
+  copies. A newcomer to an implicit group is refused (`409`), as before. In
+  two people's conversation every forget acts on the asker's copies only,
+  and a user's `message` forget answers `422` (both copies are read from one
+  buffer and one set of segments). A session bound to two people's implicit
+  group by a build of those two days stays that group's
+  ([docs/group-memory.md](docs/group-memory.md#79-implicit-groups-three-or-more-people)).
 - **One forget and undo engine for a user's memory and a group's.** Every
   forget is planned (a dry run answers the plan), applied, logged in one
   format and undone by its `forget_id`, whatever the owner or the target.

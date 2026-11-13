@@ -406,11 +406,13 @@ quarantine of a session the model keeps failing to segment. It reads chat
 rows only: a tool row and an assistant message carrying `tool_calls` are
 dropped before anything is buffered or cut, so every memcell is a slice of a
 chat (`raw_type` `Conversation`). Every cell goes to `ConversationPipeline`,
-which writes one episode in the session's space: under `groups/<group_id>/`
-for a session bound to a group -- declared, or the implicit group of a
-session of two or more people -- with speakers labelled by their roster names
-and the attribution fields set by code (`pipeline/group_render.py`); under
-`users/<sender>/` for one person's conversation with the assistant. Why in the
+which writes each cell in the session's space: once under
+`groups/<group_id>/` for a session bound to a group -- declared, or the
+implicit group of a session of three or more people -- with speakers labelled
+by their roster names and the attribution fields set by code
+(`pipeline/group_render.py`); once under each person's `users/<sender>/` for
+one person's conversation with the assistant or two people's without a
+`group_id` (one extraction call either way). Why in the
 domain: deciding where an episode ends is a memory rule, and keeping it out
 of the service lets it be tested against in-memory stores and a scripted
 model. `llm_retry.py` centralizes the host's retry of `LLMOutputError` for
