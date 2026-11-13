@@ -41,6 +41,7 @@ from everos.memory.ports import (
     OwnerDirStore,
     ProfileIndex,
     ProfileStore,
+    ProjectLinkStore,
     SceneStore,
     SessionBufferStore,
     SessionPurgeStore,
@@ -66,6 +67,8 @@ class Stores:
     owner_dir: OwnerDirStore
     session_purge: SessionPurgeStore
     groups: GroupStore
+    project_links: ProjectLinkStore
+    """Which groups belong to a project (docs/group-memory.md, section 4.4)."""
     scene: SceneStore
     group_profile: GroupProfileStore
     message_forget: MessageForgetStore

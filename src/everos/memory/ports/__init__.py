@@ -31,6 +31,7 @@ from .indexes import GroupProfileIndex as GroupProfileIndex
 from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
 from .indexes import ProfileIndex as ProfileIndex
+from .projects import ProjectLinkStore as ProjectLinkStore
 from .query import All as All
 from .query import AnyOf as AnyOf
 from .query import Comparison as Comparison
@@ -132,6 +133,7 @@ __all__ = [
     "PendingBatch",
     "ProfileIndex",
     "ProfileStore",
+    "ProjectLinkStore",
     "Scalar",
     "SceneStore",
     "Scope",

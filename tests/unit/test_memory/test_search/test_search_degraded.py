@@ -22,6 +22,7 @@ from everalgo.testing import FakeLLMClient
 from everos.component.llm.openai_provider import RawReply
 from everos.component.tokenizer import Tokenizer
 from everos.config.settings import DeciderSettings
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.memory.access import AccessPolicy
 from everos.memory.models import CanonicalMessage
 from everos.memory.ports import SearchHit, SessionKey, all_of, eq
@@ -89,8 +90,9 @@ class _RawEndpoint:
 
 
 def _manager(decider_client: Any, rows: list[SearchHit[Any]]) -> SearchManager:
+    groups = InMemoryGroupStore()
     return SearchManager(
-        access=AccessPolicy(InMemoryGroupStore()),
+        access=AccessPolicy(groups, projects=PartitionProjectLinkStore(groups)),
         episode_recaller=EpisodeRecaller(
             RecallerDeps(tokenizer=_tokenizer()),
             ScriptedIndex(sparse=rows, dense=rows, found=rows),  # type: ignore[arg-type]

@@ -370,8 +370,13 @@ def build_application(
         fence=fence,
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
-    # The one access policy every read path asks (docs/group-memory.md, D9).
-    access = AccessPolicy(stores.groups, forgotten=stores.message_forget)
+    # The one access policy every read path asks (docs/group-memory.md, D9);
+    # a project's groups are the project links' answer (section 4.4).
+    access = AccessPolicy(
+        stores.groups,
+        projects=stores.project_links,
+        forgotten=stores.message_forget,
+    )
     # Searches count the decider's rounds into it; /health reports it.
     decider_status = _decider_status(settings, providers)
     memory = _build_memory_service(
@@ -603,7 +608,11 @@ def _build_memory_service(
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     # The one access policy every read path asks (docs/group-memory.md, D9).
-    access = access or AccessPolicy(stores.groups, forgotten=stores.message_forget)
+    access = access or AccessPolicy(
+        stores.groups,
+        projects=stores.project_links,
+        forgotten=stores.message_forget,
+    )
     return MemoryService(
         index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),

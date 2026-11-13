@@ -44,7 +44,8 @@ from tests.helpers.groups import GroupWorld, join
 
 async def _read_scope(world: GroupWorld, asker: str) -> Filter:
     """The predicate the access policy compiles for ``asker`` reading ``trip``."""
-    scope = await AccessPolicy(world.stores.groups).read_scope(
+    policy = AccessPolicy(world.stores.groups, projects=world.stores.project_links)
+    scope = await policy.read_scope(
         resolve_identity(header=None, body_asker=asker),
         ScopeRequest(project_id="p", group_ids=("trip",)),
     )

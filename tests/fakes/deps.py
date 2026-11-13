@@ -17,6 +17,7 @@ from typing import Any
 from everalgo.testing import FakeLLMClient
 
 from everos.component.images import ImageLimits
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
 from everos.memory.models import Episode, MemCell
@@ -63,7 +64,12 @@ def unscripted_llm() -> FakeLLMClient:
 
 
 def make_stores(**overrides: Any) -> Stores:
-    """Fresh in-memory stores; keyword arguments replace single stores."""
+    """Fresh in-memory stores; keyword arguments replace single stores.
+
+    The project links follow the partition rule over the ``groups`` store,
+    the one given or the fresh one, as the bootstrap's do.
+    """
+    groups = overrides["groups"] if "groups" in overrides else InMemoryGroupStore()
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeStore(),
         "image_memory": InMemoryImageMemoryStore(),
@@ -76,7 +82,8 @@ def make_stores(**overrides: Any) -> Stores:
         "memorize_inbox": UnusedPort("memorize_inbox"),
         "owner_dir": UnusedPort("owner_dir"),
         "session_purge": UnusedPort("session_purge"),
-        "groups": InMemoryGroupStore(),
+        "groups": groups,
+        "project_links": PartitionProjectLinkStore(groups),
         "scene": InMemorySceneStore(),
         "group_profile": InMemoryGroupProfileStore(),
         "message_forget": InMemoryMessageForgetStore(),

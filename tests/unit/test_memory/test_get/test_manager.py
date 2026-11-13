@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.infra.persistence.index.adapters import (
     EpisodeIndexAdapter,
     ProfileIndexAdapter,
@@ -148,8 +149,9 @@ def manager(
     profile_repo: _ProfileStubRepo,
 ) -> tuple[GetManager, _StubRepo]:
     ep = _StubRepo()
+    groups = InMemoryGroupStore()
     mgr = GetManager(
-        access=AccessPolicy(InMemoryGroupStore()),
+        access=AccessPolicy(groups, projects=PartitionProjectLinkStore(groups)),
         episode_index=EpisodeIndexAdapter(ep),  # type: ignore[arg-type]
         profile_index=ProfileIndexAdapter(profile_repo),  # type: ignore[arg-type]
     )

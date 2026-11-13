@@ -11,7 +11,7 @@ External usage::
 
     from everos.memory.access import AccessPolicy, ScopeRequest, resolve_identity
 
-    policy = AccessPolicy(stores.groups)
+    policy = AccessPolicy(stores.groups, projects=stores.project_links)
     scope = await policy.read_scope(
         resolve_identity(header=None, body_asker="u_betty"),
         ScopeRequest(project_id="spring-offsite", group_ids=("trip-team",)),

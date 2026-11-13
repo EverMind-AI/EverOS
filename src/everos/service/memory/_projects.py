@@ -1,8 +1,11 @@
 """Project reads: the groups of a project an asker is in (docs/group-memory.md, 8.7).
 
-A project is the ``project_id`` partition used as a collaboration space; it
-adds no owner. Both reads run over the groups of the project the asker is a
-current member of, through the access policy:
+A project adds no owner: chat memory writes group memory only, and a project
+read pools the memory of the project's groups. Which groups those are is the
+project links' answer (section 4.4; by default the groups stored in the
+project's ``(app_id, project_id)`` space), which the access policy asks. Both
+reads run over the groups of the project the asker is a current member of,
+through the access policy:
 
 * :meth:`ProjectUseCases.read` (``GET /projects/{project_id}``) -- those
   groups and their current members. Only the asker's groups are listed: a

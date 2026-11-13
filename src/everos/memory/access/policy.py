@@ -10,6 +10,11 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
 * :meth:`AccessPolicy.member_groups` compiles the groups a personal read also
   covers when it asks to (``include_groups``): the owner's current groups,
   each read exactly as a group search by the owner reads it.
+* Which groups belong to a project is the project links' answer
+  (:class:`~everos.memory.ports.ProjectLinkStore`, section 4.4), for a
+  project scope and ``include_groups`` alike; the policy never lists a
+  space's groups itself, and each group's roster still decides what the
+  asker sees.
 * :func:`visible` answers the same question for one record that does not come
   through the index (a markdown read); :meth:`AccessPolicy.picture_visible`
   for a picture's bytes, served by content hash.
@@ -78,6 +83,7 @@ from everos.memory.ports import (
     GroupStore,
     MessageForgetStore,
     OwnerType,
+    ProjectLinkStore,
     Scope,
     SessionKey,
     Stored,
@@ -557,15 +563,22 @@ class AccessPolicy:
     Args:
         groups: Where rosters are read; the mirror is current the moment a
             roster write returns, so a removed member is refused at once.
+        projects: Which groups belong to a project (section 4.4); the
+            rosters decide what the asker sees of them.
         forgotten: Which messages of a session are forgotten; a buffer read
             leaves them out. ``None`` (a build without group forget) leaves
             the buffer as it is.
     """
 
     def __init__(
-        self, groups: GroupStore, *, forgotten: MessageForgetStore | None = None
+        self,
+        groups: GroupStore,
+        *,
+        projects: ProjectLinkStore,
+        forgotten: MessageForgetStore | None = None,
     ) -> None:
         self._groups = groups
+        self._projects = projects
         self._forgotten = forgotten
 
     async def read_scope(self, identity: Identity, request: ScopeRequest) -> ReadScope:
@@ -606,17 +619,10 @@ class AccessPolicy:
     ) -> list[str]:
         """The groups of a project ``asker`` currently belongs to, sorted."""
         found: list[str] = []
-        for group_id in await self._groups.group_ids(app_id, project_id):
-            record = await self._groups.get(
-                Scope(
-                    app_id=app_id,
-                    project_id=project_id,
-                    owner_id=group_id,
-                    owner_type="group",
-                )
-            )
+        for group in await self._groups_of(app_id, project_id):
+            record = await self._groups.get(group)
             if record is not None and record.roster.is_current_member(asker):
-                found.append(group_id)
+                found.append(group.owner_id)
         return sorted(found)
 
     async def _project_groups(
@@ -639,25 +645,49 @@ class AccessPolicy:
             )
         return replace(request, group_ids=tuple(groups), project_scope=False)
 
+    async def _groups_of(self, app_id: str, project_id: str) -> list[Scope]:
+        """The project's groups, as the project links answer (section 4.4).
+
+        A read scope covers one ``(app_id, project_id)`` space, so a linked
+        group stored in another space is refused, never read as empty.
+
+        Raises:
+            ValueError: The links answer a group outside the project's space.
+        """
+        groups = await self._projects.groups_of(app_id, project_id)
+        for group in groups:
+            if (group.app_id, group.project_id, group.owner_type) != (
+                app_id,
+                project_id,
+                "group",
+            ):
+                raise ValueError(
+                    f"project {project_id!r} links {group.owner_type} "
+                    f"{group.owner_id!r} of {group.app_id!r}/{group.project_id!r}; "
+                    "a read scope covers the project's own space only"
+                )
+        return groups
+
     async def member_groups(
         self, personal: ReadScope, *, only: Collection[str] | None = None
     ) -> ReadScope | None:
         """The groups a personal read also covers when it asks to (``include_groups``).
 
-        Every group of the read's space whose roster has its owner as a
-        current member -- of those in ``only``, when given -- compiled
-        exactly as a group search by the owner compiles it: the same
-        windows (``history_visible_from`` honoured), the same status rules
-        (superseded and forgotten records left out), the owner as the asker
-        and the asker's own audience. A group the owner left, or never
-        joined, adds nothing; an id in ``only`` that is not such a group is
-        ignored, never refused, so the answer says nothing about it.
+        Every group of the read's project (the project links' answer) whose
+        roster has its owner as a current member -- of those in ``only``,
+        when given -- compiled exactly as a group search by the owner
+        compiles it: the same windows (``history_visible_from`` honoured),
+        the same status rules (superseded and forgotten records left out),
+        the owner as the asker and the asker's own audience. A group the
+        owner left, or never joined, adds nothing; an id in ``only`` that is
+        not such a group is ignored, never refused, so the answer says
+        nothing about it.
 
         Args:
             personal: The personal read scope :meth:`read_scope` compiled,
                 which already checked that the asker is its owner.
             only: The groups to consider; ``None`` considers every group of
-                the space.
+                the project.
 
         Returns:
             The groups' read scope, or ``None`` when the owner currently
@@ -668,19 +698,10 @@ class AccessPolicy:
         owner = personal.owner_id
         wanted = None if only is None else set(only)
         views: list[GroupView] = []
-        for group_id in await self._groups.group_ids(
-            personal.app_id, personal.project_id
-        ):
-            if wanted is not None and group_id not in wanted:
+        for group in await self._groups_of(personal.app_id, personal.project_id):
+            if wanted is not None and group.owner_id not in wanted:
                 continue
-            record = await self._groups.get(
-                Scope(
-                    app_id=personal.app_id,
-                    project_id=personal.project_id,
-                    owner_id=group_id,
-                    owner_type="group",
-                )
-            )
+            record = await self._groups.get(group)
             if record is not None and record.roster.is_current_member(owner):
                 views.append(_view_of(record, owner, "asker"))
         if not views:

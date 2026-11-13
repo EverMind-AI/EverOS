@@ -25,6 +25,7 @@ import pytest
 from everalgo.types import ChatMessage, MemCell, ToolCallResult
 
 from everos.core.errors import ForbiddenError
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.memory.access import (
     AccessPolicy,
     Identity,
@@ -117,7 +118,9 @@ async def test_a_forgotten_message_is_absent_from_the_buffer() -> None:
     await groups.bind(_SESSION, "g", at=0)
     forgotten = InMemoryMessageForgetStore()
     await forgotten.record(_SESSION, ["m-2", "gen-3"], forget_id="fg_1")
-    policy = AccessPolicy(groups, forgotten=forgotten)
+    policy = AccessPolicy(
+        groups, projects=PartitionProjectLinkStore(groups), forgotten=forgotten
+    )
     read = await policy.read_scope(
         Identity(asker_id="u_betty"),
         ScopeRequest(project_id="p", group_ids=("g",)),
@@ -193,7 +196,8 @@ async def test_readable_segments_reads_each_without_its_forgotten() -> None:
 
 
 async def test_a_hash_a_group_forgot_is_served_to_nobody() -> None:
-    policy = AccessPolicy(InMemoryGroupStore())
+    groups = InMemoryGroupStore()
+    policy = AccessPolicy(groups, projects=PartitionProjectLinkStore(groups))
     asker = Identity(asker_id="u_betty")
     assert await policy.picture_visible(asker, [])
     assert not await policy.picture_visible(asker, [], forgotten_in_group=True)

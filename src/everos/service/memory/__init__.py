@@ -185,7 +185,9 @@ class MemoryService:
         self._search_manager = search_manager
         self._indexes = indexes
         self._access = access or AccessPolicy(
-            stores.groups, forgotten=stores.message_forget
+            stores.groups,
+            projects=stores.project_links,
+            forgotten=stores.message_forget,
         )
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()

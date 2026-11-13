@@ -16,7 +16,7 @@ __all__ = [
 from everos.config import Settings
 from everos.memory.deps import Indexes, Stores
 
-from .groups import GroupRosterStore
+from .groups import GroupRosterStore, PartitionProjectLinkStore
 from .images import FileImageStore
 from .index import DerivedIndex
 from .index.adapters import (
@@ -48,7 +48,13 @@ from .sqlite import (
 
 
 def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
-    """Markdown truth under ``root`` plus the SQLite state behind ``sqlite``."""
+    """Markdown truth under ``root`` plus the SQLite state behind ``sqlite``.
+
+    A project's groups are the groups stored in its space (the partition
+    rule), until a project-link feature supplies its own ``ProjectLinkStore``
+    (docs/group-memory.md, section 4.4).
+    """
+    groups = GroupRosterStore(root, sqlite.group_roster)
     return Stores(
         episode=MarkdownEpisodeStore(root),
         image_memory=MarkdownImageMemoryStore(root),
@@ -63,7 +69,8 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         memorize_inbox=SqliteMemorizeInboxStore(sqlite.memorize_inbox),
         owner_dir=MarkdownOwnerDirStore(root),
         session_purge=SqliteSessionPurgeStore(sqlite.session_purge),
-        groups=GroupRosterStore(root, sqlite.group_roster),
+        groups=groups,
+        project_links=PartitionProjectLinkStore(groups),
         scene=MarkdownSceneStore(root),
         group_profile=MarkdownGroupProfileStore(root),
         message_forget=SqliteMessageForgetStore(sqlite.message_forget),

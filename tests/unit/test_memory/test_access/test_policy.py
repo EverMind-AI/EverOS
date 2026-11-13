@@ -11,7 +11,10 @@ What these pin (docs/group-memory.md, sections 9 and 14 task 3):
   body's ``asker_id``, are 403; a personal read without an asker is today's;
 - ``history_visible_from = creation`` and ``audience = group`` change the
   windows exactly as section 15 says;
-- the user predicate is the one recalls used before the policy existed.
+- the user predicate is the one recalls used before the policy existed;
+- a project scope and ``include_groups`` read the groups the project links
+  answer (section 4.4), not the space's; the rosters still decide what the
+  asker sees, and a linked group of another space is refused.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from hypothesis import strategies as st
 
 from everos.core.errors import ForbiddenError, InvalidInputError
 from everos.core.utils.datetime import from_timestamp_ms
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.memory.access import (
     AccessPolicy,
     Identity,
@@ -62,6 +66,11 @@ async def _store(
         events=events,
     )
     return store
+
+
+def _policy(store: InMemoryGroupStore) -> AccessPolicy:
+    """The policy over ``store``, a project's groups by the partition rule."""
+    return AccessPolicy(store, projects=PartitionProjectLinkStore(store))
 
 
 def _row(group_id: str, start: int, end: int, **extra: Any) -> dict[str, Any]:
@@ -146,7 +155,7 @@ async def test_a_record_is_visible_iff_its_sources_lie_in_a_window(
     events: list[RosterEvent], asker: str, span: tuple[int, int]
 ) -> None:
     store = await _store(events)
-    policy = AccessPolicy(store)
+    policy = _policy(store)
     start, length = span
     end = start + length
     expected = _oracle(events, asker, start, end)
@@ -182,7 +191,7 @@ async def test_former_member_non_member_and_unknown_group_are_alike() -> None:
             RosterEvent(op="join", member_id="u_chen", at=10),
         ]
     )
-    policy = AccessPolicy(store)
+    policy = _policy(store)
 
     errors = []
     for asker, group in (("u_betty", "g"), ("u_zoe", "g"), ("u_chen", "nope")):
@@ -193,13 +202,13 @@ async def test_former_member_non_member_and_unknown_group_are_alike() -> None:
 
 
 async def test_a_group_scope_needs_an_asker() -> None:
-    policy = AccessPolicy(await _store([RosterEvent(op="join", member_id="a", at=1)]))
+    policy = _policy(await _store([RosterEvent(op="join", member_id="a", at=1)]))
     with pytest.raises(InvalidInputError):
         await policy.read_scope(Identity(), _request("g"))
 
 
 async def test_a_personal_scope_is_read_by_its_owner_only() -> None:
-    policy = AccessPolicy(InMemoryGroupStore())
+    policy = _policy(InMemoryGroupStore())
     request = ScopeRequest(app_id=_APP, project_id=_PROJECT, user_id="u_betty")
 
     with pytest.raises(ForbiddenError):
@@ -239,8 +248,8 @@ async def test_history_visible_from_creation_shows_a_late_joiner_everything() ->
         RosterEvent(op="join", member_id="u_chen", at=10),
         RosterEvent(op="join", member_id="u_evan", at=500),
     ]
-    strict = AccessPolicy(await _store(events))
-    open_history = AccessPolicy(await _store(events, visible_from="creation"))
+    strict = _policy(await _store(events))
+    open_history = _policy(await _store(events, visible_from="creation"))
     early = _row("g", 20, 30)
 
     strict_scope = await strict.read_scope(Identity(asker_id="u_evan"), _request("g"))
@@ -259,7 +268,7 @@ async def test_audience_group_keeps_what_every_current_member_can_see() -> None:
             RosterEvent(op="join", member_id="u_evan", at=500),
         ]
     )
-    policy = AccessPolicy(store)
+    policy = _policy(store)
     early, late = _row("g", 20, 30), _row("g", 600, 610)
 
     mine = await policy.read_scope(Identity(asker_id="u_chen"), _request("g"))
@@ -289,7 +298,7 @@ async def test_several_groups_form_one_pool_each_with_its_windows() -> None:
         group=Group(group_id="h", created_at=0),
         events=[RosterEvent(op="join", member_id="u_chen", at=0)],
     )
-    scope = await AccessPolicy(store).read_scope(
+    scope = await _policy(store).read_scope(
         Identity(asker_id="u_chen"), _request("g", "h")
     )
 
@@ -313,7 +322,7 @@ async def test_member_groups_compiles_each_group_as_the_owners_group_read(
 ) -> None:
     """The same scope, predicate for predicate, as a group read by the owner;
     nothing for a group the owner is not a current member of."""
-    policy = AccessPolicy(await _store(events))
+    policy = _policy(await _store(events))
     personal = await policy.read_scope(Identity(), _personal(owner))
     covered = await policy.member_groups(personal)
     try:
@@ -351,7 +360,7 @@ async def test_member_groups_takes_the_current_groups_of_the_space_only() -> Non
         group=Group(group_id="far", created_at=0),
         events=[RosterEvent(op="join", member_id="u_chen", at=0)],
     )
-    policy = AccessPolicy(store)
+    policy = _policy(store)
     personal = await policy.read_scope(Identity(asker_id="u_chen"), _personal("u_chen"))
 
     every = await policy.member_groups(personal)
@@ -368,10 +377,97 @@ async def test_member_groups_takes_the_current_groups_of_the_space_only() -> Non
 
 
 async def test_only_a_personal_read_covers_its_owners_groups() -> None:
-    policy = AccessPolicy(await _store([RosterEvent(op="join", member_id="a", at=1)]))
+    policy = _policy(await _store([RosterEvent(op="join", member_id="a", at=1)]))
     group = await policy.read_scope(Identity(asker_id="a"), _request("g"))
     with pytest.raises(ValueError, match="personal read"):
         await policy.member_groups(group)
+
+
+# ── a project's groups: the project links' answer (section 4.4) ─────────
+
+
+class _Links:
+    """A ``ProjectLinkStore`` that links exactly the groups it is given."""
+
+    def __init__(self, *groups: Scope) -> None:
+        self.groups = list(groups)
+        self.asked: list[tuple[str, str]] = []
+
+    async def groups_of(self, app_id: str, project_id: str) -> list[Scope]:
+        self.asked.append((app_id, project_id))
+        return list(self.groups)
+
+
+_PROJECT_SCOPE = ScopeRequest(app_id=_APP, project_id=_PROJECT, project_scope=True)
+
+
+async def _three_groups() -> InMemoryGroupStore:
+    """``g``, ``h`` and ``k`` in the space, Chen a current member of each."""
+    store = await _store([RosterEvent(op="join", member_id="u_chen", at=0)])
+    for group_id in ("h", "k"):
+        await store.save(
+            _scope(group_id),
+            group=Group(group_id=group_id, created_at=0),
+            events=[RosterEvent(op="join", member_id="u_chen", at=0)],
+        )
+    return store
+
+
+async def test_a_project_reads_its_linked_groups_not_its_space() -> None:
+    """The links name the groups; a group of the space they leave out is not read."""
+    links = _Links(_scope("h"), _scope("k"))
+    policy = AccessPolicy(await _three_groups(), projects=links)
+    chen = Identity(asker_id="u_chen")
+
+    scope = await policy.read_scope(chen, _PROJECT_SCOPE)
+    covered = await policy.member_groups(
+        await policy.read_scope(chen, _personal("u_chen"))
+    )
+
+    assert scope.owner_ids == ("h", "k")
+    assert covered is not None and covered.owner_ids == ("h", "k")
+    assert links.asked == [(_APP, _PROJECT), (_APP, _PROJECT)]
+    assert matches(scope.predicate, _row("h", 10, 20))
+    assert not matches(scope.predicate, _row("g", 10, 20))
+
+
+async def test_the_rosters_still_decide_what_a_project_shows() -> None:
+    """A linked group the asker is not in adds nothing; none at all is 403."""
+    store = await _three_groups()
+    await store.save(
+        _scope("theirs"),
+        group=Group(group_id="theirs", created_at=0),
+        events=[RosterEvent(op="join", member_id="u_zoe", at=0)],
+    )
+    chen = Identity(asker_id="u_chen")
+
+    scope = await AccessPolicy(
+        store, projects=_Links(_scope("theirs"), _scope("h"))
+    ).read_scope(chen, _PROJECT_SCOPE)
+
+    assert scope.owner_ids == ("h",)
+    for links in (_Links(_scope("theirs")), _Links()):
+        with pytest.raises(ForbiddenError):
+            await AccessPolicy(store, projects=links).read_scope(chen, _PROJECT_SCOPE)
+
+
+async def test_a_linked_group_of_another_space_is_refused_not_read_empty() -> None:
+    """A read scope covers one space; a link out of it is an error."""
+    store = await _three_groups()
+    far = Scope(app_id=_APP, project_id="other", owner_id="far", owner_type="group")
+    await store.save(
+        far,
+        group=Group(group_id="far", created_at=0),
+        events=[RosterEvent(op="join", member_id="u_chen", at=0)],
+    )
+    policy = AccessPolicy(store, projects=_Links(_scope("h"), far))
+    chen = Identity(asker_id="u_chen")
+    personal = await policy.read_scope(chen, _personal("u_chen"))
+
+    with pytest.raises(ValueError, match="own space"):
+        await policy.read_scope(chen, _PROJECT_SCOPE)
+    with pytest.raises(ValueError, match="own space"):
+        await policy.member_groups(personal)
 
 
 # ── buffered messages (row 3) ────────────────────────────────────────────
@@ -401,7 +497,7 @@ async def test_a_group_buffer_is_cut_to_the_asker_window() -> None:
     )
     session = SessionKey(app_id=_APP, project_id=_PROJECT, session_id="s")
     await store.bind(session, "g", at=0)
-    policy = AccessPolicy(store)
+    policy = _policy(store)
     buffered = [_message("u_chen", 1_000), _message("u_chen", 6_000)]
 
     evan = await policy.read_scope(Identity(asker_id="u_evan"), _request("g"))
@@ -423,7 +519,7 @@ async def test_a_group_buffer_is_cut_to_the_asker_window() -> None:
 
 
 async def test_a_one_to_one_buffer_needs_a_sender_of_the_session() -> None:
-    policy = AccessPolicy(InMemoryGroupStore())
+    policy = _policy(InMemoryGroupStore())
     session = SessionKey(app_id=_APP, project_id=_PROJECT, session_id="s")
     buffered = [_message("u_alice", 1_000)]
 

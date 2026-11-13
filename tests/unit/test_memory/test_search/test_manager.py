@@ -25,6 +25,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.component.tokenizer import Tokenizer
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.memory.access import AccessPolicy
 from everos.memory.models import CanonicalMessage, ImageMemory
 from everos.memory.ports import MemoryRef, Scope, SearchHit, SessionKey, Stored
@@ -119,8 +120,9 @@ def _build_manager(
     none.
     """
     rows = episodes or []
+    groups = InMemoryGroupStore()
     return SearchManager(
-        access=AccessPolicy(InMemoryGroupStore()),
+        access=AccessPolicy(groups, projects=PartitionProjectLinkStore(groups)),
         episode_recaller=EpisodeRecaller(
             RecallerDeps(tokenizer=_tokenizer()),
             index or ScriptedIndex(sparse=rows, dense=rows, found=rows),  # type: ignore[arg-type]

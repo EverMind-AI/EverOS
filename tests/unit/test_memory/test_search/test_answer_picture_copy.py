@@ -32,6 +32,7 @@ from everos.component.images import ImageLimits, derived_relpath
 from everos.component.tokenizer import Tokenizer
 from everos.config import SqliteSettings
 from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.infra.persistence.images import FileImageStore
 from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 from everos.memory.access import AccessPolicy
@@ -175,8 +176,9 @@ def _manager(
     episode.item.episode = f"she sent a photo of her latte (img-1: {_LATTE})"
     rows = [hit(episode, 0.8)]
     sign, latte = _picture("im_1", _SIGN), _picture("im_2", _LATTE)
+    groups = InMemoryGroupStore()
     return SearchManager(
-        access=AccessPolicy(InMemoryGroupStore()),
+        access=AccessPolicy(groups, projects=PartitionProjectLinkStore(groups)),
         episode_recaller=EpisodeRecaller(
             RecallerDeps(tokenizer=_tokenizer()),
             ScriptedIndex(sparse=rows, dense=rows, found=rows),  # type: ignore[arg-type]
