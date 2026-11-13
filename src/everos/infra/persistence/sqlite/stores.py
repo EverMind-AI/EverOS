@@ -133,6 +133,15 @@ class SqliteSessionBufferStore:
             last_memcell_ts=last_memcell_ts,
         )
 
+    async def newest_message_at(
+        self, app_id: str, project_id: str, session_ids: Sequence[str]
+    ) -> dt.datetime | None:
+        if not session_ids:
+            return None
+        return await self._cut.newest_timestamp(
+            app_id, project_id, session_ids, _SESSION_TRACK
+        )
+
     async def quarantine(
         self, session: SessionKey, extra: Sequence[CanonicalMessage]
     ) -> int:

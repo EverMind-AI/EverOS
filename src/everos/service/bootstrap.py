@@ -686,6 +686,7 @@ def _build_memory_service(
             stores.groups,
             implicit_create=settings.groups.implicit_create,
             implicit_join=settings.groups.implicit_join,
+            buffers=stores.session_buffer,
         ),
         access=access,
         strength_writer=strengths,

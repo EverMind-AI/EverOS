@@ -9,6 +9,10 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
   personal route does: a personal delete reaches the asker's own memory only
   (403 for someone else's, before anything is forgotten); a group delete is
   an owner's, an admin's or the deliverer's;
+- an implicit join from a batch whose asker may not write the group's
+  history opens no earlier than the newest message the group holds, so one
+  backdated message reads nothing of the past; owners, admins and the
+  deliverer still backdate, and a time-ordered import joins as before;
 - with ``[access] identity_header`` set, a request without the header is
   refused.
 """
@@ -28,7 +32,7 @@ from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import Episode
 from everos.memory.ports import NoSourceCheck
-from everos.service import GetRequest
+from everos.service import GetRequest, SearchRequest
 from tests.fakes import make_application
 from tests.helpers.groups import APP, PROJECT, GroupWorld
 
@@ -260,6 +264,128 @@ async def test_a_group_delete_is_a_managers_or_the_deliverers(
             "/api/v2/memory/delete", json={**body, "asker_id": asker}
         )
         assert answer.status_code == status, (asker, answer.text)
+
+
+# -- B-1: an implicit join opens no earlier than the group's history -------
+
+
+def _message(sender: str, at: int, text: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "sender_id": sender,
+        "role": "user",
+        "timestamp": at,
+        "content": text,
+        **fields,
+    }
+
+
+async def _add(
+    world: GroupWorld,
+    session: str,
+    *messages: dict[str, Any],
+    asker: str | None = None,
+    group_id: str = "trip",
+) -> Any:
+    payload: dict[str, Any] = {
+        "session_id": session,
+        "app_id": APP,
+        "project_id": PROJECT,
+        "group_id": group_id,
+        "messages": list(messages),
+    }
+    if asker is not None:
+        payload["asker_id"] = asker
+    return await world.memory.add(
+        payload, request_id="r", async_mode=False, defer_extraction=True
+    )
+
+
+async def _joined_at(world: GroupWorld, member: str, group: str = "trip") -> int:
+    record = await world.stores.groups.get(world.scope(group))
+    assert record is not None
+    (interval,) = record.roster.intervals_of(member)
+    return interval.joined_at
+
+
+def _search(group: str, asker: str, **fields: Any) -> SearchRequest:
+    return SearchRequest(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id=group,
+        asker_id=asker,
+        query="mk_secret plan",
+        top_k=20,
+        **fields,
+    )
+
+
+def _said(response: Any) -> str:
+    return json.dumps(response.data.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("asker", [None, "u_zoe"])
+async def test_a_backdated_message_from_a_stranger_joins_after_the_history(
+    world: GroupWorld, asker: str | None
+) -> None:
+    await _managed_group(world, deliverer=None)
+    await _add(
+        world,
+        "s_main",
+        _message("u_chen", T0 + 1000, "mk_secret one"),
+        _message("u_betty", T0 + 2000, "mk_secret two"),
+    )
+    await _add(world, "s_zoe", _message("u_zoe", T0 - DAY, "hello"), asker=asker)
+    assert await _joined_at(world, "u_zoe") == T0 + 2001
+    for session in ("s_main", "s_zoe"):
+        read = await world.memory.search(
+            _search("trip", "u_zoe", filters={"session_id": session})
+        )
+        assert "mk_secret" not in _said(read), session
+    # A member's view is unchanged.
+    chen = await world.memory.search(
+        _search("trip", "u_chen", filters={"session_id": "s_main"})
+    )
+    assert "mk_secret one" in _said(chen)
+
+
+@pytest.mark.parametrize("deliverer", [None, BOT])
+async def test_managers_and_the_deliverer_still_backdate_a_join(
+    world: GroupWorld, deliverer: str | None
+) -> None:
+    await _managed_group(world, deliverer=deliverer)
+    writer = deliverer or "u_chen"
+    await _add(
+        world, "s_main", _message("u_chen", T0 + 1000, "mk_secret one"), asker=writer
+    )
+    await _add(world, "s_fay", _message("u_fay", T0 - DAY, "an import"), asker=writer)
+    assert await _joined_at(world, "u_fay") == T0 - DAY
+
+
+async def test_a_time_ordered_import_joins_every_sender_at_their_first_message(
+    world: GroupWorld,
+) -> None:
+    """New senders never speak before what the group holds: nothing moves,
+    the ones whose first message ties the newest one included."""
+    await _managed_group(world, deliverer=None)
+    await _add(world, "s_main", _message("u_chen", T0 + 1000, "mk_secret one"))
+    await _add(world, "s_main", _message("u_hal", T0 + 1000, "same instant"))
+    await _add(
+        world,
+        "s_side",
+        _message("u_ida", T0 + 3000, "later"),
+        _message("u_jon", T0 + 3500, "later still"),
+    )
+    assert await _joined_at(world, "u_hal") == T0 + 1000
+    assert await _joined_at(world, "u_ida") == T0 + 3000
+    assert await _joined_at(world, "u_jon") == T0 + 3500
+
+
+async def test_a_group_with_no_messages_takes_the_first_message_join(
+    world: GroupWorld,
+) -> None:
+    await _managed_group(world, deliverer=None)
+    await _add(world, "s_main", _message("u_kim", T0 - DAY, "first words"))
+    assert await _joined_at(world, "u_kim") == T0 - DAY
 
 
 # -- B-5: a gateway's server serves no request without its header ---------

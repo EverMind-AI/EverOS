@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Sequence
 
-from sqlalchemy import delete, insert, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from everos.core.utils.datetime import get_utc_now
@@ -22,11 +22,42 @@ from everos.infra.persistence.sqlite._base.session import session_scope
 
 from .._tables import ConversationStatus, Memcell, UnprocessedBuffer
 
+_CHUNK = 500
+"""Sessions per statement of :meth:`SessionCutRepo.newest_timestamp`."""
+
 
 class SessionCutRepo(RepoBase[UnprocessedBuffer]):
     """A session's buffer, status stamp and new memcells, written atomically."""
 
     model = UnprocessedBuffer
+
+    async def newest_timestamp(
+        self, app_id: str, project_id: str, session_ids: Sequence[str], track: str
+    ) -> dt.datetime | None:
+        """The newest message time ``session_ids`` hold on ``track``: a
+        buffered message, or the closing message of a memcell cut from them.
+
+        One ``max`` per table and chunk of sessions, each over the
+        ``(app, project, session, track, timestamp)`` index.
+        """
+        wanted = sorted(set(session_ids))
+        newest: dt.datetime | None = None
+        async with session_scope(self._factory) as s:
+            for table in (UnprocessedBuffer, Memcell):
+                for start in range(0, len(wanted), _CHUNK):
+                    found = await s.scalar(
+                        select(func.max(table.timestamp)).where(
+                            table.app_id == app_id,  # type: ignore[arg-type]
+                            table.project_id == project_id,  # type: ignore[arg-type]
+                            table.session_id.in_(  # type: ignore[attr-defined]
+                                wanted[start : start + _CHUNK]
+                            ),
+                            table.track == track,  # type: ignore[arg-type]
+                        )
+                    )
+                    if found is not None and (newest is None or found > newest):
+                        newest = found
+        return newest
 
     async def keep(
         self,

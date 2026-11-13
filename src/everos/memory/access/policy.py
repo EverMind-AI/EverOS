@@ -27,8 +27,10 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
 * :meth:`AccessPolicy.buffered_messages` decides which in-flight messages of a
   session a read may see.
 * :func:`authorize_roster_change` and :func:`authorize_manage` decide roster
-  changes and meta updates; :func:`authorize_forget` decides a forget, its
-  undo and a group-scoped delete (section 5.5).
+  changes, meta updates and a group-scoped delete; :func:`authorize_forget`
+  decides a forget and its undo (section 5.5); :func:`may_backdate` decides
+  who may write a group's history (backdated events, an implicit join older
+  than the group's newest message).
 
 Rules the implementation must keep (section 9.1):
 
@@ -67,6 +69,7 @@ __all__ = [
     "authorize_roster_change",
     "intersect_windows",
     "is_deliverer",
+    "may_backdate",
     "owner_predicate",
     "visible",
     "visible_profile",
@@ -520,6 +523,21 @@ def authorize_delivery(roster: Roster, asker_id: str | None, *, group_id: str) -
         f"only the deliverer of group {group_id!r} may add messages to its "
         "sessions or flush them"
     )
+
+
+def may_backdate(roster: Roster, asker_id: str | None) -> bool:
+    """Whether ``asker_id`` may write the group's history: an owner, an admin
+    or the group's deliverer.
+
+    Backdated roster events need it (:func:`authorize_roster_change`), and so
+    does an implicit join older than the newest message the group holds: a
+    batch from anyone else opens a newcomer's interval no earlier than that
+    (:meth:`~everos.memory.groups.RosterManager.admit_batch`).
+    """
+    if is_deliverer(roster, asker_id):
+        return True
+    current = roster.current(asker_id) if asker_id else None
+    return current is not None and current.role in MANAGER_ROLES
 
 
 def authorize_manage(roster: Roster, asker_id: str | None) -> None:

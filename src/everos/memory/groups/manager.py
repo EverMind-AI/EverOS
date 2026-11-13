@@ -36,7 +36,12 @@ from everos.core.errors import (
 from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
-from everos.memory.access import admits, authorize_manage, authorize_roster_change
+from everos.memory.access import (
+    admits,
+    authorize_manage,
+    authorize_roster_change,
+    may_backdate,
+)
 from everos.memory.models import (
     Group,
     HistoryVisibleFrom,
@@ -44,7 +49,13 @@ from everos.memory.models import (
     RosterEvent,
     RosterSource,
 )
-from everos.memory.ports import GroupRecord, GroupStore, Scope, SessionKey
+from everos.memory.ports import (
+    GroupRecord,
+    GroupStore,
+    Scope,
+    SessionBufferStore,
+    SessionKey,
+)
 
 from .implicit import is_implicit_group
 
@@ -188,6 +199,10 @@ class RosterManager:
         implicit_join: ``[groups] implicit_join`` -- an unknown sender joins
             at their first message; ``False`` refuses the batch (422).
         clock: Epoch-ms "now", for events and groups that name no time.
+        buffers: Where a group's sessions hold their messages: the newest
+            one bounds an implicit join from a batch whose asker may not
+            write the group's history (:meth:`admit_batch`). ``None`` (a
+            test double) opens every implicit join at its message.
     """
 
     def __init__(
@@ -197,11 +212,13 @@ class RosterManager:
         implicit_create: bool = True,
         implicit_join: bool = True,
         clock: Callable[[], int] = _now_ms,
+        buffers: SessionBufferStore | None = None,
     ) -> None:
         self._store = store
         self._implicit_create = implicit_create
         self._implicit_join = implicit_join
         self._clock = clock
+        self._buffers = buffers
 
     @property
     def store(self) -> GroupStore:
@@ -348,6 +365,15 @@ class RosterManager:
         need an owner or admin as asker); open implicit intervals for senders
         who are not members; bind the session.
 
+        An implicit interval opens at the sender's first message -- but in a
+        group that already holds messages, no earlier than its newest one
+        unless the batch's asker may write the group's history (an owner, an
+        admin or the deliverer, :func:`~everos.memory.access.may_backdate`):
+        a sender whose message is older joins just after the group's newest
+        message. A stranger cannot date one message before the group's
+        history and read all of it; a time-ordered import, whose new senders
+        never speak before what the group holds, joins them as before.
+
         Raises:
             RosterConflictError: The session belongs to another group, or the
                 roster does not fold.
@@ -389,6 +415,8 @@ class RosterManager:
                         + ", ".join(sorted({e.member_id for e in joins}))
                         + " ([groups] implicit_join is off)"
                     )
+                if existing is not None and not may_backdate(record.roster, asker_id):
+                    joins = await self._not_before_history(scope, record, joins)
                 record = await self._store.save(scope, group=record.group, events=joins)
                 appended += joins
             await self._store.bind(
@@ -408,6 +436,37 @@ class RosterManager:
         return BatchAdmission(
             record=record, created=existing is None, appended=appended
         )
+
+    async def _not_before_history(
+        self, scope: Scope, record: GroupRecord, joins: Sequence[RosterEvent]
+    ) -> list[RosterEvent]:
+        """``joins``, each opening no earlier than the group's newest message.
+
+        A join older than the newest message the group's sessions hold opens
+        one millisecond after it, so the newcomer's window holds none of what
+        the group said before them; a join at or after it is kept as it is.
+        """
+        if self._buffers is None or not record.sessions:
+            return list(joins)
+        newest = await self._buffers.newest_message_at(
+            scope.app_id, scope.project_id, record.sessions
+        )
+        if newest is None:
+            return list(joins)
+        floor = to_timestamp_ms(newest)
+        moved = [j for j in joins if j.at < floor]
+        if not moved:
+            return list(joins)
+        logger.info(
+            "groups.implicit_join_after_history",
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            group_id=scope.owner_id,
+            members=len(moved),
+        )
+        return [
+            j.model_copy(update={"at": floor + 1}) if j.at < floor else j for j in joins
+        ]
 
     async def admit_implicit(
         self,

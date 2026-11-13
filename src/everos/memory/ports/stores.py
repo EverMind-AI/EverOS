@@ -570,6 +570,19 @@ class SessionBufferStore(Protocol):
         """Set the buffer (plus ``extra``) aside; return how many moved."""
         ...
 
+    async def newest_message_at(
+        self, app_id: str, project_id: str, session_ids: Sequence[str]
+    ) -> dt.datetime | None:
+        """The time of the newest message the sessions hold -- buffered, or
+        cut into one of their memcells (a memcell's closing message) --
+        ``None`` when they hold none.
+
+        A group's newest message: an implicit join from a batch whose asker
+        may not write the group's history opens no earlier than it
+        (:meth:`~everos.memory.groups.RosterManager.admit_batch`).
+        """
+        ...
+
 
 @runtime_checkable
 class MemcellStore(Protocol):
