@@ -117,7 +117,7 @@ def test_split_and_find_recover_every_entry(items: list[tuple[str, str]]) -> Non
 
 _section_body = st.text(max_size=120).filter(
     lambda s: (
-        not s.startswith("\n")
+        not s.startswith(("\n", "\r"))
         and not any(line.startswith("###") for line in s.splitlines())
     )
 )
