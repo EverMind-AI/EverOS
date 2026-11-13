@@ -29,8 +29,8 @@ memories"); docs/configuration.md ``[search]``. Nothing here runs unless
   curve with the same start, so they compete on equal terms.
 
 Pure scoring: no model call. :class:`CurveRanking` reads the store once per
-fused block for the memories the search has not met yet, and never writes;
-the loop (:mod:`.llm_multiround`) does the rescoring of its candidates.
+round, for the memories the search has not met yet, and never writes; the
+loop (:mod:`.llm_multiround`) does the rescoring of its candidates.
 """
 
 from __future__ import annotations
@@ -214,8 +214,8 @@ class CurveRanking:
     async def load(self, records: Iterable[Record]) -> None:
         """Read the strengths of the memories not met yet, in one store read.
 
-        The loop calls it on every fused block before asking :meth:`factor`;
-        without retention there is nothing to read.
+        The loop calls it with everything a round recalled, before it asks
+        :meth:`factor` of any block; without retention there is nothing to read.
         """
         if not self._retain:
             return

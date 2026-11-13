@@ -475,7 +475,7 @@ do not decay.
 Strengths are derived state, kept in `system.db` (`memory_strength`): markdown
 records none of it, and a store rebuilt from markdown starts every memory
 over. A search reads the strengths of the memories it has not met yet once
-per fused block; a read only queues what it used, and the server's strength
+per round; a read only queues what it used, and the server's strength
 writer writes each batch in one transaction after the response. **A
 read-only server never reinforces**: the writer exists only with
 `forgetting_curve` and `reinforce` on and the cascade enabled, so a search

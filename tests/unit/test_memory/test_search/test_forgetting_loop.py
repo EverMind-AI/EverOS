@@ -201,3 +201,31 @@ async def test_the_decider_chose_only_what_a_decided_round_kept() -> None:
     assert fell_back.failures and fell_back.failures[-1].outcome == "fallback"
     assert "alice_b" in fell_back.core
     assert fell_back.chosen == ("alice_b",)
+
+
+class _CountingStore:
+    """A strength store that records each read and holds nothing."""
+
+    def __init__(self) -> None:
+        self.reads: list[int] = []
+
+    async def read(self, keys: Any) -> dict:
+        self.reads.append(len(keys))
+        return {}
+
+    async def write(self, rows: Any) -> None:
+        raise AssertionError("a search never writes strengths")
+
+
+async def test_strengths_are_read_once_per_round_never_per_block() -> None:
+    seed = {
+        "q": [_ep("a", age_days=1), _ep("b", age_days=2)],
+        "g1": [_ep("c", age_days=3), _ep("a", age_days=1)],
+        "g2": [_ep("d", age_days=4)],
+    }
+    store = _CountingStore()
+    ranking = CurveRanking(Curve(), now=NOW, retain=True, store=store)
+    llm = _decider(_keep([0], ["g1", "g2"]), _keep([0]))
+    await _run(seed, ranking=ranking, llm=llm)
+    # Round 0 reads a and b; round 1 (two sub-query blocks) reads c and d once.
+    assert store.reads == [2, 2]

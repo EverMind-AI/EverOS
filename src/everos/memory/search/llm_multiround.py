@@ -1702,6 +1702,14 @@ async def _search_episodes_subq(
             ]
         )
         _ts_recall_done = time.monotonic()
+        if ranking is not None:
+            # One strength read for the whole round, not one per sub-query block.
+            await ranking.load(
+                stored
+                for per_query in recalls
+                for result in per_query
+                for stored in result.stored_by_id.values()
+            )
         blocks: list[tuple[str, list[Candidate]]] = []
         block_meta: list[dict[str, object]] = []
         for q, (
