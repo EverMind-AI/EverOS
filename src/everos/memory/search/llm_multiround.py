@@ -16,7 +16,10 @@ facet-gold ranked #1 for a single sub-query is never diluted by the other
 sub-queries' consensus hits (the failure mode of merging every sub-query into one
 pool). The decider sees one labelled block per sub-query (round 0 = a single
 original-question block) with a single GLOBAL index, plus a CORE-SO-FAR section
-tagging each kept item with the sub-query that surfaced it. There is **no
+tagging each kept item with the sub-query that surfaced it. With
+``[decider].dedupe_within_round`` (the default) a memory that several of a round's
+blocks retrieved is listed once, in the block where it ranks highest
+(:func:`_in_round_repeats`); what an earlier round showed is shown again. There is **no
 cross-encoder** anywhere — RRF is the only ranking (the CE was measured
 net-negative: it scored gold below RRF order and buried much of it past rank 20).
 
@@ -884,8 +887,12 @@ def _build_fit_view(
     core_order: list[str],
     core_source: dict[str, str],
     cand_by_id: dict[str, Candidate],
+    omit: frozenset[tuple[int, int]] = frozenset(),
 ) -> _FitView:
-    """The items behind :func:`_render_core_so_far` and :func:`_render_blocks`."""
+    """The items behind :func:`_render_core_so_far` and :func:`_render_blocks`.
+
+    ``omit`` is the round's left-out repeats, as :func:`_render_blocks` takes them.
+    """
     core: list[tuple[str, str, str]] = []
     for cid in core_order:
         c = cand_by_id.get(cid)
@@ -896,9 +903,11 @@ def _build_fit_view(
         core.append((f'  - [from "{src}"] {subject} - ', _decider_text(c.metadata), ""))
     out: list[tuple[str, list[tuple[str, str, str]]]] = []
     gi = 0
-    for sub_query, cands in blocks:
+    for block_id, (sub_query, cands) in enumerate(blocks):
         items: list[tuple[str, str, str]] = []
-        for c in cands:
+        for rank, c in enumerate(cands):
+            if (block_id, rank) in omit:
+                continue
             subject = str(c.metadata.get("subject", ""))
             mark = _PICTURE_MARK if _is_picture(c) else ""
             items.append((f"  {gi}: {subject} - ", _decider_text(c.metadata), mark))
@@ -1262,18 +1271,51 @@ async def run_llm_multiround(
     )
 
 
+def _in_round_repeats(
+    blocks: Sequence[tuple[str, Sequence[Candidate]]],
+) -> frozenset[tuple[int, int]]:
+    """The copies a round leaves out to list each memory once, as ``(block, rank)``.
+
+    ``[decider].dedupe_within_round``: a memory that several of the round's blocks
+    retrieved keeps the copy where it ranks highest -- the lowest rank in its block,
+    a tie going to the earlier block -- and every other copy is left out. Of the
+    copies, that one changes the least of what the decider reads: no block's order
+    changes, the memory stays at its most prominent place, and leaving out the copies
+    lower in their blocks moves the fewest items below them up a place. Ranks are the
+    blocks' own, before anything is left out. Only this round's blocks are compared,
+    so a memory an earlier round showed is never a repeat.
+    """
+    best: dict[str, tuple[int, int]] = {}
+    for block_id, (_, cands) in enumerate(blocks):
+        for rank, c in enumerate(cands):
+            if c.id not in best or rank < best[c.id][1]:
+                best[c.id] = (block_id, rank)
+    return frozenset(
+        (block_id, rank)
+        for block_id, (_, cands) in enumerate(blocks)
+        for rank, c in enumerate(cands)
+        if best[c.id] != (block_id, rank)
+    )
+
+
 def _render_blocks(
     blocks: list[tuple[str, list[Candidate]]],
+    omit: frozenset[tuple[int, int]] = frozenset(),
 ) -> tuple[str, list[Candidate], list[dict[str, object]]]:
     """Render per-sub-query blocks into the decider text + a global-index map.
 
     Returns ``(rendered, global_cands, index_meta)``: ``rendered`` is the
     ``[block: <sub-query>]`` header + numbered ``  <gi>: subject - summary`` lines
     with a SINGLE global index running across all blocks; ``global_cands[gi]`` is
-    the Candidate at that index (blocks are concatenated in order, so the same id
-    can appear at two indices when two sub-queries retrieved it — the decider is
-    told to core it once); ``index_meta[gi]`` = block_id / sub_query /
+    the Candidate at that index; ``index_meta[gi]`` = block_id / sub_query /
     rank_in_block / rrf_score, used for the trace and the core source tag.
+
+    ``omit`` holds ``(block_id, rank)`` copies to leave out (:func:`_in_round_repeats`);
+    the index runs over what is listed, without gaps, and ``rank_in_block`` stays the
+    rank in the block as recalled. A block whose every copy is left out keeps its
+    header, as a block that recalled nothing does. With nothing omitted the same id
+    can appear at two indices when two sub-queries retrieved it -- the decider is told
+    to core it once.
     """
     lines: list[str] = []
     global_cands: list[Candidate] = []
@@ -1282,6 +1324,8 @@ def _render_blocks(
     for block_id, (sub_query, cands) in enumerate(blocks):
         lines.append(f"[block: {sub_query}]")
         for rank, c in enumerate(cands):
+            if (block_id, rank) in omit:
+                continue
             subject = str(c.metadata.get("subject", ""))
             summary = _decider_text(c.metadata)
             if _is_picture(c):
@@ -1490,6 +1534,7 @@ def _build_round_trace(
     timing_s: dict[str, float],
     pictures: Sequence[Picture] = (),
     picture_candidates: int = 0,
+    left_out: Sequence[dict[str, object]] = (),
 ) -> dict[str, object]:
     """Assemble one per-round trace record (schema C).
 
@@ -1502,6 +1547,8 @@ def _build_round_trace(
     and per-stage timing. There is NO ``fused`` / ``reranked`` pool — this scheme
     has neither a merged fuse nor a cross-encoder. ``question_id`` and the gold labels
     are left for a downstream labeller (the search layer cannot know them).
+    ``decider_dedupe`` (only on a round that left a repeat out) lists the copies
+    ``[decider].dedupe_within_round`` did not show (:func:`_trace_left_out`).
     """
     evidence = [
         {
@@ -1574,7 +1621,38 @@ def _build_round_trace(
     if decision.error is not None:
         # Why the round was not decided -- the reason the search response reports.
         record["decider_error"] = decision.error[:_REASON_CHARS]
+    if left_out:
+        # Present only on a round that left a repeat out, so a run with the switch
+        # off (or a round without repeats) writes the same record as before.
+        record["decider_dedupe"] = {"left_out": list(left_out)}
     return record
+
+
+def _trace_left_out(
+    blocks: Sequence[tuple[str, Sequence[Candidate]]],
+    omit: frozenset[tuple[int, int]],
+    global_cands: Sequence[Candidate],
+) -> list[dict[str, object]]:
+    """The copies a round did not list, each with the index its memory was shown at.
+
+    One entry per left-out copy, in block order: its ``id``, ``block_id`` and
+    ``rank_in_block`` (as in ``recall.blocks``), and ``shown_as``, the global index
+    of the copy the round did list.
+    """
+    if not omit:
+        return []
+    shown_as = {c.id: gi for gi, c in enumerate(global_cands)}  # listed once each
+    return [
+        {
+            "id": cands[rank].id,
+            "block_id": block_id,
+            "rank_in_block": rank,
+            "shown_as": shown_as.get(cands[rank].id),
+        }
+        for block_id, (_, cands) in enumerate(blocks)
+        for rank in range(len(cands))
+        if (block_id, rank) in omit
+    ]
 
 
 async def _search_episodes_subq(
@@ -1605,7 +1683,8 @@ async def _search_episodes_subq(
     EACH sub-query's own pair with RRF INDEPENDENTLY (round 0 = one block for the
     original question, kept to ``[decider].seed_topk``; round>=1 = one block per
     sub-query, each kept to ``[decider].subq_topk``). The blocks are shown to the
-    decider as labelled sections with a single GLOBAL index, alongside a
+    decider as labelled sections with a single GLOBAL index (a memory several of
+    them retrieved listed once, ``[decider].dedupe_within_round``), alongside a
     CORE-SO-FAR section (each kept item tagged with its source sub-query). The
     decider returns core (global indices) + next sub-queries. Stopping:
     empty ``next_queries`` / ``[decider].no_new_core_patience`` saturated
@@ -1806,7 +1885,11 @@ async def _search_episodes_subq(
         linked = []
 
         # Render the blocked decider view + CORE-SO-FAR (global index across blocks).
-        rendered, global_cands, index_meta = _render_blocks(blocks)
+        # [decider].dedupe_within_round: a memory several blocks retrieved is listed
+        # once. Only the view changes; the blocks, and everything recorded from them
+        # above (scores, guarantees, recall pools), stay as recalled.
+        repeats = _in_round_repeats(blocks) if tune.dedupe_within_round else frozenset()
+        rendered, global_cands, index_meta = _render_blocks(blocks, repeats)
         core_so_far = _render_core_so_far(core_order, core_source, cand_by_id)
         pictures = await _round_pictures(
             global_cands,
@@ -1826,7 +1909,7 @@ async def _search_episodes_subq(
             round_idx,
             pictures,
             # The built-in decider only: an injected policy keeps its own contract.
-            _build_fit_view(blocks, core_order, core_source, cand_by_id)
+            _build_fit_view(blocks, core_order, core_source, cand_by_id, repeats)
             if tune.fit_to_window and isinstance(decide, LLMRoundDecider)
             else None,
         )
@@ -1890,6 +1973,7 @@ async def _search_episodes_subq(
                         "recall": round(_ts_recall_done - _ts_round_start, 3),
                         "decide": round(time.monotonic() - _ts_decide_start, 3),
                     },
+                    left_out=_trace_left_out(blocks, repeats, global_cands),
                 ),
             )
         logger.info(
@@ -1898,6 +1982,7 @@ async def _search_episodes_subq(
             kind=round_kind,
             n_blocks=len(blocks),
             n_candidates=len(global_cands),
+            n_repeats_left_out=len(repeats),
             n_core=len(core_ids),
             added_core=added,
             no_new_core_streak=no_new_core_streak,

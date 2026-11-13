@@ -461,6 +461,20 @@ class DeciderSettings(_Section):
     round's core and the loop stops there, since no ``next_queries`` were emitted. The
     round trace records it (``decider_salvaged``). A round with a reply that parses is
     untouched. Set it ``false`` only to reproduce a run from before 2026-11-11."""
+    dedupe_within_round: bool = True
+    """Show the decider each memory once per round. Default on.
+
+    A round after the first shows one block per sub-query, and a memory that several
+    sub-queries retrieved used to be listed in each of their blocks, under an index of
+    its own (16.7% of the candidate slots of recorded LoCoMo searches). On, it is
+    listed once, in the block where it ranks highest, a tie going to the earlier
+    block; the round's indices are then numbered over what is listed, so a reply's
+    indices still name the memories it was shown. Only one round's blocks are
+    compared: a memory an earlier round showed is shown again in full, since a decider
+    that passed it over may still need it. The prompt template, the recall, the
+    trace's recall pools and the ranking after the loop are unchanged; the round trace
+    lists the copies left out (``decider_dedupe``). Off, a round prompt is the one
+    sent before 2026-11-13."""
     image_candidates_per_round: int = Field(default=0, ge=0)
     """Pictures the decider may look at per round, highest-ranked first.
 

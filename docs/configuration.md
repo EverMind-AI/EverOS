@@ -233,6 +233,7 @@ with a comment, in the shipped `config/default.toml`. An empty `model`,
 | `fallback_core` | int | `3` | No | Core size a round falls back to when every decider attempt fails; the result lists it in `data.degraded`. |
 | `fit_to_window` | bool | `true` | No | Render a round prompt the endpoint rejects as too long again, smaller. Off, such a prompt fails every attempt and the round falls back. |
 | `salvage_truncated_core` | bool | `true` | No | Keep the core indices of a reply that was cut short. Off, such a reply fails to parse and the round falls back. |
+| `dedupe_within_round` | bool | `true` | No | List a memory once per round. In a round after the first, a memory that several sub-queries retrieved is listed in the block where it ranks highest (a tie goes to the earlier block) and left out of the others, and the round's indices are numbered over what is listed. A memory an earlier round showed is listed again. The prompt template, the recall and the result's ranking are unchanged; the round trace lists the copies left out (`decider_dedupe`). Off, a round prompt is the one sent before 2026-11-13. |
 | `image_candidates_per_round` | int | `0` | No | Pictures the decider may look at per round, highest-ranked first; `0` shows none (a decider not trained on pictures). |
 | `image_detail` | string | `"low"` | No | `detail` hint on each picture part: `low`, `high` or `auto`. |
 | `image_thumbnail_edge` | int | `448` | No | Long side of the decider's copy of a picture, px: the thumbnail a search result's `thumbnail_path` names and `GET /memory/images/{id}?variant=thumbnail` serves. |
@@ -246,6 +247,17 @@ it raised hit@1 on HotpotQA / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 / 0.29 /
 0.89 points with the RL-tuned 27B decider and by 0.03 / 0.63 / 0.66 / 0.06
 with its base model. It stays opt-in until its effect on answer accuracy is
 measured.
+
+`dedupe_within_round` was replayed offline on recorded searches (2026-11-13,
+no decider call): each round rendered with and without it and counted with the
+decider's tokenizer, which reproduced the recorded token count of every round.
+Decider input tokens per search fell by 15.3% on LoCoMo (mean 20.3k to 17.2k,
+p90 39.7k to 30.5k), 17.6% on LongMemEval (33.6k to 27.6k), 12.7% on BEAM 1M
+(48.0k to 41.9k) and 9.8% on EverMemBench (63.3k to 57.1k), 15.5-41.0% of the
+tokens of the rounds after the first; a search that stops after its first round
+is unchanged. The RL-tuned decider was trained on rounds that listed the repeats,
+and the effect on answer accuracy is not measured yet; `false` restores those
+rounds.
 
 ### `[vision_embedding]`
 

@@ -12,6 +12,23 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A multi-round search lists each memory once per round.** A round after the
+  first shows the decider one block per sub-query, and a memory that several
+  sub-queries retrieved was listed in each of their blocks, under an index of
+  its own: 16.7% of the candidate slots of recorded LoCoMo searches.
+  `[decider] dedupe_within_round` (default `true`) lists it once, in the block
+  where it ranks highest (a tie goes to the earlier block), and numbers the
+  round's indices over what is listed, so a reply names the memories it was
+  shown -- parsed, salvaged, as the fallback core or after a fit. Rounds are
+  not compared with each other: a memory an earlier round showed is listed
+  again, so one the decider passed over can still be chosen. The prompt
+  template, the recall, the trace's recall pools and the result's ranking are
+  unchanged; the round trace lists the copies left out (`decider_dedupe`).
+  Replayed on recorded searches with the decider's tokenizer (no model call),
+  decider input tokens per search fell by 15.3% / 17.6% / 12.7% / 9.8% on
+  LoCoMo / LongMemEval / BEAM 1M / EverMemBench (LoCoMo p90 39.7k to 30.5k).
+  Its effect on answer accuracy is not measured yet; `false` sends the round
+  prompts from before ([docs/configuration.md](docs/configuration.md#decider)).
 - **A user's profile is updated every five segments and at each flush.** A
   one-to-one conversation updated `user.md` after every new segment: the
   profile update was 70% of the write path's input tokens. Now a user's
