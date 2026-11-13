@@ -595,8 +595,21 @@ class SqliteForgetLogStore:
         )
         return _forget_entry(row) if row is not None else None
 
-    async def mark_undone(self, forget_id: str) -> bool:
-        return await self._repo.mark_undone(forget_id)
+    async def undone_entries(
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
+    ) -> list[ForgetEntry]:
+        rows = await self._repo.undone_rows(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
+        )
+        return [_forget_entry(row) for row in rows]
+
+    async def mark_undone(
+        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+    ) -> bool:
+        return await self._repo.mark_undone(forget_id, restored=restored)
 
 
 class SqliteMessageForgetStore:

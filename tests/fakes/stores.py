@@ -742,10 +742,32 @@ class InMemoryForgetLogStore:
                 return entry
         return None
 
-    async def mark_undone(self, forget_id: str) -> bool:
+    async def undone_entries(
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
+    ) -> list[ForgetEntry]:
+        return [
+            dataclasses.replace(entry, undone=True)
+            for entry in reversed(self.entries)
+            if (entry.app_id, entry.project_id, entry.owner_id, entry.owner_type)
+            == (app_id, project_id, owner_id, owner_type)
+            and entry.forget_id in self.undone
+        ]
+
+    async def mark_undone(
+        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+    ) -> bool:
         if forget_id in self.undone:
             return False
         self.undone.add(forget_id)
+        if restored:
+            self.entries = [
+                dataclasses.replace(
+                    entry, undo={**(entry.undo or {}), "restored": dict(restored)}
+                )
+                if entry.forget_id == forget_id and entry.undo is not None
+                else entry
+                for entry in self.entries
+            ]
         return True
 
 

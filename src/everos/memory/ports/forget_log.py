@@ -204,8 +204,26 @@ class ForgetLogStore(Protocol):
         """
         ...
 
-    async def mark_undone(self, forget_id: str) -> bool:
-        """Stamp ``undone``; ``False`` when it already was (nothing restores twice)."""
+    async def undone_entries(
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: OwnerType
+    ) -> list[ForgetEntry]:
+        """The owner's forgets an undo reversed, newest first.
+
+        What the undo of an earlier forget follows when a later forget
+        replaced what it wrote and was undone since: the later one's log says
+        what it wrote, and its ``undo["restored"]`` what its undo wrote back.
+        """
+        ...
+
+    async def mark_undone(
+        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+    ) -> bool:
+        """Stamp ``undone``; ``False`` when it already was (nothing restores twice).
+
+        ``restored`` -- per kind, ``[replaced md_path, replaced entry_id, copy
+        md_path, copy entry_id]`` of every version the undo wrote -- is kept
+        in the entry's ``undo`` under ``"restored"``.
+        """
         ...
 
 

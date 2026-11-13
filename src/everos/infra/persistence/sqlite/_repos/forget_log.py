@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
+from typing import Any
 
 from sqlalchemy import select, update
 
@@ -171,18 +172,43 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
             )
             return (await s.execute(stmt)).scalars().first()
 
-    async def mark_undone(self, forget_id: str) -> bool:
+    async def undone_rows(
+        self, *, app_id: str, project_id: str, owner_id: str, owner_type: str
+    ) -> list[ForgetLog]:
+        """The owner's forgets an undo reversed, newest first."""
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(ForgetLog)
+                .where(
+                    ForgetLog.app_id == app_id,  # type: ignore[arg-type]
+                    ForgetLog.project_id == project_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
+                    ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
+                    ForgetLog.undone_at.is_not(None),  # type: ignore[union-attr]
+                )
+                .order_by(ForgetLog.created_at.desc())
+            )
+            return list((await s.execute(stmt)).scalars().all())
+
+    async def mark_undone(
+        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+    ) -> bool:
         """Stamp ``undone_at``; whether this call is the one that stamped it.
 
         A second undo of the same forget returns ``False`` and restores
         nothing, so a retried request cannot put back material a later forget
-        removed.
+        removed. ``restored`` (what the undo wrote) joins the row's undo
+        record under ``"restored"``, in the same commit.
         """
         async with session_scope(self._factory) as s:
             row = await s.get(ForgetLog, forget_id)
             if row is None or row.undone_at is not None:
                 return False
             row.undone_at = get_utc_now()
+            if restored and row.undo_json:
+                undo = json.loads(row.undo_json)
+                undo["restored"] = dict(restored)
+                row.undo_json = json.dumps(undo, ensure_ascii=False)
             await s.commit()
         return True
 

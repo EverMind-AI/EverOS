@@ -21,12 +21,19 @@ What an undo puts back, read from the forget log (:mod:`._forget_log`):
    undone, picture files come back into circulation, scene clusters are put
    back as they were.
 
-**Order.** An undo is refused (409) while a version the forget wrote is no
-longer current -- a later forget, undo or edit changed it: undo that one first.
-Forgets of different records undo in any order.
+**Order.** A version the forget wrote may have been replaced since. The undo
+follows the replacements to the current version: through a later forget that
+was undone since (its undo wrote back a copy of what that forget replaced,
+which stands in for it), and through a person's edit (``/memory/update``),
+on top of which it writes the version it brings back
+(:mod:`._forget_merge`). It is refused (409) while a later forget that is
+still live replaced or marked it -- undo that one first -- and when a
+person's edit changed the very text the forget changed. Forgets of
+different records undo in any order.
 
-The log entry is stamped last, so an undo cut short can be sent again; a
-second undo of the same forget restores nothing. Rows logged before this
+The log entry is stamped last, with the versions the undo wrote
+(``restored``), so an undo cut short can be sent again; a second undo of the
+same forget restores nothing. Rows logged before this
 format undo too: a user's are read into it, a group's (whose forget took
 records out of markdown) are reversed by putting them back
 (:func:`reverse_legacy_group`).
@@ -65,6 +72,7 @@ from ._forget_log import (
     removed_in,
     segments_of,
 )
+from ._forget_merge import merged_over_edit
 from ._forget_models import ForgetTarget, ForgottenPicture, UndoResult
 from ._records import memory_id
 
@@ -126,6 +134,29 @@ class _Done:
     item_count: int = 0
     retired: list[str] = field(default_factory=list)
     paths: dict[str, set[str]] = field(default_factory=dict)
+    restored: dict[str, list[list[str]]] = field(default_factory=dict)
+    """Per kind, ``[replaced md_path, replaced id, copy md_path, copy id]``
+    of every version the undo wrote: the log keeps it for a later undo."""
+
+
+@dataclass(frozen=True)
+class _Back:
+    """One version the undo writes again, decided before anything is written.
+
+    Attributes:
+        kind: ``episode`` or ``scene``.
+        old: The version the forget replaced.
+        head: The current version the new one supersedes (what the forget
+            wrote, or what replaced it since); ``None`` when the forget's
+            version is not in markdown any more.
+        item: What is written: the old version, or carried over a person's
+            edit.
+    """
+
+    kind: str
+    old: str
+    head: Stored[Any] | None
+    item: Any
 
 
 class Undoer:
@@ -155,10 +186,10 @@ class Undoer:
                 self._stores, self._eraser, scope, entry, target=target
             )
         record = await self._record(scope, entry)
-        await self._check_order(scope, record)
+        backs = await self._backs(scope, record)
         keep = await self._logs.named_by_others(scope, except_id=entry.forget_id)
         done = _Done()
-        await self._rewrite_back(scope, record, done)
+        await self._rewrite_back(scope, backs, done)
         await self._unmark(scope, record, keep, done, forget_id=entry.forget_id)
         if record.revive and done.episodes:
             revived = await restore_revived_scenes(
@@ -182,12 +213,16 @@ class Undoer:
         if scope.owner_type == "group":
             await self._restore_members(scope, record, done)
             await self._stores.message_forget.undo(entry.forget_id)
-            await self._stores.forget_log.mark_undone(entry.forget_id)
+            await self._stores.forget_log.mark_undone(
+                entry.forget_id, restored=done.restored
+            )
         else:
             async with profile_lock(scope):
                 await self._restore_profile(scope, entry, record, done)
                 await self._stores.message_forget.undo(entry.forget_id)
-                await self._stores.forget_log.mark_undone(entry.forget_id)
+                await self._stores.forget_log.mark_undone(
+                    entry.forget_id, restored=done.restored
+                )
         logger.info(
             "memory.undo_completed",
             app_id=scope.app_id,
@@ -351,71 +386,114 @@ class Undoer:
 
     # ── the steps ────────────────────────────────────────────────────────
 
-    async def _check_order(self, scope: Scope, record: _Record) -> None:
-        """Refuse while a later change replaced what this forget wrote."""
-        for kind, rows in record.written.items():
-            for _old_md, _old, new_md, new in rows:
-                if not new_md:
-                    continue
-                if (await self._store(kind).deprecations(scope, new_md)).get(new):
-                    raise ConflictError(
-                        "a later forget or edit changed what this forget wrote; "
-                        "undo that one first"
-                    )
+    async def _backs(self, scope: Scope, record: _Record) -> list[_Back]:
+        """What the undo writes again, each over the version current now.
 
-    async def _rewrite_back(self, scope: Scope, record: _Record, done: _Done) -> None:
-        """Each version the forget replaced is written again, superseding its
-        replacement."""
-        episodes = record.written.get("episode") or []
-        if episodes:
-            found = {
-                row.ref.entry_id: row
-                for row in await self._stores.episode.read_many(
-                    scope, [old for _, old, _, _ in episodes]
-                )
-            }
-            pairs = [
-                (found[old], new_md, new)
-                for _, old, new_md, new in episodes
-                if old in found
-            ]
-            refs = await self._stores.episode.append_many(
-                scope, [row.item for row, _, _ in pairs], only_if=NO_SOURCE_CHECK
+        Raises:
+            ConflictError: A later forget that is still live replaced or
+                marked a version this one wrote, or a person's edit changed
+                the text it changed.
+        """
+        backs: list[_Back] = []
+        chains: _Chains | None = None
+        for kind, rows in record.written.items():
+            if not rows:
+                continue
+            store = self._store(kind)
+            found = await self._versions(
+                kind, scope, [e for _, old, _, new in rows for e in (old, new)]
             )
-            for (_row, new_md, new), ref in zip(pairs, refs, strict=True):
-                paths = done.paths.setdefault("episode", set())
-                if new_md:
+            for _old_md, old, new_md, new in rows:
+                if old not in found:
+                    continue
+                item = found[old].item
+                if not new_md or new not in found:
+                    if kind == "episode":  # nothing left to supersede
+                        backs.append(_Back(kind, old, None, item))
+                    continue
+                if not (await store.deprecations(scope, new_md)).get(new):
+                    backs.append(_Back(kind, old, found[new], item))
+                    continue
+                if chains is None:
+                    chains = await _Chains.read(self._stores, scope)
+                head, edited = chains.follow(kind, new)
+                if edited:
+                    merged = merged_over_edit(found[new].item, head.item, item)
+                    if merged is None:
+                        raise ConflictError(
+                            f"a person edited {memory_id(scope, new)!r}, the version "
+                            "this forget wrote, where the forget changed it: their "
+                            "text would be lost; edit it back to what the forget "
+                            "wrote (GET /memory/history lists the versions) and "
+                            "undo again"
+                        )
+                    item = merged
+                backs.append(_Back(kind, old, head, item))
+        return backs
+
+    async def _versions(
+        self, kind: str, scope: Scope, entry_ids: Collection[str]
+    ) -> dict[str, Stored[Any]]:
+        """The episode or scene versions of ``entry_ids`` still in markdown."""
+        wanted = set(entry_ids)
+        if kind == "scene":
+            rows: Sequence[Stored[Any]] = await self._stores.scene.versions(scope)
+        else:
+            rows = await self._stores.episode.read_many(scope, list(wanted))
+        return {r.ref.entry_id: r for r in rows if r.ref.entry_id in wanted}
+
+    async def _rewrite_back(
+        self, scope: Scope, backs: Sequence[_Back], done: _Done
+    ) -> None:
+        """Each version the forget replaced is written again, superseding the
+        version current now."""
+        episodes = [b for b in backs if b.kind == "episode"]
+        if episodes:
+            refs = await self._stores.episode.append_many(
+                scope, [b.item for b in episodes], only_if=NO_SOURCE_CHECK
+            )
+            paths = done.paths.setdefault("episode", set())
+            for back, ref in zip(episodes, refs, strict=True):
+                if back.head is not None:
+                    head = back.head.ref
                     await self._stores.episode.deprecate(
                         scope,
-                        entries=[(new_md, new)],
+                        entries=[(head.md_path, head.entry_id)],
                         replaced_by=ref.entry_id,
                         only_if=NO_SOURCE_CHECK,
                     )
-                    done.retired.append(new)
-                    paths.add(new_md)
+                    done.retired.append(head.entry_id)
+                    done.restored.setdefault("episode", []).append(
+                        [head.md_path, head.entry_id, ref.md_path, ref.entry_id]
+                    )
+                    paths.add(head.md_path)
                 done.episodes.append(ref.entry_id)
                 paths.add(ref.md_path)
-        scenes = record.written.get("scene") or []
+        scenes = [b for b in backs if b.kind == "scene" and b.head is not None]
         if scenes:
             async with scenes_lock(scope):
-                versions = {
-                    v.ref.entry_id: v for v in await self._stores.scene.versions(scope)
-                }
-                for _old_md, old, _new_md, new in scenes:
-                    if old not in versions or new not in versions:
-                        continue
-                    replacement = versions[new]
-                    copy = versions[old].item.model_copy(
-                        update={"version": replacement.item.version + 1}
+                for back in scenes:
+                    head = back.head
+                    assert head is not None
+                    copy = back.item.model_copy(
+                        update={"version": head.item.version + 1}
                     )
                     ref = await self._stores.scene.append(
-                        scope, copy, supersedes=replacement, only_if=NO_SOURCE_CHECK
+                        scope, copy, supersedes=head, only_if=NO_SOURCE_CHECK
                     )
                     if ref is not None:
                         done.scenes.append(ref.entry_id)
-                        done.retired.append(new)
+                        done.retired.append(head.ref.entry_id)
+                        done.restored.setdefault("scene", []).append(
+                            [
+                                head.ref.md_path,
+                                head.ref.entry_id,
+                                ref.md_path,
+                                ref.entry_id,
+                            ]
+                        )
                         done.paths.setdefault("scene", set()).update(
-                            {ref.md_path, replacement.ref.md_path}
+                            {ref.md_path, head.ref.md_path}
                         )
 
     async def _unmark(
@@ -586,6 +664,114 @@ class Undoer:
             "scene": self._stores.scene,
             "group_profile": self._stores.group_profile,
         }[kind]
+
+
+_LATER = "a later forget changed what this forget wrote; undo that one first"
+
+
+@dataclass(frozen=True)
+class _Chains:
+    """The owner's versions with their marks, read to follow a version an undo
+    brings back past what replaced it since.
+
+    Attributes:
+        rows: Per kind, every version by entry id with its mark.
+        followed: ``(kind, version, successor)`` hops an undone forget wrote,
+            or its undo (``restored``): the undone forget's change and the
+            copy that took it back.
+        copied: An undone forget logged without ``restored`` (undone before
+            the log kept it): ``(kind, version it wrote)`` -> the version it
+            replaced, whose copy its undo wrote next.
+    """
+
+    rows: dict[str, dict[str, tuple[Stored[Any], str | None]]]
+    followed: set[tuple[str, str, str]]
+    copied: dict[tuple[str, str], str]
+
+    @classmethod
+    async def read(cls, stores: Stores, scope: Scope) -> _Chains:
+        followed: set[tuple[str, str, str]] = set()
+        copied: dict[tuple[str, str], str] = {}
+        for entry in await stores.forget_log.undone_entries(
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+        ):
+            undo = entry.undo or {}
+            written = [
+                (kind, str(r[1]), str(r[3]))
+                for kind, rows in (
+                    (undo.get("written") or {}).items()
+                    if is_current_format(entry)
+                    else [("episode", [["", o, "", n] for o, n in entry.episode_ids])]
+                )
+                for r in rows or []
+                if r[3]
+            ]
+            followed.update(written)
+            restored = undo.get("restored")
+            if restored is None:
+                copied.update({(kind, new): old for kind, old, new in written})
+                continue
+            followed.update(
+                (kind, str(r[1]), str(r[3]))
+                for kind, rows in restored.items()
+                for r in rows or []
+            )
+        episodes = await stores.episode.read_all(scope)
+        scenes = await stores.scene.read_all(scope)
+        return cls(
+            rows={
+                "episode": {s.ref.entry_id: (s, m) for s, m in episodes},
+                "scene": {s.ref.entry_id: (s, m) for s, m in scenes},
+            },
+            followed=followed,
+            copied=copied,
+        )
+
+    def follow(self, kind: str, start: str) -> tuple[Stored[Any], bool]:
+        """The version current now that ``start`` leads to, and whether a
+        person's edit is on the way.
+
+        Raises:
+            ConflictError: A hop is neither an undone forget's (or its
+                undo's) nor a person's edit: a live forget's, or a mark.
+        """
+        rows = self.rows[kind]
+        at, edited, seen = start, False, set()
+        while at in rows and at not in seen:
+            seen.add(at)
+            stored, mark = rows[at]
+            if mark is None:
+                return stored, edited
+            following = rows.get(mark)
+            if mark == FORGOTTEN_MARK or following is None:
+                break
+            item = following[0].item
+            if (kind, at, mark) in self.followed or _copy_of(
+                item, self.copied.get((kind, at)), rows
+            ):
+                at = mark
+                continue
+            if getattr(item, "edited_by", None) and item.supersedes == at:
+                edited = True
+                at = mark
+                continue
+            break
+        raise ConflictError(_LATER)
+
+
+def _copy_of(
+    item: Any,
+    replaced: str | None,
+    rows: Mapping[str, tuple[Stored[Any], str | None]],
+) -> bool:
+    """Whether ``item`` is an undo's copy of ``replaced`` (its text as it was)."""
+    if replaced is None or replaced not in rows:
+        return False
+    before = rows[replaced][0].item.model_dump(exclude={"version"})
+    return item.model_dump(exclude={"version"}) == before
 
 
 def target_of(entry: ForgetEntry) -> ForgetTarget | None:
