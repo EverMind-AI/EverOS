@@ -1403,15 +1403,30 @@ was forgotten to everything derived from it (Step 2):
 group-profile items): forgotten when all of their sources are forgotten;
 otherwise marked `stale` and rewritten from the remaining sources by the next
 update, which appends a new version. Re-extraction and quotes skip forgotten
-messages; the memcell payload keeps them so undo can restore them. A member's
-profile that loses an item loses its summary too (it is written over every
-item): the next update writes it again from the items left, as on `user.md`.
+messages; the memcell payload keeps them so undo can restore them. A message
+forgotten while it waits in the buffer is read by no boundary or extraction
+call: it stays buffered, out of every cut, until the undo makes it an
+ordinary message of the next cut. A member's profile that loses an item
+loses its summary too (it is written over every item): the next update
+writes it again from the items left, as on `user.md` (a user's profile
+follows the same stale rule after a message forget since 2026-11-13).
+
+A forget whose target reaches what another live forget already marked (the
+segment of a record forgotten by id, a session after one of its messages)
+marks nothing again but records it as covered: a record stays forgotten
+while any live forget marked or covers it, so undoing the narrower forget
+leaves it out until the wider one is undone too.
 
 Undo restores the marks and writes the previous versions again as the newest
 (a daily log only grows), puts the profile items back in their places and a
-dropped summary while no update has written a new one; it is refused (409)
-while a later forget or edit replaced a version the forget wrote. Delete
-(owner/admin) runs the same propagation: it is a forget, soft and reversible.
+dropped summary while no update has written a new one. A version the forget
+wrote that was replaced since is followed to the current one: through a
+later forget undone since, and through an edit, over which the previous
+version is written as a three-way merge (api.md, `/memory/forget/undo`). It
+is refused (409) while a later forget that is still live replaced or marked
+a version the forget wrote, and when an edit changed the very text the
+forget changed. Delete (owner/admin) runs the same propagation: it is a
+forget, soft and reversible.
 
 One engine serves a user's memory and a group's (2026-11-13): plan (a dry
 run) → apply → one log format → undo by `forget_id`. A forget marks in a
@@ -2000,8 +2015,10 @@ Step 2 differs from the text above in these places:
     in markdown, their rows carry `deprecated_by`, and a group's history
     leaves out what a live forget marked or replaced), a picture forget is a
     text edit with no model call, and undo writes the replaced versions
-    again as the newest (refused, 409, while a later change replaced what
-    the forget wrote). A forget logged before still undoes the old way.
+    again as the newest (refused, 409, while a later forget that is still
+    live replaced what the forget wrote, or an edit changed the same text;
+    a later forget undone since and an edit elsewhere in the text are
+    followed). A forget logged before still undoes the old way.
 - **Expansion.** Only group scopes expand. A core scene leads to its
   episodes; an episode's scene is not looked up (scene membership is not
   indexed). A linked record scores 0 and reaches the final injection only if
@@ -2065,8 +2082,11 @@ Step 2 differs from the text above in these places:
   3. In a group with no owner or admin, any current member may forget;
      managers may forget records outside their own windows.
   4. Undo stays last in, first out where forgets overlap: undoing a forget
-     while a later forget holds what it wrote answers 409 (since 2026-11-13
-     also when an edit replaced it, for a user's memory as for a group's).
+     while a later forget that is still live holds what it wrote answers
+     409; once that one is undone, the earlier undo follows its copy. An
+     edit of what the forget wrote is undone over (a three-way merge), and
+     answers 409 only when it changed the very text the forget changed (for
+     a user's memory as for a group's, since 2026-11-13).
   5. The verifier stays strict: a message cited under the wrong segment,
      even one of the same session, is dropped (`unknown_message`).
 

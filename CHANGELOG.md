@@ -64,6 +64,14 @@ machinery that keeps a deleted memory from coming back.
 
 ### Added
 
+- **`/memory/get` lists a user's picture memories.** `memory_type:
+  "image_memory"` pairs with `user_id` as it does with a group scope: the
+  user's current picture memories, each item naming its owner (`user_id`,
+  or `group_id` for a group's; `group_id` is no longer required on the
+  item), under the read rules of every personal listing. Before, a user's
+  picture memory could be updated, forgotten and had a history, but a
+  caller found it only through search.
+
 - **`everos prompts` lists every prompt a chat store is built and read
   with.** Two were missing. The boundary detection that cuts every buffered
   conversation into segments is everalgo's (`everalgo.boundary.batch_detect`,
@@ -998,6 +1006,56 @@ machinery that keeps a deleted memory from coming back.
   every group in the space -- about 600 SQL statements and half a second per
   request at 200 groups. They now ask the roster mirror for the asker's
   groups first (one indexed query) and read only those.
+- **A record stays forgotten while a wider forget covers it.** Forgetting
+  an episode and then its conversation (or everything) logged nothing of
+  the episode in the wider forget -- it was forgotten already -- so
+  undoing the first forget brought the episode back, searchable, with its
+  profile item back in `user.md` and its picture file back in
+  circulation, while the wider forget still stood. A forget now records
+  what its target reaches that another live forget already holds
+  (`covered` in the forget log): an entry, a profile value or a picture
+  file stays out while any live forget marked, took or covers it, and the
+  wider forget's undo brings it back.
+- **Undo the later forget first, then the earlier: it works now.** Two
+  forgets that rewrite one record (two pictures of one episode, two
+  messages of one segment) left the earlier forget un-undoable (`409`
+  for good), even after the later one was undone as the docs instruct.
+  The undo now follows a later forget undone since to the version current
+  now (the log keeps what each undo wrote, `restored`).
+- **An edit no longer locks a forget for good.** After `/memory/update`
+  of the version a forget wrote, that forget answered `409` and no route
+  undid the edit. The undo now writes the version the forget replaced
+  over the edit as a three-way merge per field: what the person left as
+  the forget wrote it comes back, the rest stays the person's, and a text
+  both changed is merged word by word when the changes do not meet. It
+  answers `409` -- naming the edited version -- only when the edit changed
+  the very text the forget changed.
+- **A forgotten message's facts leave the user's profile.** After a
+  `message` forget the profile items resting on the segment stayed while
+  the user wrote anything else in it, so the fact the message stated
+  stayed in `user.md` and came back in search. The one-to-one profile now
+  follows the stale rule a member's profile in a group does: such an item
+  goes, its remaining segments are queued in `user.md`, and the user's
+  next profile update writes it again from what they still say, without
+  the message (no extra model call); the undo puts it back and clears the
+  queue. A user's undo also marks the forget's messages readable again
+  (only a group's did).
+- **A buffered message forgotten before its segment was cut is never
+  read.** It still went into the next boundary call and the profile
+  update, and `user.md` got an item from it. Boundary detection now keeps
+  a row a live forget names in the buffer, out of every cut and every
+  model call, until the undo; the one-to-one profile update reads its
+  segment without forgotten messages.
+- **A forgotten picture's bytes answer `404`.** `GET
+  /memory/images/{image_id}` kept serving the bytes of a picture a user's
+  forget took out of circulation. While no live memory refers to the hash
+  and a forget holds it, every variant now answers as a missing picture;
+  the undo serves it again.
+- **A picture forget keeps the text's whitespace.** Cutting a picture's
+  reference out of an episode or scene joined the whole body on single
+  spaces (paragraphs and lists became one line, a literal `()` vanished).
+  Only the reference and the spaces before it go now.
+
 - **One broken markdown entry costs that entry only.** A hand edit that
   broke one entry -- a timestamp that no longer parses, a deleted close
   marker -- failed the projection of its whole file (no entry of it was

@@ -544,13 +544,13 @@ value, is refused with `422 INVALID_INPUT` and a message that says only
 | `"episode"` | user, group | `data.episodes` — [GetEpisodeItem](#getepisodeitem) |
 | `"profile"` | user | `data.profiles` — [GetProfileItem](#getprofileitem) |
 | `"scene"` | user, group | `data.scenes` — the owner's current scene versions ([scenes.md](scenes.md)), in the [GetEpisodeItem](#getepisodeitem) shape with `type: "Scene"`; `"episode"` never lists a scene |
-| `"image_memory"` | group | `data.images` — the group's picture memories |
+| `"image_memory"` | user, group | `data.images` — the owner's current picture memories, each naming its owner (`user_id`, or `group_id`) |
 | `"member_profile"` | group | `data.profiles` — one member's profile in each group of the scope; needs `member_id` |
 | `"group_profile"` | group | `data.group_profile` — the group-profile items the asker can see, newest first; every version with `include_superseded` |
 
 `memory_type` must match the requested owner kind: `"episode"` /
-`"profile"` / `"scene"` take `user_id`; a group scope (`group_id` /
-`group_ids`) takes `"episode"`, `"scene"`, `"image_memory"`,
+`"profile"` / `"scene"` / `"image_memory"` take `user_id`; a group scope
+(`group_id` / `group_ids`) takes `"episode"`, `"scene"`, `"image_memory"`,
 `"member_profile"` and `"group_profile"`. The mismatching combinations are
 rejected with `422`. EverOS 2.0 has no agent memory: `"agent_case"` and
 `"agent_skill"` are refused with `422` like an `agent_id`
@@ -1271,7 +1271,7 @@ always present so client code can iterate without branching on
 |---|---|---|
 | `episodes` | `array<GetEpisodeItem>` | Populated when `memory_type="episode"` |
 | `scenes` | `array<GetEpisodeItem>` | Populated when `memory_type="scene"` |
-| `images` | `array<object>` | Populated when `memory_type="image_memory"` |
+| `images` | `array<object>` | Populated when `memory_type="image_memory"`: one item per picture memory, `user_id` set for a user's and `group_id` for a group's |
 | `profiles` | `array<GetProfileItem>` | Populated when `memory_type="profile"` or `"member_profile"` |
 | `group_profile` | `array<object>` | Populated when `memory_type="group_profile"` |
 | `total_count` | `integer` | Total matching records **before** paging |
@@ -1498,18 +1498,30 @@ A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
 |---|---|---|
 | `record` | `record_ids` (1..100) | the records by id, of any kind: an episode, a picture memory (its current version), a scene (its current version, and its cluster, so it does not grow back), a profile item or a replaced value |
 | `session` | `session_id` | the conversation's current episodes and picture memories |
-| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations with the assistant (one bound to no group, with no other person in it: in two people's conversation it answers `422`, as forgetting a message would change the other person's copy too), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<index in its batch, 3 digits>`, not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, and a buffered one is never read |
+| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations with the assistant (one bound to no group, with no other person in it: in two people's conversation it answers `422`, as forgetting a message would change the other person's copy too), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<index in its batch, 3 digits>`, not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, the profile items resting on such a segment go (below), and a buffered one is never read: it stays in the buffer, out of every cut and every model call, until the undo makes it an ordinary message of the next cut |
 | `owner` | — | every current episode, picture memory and scene of the user, and the whole profile: items, replaced values, summary |
 | `condition` | `memory_types` (`episode`, `image_memory`, `scene`, `profile`), `start` and/or `end` (epoch ms, `[start, end)`) | the memories of those kinds whose time falls in the range (a profile item by when it was observed) |
-| `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference |
+| `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference (only the reference goes: every other character of the text, its line breaks included, stays) |
 
 A forget **follows the sources**: a scene none of whose episodes is alive any
 more is forgotten, and one that keeps a live episode keeps its narrative,
 which may still say what a forgotten episode or message said (forget the
 scene by its id to drop it; a group's scene is written again); a picture file no live memory of the user refers to is
-taken out of circulation (the bytes stay); a profile item, or a replaced
-value, goes once every segment it rests on is forgotten (or every picture it
-was read off). A profile that loses an item loses its summary too, which is
+taken out of circulation (the bytes stay for the undo; `GET
+/memory/images/{image_id}` answers `404`, as for a picture that does not
+exist, while no live memory of anyone refers to it); a profile item, or a
+replaced value, goes once every segment it rests on is forgotten (or every
+picture it was read off). A `message` forget also takes out what rests on a
+segment that lost a message while the user still wrote something else in
+it, since it may state what the message said: an item's remaining segments
+are queued in `user.md`, and the user's next profile update reads them --
+without the forgotten message -- with its own segment, so a fact that still
+holds is written again (no extra model call; a replaced value is history
+and is not written again). A forget whose target reaches what another live
+forget already took -- the conversation of an episode forgotten by id, or
+everything -- marks nothing again but records it as **covered**: an entry,
+a profile value or a picture file stays forgotten while any live forget
+marked, took or covers it. A profile that loses an item loses its summary too, which is
 written over every item and may repeat it: the next profile update writes it
 again from the items left, and the undo puts it back while none has (a
 member's profile in a group does the same). A forget marks and erases the
@@ -1560,15 +1572,38 @@ marks it wrote go back to what they were; a version it wrote in place of
 another (a text edit, a re-extracted episode, a scene narrated again) is
 superseded by the version it replaced, written again as the newest -- nothing
 in a daily log is removed. Profile values come back in their places, by id
-(a forget logged before places were kept puts them back by description), and
-so do the values other live forgets took because of it (a profile item
-resting on its segments); an entry another live forget also marked stays
-forgotten until that one is undone too.
+(a forget logged before places were kept puts them back by description;
+an item the profile holds again, written anew since, is not put back twice),
+and so do the values other live forgets took because of it (a profile item
+resting on its segments, unless they are all still forgotten); the segments
+a `message` forget queued leave the queue, and its messages are read again
+(a buffered one by the next cut). An entry, a value or a picture file
+another live forget also marked, took or covers stays forgotten until that
+one is undone too; what this forget covered comes back with it unless
+another live forget still holds it.
 
-**Order.** `409` `CONFLICT` while a version this forget wrote is no longer
-current -- a later forget, undo or edit replaced it: undo that later forget
-first. Forgets of different records undo in any order. `applied: false` when
-it was undone already. The picture body (`user_id` + `image_id`) undoes the
+**Order.** A version this forget wrote may have been replaced since; the
+undo follows the replacements to the version current now and writes the
+old version over it:
+
+- through a later forget that was undone since (its undo wrote back what
+  that forget replaced): undo the later forget first, then this one;
+- through a person's edit (`/memory/update`): the old version is written
+  over the edit as a three-way merge per field, with the forget's version
+  as the base -- a field the person left as the forget wrote it comes back
+  as it was before the forget, a field the forget did not change keeps the
+  person's value, and a text both changed is merged word by word when the
+  changes do not meet (a picture's reference goes back into a text the
+  person corrected elsewhere). The new version stays the person's
+  (`edited_by`, `held`).
+
+`409` `CONFLICT` while a later forget that is still live replaced or marked
+a version this forget wrote -- undo that one first -- and when a person's
+edit changed the very text this forget changed: the message names the
+edited version; edit it back to what the forget wrote (`GET
+/memory/history` lists the versions) and undo again, or keep the edit.
+Forgets of different records undo in any order. `applied: false` when it was
+undone already. The picture body (`user_id` + `image_id`) undoes the
 picture's newest forget, and `/forget/session/undo` the conversation's
 newest.
 
