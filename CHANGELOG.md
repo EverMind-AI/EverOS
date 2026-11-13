@@ -1143,7 +1143,6 @@ machinery that keeps a deleted memory from coming back.
   embedding probe built its own client from the `[embedding]` settings, so an
   application given its providers read `capabilities.embed: false` with a
   working embedder; the probe now asks the one it was given.
-
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's
