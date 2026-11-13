@@ -4621,8 +4621,26 @@
             "type": "string",
             "title": "Image Id"
           },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
           "group_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Group Id"
           },
           "app_id": {
@@ -4722,12 +4740,11 @@
           "id",
           "entry_id",
           "image_id",
-          "group_id",
           "timestamp",
           "description"
         ],
         "title": "GetImageItem",
-        "description": "A group picture memory listing item -- one appearance of one picture."
+        "description": "A picture memory listing item -- one appearance of one picture.\n\nA user's names the user (``user_id``), a group's the group (``group_id``),\nas an episode listing item does."
       },
       "GetMemoryType": {
         "type": "string",
@@ -4740,7 +4757,7 @@
           "group_profile"
         ],
         "title": "GetMemoryType",
-        "description": "The kinds enumerated by ``/get``.\n\n``episode``, ``profile`` and ``scene`` are user-owned; the group kinds\nneed a group scope. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`."
+        "description": "The kinds enumerated by ``/get``.\n\n``episode``, ``profile``, ``scene`` and ``image_memory`` are listed for a\nuser; ``image_memory`` and the group kinds for a group. Cross-pairs are\nrejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`."
       },
       "GetProfileItem": {
         "properties": {

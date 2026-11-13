@@ -114,7 +114,7 @@ async def test_owner_memory_type_mismatch_returns_422(client: AsyncClient) -> No
         "/api/v1/memory/get",
         json={
             "user_id": "u1",
-            "memory_type": "image_memory",
+            "memory_type": "member_profile",
         },
     )
     assert resp.status_code == 422

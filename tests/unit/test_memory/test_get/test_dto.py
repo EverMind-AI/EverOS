@@ -171,7 +171,12 @@ def test_get_request_rejects_invalid_sort_order() -> None:
 
 @pytest.mark.parametrize(
     "memory_type",
-    [GetMemoryType.EPISODE, GetMemoryType.PROFILE, GetMemoryType.SCENE],
+    [
+        GetMemoryType.EPISODE,
+        GetMemoryType.PROFILE,
+        GetMemoryType.SCENE,
+        GetMemoryType.IMAGE_MEMORY,
+    ],
 )
 def test_get_request_allows_valid_owner_memory_pair(
     memory_type: GetMemoryType,
@@ -185,7 +190,6 @@ def test_get_request_allows_valid_owner_memory_pair(
 @pytest.mark.parametrize(
     "memory_type",
     [
-        GetMemoryType.IMAGE_MEMORY,
         GetMemoryType.MEMBER_PROFILE,
         GetMemoryType.GROUP_PROFILE,
     ],

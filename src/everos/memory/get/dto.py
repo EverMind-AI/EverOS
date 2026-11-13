@@ -6,7 +6,7 @@ ranked retrieval):
 
 * ``owner_type`` × ``memory_type`` are strictly paired:
 
-  - ``user`` → ``episode`` | ``profile`` | ``scene``
+  - ``user`` → ``episode`` | ``profile`` | ``scene`` | ``image_memory``
   - ``group`` → ``episode`` | ``scene`` | ``image_memory`` | ``member_profile``
     (the last with ``member_id``)
 
@@ -46,8 +46,9 @@ from everos.memory.search import (
 class GetMemoryType(StrEnum):
     """The kinds enumerated by ``/get``.
 
-    ``episode``, ``profile`` and ``scene`` are user-owned; the group kinds
-    need a group scope. Cross-pairs are rejected by
+    ``episode``, ``profile``, ``scene`` and ``image_memory`` are listed for a
+    user; ``image_memory`` and the group kinds for a group. Cross-pairs are
+    rejected by
     :meth:`GetRequest._validate_owner_memory_type_pair`.
     """
 
@@ -56,7 +57,7 @@ class GetMemoryType(StrEnum):
     SCENE = "scene"
     """An owner's current scene versions (user and group scopes)."""
     IMAGE_MEMORY = "image_memory"
-    """A group's picture memories (group scopes only)."""
+    """An owner's current picture memories (user and group scopes)."""
     MEMBER_PROFILE = "member_profile"
     """One member's profile in the group(s), with ``member_id`` (group scopes)."""
     GROUP_PROFILE = "group_profile"
@@ -159,6 +160,7 @@ class GetRequest(BaseModel):
             GetMemoryType.EPISODE,
             GetMemoryType.PROFILE,
             GetMemoryType.SCENE,
+            GetMemoryType.IMAGE_MEMORY,
         }
         if self.owner_type == "user" and self.memory_type not in user_kinds:
             raise ValueError(
@@ -287,14 +289,19 @@ class GetProfileItem(BaseModel):
 
 
 class GetImageItem(BaseModel):
-    """A group picture memory listing item -- one appearance of one picture."""
+    """A picture memory listing item -- one appearance of one picture.
+
+    A user's names the user (``user_id``), a group's the group (``group_id``),
+    as an episode listing item does.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     entry_id: str
     image_id: str
-    group_id: str
+    user_id: str | None = None
+    group_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
     session_id: str | None = None
@@ -328,7 +335,7 @@ class GetData(BaseModel):
     scenes: list[GetEpisodeItem] = Field(default_factory=list)
     """An owner's current scene versions (``memory_type = scene``)."""
     images: list[GetImageItem] = Field(default_factory=list)
-    """A group's picture memories (``memory_type = image_memory``)."""
+    """An owner's picture memories (``memory_type = image_memory``)."""
     profiles: list[GetProfileItem] = Field(default_factory=list)
     group_profile: list[GroupProfileEntry] = Field(default_factory=list)
     """A group's profile items (``memory_type = group_profile``), newest first."""

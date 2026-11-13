@@ -8,6 +8,8 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
   versions, rows of the episode table (``parent_type = scene``)
 * ``user`` + ``profile``       → ``data.profiles`` (one-row KV fetch
   from the ``user_profile`` table; at most one item)
+* ``user`` + ``image_memory``  → ``data.images``: the user's current picture
+  memories
 * ``group`` + ``episode``      → ``data.episodes`` inside the asker's windows
 * ``group`` + ``scene``        → ``data.scenes``: the scene versions, which share
   the episode table (``parent_type = scene``) and its windows
@@ -313,11 +315,13 @@ def _owned(item: GetEpisodeItem) -> GetEpisodeItem:
 
 def _shape_image(stored: Stored[ImageMemory]) -> GetImageItem:
     image = stored.item
+    group = stored.scope.owner_type == "group"
     return GetImageItem(
         id=stored.ref.id,
         entry_id=stored.ref.entry_id,
         image_id=image.image_id,
-        group_id=stored.scope.owner_id,
+        user_id=None if group else stored.scope.owner_id,
+        group_id=stored.scope.owner_id if group else None,
         app_id=stored.scope.app_id,
         project_id=stored.scope.project_id,
         session_id=image.session_id,
