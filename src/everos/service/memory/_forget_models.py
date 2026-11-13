@@ -135,7 +135,9 @@ class ForgetResult:
         profile_item_count: How many of those are items (not replaced values).
         stale_profile_items: Profile items taken out to be written again from
             their remaining segments (a group).
-        group_profile_items: Group-profile items forgotten.
+        group_profile_items: Group-profile items taken out of default reads:
+            forgotten, or (a picture's forget) replaced by a version whose
+            evidence no longer quotes the picture.
         stale_group_profile_items: Group-profile items taken out to be
             written again.
     """

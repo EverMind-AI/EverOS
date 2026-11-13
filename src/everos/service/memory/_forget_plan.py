@@ -29,7 +29,8 @@ Propagation:
   **marked** forgotten when none is; the picture memories of pictures only
   forgotten messages carried are marked;
 * a picture's forget writes each episode and scene that names it again
-  without the reference (:mod:`._forget_apply`);
+  without the reference, and in a group each group-profile item whose
+  evidence quotes it (:mod:`._forget_apply`);
 * scenes follow their episodes -- a user's scene is forgotten once none of its
   episodes is alive; a group's scene that lost or changed an episode is
   written again over the ones left (or forgotten below ``[scenes]
@@ -56,6 +57,7 @@ __all__ = [
     "Rewrite",
     "SceneEdit",
     "member_edit",
+    "names_picture",
     "reaches_value",
     "user_edit",
 ]
@@ -220,6 +222,11 @@ class ForgetPlan:
         profiles: The profile edits as the plan reads them (the run reads
             each document again under its lock).
         group_forgotten: Group-profile items forgotten.
+        group_rewrites: A group's current profile items that name a forgotten
+            picture (their evidence quotes it): written again without the
+            reference, the old version marked forgotten.
+        group_quoted: Their earlier versions that name it too: marked
+            forgotten, so no read of the item's versions shows the reference.
         group_stale: Group-profile items taken out to be written again.
         group_queue: Segments queued on the group profile's next update.
         retired: In a group, per kind, the versions hidden from the group's
@@ -254,6 +261,8 @@ class ForgetPlan:
     members_removed: list[str] = field(default_factory=list)
     profiles: list[ProfileEdit] = field(default_factory=list)
     group_forgotten: list[Stored[GroupProfileItem]] = field(default_factory=list)
+    group_rewrites: list[Stored[GroupProfileItem]] = field(default_factory=list)
+    group_quoted: list[Stored[GroupProfileItem]] = field(default_factory=list)
     group_stale: list[Stored[GroupProfileItem]] = field(default_factory=list)
     group_queue: list[str] = field(default_factory=list)
     retired: dict[str, set[str]] = field(default_factory=dict)
@@ -731,7 +740,24 @@ class ForgetPlanner:
                         image_id=image_id,
                     )
                 )
+        if plan.is_group:
+            await self._plan_group_quotes(plan, image_id)
         plan.pictures = [image_id]
+
+    async def _plan_group_quotes(self, plan: ForgetPlan, image_id: str) -> None:
+        """A group's profile items whose evidence quotes the picture (a quote
+        is a verbatim part of the message): the current ones are written
+        again without the reference, and every version that names it is
+        marked forgotten while the forget stands."""
+        naming = [
+            stored
+            for stored in await self._stores.group_profile.items(plan.scope)
+            if stored.item.status != "forgotten"
+            and names_picture(stored.item, image_id)
+        ]
+        plan.group_rewrites = [s for s in naming if s.item.status != "superseded"]
+        plan.group_quoted = [s for s in naming if s.item.status == "superseded"]
+        plan.retire("group_profile", {s.ref.entry_id for s in naming})
 
     # ── records by id, everything, a condition ───────────────────────────
 
@@ -1189,6 +1215,13 @@ def user_edit(
             edit.take_history(position, old)
     edit.queue = [m for m in dict.fromkeys(queue) if m not in held.pending_memcell_ids]
     return edit
+
+
+def names_picture(item: GroupProfileItem, image_id: str) -> bool:
+    """Whether a group-profile item's text or evidence names the picture."""
+    return any(image_id in s.quote for s in item.sources) or any(
+        image_id in text for text in (item.statement, item.summary, item.name)
+    )
 
 
 def reaches_value(

@@ -645,6 +645,52 @@ async def test_a_forgotten_record_is_absent_for_every_asker(
         assert picture.status_code == 404, asker
 
 
+async def test_a_forgotten_group_picture_is_quoted_by_no_profile_item(
+    fixture: _Fixture,
+) -> None:
+    """A group-profile item whose evidence quotes a picture the group forgets
+    (the quote is the raw message, ``[IMAGE: <hash>]`` and all): the picture
+    forget writes the item again without the reference -- no model call --
+    so no read of any asker shows it, current items, every version or
+    search; the undo puts the quote back."""
+    world = fixture.world
+    reference = f"[IMAGE: {fixture.picture}]"
+    await world.profile_item(
+        "trip",
+        f"floor plan decision marker {reference}",
+        start=T0 + 1500,
+        end=T0 + 1500,
+    )
+    await world.project()
+    assert reference in await _everything_read_by(fixture, "u_chen")
+    done = await fixture.client.post(
+        "/api/v2/memory/forget",
+        json=_forget_body(
+            "u_chen", {"kind": "image", "image_id": fixture.picture}, dry_run=False
+        ),
+    )
+    assert done.status_code == 200, done.text
+    await world.project()
+    for asker in ("u_chen", "u_evan", "u_dan"):
+        fixture.decider.prompts.clear()
+        seen = await _everything_read_by(fixture, asker)
+        assert reference not in seen, asker
+        if asker != "u_evan":  # the item lies before the late joiner's window
+            assert "floor plan decision marker" in seen, asker
+    undone = await fixture.client.post(
+        "/api/v2/memory/forget/undo",
+        json={
+            "project_id": PROJECT,
+            "group_id": "trip",
+            "asker_id": "u_chen",
+            "forget_id": done.json()["data"]["forget_id"],
+        },
+    )
+    assert undone.status_code == 200, undone.text
+    await world.project()
+    assert reference in await _everything_read_by(fixture, "u_chen")
+
+
 def _member_profile(member: str, *items: tuple[str, int, int]) -> Profile:
     return Profile(
         owner_id=member,

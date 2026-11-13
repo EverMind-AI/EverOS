@@ -1397,7 +1397,7 @@ was forgotten to everything derived from it (Step 2):
 | A member's messages | As above for each of them; the member-in-group profile of that member is forgotten. |
 | A session or segment | Its episodes and picture memories are forgotten; derived records follow the source rule below. |
 | A record | That record is forgotten; derived records follow the source rule. |
-| A picture | Its group picture memories are forgotten, and each episode and scene that names it gets a version without the reference (a text edit, no model call); the file stays while another live memory (any owner) refers to it. |
+| A picture | Its group picture memories are forgotten, and each episode, scene and group-profile item that names it (an item's evidence quotes the raw message, `[IMAGE: <hash>]` included) gets a version without the reference (a text edit, no model call; an item's versions that quote it are marked forgotten, so no read of its versions shows it); the file stays while another live memory (any owner) refers to it. |
 
 **Source rule** for derived records (scenes, member-in-group profile items,
 group-profile items): forgotten when all of their sources are forgotten;

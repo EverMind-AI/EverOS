@@ -1051,6 +1051,13 @@ machinery that keeps a deleted memory from coming back.
   forget took out of circulation. While no live memory refers to the hash
   and a forget holds it, every variant now answers as a missing picture;
   the undo serves it again.
+- **A forgotten group picture is quoted by no group-profile item.** An
+  item's evidence quote is the raw message, `[IMAGE: <hash>]` included, and a
+  group's picture forget left it as it was: `get group_profile` and a
+  search's `group_profile` sources kept naming the forgotten picture. The
+  forget now writes each such item again without the reference (no model
+  call, as for an episode) and marks forgotten every version that quotes it;
+  the undo writes the quote back.
 - **A picture forget keeps the text's whitespace.** Cutting a picture's
   reference out of an episode or scene joined the whole body on single
   spaces (paragraphs and lists became one line, a literal `()` vanished).

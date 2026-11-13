@@ -10,7 +10,8 @@ step fails, what the run's own reversal reads:
    episode call, :class:`Reextraction`), and each group scene that changed is
    narrated again over what it keeps;
 2. every version written in place of another supersedes it (a re-extracted
-   episode, a text edit without a picture, a group's scene narrated again);
+   episode, a text edit without a picture -- of an episode, a scene, a
+   group-profile item's quotes -- a group's scene narrated again);
 3. what goes without a successor is marked ``forgotten``, the mark each entry
    carried before kept for the undo, and its index row erased at once (the
    cascade keeps the mark on the row it projects again);
@@ -33,6 +34,7 @@ __all__ = [
     "Reextraction",
     "applied_record",
     "strip_reference",
+    "without_quoted_picture",
 ]
 
 import re
@@ -51,7 +53,13 @@ from everos.memory.extract.scene import (
     forget_orphaned_scenes,
     scene_cluster_kind,
 )
-from everos.memory.models import FORGOTTEN_MARK, Episode, Profile, Scene
+from everos.memory.models import (
+    FORGOTTEN_MARK,
+    Episode,
+    GroupProfileItem,
+    Profile,
+    Scene,
+)
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope, Stored
 
 from ._forget_log import FORMAT, Logs
@@ -278,6 +286,7 @@ class ForgetWriter:
         )
         await self._scenes(plan, prepared, replaced, reached, applied)
         await self._group_profile(plan, applied)
+        await self._group_quotes(plan, applied)
         for image_id in plan.files:
             await self._stores.images.forget(image_id)
             applied.files.append(image_id)
@@ -498,6 +507,37 @@ class ForgetWriter:
                     )
                     applied.group_queued.extend(added)
 
+    async def _group_quotes(self, plan: ForgetPlan, applied: Applied) -> None:
+        """Each group-profile item that quotes the forgotten picture, written
+        again without the reference (no model call, as for an episode): the
+        new version supersedes the old, which is then marked forgotten with
+        the link kept for the undo, as is every earlier version that quotes
+        the picture -- no read of the item's versions shows it."""
+        image_id = plan.target.image_id
+        if image_id is None or not (plan.group_rewrites or plan.group_quoted):
+            return
+        scope = plan.scope
+        marks: list[tuple[str, str, str | None]] = []
+        async with group_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+            for old in plan.group_rewrites:
+                refs = await self._stores.group_profile.append(
+                    scope,
+                    [without_quoted_picture(old, image_id)],
+                    only_if=NO_SOURCE_CHECK,
+                )
+                if not refs:
+                    continue
+                (ref,) = refs
+                applied.written.setdefault("group_profile", []).append(
+                    [old.ref.md_path, old.ref.entry_id, ref.md_path, ref.entry_id]
+                )
+                marks.append((old.ref.md_path, old.ref.entry_id, ref.entry_id))
+            marks += [
+                (s.ref.md_path, s.ref.entry_id, s.item.superseded_by)
+                for s in plan.group_quoted
+            ]
+            await self._mark("group_profile", scope, marks, applied)
+
     # ── profiles ─────────────────────────────────────────────────────────
 
     def profile_guard(self, plan: ForgetPlan) -> AbstractAsyncContextManager[None]:
@@ -638,6 +678,29 @@ def member_from_record(record: Mapping[str, Any]) -> Profile:
             **record["profile"],
             "history": list(record.get("history") or []),
             "pending_memcell_ids": list(record.get("pending_memcell_ids") or []),
+        }
+    )
+
+
+def without_quoted_picture(
+    old: Stored[GroupProfileItem], image_id: str
+) -> GroupProfileItem:
+    """A group-profile item's next version with the picture's reference cut
+    out of its evidence quotes and its text; it supersedes ``old``."""
+    item = old.item
+    return item.model_copy(
+        update={
+            "sources": [
+                s.model_copy(update={"quote": strip_reference(s.quote, image_id)})
+                for s in item.sources
+            ],
+            "statement": strip_reference(item.statement, image_id),
+            "summary": strip_reference(item.summary, image_id),
+            "name": strip_reference(item.name, image_id),
+            "supersedes": old.ref.entry_id,
+            "item_id": None,
+            "status": None,
+            "superseded_by": None,
         }
     )
 

@@ -7,10 +7,10 @@ What an undo puts back, read from the forget log (:mod:`._forget_log`):
    forget marked it too: an entry stays forgotten while any forget naming it
    stands.
 2. **What it wrote.** A version the forget wrote in place of another (a text
-   edit without a picture, a re-extracted episode, a group's scene narrated
-   again) is superseded by a copy of the version it replaced, written as the
-   newest: the logs only ever grow, and a scene's version number keeps
-   rising.
+   edit without a picture -- of an episode, a scene, a group-profile item's
+   quotes -- a re-extracted episode, a group's scene narrated again) is
+   superseded by a copy of the version it replaced, written as the newest:
+   the logs only ever grow, and a scene's version number keeps rising.
 3. **Profiles.** Values a forget took out of a profile document come back in
    their places, by id; a row written before the log kept places puts them
    back by description. A user's undo also brings back what another live
@@ -151,7 +151,7 @@ class _Back:
     """One version the undo writes again, decided before anything is written.
 
     Attributes:
-        kind: ``episode`` or ``scene``.
+        kind: ``episode``, ``scene`` or ``group_profile``.
         old: The version the forget replaced.
         head: The current version the new one supersedes (what the forget
             wrote, or what replaced it since); ``None`` when the forget's
@@ -290,7 +290,7 @@ class Undoer:
                         (str(r[0]), str(r[1]), str(r[2]), str(r[3]))
                         for r in (undo.get("written") or {}).get(kind) or []
                     ]
-                    for kind in ("episode", "scene")
+                    for kind in ("episode", "scene", "group_profile")
                 },
                 revive=scope.owner_type == "user",
                 clusters=list(undo.get("clusters") or []),
@@ -445,10 +445,13 @@ class Undoer:
     async def _versions(
         self, kind: str, scope: Scope, entry_ids: Collection[str]
     ) -> dict[str, Stored[Any]]:
-        """The episode or scene versions of ``entry_ids`` still in markdown."""
+        """The versions of ``entry_ids`` still in markdown: episodes, scene
+        versions or group-profile items."""
         wanted = set(entry_ids)
         if kind == "scene":
             rows: Sequence[Stored[Any]] = await self._stores.scene.versions(scope)
+        elif kind == "group_profile":
+            rows = await self._stores.group_profile.items(scope)
         else:
             rows = await self._stores.episode.read_many(scope, list(wanted))
         return {r.ref.entry_id: r for r in rows if r.ref.entry_id in wanted}
@@ -480,6 +483,9 @@ class Undoer:
                     paths.add(head.md_path)
                 done.episodes.append(ref.entry_id)
                 paths.add(ref.md_path)
+        items = [b for b in backs if b.kind == "group_profile" and b.head is not None]
+        if items:
+            await self._items_back(scope, items, done)
         scenes = [b for b in backs if b.kind == "scene" and b.head is not None]
         if scenes:
             async with scenes_lock(scope):
@@ -506,6 +512,39 @@ class Undoer:
                         done.paths.setdefault("scene", set()).update(
                             {ref.md_path, head.ref.md_path}
                         )
+
+    async def _items_back(
+        self, scope: Scope, backs: Sequence[_Back], done: _Done
+    ) -> None:
+        """Group-profile items written again as they were, each superseding
+        the version current now (a picture's forget wrote one without the
+        reference its quotes held)."""
+        async with group_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
+            for back in backs:
+                head = back.head
+                assert head is not None
+                copy = back.item.model_copy(
+                    update={
+                        "supersedes": head.ref.entry_id,
+                        "item_id": None,
+                        "status": None,
+                        "superseded_by": None,
+                    }
+                )
+                refs = await self._stores.group_profile.append(
+                    scope, [copy], only_if=NO_SOURCE_CHECK
+                )
+                if not refs:
+                    continue
+                (ref,) = refs
+                done.group_profile.append(ref.entry_id)
+                done.retired.append(head.ref.entry_id)
+                done.restored.setdefault("group_profile", []).append(
+                    [head.ref.md_path, head.ref.entry_id, ref.md_path, ref.entry_id]
+                )
+                done.paths.setdefault("group_profile", set()).update(
+                    {head.ref.md_path, ref.md_path}
+                )
 
     async def _restore_files(
         self, scope: Scope, entry: ForgetEntry, record: _Record, done: _Done
@@ -765,10 +804,24 @@ class _Chains:
             )
         episodes = await stores.episode.read_all(scope)
         scenes = await stores.scene.read_all(scope)
+        items = (
+            await stores.group_profile.items(scope)
+            if scope.owner_type == "group"
+            else []
+        )
         return cls(
             rows={
                 "episode": {s.ref.entry_id: (s, m) for s, m in episodes},
                 "scene": {s.ref.entry_id: (s, m) for s, m in scenes},
+                "group_profile": {
+                    s.ref.entry_id: (
+                        s,
+                        FORGOTTEN_MARK
+                        if s.item.status == "forgotten"
+                        else s.item.superseded_by,
+                    )
+                    for s in items
+                },
             },
             followed=followed,
             copied=copied,

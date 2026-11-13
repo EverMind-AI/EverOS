@@ -442,7 +442,9 @@ def plan_result(
         profile_items=items,
         profile_item_count=count,
         stale_profile_items=stale,
-        group_profile_items=rows(s.ref.entry_id for s in plan.group_forgotten),
+        group_profile_items=rows(
+            s.ref.entry_id for s in [*plan.group_forgotten, *plan.group_rewrites]
+        ),
         stale_group_profile_items=rows(s.ref.entry_id for s in plan.group_stale),
     )
 
