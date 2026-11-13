@@ -393,9 +393,16 @@ class PurgeMachine(RuleBasedStateMachine):
     def teardown(self) -> None:
         async def go() -> None:
             await self.runner.stop()
-            for task in list(self.tasks):
+            # As asyncio.run ends: every task still on the loop is finished
+            # here, so none leaves an open connection to the garbage collector
+            # (whose warning, an error under pytest, would keep the
+            # connection's thread alive and hang the interpreter's exit).
+            left = asyncio.all_tasks() - {asyncio.current_task()}
+            for task in left:
                 task.cancel()
+            await asyncio.gather(*left, return_exceptions=True)
             await self.storage.aclose()
+            await self.loop.shutdown_asyncgens()
 
         self.run(go())
         self.loop.close()
