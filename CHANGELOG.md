@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-13
+
+EverOS 1.7.0 moves onto the everalgo 2026-11 line, all final releases. The
+user profile is now built from episode narratives, every LLM task can have its
+own model and settings under `[llm.<task>]`, boundary detection can run batch
+or step, and a memory root, app or project can be purged while the server keeps
+serving. LoCoMo is published on this release at 94.61% (re-judged), with every
+retrieval method in `benchmarks/README.md`.
+
+Two changes can stop an existing setup: unknown keys under `[llm]` (or an
+`EVEROS_LLM__*` variable naming none) now fail startup, and the Python API for
+building providers changed. HTTP and CLI are unchanged apart from additions.
+See Upgrade below.
+
 ### Added
 
 - **`POST /api/v2/memory/purge`**, **`/purge/confirm`** and
@@ -94,11 +108,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **everalgo moves to the 2026-11 line**: `everalgo-core 0.7.0`,
-  `everalgo-boundary 0.5.0`, and the release candidates
-  `everalgo-user-memory 0.9.0rc8`, `everalgo-agent-memory 0.6.0rc4` and
-  `everalgo-rank 0.5.0rc5`; `everalgo-knowledge`, `everalgo-clustering` and
-  `everalgo-parser` stay at `0.3.0rc2`. The pins stay exact (`==`).
+- **everalgo moves to the 2026-11 line, all final releases**: `everalgo-core
+  0.7.0`, `everalgo-boundary 0.5.0`, `everalgo-user-memory 0.9.0`,
+  `everalgo-agent-memory 0.6.0`, `everalgo-rank 0.5.0`, and `0.3.0` of
+  `everalgo-knowledge`, `everalgo-clustering` and `everalgo-parser`. The pins
+  stay exact (`==`). No everalgo release candidate is pinned any more, so pip
+  and uv both upgrade without a pre-release flag.
   `everalgo-user-memory` is the 2026-11-12 `0.9.0rc8`, which checks every
   profile item against the episode narratives and keeps a do-not-record list
   (the next two entries). `0.9.0rc6` and `0.9.0rc7` are skipped: under the
@@ -317,9 +332,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ```bash
 pip install --upgrade everos
-# uv needs the flag for the pinned pre-release algorithm packages; without it
-# uv keeps the installed version and still reports success:
-uv pip install --upgrade --prerelease=allow everos
+# or, with uv:
+uv pip install --upgrade everos
 ```
 
 (`'everos[multimodal]'` or `'everos[milvus]'` if you installed those extras.)

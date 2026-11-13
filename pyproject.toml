@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.6.0"
+version = "1.7.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -101,18 +101,18 @@ dependencies = [
     # `pip install everos` would otherwise mix lines the suite has never run
     # together. Pin every one with `==` and raise them together, with a run of
     # the release smoke against a PyPI-resolved install.
-    "everalgo-user-memory==0.9.0rc8",
-    "everalgo-agent-memory==0.6.0rc4",
-    "everalgo-rank==0.5.0rc5",
-    "everalgo-knowledge==0.3.0rc2",
+    "everalgo-user-memory==0.9.0",
+    "everalgo-agent-memory==0.6.0",
+    "everalgo-rank==0.5.0",
+    "everalgo-knowledge==0.3.0",
     "everalgo-boundary==0.5.0",
     "everalgo-core==0.7.0",
-    "everalgo-clustering==0.3.0rc2",
-    "everalgo-parser==0.3.0rc2",
+    "everalgo-clustering==0.3.0",
+    "everalgo-parser==0.3.0",
 ]
 
 [project.optional-dependencies]
-multimodal = ["everalgo-parser[svg]==0.3.0rc2"]  # [svg] bundles cairosvg → SVG works by default
+multimodal = ["everalgo-parser[svg]==0.3.0"]  # [svg] bundles cairosvg → SVG works by default
 # Native OpenTelemetry tracing export. Optional — EverOS never imports these
 # unless [observability] is enabled. Install with: pip install everos[otel]
 otel = [
