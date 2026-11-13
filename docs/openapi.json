@@ -96,7 +96,7 @@
             }
           },
           "403": {
-            "description": "Roster events from an asker who may not send them"
+            "description": "Roster events from an asker who may not send them, or a batch to a group with a deliverer from anyone else"
           },
           "409": {
             "description": "Session bound to another group, or a roster conflict"
@@ -126,7 +126,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202. A session of a\ngroup with a deliverer is flushed by its deliverer only.",
         "operationId": "flush_memory_api_v1_memory_flush_post",
         "requestBody": {
           "content": {
@@ -166,6 +166,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A session of a group with a deliverer, flushed by anyone else"
           },
           "429": {
             "description": "Queue at its per-session or global cap"
@@ -1690,7 +1693,7 @@
             }
           },
           "403": {
-            "description": "Roster events from an asker who may not send them"
+            "description": "Roster events from an asker who may not send them, or a batch to a group with a deliverer from anyone else"
           },
           "409": {
             "description": "Session bound to another group, or a roster conflict"
@@ -1720,7 +1723,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202. A session of a\ngroup with a deliverer is flushed by its deliverer only.",
         "operationId": "flush_memory_api_v2_memory_flush_post",
         "requestBody": {
           "content": {
@@ -1760,6 +1763,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A session of a group with a deliverer, flushed by anyone else"
           },
           "429": {
             "description": "Queue at its per-session or global cap"
@@ -6118,7 +6124,7 @@
               }
             ],
             "title": "Asker Id",
-            "description": "Who sends the batch; needed for roster events of an existing group."
+            "description": "Who sends the batch; needed for roster events of an existing group, and for any batch to a group with a deliverer, which takes batches from its deliverer only (403 otherwise). The gateway's identity header, when configured, is the asker instead."
           },
           "defer_extraction": {
             "type": "boolean",
@@ -6163,6 +6169,20 @@
             "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
+          },
+          "asker_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asker Id",
+            "description": "Who flushes; read only for a session of a group with a deliverer, which only its deliverer may flush (403 otherwise). The gateway's identity header, when configured, is the asker instead."
           }
         },
         "type": "object",

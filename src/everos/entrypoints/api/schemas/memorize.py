@@ -129,7 +129,10 @@ class MemorizeAddRequest(BaseModel):
         min_length=1,
         max_length=128,
         description=(
-            "Who sends the batch; needed for roster events of an existing group."
+            "Who sends the batch; needed for roster events of an existing group, "
+            "and for any batch to a group with a deliverer, which takes batches "
+            "from its deliverer only (403 otherwise). The gateway's identity "
+            "header, when configured, is the asker instead."
         ),
     )
     defer_extraction: bool = Field(
@@ -203,6 +206,16 @@ class MemorizeFlushRequest(BaseModel):
         min_length=1,
         max_length=128,
         pattern=PATH_SAFE_CHARSET,
+    )
+    asker_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Who flushes; read only for a session of a group with a deliverer, "
+            "which only its deliverer may flush (403 otherwise). The gateway's "
+            "identity header, when configured, is the asker instead."
+        ),
     )
 
 

@@ -961,9 +961,12 @@ class MemoryService:
         accepted.
 
         Raises:
+            ForbiddenError: The session's group has a deliverer, and the
+                asker is not it (section 5.1).
             PayloadTooLargeError: Queued, and the body is over the limit.
             QueueSaturatedError: Queued, and the session or queue is full.
         """
+        await self._memorizer.check_delivery(payload)
         if (async_mode and self.accepts_async) or await self._has_backlog(payload):
             return await self._queue_request(
                 payload,
@@ -980,23 +983,33 @@ class MemoryService:
         request_id: str,
         app_id: str = "default",
         project_id: str = "default",
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> FlushResult | Queued:
         """Run one ``/flush`` inline, or queue it behind the session's backlog.
 
         A flush has no ``async_mode`` (the Cloud API has none either); it is
-        queued only when earlier requests of the session still are.
+        queued only when earlier requests of the session still are. The
+        asker matters only to a session of a group with a deliverer.
 
         Raises:
+            ForbiddenError: The session's group has a deliverer, and the
+                asker is not it (section 5.1).
             QueueSaturatedError: Queued, and the session or queue is full.
         """
-        payload = flush_payload(session_id, app_id, project_id)
+        payload = flush_payload(
+            session_id,
+            app_id,
+            project_id,
+            asker_id=asker_id,
+            asserted_asker=asserted_asker,
+        )
+        await self._memorizer.check_delivery(payload)
         if await self._has_backlog(payload):
             return await self._queue_request(
                 payload, request_id=request_id, is_final=True, defer_extraction=False
             )
-        return await self._flush_inline(
-            session_id=session_id, app_id=app_id, project_id=project_id
-        )
+        return await self._flush_inline(payload)
 
     async def _has_backlog(self, payload: dict[str, Any]) -> bool:
         return await self.has_queued(
@@ -1021,17 +1034,9 @@ class MemoryService:
         )
         return Queued(message_count=len(payload["messages"]), pending=pending)
 
-    async def _flush_inline(
-        self,
-        *,
-        session_id: str,
-        app_id: str = "default",
-        project_id: str = "default",
-    ) -> FlushResult:
+    async def _flush_inline(self, payload: dict[str, Any]) -> FlushResult:
         """Force boundary detection over the session's whole buffer."""
-        result = await self._memorize(
-            flush_payload(session_id, app_id, project_id), is_final=True
-        )
+        result = await self._memorize(payload, is_final=True)
         return FlushResult(
             status="extracted" if result.status == "extracted" else "no_extraction"
         )

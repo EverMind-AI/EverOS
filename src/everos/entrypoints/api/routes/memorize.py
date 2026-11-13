@@ -49,7 +49,10 @@ _ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": SuccessEnvelope[AcceptedResponseData],
         "description": "Queued: async_mode, or the session already had a backlog",
     },
-    403: {"description": "Roster events from an asker who may not send them"},
+    403: {
+        "description": "Roster events from an asker who may not send them, or a "
+        "batch to a group with a deliverer from anyone else"
+    },
     409: {"description": "Session bound to another group, or a roster conflict"},
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
@@ -58,6 +61,9 @@ _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
     202: {
         "model": SuccessEnvelope[AcceptedResponseData],
         "description": "Queued behind the session's backlog, how a flush is queued",
+    },
+    403: {
+        "description": "A session of a group with a deliverer, flushed by anyone else"
     },
     429: {"description": "Queue at its per-session or global cap"},
 }
@@ -125,17 +131,21 @@ async def flush_memory(
     response: Response,
     app: ApplicationDep,
     request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[FlushResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Force boundary detection over the current ``session_id`` buffer.
 
     Runs inline unless the session still has queued batches, in which case
-    the flush joins the queue behind them and answers 202.
+    the flush joins the queue behind them and answers 202. A session of a
+    group with a deliverer is flushed by its deliverer only.
     """
     result = await app.memory.flush(
         session_id=req.session_id,
         request_id=request_id,
         app_id=req.app_id,
         project_id=req.project_id,
+        asker_id=req.asker_id,
+        asserted_asker=asker_header,
     )
     if isinstance(result, Queued):
         return _accepted(response, request_id, result)

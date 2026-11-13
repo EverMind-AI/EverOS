@@ -22,7 +22,8 @@ anything is written (docs/group-memory.md, sections 7.1 and 7.9):
   admitted into its group (binding, inline roster, implicit joins; 409 / 403
   / 422 before anything is written), and an inline roster change first cuts
   the open buffer of every session of the group -- their locks held with the
-  batch's, in sorted order (D18);
+  batch's, in sorted order (D18). A group with a deliverer takes batches and
+  flushes from its deliverer only (403 otherwise, section 5.1);
 * a session of two or more people (role ``user`` senders, in the batch and
   the open buffer together) without a ``group_id``: it becomes the implicit
   group of those people, created on first sight and bound like a declared
@@ -49,7 +50,7 @@ from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory import IngestResult as _IngestResult
-from everos.memory.access import resolve_identity
+from everos.memory.access import authorize_delivery, resolve_identity
 from everos.memory.events import GroupFlushed
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
@@ -230,6 +231,50 @@ class Memorizer:
                     memcell_ids=memcell_ids,
                 )
                 raise
+
+    async def check_delivery(self, payload: dict[str, Any]) -> None:
+        """Refuse a batch or a flush from anyone but its group's deliverer (403).
+
+        Asked before a request is run or queued, so a refused one is answered
+        at once; :meth:`_admit_group_batch` asks again under the session lock,
+        which is what a queued request meets when it runs. A session of no
+        group, an implicit group and a group without a deliverer take anyone's
+        batches, as before.
+
+        Raises:
+            ForbiddenError: The group has a deliverer and the asker (the
+                gateway's header, else ``asker_id``) is not it.
+        """
+        if self._rosters is None:
+            return
+        session = SessionKey(
+            app_id=payload.get("app_id") or "default",
+            project_id=payload.get("project_id") or "default",
+            session_id=payload["session_id"],
+        )
+        group_id = payload.get("group_id") or await self._rosters.store.binding(session)
+        if group_id is None or is_implicit_group(group_id):
+            return
+        await self._check_delivery(
+            payload,
+            Scope(
+                app_id=session.app_id,
+                project_id=session.project_id,
+                owner_id=group_id,
+                owner_type="group",
+            ),
+        )
+
+    async def _check_delivery(self, payload: dict[str, Any], scope: Scope) -> None:
+        """:meth:`check_delivery` for the group ``scope``, already resolved."""
+        assert self._rosters is not None
+        record = await self._rosters.store.get(scope)
+        if record is None or record.roster.deliverer_id is None:
+            return
+        identity = resolve_identity(
+            header=payload.get("asserted_asker"), body_asker=payload.get("asker_id")
+        )
+        authorize_delivery(record.roster, identity.asker_id, group_id=scope.owner_id)
 
     async def _sessions_cut_with(
         self, payload: dict[str, Any], *, is_final: bool
@@ -533,6 +578,9 @@ class Memorizer:
                 )
             return []
         raw_roster = payload.get("roster") or []
+        # Before anything is cut or written: a group with a deliverer takes
+        # batches and flushes from it alone.
+        await self._check_delivery(payload, scope)
         if not messages and not raw_roster:
             return []  # a flush: the binding already names the group
         await self._rosters.check_binding(session, group_id)
@@ -723,11 +771,28 @@ def _status(track: TrackStatus) -> Literal["accumulated", "extracted"]:
     return "accumulated"
 
 
-def flush_payload(session_id: str, app_id: str, project_id: str) -> dict[str, Any]:
-    """The payload a flush runs with: the session, and no new messages."""
-    return {
+def flush_payload(
+    session_id: str,
+    app_id: str,
+    project_id: str,
+    *,
+    asker_id: str | None = None,
+    asserted_asker: str | None = None,
+) -> dict[str, Any]:
+    """The payload a flush runs with: the session, and no new messages.
+
+    The flush's asker (``asker_id``, the gateway's ``asserted_asker``) rides
+    along only when given, so a flush that names none is the payload it
+    always was; a group with a deliverer reads it (section 5.1).
+    """
+    payload: dict[str, Any] = {
         "session_id": session_id,
         "app_id": app_id,
         "project_id": project_id,
         "messages": [],
     }
+    if asker_id is not None:
+        payload["asker_id"] = asker_id
+    if asserted_asker is not None:
+        payload["asserted_asker"] = asserted_asker
+    return payload

@@ -194,6 +194,8 @@ class StubMemoryService:
         request_id: str,
         app_id: str = "default",
         project_id: str = "default",
+        asker_id: str | None = None,
+        asserted_asker: str | None = None,
     ) -> FlushResult | Queued:
         if await self.has_queued(session_id=session_id):
             payload = {
