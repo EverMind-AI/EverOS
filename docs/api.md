@@ -320,9 +320,11 @@ whatever text they carry. The user's and the assistant's plain messages of
 the same batch are memorized as usual.
 
 **`timestamp`** — Wall-clock anchor in **Unix epoch milliseconds (ms)**
-per the v1 API contract. Used by extraction to anchor the resulting
-episode and by the daily-log writer to bucket the entry into the right
-file (`episode-<YYYY-MM-DD>.md` etc.).
+per the v1 API contract. Extraction dates the resulting episode by it (the
+episode's `timestamp`, which search filters and orders by). It does **not**
+pick the markdown file: an entry is appended to the daily file of the day it
+is written, in the display timezone (`episode-<YYYY-MM-DD>.md` etc.), so a
+conversation from March written today lands in today's file.
 
 > Implementation note: for backward compat a value below `10^10` is read
 > as seconds (dates up to 2286-11-20) and every larger value as ms (from
@@ -658,9 +660,11 @@ correlation.
 **`status`** — Two-state outcome:
 - `"accumulated"` — Messages were added to the buffer; the boundary
   detector did **not** trigger this call. The buffer remains open.
-- `"extracted"` — During this call the boundary detector tripped; the
+- `"extracted"` — During this call the boundary detector tripped (or a
+  segment whose extraction had not finished was extracted again); the
   LLM ran extraction and the writers persisted at least one memory
-  cell. The buffer is empty after the call returns.
+  cell. The messages after the last cut (the tail the detector judged
+  unfinished) stay buffered for the next call or `/flush`.
 
 `202 Accepted` — only with `async_mode`, or when the session already has
 queued batches (see [Asynchronous mode](#asynchronous-mode)) — returns a
