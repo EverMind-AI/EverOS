@@ -34,6 +34,15 @@ import run as run_mod  # noqa: E402
 from config import BenchmarkConfig  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def backoffs(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The retry backoffs a test's calls asked for, recorded instead of slept:
+    a failing stub is retried with the real policy and takes no wall time."""
+    waits: list[float] = []
+    monkeypatch.setattr(run_mod, "_backoff_sleep", waits.append)
+    return waits
+
+
 class StubEveros:
     """Returns two episodes for every search, or a 500 for questions in ``fail``."""
 
@@ -277,7 +286,7 @@ def test_transport_error_is_retried_then_recorded(
 
 
 def test_persistent_transport_error_is_recorded(
-    tmp_path: Path, cfg: BenchmarkConfig
+    tmp_path: Path, cfg: BenchmarkConfig, backoffs: list[float]
 ) -> None:
     """When it never recovers, the question is kept and marked, not dropped."""
     conv = tmp_path / "conv0"
@@ -290,6 +299,8 @@ def test_persistent_transport_error_is_recorded(
     searches = _search(conv, cfg, Dead())
     assert len(searches) == len(QA)
     assert all(s.search_error for s in searches)
+    # Every question was retried on the real schedule (2, 4, 8, 16 s), unslept.
+    assert backoffs == [2.0, 4.0, 8.0, 16.0] * len(QA)
 
 
 def test_report_writes_and_prints(

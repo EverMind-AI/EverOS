@@ -67,6 +67,10 @@ from config import (  # noqa: E402
 )
 from tqdm import tqdm as _tqdm  # noqa: E402
 
+_backoff_sleep = time.sleep
+"""How a retry waits out its backoff (ingest, search, answer). A test swaps it
+for one that records the waits, so a run of failing calls takes no wall time."""
+
 _BAR_WIDTH = 16
 _IS_TTY = sys.stdout.isatty()
 _FILL_BG = "\033[44m" if _IS_TTY else ""
@@ -1356,7 +1360,7 @@ def _post_with_retry(
                 f"  [warn] {what} -> {status}, retry "
                 f"{attempt + 1}/{attempts - 1} in {wait:.0f}s"
             )
-            time.sleep(wait)
+            _backoff_sleep(wait)
     if tolerate:
         # The caller counts and skips. Used by ADD, where the reference keeps going so a
         # partially-extractable store still produces an honest number plus a failure
@@ -1565,7 +1569,7 @@ def _search_one(
             f"  [warn] search retry {attempt + 1}/{_SEARCH_RETRIES} "
             f"(question {i}): status={status}, backoff {wait:.0f}s"
         )
-        time.sleep(wait)
+        _backoff_sleep(wait)
 
     data = resp.get("data", {})
     episodes = data.get("episodes", [])
@@ -1927,7 +1931,7 @@ def _answer_one(
                     f"  [warn] answer retry {attempt + 1}/{config.answer_max_retries} "
                     f"(question {sr.index}): {e}{cause}, backoff {wait:.0f}s"
                 )
-                time.sleep(wait)
+                _backoff_sleep(wait)
                 continue
             # Keep the question: a marker answer is graded WRONG, which is what the
             # reference does. Raising here would remove it from the denominator.
