@@ -7,8 +7,12 @@ item's place, the messages, files, clusters and queues it changed. An undo
 reads it back (:mod:`._forget_undo`); so do the other forgets of the owner and
 its reads:
 
-* an entry stays forgotten while any live forget marked it
-  (:meth:`Logs.named_by_others`);
+* an entry stays forgotten while any live forget marked it or **covers** it
+  (:meth:`Logs.named_by_others`): a forget whose target reaches an entry
+  another live forget already holds marks nothing, and logs the entry as
+  covered (``covered``) -- with the profile values and picture files it
+  reaches the same way -- so that undoing the narrower forget leaves it out
+  while the wider one stands, and undoing the wider one brings it back;
 * a user's profile item goes once every segment it rests on is forgotten,
   this forget's or one before it (:meth:`Logs.forgotten_segments`), and comes
   back with the undo that remembers one of them again
@@ -29,13 +33,15 @@ __all__ = [
     "Logs",
     "Named",
     "Removed",
+    "covered_in",
     "is_current_format",
     "is_legacy_group",
     "named_in",
     "segments_of",
+    "value_key",
 ]
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -112,11 +118,17 @@ def named_in(entry: ForgetEntry) -> Named:
     undo = entry.undo or {}
     if is_current_format(entry):
         marked = undo.get("marked") or {}
+        covered = undo.get("covered") or {}
+
+        def ids(kind: str) -> set[str]:
+            rows = [*(marked.get(kind) or []), *(covered.get(kind) or [])]
+            return {str(r[1]) for r in rows}
+
         return Named(
-            episodes={str(r[1]) for r in marked.get("episode") or []},
-            image_memories={str(r[1]) for r in marked.get("image_memory") or []},
-            scenes={str(r[1]) for r in marked.get("scene") or []},
-            group_profile={str(r[1]) for r in marked.get("group_profile") or []},
+            episodes=ids("episode"),
+            image_memories=ids("image_memory"),
+            scenes=ids("scene"),
+            group_profile=ids("group_profile"),
         )
     if is_legacy_group(entry):
         return Named()
@@ -163,6 +175,31 @@ def removed_in(entry: ForgetEntry) -> list[Removed]:
         Removed(entry.owner_id, bucket, dict(item))
         for bucket, item in entry.removed_profile_items
     ]
+
+
+def covered_in(entry: ForgetEntry) -> list[Removed]:
+    """The profile values one forget covered: taken out by other live forgets
+    when it ran, and reached by its target (``covered["profile"]``)."""
+    if not is_current_format(entry):
+        return []
+    rows = ((entry.undo or {}).get("covered") or {}).get("profile") or []
+    return [
+        Removed(str(person), str(bucket), dict(item), None if n is None else int(n))
+        for person, bucket, n, item in rows
+    ]
+
+
+def value_key(value: Removed) -> str:
+    """One profile value's identity across forgets: its ``item_id``, else its
+    bucket and folded description (an item stored before items had ids), or
+    the summary text."""
+    if value.bucket == profile_items.SUMMARY:
+        return f"summary:{value.item.get('summary') or ''}"
+    item_id = value.item.get("item_id")
+    if isinstance(item_id, str) and item_id:
+        return item_id
+    described = profile_items.normalised(str(value.item.get("description") or ""))
+    return f"{value.person_id}:{value.bucket}:{described}"
 
 
 async def segments_of(
@@ -237,6 +274,68 @@ class Logs:
                 found.update(str(s) for s in entry.undo.get("segments") or [])
         return found | await segments_of(self._stores, scope, dict.fromkeys(sessions))
 
+    async def held(self, scope: Scope) -> dict[str, dict[str, Any]]:
+        """Per kind, the entries the owner's live forgets keep forgotten --
+        marked or covered -- each with the mark it carried before."""
+        found: dict[str, dict[str, Any]] = {}
+        for entry in await self.live(scope):
+            named = named_in(entry)
+            undo = (entry.undo or {}) if is_current_format(entry) else {}
+            rows = {
+                kind: [
+                    *((undo.get("marked") or {}).get(kind) or []),
+                    *((undo.get("covered") or {}).get(kind) or []),
+                ]
+                for kind in ("episode", "image_memory", "scene", "group_profile")
+            }
+            for kind in rows:
+                held = found.setdefault(kind, {})
+                prev = {str(r[1]): r[2] for r in rows[kind]}
+                for entry_id in named.of(kind):
+                    held.setdefault(entry_id, prev.get(entry_id))
+        return found
+
+    async def taken_values(self, scope: Scope) -> list[Removed]:
+        """The profile values the owner's live forgets keep out of
+        ``user.md``: taken out, or covered."""
+        found: dict[str, Removed] = {}
+        for entry in await self.live(scope):
+            for value in [*removed_in(entry), *covered_in(entry)]:
+                found.setdefault(value_key(value), value)
+        return list(found.values())
+
+    async def holding(
+        self, scope: Scope, *, except_id: str, covered_only: bool = False
+    ) -> set[str]:
+        """The keys (:func:`value_key`) of the profile values live forgets other
+        than ``except_id`` keep out: taken out or covered (``covered_only``:
+        covered)."""
+        found: set[str] = set()
+        for entry in await self.live(scope):
+            if entry.forget_id == except_id:
+                continue
+            values = covered_in(entry)
+            if not covered_only:
+                values += removed_in(entry)
+            found.update(value_key(v) for v in values)
+        return found
+
+    async def held_pictures(self, scope: Scope, *, except_id: str) -> set[str]:
+        """The picture files live forgets other than ``except_id`` keep out of
+        circulation: those they took out, and those of the picture memories
+        they mark or cover."""
+        found: set[str] = set()
+        for entry in await self.live(scope):
+            if entry.forget_id == except_id or not is_current_format(entry):
+                continue
+            undo = entry.undo or {}
+            found.update(str(i) for i in undo.get("files") or [])
+            for group in ("marked", "covered"):
+                for row in (undo.get(group) or {}).get("image_memory") or []:
+                    if len(row) > 3 and row[3]:
+                        found.add(str(row[3]))
+        return found
+
     async def forgotten_items(self, scope: Scope) -> set[str]:
         """The ids of profile values the owner's live forgets took out."""
         return {
@@ -260,6 +359,10 @@ class Logs:
         """
         wanted = set(segments)
         found: list[Removed] = []
+        # Still out: resting on segments the other live forgets keep forgotten
+        # whole, or covered by another live forget.
+        still = await self.forgotten_segments(scope, except_id=except_id)
+        covered = await self.holding(scope, except_id=except_id, covered_only=True)
         for other in await self.live(scope):
             if other.forget_id == except_id:
                 continue
@@ -282,7 +385,13 @@ class Logs:
                 ]
             else:
                 continue
-            found += [r for r in candidates if profile_items.rests_on(r.item, wanted)]
+            found += [
+                r
+                for r in candidates
+                if profile_items.rests_on(r.item, wanted)
+                and not _rests_within(r.item, still)
+                and value_key(r) not in covered
+            ]
         return found
 
     async def retired(self, scope: Scope) -> set[str]:
@@ -291,3 +400,10 @@ class Logs:
         for entry in await self.live(scope):
             found |= retired_in(entry)
         return found
+
+
+def _rests_within(item: Mapping[str, Any], segments: Collection[str]) -> bool:
+    """Whether every segment a profile value rests on is among ``segments``."""
+    raw = item.get("source_memcell_ids")
+    sources = {str(s) for s in raw} if isinstance(raw, list) else set()
+    return bool(sources) and sources <= set(segments)

@@ -40,7 +40,11 @@ Propagation:
   the person's next update from the segments it has left (**stale**), and in
   a group so do the group-profile items citing a forgotten message;
 * a picture file is taken out of circulation when no live memory of any
-  owner refers to it afterwards.
+  owner refers to it afterwards;
+* what the target reaches that another live forget already holds -- an entry
+  marked forgotten, a profile value taken out -- is **covered**: logged, not
+  marked again, so it stays forgotten while either forget stands
+  (:mod:`._forget_log`).
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ __all__ = [
     "Rewrite",
     "SceneEdit",
     "member_edit",
+    "reaches_value",
     "user_edit",
 ]
 
@@ -68,6 +73,7 @@ from everos.memory.extract.pipeline.pictures import image_ids_in, without_pictur
 from everos.memory.extract.scene import current_versions, newest_versions
 from everos.memory.groups import without_forgotten
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     Episode,
     GroupProfileItem,
     ImageMemory,
@@ -77,7 +83,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import Scope, SessionKey, Stored, all_of, eq, is_null
 
-from ._forget_log import Logs, segments_of
+from ._forget_log import Logs, Removed, segments_of
 from ._forget_models import ForgetTarget
 from ._records import episode_end, kind_of, picture_end, scene_chain
 
@@ -218,6 +224,13 @@ class ForgetPlan:
         group_queue: Segments queued on the group profile's next update.
         retired: In a group, per kind, the versions hidden from the group's
             history while the forget stands.
+        held: Per kind, the entries the owner's live forgets keep forgotten,
+            each with the mark it carried before (read once, by the plan).
+        covered: Per kind, ``[md_path, entry_id, previous mark(, hash)]`` of
+            the entries the target reaches that another live forget already
+            holds: logged, not marked again.
+        covered_values: The profile values other live forgets keep out of
+            ``user.md`` that the target reaches (a user's).
     """
 
     scope: Scope
@@ -244,6 +257,9 @@ class ForgetPlan:
     group_stale: list[Stored[GroupProfileItem]] = field(default_factory=list)
     group_queue: list[str] = field(default_factory=list)
     retired: dict[str, set[str]] = field(default_factory=dict)
+    held: dict[str, dict[str, Any]] = field(default_factory=dict)
+    covered: dict[str, list[list[Any]]] = field(default_factory=dict)
+    covered_values: list[Removed] = field(default_factory=list)
 
     @property
     def is_group(self) -> bool:
@@ -265,6 +281,31 @@ class ForgetPlan:
     def retire(self, kind: str, entry_ids: Collection[str]) -> None:
         if self.is_group and entry_ids:
             self.retired.setdefault(kind, set()).update(entry_ids)
+
+    def cover(
+        self, kind: str, md_path: str, entry_id: str, image_id: str | None = None
+    ) -> None:
+        """Log an entry the target reaches, forgotten already, as covered
+        while a live forget holds it (one of whose mark it is)."""
+        held = self.held.get(kind, {})
+        if entry_id not in held:
+            return
+        rows = self.covered.setdefault(kind, [])
+        if any(row[1] == entry_id for row in rows):
+            return
+        row: list[Any] = [md_path, entry_id, held[entry_id]]
+        if kind == "image_memory":
+            row.append(image_id)
+        rows.append(row)
+
+    def cover_picture(self, stored: Stored[ImageMemory]) -> None:
+        if stored.item.superseded_by == FORGOTTEN_MARK:
+            self.cover(
+                "image_memory",
+                stored.ref.md_path,
+                stored.ref.entry_id,
+                stored.item.image_id,
+            )
 
 
 @dataclass
@@ -324,6 +365,7 @@ class ForgetPlanner:
                 user's message target in a conversation of two people.
         """
         plan = ForgetPlan(scope=scope, target=target)
+        plan.held = await self._logs.held(scope)
         if already is not None:
             plan.already = dict(already)
         plan.hidden_pictures = set(
@@ -349,10 +391,13 @@ class ForgetPlanner:
         else:
             await self._plan_records(plan, strict=strict)
         if kind in ("record", "owner", "condition"):
+            covered = await self._stores.episode.read_many(
+                scope, [row[1] for row in plan.covered.get("episode", [])]
+            )
             plan.segments = list(
                 dict.fromkeys(
                     e.item.parent_id
-                    for e in plan.episodes
+                    for e in [*plan.episodes, *covered]
                     if e.item.parent_type == "memcell" and e.item.parent_id
                 )
             )
@@ -516,6 +561,7 @@ class ForgetPlanner:
             for memcell_id in fresh
         }
         plan.readable = readable
+        await self._cover_segments(plan, fresh)
         current = await self._stores.episode.read_for_segments(scope, list(fresh))
         by_segment: dict[str, list[Stored[Episode]]] = {}
         for stored in current:
@@ -572,7 +618,7 @@ class ForgetPlanner:
         )
         for memory in stored:
             memcell_id = memory.item.parent_id
-            if memory.item.superseded_by is not None:
+            if memory.item.superseded_by not in (None, FORGOTTEN_MARK):
                 continue
             if memory.item.image_id not in carried.get(memcell_id, set()):
                 continue
@@ -581,8 +627,12 @@ class ForgetPlanner:
                 for item in readable[memcell_id].items
                 for image_id in image_ids_in(str(getattr(item, "content", "") or ""))
             }
-            if memory.item.image_id not in still:
+            if memory.item.image_id in still:
+                continue
+            if memory.item.superseded_by is None:
                 plan.add_picture(memory)
+            else:
+                plan.cover_picture(memory)
 
     # ── a user's conversation ────────────────────────────────────────────
 
@@ -599,6 +649,46 @@ class ForgetPlanner:
         )
         plan.segments = sorted(await segments_of(stores, scope, [session_id]))
         plan.sessions = [session_id]
+        for stored in await self._forgotten_episodes(plan, session_id):
+            plan.cover("episode", stored.ref.md_path, stored.ref.entry_id)
+        if plan.held.get("image_memory"):
+            entries = await stores.image_memory.entries_for_session(scope, session_id)
+            for row in await stores.image_memory.read_many(
+                scope, [e for _, e, _ in entries]
+            ):
+                plan.cover_picture(row)
+
+    async def _forgotten_episodes(
+        self, plan: ForgetPlan, session_id: str
+    ) -> list[Stored[Episode]]:
+        """The conversation's episode versions a live forget holds forgotten."""
+        held = plan.held.get("episode", {})
+        if not held:
+            return []
+        scope = plan.scope
+        entries = await self._stores.episode.entries_for_session(scope, session_id)
+        marks: dict[str, dict[str, str]] = {}
+        for md_path in {md_path for md_path, _ in entries}:
+            marks[md_path] = await self._stores.episode.deprecations(scope, md_path)
+        return await self._stores.episode.read_many(
+            scope,
+            [
+                e
+                for md, e in entries
+                if marks[md].get(e) == FORGOTTEN_MARK and e in held
+            ],
+        )
+
+    async def _cover_segments(
+        self, plan: ForgetPlan, segments: Collection[str]
+    ) -> None:
+        """The forgotten episodes of segments that lost a message: covered."""
+        if not segments or not plan.held.get("episode"):
+            return
+        for session in plan.messages:
+            for stored in await self._forgotten_episodes(plan, session.session_id):
+                if stored.item.parent_id in segments:
+                    plan.cover("episode", stored.ref.md_path, stored.ref.entry_id)
 
     # ── a picture ────────────────────────────────────────────────────────
 
@@ -606,11 +696,10 @@ class ForgetPlanner:
         """The picture's live memories, and what names it (a text edit)."""
         scope, image_id = plan.scope, plan.target.image_id
         assert image_id is not None
-        occurrences = [
-            row
-            for row in await self._stores.image_memory.read_by_image(scope, image_id)
-            if row.item.superseded_by is None
-        ]
+        rows = await self._stores.image_memory.read_by_image(scope, image_id)
+        for row in rows:
+            plan.cover_picture(row)
+        occurrences = [row for row in rows if row.item.superseded_by is None]
         if not occurrences and plan.is_group:
             raise NotFoundError(f"no picture {image_id!r} in the group")
         plan.sources = {s for row in occurrences for s in row.item.sender_ids}
@@ -660,6 +749,8 @@ class ForgetPlanner:
                 elif end[1] is None:
                     plan.add_episode(end[0])
                     plan.sources |= set(end[0].item.sender_ids)
+                elif end[1] == FORGOTTEN_MARK:
+                    plan.cover("episode", end[0].ref.md_path, end[0].ref.entry_id)
             elif kind == "image_memory":
                 found = await picture_end(stores, scope, entry_id)
                 if found is None:
@@ -667,6 +758,8 @@ class ForgetPlanner:
                 elif found[1] is None:
                     plan.add_picture(found[0])
                     plan.sources |= set(found[0].item.sender_ids)
+                else:
+                    plan.cover_picture(found[0])
             elif kind == "scene":
                 if scene_rows is None:
                     scene_rows = await stores.scene.read_all(scope)
@@ -677,6 +770,9 @@ class ForgetPlanner:
                     continue
                 versions = tuple(v.stored for v in chain.versions)
                 plan.sources |= {s for v in versions for s in v.item.sender_ids}
+                if newest.mark == FORGOTTEN_MARK:
+                    ref = newest.stored.ref
+                    plan.cover("scene", ref.md_path, ref.entry_id)
                 if all(e.scene_id != newest.stored.item.scene_id for e in plan.scenes):
                     plan.scenes.append(
                         SceneEdit(
@@ -737,9 +833,13 @@ class ForgetPlanner:
         for stored, mark in await stores.episode.read_all(scope):
             if mark is None:
                 plan.add_episode(stored)
+            elif mark == FORGOTTEN_MARK:
+                plan.cover("episode", stored.ref.md_path, stored.ref.entry_id)
         for row in await stores.image_memory.read_all(scope):
             if row.item.superseded_by is None:
                 plan.add_picture(row)
+            else:
+                plan.cover_picture(row)
         for version, mark in await newest_versions(stores.scene, scope):
             if mark is None:
                 plan.scenes.append(
@@ -747,6 +847,8 @@ class ForgetPlanner:
                         scene_id=version.item.scene_id, current=version, whole=True
                     )
                 )
+            elif mark == FORGOTTEN_MARK:
+                plan.cover("scene", version.ref.md_path, version.ref.entry_id)
         plan.whole_profile = True
 
     async def _plan_condition(self, plan: ForgetPlan) -> None:
@@ -762,15 +864,25 @@ class ForgetPlanner:
 
         if "episode" in kinds:
             for stored, mark in await stores.episode.read_all(scope):
-                if mark is None and within(stored.item.timestamp):
+                if not within(stored.item.timestamp):
+                    continue
+                if mark is None:
                     plan.add_episode(stored)
+                elif mark == FORGOTTEN_MARK:
+                    plan.cover("episode", stored.ref.md_path, stored.ref.entry_id)
         if "image_memory" in kinds:
             for row in await stores.image_memory.read_all(scope):
-                if row.item.superseded_by is None and within(row.item.timestamp):
+                if not within(row.item.timestamp):
+                    continue
+                if row.item.superseded_by is None:
                     plan.add_picture(row)
+                else:
+                    plan.cover_picture(row)
         if "scene" in kinds:
             for version, mark in await newest_versions(stores.scene, scope):
-                if mark is None and within(version.item.timestamp):
+                if not within(version.item.timestamp):
+                    continue
+                if mark is None:
                     plan.scenes.append(
                         SceneEdit(
                             scene_id=version.item.scene_id,
@@ -778,6 +890,8 @@ class ForgetPlanner:
                             whole=True,
                         )
                     )
+                elif mark == FORGOTTEN_MARK:
+                    plan.cover("scene", version.ref.md_path, version.ref.entry_id)
         if "profile" in kinds:
             profile = await stores.profile.read(scope)
             if profile is not None:
@@ -920,20 +1034,22 @@ class ForgetPlanner:
         """The source rule over the owner's profile documents (a dry run's view)."""
         scope = plan.scope
         if not plan.is_group:
+            already = await self._logs.forgotten_segments(
+                scope,
+                except_session=plan.target.session_id
+                if plan.target.kind == "session"
+                else None,
+            )
             profile = await self._stores.profile.read(scope)
             if profile is not None:
-                edit = user_edit(
-                    profile,
-                    plan,
-                    already=await self._logs.forgotten_segments(
-                        scope,
-                        except_session=plan.target.session_id
-                        if plan.target.kind == "session"
-                        else None,
-                    ),
-                )
+                edit = user_edit(profile, plan, already=already)
                 if edit.changes:
                     plan.profiles.append(edit)
+            plan.covered_values = [
+                value
+                for value in await self._logs.taken_values(scope)
+                if reaches_value(plan, value, already=already)
+            ]
             return
         for member_id in await self._stores.profile.people(scope):
             if member_id in plan.members_removed:
@@ -1073,6 +1189,38 @@ def user_edit(
             edit.take_history(position, old)
     edit.queue = [m for m in dict.fromkeys(queue) if m not in held.pending_memcell_ids]
     return edit
+
+
+def reaches_value(
+    plan: ForgetPlan, value: Removed, *, already: Collection[str]
+) -> bool:
+    """Whether a forget's target reaches a value another live forget took out of
+    ``user.md``: :func:`user_edit` would take it, were it still there."""
+    if plan.whole_profile:
+        return True
+    if value.bucket == profile_items.SUMMARY:
+        return False
+    item = value.item
+    if item.get("item_id") in plan.item_ids:
+        return True
+    raw = item.get("source_memcell_ids")
+    sources = {str(s) for s in raw} if isinstance(raw, list) else set()
+    these = set(plan.segments)
+    if sources and sources <= these | set(already) and sources & these:
+        return True
+    if plan.target.kind == "message" and sources & set(plan.readable):
+        return True
+    if profile_items.rests_on_pictures(item, plan.pictures):
+        return True
+    target = plan.target
+    if target.kind == "condition" and "profile" in target.memory_types:
+        at = item.get("observed_at") or item.get("source_end")
+        return (
+            isinstance(at, int)
+            and (target.start is None or at >= target.start)
+            and (target.end is None or at < target.end)
+        )
+    return False
 
 
 def member_edit(held: Profile, plan: ForgetPlan) -> ProfileEdit:

@@ -67,10 +67,12 @@ from ._forget_log import (
     Logs,
     Named,
     Removed,
+    covered_in,
     is_current_format,
     is_legacy_group,
     removed_in,
     segments_of,
+    value_key,
 )
 from ._forget_merge import merged_over_edit
 from ._forget_models import ForgetTarget, ForgottenPicture, UndoResult
@@ -100,6 +102,9 @@ class _Record:
             back (a conversation's forget logged before files were named).
         segments: A user's segments remembered again.
         removed: Profile values to put back.
+        covered_values: Profile values other forgets took out that this one
+            covered: back with it, unless a live forget still holds them.
+        covered_pictures: The picture memories it covered, by entry id.
         others: Bring back what other live forgets took by the segment rule.
         members_removed: A group's member documents to write back.
         group_queued: Segments to take off the group profile's queue.
@@ -114,6 +119,8 @@ class _Record:
     files_of_pictures: bool = False
     segments: list[str] = field(default_factory=list)
     removed: list[Removed] = field(default_factory=list)
+    covered_values: list[Removed] = field(default_factory=list)
+    covered_pictures: set[str] = field(default_factory=set)
     others: bool = False
     members_removed: list[dict[str, Any]] = field(default_factory=list)
     group_queued: list[str] = field(default_factory=list)
@@ -198,14 +205,7 @@ class Undoer:
             done.scenes += [s.ref.entry_id for s in revived]
             done.paths.setdefault("scene", set()).update(s.ref.md_path for s in revived)
         await self._restore_clusters(scope, record.clusters)
-        files = list(record.files)
-        if record.files_of_pictures:
-            files += [
-                row.item.image_id for row in done.image_memories if row.item.image_id
-            ]
-        for image_id in dict.fromkeys(files):
-            await self._stores.images.restore(image_id)
-            done.files.append(image_id)
+        await self._restore_files(scope, entry, record, done)
         for kind, paths in done.paths.items():
             if paths:
                 await self._eraser.requeue(kind, paths)
@@ -271,9 +271,18 @@ class Undoer:
         undo = entry.undo or {}
         if is_current_format(entry):
             marked = undo.get("marked") or {}
+            covered = undo.get("covered") or {}
             return _Record(
+                # What it covered comes back with it as what it marked does:
+                # while no other live forget holds it.
                 marked={
-                    kind: [(str(r[0]), str(r[1]), r[2]) for r in marked.get(kind) or []]
+                    kind: [
+                        (str(r[0]), str(r[1]), r[2])
+                        for r in [
+                            *(marked.get(kind) or []),
+                            *(covered.get(kind) or []),
+                        ]
+                    ]
                     for kind in _KINDS
                 },
                 written={
@@ -288,6 +297,8 @@ class Undoer:
                 files=[str(i) for i in undo.get("files") or []],
                 segments=[str(s) for s in undo.get("segments") or []],
                 removed=removed_in(entry),
+                covered_values=covered_in(entry),
+                covered_pictures={str(r[1]) for r in covered.get("image_memory") or []},
                 others=scope.owner_type == "user",
                 members_removed=list(undo.get("members_removed") or []),
                 group_queued=[str(m) for m in undo.get("group_queued") or []],
@@ -496,6 +507,31 @@ class Undoer:
                             {ref.md_path, head.ref.md_path}
                         )
 
+    async def _restore_files(
+        self, scope: Scope, entry: ForgetEntry, record: _Record, done: _Done
+    ) -> None:
+        """The picture files the forget took out, and those of the picture
+        memories it covered that came back, back in circulation -- except one
+        another live forget still holds, unless a memory of it is back."""
+        back = {row.item.image_id for row in done.image_memories if row.item.image_id}
+        files = list(record.files)
+        files += [
+            row.item.image_id
+            for row in done.image_memories
+            if row.item.image_id
+            and (
+                record.files_of_pictures or row.ref.entry_id in record.covered_pictures
+            )
+        ]
+        if not files:
+            return
+        held = await self._logs.held_pictures(scope, except_id=entry.forget_id)
+        for image_id in dict.fromkeys(files):
+            if image_id in held and image_id not in back:
+                continue
+            await self._stores.images.restore(image_id)
+            done.files.append(image_id)
+
     async def _unmark(
         self,
         scope: Scope,
@@ -634,7 +670,15 @@ class Undoer:
     ) -> None:
         """A user's values back, and what other forgets took that rests on a
         segment remembered again; the caller holds the profile lock."""
-        values = list(record.removed)
+        # A value another live forget covers stays out until that one is
+        # undone too; one this forget covered comes back unless another live
+        # forget still holds it.
+        covering = await self._logs.holding(
+            scope, except_id=entry.forget_id, covered_only=True
+        )
+        holding = await self._logs.holding(scope, except_id=entry.forget_id)
+        values = [v for v in record.removed if value_key(v) not in covering]
+        values += [v for v in record.covered_values if value_key(v) not in holding]
         if record.others and record.segments:
             values += await self._logs.removed_by_others(
                 scope, record.segments, except_id=entry.forget_id

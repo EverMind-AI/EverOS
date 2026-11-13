@@ -134,8 +134,19 @@ class Applied:
 
 
 def applied_record(plan: ForgetPlan, applied: Applied) -> dict[str, Any]:
-    """The forget log's ``undo_json`` of a run: the plan's facts and its changes."""
-    return {
+    """The forget log's ``undo_json`` of a run: the plan's facts and its changes.
+
+    ``covered`` -- what the target reached that other live forgets already
+    held (:mod:`._forget_log`) -- is written only when there is some.
+    """
+    covered: dict[str, list[Any]] = {k: rows for k, rows in plan.covered.items()}
+    if plan.covered_values:
+        covered["profile"] = [
+            [v.person_id, v.bucket, v.position, v.item] for v in plan.covered_values
+        ]
+    pictures = [m.item.image_id for m in plan.image_memories]
+    pictures += [str(row[3]) for row in plan.covered.get("image_memory", [])]
+    record = {
         "format": FORMAT,
         "target": plan.target.to_json(),
         "sources": sorted(plan.sources),
@@ -153,11 +164,11 @@ def applied_record(plan: ForgetPlan, applied: Applied) -> dict[str, Any]:
         "group_queued": applied.group_queued,
         "segments": list(plan.segments),
         # Named apart so the picture-bytes check finds a hash by key.
-        "pictures": [
-            {"image_id": image_id}
-            for image_id in dict.fromkeys(m.item.image_id for m in plan.image_memories)
-        ],
+        "pictures": [{"image_id": image_id} for image_id in dict.fromkeys(pictures)],
     }
+    if covered:
+        record["covered"] = covered
+    return record
 
 
 class ForgetWriter:
