@@ -68,10 +68,11 @@ async def _group(srv: FaultServer, group: str) -> None:
 # ── the episode call ────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("fault", [*TRANSIENT, "empty"])
+@pytest.mark.parametrize("fault", [*TRANSIENT, "empty", "503,503", "429,500"])
 async def test_one_failed_episode_call_is_absorbed(tmp_path: Path, fault: str) -> None:
+    """One bad attempt, or a burst of two 5xx/429 (the SDK's own two retries)."""
     async with FaultServer.open(tmp_path / "root") as srv:
-        srv.upstream.inject("EpisodeReply", fault)
+        srv.upstream.inject("EpisodeReply", *fault.split(","))
         resp, sent = await srv.say("s1", "u1", "A")
         assert resp.status_code == 200, resp.text
         await _flushed(srv, "s1")
@@ -348,3 +349,23 @@ async def test_decider_faults_degrade_the_search_and_say_so(
         assert (health["decider"]["failed_rounds"] > 0) == (outcome is not None)
         again = await srv.search("notes", user_id="u1")
         assert again.status_code == 200 and again.json()["data"]["degraded"] == []
+
+
+async def test_a_queued_batch_whose_extraction_fails_is_reported_on_its_task(
+    tmp_path: Path,
+) -> None:
+    """``async_mode``: the 202 went out before the failure, so the task and the
+    queue's health are where the client learns of it."""
+    async with FaultServer.open(tmp_path / "root") as srv:
+        srv.upstream.cut_on_add = True
+        srv.upstream.down.add("EpisodeReply")
+        resp, _sent = await srv.say("s1", "u1", "T", async_mode=True)
+        assert resp.status_code == 202, resp.text
+        request_id = resp.json()["request_id"]
+        await srv.settle()
+        task = await srv.client.get(f"/api/v1/tasks/{request_id}")
+        assert task.status_code == 200, task.text
+        body = task.json()
+        assert "failed" in str(body) and "503" in str(body), body
+        queue = (await srv.health())["memorize_queue"]
+        assert queue["failed"] >= 1, queue
