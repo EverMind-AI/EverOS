@@ -135,7 +135,7 @@ refused for datasets whose sessions carry their own ids.
 
 **Optional -- a separate retrieval decider** (`llm_multiround` only). Each config comes
 pre-filled with the decider behind its published number (the Decider column in
-[6. Results](#6-results); for LoCoMo, [its methods table](#locomo-by-retrieval-method)).
+[6. Results](#6-results); for LoCoMo, [its methods table](#by-retrieval-method)).
 To use it, set `BENCH_DECIDER_BASE_URL` to an OpenAI-compatible endpoint that serves it
 and `BENCH_DECIDER_API_KEY` to its key; set `BENCH_DECIDER_MODEL` only to run another
 model. LoCoMo's decider is on OpenRouter: `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`
@@ -374,20 +374,13 @@ others from `benchmarks/configs/<dataset>.toml`.
 > **SubtleMemory** — routes each question between two answer contracts on whether
 > fact extraction found a conflict; the adapter does this automatically.
 
-\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
-its corrected answers (see [Two scores per run](#two-scores-per-run)).
+### LoCoMo
 
-### LoCoMo by retrieval method
+**EverOS scores 94.61%\* on LoCoMo.**
 
-The best of three full runs of each LoCoMo config, then every other retrieval method searching
-that run's stores, one run each (see
-[Scoring another retrieval method on stores you built](#scoring-another-retrieval-method-on-stores-you-built)).
-Measured with everalgo-core 0.7.0 and everalgo-boundary 0.5.0 at commit `ccb402af`
-(`llm_multiround` at `d278a2cb`): extraction and answers by `openai/gpt-4.1-mini`, judging by
-`openai/gpt-4o-mini` three times, and `llm_multiround`'s decider
-`deepseek/deepseek-v4-flash-0731` with thinking off.
+#### By retrieval method
 
-| Retrieval method | `locomo-step` | `locomo` (default) |
+| Retrieval method | Step boundary detection (`locomo-step`) | Batch boundary detection (`locomo`, default) |
 |---|---|---|
 | `agentic` | **94.61\*** | 94.35\* |
 | `llm_multiround` | 94.29\* | 94.29\* |
@@ -395,7 +388,13 @@ Measured with everalgo-core 0.7.0 and everalgo-boundary 0.5.0 at commit `ccb402a
 | `vector` | 92.73\* | 92.08\* |
 | `keyword` | 91.04\* | 92.27\* |
 
-\* Re-judged, as above.
+\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
+its corrected answers.
+
+Best of three `agentic` runs per config; every other method searched that run's stores once.
+Extraction and answers by `openai/gpt-4.1-mini`, judging by `openai/gpt-4o-mini` three times,
+`llm_multiround`'s decider `deepseek/deepseek-v4-flash-0731` with thinking off; everalgo-core
+0.7.0, everalgo-boundary 0.5.0.
 
 ### Batch or step
 

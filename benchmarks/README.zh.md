@@ -121,7 +121,7 @@ EverOS 从那里读取。LoCoMo 的配置还把每条消息都记在被提问的
 数据集 session。session 自带 id 的数据集不接受 `"conversation"`。
 
 **可选：单独的检索 decider**（只用于 `llm_multiround`）。各配置已预填已发表数字所用的 decider
-（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [LoCoMo 各检索方式](#locomo-各检索方式)）。
+（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [各检索方式](#各检索方式)）。
 要使用它，把 `BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，`BENCH_DECIDER_API_KEY`
 填它的 key；只有想换别的模型时才设 `BENCH_DECIDER_MODEL`。LoCoMo 的 decider 在 OpenRouter 上：
 `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，key 填你的 OpenRouter key；它的配置让 decider 关着思考运行。不设端点时由
@@ -333,18 +333,13 @@ ps -eo pid,command | grep "[e]veros server start"    # 查残留的 server
 > **SubtleMemory**——按事实抽取是否发现冲突，在两套答题契约之间逐题路由，
 > 适配器自动完成。
 
-\* 重判口径：LoCoMo 审计认为金标有问题的 99 道题，改为对照审计给出的正确答案判分（见
-[每次运行给出两个分数](#每次运行给出两个分数)）。
+### LoCoMo
 
-### LoCoMo 各检索方式
+**EverOS 在 LoCoMo 上得分 94.61%\*。**
 
-每份 LoCoMo 配置完整跑 3 次取最高的一次，再用这次运行建好的库跑其余每种检索方式各 1 次（做法见
-[在已建好的库上给其他检索方式打分](#在已建好的库上给其他检索方式打分)）。测量环境：everalgo-core 0.7.0、
-everalgo-boundary 0.5.0，提交 `ccb402af`（`llm_multiround` 为 `d278a2cb`）。抽取和答题用
-`openai/gpt-4.1-mini`，判分用 `openai/gpt-4o-mini` 判 3 次，`llm_multiround` 的 decider 用
-`deepseek/deepseek-v4-flash-0731`，关着思考。
+#### 各检索方式
 
-| 检索方式 | `locomo-step` | `locomo`（默认） |
+| 检索方式 | 逐条边界检测（`locomo-step`） | 批量边界检测（`locomo`，默认） |
 |---|---|---|
 | `agentic` | **94.61\*** | 94.35\* |
 | `llm_multiround` | 94.29\* | 94.29\* |
@@ -352,7 +347,11 @@ everalgo-boundary 0.5.0，提交 `ccb402af`（`llm_multiround` 为 `d278a2cb`）
 | `vector` | 92.73\* | 92.08\* |
 | `keyword` | 91.04\* | 92.27\* |
 
-\* 重判口径，同上。
+\* 重判口径：LoCoMo 审计认为标准答案有误的 99 道题，按审计修正后的答案判分。
+
+每份配置的 `agentic` 跑 3 次取最高的一次，其余检索方式在那次运行建好的库上各跑 1 次。抽取和答题用
+`openai/gpt-4.1-mini`，判分用 `openai/gpt-4o-mini` 判 3 次，`llm_multiround` 的 decider 用
+`deepseek/deepseek-v4-flash-0731`（关思考）；everalgo-core 0.7.0、everalgo-boundary 0.5.0。
 
 ### batch 还是 step
 
