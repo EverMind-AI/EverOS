@@ -115,6 +115,10 @@ async def assert_md_lance_strict_consistent(
     root = memory_root
     stats: dict[str, KindConsistencyStats] = {}
     for spec in KIND_REGISTRY:
+        if spec.index_schema is None:
+            # A kind that projects into SQLite only (the group roster) has no
+            # index rows to compare with.
+            continue
         md_paths = sorted(
             p.relative_to(root).as_posix() for p in root.glob(spec.path_glob())
         )
