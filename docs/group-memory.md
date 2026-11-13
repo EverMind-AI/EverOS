@@ -1773,7 +1773,12 @@ Step 2 differs from the text above in these places:
   of 2 dissent were linked to their topic. The call's prompt grew by 61
   tokens (about 4%); there is still one call per batch.
 - **Message ids.** A group batch's `messages[].message_id` is the message's
-  id in its segment; without one the generated id stays.
+  id in its segment; without one the generated id stays. A group batch
+  names `group_id`, arrives in a session bound to a group, or brings the
+  session to two or more people (their implicit group); a batch of one
+  person's session keeps the generated id (`m_<session_id>_<epoch ms>_<index
+  in the batch>`) whatever it sends. A message forget names the id the
+  memory holds (2026-11-13).
 - **Forget (task 12).** Profile items that may quote a forgotten message are
   removed at once and rewritten from their remaining segments by the next
   update (absent until then, not marked stale). Targets: `message`,
