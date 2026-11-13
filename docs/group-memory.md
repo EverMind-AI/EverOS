@@ -1,9 +1,11 @@
 # Group and Project Memory
 
-Design for EverOS 2.0. Group chats and projects become first-class memory
-owners: one group episode per conversation segment, every memory says who said
-it and whom it is about, the assistant's own messages are marked as such, and
-every read is checked against the asker's group membership.
+Design for EverOS 2.0. Group chats become first-class memory owners: one
+group episode per conversation segment, every memory says who said it and whom
+it is about, the assistant's own messages are marked as such, and every read is
+checked against the asker's group membership. A project reads across the
+groups linked to it; chat memory writes group memory only
+([Section 4.4](#44-project)).
 
 Status: design. Code references point at commit `08bb031` (2.0 development
 line). Line numbers in the EverMemOS reuse map refer to the EverMemOS snapshot
@@ -69,6 +71,7 @@ marks the places where 2.0 replaces an EverMemOS design.
 | D16 | Stores that ingested a group under one user are rebuilt from raw conversations, not converted. | n/a |
 | D17 | Profile items read from a picture go to the picture's poster only, on every path. | n/a (fixes a 2.0 development-line leak). |
 | D18 | A session belongs to at most one group; boundary detection stays linear per session; a roster change closes the open buffer first. | Adapted: EverMemOS carried `group_id` per message. |
+| D19 | Chat memory writes group memory only; project memory comes from working memory. Which groups belong to a project is one port's answer (`ProjectLinkStore`, section 4.4): the default is the partition rule, and the many-to-many project-group link, maintained by a separate feature, plugs in there (decided 2026-11-13). | New. |
 
 ---
 
@@ -103,7 +106,7 @@ answers to that person about things another member said.
 
 Goals:
 
-- Model a group (and its project) as an owner with a roster that changes over time.
+- Model a group as an owner with a roster that changes over time, and read a project as the groups linked to it.
 - Extract one group record per segment, with attribution that keeps speaker and subject apart.
 - Keep group state (topics, decisions, dissent, roles) as versioned, append-only items.
 - Answer group questions per asker: the same question can have different answers for different members.
@@ -191,14 +194,47 @@ Two kinds of role exist and are kept apart:
 
 ### 4.4 Project
 
-A project is the existing `project_id` partition, used as a collaboration
-space. It holds:
+Chat memory writes group memory only. A project adds no owner, and the chat
+path writes nothing under it; the project's own memory is extracted by working
+memory, which is developed separately and is not part of this design. What
+chat memory reads at project scope is the memory of the project's groups.
 
-- the groups whose `project_id` it is;
-- its members: the union of the current members of those groups (derived, never stored separately).
+**Which groups belong to a project.** The relation is many-to-many: a project
+can link several groups, and a group several projects. A separate
+project-link feature maintains it; chat memory only reads it, through one
+port:
 
-The project adds no new owner. Project-scope reads (Step 2) run over the groups
-the asker currently belongs to ([Section 8.7](#87-project-roll-up-step-2)).
+- **Port.** `ProjectLinkStore.groups_of(app_id, project_id)`
+  (`src/everos/memory/ports/projects.py`): the project's groups, each by its
+  storage scope (`app_id`, `project_id`, `group_id`), sorted.
+- **Default adapter.** `PartitionProjectLinkStore`
+  (`src/everos/infra/persistence/groups/project_links.py`), the partition
+  rule: a project's groups are the groups stored in its `(app_id,
+  project_id)` partition.
+- **Wiring.** Built with the other stores (`build_stores`, as
+  `Stores.project_links`) and injected by the bootstrap into the access
+  policy; the project-link feature supplies its own adapter there.
+- **Reserved.** The reverse direction, the projects a group belongs to.
+  Nothing reads it yet, so it is not a method of the port.
+
+Every read that needs a project's groups asks the port, through the access
+policy: a `project_scope` search, `GET /api/v2/projects/{project_id}` and its
+`/profile` ([Section 8.7](#87-project-roll-up-step-2)), and a personal search
+or listing with `include_groups`
+([Section 8.8](#88-a-personal-search-over-the-users-groups)). No read lists a
+partition's groups itself.
+
+The port says which groups; the access policy still decides what the asker
+sees of them. A project read covers only the groups the asker currently
+belongs to, each inside the asker's membership windows, and an asker in none
+of them is refused (403). The project's members are the union of the current
+members of those groups (derived, never stored separately).
+
+A group linked to several projects is still stored once, in one partition,
+which is why the port answers each group with its scope. A read scope covers
+one `(app_id, project_id)` partition, so the access policy refuses a linked
+group stored in another partition (an error, never an empty answer); reading
+across partitions is part of the project-link feature.
 
 ### 4.5 Speaker, subject, origin
 
@@ -321,7 +357,7 @@ gives the group.
 | Scope | Fields |
 |---|---|
 | one-to-one user | `user_id` (unchanged); `asker_id` optional and, if given, must equal `user_id` |
-| user and their groups (optional, off by default) | `user_id` + `include_groups: true`, optionally `include_group_ids`: the user's memory and every group of the space the user currently belongs to, as one pool ([Section 8.8](#88-a-personal-search-over-the-users-groups)) |
+| user and their groups (optional, off by default) | `user_id` + `include_groups: true`, optionally `include_group_ids`: the user's memory and every group of the project the user currently belongs to, as one pool ([Section 8.8](#88-a-personal-search-over-the-users-groups)) |
 | one group | `group_id` + `asker_id` |
 | several groups | `group_ids` + `asker_id` |
 | project (Step 2) | `project_scope: true` + `asker_id`: every group in the project the asker belongs to |
@@ -1081,6 +1117,11 @@ answered from `joined_after` on the current decision.
 - `GET /api/v2/projects/{project_id}/profile?asker_id=` returns the visible
   current group-profile items of those groups, each tagged with its group, in
   time order. Duplicates across groups are not merged.
+- Both, and `GET /api/v2/projects/{project_id}`, take the project's groups from
+  `ProjectLinkStore` ([Section 4.4](#44-project)), by default the groups stored
+  in the project's `(app_id, project_id)` partition. The access policy keeps
+  those the asker currently belongs to and applies the asker's windows, as for
+  any group read.
 
 ### 8.8 A personal search over the user's groups
 
@@ -1090,15 +1131,16 @@ together. `include_group_ids` narrows the groups; an id that is not a group
 the user currently belongs to adds nothing and is not reported.
 
 **Scope.** The access policy compiles the groups
-(`AccessPolicy.member_groups`): every group of the `(app_id, project_id)`
-whose roster has the user as a current member, each with exactly the windows,
-status rules and roster a group search by the user would get -- the same code
-builds both. A group the user left, or never joined, contributes nothing; a
-record outside the user's windows in a group is not a candidate; superseded
-and forgotten records are excluded by the same predicate. The personal
-predicate and the groups' are ORed into the `where` of every recall, so
-visibility stays in the index query and the decider never sees a record the
-user may not.
+(`AccessPolicy.member_groups`): every group of the project -- the groups
+`ProjectLinkStore` answers ([Section 4.4](#44-project)), by default those of
+the `(app_id, project_id)` partition -- whose roster has the user as a current
+member, each with exactly the windows, status rules and roster a group search
+by the user would get; the same code builds both. A group the user left, or
+never joined, contributes nothing; a record outside the user's windows in a
+group is not a candidate; superseded and forgotten records are excluded by the
+same predicate. The personal predicate and the groups' are ORed into the
+`where` of every recall, so visibility stays in the index query and the
+decider never sees a record the user may not.
 
 **One pool.** Personal and group records compete in every recall and are
 fused with RRF as one list per sub-query; the decider sees them in the
@@ -1128,7 +1170,7 @@ rules (windows, forgotten messages left out).
 group` (a reply posted into one group is a group search), answer `422`.
 
 **Cost.** No model call is added and the write side is unchanged. Reads: one
-roster read per group of the space to find the user's groups (one per listed
+roster read per group of the project to find the user's groups (one per listed
 group with `include_group_ids`), the same recall queries as a personal search
 with a wider `where`, one profile-index read per group with `include_profile`,
 and one group-profile read for the decisions. The decider's tokens per round

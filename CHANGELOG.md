@@ -355,6 +355,23 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A project's groups come from one port (EverOS 2.0).** Chat memory writes
+  group memory only; a project read pools the memory of the project's groups,
+  and the project's own memory is extracted by working memory. Which groups a
+  project has is now the answer of `ProjectLinkStore`
+  (`memory/ports/projects.py`), which the access policy asks for a
+  `project_scope` search, `GET /api/v2/projects/{project_id}` and its
+  `/profile`, and for `include_groups`; the rosters still decide what the
+  asker sees. The relation is many-to-many and is maintained by a separate
+  project-link feature, which plugs its adapter in there. The default,
+  `PartitionProjectLinkStore`, is the rule these reads applied before: a
+  project's groups are the groups stored in its `(app_id, project_id)`
+  partition. Responses, the decider's input and costs are unchanged. A read
+  scope covers one partition, so a link to a group stored in another one is
+  refused (an error, not an empty answer) until the link feature reads across
+  partitions; the reverse direction (the projects a group belongs to) is
+  reserved, not yet a method
+  ([docs/group-memory.md](docs/group-memory.md#44-project)).
 - **One scene implementation for users and groups (EverOS 2.0, breaking
   config).** `update_user_scenes` and `update_group_scenes` run one core
   (`memory/strategies/_scenes.py`), and a forget inside a group writes a
