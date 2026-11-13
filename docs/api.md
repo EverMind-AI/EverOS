@@ -937,6 +937,8 @@ memories, ranked together, plus optional profiles.
 | `include_group_ids` | `array<string> \| null` | no | `null` | with `include_groups`; `1..16` ids |
 | `images` | `array` | no | `[]` | at most 4 pictures that are part of the question |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
+| `include_past` | `boolean` | no | `false` | see below |
+| `asked_at` | `integer \| string \| null` | no | `null` | epoch ms or ISO-8601; see below |
 
 **Owner scope** — **Exactly one** of `user_id`, `group_id` and
 `group_ids` must be set. EverOS 2.0 has no agent memory: an `agent_id` or a
@@ -991,6 +993,33 @@ named members' member-in-group profiles. Profiles are not ranked;
 [FilterNode](#filternode-filter-dsl). Applied **before** ranking, so
 it does not perturb the ranker.
 
+**`include_past`** — Ask about the past. Off by default; a request without
+it is answered exactly as before. With it the search also ranks the versions
+a default search never shows: in the user's own memory every superseded
+version and every forgotten memory (what the user's own
+[`/memory/history`](#get-apiv2memoryhistory) lists); in a group, the
+superseded versions inside the asker's membership windows -- never a
+forgotten record, nor a version a live forget marked or replaced (they may
+say what was forgotten, and other members read the group). A personal search
+with `include_groups` reads each group by the same rule. A past version's
+score is multiplied by `[search] past_state_factor` (0.3), so a current
+version of about the same relevance stays ahead; the decider reads every
+candidate as usual (its text carries its date). Every returned episode and
+picture memory then carries `status`, and a superseded one the version that
+replaced it, when the asker can see that version: `superseded_by` and
+`valid_until` (see [SearchEpisodeItem](#searchepisodeitem)). A picture an
+episode refers to is attached only when it is current, as always. The
+constraint block of a group search is built from current records only. No
+model call.
+
+**`asked_at`** — When the question is asked: epoch milliseconds, or an
+ISO-8601 time (one without an offset is read in the display timezone). The
+forgetting curve (`[search] forgetting_curve`,
+[configuration.md](configuration.md#search)) measures every memory's age up
+to it, and dates the reinforcements of this search at it. Unset: now.
+Nothing else reads it; with the curve off it changes nothing. A value that is
+neither is refused (`422`).
+
 The `radius`, `min_score` and `enable_llm_rerank` fields of 1.x tuned the
 removed methods; a request that still sends them is refused as an unknown
 field (`422`).
@@ -1034,7 +1063,9 @@ ended on such a round.
 
 Conversation episode (or group scene) selected by the search. `score` is
 the multi-round fusion score: the highest reciprocal-rank-fusion score
-the episode reached across the sub-queries that recalled it.
+the episode reached across the sub-queries that recalled it (with the
+forgetting curve on, after its weighting; with `include_past`, after a past
+version's state factor).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1050,6 +1081,12 @@ the episode reached across the sub-queries that recalled it.
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation" \| "Scene"` | `"Scene"` for a scene version ([scenes.md](scenes.md)): a narrative over several of the owner's episodes, ranked with them (`session_id` is `null`) |
 | `score` | `number` | Fusion score for this episode |
+| `status` | `"current" \| "superseded" \| "forgotten"` | Only with `include_past`: the version's state. Absent otherwise |
+| `superseded_by` | `string` | Only with `include_past`, on a superseded version whose successor the asker can see: that version's id |
+| `valid_until` | `string` | With `superseded_by`: that version's own time (ISO-8601). The version said what it says from `timestamp` until then; a scene's next version is dated by its newest member, a person's edit keeps the memory's time |
+
+A picture memory in `images` carries the same three under `include_past`
+(its `status` field is always present and reads `current` otherwise).
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
 > under two projects (each project keeps its own daily files and sequence);
@@ -1308,7 +1345,8 @@ EverOS 2.0 never edits or deletes a memory in place. A change writes a **new
 version** that names the one it replaced; a forget **marks** what it reaches,
 and its undo takes the mark away. Every old version stays in markdown, so
 `GET /memory/history` can show it -- a default search or get shows only the
-current versions.
+current versions, and a search with `include_past` ranks the old ones too
+(inside a group, none a forget marked or replaced).
 
 A memory is named by the id a read returned: `<owner>_<entry_id>` (or the
 bare entry id) for an episode (`ep_` / a group's `gep_`), a picture memory
@@ -1458,7 +1496,8 @@ written over every item and may repeat it: the next profile update writes it
 again from the items left, and the undo puts it back while none has (a
 member's profile in a group does the same). A forget marks and erases the
 index rows at once: nothing leaves markdown, and the forgotten versions stay
-readable through the user's `/memory/history`. Every forget is recorded in
+readable through the user's `/memory/history` and a search of the user's with
+`include_past`. Every forget is recorded in
 the forget log (`system.db`) with what it marked or wrote and what it took
 out of profile documents, each value with its place, who asked and why. A
 conversation sent again after its forget (or continued) is new material: its

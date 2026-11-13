@@ -399,7 +399,7 @@ The cascade projects the markdown truth into the search index (see
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Run the cascade (watcher + scanner + worker) in the server. Off: md edits never become searchable — only for runs that never search, or that drive `everos cascade sync` themselves. `EVEROS_DISABLE_CASCADE=1` (the evaluation harness's switch) also turns it off. |
+| `enabled` | bool | `true` | Run the cascade (watcher + scanner + worker) in the server. Off: md edits never become searchable — only for runs that never search, or that drive `everos cascade sync` themselves. `EVEROS_DISABLE_CASCADE=1` (the evaluation harness's switch) also turns it off. A server with it off is read-only and never reinforces a memory ([`[search]`](#search), the forgetting curve). |
 | `watcher_enabled` | bool | `true` | Run the filesystem watcher. Off: the scanner alone picks up md edits, one `scan_interval_seconds` later. For a host whose inotify watch limit is exhausted (the server would otherwise die at startup with `Errno 28`); unlike `enabled = false`, md still reaches the index. `EVEROS_DISABLE_CASCADE_WATCHER=1` also turns it off. |
 | `optimize_heartbeat_seconds` | float | `60.0` | Idle sweep offering every kind to the optimizer, so an unindexed tail left by a crash is merged without new writes. |
 | `optimize_prune_interval_seconds` | float | `300.0` | How often superseded dataset versions are reclaimed. |
@@ -431,6 +431,58 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
 | `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
+
+### `[search]`
+
+What a search adds around its multi-round ranking: a group search's link
+expansion, constraint block and group-profile attachments
+([group-memory.md](group-memory.md), 8.3-8.5), and the forgetting curve
+every search can rank by. No key here adds a model call except
+`constraints = "model"`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `expansion` | bool | `true` | A group search follows the stored links of each round's new core (decision chains, shared topics, members, a scene's episodes) into the next round. |
+| `link_slots` | int | `5` | Linked records that join a round at most. |
+| `constraints` | str | `"rules"` | The constraint block of a group search: `rules` (verified group-profile items and the core's metadata) or `model` (one extra call stating applicability and scope). |
+| `group_profile_cap` | int | `20` | Current group-profile items attached per kind. |
+| `forgetting_curve` | bool | `false` | Rank by the forgetting curve (below). Off: a search ranks exactly as before and nothing is reinforced. |
+| `initial_strength_days` | float | `30.0` | `S` of a memory never reinforced: the days its retention takes to fall to 0.9. Episodes, scenes and picture memories alike. |
+| `max_strength_days` | float | `3650.0` | The most `S` grows to (ten years). At least `initial_strength_days`. |
+| `reinforce_gain` | float | `2.0` | `g` in `S <- S * (1 + g * (1 - R))`. |
+| `retention_weight` | float | `0.3` | `w`: a candidate's fused score is multiplied by `1 - w + w * R`, so age takes at most this share of it. |
+| `reinforce` | bool | `true` | With the curve on, strengthen what the decider keeps as core and what `get` returns. `false` keeps every memory at its initial strength. |
+| `past_state_factor` | float | `0.3` | A search with `include_past` multiplies the score of a superseded version or a forgotten memory by this (with or without the curve). |
+
+**The forgetting curve.** Every memory has a strength `S` (days) and a
+clock. After `t` days its retention is `R = 1 / (1 + t / (9 * S))`: 0.9 when
+`t = S`, falling ever more slowly and never to zero -- with `S = 30`, a
+two-year-old memory keeps 0.27 (an exponential would keep 0.08), so old
+memories stay reachable. Each sub-query's fused list is rescored by
+`1 - w + w * R` and sorted again before it is cut to its block; no candidate
+is ever dropped, so the curve only reorders. When the decider keeps a memory
+as core (not the core of a round that fell back, which is the ranking's), or
+a `get` page returns it, `S` grows by `1 + g * (1 - R)` and the clock
+restarts: a memory recalled after a long gap gains much, one used a moment
+ago almost nothing. A memory never reinforced has `initial_strength_days`,
+and its clock starts at its own time: an episode's or a picture's (when it
+happened), a scene version's (its newest member's, so every scene update
+restarts the scene's clock). Versions share one strength -- an episode is
+keyed by its segment, a scene by its scene id, a picture memory by its file
+and segment -- and owners never share one. Profiles and group-profile items
+do not decay.
+
+Strengths are derived state, kept in `system.db` (`memory_strength`): markdown
+records none of it, and a store rebuilt from markdown starts every memory
+over. A search reads the strengths of the memories it has not met yet once
+per fused block; a read only queues what it used, and the server's strength
+writer writes each batch in one transaction after the response. **A
+read-only server never reinforces**: the writer exists only with
+`forgetting_curve` and `reinforce` on and the cascade enabled, so a search
+server with `[cascade] enabled = false` (the evaluation harness's
+`EVEROS_DISABLE_CASCADE=1`) answers the same question the same way every
+time. A request's `asked_at` ([api.md](api.md#post-apiv2memorysearch)) sets
+the time ages are measured to; unset, it is now.
 
 ### `[access]`
 

@@ -78,6 +78,32 @@ machinery that keeps a deleted memory from coming back.
   round of every search, as against `search`, an optional search step (the
   constraint binding). No prompt text changed; every model request is
   byte for byte what it was, and the other entries are unchanged.
+- **The forgetting curve and asking about the past (both off by default).**
+  `[search] forgetting_curve = true` ranks every search by a memory's
+  retention: each candidate's fused score is multiplied by
+  `1 - w + w * R` with `R = 1 / (1 + days / (9 * S))`, `w = retention_weight`
+  (0.3) and `S` the memory's strength in days, and each block is sorted again
+  before it is cut (nothing is dropped). `S` starts at `initial_strength_days`
+  (30; episodes, scenes and picture memories alike) and grows by
+  `1 + reinforce_gain * (1 - R)` (gain 2, at most `max_strength_days`, ten
+  years) each time the decider keeps the memory as core or `get` returns it;
+  the memory's versions share it. Strengths live in `system.db`
+  (`memory_strength`, created at startup, empty until the curve reinforces
+  something); a read only queues what it used and the server writes it after
+  the response, one transaction per batch. A read-only server
+  (`[cascade] enabled = false`, the evaluation harness's
+  `EVEROS_DISABLE_CASCADE=1`) and `reinforce = false` never reinforce.
+  `/memory/search` takes `asked_at` (epoch ms or ISO-8601), the time ages are
+  measured to, and `include_past`: the user's own superseded versions and
+  forgotten memories, or a group's superseded versions inside the asker's
+  windows (never a forgotten record, nor a version a live forget retired),
+  join the ranking at `past_state_factor` (0.3) of their score, and every
+  returned episode and picture memory says its `status`, with the version
+  that replaced it (`superseded_by`, `valid_until`) when the asker can see
+  it. No model call is added; with both off, requests, results and traces are
+  byte-identical to before. Whether the curve helps is not measured yet
+  ([docs/configuration.md](docs/configuration.md#search),
+  [docs/api.md](docs/api.md#post-apiv2memorysearch)).
 - **One deliverer per group, and each message once.** A group names the
   identity its gateway asserts for the group's key as `deliverer_id`
   (`PUT /groups/{id}`, by owners, admins or the deliverer; `null` clears it;
