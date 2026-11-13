@@ -436,9 +436,9 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and
 
 What a search adds around its multi-round ranking: a group search's link
 expansion, constraint block and group-profile attachments
-([group-memory.md](group-memory.md), 8.3-8.5), and the forgetting curve
-every search can rank by. No key here adds a model call except
-`constraints = "model"`.
+([group-memory.md](group-memory.md), 8.3-8.5), the forgetting curve
+every search can rank by, and asking about the past by a question's wording.
+No key here adds a model call except `constraints = "model"`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -453,6 +453,12 @@ every search can rank by. No key here adds a model call except
 | `retention_weight` | float | `0.3` | `w`: a candidate's fused score is multiplied by `1 - w + w * R`, so age takes at most this share of it. |
 | `reinforce` | bool | `true` | With the curve on, strengthen what the decider keeps as core and what `get` returns. `false` keeps every memory at its initial strength. |
 | `past_state_factor` | float | `0.3` | A search with `include_past` multiplies the score of a superseded version or a forgotten memory by this (with or without the curve). |
+| `past_triggers` | bool | `false` | A search that does not set `include_past` reads the past, as with `include_past = true`, when its question holds past-time wording (below); `data.past_trigger` names what fired. Off: the wording changes nothing. |
+| `past_trigger_dates` | bool | `true` | With `past_triggers`, an explicit date whose whole period ended before the day the question is asked is a trigger too. |
+| `past_trigger_words_en` | list[str] | built-in | English triggers: regular expressions matched case-insensitively as whole words. Unset: the built-in list (`src/everos/config/past_triggers_en.toml`); a list set replaces it; `[]` has none. |
+| `past_trigger_exceptions_en` | list[str] | built-in | Regular expressions inside whose match an English trigger does not count ("is used to", "in the past week"). |
+| `past_trigger_words_zh` | list[str] | built-in | Chinese triggers, simplified and traditional: regular expressions matched anywhere in the question (`src/everos/config/past_triggers_zh.toml`). |
+| `past_trigger_exceptions_zh` | list[str] | built-in | Regular expressions inside whose match a Chinese trigger does not count (a direction such as "walk over", the past tense, a deadline such as "before tomorrow"). |
 
 **The forgetting curve.** Every memory has a strength `S` (days) and a
 clock. After `t` days its retention is `R = 1 / (1 + t / (9 * S))`: 0.9 when
@@ -483,6 +489,61 @@ server with `[cascade] enabled = false` (the evaluation harness's
 `EVEROS_DISABLE_CASCADE=1`) answers the same question the same way every
 time. A request's `asked_at` ([api.md](api.md#post-apiv2memorysearch)) sets
 the time ages are measured to; unset, it is now.
+
+**Asking about the past by its wording.** With `past_triggers` on, a search
+request that does not set `include_past` is answered as if it had set it to
+`true` when its question holds past-time wording, and the response's
+`data.past_trigger` names what fired, as it reads in the question. Only the
+question as asked is read, never a sub-query the decider writes, so whether a
+search reads the past does not depend on the decider's wording. An
+`include_past` the request sets, `true` or `false`, always wins.
+
+- **English** (`past_triggers_en.toml`): precise phrases only -- "used to",
+  "previously", "formerly", "originally", "at first", "back then", "back in
+  the day", "in the past", "at that time", "in those days", "last time",
+  "anymore", "any more" (not before a noun: "any more questions" is a
+  quantity), "no longer", "before I / we / you / he / she / they" followed
+  by a past-tense verb ("before I moved"; "before I leave" asks about what
+  is to come), "changed from", "switched from", "the old / previous / former
+  / original" and "my / our / your / his / her / their previous / former".
+  A bare "before", "earlier" or "old" is not on the list: ordinary questions
+  are full of them. The exceptions keep "used to" meaning "accustomed to"
+  ("I'm used to it", "getting used to") or a passive ("what is the folder
+  used to store"), a present-tense verb after "before I" ("before we
+  proceed") and a recent span ("in the past week") from firing.
+- **Chinese** (`past_triggers_zh.toml`, simplified and traditional): the
+  words for before and previously, the past, once, originally and at first,
+  at that time and back then, last time, the old one, the former holder, no
+  longer, and "before changing it" / "before switching". Chinese puts no
+  space between words, so the exceptions are the longer words that hold a
+  trigger without meaning the past: a direction after a verb ("walk over",
+  "send over"), "go over" as a verb, the past tense, a recent span counted
+  back from now ("the past week"), a deadline ("before tomorrow", "before
+  five o'clock"), "so that is how it is", and a handful of compounds.
+- **Dates** (`past_trigger_dates`): an explicit date is a trigger when its
+  whole period -- a year, a month or a day -- ended before the day the
+  question is asked (`asked_at`, else now, in the display timezone): "in
+  2019", "the summer of 2019", "March 2024", "2024-03-05", "5 March 2024",
+  "the 1990s", and the Chinese year, month and date forms. A year stands
+  alone only after a preposition ("in", "since", "during" ...), so "my 2019
+  Honda" or "2000 steps" is no date, and a date written day/month or
+  month/day counts only when both readings are past. Relative words
+  ("yesterday", "last week") are not dates: they ask what happened lately,
+  not what something used to be.
+
+Every list entry is a Python regular expression, an English one matched
+case-insensitively as whole words (no letter or digit right before or after
+it), a Chinese one anywhere; the question is read after Unicode NFKC
+normalisation with its whitespace collapsed. A trigger that lies inside a
+match of one of its language's exceptions does not count. A list set in
+`everos.toml` (or as JSON in `EVEROS_SEARCH__PAST_TRIGGER_WORDS_EN`, ...)
+replaces its built-in one, and `[]` switches it off; an entry that is no
+regular expression, or that matches an empty question, is refused when the
+settings load. Mind what the past holds: in a user's own memory it includes
+the forgotten memories, so with this on, a question's wording brings back
+what the user forgot (marked `forgotten`, at `past_state_factor` of its
+score), as `include_past` does. No model call; the patterns are compiled
+once, when the server starts.
 
 ### `[access]`
 

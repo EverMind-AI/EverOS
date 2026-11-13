@@ -1012,6 +1012,19 @@ episode refers to is attached only when it is current, as always. The
 constraint block of a group search is built from current records only. No
 model call.
 
+Left unset, `include_past` can also be switched on by the question itself: a
+deployment with `[search] past_triggers` on (off by default,
+[configuration.md](configuration.md#search)) answers a request that does not
+send `include_past` as if it had sent `true` when its `query` holds
+past-time wording -- "used to", "back then", "no longer", "before I moved",
+their Chinese counterparts, or an explicit date whose whole period ended
+before the day it is asked (`asked_at`, else now): "in 2019", "March 2024",
+"2024-03-05". The response then names what fired in `data.past_trigger`.
+Only the question as asked is read, never a sub-query the decider writes. A
+request that sends `include_past`, `true` or `false`, is answered as it says
+whatever its question holds; with the switch off the wording changes
+nothing.
+
 **`asked_at`** — When the question is asked: epoch milliseconds, or an
 ISO-8601 time (one without an offset is read in the display timezone). The
 forgetting curve (`[search] forgetting_curve`,
@@ -1038,6 +1051,7 @@ owner scope; arrays that do not apply stay `[]`.
 | `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Buffer rows have no owner attribution — boundary detection runs before owner inference |
 | `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows; for `include_groups`, the groups searched alongside the user |
 | `degraded` | `array<SearchDegradation>` | What did not run as configured; `[]` when the search did. See below |
+| `past_trigger` | `string` | Only when the question's wording made the search read the past (`[search] past_triggers`, `include_past` not sent): the trigger as it reads in the question, e.g. `"used to"`, `"in 2019"`. Absent otherwise |
 
 #### SearchDegradation
 

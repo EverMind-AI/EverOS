@@ -1347,7 +1347,7 @@ Every read path calls it:
 
 | # | Read path | Today | With the policy |
 |---|---|---|---|
-| 1 | Search: every recaller, the multi-round loop, expansion lookups | owner predicate only | `read_scope` predicate in every `where`; with `include_past`, `past_predicate`: the superseded versions inside the windows too, never a forgotten record or one a live forget retired |
+| 1 | Search: every recaller, the multi-round loop, expansion lookups | owner predicate only | `read_scope` predicate in every `where`; with `include_past` (sent, or switched on by the question's wording under `[search] past_triggers`), `past_predicate`: the superseded versions inside the windows too, never a forgotten record or one a live forget retired |
 | 2 | Search: pictures attached to episodes | attached by reference | attached only if visible |
 | 3 | Search: buffered messages of a session (`manager.py:334-351`) | all senders | the session's group window; one-to-one only for a sender of the session |
 | 4 | Search: attached profiles | owner's profile | member-in-group profiles of the scope; personal profile only in one-to-one scope |

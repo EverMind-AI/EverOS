@@ -104,6 +104,32 @@ machinery that keeps a deleted memory from coming back.
   byte-identical to before. Whether the curve helps is not measured yet
   ([docs/configuration.md](docs/configuration.md#search),
   [docs/api.md](docs/api.md#post-apiv2memorysearch)).
+- **Asking about the past by a question's wording (off by default).**
+  `[search] past_triggers = true` answers a `/memory/search` request that
+  does not send `include_past` as if it had sent `true` when its question --
+  as asked, never a decider's sub-query -- holds past-time wording, and names
+  what fired in `data.past_trigger` (absent otherwise, so every other
+  response is byte for byte what it was). An `include_past` the request
+  sends, `true` or `false`, always wins. Built-in lists in English and
+  Chinese (simplified and traditional), in
+  `src/everos/config/past_triggers_en.toml` and `past_triggers_zh.toml`:
+  precise phrases ("used to", "back then", "no longer", "before I" with a
+  past-tense verb, "the old / previous / former" ...; no bare "before",
+  "earlier" or "old") and their Chinese counterparts, each language with
+  exceptions for the longer words and phrases that hold a trigger without
+  meaning the past ("is used to", "in the past week", a direction such as
+  "walk over" or a deadline such as "before tomorrow" in Chinese). With
+  `past_trigger_dates` (on with the switch), an explicit year, month or date
+  whose whole period ended before the day the question is asked is a
+  trigger too ("in 2019", "March 2024", "2024-03-05", "the 1990s" and the
+  Chinese forms); relative words such as "yesterday" are not. The four lists
+  (`past_trigger_words_en` / `_zh`, `past_trigger_exceptions_en` / `_zh`)
+  are regular expressions; a list set in `everos.toml` replaces its built-in
+  one and `[]` switches it off; an entry that is no regular expression or
+  matches an empty question is refused at load. No model call; with the
+  switch off, requests, results and model requests are byte-identical to
+  before ([docs/configuration.md](docs/configuration.md#search),
+  [docs/api.md](docs/api.md#post-apiv2memorysearch)).
 - **One deliverer per group, and each message once.** A group names the
   identity its gateway asserts for the group's key as `deliverer_id`
   (`PUT /groups/{id}`, by owners, admins or the deliverer; `null` clears it;
