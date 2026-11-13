@@ -127,11 +127,19 @@ def _scope(owner: str) -> Scope:
 
 
 class _Jitter:
-    """Proxy a store; every call yields for a random moment first."""
+    """Proxy a store; every call yields for a random moment first.
 
-    def __init__(self, target: Any, rng: random.Random) -> None:
+    Each call's start and outcome go to ``log``, so a failed check can show
+    the order in which the actors reached an owner's files.
+    """
+
+    def __init__(
+        self, target: Any, rng: random.Random, kind: str, log: list[str]
+    ) -> None:
         self._target = target
         self._rng = rng
+        self._kind = kind
+        self._log = log
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._target, name)
@@ -140,9 +148,33 @@ class _Jitter:
 
         async def call(*args: Any, **kwargs: Any) -> Any:
             await asyncio.sleep(self._rng.random() * 0.003)
-            return await attr(*args, **kwargs)
+            what = f"{self._kind}.{name}({_brief([*args, *kwargs.values()])})"
+            self._log.append(f"start {what}")
+            try:
+                result = await attr(*args, **kwargs)
+            except BaseException as err:
+                self._log.append(f"raise {what} {type(err).__name__}")
+                raise
+            self._log.append(f"done  {what} -> {_brief(result)}")
+            return result
 
         return call
+
+
+def _brief(value: Any) -> str:
+    """A short, owner-revealing rendering of a store call's argument or result."""
+    if isinstance(value, Scope):
+        return f"owner={value.owner_id}"
+    if isinstance(value, MemoryRef):
+        return value.id
+    if hasattr(value, "ref") and isinstance(value.ref, MemoryRef):
+        return value.ref.id
+    if isinstance(value, str):
+        return value[:48]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = sorted(_brief(v) for v in value)
+        return "[" + ", ".join(items[:12]) + (", ..." if len(items) > 12 else "") + "]"
+    return type(value).__name__
 
 
 class _DiskFull:
@@ -208,6 +240,8 @@ class _World:
     memcells: int = 0
     memcell_order: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
     disk: _DiskFull = dataclasses.field(default_factory=lambda: _DiskFull(None))
+    calls: list[str] = dataclasses.field(default_factory=list)
+    """Every store call's start and outcome, in order (see :class:`_Jitter`)."""
 
     def build(self) -> None:
         """(Re)build the stores over the root: the process (re)starts."""
@@ -243,10 +277,12 @@ class _World:
 
         self.stores = dataclasses.replace(
             stores,
-            episode=_Jitter(stores.episode, self.rng),
-            atomic_fact=_Jitter(stores.atomic_fact, self.rng),
-            memcell=_Jitter(stores.memcell, self.rng),
-            cluster=_Jitter(stores.cluster, self.rng),
+            episode=_Jitter(stores.episode, self.rng, "episode", self.calls),
+            atomic_fact=_Jitter(
+                stores.atomic_fact, self.rng, "atomic_fact", self.calls
+            ),
+            memcell=_Jitter(stores.memcell, self.rng, "memcell", self.calls),
+            cluster=_Jitter(stores.cluster, self.rng, "cluster", self.calls),
             session_purge=_RecordingPurge(),
         )
         self.service = make_memory_service(
@@ -765,6 +801,26 @@ async def _md_entries(
     return episodes, facts
 
 
+async def _diagnosis(world: _World, owner: str) -> str:
+    """The owner's markdown files as they are now, and every store call made."""
+    lines = [f"by_ids={sorted(world.by_ids)} merged={world.merged}", "files:"]
+    for md in sorted(world.root.rglob("*.md")):
+        if owner not in md.parts:
+            continue
+        try:
+            doc = await MarkdownReader.read(md)
+        except FileNotFoundError:
+            continue
+        marks = {
+            k: doc.frontmatter.get(k) for k in ("entry_count", "deprecated_entries")
+        }
+        ids = [e.id for e in doc.entries]
+        lines.append(f"  {md.relative_to(world.root)} {ids} {marks}")
+    lines.append("store calls, every owner (one owner's write can land in another's):")
+    lines += [f"  {c}" for c in world.calls]
+    return "\n".join(lines)
+
+
 async def _seed(world: _World) -> None:
     """Phase 0, in order: episodes in both sessions, clustered, with facts --
     something for every later actor to race over."""
@@ -834,15 +890,23 @@ async def _check(world: _World) -> None:
             assert found is None, ("by-id closure still clustered", owner, entry)
     # I4: whatever was written and is gone was some deletion's target.
     by_id = {(o, e) for o, t in world.by_ids for e in _closure(world, o, t)}
-    for (owner, entry), (session, memcell) in world.written.items():
-        if (owner, entry) in episodes:
-            continue
-        assert (
+    vanished = [
+        (owner, entry)
+        for (owner, entry), (session, memcell) in world.written.items()
+        if (owner, entry) not in episodes
+        and not (
             memcell in world.purged
             or (owner, session) in world.owner_sessions
             or (owner, entry) in by_id
             or owner in world.owner_deleting
-        ), ("an episode vanished with no deletion", owner, entry)
+        )
+    ]
+    if vanished:
+        owner, entry = vanished[0]
+        raise AssertionError(
+            ("an episode vanished with no deletion", owner, entry),
+            await _diagnosis(world, owner),
+        )
     for (owner, fact), parent in world.facts.items():
         if (owner, fact) not in facts and owner not in world.owner_deleting:
             assert (owner, parent) not in episodes or world.written[(owner, parent)][
