@@ -62,9 +62,13 @@ run `everos cascade rebuild`.
 ## `everos prompts`
 
 Prints the prompt manifest as JSON: every prompt EverOS registers (id,
-version, fingerprint of its text, and whether it is sent while a store is
-written or while it is searched) and the everalgo prompts it sends unchanged
-(package, installed version, fingerprint). It needs no memory root, no
+version, fingerprint of its text, and when it is sent: `write` while a store is
+written, `read` by the multi-round decider on every round of every search,
+`search` by an optional search step) and the everalgo prompts it sends
+unchanged -- boundary detection, the episode rules, the profile update and
+consolidation (package, installed version, fingerprint). A prompt assembled by
+rule lists the fingerprint of each variant: `chat.episode` and
+`search.decider` have a `text` and a `pictures` one. It needs no memory root, no
 configuration and no model. Save it beside a store when the store is built
 (`everos prompts > <store>/prompts.json`): two stores built by the same
 prompts carry the same manifest, and a prompt change shows up as a new

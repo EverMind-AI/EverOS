@@ -6,23 +6,30 @@ What these pin:
   the manifest, under its own id, with its version and fingerprint -- a prompt
   registered later cannot be left out of what a store records;
 - the everalgo prompts a chat store is written with are recorded by
-  fingerprint against the vendored everalgo-user-memory build: the episode
+  fingerprint against the vendored everalgo builds: the batch boundary
+  detection (everalgo-boundary) every conversation is cut with, the episode
   rules ``chat.episode`` opens with, and the profile update and consolidation
-  of ``ProfileExtractor.aupdate``. An everalgo change to any of them fails
-  here, on purpose, before it reaches a store;
-- each entry says when its prompt is sent: while a store is written, or while
-  it is searched; a prompt assembled by rule lists each variant's fingerprint
-  (``chat.episode``: ``text`` and ``pictures``).
+  of ``ProfileExtractor.aupdate`` (everalgo-user-memory). An everalgo change to
+  any of them fails here, on purpose, before it reaches a store;
+- each entry says when its prompt is sent: while a store is written, on every
+  round of every search (the multi-round decider, ``read``), or by an optional
+  search step; a prompt assembled by rule lists each variant's fingerprint
+  (``chat.episode`` and ``search.decider``: ``text`` and ``pictures``);
+- the decider's ``text`` variant is ``_DECIDER_PROMPT`` alone, so its
+  fingerprint is the first 16 hex digits of the SHA-256 of that constant --
+  the digest the RL tooling already records for the prompt a policy saw.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import pkgutil
 
 import everos.memory
 from everos.memory.prompt_manifest import ALGO_PROMPTS, prompt_manifest
 from everos.memory.prompts import PromptTemplate
+from everos.memory.search import llm_multiround
 
 
 def _registered_templates() -> dict[str, PromptTemplate]:
@@ -61,6 +68,11 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
     }
 
     assert recorded == {
+        "everalgo.boundary.batch_detect": (
+            "everalgo-boundary",
+            "0.4.1",
+            "db589ab87364c7db",
+        ),
         "everalgo.user_memory.episode_rules": (
             "everalgo-user-memory",
             "0.9.0rc6.dev6",
@@ -93,4 +105,25 @@ def test_each_entry_says_when_its_prompt_is_sent() -> None:
     prompts = prompt_manifest()["prompts"]
 
     assert prompts["chat.scene_update"]["used"] == "write"
+    assert prompts["everalgo.boundary.batch_detect"]["used"] == "write"
     assert prompts["search.constraint_bind"]["used"] == "search"
+    assert prompts["search.decider"]["used"] == "read"
+
+
+def test_the_decider_prompt_is_recorded_with_its_two_variants() -> None:
+    decider = prompt_manifest()["prompts"]["search.decider"]
+
+    assert (decider["owner"], decider["version"]) == ("everos", 1)
+    assert decider["fingerprint"] == "30088db20a1bbf50"
+    assert decider["variants"] == {
+        "text": "4662b538083707a2",
+        "pictures": "30088db20a1bbf50",
+    }
+
+
+def test_the_decider_text_variant_is_the_prompt_constant_alone() -> None:
+    prompt = llm_multiround._DECIDER_PROMPT
+    text = prompt_manifest()["prompts"]["search.decider"]["variants"]["text"]
+
+    assert llm_multiround.DECIDER.parts[0] is prompt
+    assert text == hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]

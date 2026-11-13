@@ -1444,9 +1444,9 @@ prompt every chat cell is extracted with (`chat.episode`,
 `src/everos/memory/extract/pipeline/episode.py`, assembled by rule: a text cell
 is sent everalgo's episode prompt byte for byte, a cell with pictures the same
 rules plus the picture rules, because everalgo's message type is text-only),
-and the multi-round decider prompt
-(`src/everos/memory/search/llm_multiround.py`), because the decider is a
-pluggable hook of the EverOS retrieval loop. A new everalgo operator also needs an
+and the multi-round decider prompt (`search.decider`,
+`src/everos/memory/search/llm_multiround.py`, with a `text` and a `pictures`
+variant), because the decider is a pluggable hook of the EverOS retrieval loop. A new everalgo operator also needs an
 everalgo release before EverOS can depend on it. Group memory therefore follows
 the same path:
 
@@ -1462,8 +1462,11 @@ Every prompt and template is registered with an id, a version and a fingerprint
 and can be overridden like the other 2.0 prompts. Keeping the registry id when a
 prompt moves to everalgo keeps data built from the registry valid. `everos
 prompts` prints them all, with the fingerprints of the everalgo prompts a store
-is written with (`src/everos/memory/prompt_manifest.py`). Step 1 needs
-no everalgo release at all.
+is written with -- boundary detection, the episode rules, the profile update and
+consolidation (`src/everos/memory/prompt_manifest.py`). Each entry says when it
+is sent: `write` while a store is written, `read` on every round of every
+search (the decider), `search` by an optional search step (the constraint
+binding). Step 1 needs no everalgo release at all.
 
 ---
 

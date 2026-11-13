@@ -64,6 +64,20 @@ machinery that keeps a deleted memory from coming back.
 
 ### Added
 
+- **`everos prompts` lists every prompt a chat store is built and read
+  with.** Two were missing. The boundary detection that cuts every buffered
+  conversation into segments is everalgo's (`everalgo.boundary.batch_detect`,
+  package `everalgo-boundary`, its system and user templates fingerprinted).
+  The multi-round decider's prompt is registered as `search.decider`
+  (version 1) in two variants: `text`, the round prompt alone -- its
+  fingerprint is the first 16 hex digits of the SHA-256 of
+  `_DECIDER_PROMPT`, the digest the RL tooling records for the prompt a
+  policy saw -- and `pictures`, which adds the `(picture)` mark of a picture's
+  evidence line and the two text parts before a question's picture and a
+  candidate's thumbnail. Its entry says `"used": "read"`: sent on every
+  round of every search, as against `search`, an optional search step (the
+  constraint binding). No prompt text changed; every model request is
+  byte for byte what it was, and the other entries are unchanged.
 - **One deliverer per group, and each message once.** A group names the
   identity its gateway asserts for the group's key as `deliverer_id`
   (`PUT /groups/{id}`, by owners, admins or the deliverer; `null` clears it;

@@ -2,7 +2,8 @@
 
 Algorithm prompts belong to everalgo. A few live here (docs/group-memory.md,
 section 11): the chat episode prompt, the group roster block, the
-group-profile update and the constraint-binding call. Each is a
+group-profile update, the scene update, the constraint-binding call and the
+multi-round decider. Each is a
 :class:`PromptTemplate` with an id, a version and a fingerprint of its text,
 pinned by tests, so data built from one version can be told apart from data
 built from another, and the id survives a move to everalgo.

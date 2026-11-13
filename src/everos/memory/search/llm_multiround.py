@@ -74,6 +74,7 @@ from everos.core.observability.logging import get_logger
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import Filter, Stored
 from everos.memory.ports.images import ImageStore
+from everos.memory.prompts import PromptTemplate
 
 from .dto import SearchEpisodeItem, SearchImageItem
 from .recall import RecallResult
@@ -368,6 +369,28 @@ CANDIDATES THIS ROUND:
 Reply with ONLY this JSON object (no prose, no code fences); "core" values are \
 GLOBAL indices into the candidates above:
 {{"core": [<indices>], "next_queries": ["<q1>", "..."]}}"""
+
+DECIDER = PromptTemplate(
+    id="search.decider",
+    version=1,
+    parts=(
+        # 0: the round prompt, the whole text of a round without pictures.
+        _DECIDER_PROMPT,
+        # 1: the mark on a picture's evidence line; 2-3: the text part before
+        # the question's picture and before a candidate's thumbnail.
+        _PICTURE_MARK,
+        "Picture attached to the question:",
+        "Picture for evidence item {label}:",
+    ),
+    variants=(("text", (0,)), ("pictures", (0, 1, 2, 3))),
+)
+"""The multi-round decider's prompt, every round of every search, by rule:
+``text`` is a round whose evidence holds no picture (part 0, sent as a plain
+string); ``pictures`` a round with a picture among its candidates or attached
+to its question, whose evidence lines may carry part 1 and whose thumbnails
+follow the text, each after part 2 or 3 (:func:`_content`).
+``_DECIDER_PROMPT`` stays a literal module constant: the RL environment reads
+it from this file's source."""
 
 
 class _DecisionReply(StrictOutputModel):
@@ -1325,16 +1348,17 @@ def _content(
 
     Each picture is introduced by a text part naming its evidence index, so the
     decider can map "what does item 7 show" onto the right image rather than
-    guessing by position.
+    guessing by position. Both introductions are :data:`DECIDER`'s parts.
     """
     if not pictures:
         return prompt
+    *_, question_caption, item_caption = DECIDER.parts
     parts: list[object] = [{"type": "text", "text": prompt}]
     for picture in pictures:
         caption = (
-            "Picture attached to the question:"
+            question_caption
             if picture.question
-            else f"Picture for evidence item {picture.label}:"
+            else item_caption.format(label=picture.label)
         )
         parts.append({"type": "text", "text": caption})
         part = image_url_part_from_bytes(picture.data, picture.mime)
