@@ -101,6 +101,16 @@
           "429": {
             "description": "Queue at its per-session or global cap"
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -163,6 +173,16 @@
           },
           "429": {
             "description": "Queue at its per-session or global cap"
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -599,6 +619,16 @@
               }
             }
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -773,6 +803,16 @@
               }
             }
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -943,6 +983,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentPatchResponse_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1346,6 +1396,16 @@
           "429": {
             "description": "Queue at its per-session or global cap"
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1408,6 +1468,16 @@
           },
           "429": {
             "description": "Queue at its per-session or global cap"
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1844,6 +1914,16 @@
               }
             }
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2018,6 +2098,16 @@
               }
             }
           },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2188,6 +2278,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentPatchResponse_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3535,6 +3635,7 @@
           "PAYLOAD_TOO_LARGE",
           "QUEUE_SATURATED",
           "SESSION_BUSY",
+          "PURGE_IN_PROGRESS",
           "PURGE_NONCE_INVALID"
         ],
         "title": "ErrorCode",

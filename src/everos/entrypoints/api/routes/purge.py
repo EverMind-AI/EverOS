@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Path
 
@@ -17,6 +17,15 @@ from everos.entrypoints.api.schemas import (
 )
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+REFUSED_DURING_PURGE: dict[int | str, dict[str, Any]] = {
+    409: {
+        "model": ErrorResponse,
+        "description": "PURGE_IN_PROGRESS: a running purge is clearing this "
+        "app / project; resend once the job named in the message has ended",
+    },
+}
+"""The answer of a write route while a purge clears the range it names."""
 
 _PathJobId = Annotated[
     str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")

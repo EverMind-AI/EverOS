@@ -88,8 +88,8 @@ class Tombstone:
 class PurgeMarks:
     """The tombstones, the active job and the tracked work of one root.
 
-    The active job only serves the one-purge-at-a-time rule and the trash
-    sweep at startup; it blocks nothing.
+    The active job serves the one-purge-at-a-time rule, the trash sweep at
+    startup and the refusal of writes into its range.
     """
 
     def __init__(self) -> None:

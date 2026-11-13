@@ -1561,9 +1561,9 @@ expires after `[purge] nonce_ttl_seconds` (5 minutes by default).
 
 #### While a purge runs
 
-A purge **does not block** anything: reads, writes to other apps and
-projects, background work, even writes to the purged range itself, all
-proceed. A purge deletes the range, waits until the work that was in
+A purge **does not block** reads, writes to other apps and projects, or
+background work: they all proceed. Only a write into the purged range
+itself is refused (see below). A purge deletes the range, waits until the work that was in
 flight when it was confirmed has ended (a slow `/add`, an extraction, a
 knowledge upload, an index projection -- work on input taken in before the
 confirm), then deletes again. Background work on input taken in before the
@@ -1573,8 +1573,14 @@ range's own `async_mode` requests accepted before the confirm and still
 queued are dropped and show `purge_in_progress` in
 `GET /api/v2/tasks/{task_id}` -- do not resend them.
 
-Data written into the purged range while the purge runs may be deleted,
-partly or entirely; write to a range after its purge `succeeded`.
+A write into the purged range answers `409` `PURGE_IN_PROGRESS` until the
+job ends (`succeeded` or `failed`): `POST /memory/add`, `POST /memory/flush`,
+and `POST` / `PUT` / `PATCH /knowledge/documents`. Purging a project refuses
+writes to that project; an app, to all its projects; the `space`, all
+writes. The message names the job: poll `GET /purge/{job_id}` and resend
+once it has ended. A refused write wrote nothing. Deletions
+(`/memory/delete`, `/memory/delete_by_ids`, `DELETE /knowledge/documents`)
+are not refused.
 
 The wait has no limit of its own: a purge ends `failed` once it has run
 for `[purge] run_budget_seconds` (2 h of running time, the wait included,
@@ -1600,22 +1606,25 @@ mid-purge resumes the job when it starts again.
 | `404` | `PURGE_NONCE_INVALID` | The nonce is unknown, expired or already used; request a new one |
 | `503` | `EXTERNAL_SERVICE_UNAVAILABLE` | The job could not be recorded; nothing started and the nonce is still valid |
 | `404` | `NOT_FOUND` | `GET` of an unknown `job_id` |
+| `409` | `PURGE_IN_PROGRESS` | A write (`/add`, `/flush`, knowledge document upload, replace or patch) into the range a running purge is clearing; resend after the job ends |
 
-The Cloud API spells the same condition in lower case
-(`purge_nonce_invalid`); a client that matches on `error.code` and talks
-to both should accept either spelling. Unlike the Cloud API, writes are
-never refused while a purge runs, so `purge_in_progress` appears only in
-`GET /api/v2/tasks/{task_id}`.
+The Cloud API spells the same conditions in lower case
+(`purge_nonce_invalid`, `purge_in_progress`); a client that matches on
+`error.code` and talks to both should accept either spelling. Unlike the
+Cloud API, which refuses every write of the tenant while a purge runs, only
+writes into the purged range are refused. In `GET /api/v2/tasks/{task_id}`
+the code of a dropped queued request is the lower-case `purge_in_progress`.
 
 #### Known gaps
 
-- Data written into the range while the purge runs may be deleted in some
-  stores and kept in others (for example the markdown kept, its index row
-  gone until the next scan); a memory written for the same owner on the
-  same day can reuse the id of a purged one, and a write landing exactly
-  while the range's folder is moved away can fail.
-- Work that starts while the purge runs and is not waited for (a request to
-  the range, the work it triggers, or a Reflection run over every owner) can
+- Background work that names no app or project and starts while the purge
+  runs (a Reflection run over every owner, `POST /ome/trigger`) is not
+  refused; what it writes into the range may be deleted in some stores and
+  kept in others (for example the markdown kept, its SQLite row gone). A
+  write accepted before the confirm and still running can fail while the
+  range's folder is moved away; its data is purged anyway.
+- Work that starts while the purge runs and is not waited for (such as the
+  background work above) can
   read data of the range that is not deleted yet, or that older work wrote
   back meanwhile, and leave some of it once the purge ends. Requesting the
   range again shows it (a non-zero summary); purge again to clear it.

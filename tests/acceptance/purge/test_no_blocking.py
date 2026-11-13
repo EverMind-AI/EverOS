@@ -1,8 +1,9 @@
-"""T7.1: while a purge runs every route answers as it does without one (A7).
+"""T7.1: while a purge runs only writes into its range are refused (A7).
 
-Nothing is refused: reads, writes outside the purged range and writes with
-no range answer the same status code as before the purge; writes to the
-purged range itself are accepted too (spec v3 C14, D3).
+Reads, writes outside the purged range and writes with no range answer the
+same status code as before the purge; a write into the purged range answers
+409 ``PURGE_IN_PROGRESS`` naming the job, and is accepted again once the job
+has ended (spec v3 C14, D3, D37).
 """
 
 from __future__ import annotations
@@ -96,15 +97,15 @@ def _sweep(
     return out
 
 
-def _add(srv: Any, where: dict[str, str], session: str) -> int:
+def _add(srv: Any, where: dict[str, str], session: str) -> Any:
     token = scope_token(where["app_id"], where["project_id"])
     return srv.post(
         "/memory/add",
         {"session_id": session, "messages": chat("u1", token), **where},
-    ).status_code
+    )
 
 
-def test_t7_1_routes_answer_as_without_a_purge(make_world: Any) -> None:
+def test_t7_1_only_writes_into_the_purged_range_are_refused(make_world: Any) -> None:
     world = make_world(
         "T7.1", ENV="DEV", EVEROS_TEST_FAILPOINTS="purge.before_step8=pause"
     )
@@ -127,14 +128,18 @@ def test_t7_1_routes_answer_as_without_a_purge(make_world: Any) -> None:
     # Confirming another range answers the running job (D25), not 409.
     nonce = srv.purge(scope="app", app_id="a2").json()["data"]["nonce"]
     confirm = srv.call("POST", "/memory/purge/confirm", {"nonce": nonce})
-    adds = {"other": _add(srv, OTHER, "during-o"), "s": _add(srv, S, "during-s")}
+    added = {"other": _add(srv, OTHER, "during-o"), "s": _add(srv, S, "during-s")}
+    adds = {where: resp.status_code for where, resp in added.items()}
     assert srv.job(job_id).json()["data"]["status"] == "running"  # window open
     assert confirm.status_code == 202 and confirm.json()["data"]["job_id"] == job_id
-    assert adds == {"other": 200, "s": 200}
+    # (b): a write into the purged project is refused, naming the job.
+    assert adds == {"other": 200, "s": 409}, added["s"].text
+    refusal = added["s"].json()["error"]
+    assert refusal["code"] == "PURGE_IN_PROGRESS" and job_id in refusal["message"]
     release(srv.fp_dir, "purge.before_step8")
     assert finish(srv, job_id)["status"] == "succeeded"
-    # (b): the purged project answers as the cleared project does.
     cleared = _sweep(srv, routes, S, s_ids)
+    after_add = _add(srv, S, "after-s").status_code  # ended: accepted again
 
     def show(codes: dict[tuple[str, str], int]) -> dict[str, int]:
         return {f"{m} {p}": c for (m, p), c in codes.items()}
@@ -148,8 +153,11 @@ def test_t7_1_routes_answer_as_without_a_purge(make_world: Any) -> None:
             "cleared_s": show(cleared),
             "confirm_other": confirm.status_code,
             "adds": adds,
+            "refusal": refusal,
+            "after_add": after_add,
         },
     )
+    assert after_add == 200
     assert during["other"] == baseline["other"]
     assert during["s"] == cleared
     for codes in during.values():

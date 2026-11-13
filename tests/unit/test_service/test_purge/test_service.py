@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.errors import NotFoundError, PurgeNonceInvalidError, StorageError
+from everos.core.errors import (
+    NotFoundError,
+    PurgeInProgressError,
+    PurgeNonceInvalidError,
+    StorageError,
+)
 from everos.core.purge_marks import MARKS
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import purge_scope
@@ -196,3 +201,47 @@ def test_default_maps_to_reserved_dirs() -> None:
     assert scope.covers("default", "default")
     with pytest.raises(ValueError):
         purge_scope("app", None, None)
+
+
+@pytest.mark.parametrize(
+    ("scope", "app", "project", "refused"),
+    [
+        (("project", "a1", "p1"), "a1", "p1", True),
+        (("project", "a1", "p1"), "a1", "p2", False),
+        (("project", "a1", "p1"), "a2", "p1", False),
+        (("app", "a1", None), "a1", "p9", True),
+        (("app", "a1", None), "a2", "p1", False),
+        (("space", None, None), "a9", "p9", True),
+        (("project", "default", "default"), "default", "default", True),
+    ],
+)
+async def test_writes_are_refused_only_in_the_running_purges_range(
+    storage: Storage,
+    scope: tuple[str, str | None, str | None],
+    app: str,
+    project: str,
+    refused: bool,
+) -> None:
+    p = await _ready(storage)
+    p.service.refuse_writes_to(app, project)  # nothing running
+    job = await p.service.confirm((await p.service.request(*scope)).nonce)
+    if refused:
+        with pytest.raises(PurgeInProgressError, match=job.job_id):
+            p.service.refuse_writes_to(app, project)
+    else:
+        p.service.refuse_writes_to(app, project)
+    assert await p.run_to_end(job.job_id) == "succeeded"
+    p.service.refuse_writes_to(app, project)  # ended: accepted again
+
+
+async def test_writes_stay_refused_after_a_restart(storage: Storage) -> None:
+    p = await _ready(storage)
+    job = await p.service.confirm(
+        (await p.service.request("project", "a1", "p1")).nonce
+    )
+    MARKS.reset()  # a new process: only system.db remembers the job
+    again = make_purge(storage)
+    again.service.refuse_writes_to("a1", "p1")
+    await again.service.restore()
+    with pytest.raises(PurgeInProgressError, match=job.job_id):
+        again.service.refuse_writes_to("a1", "p1")

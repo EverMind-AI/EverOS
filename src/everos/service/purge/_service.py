@@ -14,7 +14,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from everos.core.errors import NotFoundError, PurgeNonceInvalidError, StorageError
+from everos.core.errors import (
+    NotFoundError,
+    PurgeInProgressError,
+    PurgeNonceInvalidError,
+    StorageError,
+)
 from everos.core.failpoints import afailpoint
 from everos.core.observability.logging import get_logger
 from everos.core.purge_marks import MARKS, PurgeMarks, PurgeScope, Tombstone
@@ -240,6 +245,25 @@ class PurgeService:
     def track(self, origin: datetime) -> AbstractContextManager[None]:
         """Register a write request taken in at ``origin`` while it runs."""
         return self.marks.track(origin)
+
+    def refuse_writes_to(self, app_id: str, project_id: str) -> None:
+        """Refuse a write into the range the running purge is clearing.
+
+        Accepting it would answer success for data the purge's second pass
+        may then delete in part.
+
+        Raises:
+            PurgeInProgressError: The running purge covers
+                ``(app_id, project_id)``.
+        """
+        marks = self.marks
+        active = marks.active_scope
+        if active is not None and active.covers(app_id, project_id):
+            job_id = marks.active_job_id
+            raise PurgeInProgressError(
+                f"purge job {job_id} is clearing this app / project; poll "
+                f"GET /api/v2/memory/purge/{job_id} and resend after it ends"
+            )
 
     def covers_trash(self, scope: Scope) -> bool:
         """Whether a ``/delete`` trash folder belongs to the running purge."""

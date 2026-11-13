@@ -4,8 +4,9 @@ A purge drops background work whose input predates it, and waits for the
 work already in flight before it clears the scope a second time. A write
 request is such an input: its arrival time becomes the request's ``ORIGIN``
 (events it emits carry it), and the request is registered with the purge
-for as long as it runs. Nothing is refused; ``GET`` / ``HEAD`` / ``OPTIONS``
-pass untouched.
+for as long as it runs. Nothing is refused here (a write into the range
+being purged is refused by its route); ``GET`` / ``HEAD`` / ``OPTIONS`` pass
+untouched.
 """
 
 from __future__ import annotations

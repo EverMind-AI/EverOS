@@ -309,11 +309,15 @@ def StubKnowledgeService() -> Any:  # noqa: N802 - reads as the class it doubles
 
 
 class StubPurgeService:
-    """Purge double: ``tracked`` lists the origin of each write request seen."""
+    """Purge double: ``tracked`` lists the origin of each write request seen,
+    ``checked_writes`` the range of each write a route asked about; set
+    ``refusing`` to the error that check raises."""
 
     def __init__(self, lifecycle: list[str] | None = None) -> None:
         self.lifecycle = lifecycle if lifecycle is not None else []
         self.tracked: list[Any] = []
+        self.checked_writes: list[tuple[str, str]] = []
+        self.refusing: Exception | None = None
         self.request = AsyncMock()
         self.confirm = AsyncMock()
         self.get = AsyncMock()
@@ -321,6 +325,11 @@ class StubPurgeService:
     def track(self, origin: Any) -> contextlib.AbstractContextManager[None]:
         self.tracked.append(origin)
         return contextlib.nullcontext()
+
+    def refuse_writes_to(self, app_id: str, project_id: str) -> None:
+        self.checked_writes.append((app_id, project_id))
+        if self.refusing is not None:
+            raise self.refusing
 
     def covers_trash(self, scope: Any) -> bool:
         return False

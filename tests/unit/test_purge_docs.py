@@ -24,7 +24,8 @@ KEYWORDS = {
         "PURGE_NONCE_INVALID",
         "purge_in_progress",
         "does not block",
-        "may be deleted",
+        "PURGE_IN_PROGRESS",
+        "A refused write wrote nothing",
         "restart the server, then purge again",
         "only once",
         "If the `202` is lost",
@@ -80,9 +81,8 @@ def test_curl_example_has_only_the_three_placeholders() -> None:
     assert "$PORT" in blocks[0]
 
 
-def test_purge_docs_no_longer_promise_refused_writes() -> None:
-    """Writes are never refused while a purge runs (spec v3 D3)."""
-    assert "PURGE_IN_PROGRESS" not in (DOCS / "api.md").read_text(encoding="utf-8")
+def test_purge_docs_drop_the_removed_settle_wait() -> None:
+    """``settle_wait_seconds`` is gone (spec v3 D19)."""
     assert "settle_wait_seconds" not in (DOCS / "configuration.md").read_text(
         encoding="utf-8"
     )
