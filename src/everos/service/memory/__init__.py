@@ -236,6 +236,10 @@ class MemoryService:
             image_store=stores.images,
             vision=settings.extraction.vision,
             rosters=rosters,
+            # A segment whose extraction failed is extracted again by its
+            # session's next add or flush.
+            memcells=stores.memcell,
+            forget_log=stores.forget_log,
             # A group takes each message once (docs/group-memory.md, 5.2).
             dedupe=GroupDedupe(
                 stores.group_messages,

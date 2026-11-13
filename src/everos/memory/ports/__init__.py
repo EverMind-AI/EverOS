@@ -69,6 +69,7 @@ from .stores import NO_SOURCE_CHECK as NO_SOURCE_CHECK
 from .stores import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
+from .stores import FailedSegment as FailedSegment
 from .stores import GroupProfileStore as GroupProfileStore
 from .stores import ImageMemoryStore as ImageMemoryStore
 from .stores import MemcellStore as MemcellStore
@@ -115,6 +116,7 @@ __all__ = [
     "EpisodeStore",
     "Event",
     "EventBus",
+    "FailedSegment",
     "Filter",
     "ForgetEntry",
     "ForgetLogStore",

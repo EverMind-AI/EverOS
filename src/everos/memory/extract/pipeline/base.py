@@ -34,12 +34,16 @@ class PreparedCell:
         picture_names: ``image_id -> client file name`` for the pictures the
             cell carries. Read off the ingested content items, because the
             cell's text keeps only the hash; empty when no picture had a name.
+        retry: An earlier extraction of the cell failed. Its owners whose
+            episode of it was written before the failure are skipped, so no
+            one gets a second copy.
     """
 
     cell: MemCell
     memcell_id: str
     sender_ids: Sequence[str] = ()
     picture_names: Mapping[str, str] = field(default_factory=dict)
+    retry: bool = False
 
 
 @dataclass(frozen=True)

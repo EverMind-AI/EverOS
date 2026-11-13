@@ -10,6 +10,9 @@ deserialise the payload back into an algo ``MemCell``. Episode markdown
 still carries the LLM-synthesised narrative; ``payload_json`` is the
 chat-stream archive that narrative was distilled from.
 
+``extraction_retry`` marks a segment whose extraction failed: the session's
+next add or flush extracts it again (``SqliteMemcellStore``).
+
 A ``system.db`` written by an earlier 2.0 build also has three nullable
 ``case_*`` columns (the agent-case extraction stamp); nothing reads or
 writes them now.
@@ -57,3 +60,8 @@ class Memcell(BaseTable, table=True):
     strategies can deserialise it back into an algo MemCell long after
     ``unprocessed_buffer`` has dropped the staging rows."""
     timestamp: UtcDatetime = Field(sa_type=UtcDateTimeColumn)
+    extraction_retry: str | None = None
+    """JSON of a segment whose extraction failed and is to be tried again
+    (failures so far, the group it was cut in, its pictures' client names);
+    ``NULL`` for every other segment, a legacy one included. Added after the
+    table's first release (``schema._ADDED_COLUMNS``)."""

@@ -212,7 +212,11 @@ async def test_a_failed_batch_records_nothing(tmp_path: Path) -> None:
         assert await _held_texts(world, "s1") == ["fly Friday"]
 
 
-async def test_a_batch_whose_extraction_failed_is_taken_again(tmp_path: Path) -> None:
+async def test_a_segment_whose_extraction_failed_is_extracted_once_again(
+    tmp_path: Path,
+) -> None:
+    """The segment is stored and marked: its re-send is a duplicate, and the
+    session's next flush extracts it -- once."""
     model = _Model()
     async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
         await _trip(world)
@@ -224,9 +228,14 @@ async def test_a_batch_whose_extraction_failed_is_taken_again(tmp_path: Path) ->
         with pytest.raises(RuntimeError, match="episode model down"):
             await _add(world, batch, defer=False)
         model.fail_episode = 0
-        retried = await _add(world, batch, defer=False)
-        assert (retried.duplicates, retried.status) == (0, "extracted")
+        resent = await _add(world, batch, defer=False)
+        assert (resent.duplicates, resent.status) == (1, "accumulated")
+        assert (await _flush(world, "s1")).status == "extracted"
+        assert await _held_texts(world, "s1") == ["fly Friday"]
+        episodes = await world.stores.episode.read_all(world.scope("trip"))
+        assert len(episodes) == 1
         assert (await _add(world, batch, defer=False)).duplicates == 1
+        assert (await _flush(world, "s1")).status == "no_extraction"
 
 
 async def test_two_batches_racing_with_one_message_store_it_once(

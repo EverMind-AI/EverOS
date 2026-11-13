@@ -40,6 +40,7 @@ from everos.memory.models import (
     ToolCall,
 )
 from everos.memory.ports import (
+    FailedSegment,
     ForgetEntry,
     ForgetTarget,
     OwnerType,
@@ -180,6 +181,31 @@ class SqliteMemcellStore:
             row.memcell_id: MemCell.model_validate_json(row.payload_json)
             for row in rows
         }
+
+    async def record_extraction_failure(self, segment: FailedSegment) -> None:
+        await self._repo.set_retry(
+            segment.memcell_id,
+            json.dumps(
+                {
+                    "failures": segment.failures,
+                    "failed_at_ms": segment.failed_at_ms,
+                    "group_id": segment.group_id,
+                    "picture_names": dict(segment.picture_names),
+                },
+                sort_keys=True,
+            ),
+        )
+
+    async def clear_extraction_failure(self, memcell_id: str) -> None:
+        await self._repo.set_retry(memcell_id, None)
+
+    async def failed_segments(self, session: SessionKey) -> list[FailedSegment]:
+        rows = await self._repo.retries_in_session(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+        )
+        return [_failed_segment(row) for row in rows]
 
     async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
         rows = await self._repo.in_session(
@@ -471,6 +497,20 @@ def _record_to_row(record: MemcellRecord, session: SessionKey) -> Memcell:
         sender_ids_json=json.dumps(record.sender_ids),
         payload_json=record.cell.model_dump_json(),
         timestamp=from_timestamp_ms(record.cell.timestamp),
+    )
+
+
+def _failed_segment(row: Memcell) -> FailedSegment:
+    retry = json.loads(row.extraction_retry or "{}")
+    return FailedSegment(
+        memcell_id=row.memcell_id,
+        cell=MemCell.model_validate_json(row.payload_json),
+        sender_ids=tuple(json.loads(row.sender_ids_json)),
+        message_ids=tuple(json.loads(row.message_ids_json)),
+        group_id=retry.get("group_id"),
+        picture_names=dict(retry.get("picture_names") or {}),
+        failures=int(retry.get("failures") or 1),
+        failed_at_ms=int(retry.get("failed_at_ms") or 0),
     )
 
 

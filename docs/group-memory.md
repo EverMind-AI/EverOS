@@ -430,10 +430,14 @@ copy. A message is a **duplicate** when its group already holds it:
   counts them (present only when there are some); a queued batch logs them
   (`memorize.duplicates_skipped`). A batch of nothing but duplicates answers
   `accumulated` and makes no model call.
-- **Retries are safe.** A batch's keys are recorded once it is stored and its
-  own segments extracted, so a batch that failed recorded nothing and its
-  retry is taken in full. Two batches of one group that carry the same
-  message at the same time store it once: the second waits for the first.
+- **Retries are safe.** A batch's keys are recorded once it is stored. A
+  batch that failed before that (its boundary call) recorded nothing, and its
+  retry is taken in full. A segment whose extraction failed is stored and
+  marked, and the session's next add or flush extracts it again
+  ([api.md, Failure](api.md#asynchronous-mode)), so its messages are held and
+  a retry of the batch skips them: the segment is extracted once, never cut
+  twice. Two batches of one group that carry the same message at the same
+  time store it once: the second waits for the first.
 - **Where.** Explicit groups and implicit groups of three or more people.
   Never a session of one or two people without `group_id`, which is no
   group: its path is unchanged

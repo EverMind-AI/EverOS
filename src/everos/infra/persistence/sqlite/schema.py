@@ -35,6 +35,7 @@ _ADDED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "group_meta": ("deliverer_id",),
     "image_original": ("forgotten_at",),
     "md_change_state": ("unreadable_entries",),
+    "memcell": ("extraction_retry",),
     "unprocessed_buffer": ("client_message_id",),
 }
 """Columns added to a table after its first release, by table name."""

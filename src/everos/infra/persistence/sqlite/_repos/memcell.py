@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
@@ -63,6 +63,40 @@ class MemcellRepo(RepoBase[Memcell]):
                 rows = (await s.execute(stmt)).scalars().all()
                 by_id.update((r.memcell_id, r) for r in rows)
         return [by_id[mid] for mid in memcell_ids if mid in by_id]
+
+    async def set_retry(self, memcell_id: str, retry_json: str | None) -> None:
+        """Write one row's ``extraction_retry`` (``None`` clears it).
+
+        A row that is gone (its session deleted) is left gone.
+        """
+        stmt = (
+            update(Memcell)
+            .where(Memcell.memcell_id == memcell_id)  # type: ignore[arg-type]
+            .values(extraction_retry=retry_json)
+        )
+        async with session_scope(self._factory) as s:
+            await s.execute(stmt)
+            await s.commit()
+
+    async def retries_in_session(
+        self, *, app_id: str, project_id: str, session_id: str
+    ) -> list[Memcell]:
+        """The session's rows whose ``extraction_retry`` is set, oldest first."""
+        stmt = (
+            select(Memcell)
+            .where(
+                Memcell.app_id == app_id,
+                Memcell.project_id == project_id,
+                Memcell.session_id == session_id,
+                Memcell.extraction_retry.is_not(None),  # type: ignore[union-attr]
+            )
+            .order_by(
+                Memcell.timestamp,  # type: ignore[arg-type]
+                Memcell.memcell_id,  # type: ignore[arg-type]
+            )
+        )
+        async with session_scope(self._factory) as s:
+            return list((await s.execute(stmt)).scalars().all())
 
     async def in_session(
         self, *, app_id: str, project_id: str, session_id: str

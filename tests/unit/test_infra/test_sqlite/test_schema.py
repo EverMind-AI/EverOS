@@ -22,7 +22,7 @@ from everos.infra.persistence.sqlite import (
     SqliteMemcellStore,
 )
 from everos.memory.models import MemcellRecord
-from everos.memory.ports import SessionKey
+from everos.memory.ports import FailedSegment, SessionKey
 
 _CASE_COLUMNS = {"case_extracted_at", "case_skip_reason", "case_skip_detail_json"}
 _CASE_MEMCELL_DDL = """
@@ -136,4 +136,41 @@ async def test_an_older_ledger_gains_the_unreadable_entries_column(
             await conn.execute(text("PRAGMA table_info(md_change_state)"))
         ).fetchall()
     assert "unreadable_entries" in {row[1] for row in rows}
+    await database.dispose()
+
+
+async def test_an_older_memcell_table_gains_the_retry_column(tmp_path: Path) -> None:
+    """A segment of a system.db from before it is no failed segment."""
+    database = SqliteDatabase(MemoryRoot(tmp_path), SqliteSettings())
+    async with database.engine.begin() as conn:
+        await conn.execute(text(_CASE_MEMCELL_DDL))
+        await conn.execute(text(_STAMPED_ROW), {"payload": _cell().model_dump_json()})
+
+    await database.create_schema()
+    await database.create_schema()  # idempotent
+
+    assert "extraction_retry" in await _memcell_columns(database)
+    store = SqliteMemcellStore(MemcellRepo(session_factory=database.session_factory))
+    assert await store.failed_segments(_SESSION) == []
+
+    failed = FailedSegment(
+        memcell_id="mc_old",
+        cell=_cell(),
+        sender_ids=("u1",),
+        message_ids=("m1",),
+        group_id=None,
+        picture_names={"abc": "boarding.png"},
+        failures=2,
+        failed_at_ms=1_747_216_800_000,
+    )
+    await store.record_extraction_failure(failed)
+    await store.record_extraction_failure(
+        FailedSegment(**{**failed.__dict__, "memcell_id": "mc_gone"})
+    )
+    # Read back as written (a gone segment stays gone).
+    assert await store.failed_segments(_SESSION) == [
+        FailedSegment(**{**failed.__dict__, "sender_ids": (), "message_ids": ()})
+    ]
+    await store.clear_extraction_failure("mc_old")
+    assert await store.failed_segments(_SESSION) == []
     await database.dispose()

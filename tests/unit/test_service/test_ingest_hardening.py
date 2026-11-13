@@ -5,6 +5,9 @@
   true re-send is one message, counted in ``duplicates``.
 * A millisecond timestamp before 2001-09-09 is milliseconds, not seconds past
   year 9999.
+* A segment whose extraction failed is extracted again by the session's next
+  add or flush -- once: its re-send is a duplicate, an add waits
+  ``RETRY_AFTER_MS``, and after ``MAX_EXTRACTION_FAILURES`` it is left.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pydantic import ValidationError
 from everos.core.utils.datetime import MAX_EPOCH_MS, to_timestamp_ms
 from everos.entrypoints.api.schemas.memorize import MessageItemDTO
 from everos.memory.ports import Scope
+from everos.service.memory._retry import MAX_EXTRACTION_FAILURES
 from tests.helpers.groups import APP, PROJECT, GroupWorld
 
 T0 = 1_772_323_200_000  # 2026-03-01 00:00:00 UTC
@@ -148,3 +152,98 @@ def test_a_timestamp_past_the_calendar_is_refused_not_a_500() -> None:
     assert MessageItemDTO(timestamp=MAX_EPOCH_MS, **fields).timestamp == MAX_EPOCH_MS
     with pytest.raises(ValidationError, match="less than or equal"):
         MessageItemDTO(timestamp=MAX_EPOCH_MS + 1, **fields)
+
+
+# ── B-7 / A-3: a segment whose extraction failed ─────────────────────────
+
+
+async def test_a_failed_segment_is_extracted_by_the_next_flush_once(
+    tmp_path: Path,
+) -> None:
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        said = [
+            _message("amy", T0, "My door code is 4417"),
+            _message("bot", T0 + 1, "Noted.", role="assistant"),
+        ]
+        await _add(world, "s", *said)
+        model.fail_episode = 10
+        with pytest.raises(RuntimeError, match="episode model down"):
+            await _flush(world, "s")
+        model.fail_episode = 0
+        assert await _buffered(world, "s") == []
+        assert await _episodes(world, "amy") == []
+
+        # The client sends the batch again: it waits for the segment's retry.
+        resent = await _add(world, "s", *said)
+        assert (resent.duplicates, resent.status) == (2, "accumulated")
+        assert await _buffered(world, "s") == []
+
+        model.calls.clear()
+        assert (await _flush(world, "s")).status == "extracted"
+        assert model.calls == ["EpisodeReply"]
+        assert len(await _episodes(world, "amy")) == 1
+
+        # Extracted: nothing is left to try, and nothing is held any more.
+        model.calls.clear()
+        assert (await _flush(world, "s")).status == "no_extraction"
+        assert model.calls == []
+        assert await world.stores.memcell.failed_segments(world.session("s")) == []
+
+
+async def test_an_add_waits_before_it_retries_a_flush_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        await _add(world, "s", _message("amy", T0, "Trip to Porto"))
+        model.fail_episode = 1
+        with pytest.raises(RuntimeError):
+            await _flush(world, "s")
+        model.calls.clear()
+        await _add(world, "s", _message("amy", T0 + 10, "in May"))
+        assert "EpisodeReply" not in model.calls, "within RETRY_AFTER_MS"
+
+        monkeypatch.setattr("everos.service.memory._retry.RETRY_AFTER_MS", 0)
+        model.calls.clear()
+        later = await _add(world, "s", _message("amy", T0 + 20, "with Ben"))
+        assert model.calls.count("EpisodeReply") == 1
+        assert later.status == "extracted"
+        assert len(await _episodes(world, "amy")) == 1
+
+
+async def test_a_segment_that_keeps_failing_is_left(tmp_path: Path) -> None:
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        await _add(world, "s", _message("amy", T0, "Trip to Porto"))
+        model.fail_episode = 100
+        with pytest.raises(RuntimeError):
+            await _flush(world, "s")
+        for _ in range(MAX_EXTRACTION_FAILURES + 2):
+            await _flush(world, "s")
+        assert model.calls.count("EpisodeReply") == MAX_EXTRACTION_FAILURES
+        [left] = await world.stores.memcell.failed_segments(world.session("s"))
+        assert left.failures == MAX_EXTRACTION_FAILURES
+        # Left: its messages are no longer held, so the client can send them.
+        model.fail_episode = 0
+        resent = await _add(world, "s", _message("amy", T0, "Trip to Porto"))
+        assert resent.duplicates == 0
+
+
+async def test_a_forget_of_the_conversation_holds_the_retry(tmp_path: Path) -> None:
+    model = _Model()
+    async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=model)) as world:
+        await _add(world, "s", _message("amy", T0, "My door code is 4417"))
+        model.fail_episode = 1
+        with pytest.raises(RuntimeError):
+            await _flush(world, "s")
+        await world.memory.delete(
+            app_id=APP, project_id=PROJECT, user_id="amy", session_id="s"
+        )
+        model.calls.clear()
+        assert (await _flush(world, "s")).status == "no_extraction"
+        assert "EpisodeReply" not in model.calls
+        assert await _episodes(world, "amy") == []
+        # Its messages are not held: sent again after the delete, they are new.
+        again = await _add(world, "s", _message("amy", T0, "My door code is 4417"))
+        assert again.duplicates == 0

@@ -45,6 +45,7 @@ from everos.memory.models import (
     fold_roster,
 )
 from everos.memory.ports import (
+    FailedSegment,
     ForgetEntry,
     ForgetTarget,
     GroupRecord,
@@ -531,6 +532,7 @@ class InMemoryMemcellStore:
         self.cells: dict[str, MemCell] = {}
         self.sessions: dict[str, SessionKey] = {}
         self.case_marks: dict[str, tuple[str | None, dict[str, Any]]] = {}
+        self.failed: dict[str, FailedSegment] = {}
 
     def seed(
         self, memcell_id: str, cell: MemCell, session: SessionKey | None = None
@@ -551,6 +553,23 @@ class InMemoryMemcellStore:
 
     async def cells_by_id(self, memcell_ids: Sequence[str]) -> dict[str, MemCell]:
         return {i: self.cells[i] for i in memcell_ids if i in self.cells}
+
+    async def record_extraction_failure(self, segment: FailedSegment) -> None:
+        if segment.memcell_id in self.cells:
+            self.failed[segment.memcell_id] = segment
+
+    async def clear_extraction_failure(self, memcell_id: str) -> None:
+        self.failed.pop(memcell_id, None)
+
+    async def failed_segments(self, session: SessionKey) -> list[FailedSegment]:
+        return sorted(
+            (
+                f
+                for f in self.failed.values()
+                if self.sessions.get(f.memcell_id) == session
+            ),
+            key=lambda f: f.cell.timestamp,
+        )
 
     async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
         return {

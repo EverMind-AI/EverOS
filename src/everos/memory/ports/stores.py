@@ -13,6 +13,7 @@ __all__ = [
     "REPLAYS_EXHAUSTED_PREFIX",
     "ClusterStore",
     "EpisodeStore",
+    "FailedSegment",
     "GroupProfileStore",
     "ImageMemoryStore",
     "MemcellStore",
@@ -29,7 +30,7 @@ __all__ = [
 ]
 
 import datetime as dt
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol, final, runtime_checkable
 
@@ -584,6 +585,33 @@ class SessionBufferStore(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class FailedSegment:
+    """A segment whose extraction failed, waiting to be extracted again.
+
+    Attributes:
+        memcell_id: The segment.
+        cell: Its messages, as cut.
+        sender_ids: Its distinct senders, as the boundary recorded them.
+        message_ids: Its messages' generated ids: a re-send of one of them
+            waits for the segment's retry instead of being taken again.
+        group_id: The group it was cut in; ``None`` for a one-to-one segment.
+        picture_names: ``image_id -> client file name`` of its pictures,
+            which the cell's text does not keep.
+        failures: How many extractions of it failed.
+        failed_at_ms: When the last one did, epoch milliseconds.
+    """
+
+    memcell_id: str
+    cell: MemCell
+    sender_ids: tuple[str, ...]
+    message_ids: tuple[str, ...]
+    group_id: str | None
+    picture_names: Mapping[str, str]
+    failures: int
+    failed_at_ms: int
+
+
 @runtime_checkable
 class MemcellStore(Protocol):
     """Boundary-detected conversation slices."""
@@ -601,6 +629,21 @@ class MemcellStore(Protocol):
         the ids are gone the caller cannot tell which cell is which. This is
         the read for a caller that holds several ids and needs each answer.
         """
+        ...
+
+    async def record_extraction_failure(self, segment: FailedSegment) -> None:
+        """Mark ``segment.memcell_id`` as failed, with what a retry needs.
+
+        A segment that is gone (its session deleted) stays gone.
+        """
+        ...
+
+    async def clear_extraction_failure(self, memcell_id: str) -> None:
+        """The segment is extracted: nothing is left to try again."""
+        ...
+
+    async def failed_segments(self, session: SessionKey) -> list[FailedSegment]:
+        """The session's segments marked failed, oldest first."""
         ...
 
     async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:

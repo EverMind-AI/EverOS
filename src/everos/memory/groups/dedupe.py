@@ -12,10 +12,11 @@ Rules the implementation keeps:
 
 * keys come from the batch as sent, before ingest: a duplicate costs no
   ingest, no boundary call and no extraction -- dedupe only removes calls;
-* a key is recorded (:meth:`Claim.commit`) only once its batch is stored and
-  the batch's own cells are extracted: a batch that fails records nothing, so
-  its retry is taken in full -- a cell whose extraction failed is extracted
-  again from the retry, as before dedupe;
+* a key is recorded (:meth:`Claim.commit`) once its batch is stored: a batch
+  that fails before (its boundary call) records nothing, so its retry is taken
+  in full; a cell whose extraction failed is stored, marked and extracted
+  again by its session's next add or flush, so its keys are recorded and a
+  retry of the batch skips its messages;
 * a forget never removes a key: a forgotten message sent again stays
   forgotten, whichever session it comes back in;
 * a ``/memory/delete`` of a session (a forget of the whole session whose
@@ -125,8 +126,8 @@ class Claim:
     async def commit(self) -> None:
         """Record the batch's other keys as held by its session.
 
-        Called once the batch is stored and its own cells extracted; a key
-        recorded twice is the same row.
+        Called once the batch is stored (its own cells extracted, or marked
+        to be extracted again); a key recorded twice is the same row.
         """
         await self._owner.store.record(self._scope, self._session, self._fresh)
 

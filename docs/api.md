@@ -816,16 +816,26 @@ Limits are configured under `[memorize.async_queue]`, see
 
 **Failure.** A batch whose delivery raises is marked `failed` and skipped
 so its session keeps moving; `GET /tasks/{request_id}` shows `error`.
-There is no automatic retry by default (`max_attempts = 1`), because the
-memorize pipeline is not atomic: boundary detection writes the memcell and
-consumes the session buffer before extraction runs. A failure before that
-point (the common one: the boundary LLM call failed) leaves nothing behind,
-and re-sending the batch is safe. A failure after it leaves the memcell
-without its episode; re-sending then cuts a second memcell, and a `/flush`
-finds an empty buffer. `last_error` does not say which step failed. The
-server never re-drives a failed batch and deletes its row with the others
-after seven days. Synchronous calls have the same property; they just hand
-the decision to the client as a 5xx.
+There is no automatic retry of a batch by default (`max_attempts = 1`),
+because the memorize pipeline is not atomic: boundary detection writes the
+memcell and consumes the session buffer before extraction runs. A failure
+before that point (the common one: the boundary LLM call failed) leaves
+nothing behind, and re-sending the batch is safe. A failure after it (the
+episode call failed) leaves the memcell without its episode, **marked**: the
+session's next `/add` or `/flush` extracts that segment again -- a flush at
+once, an add once 30 seconds have passed since the failure (a provider that
+is down fails every attempt) -- up to three attempts in all, after which it
+is left and logged (`memorize_cell_extraction_abandoned`). A retry that fails
+again never fails the call that made it; one that succeeds makes that call
+answer `extracted`. Re-sending the batch meanwhile is safe: its messages are
+held by the waiting segment and skipped (`duplicates`), never cut into a
+second one. A segment whose conversation was forgotten (or deleted) is not
+extracted while that forget stands, and its messages are not held, so the
+conversation sent again after a delete is taken. A deferred add never
+retries (it makes no model call). `last_error` does not say which step
+failed. The server never re-drives a failed batch and deletes its row with
+the others after seven days. Synchronous calls have the same property; they
+just hand the decision to the client as a 5xx.
 
 **Delivery is at-least-once across a crash.** A row that was in flight
 when the process died is delivered again on the next start. If the first
@@ -1811,8 +1821,11 @@ again stays forgotten) -- keyed by `message_id`, or by sender, timestamp (ms)
 and the SHA-256 of the content when no id was sent. A skipped message costs no
 model call; the `200` answer counts them in `duplicates` (absent when none),
 and a queued batch logs them (`memorize.duplicates_skipped`). A retry is safe:
-a batch's messages count as held once it is stored and its own segments
-extracted, so a failed batch's retry is taken in full. A `/memory/delete` of a
+a batch's messages count as held once it is stored; a batch that failed
+before (its boundary call) is taken in full, and a segment whose extraction
+failed is extracted again by the session's next add or flush (see Failure in
+[Asynchronous mode](#asynchronous-mode)), so its re-sent messages are
+skipped. A `/memory/delete` of a
 session releases its messages, so the conversation sent again is taken as
 before. Explicit groups and implicit groups of three or more people; never a
 session of one or two people. A sender who is not a member joins at their first

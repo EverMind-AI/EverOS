@@ -238,6 +238,10 @@ class ConversationPipeline:
             cell = await self._readable(prepared.memcell_id, prepared.cell)
             if cell is not prepared.cell and not _has_text(cell):
                 return CellOutcome(message_count=message_count)
+        if prepared.retry:
+            spaces = await self._unwritten(spaces, prepared.memcell_id)
+            if not spaces:
+                return CellOutcome(message_count=message_count)
         found = await self._extract_segment(
             spaces[0], session, prepared.memcell_id, cell, senders=prepared.sender_ids
         )
@@ -247,7 +251,10 @@ class ConversationPipeline:
             # Each person's copy: the same reading of the segment, filed under
             # its own owner, pictures first, as for one person.
             mine = _owned_by(found, space.scope.owner_id)
-            md_paths += await self._persist_pictures(space, ingested, prepared, mine)
+            if not (prepared.retry and await self._pictures_written(space, prepared)):
+                md_paths += await self._persist_pictures(
+                    space, ingested, prepared, mine
+                )
             ref = await self._persist(
                 space, ingested, mine.episode, prepared.memcell_id
             )
@@ -296,6 +303,32 @@ class ConversationPipeline:
             space, session, memcell_id, cell, senders=senders
         )
         return found.episode
+
+    async def _unwritten(
+        self, spaces: Sequence[_Space], memcell_id: str
+    ) -> list[_Space]:
+        """The spaces that hold no episode of the segment yet.
+
+        A retried segment's earlier extraction may have failed after writing
+        some owners' copies (and their pictures); those are not written again.
+        """
+        return [
+            space
+            for space in spaces
+            if not await self._episode_store.read_for_segments(
+                space.scope, [memcell_id]
+            )
+        ]
+
+    async def _pictures_written(self, space: _Space, prepared: PreparedCell) -> bool:
+        """Whether the space holds a picture memory of the segment already."""
+        if self._image_memory_store is None:
+            return False
+        return bool(
+            await self._image_memory_store.read_for_segments(
+                space.scope, [prepared.memcell_id]
+            )
+        )
 
     async def _group_space(self, scope: Scope, cell: MemCell) -> _Space:
         """The group's space: its meta and roster as stored now."""
