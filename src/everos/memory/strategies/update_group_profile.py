@@ -21,13 +21,16 @@ dissent, roles -- kept by one model call per batch of the group's segments
   names that resolves to nothing drops only the link, also counted; items are
   built from the verified evidence alone.
 - **A call that yields nothing usable** (an invalid reply, a failed call) is
-  not raised -- raising made the scheduler retry at once, and the idle tick,
-  which fires on every scan while a group stays idle, call again and again.
-  It is counted (``everos_group_profile_update_failures_total`` by reason),
-  and the batch stays queued with a back-off: no update of the group tries
-  again before ``group_profile_idle_seconds`` has passed, then twice that;
-  new segments still queue meanwhile. The :data:`ATTEMPTS`-th failure in a
-  row drops the batch: its operations are lost, its segments stay searchable.
+  not retried at once -- that made the idle tick, which fires on every scan
+  while a group stays idle, call again and again. The batch stays queued with
+  a back-off: no update of the group tries again before
+  ``group_profile_idle_seconds`` has passed, then twice that; new segments
+  still queue meanwhile. The :data:`ATTEMPTS`-th failure in a row drops the
+  batch: its operations are lost, its segments stay searchable. Every failure
+  is counted (``everos_group_profile_update_failures_total`` by reason and
+  outcome) and fails its run (:class:`~everos.memory.ports.DeferredFailure`):
+  the engine records the run as failed, with the reason and what became of
+  the batch, and does not retry it -- the back-off does.
 - **Lock.** One per group (:func:`group_profile_lock`): an update reads the
   items the previous one wrote, and a segment queued meanwhile waits.
 - **Language.** Named to the model, resolved in code from the batch's human
@@ -69,6 +72,7 @@ from everos.memory.extract.pipeline.pictures import memcell_alive
 from everos.memory.groups import readable_segments
 from everos.memory.models import MemCell, Roster
 from everos.memory.ports import (
+    DeferredFailure,
     Event,
     Idle,
     IdleTick,
@@ -103,7 +107,12 @@ def _applies(event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps) -> bool:
 async def update_group_profile(
     event: EpisodeExtracted | GroupFlushed | IdleTick, deps: MemoryDeps
 ) -> list[Event]:
-    """Queue a new segment on the group's batch, or read the batch when due."""
+    """Queue a new segment on the group's batch, or read the batch when due.
+
+    Raises:
+        DeferredFailure: The update's call yielded nothing usable; the batch
+            was kept with a back-off, or dropped.
+    """
     groups = load_settings().groups
     if not groups.group_profile:
         return []
@@ -138,16 +147,16 @@ async def update_group_profile(
         failure = await _update(deps, scope, pending)
         if failure is None:
             await deps.stores.group_profile.set_pending(scope, [])
-        else:
-            await _back_off(
-                deps,
-                scope,
-                batch,
-                pending,
-                reason=failure,
-                wait_seconds=groups.group_profile_idle_seconds,
-            )
-    return []
+            return []
+        outcome = await _back_off(
+            deps,
+            scope,
+            batch,
+            pending,
+            reason=failure,
+            wait_seconds=groups.group_profile_idle_seconds,
+        )
+    raise DeferredFailure(outcome)
 
 
 async def _update(deps: MemoryDeps, scope: Scope, pending: list[str]) -> str | None:
@@ -241,8 +250,9 @@ async def _back_off(
     *,
     reason: str,
     wait_seconds: int,
-) -> None:
-    """Count a failed update; keep the batch for a later try, or drop it."""
+) -> str:
+    """Count a failed update; keep the batch for a later try, or drop it.
+    Returns what became of the batch, for the run's error."""
     failures = batch.failures + 1
     if failures >= ATTEMPTS:
         _failures.labels(reason=reason, outcome="dropped").inc()
@@ -254,7 +264,11 @@ async def _back_off(
             reason=reason,
         )
         await deps.stores.group_profile.set_pending(scope, [])
-        return
+        return (
+            f"group profile update of {scope.owner_id!r} failed ({reason}) "
+            f"{failures} times in a row: its batch of {len(pending)} segments "
+            "was dropped"
+        )
     wait = wait_seconds * 2 ** (failures - 1)
     _failures.labels(reason=reason, outcome="backed_off").inc()
     logger.warning(
@@ -267,6 +281,11 @@ async def _back_off(
     )
     await deps.stores.group_profile.set_pending(
         scope, pending, failures=failures, retry_at=_now_ms() + wait * 1000
+    )
+    return (
+        f"group profile update of {scope.owner_id!r} failed ({reason}): its batch "
+        f"of {len(pending)} segments is kept and read again in {wait} s "
+        f"(failure {failures} of {ATTEMPTS})"
     )
 
 

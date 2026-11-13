@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.\n\nThe ``decider`` block names the multi-round decider and says whether it\nanswered the startup probe, and how many rounds failed since.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.\n\nThe ``decider`` block names the multi-round decider and says whether it\nanswered the startup probe, and how many rounds failed since. The ``ome``\nblock counts the offline engine's strategy runs that failed since then.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -5976,6 +5976,16 @@
                 "type": "null"
               }
             ]
+          },
+          "ome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OmeHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -6634,6 +6644,51 @@
         ],
         "title": "MessageTarget",
         "description": "Messages of one session of the group, by id."
+      },
+      "OmeHealthBlock": {
+        "properties": {
+          "failed_runs": {
+            "type": "integer",
+            "title": "Failed Runs",
+            "description": "Runs that failed since the server started.",
+            "default": 0
+          },
+          "by_strategy": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Strategy",
+            "description": "The same, by strategy name."
+          },
+          "last_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure",
+            "description": "The newest failed run: its strategy and its error's first line."
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          }
+        },
+        "type": "object",
+        "title": "OmeHealthBlock",
+        "description": "The offline memory engine's strategy runs that failed.\n\nA run counts once it has failed with no retry left: a strategy that kept\nfailing through its retries, or one that failed while it keeps the work\nfor a later run of its own (a group-profile update whose model call\nyielded nothing usable backs off, or drops its batch after its last\nattempt). The counts are since the server started; the run records hold\nevery run. A failed run is not an outage of memory: what it would have\nwritten is late or, for a dropped batch, missing."
       },
       "ProfileSourceItem": {
         "properties": {

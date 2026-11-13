@@ -2,7 +2,9 @@
 
 Acquires ``engine_sem`` (FIFO), drives the per-attempt RunRecord state
 machine (``RUNNING → SUCCESS / FAILED / DEAD_LETTER``), and fires
-``on_dead_letter`` after exhausted retries or contract violations.
+``on_dead_letter`` after exhausted retries, contract violations, or a
+:class:`~everos.memory.ports.DeferredFailure` (a failed run whose strategy
+keeps the work for a later run of its own: no retry).
 
 Per attempt, binds ``strategy_name`` / ``run_id`` / ``attempt`` into
 the log context (so every log record carries those fields
@@ -34,7 +36,7 @@ from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.exceptions import StrategyContractError
 from everos.infra.ome.records import RunRecord
-from everos.memory.ports import Event
+from everos.memory.ports import DeferredFailure, Event
 
 logger = get_logger(__name__)
 
@@ -197,6 +199,13 @@ class Runner:
                     _CURRENT_STRATEGY.reset(token)
             except StrategyContractError as e:
                 await self._terminate_dead_letter(current_run_id, _format_error(e))
+                return True
+            except DeferredFailure as e:
+                # The strategy keeps the work for a later run of its own: the
+                # run failed, and a retry now would only find it waiting.
+                await self._terminate_dead_letter(
+                    current_run_id, f"{type(e).__name__}: {e}"
+                )
                 return True
             except Exception as e:
                 err = _format_error(e)

@@ -91,6 +91,7 @@ from .stores import WithdrawnEntry as WithdrawnEntry
 from .strategy import AppliesTo as AppliesTo
 from .strategy import Counter as Counter
 from .strategy import Cron as Cron
+from .strategy import DeferredFailure as DeferredFailure
 from .strategy import Idle as Idle
 from .strategy import Immediate as Immediate
 from .strategy import StrategyFn as StrategyFn
@@ -119,6 +120,7 @@ __all__ = [
     "Counter",
     "Cron",
     "CronTick",
+    "DeferredFailure",
     "EpisodeIndex",
     "EpisodeStore",
     "Event",

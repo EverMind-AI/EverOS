@@ -12,7 +12,7 @@ from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.records import RunStatus
 from everos.memory.deps import MemoryDeps
-from everos.memory.ports import Event, Immediate
+from everos.memory.ports import DeferredFailure, Event, Immediate
 from tests.helpers.ome import ome_strategy
 
 
@@ -145,6 +145,42 @@ async def test_runner_dead_letter_after_exhaust(
     )
     assert len(dead_runs) == 1
     assert len(dl_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deferred_failure_is_recorded_failed_and_not_retried(setup) -> None:
+    """A strategy that keeps its work for a later run of its own fails its run
+    with the reason, at once: a retry would only find the work waiting."""
+    rec_store, sem, config = setup
+    calls: list[int] = []
+
+    @ome_strategy(
+        name="deferring",
+        trigger=Immediate(on=[_E]),
+        emits=[],
+        max_retries=2,
+    )
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        calls.append(1)
+        raise DeferredFailure("update failed (timeout): batch kept, again in 60 s")
+
+    dead: list = []
+    runner = Runner(
+        run_record_store=rec_store,
+        engine_sem=sem,
+        emit_hook=_no_emit,
+        config=config,
+        on_dead_letter=dead.append,
+    )
+    await runner.run(s, _E(), run_id="r1", max_retries_snapshot=2)
+
+    assert calls == [1]
+    (run,) = await rec_store.list_runs(strategy_name="deferring")
+    assert run.status == RunStatus.DEAD_LETTER and run.attempt == 0
+    assert run.error == (
+        "DeferredFailure: update failed (timeout): batch kept, again in 60 s"
+    )
+    assert [r.run_id for r in dead] == [run.run_id]
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.faults import T0, FaultServer, assert_exactly_once
+from tests.helpers.faults import T0, FaultServer, assert_exactly_once, wait_until
 
 TRANSIENT = ["timeout", "500", "502", "503", "429", "malformed", "truncated", "cut"]
 """One failed attempt, then a good reply: the provider's retries absorb it."""
@@ -291,6 +291,44 @@ async def test_a_failed_group_profile_update_is_kept_and_caught_up(
         )
         missing = [m for m in [*first, *second] if m not in text]
         assert missing == [], text
+        await _clean(srv)
+
+
+async def test_a_failed_group_profile_update_fails_its_run_and_is_counted(
+    tmp_path: Path,
+) -> None:
+    """The update whose call yields nothing usable keeps its batch (above) and
+    says so: its run is recorded failed with the reason -- no retry at once,
+    the back-off owns that -- and ``/health`` counts it in its ``ome`` block."""
+    env = {"EVEROS_GROUPS__GROUP_PROFILE_IDLE_SECONDS": "2"}
+    async with FaultServer.open(tmp_path / "root", env=env) as srv:
+        await _group(srv, "trip")
+        srv.upstream.down.add("GroupProfileReply")
+        resp, _sent = await srv.say("s1", "u1", "G", 2, group="trip")
+        assert resp.status_code == 200, resp.text
+        await _flushed(srv, "s1")
+
+        async def counted() -> bool:
+            ome = (await srv.health())["ome"]
+            return any(
+                name.startswith("update_group_profile") for name in ome["by_strategy"]
+            )
+
+        await wait_until(counted)
+        ome = (await srv.health())["ome"]
+        assert ome["failed_runs"] >= 1
+        assert "kept and read again" in ome["last_failure"], ome
+        runs = [
+            run
+            for name in ("update_group_profile", "update_group_profile_idle")
+            for run in await srv.runs(name)
+            if run[0] != "success"
+        ]
+        assert runs, runs
+        # Dead-lettered at once: a retry (a ``failed`` row) would only have
+        # found the batch waiting out its back-off.
+        assert all(status == "dead_letter" for status, _ in runs), runs
+        assert all("DeferredFailure" in (error or "") for _, error in runs), runs
         await _clean(srv)
 
 

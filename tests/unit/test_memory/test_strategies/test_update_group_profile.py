@@ -44,7 +44,7 @@ from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
 from everos.memory.events import EpisodeExtracted, GroupFlushed
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.models import Group, RosterEvent
-from everos.memory.ports import IdleTick, PendingBatch, Scope
+from everos.memory.ports import DeferredFailure, IdleTick, PendingBatch, Scope
 from everos.memory.strategies import (
     UPDATE_GROUP_PROFILE_IDLE_SPEC,
     update_group_profile,
@@ -511,34 +511,45 @@ async def test_an_unusable_reply_backs_off_then_drops_the_batch(
     _segment(deps, "mc_2", 2_000, ("m-2", "u_chen", "more"))
     backed_off, dropped = _failures("backed_off"), _failures("dropped")
 
-    async def scans(n: int = 10) -> None:
-        """The scheduler's idle ticks, and flushes, while the group stays idle."""
+    async def scans(n: int = 10) -> list[str]:
+        """The scheduler's idle ticks, and flushes, while the group stays idle;
+        the runs they failed."""
+        failed: list[str] = []
         for _ in range(n):
-            await update_group_profile(_tick(), deps)
-            await update_group_profile(_FLUSHED, deps)
+            for event in (_tick(), _FLUSHED):
+                try:
+                    await update_group_profile(event, deps)
+                except DeferredFailure as failure:
+                    failed.append(str(failure))
+        return failed
 
-    await update_group_profile(_extracted("mc_1"), deps)  # not raised
+    # The run fails -- the engine records it, with no retry -- and the batch
+    # is kept with a back-off.
+    with pytest.raises(DeferredFailure, match=r"kept and read again in 600 s"):
+        await update_group_profile(_extracted("mc_1"), deps)
     batch = await deps.stores.group_profile.pending_batch(_SCOPE)
     assert model.calls == 1 and batch.memcell_ids == ("mc_1",)
     assert (batch.failures, batch.retry_at) == (1, to_timestamp_ms(clock[0]) + 600_000)
-    await scans()
+    assert await scans() == []  # waiting: nothing read, nothing failed
     await update_group_profile(_extracted("mc_2"), deps)  # queued, not read
     assert model.calls == 1
     batch = await deps.stores.group_profile.pending_batch(_SCOPE)
     assert batch.memcell_ids == ("mc_1", "mc_2") and batch.failures == 1
 
     clock[0] += timedelta(seconds=600)
-    await scans()
+    (failed,) = await scans()
+    assert "(invalid_reply)" in failed and "failure 2 of 3" in failed
     batch = await deps.stores.group_profile.pending_batch(_SCOPE)
     assert model.calls == 2 and batch.failures == 2
     assert batch.retry_at == to_timestamp_ms(clock[0]) + 1_200_000  # twice as long
 
     clock[0] += timedelta(seconds=1_200)
-    await scans()
+    (failed,) = await scans()
+    assert "3 times in a row" in failed and "was dropped" in failed
     assert model.calls == 3
     assert await deps.stores.group_profile.pending_batch(_SCOPE) == PendingBatch()
     clock[0] += timedelta(days=1)
-    await scans()
+    assert await scans() == []
     assert model.calls == 3  # nothing left to try
     assert await _items(deps) == []
     assert _failures("backed_off") - backed_off == 2
@@ -553,7 +564,8 @@ async def test_a_later_try_that_works_clears_the_record(
     deps = make_deps(llm=FakeLLMClient(handler=model))
     _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
 
-    await update_group_profile(_extracted("mc_1"), deps)
+    with pytest.raises(DeferredFailure):
+        await update_group_profile(_extracted("mc_1"), deps)
     clock[0] += timedelta(seconds=601)
     await update_group_profile(_tick(), deps)
 
@@ -574,7 +586,8 @@ async def test_a_reply_that_never_parses_is_a_failure_too(
     deps = make_deps(llm=FakeLLMClient(handler=garbage))
     _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
 
-    await update_group_profile(_extracted("mc_1"), deps)
+    with pytest.raises(DeferredFailure):
+        await update_group_profile(_extracted("mc_1"), deps)
 
     assert len(calls) == 3  # the operator's own attempts, then the back-off
     batch = await deps.stores.group_profile.pending_batch(_SCOPE)

@@ -121,7 +121,12 @@ from everos.memory.strategies import (
 )
 from everos.service._warmup import warm_token_counter
 from everos.service.memory import MemoryService, StrengthWriter
-from everos.service.ops import BackfillDeps, Capabilities, OpsService
+from everos.service.ops import (
+    BackfillDeps,
+    Capabilities,
+    OpsService,
+    StrategyFailures,
+)
 
 logger = get_logger(__name__)
 
@@ -353,6 +358,14 @@ def build_application(
     )
     ome_lock = OmeLock(root.ome_db)
     engine = _build_engine(root, deps, settings, lock=ome_lock)
+    # Every run that fails with no retry left -- a strategy's last attempt,
+    # or a deferred failure -- is counted for /health.
+    strategy_failures = StrategyFailures()
+    engine.on_dead_letter(
+        lambda run: strategy_failures.record(
+            run.strategy_name, run.error, run.finished_at
+        )
+    )
     capabilities = _capabilities(settings, providers)
     admin = CascadeAdmin(
         database=database,
@@ -421,6 +434,7 @@ def build_application(
             capabilities=capabilities,
             queue_health=memory.queue_health,
             decider=decider_status,
+            strategy_failures=strategy_failures,
         ),
         capabilities=capabilities,
         _settings=settings,

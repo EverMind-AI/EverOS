@@ -28,12 +28,14 @@ __all__ = [
     "CascadeStatus",
     "HealthReport",
     "NullBackfillPresenter",
+    "OmeHealth",
     "OmeRun",
     "OmeTriggerResult",
     "OpsService",
     "ProviderStatus",
     "QuiesceResult",
     "RebuildResult",
+    "StrategyFailures",
     "VectorsPhaseResult",
     "compute_disabled_features",
     "format_tokens",
@@ -45,11 +47,13 @@ from typing import TYPE_CHECKING
 
 from . import _cascade, _ome, _tasks
 from ._health import QueueHealthProbe, health_report, no_queue
+from ._health import StrategyFailures as StrategyFailures
 from ._health import compute_disabled_features as compute_disabled_features
 from ._models import Capabilities as Capabilities
 from ._models import CascadeHealthReport as CascadeHealthReport
 from ._models import CascadeStatus as CascadeStatus
 from ._models import HealthReport as HealthReport
+from ._models import OmeHealth as OmeHealth
 from ._models import OmeRun as OmeRun
 from ._models import OmeTriggerResult as OmeTriggerResult
 from ._models import ProviderStatus as ProviderStatus
@@ -98,6 +102,8 @@ class OpsService:
             :meth:`health`; ``None`` while the queue is not running.
         decider: The multi-round decider's status: :meth:`start` probes it
             once in the background, :meth:`health` reports it.
+        strategy_failures: The OME runs that failed with no retry left,
+            reported by :meth:`health` while ``[ome] enabled`` holds.
     """
 
     def __init__(
@@ -115,6 +121,7 @@ class OpsService:
         capabilities: Capabilities,
         queue_health: QueueHealthProbe = no_queue,
         decider: DeciderStatus | None = None,
+        strategy_failures: StrategyFailures | None = None,
     ) -> None:
         self._settings = settings
         self._root = root
@@ -128,6 +135,7 @@ class OpsService:
         self._capabilities = capabilities
         self._queue_health = queue_health
         self._decider = decider
+        self._strategy_failures = strategy_failures
         self._decider_probe: asyncio.Task[None] | None = None
         self._cascade_attached = False
 
@@ -167,13 +175,14 @@ class OpsService:
 
     async def health(self) -> HealthReport:
         """Provider flags, disabled features, and the cascade / queue / decider
-        blocks."""
+        / OME blocks."""
         return await health_report(
             admin=self._admin,
             capabilities=self._capabilities,
             cascade=self._cascade if self._cascade_attached else None,
             queue_health=self._queue_health,
             decider=self._decider,
+            ome=self._strategy_failures if self._settings.ome.enabled else None,
         )
 
     # ── tasks ──────────────────────────────────────────────────────────────

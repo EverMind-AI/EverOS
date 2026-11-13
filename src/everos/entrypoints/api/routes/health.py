@@ -14,6 +14,7 @@ from everos.entrypoints.api.schemas import (
     HealthCapabilities,
     HealthResponse,
     MemorizeQueueHealthBlock,
+    OmeHealthBlock,
 )
 
 router = APIRouter(tags=["health"])
@@ -34,7 +35,8 @@ async def health(app: ApplicationDep) -> HealthResponse:
     not flip ``healthy``. Alert on ``cascade.healthy``.
 
     The ``decider`` block names the multi-round decider and says whether it
-    answered the startup probe, and how many rounds failed since.
+    answered the startup probe, and how many rounds failed since. The ``ome``
+    block counts the offline engine's strategy runs that failed since then.
     """
     report = await app.ops.health()
     return HealthResponse(
@@ -56,5 +58,10 @@ async def health(app: ApplicationDep) -> HealthResponse:
             None
             if report.decider is None
             else DeciderHealthBlock(**dataclasses.asdict(report.decider))
+        ),
+        ome=(
+            None
+            if report.ome is None
+            else OmeHealthBlock(**dataclasses.asdict(report.ome))
         ),
     )

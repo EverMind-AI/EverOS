@@ -21,6 +21,7 @@ from __future__ import annotations
 
 __all__ = [
     "QueueHealthProbe",
+    "StrategyFailures",
     "cascade_probe_failed",
     "cascade_report",
     "compute_disabled_features",
@@ -31,6 +32,7 @@ __all__ = [
 
 import dataclasses
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from everos.core.observability.logging import get_logger
@@ -39,6 +41,7 @@ from everos.service.ops._models import (
     Capabilities,
     CascadeHealthReport,
     HealthReport,
+    OmeHealth,
     ProviderStatus,
 )
 
@@ -56,6 +59,41 @@ async def no_queue() -> QueueHealth | None:
     return None
 
 
+_ERROR_CHARS = 300
+"""How much of a failed run's error ``last_failure`` keeps."""
+
+
+class StrategyFailures:
+    """The offline engine's strategy runs that failed with no retry left,
+    counted since the server started (the engine reports each one).
+
+    A run that keeps failing past its retries -- or that fails while its
+    strategy keeps the work for a later run of its own, as the group profile
+    does -- is counted here, by strategy, for ``GET /health``.
+    """
+
+    def __init__(self) -> None:
+        self._by_strategy: dict[str, int] = {}
+        self._last: tuple[str, datetime | None] | None = None
+
+    def record(self, strategy: str, error: str | None, at: datetime | None) -> None:
+        """Count one failed run of ``strategy``."""
+        self._by_strategy[strategy] = self._by_strategy.get(strategy, 0) + 1
+        first = (error or "").strip().splitlines()[:1]
+        line = first[0][:_ERROR_CHARS] if first else "no error recorded"
+        self._last = (f"{strategy}: {line}", at)
+
+    def snapshot(self) -> OmeHealth:
+        """The counts as they are now."""
+        last, at = self._last if self._last is not None else (None, None)
+        return OmeHealth(
+            failed_runs=sum(self._by_strategy.values()),
+            by_strategy=dict(self._by_strategy),
+            last_failure=last,
+            last_failure_at=at,
+        )
+
+
 async def health_report(
     *,
     admin: CascadeAdmin,
@@ -63,8 +101,10 @@ async def health_report(
     cascade: CascadeOrchestrator | None,
     queue_health: QueueHealthProbe,
     decider: DeciderStatus | None = None,
+    ome: StrategyFailures | None = None,
 ) -> HealthReport:
-    """Provider flags, disabled features, and the cascade / queue / decider blocks.
+    """Provider flags, disabled features, and the cascade / queue / decider /
+    OME blocks.
 
     ``cascade`` is ``None`` while the server is not running it. A probe that
     raises (a locked or full SQLite, say) is reported as an unhealthy block
@@ -91,6 +131,7 @@ async def health_report(
         cascade=await _probe_cascade(cascade),
         memorize_queue=await _probe_queue(queue_health),
         decider=decider_health,
+        ome=ome.snapshot() if ome is not None else None,
     )
 
 

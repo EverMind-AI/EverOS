@@ -15,6 +15,10 @@ Load-bearing rules:
   the adapter rejects the whole return value before publishing any of it.
 - ``applies_to`` is evaluated at dispatch time, before a run exists: a
   strategy it rejects leaves no run record.
+- A strategy that fails raises: the engine records the run as failed and
+  retries it, up to ``max_retries``. One that keeps its work for a later run
+  of its own -- a back-off it records itself -- raises :class:`DeferredFailure`
+  instead: the run is recorded as failed and not retried at once.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ __all__ = [
     "AppliesTo",
     "Counter",
     "Cron",
+    "DeferredFailure",
     "Idle",
     "Immediate",
     "StrategyFn",
@@ -158,6 +163,17 @@ class Counter(BaseModel):
 # contravariant, so no single event type would admit every strategy.
 type StrategyFn = Callable[[Any, MemoryDeps], Awaitable[list[Event]]]
 type AppliesTo = str | Callable[[Any, MemoryDeps], bool] | None
+
+
+class DeferredFailure(Exception):  # noqa: N818 -- a run's outcome, not a fault
+    """A strategy run failed, and its work waits for a later run of its own.
+
+    The strategy has recorded what it needs to try again (a back-off it keeps
+    itself, as the group profile does), so a retry at once would only find the
+    work waiting. The engine records the run as failed -- with no retry left,
+    the message as its error -- and does not run it again; the failure counts
+    wherever failed runs do.
+    """
 
 
 @dataclass(frozen=True)

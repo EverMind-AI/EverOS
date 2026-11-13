@@ -138,3 +138,39 @@ async def test_ops_start_probes_the_decider_in_the_background() -> None:
     assert endpoint.calls == 1
     assert report.providers.decider is True
     assert report.decider.reachable is True
+
+
+# ── the offline engine's failed runs ────────────────────────────────────────
+
+
+async def test_health_counts_the_engines_failed_runs() -> None:
+    from datetime import UTC, datetime
+
+    from everos.service.ops import StrategyFailures
+
+    at = datetime(2026, 11, 13, tzinfo=UTC)
+    failures = StrategyFailures()
+    failures.record(
+        "update_group_profile",
+        "DeferredFailure: group profile update of 'trip' failed (invalid_reply): "
+        "its batch of 2 segments is kept and read again in 600 s (failure 1 of 3)",
+        at,
+    )
+    failures.record("extract_user_profile", "RuntimeError: boom\nTraceback ...", at)
+    application = make_application(capabilities=_NEUTRAL)
+    application.ops.strategy_failures = failures
+
+    response: Any = await health_route.health(application)
+
+    assert response.ome.failed_runs == 2
+    assert response.ome.by_strategy == {
+        "update_group_profile": 1,
+        "extract_user_profile": 1,
+    }
+    assert response.ome.last_failure == "extract_user_profile: RuntimeError: boom"
+    assert response.ome.last_failure_at == at
+
+
+async def test_health_has_no_engine_block_without_a_counter() -> None:
+    response: Any = await health_route.health(make_application(capabilities=_NEUTRAL))
+    assert response.ome is None

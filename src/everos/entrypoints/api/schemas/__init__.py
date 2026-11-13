@@ -45,6 +45,7 @@ from .health import DeciderHealthBlock as DeciderHealthBlock
 from .health import HealthCapabilities as HealthCapabilities
 from .health import HealthResponse as HealthResponse
 from .health import MemorizeQueueHealthBlock as MemorizeQueueHealthBlock
+from .health import OmeHealthBlock as OmeHealthBlock
 from .ids import AppScopeId as AppScopeId
 from .ids import PathSafeId as PathSafeId
 from .ids import ProjectScopeId as ProjectScopeId
@@ -111,6 +112,7 @@ __all__ = [
     "MemoryHistoryResponseData",
     "MemoryVersionData",
     "MessageItemDTO",
+    "OmeHealthBlock",
     "PathSafeId",
     "ProjectDTO",
     "ProjectGroupDTO",

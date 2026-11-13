@@ -84,10 +84,16 @@ without `/health` calling a model. The other capability flags are
 provider). `disabled_features` lists at most two features the configured
 providers leave off: `vector_recall` (no embedder: multi-round search
 recalls by keyword only) and `multimodal_upload` (no multimodal LLM or no
-parser: a non-text chat item is not read into text). In the `cascade` block,
-`waiting_for_space` counts the markdown files whose index write found the disk
-full: each is retried with a back-off until the write lands, never filed as
-`failed_permanent`, and while any waits `healthy` is `false` with a reason.
+parser: a non-text chat item is not read into text). The `ome` block (absent
+while `[ome] enabled = false`) counts the offline engine's strategy runs that
+failed with no retry left since start -- `failed_runs`, `by_strategy`, and
+`last_failure` / `last_failure_at` for the newest -- among them a group-profile
+update whose model call yielded nothing usable: its batch is kept with a
+back-off (or dropped after its last attempt), and its run is recorded as
+failed with the reason. In the `cascade` block, `waiting_for_space` counts the
+markdown files whose index write found the disk full: each is retried with a
+back-off until the write lands, never filed as `failed_permanent`, and while
+any waits `healthy` is `false` with a reason.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy

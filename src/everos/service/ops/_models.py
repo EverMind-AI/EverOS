@@ -15,6 +15,7 @@ __all__ = [
 ]
 
 import dataclasses
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -55,6 +56,25 @@ class ProviderStatus:
 
 
 @dataclasses.dataclass(frozen=True)
+class OmeHealth:
+    """The offline engine's strategy runs that failed with no retry left
+    since the server started, as ``GET /health`` reports them.
+
+    Attributes:
+        failed_runs: How many, every strategy together.
+        by_strategy: How many, by strategy name.
+        last_failure: The newest one: its strategy and the first line of
+            its error.
+        last_failure_at: When it was recorded.
+    """
+
+    failed_runs: int = 0
+    by_strategy: dict[str, int] = dataclasses.field(default_factory=dict)
+    last_failure: str | None = None
+    last_failure_at: datetime | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class CascadeHealthReport:
     """Readiness of the md -> index projection, as ``GET /health`` shows it."""
 
@@ -89,6 +109,8 @@ class HealthReport:
     decider: DeciderHealth | None = None
     """The decider's identity, startup probe and round counts; ``None`` when
     the application was assembled without a decider status."""
+    ome: OmeHealth | None = None
+    """The offline engine's failed runs; ``None`` while the engine is off."""
 
 
 @dataclasses.dataclass(frozen=True)

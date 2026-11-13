@@ -1933,16 +1933,19 @@ Step 2 differs from the text above in these places:
   `true`). The idle trigger is the scheduler's: it fires again on every scan
   while a group stays idle, and a tick with nothing queued returns at once.
 - **An update whose call yields nothing usable** (a reply that never
-  validates, a failed call) is not raised: raised, it was retried at once by
-  the scheduler and called again by every idle scan, about six calls a minute
-  for one idle group in the 2026-11-11 check. It is counted in
-  `everos_group_profile_update_failures_total` (by `reason` and `outcome`),
-  and the batch stays queued with a back-off kept in `profile/pending.md`
-  (`failures`, `retry_at`): no trigger of the group reads it before
-  `group_profile_idle_seconds` has passed, then twice that, while new
-  segments still queue. The third failure in a row drops the batch: its
-  operations are lost, its segments stay searchable. A forget that queues
-  segments rewrites the batch and clears the record.
+  validates, a failed call) is not retried at once: retried, it was called
+  again by every idle scan, about six calls a minute for one idle group in
+  the 2026-11-11 check. The batch stays queued with a back-off kept in
+  `profile/pending.md` (`failures`, `retry_at`): no trigger of the group
+  reads it before `group_profile_idle_seconds` has passed, then twice that,
+  while new segments still queue. The third failure in a row drops the
+  batch: its operations are lost, its segments stay searchable. Each failure
+  is counted in `everos_group_profile_update_failures_total` (by `reason`
+  and `outcome`) and fails its run: the strategy raises a deferred failure,
+  which the engine records as failed (dead-lettered, the reason and what
+  became of the batch as its error) without a retry of its own, and
+  `GET /health` counts it in its `ome` block. A forget that queues segments
+  rewrites the batch and clears the record.
 - **Reply parsing.** The update reply is lenient about form: a key left out
   or `null` reads as empty, and one id where a list is expected as a list of
   it (`""` as no one); in the check, 33 of 42 replies had left out the keys

@@ -82,6 +82,31 @@ class DeciderHealthBlock(BaseModel):
     last_failure_at: datetime | None = None
 
 
+class OmeHealthBlock(BaseModel):
+    """The offline memory engine's strategy runs that failed.
+
+    A run counts once it has failed with no retry left: a strategy that kept
+    failing through its retries, or one that failed while it keeps the work
+    for a later run of its own (a group-profile update whose model call
+    yielded nothing usable backs off, or drops its batch after its last
+    attempt). The counts are since the server started; the run records hold
+    every run. A failed run is not an outage of memory: what it would have
+    written is late or, for a dropped batch, missing.
+    """
+
+    failed_runs: int = Field(
+        default=0, description="Runs that failed since the server started."
+    )
+    by_strategy: dict[str, int] = Field(
+        default_factory=dict, description="The same, by strategy name."
+    )
+    last_failure: str | None = Field(
+        default=None,
+        description="The newest failed run: its strategy and its error's first line.",
+    )
+    last_failure_at: datetime | None = None
+
+
 class CascadeHealthBlock(BaseModel):
     """Readiness of the md → LanceDB projection (cascade) subsystem.
 
@@ -195,3 +220,6 @@ class HealthResponse(BaseModel):
     decider: DeciderHealthBlock | None = None
     """The multi-round decider; ``None`` only for an application assembled
     without one."""
+    ome: OmeHealthBlock | None = None
+    """The offline engine's failed runs; ``None`` while the engine is off
+    (``[ome] enabled = false``)."""

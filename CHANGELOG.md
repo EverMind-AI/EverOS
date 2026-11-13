@@ -1133,6 +1133,12 @@ machinery that keeps a deleted memory from coming back.
   wait, outside the retry budget -- and is indexed with no manual step once
   space is freed. `cascade status` and `/health` count the files
   (`waiting_for_space`), and the cascade reads unhealthy meanwhile.
+- **A failed group-profile update says so.** Its run was recorded as a
+  success, the failure visible only in a warning and a metric. It now fails
+  its run -- dead-lettered by the engine with the reason and what became of
+  the batch, and no retry at once (the back-off is unchanged) -- and
+  `/health` counts it in a new `ome` block, with every other strategy run
+  that failed with no retry left since start.
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's
