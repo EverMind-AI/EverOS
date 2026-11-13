@@ -305,7 +305,8 @@ class FileImageStore:
         return restored
 
     async def metadata(self, image_id: str) -> StoredImageInfo | None:
-        """Format, size, dimensions and reference count, or ``None``."""
+        """Format, size, dimensions, reference count and whether a forget took
+        the picture out of circulation, or ``None``."""
         row = await self._originals.get_by_id(image_id)
         if row is None:
             return None
@@ -317,6 +318,7 @@ class FileImageStore:
             height=row.height,
             original_path=row.original_path,
             ref_count=row.ref_count,
+            forgotten=row.forgotten_at is not None,
         )
 
 

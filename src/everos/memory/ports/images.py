@@ -88,7 +88,8 @@ class ImageStore(Protocol):
         ...
 
     async def metadata(self, image_id: str) -> StoredImageInfo | None:
-        """Format, size, dimensions and reference count, or ``None``."""
+        """Format, size, dimensions, reference count and whether a forget took
+        the picture out of circulation (:meth:`forget`), or ``None``."""
         ...
 
     async def release(self, image_id: str) -> int:

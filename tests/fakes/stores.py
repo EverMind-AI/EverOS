@@ -953,6 +953,7 @@ class InMemoryImageStore:
             height=1,
             original_path=await self.relpath_of(image_id),
             ref_count=self.refs.get(image_id, 0),
+            forgotten=image_id in self.forgotten,
         )
 
     async def release(self, image_id: str) -> int:

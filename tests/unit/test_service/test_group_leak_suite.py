@@ -1877,6 +1877,58 @@ async def test_behind_a_gateway_a_request_without_its_header_reads_nothing(
     assert served.status_code == 200 and ALPHA in served.text
 
 
+# ── a user's own forgets: the fact, the buffer, the picture bytes ─────
+
+
+async def test_a_users_forgotten_pictures_bytes_are_served_to_nobody(
+    tmp_path: Path,
+) -> None:
+    """Row 7 for a user's own picture: while its forget stands the bytes
+    answer exactly as a missing picture's, for the owner and for anyone;
+    the undo serves them again."""
+    async with GroupWorld.open(tmp_path, settings=SETTINGS) as world:
+        picture = await world.picture(
+            world.personal("u_amy"), "a red kite", at=T0, shade=77, poster="u_amy"
+        )
+        await world.project()
+        app = create_app(
+            application=make_application(
+                memory=world.memory, images=world.stores.images
+            )
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://t"
+        ) as client:
+            url = f"/api/v2/memory/images/{picture}"
+            assert (await client.get(url)).status_code == 200
+            done = await world.memory.forget(
+                app_id=APP,
+                project_id=PROJECT,
+                user_id="u_amy",
+                target=ForgetTarget(kind="image", image_id=picture),
+                dry_run=False,
+            )
+            missing = await client.get(f"/api/v2/memory/images/{'ef' * 32}")
+            for params in ({}, {"asker_id": "u_amy"}, {"asker_id": "u_zoe"}):
+                for variant in ("original", "model", "thumbnail"):
+                    response = await client.get(
+                        url, params={**params, "variant": variant}
+                    )
+                    assert response.status_code == 404, (params, variant)
+                    error, absent = response.json()["error"], missing.json()["error"]
+                    assert (error["code"], error["message"]) == (
+                        absent["code"],
+                        absent["message"],
+                    )
+            await world.memory.undo_forget(
+                app_id=APP,
+                project_id=PROJECT,
+                user_id="u_amy",
+                forget_id=done.forget_id,
+            )
+            assert (await client.get(url)).status_code == 200
+
+
 def test_no_other_question_of_the_suite_reads_the_past() -> None:
     """The suite runs with ``[search] past_triggers`` on: its questions that do
     not ask about the past hold no trigger, so they are read as with the

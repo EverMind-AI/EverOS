@@ -320,7 +320,10 @@ class MemoryService:
 
         A hash only personal memories refer to is served as before; one a
         live group picture memory refers to needs an asker who can see one of
-        them. The route answers an invisible picture exactly as a missing one.
+        them. A hash no live memory refers to any more is served by nobody
+        while a forget holds it out of circulation -- the file stays on disk
+        for the undo, which serves it again. The route answers an invisible
+        picture exactly as a missing one.
 
         Raises:
             ForbiddenError: The identity header and ``asker_id`` disagree.
@@ -332,6 +335,10 @@ class MemoryService:
             all_of(eq("image_id", image_id), is_null("deprecated_by")), limit=1000
         )
         references = [hit.stored for hit in hits]
+        if not references:
+            info = await self._stores.images.metadata(image_id)
+            if info is not None and info.forgotten:
+                return False
         return await self._access.picture_visible(
             identity,
             references,

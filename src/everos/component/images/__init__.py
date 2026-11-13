@@ -167,6 +167,8 @@ class StoredImageInfo:
         height: Pixel height.
         original_path: Memory-root-relative path.
         ref_count: Image-memory entries pointing at this file.
+        forgotten: A forget took the picture out of circulation (the bytes
+            stay on disk for its undo).
     """
 
     image_id: str
@@ -176,6 +178,7 @@ class StoredImageInfo:
     height: int
     original_path: str
     ref_count: int
+    forgotten: bool = False
 
 
 def hash_bytes(data: bytes) -> str:
