@@ -607,7 +607,7 @@ def test_a_conversation_whose_decider_fell_back_stops_before_answering(
         run_mod.DeciderTraceValidationError, match="1 llm_multiround round"
     ) as exc:
         run_mod._assert_no_decider_fallback(trace_dir, "a_conv0")
-    assert '"reasoning": {"enabled": false}' in str(exc.value)
+    assert "llm_multiround_decider_error" in str(exc.value)
 
     run_mod._assert_no_decider_fallback(trace_dir, "b_conv1")
 

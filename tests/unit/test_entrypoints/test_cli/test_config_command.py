@@ -48,7 +48,7 @@ def test_each_task_shows_its_model_and_where_each_field_came_from(
     assert "llm.boundary: model=openai/gpt-4.1-nano" in tasks
     assert "profile: model = openai/gpt-4.1-mini, host = localhost" in tasks
     assert "decider: model = openai/gpt-4.1-mini" in tasks
-    assert "max_tokens=512" in tasks, "the decider's own default is shown"
+    assert "timeout_seconds=60.0" in tasks, "the decider's own default is shown"
 
 
 def test_the_key_is_masked_everywhere(tmp_path: Path) -> None:

@@ -3553,11 +3553,11 @@ def _assert_no_decider_fallback(trace_dir: Path, owner_id: str) -> None:
     (:func:`_assert_clean_decider_trace`); checking each conversation here, before
     ANSWER, keeps the run from paying for answers and judgements that report will
     throw away. The startup probe cannot catch this: its one short request can
-    answer while the real decisions, with every candidate shown, run out of output.
+    succeed where the real decisions, with every candidate shown, fail.
 
     Raises:
         DeciderTraceValidationError: The owner's trace has a ``decider_failed``
-            round; the message says how to give the decider room.
+            round; the message points at the server log's reason.
     """
     failed = 0
     for path in sorted(trace_dir.glob("trace*.jsonl")):
@@ -3574,10 +3574,9 @@ def _assert_no_decider_fallback(trace_dir: Path, owner_id: str) -> None:
     if failed:
         raise DeciderTraceValidationError(
             f"{owner_id}: {failed} llm_multiround round(s) fell back to a fixed core "
-            "after every decider attempt failed (see `llm_multiround_decider_error` in "
-            "the server log); not answering or judging this conversation. A reasoning "
-            "decider that spends its output cap thinking fails this way: turn thinking "
-            f"off ({_THINKING_OFF_OPENROUTER} on OpenRouter, {_THINKING_OFF} on vLLM)."
+            "after every decider attempt failed; not answering or judging this "
+            "conversation. The server log's `llm_multiround_decider_error` lines "
+            "say why."
         )
 
 
@@ -3585,14 +3584,6 @@ _DECIDER_PROBE = Path(__file__).resolve().with_name("decider_probe.py")
 
 _NO_CONTENT_REASONS = frozenset({"cut_short", "no_content", "invalid_reply"})
 """How a reasoning decider that spends its output cap thinking fails the probe."""
-
-_THINKING_OFF = (
-    'EVEROS_LLM__DECIDER__EXTRA=\'{"extra_body": {"chat_template_kwargs": '
-    '{"enable_thinking": false}}}\''
-)
-_THINKING_OFF_OPENROUTER = (
-    'EVEROS_LLM__DECIDER__EXTRA=\'{"extra_body": {"reasoning": {"enabled": false}}}\''
-)
 
 
 class DeciderProbe(NamedTuple):
@@ -3723,8 +3714,8 @@ def _assert_decider_answers(probe: DeciderProbe) -> None:
         )
         return
     hint = (
-        ". A reasoning model that spends its output cap thinking fails this way; "
-        f"turn thinking off with {_THINKING_OFF}"
+        ". A model that thinks before it answers fails this way when its output cap "
+        "runs out first; leave EVEROS_LLM__DECIDER__MAX_TOKENS unset or raise it"
         if probe.reason in _NO_CONTENT_REASONS
         else ""
     )

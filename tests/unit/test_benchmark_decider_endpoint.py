@@ -332,9 +332,9 @@ def test_what_llm_decider_leaves_unset_comes_from_its_defaults_and_llm(
 
     assert report["outcome"] == "answered", report
     assert fake.requests[0]["model"] == "policy", "the decider's model, not [llm]'s"
-    assert fake.requests[0]["max_tokens"] == 512, "the decider's own default"
+    assert "max_tokens" not in fake.requests[0], "the decider sets no output cap"
     assert report["sources"]["base_url"] == "llm"
-    assert report["sources"]["max_tokens"] == "default"
+    assert report["sources"]["timeout_seconds"] == "default"
 
 
 def test_the_report_carries_each_effective_setting(
@@ -487,7 +487,7 @@ def test_an_empty_reply_stops_the_run(fake: _FakeDecider, tmp_path: Path) -> Non
     models = run.ServerModels(
         decider_model="policy", decider_base_url=fake.base_url, decider_api_key=_KEY
     )
-    with pytest.raises(run.DeciderUnreachableError, match="enable_thinking"):
+    with pytest.raises(run.DeciderUnreachableError, match="MAX_TOKENS"):
         run._resolve_decider(_cfg(), _server_env(tmp_path, models), ask=True)
 
 
@@ -602,7 +602,7 @@ def test_the_probe_runs_before_anything_is_recorded() -> None:
 def test_a_thinking_failure_names_the_fix() -> None:
     """ "Thought instead of answering" has a specific fix; the message carries it."""
     probe = _probe(outcome="failed", reason="cut_short", error="generation cut short")
-    with pytest.raises(run.DeciderUnreachableError, match="enable_thinking"):
+    with pytest.raises(run.DeciderUnreachableError, match="MAX_TOKENS"):
         run._assert_decider_answers(probe)
 
 
@@ -610,7 +610,7 @@ def test_a_transport_failure_does_not_suggest_thinking() -> None:
     probe = _probe(outcome="failed", reason="transport", error="Connection error.")
     with pytest.raises(run.DeciderUnreachableError) as caught:
         run._assert_decider_answers(probe)
-    assert "enable_thinking" not in str(caught.value)
+    assert "MAX_TOKENS" not in str(caught.value)
 
 
 def test_nothing_configured_says_so_instead_of_returning_quietly(

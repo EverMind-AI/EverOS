@@ -131,7 +131,6 @@ _INHERIT_CASES: list[tuple[str, dict[str, Any], LLMTask, dict[str, Any]]] = [
         LLMTask.DECIDER,
         {
             "timeout_seconds": 60.0,
-            "max_tokens": 512,
             "sdk_max_retries": 0,
             "invalid_reply_retries": 1,
             "temperature": 0.3,
@@ -315,7 +314,7 @@ def test_tasks_configured_alike_share_and_the_rest_split() -> None:
 def test_the_decider_is_never_shared_even_when_configured_alike() -> None:
     """Its SDK retry count is fixed at construction and must stay its own."""
     same = LLMTaskSettings(
-        timeout_seconds=60.0, max_tokens=512, sdk_max_retries=0, invalid_reply_retries=1
+        timeout_seconds=60.0, sdk_max_retries=0, invalid_reply_retries=1
     )
     providers = _providers(_settings({"search": same}))
     assert providers[LLMTask.DECIDER] is not providers[LLMTask.SEARCH]
@@ -414,11 +413,10 @@ async def test_the_decider_sends_its_reply_cap_and_extra(
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
-async def test_the_deciders_default_request_is_unchanged(
+async def test_the_deciders_default_request_sets_no_output_cap(
     wire: list[dict[str, Any]],
 ) -> None:
-    """Before tasks the decider passed 512 per call; its client now sends it."""
+    """A thinking decider needs room before it answers, so nothing caps it."""
     await _send(_providers(_settings())[LLMTask.DECIDER])
     (body,) = wire
-    assert sorted(body) == ["max_tokens", "messages", "model", "response_format"]
-    assert body["max_tokens"] == 512
+    assert sorted(body) == ["messages", "model", "response_format"]

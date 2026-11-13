@@ -187,7 +187,6 @@ LLM_TASK_DEFAULTS: Final[Mapping[LLMTask, Mapping[str, Any]]] = MappingProxyType
         LLMTask.DECIDER: MappingProxyType(
             {
                 "timeout_seconds": 60.0,
-                "max_tokens": 512,
                 "sdk_max_retries": 0,
                 "invalid_reply_retries": 1,
             }
@@ -200,10 +199,9 @@ leaves them unset.
 Only the decider has any. It runs inside a search request, so one round's
 deadline and retry budget are bounded by the caller waiting on it, not by
 ``[llm]``'s background-extraction values. The values are the ones ``[decider]``
-shipped with. ``max_tokens`` is a guard, not a budget: the reply is one JSON
-object of a few dozen tokens, and uncapped, a model that will not stop generates
-until the deadline, losing the round to a timeout instead of a visible parse
-failure. ``sdk_max_retries`` is 0 because ``[decider].retries`` already retries
+shipped with. The output cap is not among them: the decider inherits ``[llm]``'s
+``max_tokens``, so a model that thinks before it answers has room to.
+``sdk_max_retries`` is 0 because ``[decider].retries`` already retries
 at its own layer and the two multiply -- four decider attempts times three SDK
 requests against a 60s deadline was a 728s round."""
 

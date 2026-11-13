@@ -118,7 +118,7 @@ base_url = "https://openrouter.ai/api/v1"
 # is switched on depends on the gateway; nest its field under extra_body in extra.
 #
 # The multi-round retrieval decider runs inside a search request, so the fields it
-# leaves unset among timeout_seconds (60), max_tokens (512), sdk_max_retries (0) and
+# leaves unset among timeout_seconds (60), sdk_max_retries (0) and
 # invalid_reply_retries (1) take these values of its own instead of [llm]'s.
 # ⚠ model and base_url must move together. Renaming the model while leaving the
 # endpoint pointed at a server that does not host it returns 404 on every call,
