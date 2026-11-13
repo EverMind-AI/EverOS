@@ -271,6 +271,9 @@ async def test_an_implicit_group_of_three_dedupes_two_people_do_not(
         await _add(world, _batch("u1", *two))
         repeated = await _add(world, _batch("u2", *two))
         assert repeated.duplicates == 0
+        # Two people are no group: their sessions stay personal (D14).
+        for session in ("u1", "u2"):
+            assert await world.stores.groups.binding(world.session(session)) is None
 
         solo = [_message("u_gus", 1, "note to self", "r-1")]
         await _add(world, _batch("v1", *solo))
