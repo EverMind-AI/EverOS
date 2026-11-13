@@ -223,11 +223,6 @@ filterwarnings = [
     # BaseEventLoop.__del__ fire after pytest closes the event loop.
     # Upstream lifecycle issue; we cannot fix their cleanup order.
     "ignore:Exception ignored.*:pytest.PytestUnraisableExceptionWarning",
-    # aiosqlite Connection.__del__ warns about a connection collected unclosed,
-    # then stops its non-daemon worker thread. Raised as an error the warning
-    # aborts __del__ before that stop (an exception in __del__ fails no test),
-    # and Python 3.13 then waits on the thread at exit forever (a CI hang).
-    "default:.*was deleted before being closed:ResourceWarning",
 ]
 markers = [
     "slow: runs that take >=10s (regardless of dependency); CI default excludes these. Run with `pytest -m slow`.",

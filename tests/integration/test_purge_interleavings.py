@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import os
 import shutil
 import tempfile
@@ -34,6 +35,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
 from hypothesis import HealthCheck, Phase, currently_in_test_context, event, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
@@ -57,6 +59,14 @@ from everos.service.purge import PurgeRunGate
 from tests.fakes.storage import make_storage
 from tests.helpers.ome import ome_strategy
 from tests.unit.test_service.test_purge._harness import Purge, make_purge
+
+# A step that cancels work (a restart is a process dying) can strand an
+# aiosqlite connection. Its finaliser warns, then stops the connection's
+# worker thread; raised as an error the warning aborts that stop, and a
+# non-daemon worker thread then blocks the interpreter's exit (Python 3.13).
+pytestmark = pytest.mark.filterwarnings(
+    "default:.*was deleted before being closed:ResourceWarning"
+)
 
 SCOPES = [("a1", "p1"), ("a1", "p2"), ("a2", "p1")]
 PURGES = [("project", "a1", "p1"), ("app", "a1", None), ("space", None, None)]
@@ -394,9 +404,7 @@ class PurgeMachine(RuleBasedStateMachine):
         async def go() -> None:
             await self.runner.stop()
             # As asyncio.run ends: every task still on the loop is finished
-            # here, so none leaves an open connection to the garbage collector
-            # (whose warning, an error under pytest, would keep the
-            # connection's thread alive and hang the interpreter's exit).
+            # here, so none leaves an open connection to the garbage collector.
             left = asyncio.all_tasks() - {asyncio.current_task()}
             for task in left:
                 task.cancel()
@@ -407,6 +415,7 @@ class PurgeMachine(RuleBasedStateMachine):
         self.run(go())
         self.loop.close()
         MARKS.reset()
+        gc.collect()  # what a step stranded is stopped now, under pytestmark
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 
