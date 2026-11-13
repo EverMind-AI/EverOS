@@ -342,14 +342,6 @@ async def test_a_forget_during_profile_updates(tmp_path: Path) -> None:
 # ── the session lock ────────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a session lock wait or a boundary attempt past "
-        "session_lock_timeout_seconds raises a bare TimeoutError, answered "
-        "500 INTERNAL_ERROR instead of a retryable 503"
-    ),
-)
 async def test_the_session_lock_against_a_slow_model(tmp_path: Path) -> None:
     """A boundary call slower than ``session_lock_timeout_seconds``: the adds it
     holds up are refused (503), and sending those again loses and doubles

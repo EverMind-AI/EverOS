@@ -93,6 +93,14 @@ def _make_app() -> FastAPI:
     async def _runtime() -> None:
         raise RuntimeError("oops")
 
+    @app.get("/raise/timeout")
+    async def _timeout() -> None:
+        raise TimeoutError
+
+    @app.get("/raise/os-error")
+    async def _os_error() -> None:
+        raise OSError(28, "No space left on device")
+
     @app.post("/raise/request-validation")
     async def _request_validation(body: dict) -> None:
         # Starlette raises RequestValidationError automatically when
@@ -251,6 +259,24 @@ async def test_llm_not_configured_returns_422(client: AsyncClient) -> None:
     assert data["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
     assert data["error"]["message"] == _LLM_NOT_CONFIGURED_MESSAGE
     _assert_envelope(data, path="/raise/llm-not-configured")
+
+
+async def test_timeout_error_returns_a_retryable_503(client: AsyncClient) -> None:
+    """A bare TimeoutError -- an /add past the session lock's bound, a boundary
+    call past its attempt timeout -- is transient: 503, not the 500 catch-all."""
+    resp = await client.get("/raise/timeout")
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
+    assert data["error"]["message"].startswith("Timed out")
+    _assert_envelope(data, path="/raise/timeout")
+
+
+async def test_other_os_errors_still_return_500(client: AsyncClient) -> None:
+    """TimeoutError is an OSError; mapping it must not catch its parent."""
+    resp = await client.get("/raise/os-error")
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "INTERNAL_ERROR"
 
 
 # ---------------------------------------------------------------------------

@@ -259,7 +259,7 @@ parsing the human-readable `message` field.
 | `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | A forget of a conversation (`/forget`, `/forget/session`, `/delete` with a `session_id`) while an `/add` holds the session past `delete_wait_seconds`; nothing was forgotten |
-| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`), or an `/add` / `/flush` waited for its session's lock, or for the boundary model call, past `[memorize] session_lock_timeout_seconds` |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
 | `INTERNAL_ERROR` | `500` | No | Unhandled exception (internal details are logged, never leaked) |

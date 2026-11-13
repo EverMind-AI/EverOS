@@ -99,6 +99,17 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
         ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE,
         log=("warning", "infrastructure_error"),
     ),
+    # A wait that ran past its bound -- an /add or /flush behind the session's
+    # lock, or a boundary model call, past [memorize]
+    # session_lock_timeout_seconds -- is as transient as an external service
+    # that timed out. The bare exception carries no message of its own.
+    TimeoutError: _Rule(
+        503,
+        ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE,
+        message="Timed out waiting for a busy session or an external service; "
+        "retry later.",
+        log=("warning", "timeout_error"),
+    ),
     # Permanent, not retryable.
     errors.CapabilityError: _Rule(
         503, ErrorCode.CAPABILITY_UNAVAILABLE, log=("warning", "capability_error")
