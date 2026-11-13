@@ -181,8 +181,11 @@ rewritten:
 | `update` | changes `display_name`, `aliases`, `role` or `title` from `at` on |
 
 The roster at time `t` is the fold of all events with `at <= t`. Events may be
-backdated (an importer replays a history); backdating is restricted to owners
-and admins.
+backdated (an importer replays a history); backdating is restricted to owners,
+admins and the group's deliverer. An implicit join ([Section 5.2](#52-add)) is
+held to the same rule: from anyone else's batch, a sender whose first message
+is older than the newest message the group already holds joins just after
+that message, so one backdated message never opens the group's history.
 
 Two kinds of role exist and are kept apart:
 
@@ -328,6 +331,17 @@ included (the deliverer mirrors the chat platform's membership); any member
 may send `leave` for themselves. The response returns the current roster and
 the number of events applied.
 
+A group with no current owner or admin (one a batch without an asker created)
+is managed by its deliverer alone: only the deliverer changes its meta and its
+roster, and a member may still leave. A member could otherwise lift their own
+window -- open the history to every member, name themselves deliverer, or
+promote themselves and backdate a join. Once the deliverer names an owner or
+admin, the managers manage the group as any other. A group meant to be
+managed gets its manager or deliverer when it is created: `PUT
+/api/v2/groups/{group_id}` first, or `asker_id` on the batch that creates it
+(the asker becomes its owner). An implicit group ([Section 7.9](#79-implicit-groups-three-or-more-people))
+takes no roster or meta change at all.
+
 **Read a group**: `GET /api/v2/groups/{group_id}?app_id=&project_id=&asker_id=&include_history=false`
 returns the meta (`deliverer_id` among it) and the current roster (with every
 interval when `include_history=true`). Only current members and the group's
@@ -353,8 +367,13 @@ senders (configurable).
 
 A message from a sender who is not a member opens an interval at that message's
 timestamp with `source = "implicit"` and role `member` (or `assistant` for
-role=assistant). With `[groups] implicit_join = false` such a batch is rejected
-with 422.
+role=assistant). In a group that already holds messages the interval opens no
+earlier than the newest of them, unless the batch's `asker_id` is an owner, an
+admin or the group's deliverer (who may backdate): an older message from
+anyone else's batch opens the interval one millisecond after the group's
+newest message. A time-ordered import, whose new senders never speak before
+what the group holds, is unchanged. With `[groups] implicit_join = false` such
+a batch is rejected with 422.
 
 ```json
 {
@@ -1151,7 +1170,9 @@ It is built in two layers:
    statuses were verified at write time. Core episodes and picture memories not
    covered by an item get a metadata constraint (subjects, status, source segment,
    speakers, times) whose quote is the source message with the highest token
-   overlap with the record.
+   overlap with the record. Quotes are read from the segment without its
+   forgotten messages and without the references to the pictures the group
+   forgot: no quote names a forgotten picture.
 2. **Model (optional).** `[search] constraints = "model"` adds one call with the
    extractor role: given the question, the core and the rule constraints, it
    writes applicability and scope per constraint, with exact quotes. Code
@@ -1299,7 +1320,7 @@ Other kinds answer `422`.
 | Personal memory (`users/<u>/`) | `u` only |
 | Group memory (`groups/<g>/`: episodes, picture memories, scenes, member-in-group profiles, group-profile items, buffered messages) | current members of `g`, and only records all of whose sources fall inside one of the asker's membership windows in `g`; the deliverer of `g` (below) |
 | Roster and group meta | current members of `g`; the deliverer of `g` |
-| Everything of `g`, as its superadmin | the deliverer of `g` ([Section 5.1](#51-groups-and-roster)): every right of an owner -- meta (its own `deliverer_id` included), any roster event (backdated too), forget, undo, edit and delete -- and alone to add to `g`'s sessions and flush them. It reads `g`'s whole history (search, get, history, picture bytes, the group read) with no membership window. Its **search without an `audience` reads as `audience = group`**: only the time every current member can see, so a reply it posts into the group cannot reveal to a newer member what was said before they joined; `audience = asker` gives it the whole history. It reads nothing of another group. |
+| Everything of `g`, as its superadmin | the deliverer of `g` ([Section 5.1](#51-groups-and-roster)): every right of an owner -- meta (its own `deliverer_id` included), any roster event (backdated too), forget, undo, edit and delete -- and alone to add to `g`'s sessions and flush them. It reads `g`'s whole history (search, get, history, picture bytes, the group read) with no membership window. Its **search without an `audience` reads as `audience = group`**: only the time every current person can see (an assistant member is no audience), so a reply it posts into the group cannot reveal to a newer member what was said before they joined; `audience = asker` gives it the whole history. It reads nothing of another group. |
 
 Consequences, stated explicitly:
 
@@ -1310,6 +1331,7 @@ Consequences, stated explicitly:
 - Invisible records behave as absent: a get by id returns 404, a search omits them, a picture hash referenced only by invisible group memories returns 404.
 - An owner or admin role grants roster management and forgetting, not extra reading.
 - The deliverer is never a member: it is never one of the `audience = group` intersection (even when it is a member too), and a member's windows are the same with or without it. A human asker's default audience stays `asker`.
+- `audience = group` intersects the windows of the current human members only: an assistant member (its `kind` or `role` is `assistant`) is never one of it, so an assistant's implicit join at its first reply hides nothing said before.
 - One rule decides the deliverer, `is_deliverer` in the access policy, which every `authorize_*` function and `read_scope` consult.
 
 ### 9.2 Identity
@@ -1318,8 +1340,11 @@ Every group request carries `asker_id`. EverOS has no authentication
 ([SECURITY.md](../SECURITY.md)): the identity is the caller's assertion. A
 deployment that serves several people puts a gateway in front and sets
 `[access] identity_header`; EverOS then reads the asker from that header and
-rejects a request whose body `asker_id` differs (403). One-to-one requests
-without `asker_id` are read as asked by their owner, which is today's behaviour.
+rejects a request whose body `asker_id` differs (403). With the header
+configured, a request that does not carry it (or carries it empty) is refused
+(403) on every memory, group and project route, rather than read on its
+body's `asker_id`. Without the header configured, one-to-one requests without
+`asker_id` are read as asked by their owner, which is today's behaviour.
 
 The keys are the gateway's. A cloud deployment issues each group one key for
 its forwarding program; the gateway asserts the identity that key stands for,
@@ -1758,8 +1783,10 @@ The first half of Step 1 differs from the text above in these places:
   message time. Like the roster route, a batch that carries roster events
   cuts the open buffer of every session of the group before the change
   applies (tasks 4-7 closed the gap where it cut only its own session).
-- **Groups without an owner or admin** may be managed by any current member, so
-  an implicitly created group can always be administered.
+- **Groups without an owner or admin** are managed by their deliverer alone
+  (2026-11-13; before, by any current member): a member may only leave. A
+  group a batch without an asker creates has neither, so it takes no roster or
+  meta change until it is created with a manager or a deliverer.
 - **Route prefix.** The group routes are also mounted under `/api/v1`, like
   every other v2 route.
 - **Picture bytes.** An asker who holds a personal memory of the same picture
@@ -1960,8 +1987,9 @@ Step 2 differs from the text above in these places:
   group-profile or member-profile item ids), `image`; there is no separate
   segment target. A group without owner or admin lets any current member
   forget; managers may forget records outside their own windows. A
-  group-scoped delete is an owner's or admin's forget of a session or of a
-  member's messages. Not scrubbed: the memcell payload (by design), the
+  group-scoped delete is an owner's, an admin's or the deliverer's forget of a
+  session or of a member's messages (in a group with no owner or admin, the
+  deliverer's alone). Not scrubbed: the memcell payload (by design), the
   scheduler's event log, and older LanceDB table versions until the cascade
   prunes them.
   - *Until 2026-11-12* a group forget took superseded and forgotten versions
@@ -2090,7 +2118,7 @@ decision replaces it.
 | Question | Default |
 |---|---|
 | Does a member see history from before they joined? | No: strict membership windows. A per-group setting `history_visible_from` takes `join` (default) or `creation`; `creation` shows a new member the group's history from its start. |
-| A reply posted to the whole group | `/memory/search` takes `audience`: `asker` (default, the asker's view) or `group` (only content that every current member can see). A client posting into the group uses `group`. |
+| A reply posted to the whole group | `/memory/search` takes `audience`: `asker` (default, the asker's view) or `group` (only content that every current person can see; an assistant member is no audience). A client posting into the group uses `group`. |
 | Hard delete inside a group | `/memory/delete` keeps its user scopes (an `agent_id` answers `422`: EverOS 2.0 has no agent memory). A group-scoped delete is owner/admin only and behaves as a forget (soft, propagated) in Step 2; until then group-scoped delete and forget answer `422`. |
 | Step 2's two new prompts and the extraction model | They run zero-shot, guarded by the code checks of [Section 7.5](#75-group-profile-step-2) and [Section 8.4](#84-constraint-block-step-2); group-chat data is collected for a later fine-tune. |
 | Paid evaluation runs | A one-group cost probe precedes every full GroupAssistBench run; GateMem is used only once its data licence is confirmed. |

@@ -947,8 +947,57 @@ machinery that keeps a deleted memory from coming back.
   an unusable reply is one failed attempt of `[decider] retries`; a value
   still set for it is ignored.
 
+### Security
+
+- **The delete aliases take the gateway's identity.** With `[access]
+  identity_header` set, `POST /memory/delete` and `/memory/delete_by_ids`
+  ignored the asserted asker: one identity could forget another user's whole
+  memory. Now a personal delete reaches the asserted user's own memory only,
+  as every other personal route does: a `user_id` naming someone else is 403
+  before anything is forgotten, a `session_id` alone forgets the asker's copy
+  of the conversation, and `/delete_by_ids` refuses (403, nothing forgotten)
+  an id of another user's episode; the forget log records the asker. A group
+  delete stays an owner's, an admin's or the deliverer's. Without a gateway
+  nothing changes.
+- **A backdated message no longer opens a group's history.** A sender who is
+  not a member joined at their first message's timestamp, so one
+  `/memory/add` message dated before the group existed made a stranger a
+  member of its whole history. Now, in a group that already holds messages,
+  an implicit join from a batch whose asker is not an owner, an admin or the
+  group's deliverer opens no earlier than the group's newest message (one
+  millisecond after it, when the message is older). Managers and the
+  deliverer still backdate, and a time-ordered import -- new senders never
+  speak before what the group holds -- joins every sender as before.
+- **A group without an owner or admin is managed by its deliverer.** Any
+  current member could change such a group's meta and roster, and so lift
+  their own window: open the history to every member, name themselves
+  deliverer, or promote themselves and backdate a join. Now only the
+  deliverer changes its meta and roster (and runs its group deletes), a
+  member may still leave, and an owner or admin the deliverer names manages
+  it from then on. A group a batch without an asker creates has neither: give
+  a group its owner or deliverer when it is created. Implicit groups take no
+  roster change, as before; forgetting is unchanged.
+- **A request without the configured identity header is refused.** With
+  `[access] identity_header` set, a request that did not carry the header was
+  still served on its body's `asker_id` (and a personal read without one as
+  its owner). Now it is 403 on every memory, group and project route.
+
 ### Fixed
 
+- **An assistant's implicit join no longer hides a group's history from
+  `audience = group`.** The intersection counted assistant members, so an
+  assistant's first reply cut everything said before it from the deliverer's
+  default search. It now intersects the windows of current people only (the
+  deliverer was already left out).
+- **A forgotten group picture is quoted by no constraint.** A constraint's
+  quote is the raw message, which kept the forgotten picture's
+  `[IMAGE: <hash>]` reference; quotes (and the segments the binding call is
+  shown) are now read without the pictures the group forgot.
+- **Reads over the asker's groups read only the asker's rosters.**
+  `include_groups`, `project_scope` and `GET /projects/{id}` read the roster of
+  every group in the space -- about 600 SQL statements and half a second per
+  request at 200 groups. They now ask the roster mirror for the asker's
+  groups first (one indexed query) and read only those.
 - **One broken markdown entry costs that entry only.** A hand edit that
   broke one entry -- a timestamp that no longer parses, a deleted close
   marker -- failed the projection of its whole file (no entry of it was

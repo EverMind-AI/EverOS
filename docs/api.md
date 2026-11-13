@@ -249,7 +249,7 @@ parsing the human-readable `message` field.
 | `error.code` | HTTP | Retryable? | When |
 |---|---|---|---|
 | `NOT_FOUND` | `404` | No | Requested resource does not exist -- or exists but the asker may not see it (a group picture outside their membership windows answers exactly as a missing one) |
-| `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin, a batch or a flush to a group with a deliverer from anyone else |
+| `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin (in a group with no owner or admin, anyone but the deliverer), a batch or a flush to a group with a deliverer from anyone else, a personal delete behind a gateway of another user's memory, a request without the configured identity header |
 | `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. a session bound to another group; a roster event that conflicts with the member's open interval; a group undo whose forget a later forget rewrote) |
 | `VERSION_CONFLICT` | `409` | No | `/memory/update` named a version that is no longer the current one; `message` names the current version. Read it (`/memory/history`) and decide again |
 | `MEMORY_FORGOTTEN` | `409` | No | `/memory/update` named a forgotten memory; undo the forget first |
@@ -1372,7 +1372,9 @@ group. A user's memory is named by `user_id`; a group's by `group_id` with
 `asker_id`, under the forget rule: owners and admins may change or forget any
 record of the group, a member those resting on their own messages alone. A
 personal memory is changed and read by its owner: an `asker_id` (or the
-identity header) naming someone else is `403`.
+identity header) naming someone else is `403`. So is it deleted: behind a
+gateway, `/memory/delete` and `/delete_by_ids` reach the asserted user's own
+memory only.
 
 | Route | What |
 |---|---|
@@ -1583,9 +1585,15 @@ once and reversible by the `forget_ids` it returns.
 | `user_id` + `session_id` | target `session` of the user |
 | `session_id` | target `session` of every user whose memory holds the conversation, one forget each |
 | `agent_id` (± `session_id`) | refused, `422`: EverOS 2.0 has no agent memory |
-| `group_id` + `asker_id` + `session_id` or `user_id` | the group's delete: an owner's or admin's forget of the session or the member's messages ([group-memory.md](group-memory.md), section 15) |
+| `group_id` + `asker_id` + `session_id` or `user_id` | the group's delete: an owner's, an admin's or the deliverer's forget of the session or the member's messages; in a group with no owner or admin, the deliverer's alone ([group-memory.md](group-memory.md), section 15) |
 
-A session bound to a group without `group_id` is `422`. Nothing leaves
+Behind a gateway (`[access] identity_header`) the asserted user deletes in
+their own memory only: a `user_id` naming someone else is `403` before
+anything is forgotten, and a `session_id` alone forgets the asserted user's
+copy of the conversation, not the other holders'. Without a gateway a
+personal delete takes no asker (`asker_id` is `422` without `group_id`) and
+reaches what it names, as before. A session bound to a group without
+`group_id` is `422`. Nothing leaves
 markdown, and the conversation's segments and buffer stay in `system.db`:
 sending the conversation again writes new memories beside the forgotten ones.
 
@@ -1606,8 +1614,10 @@ forget of the conversation.
 `<owner_id>_ep_<YYYYMMDD>_<n>`, 1..50; a `reason` whose `code` is kept and
 whose `note` is never logged), target `record` per owner, run at once. One
 malformed id rejects the whole request (`422`). Ids that match nothing are
-skipped; sending the same request again forgets nothing more. The answer is
-Cloud's shape with the forgets' ids:
+skipped; sending the same request again forgets nothing more. Behind a
+gateway every id must name the asserted user's own episode: one of another
+user's is `403`, and nothing is forgotten. The answer is Cloud's shape with
+the forgets' ids:
 
 ```json
 {"data": {"memory_type": "episode", "success": true, "forget_ids": ["fg_…"]}}
@@ -1690,14 +1700,23 @@ intervals (`[joined_at, left_at)`, epoch ms) kept as an append-only log in
 
 | Route | Who may | What |
 |---|---|---|
-| `PUT /api/v2/groups/{group_id}` | anyone to create; owners, admins and the deliverer to update | Create the group (a roster that names no owner makes the asker its owner) or update `name` / `description` / `extra` / `history_visible_from` / `deliverer_id` (`null` clears it; a field left out is kept); `roster` events are appended |
-| `POST /api/v2/groups/{group_id}/roster` | owners, admins and the deliverer; a member for their own `leave` | Append `join` / `leave` / `update` events. The open buffers of the group's sessions are cut first, so no segment spans the change |
+| `PUT /api/v2/groups/{group_id}` | anyone to create; owners, admins and the deliverer to update (in a group with no owner or admin, the deliverer alone) | Create the group (a roster that names no owner makes the asker its owner) or update `name` / `description` / `extra` / `history_visible_from` / `deliverer_id` (`null` clears it; a field left out is kept); `roster` events are appended |
+| `POST /api/v2/groups/{group_id}/roster` | owners, admins and the deliverer (in a group with no owner or admin, the deliverer alone); a member for their own `leave` | Append `join` / `leave` / `update` events. The open buffers of the group's sessions are cut first, so no segment spans the change |
 | `GET /api/v2/groups/{group_id}?project_id=&asker_id=&include_history=` | current members and the deliverer | Meta (`deliverer_id` among it) and current roster; every interval with `include_history=true` |
 
 A roster event: `op`, `member_id`, optional `kind` (`human` / `assistant`),
 `display_name`, `aliases`, `role` (`owner` / `admin` / `member` /
 `assistant`), `title`, `at` (epoch ms, default now). A `join` for a member who
 is in the group, or a `leave` / `update` for one who is not, is `409`.
+
+A group a batch without an asker creates has no owner, admin or deliverer: its
+meta and roster take no change (a member may still leave), so a group meant
+to be managed gets its owner or deliverer at creation (`PUT` first, or
+`asker_id` on the creating batch, which makes the asker its owner). A sender
+who is not a member joins at their first message; in a group that already
+holds messages, a batch from anyone but an owner, an admin or the deliverer
+opens that join no earlier than the group's newest message, so a backdated
+message reads none of the group's past.
 
 **The deliverer.** One program forwards a group's chat, with one key per
 group: the gateway asserts the identity the key stands for, and the group
@@ -1713,7 +1732,8 @@ never listed in the roster or shown to a model. Once it is set:
   `/memory/search`, `/memory/get`, `/memory/history`, picture bytes and
   `GET /groups/{id}`, with no membership window;
 - its `/memory/search` without an `audience` reads as `audience: "group"`:
-  only what every current member can see, so a reply it posts into the group
+  only what every current person can see (an assistant member is no
+  audience), so a reply it posts into the group
   shows a newer member nothing from before they joined; `audience: "asker"`
   gives it the whole history. It is never counted among the members of that
   intersection, a member's default stays `asker`, and it reads nothing of
@@ -1755,8 +1775,8 @@ batch on (earlier segments stay the two people's copies). See
 
 `/memory/search` and `/memory/get` take `group_id` or `group_ids` (one pool)
 with `asker_id` and `audience` (`asker`, default; `group`: only what every
-current member can see; a group's deliverer that names none searches as
-`group`). The asker must be a current member of each group (or its
+current human member can see -- an assistant member is no audience; a group's
+deliverer that names none searches as `group`). The asker must be a current member of each group (or its
 deliverer), and sees only records whose sources lie inside one of their
 membership windows;
 the search response carries a `scope` block with those windows. A user's own
@@ -1766,7 +1786,8 @@ search can cover the user's groups too (`include_groups`, off by default; see
 records are changed with `/memory/update`, read with `/memory/history` and
 forgotten with `/memory/forget` and a group body
 ([Changing and forgetting a memory](#changing-and-forgetting-a-memory)); a
-group-scoped `/memory/delete` is an owner's or admin's forget.
+group-scoped `/memory/delete` is an owner's, an admin's or the deliverer's
+forget.
 
 **What a group session writes.** Each segment becomes one group episode under
 `groups/<group_id>/episodes/`, with `sender_ids` (who spoke), `subject_ids`
@@ -1797,7 +1818,11 @@ attached. The multi-round search starts from `"<display name>: <question>"`.
 **Identity.** EverOS has no authentication: `asker_id` is the caller's
 assertion. A deployment behind a gateway sets `[access] identity_header`; the
 asker is then read from that header and a body `asker_id` that differs is
-`403`. A one-to-one request without `asker_id` is read as asked by its owner.
+`403`. With the header configured, a request that does not carry it (or
+carries it empty) is `403` on every memory, group and project route, before
+anything is read or written: it is never served on its body's `asker_id`.
+Without it, a one-to-one request without `asker_id` is read as asked by its
+owner.
 
 ## OpenAPI spec source
 

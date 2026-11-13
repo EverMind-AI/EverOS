@@ -552,7 +552,7 @@ once, when the server starts.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `identity_header` | str \| null | unset | The header a gateway in front of EverOS sets to the asker's id ([group-memory.md](group-memory.md), section 9.2). When set, the asker is read from it and a request whose body `asker_id` differs is refused with 403. Unset: the body's `asker_id` is the asker. EverOS itself has no authentication. |
+| `identity_header` | str \| null | unset | The header a gateway in front of EverOS sets to the asker's id ([group-memory.md](group-memory.md), section 9.2). When set, the asker is read from it, a request whose body `asker_id` differs is refused with 403, and so is a request that does not carry the header (or carries it empty) on every memory, group and project route. Unset: the body's `asker_id` is the asker. EverOS itself has no authentication. |
 
 ### `[logging]`
 
