@@ -199,6 +199,14 @@ class SqliteMemcellStore:
     async def clear_extraction_failure(self, memcell_id: str) -> None:
         await self._repo.set_retry(memcell_id, None)
 
+    async def senders_in_session(self, session: SessionKey) -> list[str]:
+        lists = await self._repo.senders_in_session(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+        )
+        return sorted({str(sender) for raw in lists for sender in json.loads(raw)})
+
     async def failed_segments(self, session: SessionKey) -> list[FailedSegment]:
         rows = await self._repo.retries_in_session(
             app_id=session.app_id,

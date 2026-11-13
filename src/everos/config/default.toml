@@ -357,6 +357,12 @@ max_concurrent_runs = 20
 # not a latency target -- too low kills slow-but-healthy extractions. 0 disables.
 run_timeout_seconds = 1800.0
 
+[profile]
+# A user's own profile (users/<u>/user.md) is updated after this many new
+# segments of their conversations, read in one update, and at every flush of
+# one of them -- like a member's profile in a group. 1 updates every segment.
+update_every = 5
+
 [groups]
 # Group memory (docs/group-memory.md, section 5.2).
 # An /add naming an unknown group_id creates the group.

@@ -1088,6 +1088,21 @@ class MilvusSettings(_Section):
         return value
 
 
+class ProfileSettings(_Section):
+    """A user's own profile (``[profile]``, ``users/<u>/user.md``).
+
+    ``update_every``: the profile is updated after this many new segments of
+    the user's own conversations, all read in one update, and at every flush
+    of one of them -- the cadence a member's profile in a group has
+    (``[groups] member_profile_every``). Episodes are searchable at once, only
+    the profile lags. ``1`` updates at every segment, as before.
+
+    Env binding: EVEROS_PROFILE__UPDATE_EVERY
+    """
+
+    update_every: int = Field(default=5, ge=1)
+
+
 class GroupsSettings(_Section):
     """Group memory (``[groups]``, docs/group-memory.md sections 5.2 and 7.4).
 
@@ -1554,6 +1569,7 @@ class Settings(BaseSettings):
     multimodal: MultimodalSettings = MultimodalSettings()
     images: ImagesSettings = ImagesSettings()
     extraction: ExtractionSettings = ExtractionSettings()
+    profile: ProfileSettings = ProfileSettings()
     groups: GroupsSettings = GroupsSettings()
     search: GroupSearchSettings = GroupSearchSettings()
     access: AccessSettings = AccessSettings()

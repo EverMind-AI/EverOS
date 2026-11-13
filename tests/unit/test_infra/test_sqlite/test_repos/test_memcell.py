@@ -138,3 +138,21 @@ async def test_find_by_ids_handles_chunk_size_larger_than_sqlite_limit(
     # appeared in ``query_ids`` (fakes are silently dropped between them).
     expected_order = [mid for mid in query_ids if mid in set(real_ids)]
     assert got_ids == expected_order
+
+
+async def test_senders_in_session_lists_each_sender_list_once(
+    repo: MemcellRepo,
+) -> None:
+    rows = [_memcell(f"mc_{i}") for i in range(4)]
+    rows[0].sender_ids_json = '["u_a", "bot"]'
+    rows[1].sender_ids_json = '["u_a", "bot"]'
+    rows[2].sender_ids_json = '["u_b"]'
+    rows[3].session_id = "other"
+    rows[3].sender_ids_json = '["u_c"]'
+    await repo.insert_many(rows)
+    lists = await repo.senders_in_session(
+        app_id=rows[0].app_id,
+        project_id=rows[0].project_id,
+        session_id=rows[0].session_id,
+    )
+    assert sorted(lists) == ['["u_a", "bot"]', '["u_b"]']

@@ -561,6 +561,17 @@ class InMemoryMemcellStore:
     async def clear_extraction_failure(self, memcell_id: str) -> None:
         self.failed.pop(memcell_id, None)
 
+    async def senders_in_session(self, session: SessionKey) -> list[str]:
+        return sorted(
+            {
+                str(getattr(item, "sender_id", ""))
+                for memcell_id, cell in self.cells.items()
+                if self.sessions.get(memcell_id) == session
+                for item in cell.items
+                if getattr(item, "sender_id", None)
+            }
+        )
+
     async def failed_segments(self, session: SessionKey) -> list[FailedSegment]:
         return sorted(
             (

@@ -646,6 +646,11 @@ class MemcellStore(Protocol):
         """The session's segments marked failed, oldest first."""
         ...
 
+    async def senders_in_session(self, session: SessionKey) -> list[str]:
+        """Everyone who sent a message cut into one of the session's segments,
+        sorted: whose one-to-one profile a flush of it brings up to date."""
+        ...
+
     async def cells_in_session(self, session: SessionKey) -> dict[str, MemCell]:
         """Every cell of the session, keyed by memcell id, oldest first.
 

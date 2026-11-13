@@ -49,9 +49,19 @@ def _nothing_cut() -> BoundaryOutcome:
     )
 
 
+class _Bus:
+    """Takes what a flush announces (``SessionFlushed``)."""
+
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def publish(self, events: Any) -> None:
+        self.events.extend(events)
+
+
 @pytest.fixture
 def mm() -> MemoryService:
-    return make_memory_service(boundary=_EmptyBoundary())
+    return make_memory_service(boundary=_EmptyBoundary(), bus=_Bus())
 
 
 @pytest.fixture(autouse=True)

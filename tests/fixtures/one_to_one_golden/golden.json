@@ -164,6 +164,12 @@
   },
   {
    "app_id": "default",
+   "project_id": "default",
+   "session_id": "s_locomo",
+   "type": "SessionFlushed"
+  },
+  {
+   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000001",
    "episode_timestamp_ms": 1750896270000,
    "language": "English",
@@ -208,6 +214,12 @@
   },
   {
    "app_id": "default",
+   "project_id": "default",
+   "session_id": "s_solo",
+   "type": "SessionFlushed"
+  },
+  {
+   "app_id": "default",
    "episode_entry_id": "ep_<TODAY>_00000001",
    "episode_timestamp_ms": 1761000120000,
    "language": "English",
@@ -216,6 +228,12 @@
    "project_id": "default",
    "session_id": "s_picture",
    "type": "EpisodeExtracted"
+  },
+  {
+   "app_id": "default",
+   "project_id": "default",
+   "session_id": "s_picture",
+   "type": "SessionFlushed"
   }
  ],
  "get": {

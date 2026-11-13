@@ -95,6 +95,20 @@ class EpisodeExtracted(Event):
 _REFLECTION_KEYS = frozenset({"source", "reflection"})
 
 
+class SessionFlushed(Event):
+    """Fired when a flush of a session bound to no group has run.
+
+    The users' profiles waiting on ``[profile] update_every`` are brought up
+    to date on it, as a group's flush does for its members: a flush is where a
+    client says it wants the rest current too. Fired whether or not the flush
+    cut a segment.
+    """
+
+    session_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+
+
 class GroupFlushed(Event):
     """Fired when a flush of a session bound to a group has run.
 

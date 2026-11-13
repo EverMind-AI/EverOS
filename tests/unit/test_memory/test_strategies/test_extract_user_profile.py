@@ -10,6 +10,7 @@ so the assertions are on what the model was sent and what was stored.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 from typing import Any
 
@@ -19,11 +20,12 @@ from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
 
 from everos.component.images import ImageLimits
+from everos.config import Settings
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtracted, SessionFlushed
 from everos.memory.models import FORGOTTEN_MARK, Episode, ExplicitInfoItem, Profile
-from everos.memory.ports import NO_SOURCE_CHECK, Scope
+from everos.memory.ports import NO_SOURCE_CHECK, Scope, SessionKey
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
 from tests.fakes import make_deps
 
@@ -42,6 +44,23 @@ _DOG = "d" * 64
 @pytest.fixture(autouse=True)
 def _isolate_partition_locks() -> None:
     _reset_for_tests()
+
+
+def _every(monkeypatch: pytest.MonkeyPatch, n: int) -> None:
+    """Set ``[profile] update_every`` for the strategy under test."""
+    base = Settings()
+    settings = base.model_copy(
+        update={"profile": base.profile.model_copy(update={"update_every": n})}
+    )
+    module = importlib.import_module("everos.memory.strategies.extract_user_profile")
+    monkeypatch.setattr(module, "load_settings", lambda: settings)
+
+
+@pytest.fixture(autouse=True)
+def _every_segment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The update itself is under test here: every segment is read at once
+    (``update_every = 1``); the cadence has its own tests below."""
+    _every(monkeypatch, 1)
 
 
 def _scope(owner_id: str = "u_alice") -> Scope:
@@ -121,13 +140,46 @@ class _Model:
 
 
 def _deps(model: _Model, **kwargs: Any) -> MemoryDeps:
-    return make_deps(llm=model.llm, **kwargs)
+    return _with_episodes(make_deps(llm=model.llm, **kwargs))
+
+
+def _with_episodes(deps: MemoryDeps) -> MemoryDeps:
+    """``deps`` whose seeded segments come with their episodes, as the pipeline
+    writes each one (a person's, for every user sender) before its event."""
+    seed = deps.stores.memcell.seed
+
+    def seed_with_episodes(memcell_id: str, cell: MemCell, *args: Any) -> None:
+        seed(memcell_id, cell, *args)
+        for sender in dict.fromkeys(
+            item.sender_id for item in cell.items if item.role == "user"
+        ):
+            deps.stores.episode.seed(
+                _scope(sender),
+                # The id _seed_episode gives the segment's alice episode.
+                f"ep_{memcell_id}"
+                if sender == "u_alice"
+                else f"ep_{memcell_id}_{sender}",
+                Episode(
+                    owner_id=sender,
+                    episode="...",
+                    summary="...",
+                    timestamp=cell.timestamp,
+                    session_id="sess_1",
+                    parent_id=memcell_id,
+                ),
+            )
+
+    deps.stores.memcell.seed = seed_with_episodes  # type: ignore[method-assign]
+    return deps
 
 
 def test_spec_listens_to_a_users_own_episodes_only() -> None:
     spec = EXTRACT_USER_PROFILE_SPEC
     assert spec.name == "extract_user_profile"
-    assert list(spec.trigger.on) == [EpisodeExtracted]  # type: ignore[union-attr]
+    assert list(spec.trigger.on) == [  # type: ignore[union-attr]
+        EpisodeExtracted,
+        SessionFlushed,
+    ]
     assert spec.applies_to is not None
     assert spec.applies_to(_event(), make_deps())
     assert spec.applies_to(_event(), make_deps(embedding=None))
@@ -275,6 +327,8 @@ async def test_the_owners_pictures_are_attached_and_another_senders_are_not() ->
 def _seed_episode(deps: MemoryDeps, memcell_id: str = "mc_1") -> str:
     """The segment's episode, as the pipeline wrote it before the event."""
     entry_id = f"ep_{memcell_id}"
+    if any(r.ref.entry_id == entry_id for r in deps.stores.episode.records):
+        return entry_id  # seeded with its segment (:func:`_with_episodes`)
     deps.stores.episode.seed(
         _scope(),
         entry_id,
@@ -545,7 +599,7 @@ async def _probe(owner_a: str, owner_b: str) -> list[str]:
         log.append(f"leave:{owner}")
         return json.dumps({"operations": [{"action": "none"}]})
 
-    deps = make_deps(llm=FakeLLMClient(handler=slow))
+    deps = _with_episodes(make_deps(llm=FakeLLMClient(handler=slow)))
     for n, owner in enumerate((owner_a, owner_b)):
         deps.stores.memcell.seed(f"mc_{n}", _memcell((owner, "hello"), ts=_TS + n))
     await asyncio.gather(
@@ -564,3 +618,137 @@ async def test_partition_lock_lets_different_owners_run_in_parallel() -> None:
     log = await _probe("u_alice", "u_bob")
     assert log.index("enter:u_alice") < log.index("leave:u_bob")
     assert log.index("enter:u_bob") < log.index("leave:u_alice")
+
+
+# ── Cadence: [profile] update_every ─────────────────────────────────────
+
+
+def _none() -> str:
+    return json.dumps({"operations": [{"action": "none"}]})
+
+
+def _segments_sent(model: _Model, call: int) -> int:
+    return model.user_text(call).count("<segment id=")
+
+
+async def test_a_first_segment_is_read_at_once_then_every_n_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _every(monkeypatch, 3)
+    model = _Model(json.dumps({"operations": [_add("Lives in Paris.")]}), _none())
+    deps = _deps(model)
+    for n in range(1, 5):
+        deps.stores.memcell.seed(
+            f"mc_{n}", _memcell(("u_alice", f"note {n}"), ts=_TS + n * 10)
+        )
+
+    await extract_user_profile(_event("mc_1"), deps)  # no profile yet: at once
+    assert len(model.sent) == 1
+    for n in (2, 3):
+        await extract_user_profile(_event(f"mc_{n}"), deps)
+        await extract_user_profile(_event(f"mc_{n}"), deps)  # a replay: once
+    assert len(model.sent) == 1
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == ["mc_2", "mc_3"]
+
+    await extract_user_profile(_event("mc_4"), deps)
+    assert len(model.sent) == 2
+    assert _segments_sent(model, 1) == 3
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == []
+    assert [i.description for i in stored.explicit_info] == ["Lives in Paris."]
+
+
+async def test_a_flush_reads_what_its_conversation_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _every(monkeypatch, 5)
+    model = _Model(_none(), _none())
+    deps = _deps(model)
+    session = SessionKey("default", "default", "sess_1")
+    for n in (1, 2):
+        cell = _memcell(("u_alice", f"note {n}"), ("u_bob", "ok"), ts=_TS + n * 10)
+        deps.stores.memcell.seed(f"mc_{n}", cell, session)
+    for n in (1, 2):
+        await extract_user_profile(_event(f"mc_{n}"), deps)
+    assert len(model.sent) == 1  # the first at once, the second queued
+
+    flushed = SessionFlushed(session_id="sess_1")
+    assert EXTRACT_USER_PROFILE_SPEC.applies_to(flushed, deps)  # type: ignore[misc]
+    await extract_user_profile(flushed, deps)
+    assert len(model.sent) == 2  # alice's queue; bob has no profile, nothing
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == []
+    await extract_user_profile(flushed, deps)
+    assert len(model.sent) == 2  # nothing left to read
+
+
+async def test_a_queued_segment_forgotten_before_its_update_is_not_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _every(monkeypatch, 2)
+    model = _Model(_none(), _none())
+    deps = _deps(model)
+    for n in (1, 2, 3):
+        deps.stores.memcell.seed(
+            f"mc_{n}", _memcell(("u_alice", f"note {n}"), ts=_TS + n * 10)
+        )
+    await extract_user_profile(_event("mc_1"), deps)
+    await extract_user_profile(_event("mc_2"), deps)
+    (stored,) = await deps.stores.episode.read_many(_scope(), ["ep_mc_2"])
+    await deps.stores.episode.deprecate(
+        _scope(),
+        entries=[(stored.ref.md_path, "ep_mc_2")],
+        replaced_by=FORGOTTEN_MARK,
+        only_if=NO_SOURCE_CHECK,
+    )
+    await extract_user_profile(_event("mc_3"), deps)
+    assert len(model.sent) == 2
+    assert "note 3" in model.user_text(1)
+    assert "note 2" not in model.user_text(1)
+
+
+class _DownError(Exception):
+    """The profile model's endpoint failed after its retries."""
+
+
+async def test_a_failed_update_keeps_its_segments_for_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead-lettered update loses nothing: its segments stay queued, and
+    the next update reads them with its own."""
+    _every(monkeypatch, 5)
+    replies: list[str | Exception] = [
+        _DownError("down"),
+        json.dumps({"operations": [_add("Lives in Paris."), _add("Has a dog.")]}),
+    ]
+    sent: list[list[LLMMessage]] = []
+
+    def answer(messages: list[LLMMessage], **_kwargs: Any) -> str:
+        sent.append(messages)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    deps = _with_episodes(make_deps(llm=FakeLLMClient(handler=answer)))
+    deps.stores.memcell.seed("mc_1", _memcell(("u_alice", "I live in Paris.")))
+    deps.stores.memcell.seed(
+        "mc_2", _memcell(("u_alice", "I have a dog."), ts=_TS + 10)
+    )
+
+    with pytest.raises(Exception, match="down"):
+        await extract_user_profile(_event("mc_1"), deps)
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == ["mc_1"]
+
+    await extract_user_profile(_event("mc_2"), deps)
+    assert len(sent) == 2
+    text = "\n".join(str(m.content) for m in sent[1])
+    assert "I live in Paris." in text and "I have a dog." in text
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == []
+    assert {i.description for i in stored.explicit_info} == {
+        "Lives in Paris.",
+        "Has a dog.",
+    }

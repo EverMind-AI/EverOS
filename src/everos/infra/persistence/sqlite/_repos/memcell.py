@@ -98,6 +98,27 @@ class MemcellRepo(RepoBase[Memcell]):
         async with session_scope(self._factory) as s:
             return list((await s.execute(stmt)).scalars().all())
 
+    async def senders_in_session(
+        self, *, app_id: str, project_id: str, session_id: str
+    ) -> list[str]:
+        """Every sender of the session's rows, as their distinct JSON lists.
+
+        One ``DISTINCT`` over the ``(app, project, session, ...)`` index: a
+        conversation's rows repeat a handful of sender lists, so a long one
+        costs no more than a short one to read.
+        """
+        stmt = (
+            select(Memcell.sender_ids_json)
+            .where(
+                Memcell.app_id == app_id,
+                Memcell.project_id == project_id,
+                Memcell.session_id == session_id,
+            )
+            .distinct()
+        )
+        async with session_scope(self._factory) as s:
+            return list((await s.execute(stmt)).scalars().all())
+
     async def in_session(
         self, *, app_id: str, project_id: str, session_id: str
     ) -> list[Memcell]:

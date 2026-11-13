@@ -420,6 +420,14 @@ strategies and is hot-reloaded; these require a restart.
 | `max_concurrent_runs` | int | `20` | Cap on concurrent strategy runs. Each slot mostly waits on a remote extraction call, so a bulk ingest can afford far more. |
 | `run_timeout_seconds` | float | `1800.0` | Wall-clock ceiling on one strategy attempt — a deadlock backstop, not a latency target; too low kills slow-but-healthy extractions. `0` disables it. |
 
+### `[profile]`
+
+A user's own profile (`users/<user_id>/user.md`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `update_every` | int | `5` | The profile is updated after this many new segments of the user's own conversations, all read in one update call, and at every flush of one of them (the cadence of `[groups] member_profile_every`). A user's first segment, while they have no profile, is read at once. Episodes are searchable at once; only the profile lags. `1` updates at every segment, as before 2026-11-13. |
+
 ### `[groups]`
 
 Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and

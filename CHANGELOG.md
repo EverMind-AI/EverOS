@@ -12,6 +12,26 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A user's profile is updated every five segments and at each flush.** A
+  one-to-one conversation updated `user.md` after every new segment: the
+  profile update was 70% of the write path's input tokens. Now a user's
+  segments are queued on their profile (`pending_memcell_ids`) and read
+  together after `[profile] update_every` (default 5) of them, and at every
+  flush of one of their conversations (a new `SessionFlushed` event, which a
+  flush of a session bound to no group publishes) -- the cadence a member's
+  profile in a group already had. A user's first segment, while they have no
+  profile, is still read at once, so a personal search never attaches an empty
+  profile. A queued segment whose episode the owner forgot before the update
+  is not read. An update that fails (and is dead-lettered after its retries)
+  leaves every segment it was to read queued, the triggering one included,
+  so a later update reads them: before, the next update read its own segment
+  only and the failed window's facts never reached `user.md`. Measured on the LoCoMo excerpt (419 messages, two people,
+  scripted model, tiktoken estimate), per 1,000 messages and the same for one
+  message per add and for batched adds: profile update calls 224 -> 52, their
+  input tokens 975k -> 240k, of which not a cached prefix 139k -> 121k (the
+  queued segments are new text, so far less of each prompt repeats the
+  previous one). `update_every = 1` restores the old cadence
+  ([docs/configuration.md](docs/configuration.md#profile)).
 - **Implicit groups start at three people; two people keep their own
   copies.** A session sent without `group_id` becomes the implicit group of
   its people (`implicit_<hash>`, the same for every session between the same

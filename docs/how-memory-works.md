@@ -212,9 +212,12 @@ derived later by the OME, an in-process async strategy engine. When
 extraction carves a MemCell, it emits an event; OME strategies pick it up
 and write their markdown when ready:
 
-- `extract_user_profile` — the owner's `user.md`, updated once per new
-  segment from that segment only (with the pictures the owner posted in it):
-  one update call, and a consolidation call only when a part of the profile is
+- `extract_user_profile` — the owner's `user.md`, updated from the new
+  segments only (with the pictures the owner posted in them): a user's first
+  segment at once, then every `[profile] update_every` (5) new segments, read
+  together, and at each flush of one of their conversations -- the cadence a
+  member's profile in a group has. One update call, and a consolidation call
+  only when a part of the profile is
   over its cap and has grown since it was last consolidated. Every item keeps
   its id and source segments; a replaced or retired item moves to the file's
   `history`, and a new value names the item it replaced. A segment whose

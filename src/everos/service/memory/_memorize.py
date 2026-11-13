@@ -60,7 +60,7 @@ from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import epoch_ms, get_utc_now, to_timestamp_ms
 from everos.memory import IngestResult as _IngestResult
 from everos.memory.access import authorize_delivery, resolve_identity
-from everos.memory.events import GroupFlushed
+from everos.memory.events import GroupFlushed, SessionFlushed
 from everos.memory.extract.ingest import generated_ids
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
@@ -476,32 +476,41 @@ class Memorizer:
         return result
 
     async def _announce_flush(self, payload: dict[str, Any], *, is_final: bool) -> None:
-        """Publish ``GroupFlushed`` after a flush of a session bound to a group.
+        """Publish ``GroupFlushed`` after a flush of a session bound to a group,
+        ``SessionFlushed`` after a flush of any other session.
 
-        Published whether or not the flush cut a segment: the member-in-group
-        profiles waiting on ``[groups] member_profile_every`` are brought up
-        to date on it (section 7.4).
+        Published whether or not the flush cut a segment: the profiles
+        waiting on ``[groups] member_profile_every`` (a group's members,
+        section 7.4) or on ``[profile] update_every`` (the users of a
+        one-to-one session) are brought up to date on it.
         """
-        if not is_final or self._rosters is None:
+        if not is_final:
             return
         session = SessionKey(
             app_id=payload.get("app_id") or "default",
             project_id=payload.get("project_id") or "default",
             session_id=payload["session_id"],
         )
-        group_id = await self._rosters.store.binding(session)
-        if group_id is None:
-            return
-        await self._bus.publish(
-            [
-                GroupFlushed(
-                    group_id=group_id,
-                    session_id=session.session_id,
-                    app_id=session.app_id,
-                    project_id=session.project_id,
-                )
-            ]
+        group_id = (
+            await self._rosters.store.binding(session)
+            if self._rosters is not None
+            else None
         )
+        flushed: GroupFlushed | SessionFlushed = (
+            SessionFlushed(
+                session_id=session.session_id,
+                app_id=session.app_id,
+                project_id=session.project_id,
+            )
+            if group_id is None
+            else GroupFlushed(
+                group_id=group_id,
+                session_id=session.session_id,
+                app_id=session.app_id,
+                project_id=session.project_id,
+            )
+        )
+        await self._bus.publish([flushed])
 
     async def _cut(
         self,

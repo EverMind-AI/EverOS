@@ -38,6 +38,12 @@ on 2026-11-13, when two people stopped being a group (docs/group-memory.md,
 D14): they are again the per-sender fan-out's, as recorded at the commit
 before (d4f1037), with the chat-only edits below.
 
+It was edited by hand a third time (2026-11-13) for the one-to-one profile
+cadence (``[profile] update_every``): each flush of a session bound to no group
+now publishes ``SessionFlushed``, which brings the users' queued profile
+updates current, so the event list gains one per flush (``s_locomo``,
+``s_solo``, ``s_picture``) and nothing else changed.
+
 It was edited by hand a second time (2026-11-13) for the message id scheme,
 which names a message by its sender and content instead of its place in its
 batch (two messages with one timestamp, each sent alone, had the same id and
