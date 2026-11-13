@@ -719,9 +719,25 @@ class FaultServer:
                 streak = 0 if busy else streak + 1
                 await asyncio.sleep(0.1)
 
-    async def consistent(self) -> None:
-        """Markdown and the index agree, row for row (after :meth:`settle`)."""
-        await assert_md_lance_strict_consistent(self.root, self.view.repos)
+    async def consistent(self, seconds: float = 20.0) -> None:
+        """Markdown and the index agree, row for row.
+
+        Compared once the cascade has drained (:meth:`settle`); a file written
+        after that -- an update that finished a moment later -- is projected
+        before it is compared again, for up to ``seconds``: the last mismatch
+        is raised when they never agree.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        while True:
+            await self.settle()
+            try:
+                await assert_md_lance_strict_consistent(self.root, self.view.repos)
+                return
+            except AssertionError:
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(0.5)
 
     async def ledger(self) -> Any:
         return await self.view.sqlite.md_change_state.queue_summary()
