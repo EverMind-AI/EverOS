@@ -20,6 +20,7 @@ from .image_original import ImageOriginal as ImageOriginal
 from .md_change_state import MdChangeState as MdChangeState
 from .memcell import Memcell as Memcell
 from .memorize_inbox import MemorizeInbox as MemorizeInbox
+from .memory_strength import MemoryStrength as MemoryStrength
 from .unprocessed_buffer import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "MdChangeState",
     "Memcell",
     "MemorizeInbox",
+    "MemoryStrength",
     "MessageForget",
     "SessionBinding",
     "UnprocessedBuffer",

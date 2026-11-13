@@ -10,6 +10,12 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
 * :meth:`AccessPolicy.member_groups` compiles the groups a personal read also
   covers when it asks to (``include_groups``): the owner's current groups,
   each read exactly as a group search by the owner reads it.
+* :meth:`AccessPolicy.past_predicate` widens a scope for a read of the past
+  (``include_past``): a user's own memory with every version, superseded and
+  forgotten; a group's with its superseded versions only -- never a forgotten
+  record nor one a live forget retired, and always inside the asker's
+  windows. It never widens what the asker may see beyond what their own
+  history shows them.
 * Which groups belong to a project is the project links' answer
   (:class:`~everos.memory.ports.ProjectLinkStore`, section 4.4), for a
   project scope and ``include_groups`` alike; the policy never lists a
@@ -88,6 +94,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import (
     Filter,
+    ForgetLogStore,
     GroupRecord,
     GroupStore,
     MessageForgetStore,
@@ -103,6 +110,7 @@ from everos.memory.ports import (
     is_null,
     lt,
     ne,
+    retired_in,
 )
 
 from .identity import Identity
@@ -641,6 +649,9 @@ class AccessPolicy:
         forgotten: Which messages of a session are forgotten; a buffer read
             leaves them out. ``None`` (a build without group forget) leaves
             the buffer as it is.
+        forget_log: The forgets; a group's read of the past leaves out what
+            its live forgets retired. ``None`` reads a group's past as its
+            present.
     """
 
     def __init__(
@@ -649,10 +660,12 @@ class AccessPolicy:
         *,
         projects: ProjectLinkStore,
         forgotten: MessageForgetStore | None = None,
+        forget_log: ForgetLogStore | None = None,
     ) -> None:
         self._groups = groups
         self._projects = projects
         self._forgotten = forgotten
+        self._forget_log = forget_log
 
     async def read_scope(self, identity: Identity, request: ScopeRequest) -> ReadScope:
         """The compiled scope of one read.
@@ -781,6 +794,48 @@ class AccessPolicy:
             return None
         return _group_read_scope(
             personal.app_id, personal.project_id, owner, "asker", views
+        )
+
+    async def past_predicate(self, scope: ReadScope) -> Filter:
+        """What a read of the past may see in ``scope`` (``include_past``).
+
+        A user's own memory, whole: every version of every record, the
+        superseded and the forgotten ones too -- what the user's own history
+        lists. A group's, as its history shows it to the asker: the current
+        and the superseded versions inside the asker's windows, never a
+        forgotten record, nor one a live forget of the group retired (a
+        version it marked or replaced, or one that led to it: it may say what
+        was forgotten, and other members read the group). One forget-log read
+        per group. Without a forget log a group's past is its present.
+        """
+        if not scope.is_group:
+            return scope.scope_of(scope.owner_id).to_filter()
+        if self._forget_log is None:
+            return scope.predicate
+        clauses: list[Filter] = []
+        for view in scope.groups:
+            clause = view.predicate()
+            if clause is None:
+                continue
+            retired: set[str] = set()
+            for entry in await self._forget_log.live_entries(
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                owner_id=view.group_id,
+                owner_type="group",
+            ):
+                retired |= retired_in(entry)
+            clauses.append(
+                all_of(clause, *(ne("entry_id", e) for e in sorted(retired)))
+            )
+        if not clauses:
+            return _NOTHING
+        return all_of(
+            eq("owner_type", "group"),
+            eq("app_id", scope.app_id),
+            eq("project_id", scope.project_id),
+            any_of(is_null("deprecated_by"), ne("deprecated_by", FORGOTTEN_MARK)),
+            any_of(*clauses),
         )
 
     async def _group_scope(

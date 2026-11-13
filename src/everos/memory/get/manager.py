@@ -26,13 +26,23 @@ policy's read scope (:mod:`everos.memory.access`); filters are compiled onto
 it through :func:`compile_scoped_for_get` so the column allow-list stays
 shared with :mod:`memory.search`. Pagination + sort run in the index
 behind the injected ports.
+
+With the forgetting curve on (``[search] forgetting_curve``) every episode,
+scene version and picture memory a page returns is handed to the
+reinforcement sink, which strengthens it after the response; profiles and
+group-profile items do not decay and are not. A read-only server has no sink.
 """
 
 from __future__ import annotations
 
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
-from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
+from everos.core.utils.datetime import (
+    from_timestamp_ms,
+    get_utc_now,
+    to_display_tz,
+    to_timestamp_ms,
+)
 from everos.memory.access import (
     AccessPolicy,
     ReadScope,
@@ -50,6 +60,7 @@ from everos.memory.ports import (
     ImageMemoryIndex,
     Page,
     ProfileIndex,
+    ReinforcementSink,
     Scope,
     Stored,
     all_of,
@@ -62,6 +73,7 @@ from everos.memory.search import (
     fetch_user_profile,
     group_source,
     item_versions,
+    reinforcements,
     shape_profile_item,
     visible_profile_items,
 )
@@ -90,6 +102,8 @@ class GetManager:
         image_index: Picture-memory reads (group listings); ``None`` refuses
             them.
         group_profile_index: Group-profile reads; ``None`` refuses them.
+        reinforce: Where the records a page returns are handed to be
+            reinforced (the forgetting curve); ``None`` reinforces nothing.
     """
 
     def __init__(
@@ -100,8 +114,10 @@ class GetManager:
         access: AccessPolicy,
         image_index: ImageMemoryIndex | None = None,
         group_profile_index: GroupProfileIndex | None = None,
+        reinforce: ReinforcementSink | None = None,
     ) -> None:
         self._access = access
+        self._reinforce = reinforce
         self._images = image_index
         self._group_profile = group_profile_index
         self._ep = episode_index
@@ -147,6 +163,7 @@ class GetManager:
                     eq("parent_type", "scene") if scenes else ne("parent_type", "scene")
                 )
                 found = await self._ep.paginate(all_of(where, kind), page)
+                self._reinforced(found.items)
                 items = [self._shape_episode(e) for e in found.items]
                 if req.include_groups:
                     items = [_owned(item) for item in items]
@@ -161,6 +178,7 @@ class GetManager:
                 if self._images is None:
                     raise RuntimeError("picture listings need the picture index")
                 images = await self._images.paginate(where, page)
+                self._reinforced(images.items)
                 shaped = [_shape_image(i) for i in images.items]
                 data = GetData(
                     images=shaped, total_count=images.total, count=len(shaped)
@@ -197,6 +215,14 @@ class GetManager:
                 )
 
         return GetResponse(request_id=request_id, data=data)
+
+    def _reinforced(
+        self, read: list[Stored[Episode]] | list[Stored[ImageMemory]]
+    ) -> None:
+        """Hand what a page returned to the reinforcement sink, if there is one."""
+        if self._reinforce is not None and read:
+            at = to_timestamp_ms(get_utc_now())
+            self._reinforce.reinforce(reinforcements(read, at=at))
 
     async def _pool(self, req: GetRequest, scope: ReadScope) -> Filter:
         """The owner part of a listing's ``where``: the read scope's predicate.

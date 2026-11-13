@@ -390,6 +390,24 @@ link_slots = 5
 constraints = "rules"
 # Current group-profile items attached per kind to a group search.
 group_profile_cap = 20
+# The forgetting curve (docs/configuration.md, [search]); off by default. On,
+# each candidate's fused score is multiplied by
+# 1 - retention_weight + retention_weight * R, with R = 1 / (1 + days / (9 * S)):
+# days since the memory was last used, S its strength in days. S starts at
+# initial_strength_days; each time the decider keeps the memory as core, or
+# get returns it, S grows by 1 + reinforce_gain * (1 - R), up to
+# max_strength_days. No model call; a read-only server
+# ([cascade] enabled = false) never reinforces.
+forgetting_curve = false
+initial_strength_days = 30.0
+max_strength_days = 3650.0
+reinforce_gain = 2.0
+retention_weight = 0.3
+reinforce = true
+# A search with include_past also ranks superseded versions and forgotten
+# memories (inside groups, never a forgotten one); their score is multiplied
+# by this.
+past_state_factor = 0.3
 
 [access]
 # Gateway identity header (docs/group-memory.md, section 9.2). EverOS has no

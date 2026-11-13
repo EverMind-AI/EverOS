@@ -19,7 +19,9 @@ Where everalgo's ``Candidate`` type may appear -- three places, nowhere else:
 
 ``manager.py`` orchestrates: it resolves the read scope, runs the loop,
 attaches profiles and referenced pictures, and neither constructs nor
-imports an everalgo candidate type.
+imports an everalgo candidate type. ``forgetting.py`` is the forgetting
+curve's arithmetic (retention, a version's state, reinforcement), off by
+default; the loop reweighs its candidates with it.
 
 External usage::
 
@@ -67,6 +69,9 @@ from .filters import FilterError as FilterError
 from .filters import compile_filters as compile_filters
 from .filters import compile_predicate as compile_predicate
 from .filters import compile_scoped as compile_scoped
+from .forgetting import Curve as Curve
+from .forgetting import reinforcements as reinforcements
+from .forgetting import strengthen as strengthen
 from .group_profile import item_versions as item_versions
 from .group_profile import shape_profile_item as shape_profile_item
 from .group_profile import visible_profile as visible_profile
@@ -81,6 +86,7 @@ __all__ = [
     "NO_AGENT_MEMORY",
     "RESERVED_FIELDS",
     "AudienceItem",
+    "Curve",
     "DeciderHealth",
     "DeciderStatus",
     "FilterError",
@@ -105,7 +111,9 @@ __all__ = [
     "fetch_user_profile",
     "group_source",
     "item_versions",
+    "reinforcements",
     "shape_profile_item",
+    "strengthen",
     "visible_profile",
     "visible_profile_items",
     "with_audience",

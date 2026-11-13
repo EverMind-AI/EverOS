@@ -43,6 +43,7 @@ from ._repos import ImageOriginalRepo as ImageOriginalRepo
 from ._repos import MdChangeStateRepo as MdChangeStateRepo
 from ._repos import MemcellRepo as MemcellRepo
 from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
+from ._repos import MemoryStrengthRepo as MemoryStrengthRepo
 from ._repos import MessageForgetRepo as MessageForgetRepo
 from ._repos import QueueSummary as QueueSummary
 from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
@@ -57,6 +58,7 @@ from ._tables import ImageOriginal as ImageOriginal
 from ._tables import MdChangeState as MdChangeState
 from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
+from ._tables import MemoryStrength as MemoryStrength
 from ._tables import MessageForget as MessageForget
 from ._tables import SessionBinding as SessionBinding
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
@@ -70,6 +72,7 @@ from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteMessageForgetStore as SqliteMessageForgetStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
+from .stores import SqliteStrengthStore as SqliteStrengthStore
 
 __all__ = [
     "MTIME_TOLERANCE_SECONDS",
@@ -94,6 +97,8 @@ __all__ = [
     "MemcellRepo",
     "MemorizeInbox",
     "MemorizeInboxRepo",
+    "MemoryStrength",
+    "MemoryStrengthRepo",
     "MessageForget",
     "MessageForgetRepo",
     "QueueSummary",
@@ -111,6 +116,7 @@ __all__ = [
     "SqliteRepos",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
+    "SqliteStrengthStore",
     "UnprocessedBuffer",
     "UnprocessedBufferRepo",
     "create_session_factory",

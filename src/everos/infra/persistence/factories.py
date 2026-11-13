@@ -45,6 +45,7 @@ from .sqlite import (
     SqliteRepos,
     SqliteSessionBufferStore,
     SqliteSessionPurgeStore,
+    SqliteStrengthStore,
 )
 
 
@@ -76,6 +77,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         group_profile=MarkdownGroupProfileStore(root),
         message_forget=SqliteMessageForgetStore(sqlite.message_forget),
         group_messages=SqliteGroupMessageStore(sqlite.group_message),
+        strength=SqliteStrengthStore(sqlite.memory_strength),
     )
 
 

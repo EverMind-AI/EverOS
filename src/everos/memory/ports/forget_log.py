@@ -32,7 +32,14 @@ them while the segment itself (the memcell payload) keeps them for an undo.
 
 from __future__ import annotations
 
-__all__ = ["ForgetEntry", "ForgetLogStore", "ForgetTarget", "MessageForgetStore"]
+__all__ = [
+    "UNDO_FORMAT",
+    "ForgetEntry",
+    "ForgetLogStore",
+    "ForgetTarget",
+    "MessageForgetStore",
+    "retired_in",
+]
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
@@ -90,6 +97,26 @@ class ForgetEntry:
     app_id: str = "default"
     project_id: str = "default"
     created_at: int | None = None
+
+
+UNDO_FORMAT = 2
+"""``undo["format"]`` of the one log format every forget writes now."""
+
+
+def retired_in(entry: ForgetEntry) -> set[str]:
+    """The entry ids a group forget keeps out of the group's reads of the past.
+
+    The versions it marked or replaced, every version that led to them, and the
+    scene versions that changed: any of them may say what was forgotten, and
+    other members read the group. A group's history leaves them out, and so
+    does a search that asks about the past. Only the current log format lists
+    them; a group forget logged before it took its records out of markdown,
+    and a user's forget retires nothing.
+    """
+    undo = entry.undo or {}
+    if undo.get("format") != UNDO_FORMAT:
+        return set()
+    return {str(i) for ids in (undo.get("retired") or {}).values() for i in ids}
 
 
 @runtime_checkable

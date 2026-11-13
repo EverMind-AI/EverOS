@@ -19,13 +19,14 @@ __all__ = [
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
+    FORGOTTEN_MARK,
     Episode,
     GroupProfileItem,
     ImageMemory,
@@ -303,6 +304,7 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
             origin=fields.get("origin"),
             source_start=_ms_or_none(fields.get("source_start")),
         ),
+        mark=fields.get("deprecated_by"),
     )
 
 
@@ -331,13 +333,25 @@ def _stored_image_memory(fields: Row) -> Stored[ImageMemory]:
             parent_type=fields.get("parent_type") or "memcell",
             entry_id=fields.get("entry_id"),
             md_path=fields.get("md_path"),
-            status="superseded" if fields.get("deprecated_by") else "current",
+            status=_status(fields.get("deprecated_by")),
             superseded_by=fields.get("deprecated_by"),
             sender_ids=list(fields.get("sender_ids") or []),
             subject_ids=list(fields.get("subject_ids") or []),
             origin=fields.get("origin"),
         ),
+        mark=fields.get("deprecated_by"),
     )
+
+
+def _status(mark: str | None) -> Literal["current", "superseded", "forgotten"]:
+    """What a row's ``deprecated_by`` says: replaced by an entry, or forgotten.
+
+    Only a read of past versions meets a marked row; every other read's
+    predicate keeps current rows only, which read ``current`` as before.
+    """
+    if mark == FORGOTTEN_MARK:
+        return "forgotten"
+    return "superseded" if mark else "current"
 
 
 def _stored_group_profile_items(rows: Sequence[Row]) -> list[Stored[GroupProfileItem]]:

@@ -44,6 +44,13 @@ and a stranger get nothing of the group (their own memory still answers), a
 later joiner and a member who was away get nothing said outside their
 windows, a forgotten record or message is absent, and another member's
 records -- personal memory, a profile in the group -- never come along.
+
+A search that asks about the past (``include_past``) takes them all again:
+it adds a group's superseded versions inside the asker's windows and nothing
+else -- never a version outside them, never a forgotten record, never the
+version a forgotten message was taken out of (a live forget retires it) --
+in a group search and in a personal one over the user's groups, and a
+stranger's past holds nothing of two people's copies.
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ from everos.service import (
     NO_AGENT_MEMORY,
     ForgetTarget,
     GetRequest,
+    MemoryChanges,
     SearchRequest,
 )
 from tests.fakes import make_application
@@ -287,6 +295,41 @@ async def test_search_returns_nothing_outside_the_askers_windows(
     assert response.data.profiles == []
 
 
+@pytest.mark.parametrize("asker", ["u_chen", "u_evan", "u_dan"])
+async def test_the_past_returns_no_version_outside_the_askers_windows(
+    fixture: _Fixture, asker: str
+) -> None:
+    """Rows 1-4 asking about the past: every group record has a newer version;
+    the old ones come back inside the asker's windows and nowhere else, in
+    the response and in the decider's input alike."""
+    world = fixture.world
+    for text in GROUP_RECORDS:
+        await world.memory.update_memory(
+            app_id=APP,
+            project_id=PROJECT,
+            group_id="trip",
+            asker_id="u_chen",
+            record_id=await _record_id(world, text),
+            changes=MemoryChanges(content=f"{text} revised"),
+        )
+    await world.project()
+    fixture.decider.prompts.clear()
+    response = await world.memory.search(
+        _search(group_id="trip", asker_id=asker, include_past=True)
+    )
+    mixed = await world.memory.search(_mixed(asker, include_past=True))
+    blob = _everything_text(response) + _everything_text(mixed)
+    seen_by_decider = "\n".join(fixture.decider.prompts)
+    old = {e.episode for e in response.data.episodes if e.status == "superseded"}
+    for text, (start, end) in GROUP_RECORDS.items():
+        if _visible(asker, start, end):
+            assert text in old, (asker, text)
+        else:
+            assert text not in blob, (asker, text)
+            assert text not in seen_by_decider, (asker, text)
+    assert "personal marker" not in json.dumps(response.data.model_dump(mode="json"))
+
+
 @pytest.mark.parametrize("asker", ["u_betty", "u_zoe"])
 async def test_former_and_non_members_read_nothing_of_the_group(
     fixture: _Fixture, asker: str
@@ -471,11 +514,19 @@ async def _everything_read_by(fixture: _Fixture, asker: str) -> str:
     response = await world.memory.search(
         _search(group_id="trip", asker_id=asker).model_copy(update={"filters": None})
     )
+    past = await world.memory.search(
+        _search(group_id="trip", asker_id=asker, include_past=True).model_copy(
+            update={"filters": None}
+        )
+    )
     mixed = await world.memory.search(_mixed(asker))
+    mixed_past = await world.memory.search(_mixed(asker, include_past=True))
     mixed_listing = await world.memory.get(_mixed_listing(asker))
     blobs = [
         _everything_text(response),
+        _everything_text(past),
         _everything_text(mixed),
+        _everything_text(mixed_past),
         json.dumps(mixed_listing.model_dump(mode="json")),
         "\n".join(fixture.decider.prompts),
     ]
@@ -1184,7 +1235,12 @@ async def test_include_groups_never_reads_a_forgotten_message(tmp_path: Path) ->
             in_buffer = await world.memory.search(
                 _mixed(asker, filters={"session_id": "s_trip"})
             )
-            blob = _everything_text(found) + _everything_text(in_buffer)
+            past = await world.memory.search(_mixed(asker, include_past=True))
+            blob = (
+                _everything_text(found)
+                + _everything_text(in_buffer)
+                + _everything_text(past)
+            )
             seen = "\n".join(model.decider_prompts)
             assert KEPT_SAID in blob, asker  # the rest is still remembered
             for secret in (SECRET_SAID, SECRET_BUFFERED):
@@ -1304,8 +1360,19 @@ async def test_a_forgotten_message_reaches_no_version_and_no_live_row(
                               asker_id=asker, query="locker code plan marker",
                               top_k=20)
             )  # fmt: skip
-            blob = _everything_text(found) + await _versions_read_by(
-                world, "trip", asker, *forgot.episodes
+            past = await world.memory.search(
+                SearchRequest(app_id=APP, project_id=PROJECT, group_id="trip",
+                              asker_id=asker, query="locker code plan marker",
+                              top_k=20, include_past=True)
+            )  # fmt: skip
+            mixed_past = await world.memory.search(
+                _mixed(asker, query="locker code plan marker", include_past=True)
+            )
+            blob = (
+                _everything_text(found)
+                + _everything_text(past)
+                + _everything_text(mixed_past)
+                + await _versions_read_by(world, "trip", asker, *forgot.episodes)
             )
             assert KEPT_SAID in blob, asker
             assert SECRET_SAID not in blob, asker
@@ -1355,9 +1422,17 @@ async def test_an_implicit_groups_forgotten_message_is_read_by_none(
             model.decider_prompts.clear()
             group = await world.memory.search(_people(group_id=pair, asker_id=person))
             mixed = await world.memory.search(_mixed(person, query="cabin marker"))
+            past = await world.memory.search(
+                _people(group_id=pair, asker_id=person, include_past=True)
+            )
+            mixed_past = await world.memory.search(
+                _mixed(person, query="cabin marker", include_past=True)
+            )
             blob = (
                 _everything_text(group)
                 + _everything_text(mixed)
+                + _everything_text(past)
+                + _everything_text(mixed_past)
                 + await _versions_read_by(world, pair, person, *forgot.episodes)
             )
             assert LATER_PAIR_SAID in blob, person  # Bob's words stay
@@ -1509,9 +1584,20 @@ async def test_two_people_read_their_own_copies_and_a_stranger_nothing(
         model.decider_prompts.clear()
         with pytest.raises(ForbiddenError):
             await world.memory.search(_people(user_id="u_ann", asker_id="u_zoe"))
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(
+                _people(user_id="u_ann", asker_id="u_zoe", include_past=True)
+            )
         stranger = await world.memory.search(_mixed("u_zoe", query="cabin marker"))
+        stranger_past = await world.memory.search(
+            _mixed("u_zoe", query="cabin marker", include_past=True)
+        )
         listed = await world.memory.get(_mixed_listing("u_zoe"))
-        blob = _everything_text(stranger) + json.dumps(listed.model_dump(mode="json"))
+        blob = (
+            _everything_text(stranger)
+            + _everything_text(stranger_past)
+            + json.dumps(listed.model_dump(mode="json"))
+        )
         assert PAIR_SAID not in blob
         assert PAIR_SAID not in "\n".join(model.decider_prompts)
 

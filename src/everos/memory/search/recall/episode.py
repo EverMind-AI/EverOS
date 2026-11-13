@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import ClassVar
 
 from everos.memory.models import Episode
-from everos.memory.ports import EpisodeIndex, Filter
+from everos.memory.ports import EpisodeIndex, Filter, Stored
 
 from .base import (
     RecallerDeps,
     RecallResult,
+    find_entries,
     from_hits,
     stable_sparse_top,
 )
@@ -63,3 +64,13 @@ class EpisodeRecaller:
     async def has_any(self, where: Filter) -> bool:
         """Whether any episode matches ``where`` (one row is read at most)."""
         return bool(await self._index.find(where, limit=1))
+
+    async def find_entries(
+        self, where: Filter, entries: Mapping[str, Collection[str]]
+    ) -> list[Stored[Episode]]:
+        """The episodes ``entries`` names (owner id -> entry ids) in ``where``.
+
+        What a search for the past reads the version that replaced a
+        returned one from; ``where`` is its read scope.
+        """
+        return await find_entries(self._index, where, entries)

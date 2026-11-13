@@ -286,11 +286,18 @@ class MemoryRef:
 
 @dataclass(frozen=True)
 class Stored[T]:
-    """A domain object that has been persisted, with its identity and scope."""
+    """A domain object that has been persisted, with its identity and scope.
+
+    ``mark`` is the record's version state as an index read found it (its
+    ``deprecated_by``): ``None`` for a current record, the entry id of the
+    version that replaced it, or ``forgotten``. Only a read that asks for past
+    versions can meet anything but ``None``; a markdown read leaves it unset.
+    """
 
     ref: MemoryRef
     scope: Scope
     item: T
+    mark: str | None = None
 
 
 @dataclass(frozen=True)

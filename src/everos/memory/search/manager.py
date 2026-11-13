@@ -37,10 +37,20 @@ recall for every sub-query; a deployment without an embedder runs BM25 alone
 (keyword recall), and the loop, the decider and the ranking are otherwise the
 same.
 
+Two switches widen or reweigh the ranking, both off by default
+(:mod:`.forgetting`): ``[search] forgetting_curve`` multiplies every fused
+score by the memory's retention and hands the decider's own core to the
+reinforcement sink (a read-only server has none); a request's
+``include_past`` widens the read scope to the versions a default search
+never shows (:meth:`AccessPolicy.past_predicate`), scores them down by
+``[search] past_state_factor`` and says every returned record's version
+state (:mod:`.past`). Neither adds a model call.
+
 The manager never writes memory; it reads the derived index and markdown,
 and asks the picture store for scaled copies (a disposable cache under
 ``figures/.cache/``): the decider's thumbnails, and the answering model's copy
-every returned picture names as ``model_path``.
+every returned picture names as ``model_path``. Strengths are written by the
+reinforcement sink, after the response, never here.
 """
 
 from __future__ import annotations
@@ -61,7 +71,7 @@ from everos.core.observability.tracing import (
     emit_recall_scores,
     memory_span,
 )
-from everos.core.utils.datetime import to_display_tz
+from everos.core.utils.datetime import get_utc_now, to_display_tz, to_timestamp_ms
 from everos.memory.access import (
     AccessPolicy,
     ReadScope,
@@ -70,17 +80,19 @@ from everos.memory.access import (
 )
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.groups import named_members, roster_names
-from everos.memory.models import CanonicalMessage, ImageMemory, MemCell
+from everos.memory.models import CanonicalMessage, Episode, ImageMemory, MemCell
 from everos.memory.ports import (
     EpisodeIndex,
     Filter,
     GroupProfileIndex,
     MemcellStore,
     MessageForgetStore,
+    ReinforcementSink,
     SceneStore,
     SessionBufferStore,
     SessionKey,
     Stored,
+    StrengthStore,
     all_of,
     any_of,
     eq,
@@ -106,6 +118,7 @@ from .dto import (
 )
 from .expansion import GroupLinks
 from .filters import compile_scoped
+from .forgetting import Curve, CurveRanking, reinforcements
 from .group_profile import visible_profile, visible_profile_items
 from .llm_multiround import (
     Coverage,
@@ -113,6 +126,7 @@ from .llm_multiround import (
     RoundDecider,
     run_llm_multiround,
 )
+from .past import with_versions
 from .shaper import attach_referenced_pictures, name_copies
 
 if TYPE_CHECKING:
@@ -149,14 +163,18 @@ class _Ranked(NamedTuple):
 
     ``core`` is the decider's core as result ids; the constraint block of a
     group search is built from it. ``failures`` are the rounds the decider
-    did not decide, which the response reports as ``degraded``.
+    did not decide, which the response reports as ``degraded``. ``records``
+    are the stored records behind every candidate the loop saw, ``chosen``
+    the core the decider chose itself (what the forgetting curve reinforces).
     """
 
     episodes: list[SearchEpisodeItem]
     images: list[SearchImageItem]
     coverage: Coverage
     core: list[str]
-    failures: tuple[DeciderFailure, ...] = ()
+    failures: tuple[DeciderFailure, ...]
+    records: Mapping[str, Stored[Episode] | Stored[ImageMemory]]
+    chosen: tuple[str, ...]
 
 
 def _degraded(failures: Sequence[DeciderFailure]) -> list[SearchDegradation]:
@@ -198,8 +216,15 @@ class SearchManager:
         scenes: SceneStore | None = None,
         group_search: GroupSearchSettings | None = None,
         decider_status: DeciderStatus | None = None,
+        strengths: StrengthStore | None = None,
+        reinforce: ReinforcementSink | None = None,
     ) -> None:
         self._access = access
+        # The forgetting curve ([search] forgetting_curve): where a search
+        # reads strengths, and where it hands the decider's own core to be
+        # reinforced -- ``None`` on a read-only server, which never reinforces.
+        self._strengths = strengths
+        self._reinforce = reinforce
         # Counts the built-in decider's rounds for GET /health; an injected
         # policy's rounds are not the configured decider's and are not counted.
         self._decider_status = decider_status
@@ -281,7 +306,9 @@ class SearchManager:
             # error (422).
             scope = await self._read_scope(req, asserted_asker)
             groups = await self._member_groups(req, scope)
-            where = compile_scoped(req.filters, _pooled(scope, groups))
+            owners = await self._owners(req, scope, groups)
+            where = compile_scoped(req.filters, owners)
+            now = self._now(req)
             ranked, profiles, unprocessed, group_profile = await asyncio.gather(
                 self._search_episodes(
                     req,
@@ -289,13 +316,25 @@ class SearchManager:
                     question_image_ids=question_image_ids,
                     scope=scope,
                     groups=groups,
+                    now=now,
                 ),
                 self._profiles(req, scope, groups),
                 self._load_unprocessed(req, scope, groups=groups),
                 self._attach_group_profile(req, scope, groups),
             )
+            self._reinforce_core(ranked, at=now)
             await self._resolve_episode_pictures(ranked, scope, groups)
             images = await self._name_copies(ranked.episodes, ranked.images)
+            if req.include_past:
+                episodes, images = await with_versions(
+                    owners,
+                    ranked.records,
+                    ranked.episodes,
+                    images,
+                    episode_reader=self._ep,
+                    image_reader=self._images,
+                )
+                ranked = ranked._replace(episodes=episodes)
             data = await self._data(
                 req,
                 scope,
@@ -483,13 +522,29 @@ class SearchManager:
         """
         scope = await self._read_scope(req, None)
         groups = await self._member_groups(req, scope)
-        where = compile_scoped(req.filters, _pooled(scope, groups))
+        owners = await self._owners(req, scope, groups)
+        where = compile_scoped(req.filters, owners)
         ranked = await self._search_episodes(
-            req, where, decider=decider, scope=scope, groups=groups
+            req,
+            where,
+            decider=decider,
+            scope=scope,
+            groups=groups,
+            now=self._now(req),
         )
+        episodes = ranked.episodes
+        if req.include_past:
+            episodes, _images = await with_versions(
+                owners,
+                ranked.records,
+                episodes,
+                [],
+                episode_reader=self._ep,
+                image_reader=self._images,
+            )
         if not req.include_groups:
-            return ranked.episodes
-        return [_owned_episode(e) for e in ranked.episodes]
+            return episodes
+        return [_owned_episode(e) for e in episodes]
 
     async def _search_episodes(
         self,
@@ -500,6 +555,7 @@ class SearchManager:
         groups: ReadScope | None,
         decider: RoundDecider | None = None,
         question_image_ids: Sequence[str] = (),
+        now: int,
     ) -> _Ranked:
         """The episodes and the pictures ranked with them, by multi-round.
 
@@ -507,7 +563,8 @@ class SearchManager:
         8.3) when ``[search] expansion`` is on. ``groups`` are the groups a
         personal search also covers (``include_groups``): their roster names
         the asker in the question; ``where`` already holds them. A personal
-        search's question is the one asked.
+        search's question is the one asked. ``now`` is the time the
+        forgetting curve measures ages up to.
         """
         expander = self._expander(scope, where)
         result = await run_llm_multiround(
@@ -532,6 +589,7 @@ class SearchManager:
             ),
             expander=expander,
             link_slots=self._group_search.link_slots if expander else 0,
+            ranking=self._ranking(req, now),
         )
         if decider is None and self._decider_status is not None:
             self._decider_status.record(result.rounds, result.failures)
@@ -541,7 +599,58 @@ class SearchManager:
             result.coverage,
             list(result.core),
             result.failures,
+            result.records,
+            result.chosen if decider is None else (),
         )
+
+    # ── Forgetting curve and the past (docs/configuration.md, [search]) ──
+
+    async def _owners(
+        self, req: SearchRequest, scope: ReadScope, groups: ReadScope | None
+    ) -> Filter:
+        """The owner part of every recall's ``where``.
+
+        The read scope's predicate (ORed with the groups a personal search
+        also covers); for a search with ``include_past``, the access policy's
+        predicate of the past for each, which never shows the asker more than
+        their own history does.
+        """
+        if not req.include_past:
+            return _pooled(scope, groups)
+        past = await self._access.past_predicate(scope)
+        if groups is None:
+            return past
+        return any_of(past, await self._access.past_predicate(groups))
+
+    @staticmethod
+    def _now(req: SearchRequest) -> int:
+        """When the question is asked (``asked_at``, else now), epoch ms."""
+        asked = req.asked_at_ms
+        return asked if asked is not None else to_timestamp_ms(get_utc_now())
+
+    def _ranking(self, req: SearchRequest, now: int) -> CurveRanking | None:
+        """The loop's reweighing: the curve, a past version's state; ``None``
+        (rank exactly as before) unless the curve is on or the past asked for."""
+        settings = self._group_search
+        if not settings.forgetting_curve and not req.include_past:
+            return None
+        return CurveRanking(
+            Curve.of(settings),
+            now=now,
+            retain=settings.forgetting_curve,
+            store=self._strengths,
+        )
+
+    def _reinforce_core(self, ranked: _Ranked, *, at: int) -> None:
+        """Hand the decider's own core to the reinforcement sink (if any).
+
+        A round's fallback core is the ranking's, not the decider's, and an
+        injected decider's search (an RL environment) reinforces nothing.
+        """
+        if self._reinforce is None or not ranked.chosen:
+            return
+        used = [ranked.records[c] for c in ranked.chosen if c in ranked.records]
+        self._reinforce.reinforce(reinforcements(used, at=at))
 
     async def _resolve_episode_pictures(
         self, ranked: _Ranked, scope: ReadScope, groups: ReadScope | None
@@ -746,7 +855,13 @@ class SearchManager:
         ):
             return []
         core_ids = set(ranked.core)
-        core = [r for r in (*ranked.episodes, *images) if r.id in core_ids]
+        # A search for the past may keep an old version as core; what an
+        # answer must respect is read from current records only.
+        core = [
+            r
+            for r in (*ranked.episodes, *images)
+            if r.id in core_ids and r.status in (None, "current")
+        ]
         constraints, cells = await build_constraints(
             scope=scope,
             core=core,

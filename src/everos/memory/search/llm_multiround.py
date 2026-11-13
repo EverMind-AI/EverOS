@@ -92,6 +92,8 @@ if TYPE_CHECKING:
     from everos.memory.search.recall.episode import EpisodeRecaller
     from everos.memory.search.recall.image_memory import ImageMemoryRecaller
 
+    from .forgetting import CurveRanking
+
 
 # ── Retrieval hyperparameters (per-sub-query RRF blocks) ──────────────────────
 # Each round fuses every current sub-query's BM25+vector recall with RRF
@@ -267,6 +269,10 @@ class MultiroundResult(NamedTuple):
         rounds: Rounds the decider was asked to decide.
         failures: The rounds it did not decide (:class:`DeciderFailure`), in
             order; empty when every round was decided.
+        chosen: The core the decider chose itself, in ``core`` order: the
+            core of a round that fell back (``[decider] fallback_core``) is
+            the ranking's, not the decider's, and is left out. What the
+            forgetting curve reinforces.
     """
 
     episodes: list[SearchEpisodeItem]
@@ -276,6 +282,7 @@ class MultiroundResult(NamedTuple):
     records: dict[str, Stored[Episode] | Stored[ImageMemory]]
     rounds: int = 0
     failures: tuple[DeciderFailure, ...] = ()
+    chosen: tuple[str, ...] = ()
 
 
 @runtime_checkable
@@ -1219,6 +1226,7 @@ async def run_llm_multiround(
     visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
     expander: LinkExpander | None = None,
     link_slots: int = 0,
+    ranking: CurveRanking | None = None,
 ) -> MultiroundResult:
     """The multi-round loop, with what a group search needs besides the ranking.
 
@@ -1227,6 +1235,8 @@ async def run_llm_multiround(
     ``expander`` and ``link_slots`` above 0, each round's new core is followed
     along its stored links and at most ``link_slots`` linked records join the
     next round (section 8.3); without one the loop is exactly the plain one.
+    With a ``ranking`` (the forgetting curve, a search for the past), every
+    fused block is rescored by it before it is cut.
     """
     return await _search_episodes_subq(
         query,
@@ -1247,6 +1257,7 @@ async def run_llm_multiround(
         visual_embed_query_fn=visual_embed_query_fn,
         expander=expander,
         link_slots=link_slots,
+        ranking=ranking,
     )
 
 
@@ -1585,6 +1596,7 @@ async def _search_episodes_subq(
     visual_embed_query_fn: Callable[[str], Awaitable[list[float]]] | None = None,
     expander: LinkExpander | None = None,
     link_slots: int = 0,
+    ranking: CurveRanking | None = None,
 ) -> MultiroundResult:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
@@ -1611,6 +1623,12 @@ async def _search_episodes_subq(
     labelled with the sub-query that surfaced their anchor, rendered like any
     candidate, so the decider's input format does not change. A linked record
     already in the round, or already core, is not shown twice.
+
+    The forgetting curve (:mod:`.forgetting`): with a ``ranking``, each
+    sub-query's fused list is rescored -- age and version state -- and sorted
+    again before it is cut to the block, so the block, the guarantee and the
+    final fill all see the weighted scores. Nothing is dropped by it, and the
+    decider's input format does not change.
     """
     # Honour an injected decider. The parameter and the RoundDecider protocol were
     # written for this ("a Phase-2 policy implements this same signature so the loop
@@ -1718,12 +1736,32 @@ async def _search_episodes_subq(
             # label; later rounds label each block with its own sub-query text.
             label = "original question" if round_idx == 0 else q
             fused = rrf(r_sparse, r_dense, k=tune.rrf_k)  # ranked by RRF score
+            recalled: dict[str, Stored[Episode] | Stored[ImageMemory]] = {}
+            if ranking is not None:
+                recalled = {**images_by_id, **episodes_by_id}
+                fused = await _reweigh(fused, ranking, recalled)
             block = fused[:block_topk]
             blocks.append((label, block))
             if label not in subqueries_seen:
                 subqueries_seen.append(label)
             sparse_ids = {c.id for c in r_sparse}
             dense_ids = {c.id for c in r_dense}
+            ranked_meta: list[dict[str, object]] = [
+                {
+                    "id": c.id,
+                    "session_id": c.metadata.get("session_id"),
+                    "rrf_score": c.score,
+                    "rank": r,
+                    "in_sparse": c.id in sparse_ids,
+                    "in_dense": c.id in dense_ids,
+                }
+                for r, c in enumerate(block)
+            ]
+            if ranking is not None:
+                # What the curve did to each kept candidate; ``rrf_score`` is
+                # then the weighted score it was ranked by.
+                for entry, c in zip(ranked_meta, block, strict=True):
+                    entry["curve"] = ranking.describe(recalled.get(c.id))
             for c in block:
                 subq_hits.setdefault(c.id, {})[label] = c.score
                 cur = cand_by_id.get(c.id)
@@ -1742,17 +1780,7 @@ async def _search_episodes_subq(
                     "sparse": _trace_cand_pool(r_sparse),
                     "dense": _trace_cand_pool(r_dense),
                     "visual": _trace_cand_pool(image_visual.candidates),
-                    "rrf_ranked": [
-                        {
-                            "id": c.id,
-                            "session_id": c.metadata.get("session_id"),
-                            "rrf_score": c.score,
-                            "rank": r,
-                            "in_sparse": c.id in sparse_ids,
-                            "in_dense": c.id in dense_ids,
-                        }
-                        for r, c in enumerate(block)
-                    ],
+                    "rrf_ranked": ranked_meta,
                 }
             )
         if round_idx == 0 and not any(b for _, b in blocks):
@@ -1905,9 +1933,18 @@ async def _search_episodes_subq(
         **images_by_id,
         **episodes_by_id,
     }
+    fell_back = {f.round_idx for f in failures if f.outcome == "fallback"}
+    chosen = tuple(cid for cid in core_order if core_round[cid] not in fell_back)
     if not cand_by_id and not core_by_id:
         return MultiroundResult(
-            [], [], coverage, list(core_order), records, rounds, tuple(failures)
+            [],
+            [],
+            coverage,
+            list(core_order),
+            records,
+            rounds,
+            tuple(failures),
+            chosen,
         )
     episodes, images = _finalize_injection(
         owner_id=owner_id,
@@ -1935,7 +1972,30 @@ async def _search_episodes_subq(
         records,
         rounds,
         tuple(failures),
+        chosen,
     )
+
+
+async def _reweigh(
+    fused: Sequence[Candidate],
+    ranking: CurveRanking,
+    records: Mapping[str, Stored[Episode] | Stored[ImageMemory]],
+) -> list[Candidate]:
+    """``fused`` rescored by the forgetting curve and sorted again, best first.
+
+    Each score is multiplied by the ranking's factor for the candidate's
+    record (1 without one); candidates of equal score keep their fused order.
+    None is dropped.
+    """
+    await ranking.load(records[c.id] for c in fused if c.id in records)
+    scored = sorted(
+        (
+            (c.score * ranking.factor(records.get(c.id)), position, c)
+            for position, c in enumerate(fused)
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    return [c.model_copy(update={"score": score}) for score, _, c in scored]
 
 
 def _join_linked(

@@ -17,6 +17,8 @@ from .md_change_state import MdChangeStateRepo as MdChangeStateRepo
 from .md_change_state import QueueSummary as QueueSummary
 from .memcell import MemcellRepo as MemcellRepo
 from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
+from .memory_strength import MemoryStrengthRepo as MemoryStrengthRepo
+from .memory_strength import StrengthRow as StrengthRow
 from .session_cut import SessionCutRepo as SessionCutRepo
 from .session_purge import SessionPurgeRepo as SessionPurgeRepo
 from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
@@ -31,10 +33,12 @@ __all__ = [
     "MdChangeStateRepo",
     "MemcellRepo",
     "MemorizeInboxRepo",
+    "MemoryStrengthRepo",
     "MessageForgetRepo",
     "QueueSummary",
     "SessionCutRepo",
     "SessionPurgeRepo",
+    "StrengthRow",
     "UnprocessedBufferRepo",
     "mint_forget_id",
 ]

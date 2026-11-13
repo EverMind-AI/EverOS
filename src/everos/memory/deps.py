@@ -46,6 +46,7 @@ from everos.memory.ports import (
     SceneStore,
     SessionBufferStore,
     SessionPurgeStore,
+    StrengthStore,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +77,9 @@ class Stores:
     group_messages: GroupMessageStore | None = None
     """Which messages each group holds (its dedupe ledger, section 5.2);
     ``None`` takes every message, as a build without the ledger does."""
+    strength: StrengthStore | None = None
+    """Each memory's strength under the forgetting curve (``[search]
+    forgetting_curve``); ``None`` reads every memory as never reinforced."""
 
 
 @dataclass(frozen=True)

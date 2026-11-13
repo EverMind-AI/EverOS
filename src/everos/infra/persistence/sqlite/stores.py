@@ -17,6 +17,7 @@ __all__ = [
     "SqliteMessageForgetStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
+    "SqliteStrengthStore",
 ]
 
 import datetime as dt
@@ -45,6 +46,8 @@ from everos.memory.ports import (
     PageResult,
     Scope,
     SessionKey,
+    Strength,
+    StrengthKey,
 )
 
 from ._repos import (
@@ -53,9 +56,11 @@ from ._repos import (
     GroupMessageRepo,
     MemcellRepo,
     MemorizeInboxRepo,
+    MemoryStrengthRepo,
     MessageForgetRepo,
     SessionCutRepo,
     SessionPurgeRepo,
+    StrengthRow,
     UnprocessedBufferRepo,
 )
 from ._tables import ForgetLog as ForgetLogRow
@@ -682,3 +687,59 @@ class SqliteGroupMessageStore:
         await self._repo.record(
             scope.app_id, scope.project_id, scope.owner_id, session.session_id, keys
         )
+
+
+class SqliteStrengthStore:
+    """:class:`~everos.memory.ports.StrengthStore` over ``memory_strength``.
+
+    One read per owner the keys name (a search spans one owner, or a user and
+    the user's groups); a write is one transaction.
+
+    Args:
+        repo: Repository of the ``memory_strength`` table.
+    """
+
+    def __init__(self, repo: MemoryStrengthRepo) -> None:
+        self._repo = repo
+
+    async def read(self, keys: Collection[StrengthKey]) -> dict[StrengthKey, Strength]:
+        by_owner: dict[tuple[str, str, str, str], set[str]] = {}
+        for key in keys:
+            owner = (key.app_id, key.project_id, key.owner_type, key.owner_id)
+            by_owner.setdefault(owner, set()).add(key.memory)
+        found: dict[StrengthKey, Strength] = {}
+        for owner, memories in sorted(by_owner.items()):
+            for row in await self._repo.read(owner, memories):
+                found[_strength_key(row)] = Strength(
+                    days=row.strength_days,
+                    reinforced_at=row.reinforced_at_ms,
+                    reinforcements=row.reinforcements,
+                )
+        return found
+
+    async def write(self, rows: Mapping[StrengthKey, Strength]) -> None:
+        await self._repo.write(
+            [
+                StrengthRow(
+                    app_id=key.app_id,
+                    project_id=key.project_id,
+                    owner_type=key.owner_type,
+                    owner_id=key.owner_id,
+                    memory_key=key.memory,
+                    strength_days=strength.days,
+                    reinforced_at_ms=strength.reinforced_at,
+                    reinforcements=strength.reinforcements,
+                )
+                for key, strength in sorted(rows.items())
+            ]
+        )
+
+
+def _strength_key(row: StrengthRow) -> StrengthKey:
+    return StrengthKey(
+        app_id=row.app_id,
+        project_id=row.project_id,
+        owner_type=cast(OwnerType, row.owner_type),
+        owner_id=row.owner_id,
+        memory=row.memory_key,
+    )

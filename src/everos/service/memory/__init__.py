@@ -8,11 +8,12 @@ request to the ``async_mode`` queue.
 The add cycle lives in ``_memorize`` (lock, cut, extract, publish);
 ``_extraction`` keeps an extraction alive past a cancelled request, and
 ``_queue`` is the ``async_mode`` worker (steps in ``_queue_steps``, data in
-``_queue_models``).
+``_queue_models``); ``_strength`` writes what the forgetting curve's reads
+reinforce, when ``[search] forgetting_curve`` is on.
 Everything is injected by :func:`everos.service.build_application`; the
-service owns only those two background collaborators (extraction supervisor,
-queue worker) and their lifecycle (:meth:`~MemoryService.start` /
-:meth:`~MemoryService.aclose`).
+service owns only those background collaborators (extraction supervisor,
+queue worker, strength writer) and their lifecycle
+(:meth:`~MemoryService.start` / :meth:`~MemoryService.aclose`).
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ __all__ = [
     "RevisionResult",
     "RosterChangeResult",
     "RosterEventInput",
+    "StrengthWriter",
     "TaskItem",
     "TaskPage",
     "UndoResult",
@@ -106,6 +108,7 @@ from ._queue_models import TaskPage as TaskPage
 from ._queue_models import to_task_item as to_task_item
 from ._revise import RevisionManager
 from ._revise import RevisionResult as RevisionResult
+from ._strength import StrengthWriter as StrengthWriter
 from ._update import MemoryChanges as MemoryChanges
 from ._update import UpdateManager
 from ._update import UpdateResult as UpdateResult
@@ -162,6 +165,8 @@ class MemoryService:
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
         scene_narrator: Writes a group's scene again when a forget changed
             its episodes; ``None`` marks it forgotten instead.
+        strength_writer: Writes what the forgetting curve's reads reinforce;
+            ``None`` (the curve off, a read-only server) writes nothing.
     """
 
     def __init__(
@@ -182,13 +187,16 @@ class MemoryService:
         rosters: RosterManager | None = None,
         access: AccessPolicy | None = None,
         scene_narrator: SceneNarrator | None = None,
+        strength_writer: StrengthWriter | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._indexes = indexes
+        self._strength_writer = strength_writer
         self._access = access or AccessPolicy(
             stores.groups,
             projects=stores.project_links,
             forgotten=stores.message_forget,
+            forget_log=stores.forget_log,
         )
         self._get_manager = get_manager
         self._extractions = ExtractionSupervisor()
@@ -256,15 +264,20 @@ class MemoryService:
     # ── lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start delivering the ``async_mode`` queue."""
+        """Start delivering the ``async_mode`` queue (and writing strengths)."""
         if not self._queue.accepting:
             logger.info("memorize_queue_not_accepting_async")
         await self._queue.start()
+        if self._strength_writer is not None:
+            await self._strength_writer.start()
 
     async def aclose(self) -> None:
-        """Stop the queue, then wait (bounded) for extractions still running."""
+        """Stop the queue, then wait (bounded) for extractions still running
+        and for the strengths still queued."""
         await self._queue.stop()
         await self._extractions.shutdown(_DRAIN_TIMEOUT_SECONDS)
+        if self._strength_writer is not None:
+            await self._strength_writer.aclose()
 
     # ── read use cases ─────────────────────────────────────────────────────
 

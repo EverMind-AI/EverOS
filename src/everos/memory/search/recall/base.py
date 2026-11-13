@@ -22,14 +22,22 @@ index returns tied hits in.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from typing import Any, Final, Literal
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Final, Literal, Protocol
 
 from everalgo.types import Candidate
 from pydantic import BaseModel
 
 from everos.component.tokenizer import Tokenizer
-from everos.memory.ports import SearchHit, Stored
+from everos.memory.ports import (
+    Filter,
+    SearchHit,
+    Stored,
+    all_of,
+    any_of,
+    eq,
+    one_of,
+)
 
 type CandidateSource = Literal["keyword", "vector", "other"]
 
@@ -99,6 +107,32 @@ def from_hits[T: BaseModel](
         candidates.append(to_candidate(hit.stored, score=hit.score, source=source))
         stored_by_id[hit.stored.ref.id] = hit.stored
     return RecallResult(candidates=candidates, stored_by_id=stored_by_id)
+
+
+class _Findable[T](Protocol):
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[T]]: ...
+
+
+async def find_entries[T](
+    index: _Findable[T], where: Filter, entries: Mapping[str, Collection[str]]
+) -> list[Stored[T]]:
+    """The records ``entries`` names (owner id -> entry ids), inside ``where``.
+
+    One index read for every owner; an owner with no entry adds nothing, and
+    so does a call with none at all.
+    """
+    clauses = [
+        all_of(eq("owner_id", owner), one_of("entry_id", sorted(ids)))
+        for owner, ids in sorted(entries.items())
+        if ids
+    ]
+    if not clauses:
+        return []
+    wanted = sum(len(ids) for ids in entries.values())
+    hits = await index.find(all_of(where, any_of(*clauses)), limit=wanted)
+    return [hit.stored for hit in hits]
 
 
 BM25_TIE_DECIMALS: Final = 5

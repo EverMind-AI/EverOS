@@ -33,6 +33,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from everos.core.utils.datetime import from_iso_format, to_timestamp_ms
+
 
 class SearchMethod(StrEnum):
     """The search method. Multi-round retrieval is the only one.
@@ -210,6 +212,42 @@ class SearchRequest(BaseModel):
         ),
     )
     filters: FilterNode | None = None
+    include_past: bool = False
+    """Ask about the past (off by default). The search also ranks the
+    versions a default search never shows: in the user's own memory every
+    superseded version and every forgotten memory; in a group, the
+    superseded versions inside the asker's windows -- never a forgotten
+    record, nor one a live forget retired. Their score is multiplied by
+    ``[search] past_state_factor``, and every returned episode and picture
+    then says its ``status`` (and, once replaced, ``superseded_by`` and
+    ``valid_until``). No model call; without it a request is answered
+    exactly as before."""
+    asked_at: int | str | None = None
+    """When the question is asked: epoch ms or an ISO-8601 time (one without
+    an offset is read in the display timezone). The forgetting curve
+    (``[search] forgetting_curve``) measures each memory's age up to it, and a
+    reinforcement is dated at it. Unset: now. Nothing else reads it."""
+
+    @field_validator("asked_at", mode="before")
+    @classmethod
+    def _readable_time(cls, value: Any) -> Any:
+        """Epoch ms or an ISO-8601 time; a boolean is neither (422)."""
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, int | str):
+            raise ValueError("asked_at must be epoch ms or an ISO-8601 time")
+        try:
+            from_iso_format(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("asked_at must be epoch ms or an ISO-8601 time") from exc
+        return value
+
+    @property
+    def asked_at_ms(self) -> int | None:
+        """``asked_at`` in epoch ms; ``None`` when unset."""
+        if self.asked_at is None:
+            return None
+        return to_timestamp_ms(from_iso_format(self.asked_at))
 
     @model_validator(mode="before")
     @classmethod
@@ -385,6 +423,24 @@ class SearchEpisodeItem(BaseModel):
     score: float
     audience: AudienceItem | None = None
     """Who heard it, on a group episode (section 8.6); unset otherwise."""
+    status: Literal["current", "superseded", "forgotten"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """In a search with ``include_past``: ``current``, ``superseded`` (a later
+    version replaced it) or ``forgotten``. Absent from every other response,
+    which stays byte for byte as it was."""
+    superseded_by: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """In a search with ``include_past``, on a superseded version the asker
+    can see the successor of: the id of the version that replaced it."""
+    valid_until: _dt.datetime | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """With ``superseded_by``: the time of the version that replaced it (a
+    scene's next version: its newest member's; a person's edit keeps the
+    memory's time). The version said what it says from ``timestamp`` until
+    then."""
 
 
 class SearchImageItem(BaseModel):
@@ -465,6 +521,17 @@ class SearchImageItem(BaseModel):
     height: int = 0
     """Pixel height of the original."""
     status: Literal["current", "superseded", "forgotten"] = "current"
+    """``current`` unless a search with ``include_past`` brought back an older
+    or forgotten version."""
+    superseded_by: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """As on an episode: in a search with ``include_past``, the version that
+    replaced this one, when the asker can see it."""
+    valid_until: _dt.datetime | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """With ``superseded_by``: the time of the version that replaced it."""
     label: str = ""
     """``img-N`` the referring episode's body uses, when this item is attached
     to an episode rather than ranked. Empty for a ranked result: a picture

@@ -40,13 +40,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from everos.memory.extract.pipeline import profile_items
-from everos.memory.ports import SessionKey
+from everos.memory.ports import UNDO_FORMAT, SessionKey, retired_in
 
 if TYPE_CHECKING:
     from everos.memory.deps import Stores
     from everos.memory.ports import ForgetEntry, Scope
 
-FORMAT = 2
+FORMAT = UNDO_FORMAT
 """``undo_json["format"]`` of the one log format."""
 
 
@@ -289,7 +289,5 @@ class Logs:
         """The entry ids a group's live forgets keep out of its history."""
         found: set[str] = set()
         for entry in await self.live(scope):
-            if is_current_format(entry):
-                for ids in ((entry.undo or {}).get("retired") or {}).values():
-                    found.update(str(i) for i in ids)
+            found |= retired_in(entry)
         return found

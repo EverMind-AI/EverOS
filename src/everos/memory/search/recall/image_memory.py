@@ -20,7 +20,7 @@ class to the previous behaviour exactly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import ClassVar
 
 from everos.memory.models import ImageMemory
@@ -32,7 +32,13 @@ from everos.memory.ports import (
     one_of,
 )
 
-from .base import RecallerDeps, RecallResult, from_hits, stable_sparse_top
+from .base import (
+    RecallerDeps,
+    RecallResult,
+    find_entries,
+    from_hits,
+    stable_sparse_top,
+)
 
 IMAGE_KIND = "image_memory"
 """``Candidate.metadata["kind"]`` stamped on every picture candidate.
@@ -119,6 +125,16 @@ class ImageMemoryRecaller:
             limit=max(len(image_ids) * 4, 1),
         )
         return [hit.stored for hit in hits]
+
+    async def find_entries(
+        self, where: Filter, entries: Mapping[str, Collection[str]]
+    ) -> list[Stored[ImageMemory]]:
+        """The picture memories ``entries`` names (owner id -> entry ids) in ``where``.
+
+        What a search for the past reads the version that replaced a
+        returned one from; ``where`` is its read scope.
+        """
+        return await find_entries(self._index, where, entries)
 
 
 def _tagged(result: RecallResult[ImageMemory]) -> RecallResult[ImageMemory]:

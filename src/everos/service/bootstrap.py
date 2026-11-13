@@ -98,7 +98,7 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 from everos.memory.access import AccessPolicy
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.deps import MemoryDeps
+from everos.memory.deps import MemoryDeps, Stores
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import ConversationPipeline
 from everos.memory.extract.scene import SceneNarrator
@@ -106,7 +106,7 @@ from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
 from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
-from everos.memory.search import DeciderStatus
+from everos.memory.search import Curve, DeciderStatus
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     EpisodeRecaller,
@@ -120,7 +120,7 @@ from everos.memory.strategies import (
     UPDATE_GROUP_PROFILE_SPEC,
 )
 from everos.service._warmup import warm_token_counter
-from everos.service.memory import MemoryService
+from everos.service.memory import MemoryService, StrengthWriter
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 
 logger = get_logger(__name__)
@@ -376,6 +376,7 @@ def build_application(
         stores.groups,
         projects=stores.project_links,
         forgotten=stores.message_forget,
+        forget_log=stores.forget_log,
     )
     # Searches count the decider's rounds into it; /health reports it.
     decider_status = _decider_status(settings, providers)
@@ -612,7 +613,9 @@ def _build_memory_service(
         stores.groups,
         projects=stores.project_links,
         forgotten=stores.message_forget,
+        forget_log=stores.forget_log,
     )
+    strengths = _strength_writer(settings, stores)
     return MemoryService(
         index_eraser=index_eraser,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
@@ -666,6 +669,8 @@ def _build_memory_service(
             scenes=stores.scene,
             group_search=settings.search,
             decider_status=decider_status,
+            strengths=stores.strength,
+            reinforce=strengths,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,
@@ -673,6 +678,7 @@ def _build_memory_service(
             access=access,
             image_index=indexes.image_memory,
             group_profile_index=indexes.group_profile,
+            reinforce=strengths,
         ),
         indexes=indexes,
         image_limits=_image_limits(settings),
@@ -682,7 +688,25 @@ def _build_memory_service(
             implicit_join=settings.groups.implicit_join,
         ),
         access=access,
+        strength_writer=strengths,
     )
+
+
+def _strength_writer(settings: Settings, stores: Stores) -> StrengthWriter | None:
+    """What writes the forgetting curve's reinforcements, when anything does.
+
+    Only with ``[search] forgetting_curve`` and ``reinforce`` on, and only on
+    a server that writes derived state: ``[cascade] enabled = false`` (the
+    evaluation harness's ``EVEROS_DISABLE_CASCADE=1``) is a read-only server,
+    and a read-only server never reinforces -- the same question asked twice
+    gets the same answer.
+    """
+    search = settings.search
+    if not (search.forgetting_curve and search.reinforce and settings.cascade.enabled):
+        return None
+    if stores.strength is None:
+        return None
+    return StrengthWriter(stores.strength, Curve.of(search))
 
 
 # ── start helpers ──────────────────────────────────────────────────────────

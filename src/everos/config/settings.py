@@ -1118,7 +1118,8 @@ class GroupsSettings(_Section):
 
 
 class GroupSearchSettings(_Section):
-    """``[search]`` -- what a group search adds around its ranking (sections 8.3-8.5).
+    """``[search]`` -- what a group search adds around its ranking (sections
+    8.3-8.5), and the forgetting curve every search can rank by.
 
     ``expansion``: after each round of a group's multi-round search, follow the
     stored links of the round's new core (decision chains, shared topics, the
@@ -1130,17 +1131,51 @@ class GroupSearchSettings(_Section):
     quotes. ``group_profile_cap``: current group-profile items attached per
     kind (topics, decisions, dissent, roles).
 
+    The forgetting curve (off by default; docs/configuration.md):
+    ``forgetting_curve`` multiplies each candidate's fused score by
+    ``1 - retention_weight + retention_weight * R``, ``R = 1 / (1 + days /
+    (9 * S))`` with ``S`` a memory's strength in days (``initial_strength_days``
+    until the decider keeps it as core or ``get`` returns it; each use
+    multiplies it by ``1 + reinforce_gain * (1 - R)``, at most
+    ``max_strength_days``). ``reinforce = false`` keeps every strength at its
+    initial value; a read-only server (``[cascade] enabled = false``) never
+    reinforces. ``past_state_factor`` multiplies the score of a superseded
+    version or a forgotten memory a search with ``include_past`` brings back.
+    No setting here adds a model call.
+
     Env binding:
         EVEROS_SEARCH__EXPANSION
         EVEROS_SEARCH__LINK_SLOTS
         EVEROS_SEARCH__CONSTRAINTS
         EVEROS_SEARCH__GROUP_PROFILE_CAP
+        EVEROS_SEARCH__FORGETTING_CURVE
+        EVEROS_SEARCH__INITIAL_STRENGTH_DAYS
+        EVEROS_SEARCH__MAX_STRENGTH_DAYS
+        EVEROS_SEARCH__REINFORCE_GAIN
+        EVEROS_SEARCH__RETENTION_WEIGHT
+        EVEROS_SEARCH__PAST_STATE_FACTOR
+        EVEROS_SEARCH__REINFORCE
     """
 
     expansion: bool = True
     link_slots: int = Field(default=5, ge=0)
     constraints: Literal["rules", "model"] = "rules"
     group_profile_cap: int = Field(default=20, ge=1)
+    forgetting_curve: bool = False
+    initial_strength_days: float = Field(default=30.0, gt=0)
+    max_strength_days: float = Field(default=3650.0, gt=0)
+    reinforce_gain: float = Field(default=2.0, ge=0)
+    retention_weight: float = Field(default=0.3, ge=0, le=1)
+    past_state_factor: float = Field(default=0.3, gt=0, le=1)
+    reinforce: bool = True
+
+    @model_validator(mode="after")
+    def _strength_cap_above_start(self) -> GroupSearchSettings:
+        if self.max_strength_days < self.initial_strength_days:
+            raise ValueError(
+                "[search] max_strength_days must be at least initial_strength_days"
+            )
+        return self
 
 
 class AccessSettings(_Section):
