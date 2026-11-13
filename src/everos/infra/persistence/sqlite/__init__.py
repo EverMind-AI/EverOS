@@ -37,6 +37,7 @@ from ._base import session_scope as session_scope
 from ._repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from ._repos import ClusterRepo as ClusterRepo
 from ._repos import ForgetLogRepo as ForgetLogRepo
+from ._repos import GroupMessageRepo as GroupMessageRepo
 from ._repos import GroupRosterRepo as GroupRosterRepo
 from ._repos import ImageOriginalRepo as ImageOriginalRepo
 from ._repos import MdChangeStateRepo as MdChangeStateRepo
@@ -50,6 +51,7 @@ from ._tables import ClusterMember as ClusterMember
 from ._tables import ConversationStatus as ConversationStatus
 from ._tables import ForgetLog as ForgetLog
 from ._tables import GroupMember as GroupMember
+from ._tables import GroupMessage as GroupMessage
 from ._tables import GroupMeta as GroupMeta
 from ._tables import ImageOriginal as ImageOriginal
 from ._tables import MdChangeState as MdChangeState
@@ -62,6 +64,7 @@ from .repositories import SqliteRepos as SqliteRepos
 from .sqlite_manager import SqliteDatabase as SqliteDatabase
 from .stores import SqliteClusterStore as SqliteClusterStore
 from .stores import SqliteForgetLogStore as SqliteForgetLogStore
+from .stores import SqliteGroupMessageStore as SqliteGroupMessageStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteMessageForgetStore as SqliteMessageForgetStore
@@ -79,6 +82,8 @@ __all__ = [
     "ForgetLog",
     "ForgetLogRepo",
     "GroupMember",
+    "GroupMessage",
+    "GroupMessageRepo",
     "GroupMeta",
     "GroupRosterRepo",
     "ImageOriginal",
@@ -99,6 +104,7 @@ __all__ = [
     "SqliteClusterStore",
     "SqliteDatabase",
     "SqliteForgetLogStore",
+    "SqliteGroupMessageStore",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",

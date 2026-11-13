@@ -73,8 +73,10 @@ class MessageItemDTO(BaseModel):
         min_length=1,
         max_length=128,
         description=(
-            "Optional client id of the message, unique within the session. "
-            "Kept for a group session (message-level forget, source quotes); "
+            "Optional client id of the message: the chat platform's id, unique "
+            "within the group. Kept for a group session (message-level forget, "
+            "source quotes) and what the group dedupes by -- a message whose "
+            "id the group already holds, in any of its sessions, is skipped; "
             "ignored on a one-to-one session."
         ),
     )
@@ -179,6 +181,14 @@ class AddResponseData(BaseModel):
         description=(
             "Non-text items that could not be read into text (a parser call "
             "that failed). The rest of their message is kept."
+        ),
+    )
+    duplicates: int | None = Field(
+        default=None,
+        description=(
+            "Messages of the batch its group already held, skipped: by "
+            "message_id when one was sent, else by sender, timestamp and "
+            "content. Present only when the batch had some."
         ),
     )
 

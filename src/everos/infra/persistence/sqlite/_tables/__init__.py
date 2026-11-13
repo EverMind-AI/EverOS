@@ -13,6 +13,7 @@ from .conversation_status import ConversationStatus as ConversationStatus
 from .forget_log import ForgetLog as ForgetLog
 from .forget_log import MessageForget as MessageForget
 from .group import GroupMember as GroupMember
+from .group import GroupMessage as GroupMessage
 from .group import GroupMeta as GroupMeta
 from .group import SessionBinding as SessionBinding
 from .image_original import ImageOriginal as ImageOriginal
@@ -27,6 +28,7 @@ __all__ = [
     "ConversationStatus",
     "ForgetLog",
     "GroupMember",
+    "GroupMessage",
     "GroupMeta",
     "ImageOriginal",
     "MdChangeState",

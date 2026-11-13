@@ -38,6 +38,7 @@ from .memory_root import MemoryRoot
 from .sqlite import (
     SqliteClusterStore,
     SqliteForgetLogStore,
+    SqliteGroupMessageStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
     SqliteMessageForgetStore,
@@ -74,6 +75,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         scene=MarkdownSceneStore(root),
         group_profile=MarkdownGroupProfileStore(root),
         message_forget=SqliteMessageForgetStore(sqlite.message_forget),
+        group_messages=SqliteGroupMessageStore(sqlite.group_message),
     )
 
 

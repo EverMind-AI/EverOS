@@ -13,6 +13,9 @@ said, and who joined since (section 8.6). :func:`without_forgotten` reads a
 segment without the messages a live forget names -- what every reader of a
 group segment does (section 9.4). :func:`verbatim_part` is the one test of
 whether a model's quote copies a group message (sections 7.5 and 8.4).
+:class:`GroupDedupe` decides which messages of a batch the group already
+holds (:func:`message_key`), so a group takes each message once (section
+5.2).
 
 External usage::
 
@@ -26,6 +29,9 @@ from __future__ import annotations
 
 from .audience import RecordAudience as RecordAudience
 from .audience import record_audience as record_audience
+from .dedupe import Claim as Claim
+from .dedupe import GroupDedupe as GroupDedupe
+from .dedupe import message_key as message_key
 from .forgotten import readable_segments as readable_segments
 from .forgotten import without_forgotten as without_forgotten
 from .implicit import IMPLICIT_GROUP_PREFIX as IMPLICIT_GROUP_PREFIX
@@ -49,6 +55,8 @@ __all__ = [
     "IMPLICIT_GROUP_PREFIX",
     "BatchAdmission",
     "BatchMessage",
+    "Claim",
+    "GroupDedupe",
     "GroupMetaUpdate",
     "NamedMember",
     "RecordAudience",
@@ -58,6 +66,7 @@ __all__ = [
     "implicit_group_id",
     "implicit_joins",
     "is_implicit_group",
+    "message_key",
     "named_members",
     "names_of",
     "normalise_space",

@@ -10,6 +10,7 @@ from .forget_log import ForgetLogRepo as ForgetLogRepo
 from .forget_log import MessageForgetRepo as MessageForgetRepo
 from .forget_log import mint_forget_id as mint_forget_id
 from .group import GroupRosterRepo as GroupRosterRepo
+from .group_message import GroupMessageRepo as GroupMessageRepo
 from .image_original import ImageOriginalRepo as ImageOriginalRepo
 from .md_change_state import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from .md_change_state import MdChangeStateRepo as MdChangeStateRepo
@@ -24,6 +25,7 @@ __all__ = [
     "MTIME_TOLERANCE_SECONDS",
     "ClusterRepo",
     "ForgetLogRepo",
+    "GroupMessageRepo",
     "GroupRosterRepo",
     "ImageOriginalRepo",
     "MdChangeStateRepo",

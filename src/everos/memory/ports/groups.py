@@ -17,13 +17,17 @@ Invariants a caller relies on:
 * A session is bound to at most one group (D18). :meth:`GroupStore.bind` never
   rebinds: it answers the group the session is already bound to, and the caller
   decides whether that is a conflict.
+
+:class:`GroupMessageStore` is the group's dedupe ledger (section 5.2): which
+messages the group already holds, by key, in whichever of its sessions. It is
+system state, not a mirror of ``group.md``.
 """
 
 from __future__ import annotations
 
-__all__ = ["GroupRecord", "GroupStore"]
+__all__ = ["GroupMessageStore", "GroupRecord", "GroupStore"]
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -90,5 +94,31 @@ class GroupStore(Protocol):
         Returns:
             The group the session is bound to afterwards: ``group_id``, or the
             group an earlier batch bound it to.
+        """
+        ...
+
+
+@runtime_checkable
+class GroupMessageStore(Protocol):
+    """Which messages each group already holds: its dedupe ledger.
+
+    One entry per message a group took, under the message's dedupe key
+    (:func:`everos.memory.groups.message_key`), naming the session that holds
+    it. An entry is recorded once its message is stored (buffered or cut into
+    a segment), and a forget never removes one: a forgotten message is still
+    held.
+    """
+
+    async def held(self, scope: Scope, keys: Collection[str]) -> dict[str, str]:
+        """Of ``keys``, those the group ``scope`` holds, each with its session."""
+        ...
+
+    async def record(
+        self, scope: Scope, session: SessionKey, keys: Collection[str]
+    ) -> None:
+        """Note that ``session`` holds ``keys`` for the group ``scope``.
+
+        A key the group held before moves to ``session`` (the message was
+        taken again after a ``/memory/delete`` released its old session).
         """
         ...

@@ -32,6 +32,12 @@ anything is written (docs/group-memory.md, sections 7.1 and 7.9):
 
 The conversation pipeline writes each cell's one episode in that space, so
 group content is never filed as a sender's personal memory.
+
+A group takes each message once (section 5.2): the batch's messages the group
+already holds -- in any of its sessions, forgotten or not -- are skipped
+before ingest (:class:`~everos.memory.groups.GroupDedupe`), and the rest are
+recorded as held once they are stored. Explicit groups and implicit groups of
+three or more people only; a one-to-one session never.
 """
 
 from __future__ import annotations
@@ -54,7 +60,13 @@ from everos.memory.access import authorize_delivery, resolve_identity
 from everos.memory.events import GroupFlushed
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
-from everos.memory.groups import BatchMessage, implicit_group_id, is_implicit_group
+from everos.memory.groups import (
+    BatchMessage,
+    Claim,
+    GroupDedupe,
+    implicit_group_id,
+    is_implicit_group,
+)
 from everos.memory.ports import Scope, SessionKey
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._groups import to_events
@@ -98,6 +110,8 @@ class Memorizer:
         rosters: Admits a batch into its group, declared or implicit; ``None``
             refuses ``group_id`` and makes no implicit group (a build without
             group memory).
+        dedupe: Which of a group batch's messages the group already holds;
+            ``None`` takes every message (a build without the ledger).
     """
 
     def __init__(
@@ -114,8 +128,10 @@ class Memorizer:
         image_store: ImageStore | None = None,
         vision: bool = True,
         rosters: RosterManager | None = None,
+        dedupe: GroupDedupe | None = None,
     ) -> None:
         self._rosters = rosters
+        self._dedupe = dedupe
         self._session_buffer = session_buffer
         self._raw_file_builder = raw_file_builder
         self._image_store = image_store
@@ -200,12 +216,13 @@ class Memorizer:
                     others=others,
                 )
                 elsewhere = await self._cut_buffers(app_id, project_id, held_others)
-                prepared = await self._cut(
+                prepared, claim = await self._cut(
                     payload,
                     is_final=is_final,
                     defer_extraction=defer_extraction,
                 )
             if isinstance(prepared, MemorizeResult) and not elsewhere:
+                await self._settle(claim, payload)
                 await self._announce_flush(payload, is_final=is_final)
                 return prepared
             # The cells exist, so their extraction must not die with a
@@ -218,7 +235,9 @@ class Memorizer:
                 for mid in b.memcell_ids
             ]
             extraction = self._extractions.supervise(
-                self._extract_cut(payload, prepared, elsewhere, is_final=is_final),
+                self._extract_cut(
+                    payload, prepared, elsewhere, claim=claim, is_final=is_final
+                ),
                 session_id=session_id,
                 memcell_ids=memcell_ids,
             )
@@ -385,14 +404,26 @@ class Memorizer:
         prepared: MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]],
         elsewhere: Sequence[tuple[IngestResult, BoundaryOutcome]],
         *,
+        claim: Claim | None = None,
         is_final: bool,
     ) -> MemorizeResult:
-        """Extract the batch's own cells, then those cut from the group's others."""
-        result = (
-            prepared
-            if isinstance(prepared, MemorizeResult)
-            else await self._extract(payload, *prepared)
-        )
+        """Extract the batch's own cells, then those cut from the group's others.
+
+        The batch's messages are recorded as held once its own cells are
+        extracted (``claim``); if that fails nothing is recorded, so a retry
+        of the batch is taken in full, as it was before the ledger existed.
+        """
+        try:
+            result = (
+                prepared
+                if isinstance(prepared, MemorizeResult)
+                else await self._extract(payload, *prepared)
+            )
+        except BaseException:
+            if claim is not None:
+                claim.release()
+            raise
+        await self._settle(claim, payload)
         for ingested, closed in elsewhere:
             await self._extract(
                 flush_payload(
@@ -438,13 +469,17 @@ class Memorizer:
         *,
         is_final: bool,
         defer_extraction: bool,
-    ) -> MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]]:
+    ) -> tuple[
+        MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]], Claim | None
+    ]:
         """Inner critical section — runs under the per-session lock.
 
         Returns the result when nothing reached the boundary, or the
         ingested batch and the boundary outcomes for :meth:`_extract` to run
         once the lock is released (two for a group batch whose roster change
-        cut the open buffer first, one otherwise).
+        cut the open buffer first, one otherwise) -- and, for a group batch,
+        the claim on its messages (section 5.2), which the caller settles
+        once the batch's own cells are extracted.
         """
         session = SessionKey(
             app_id=payload.get("app_id") or "default",
@@ -456,6 +491,7 @@ class Memorizer:
         if group_id is None:
             group_id, buffered = await self._people_of(payload, session)
         cut_first: list[BoundaryOutcome] = []
+        claim: Claim | None = None
         if group_id is not None:
             payload = {**payload, "group_id": group_id}
             cut_first = await self._admit_group_batch(
@@ -465,12 +501,38 @@ class Memorizer:
                 buffered=buffered,
                 is_final=is_final,
             )
+            claim = await self._claim(payload, session, group_id)
+        try:
+            stored = await self._store(
+                payload,
+                cut_first,
+                is_final=is_final,
+                defer_extraction=defer_extraction,
+                skip=claim.duplicates if claim is not None else frozenset(),
+            )
+        except BaseException:
+            if claim is not None:
+                claim.release()
+            raise
+        return stored, claim
+
+    async def _store(
+        self,
+        payload: dict[str, Any],
+        cut_first: list[BoundaryOutcome],
+        *,
+        is_final: bool,
+        defer_extraction: bool,
+        skip: frozenset[int] = frozenset(),
+    ) -> MemorizeResult | tuple[IngestResult, list[BoundaryOutcome]]:
+        """Ingest the batch (but the messages at ``skip``) and run its boundary."""
         ingested = await ingest_process(
             payload,
             multimodal_llm=self._multimodal_llm,
             raw_file_builder=self._raw_file_builder,
             image_store=self._image_store,
             vision=self._vision,
+            skip=skip,
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested)
@@ -485,6 +547,71 @@ class Memorizer:
             # Nothing went past the boundary stage — no pipelines to dispatch.
             return _result(payload, ingested, _status(boundary.status))
         return ingested, boundaries
+
+    async def _claim(
+        self, payload: dict[str, Any], session: SessionKey, group_id: str
+    ) -> Claim | None:
+        """Which of the batch's messages the group already holds (section 5.2).
+
+        ``None`` -- every message taken -- for a flush, a build without the
+        ledger and an implicit group of fewer than three people (two people
+        are no group). Skipped messages are logged.
+        """
+        messages = payload.get("messages") or []
+        if self._dedupe is None or not messages:
+            return None
+        scope = Scope(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            owner_id=group_id,
+            owner_type="group",
+        )
+        if is_implicit_group(group_id) and not await self._three_or_more(scope):
+            return None
+        claim = await self._dedupe.claim(scope, session, messages)
+        if claim.duplicates:
+            logger.info(
+                "memorize.duplicates_skipped",
+                app_id=session.app_id,
+                project_id=session.project_id,
+                group_id=group_id,
+                session_id=session.session_id,
+                skipped=len(claim.duplicates),
+                messages=len(messages),
+            )
+        return claim
+
+    async def _three_or_more(self, scope: Scope) -> bool:
+        """Whether an implicit group has three or more people (its identity)."""
+        assert self._rosters is not None
+        record = await self._rosters.store.get(scope)
+        people = (
+            {i.member_id for i in record.roster.intervals if i.kind == "human"}
+            if record is not None
+            else set()
+        )
+        return len(people) >= 3
+
+    async def _settle(self, claim: Claim | None, payload: dict[str, Any]) -> None:
+        """Record the batch's messages as held by its group, and drop the claim.
+
+        Called once the batch is stored and its own cells extracted. A failed
+        write is logged, not raised: the messages are kept, and a client told
+        to send them again would have them taken twice.
+        """
+        if claim is None:
+            return
+        try:
+            await claim.commit()
+        except Exception as exc:
+            logger.warning(
+                "memorize.duplicates_ledger_write_failed",
+                session_id=payload["session_id"],
+                group_id=payload.get("group_id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            claim.release()
 
     async def _group_of(
         self, payload: dict[str, Any], session: SessionKey
@@ -703,6 +830,7 @@ def _result(
         status=status,
         rejected=ingested.rejected_count,
         failed=ingested.failed_count,
+        duplicates=ingested.skipped_count,
     )
 
 

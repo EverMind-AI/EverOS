@@ -39,6 +39,7 @@ input, not pictures to store: they are neither stored nor refused.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from everos.component.images import ImageLimits
@@ -78,6 +79,7 @@ async def process(
     image_store: ImageStore | None = None,
     image_limits: ImageLimits | None = None,
     vision: bool = True,
+    skip: Collection[int] = (),
 ) -> IngestResult:
     """Normalise the raw add payload into an :class:`IngestResult`.
 
@@ -92,6 +94,10 @@ async def process(
         vision: Whether the extraction model reads images
             (``[extraction] vision``). False routes pictures through the
             parser into text instead of storing them.
+        skip: Positions in ``payload["messages"]`` not to ingest -- a group's
+            duplicates (section 5.2): nothing of them is stored, parsed or
+            counted, and the other messages keep their positions, so their
+            generated ids are the ones the full batch gives them.
 
     Returns:
         The canonical messages, with ``rejected_count`` (pictures refused)
@@ -116,6 +122,8 @@ async def process(
     failed = 0
     rejected = 0
     for idx, m in enumerate(raw_messages):
+        if idx in skip:
+            continue
         content_items = coerce_items(m["content"])
         # With vision off a picture is parser input, like a pdf: not stored,
         # not refused.
@@ -178,6 +186,7 @@ async def process(
         rejected_count=rejected,
         failed_count=failed,
         group_id=group_id,
+        skipped_count=len(skip),
     )
 
 

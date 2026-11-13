@@ -11,6 +11,7 @@ from __future__ import annotations
 __all__ = [
     "SqliteClusterStore",
     "SqliteForgetLogStore",
+    "SqliteGroupMessageStore",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",
@@ -49,6 +50,7 @@ from everos.memory.ports import (
 from ._repos import (
     ClusterRepo,
     ForgetLogRepo,
+    GroupMessageRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     MessageForgetRepo,
@@ -655,3 +657,28 @@ def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
         project_id=row.project_id,
         created_at=to_timestamp_ms(row.created_at) if row.created_at else None,
     )
+
+
+class SqliteGroupMessageStore:
+    """:class:`~everos.memory.ports.GroupMessageStore` over ``group_message``.
+
+    Args:
+        repo: Repository of the ``group_message`` table.
+    """
+
+    def __init__(self, repo: GroupMessageRepo) -> None:
+        self._repo = repo
+
+    async def held(self, scope: Scope, keys: Collection[str]) -> dict[str, str]:
+        if not keys:
+            return {}
+        return await self._repo.held(
+            scope.app_id, scope.project_id, scope.owner_id, keys
+        )
+
+    async def record(
+        self, scope: Scope, session: SessionKey, keys: Collection[str]
+    ) -> None:
+        await self._repo.record(
+            scope.app_id, scope.project_id, scope.owner_id, session.session_id, keys
+        )

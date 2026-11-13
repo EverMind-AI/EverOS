@@ -87,7 +87,8 @@ class IngestResult(BaseModel):
     picture, unreadable), ``failed_count`` the non-text items the parser could
     not turn into text; ``unparsed_non_text_count`` is their sum. Each such
     item is counted once, stays on its message's content items, and adds
-    nothing to its ``text``.
+    nothing to its ``text``. ``skipped_count`` counts the batch's messages
+    ingest was told to leave out: the ones the group already held.
     """
 
     session_id: str
@@ -103,6 +104,7 @@ class IngestResult(BaseModel):
     group_id: str | None = None
     """The group the session is bound to (D18); ``None`` on the one-to-one path.
     A pipeline reads it to know whose memory a cell is."""
+    skipped_count: int = 0
 
 
 class Episode(BaseModel):

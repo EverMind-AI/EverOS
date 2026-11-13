@@ -29,6 +29,7 @@ from everos.memory.ports import (
     EpisodeIndex,
     EpisodeStore,
     ForgetLogStore,
+    GroupMessageStore,
     GroupProfileIndex,
     GroupProfileStore,
     GroupStore,
@@ -72,6 +73,9 @@ class Stores:
     scene: SceneStore
     group_profile: GroupProfileStore
     message_forget: MessageForgetStore
+    group_messages: GroupMessageStore | None = None
+    """Which messages each group holds (its dedupe ledger, section 5.2);
+    ``None`` takes every message, as a build without the ledger does."""
 
 
 @dataclass(frozen=True)

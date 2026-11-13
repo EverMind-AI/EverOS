@@ -88,7 +88,7 @@ def _payload(req: MemorizeAddRequest, asker_header: str | None) -> dict[str, Any
     return payload
 
 
-@router.post("/add", responses=_ADD_RESPONSES)
+@router.post("/add", responses=_ADD_RESPONSES, response_model_exclude_none=True)
 async def add_memory(
     req: Annotated[MemorizeAddRequest, ...],
     response: Response,
@@ -104,7 +104,9 @@ async def add_memory(
     their implicit group; one person's conversation is their own memory.
     ``rejected`` / ``failed`` count the non-text items dropped at ingest; a
     queued batch (202) is ingested later and logs them
-    (``memorize.ingest_dropped``).
+    (``memorize.ingest_dropped``). A group takes each message once:
+    ``duplicates`` counts the messages it already held, which were skipped
+    (a queued batch logs them, ``memorize.duplicates_skipped``).
     """
     result = await app.memory.add(
         _payload(req, asker_header),
@@ -121,6 +123,7 @@ async def add_memory(
             status=result.status,
             rejected=result.rejected,
             failed=result.failed,
+            duplicates=result.duplicates or None,
         ),
     )
 

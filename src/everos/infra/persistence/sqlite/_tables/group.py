@@ -1,5 +1,10 @@
 """``group_meta`` / ``group_member`` / ``session_binding`` -- the roster mirror.
 
+``group_message`` sits beside them but mirrors nothing: it is the group's
+dedupe ledger (docs/group-memory.md, section 5.2), system state like the
+memcells and the buffer -- one row per message the group took, never derived
+from markdown, so ``everos cascade rebuild`` leaves it as it is.
+
 ``groups/<group_id>/group.md`` is the truth (docs/group-memory.md, section
 6.1); these three tables are what every read asks, written in the same locked
 operation as the markdown so that a member removed from a group loses access
@@ -67,6 +72,27 @@ class GroupMember(BaseTable, table=True):
     joined_at: int = Field(sa_column=Column(BigInteger, nullable=False))
     left_at: int | None = Field(default=None, sa_column=Column(BigInteger))
     source: str = "api"
+
+
+class GroupMessage(BaseTable, table=True):
+    """One message a group holds: its dedupe key and the session holding it.
+
+    PK ``(app_id, project_id, group_id, key)`` -- the lookup a batch makes,
+    one ``IN`` over its keys. ``key`` is ``id:<message_id>`` for a message
+    the client gave an id, else ``fp:<sender_id>:<epoch ms>:<sha256 of the
+    content as sent>`` (:func:`everos.memory.groups.message_key`). A row is
+    written once its message is stored, moves to a later session that takes
+    the message again after a ``/memory/delete`` released it, and is never
+    removed by a forget.
+    """
+
+    __tablename__ = "group_message"  # type: ignore[assignment]
+
+    app_id: str = Field(primary_key=True)
+    project_id: str = Field(primary_key=True)
+    group_id: str = Field(primary_key=True)
+    key: str = Field(primary_key=True)
+    session_id: str
 
 
 class SessionBinding(BaseTable, table=True):

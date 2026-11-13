@@ -70,6 +70,7 @@ from everos.memory.extract.ingest.multimodal import (
     PictureBudget,
     keep_question_pictures,
 )
+from everos.memory.groups import GroupDedupe
 from everos.memory.ports import Scope, SessionKey, all_of, eq, is_null
 
 from ._delete import DeleteAlias
@@ -227,6 +228,14 @@ class MemoryService:
             image_store=stores.images,
             vision=settings.extraction.vision,
             rosters=rosters,
+            # A group takes each message once (docs/group-memory.md, 5.2).
+            dedupe=GroupDedupe(
+                stores.group_messages,
+                forget_log=stores.forget_log,
+                wait_seconds=settings.memorize.session_lock_timeout_seconds,
+            )
+            if stores.group_messages is not None
+            else None,
         )
         self._groups = (
             GroupUseCases(rosters=rosters, memorizer=self._memorizer, clock=clock)

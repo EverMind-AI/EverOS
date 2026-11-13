@@ -54,7 +54,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
+        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
         "operationId": "add_memory_api_v1_memory_add_post",
         "requestBody": {
           "content": {
@@ -1651,7 +1651,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``).",
+        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
         "operationId": "add_memory_api_v2_memory_add_post",
         "requestBody": {
           "content": {
@@ -3296,6 +3296,18 @@
             "title": "Failed",
             "description": "Non-text items that could not be read into text (a parser call that failed). The rest of their message is kept.",
             "default": 0
+          },
+          "duplicates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicates",
+            "description": "Messages of the batch its group already held, skipped: by message_id when one was sent, else by sender, timestamp and content. Present only when the batch had some."
           }
         },
         "type": "object",
@@ -6526,7 +6538,7 @@
               }
             ],
             "title": "Message Id",
-            "description": "Optional client id of the message, unique within the session. Kept for a group session (message-level forget, source quotes); ignored on a one-to-one session."
+            "description": "Optional client id of the message: the chat platform's id, unique within the group. Kept for a group session (message-level forget, source quotes) and what the group dedupes by -- a message whose id the group already holds, in any of its sessions, is skipped; ignored on a one-to-one session."
           }
         },
         "type": "object",

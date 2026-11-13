@@ -23,6 +23,7 @@ from .forget_log import ForgetEntry as ForgetEntry
 from .forget_log import ForgetLogStore as ForgetLogStore
 from .forget_log import ForgetTarget as ForgetTarget
 from .forget_log import MessageForgetStore as MessageForgetStore
+from .groups import GroupMessageStore as GroupMessageStore
 from .groups import GroupRecord as GroupRecord
 from .groups import GroupStore as GroupStore
 from .images import ImageStore as ImageStore
@@ -110,6 +111,7 @@ __all__ = [
     "ForgetEntry",
     "ForgetLogStore",
     "ForgetTarget",
+    "GroupMessageStore",
     "GroupProfileIndex",
     "GroupProfileStore",
     "GroupRecord",
