@@ -47,6 +47,22 @@ machinery that keeps a deleted memory from coming back.
 
 ### Added
 
+- **One deliverer per group, and each message once.** A group names the
+  identity its gateway asserts for the group's key as `deliverer_id`
+  (`PUT /groups/{id}`, by owners, admins or the deliverer; `null` clears it;
+  `GET` returns it): the one program that forwards the group's chat. Once
+  set, `/memory/add` to the group's sessions and `/memory/flush` of them are
+  taken from it alone (`403` otherwise; `/memory/flush` takes an optional
+  `asker_id`), and it is the group's superadmin: every right of an owner,
+  backdated roster events included, and the whole history to read, with a
+  search that names no `audience` reading as `group`. Without one nothing
+  changes. A group (explicit, or implicit of three or more people) also skips
+  a message it already holds in any of its sessions, forgotten ones included,
+  by `message_id` or by sender, time and content hash: no model call is made
+  for it and the answer counts it in `duplicates`. A `/memory/delete` of a
+  session releases its messages, so sending it again works as before.
+  `system.db` gains `group_meta.deliverer_id` and the `group_message` ledger
+  at startup; no rebuild ([docs/group-memory.md](docs/group-memory.md#51-groups-and-roster)).
 - **A personal search can cover the user's groups (`include_groups`, off by
   default).** `/memory/search` with `user_id` and `include_groups: true`
   searches the user's memory and every group of the space the user currently

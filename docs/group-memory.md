@@ -280,7 +280,34 @@ used; one-to-one requests are accepted exactly as today.
 ```
 
 Creating a group whose roster names no owner makes the asker its owner.
-Updating meta requires an owner or admin.
+Updating meta requires an owner or admin (or the group's deliverer, below).
+
+**The deliverer: one program, one key per group.** A group's chat reaches
+EverOS through one forwarding program, which stands for the group the way a
+butler does: it sees every message of the chat platform and sends them, and
+the platform's membership changes, with one key that belongs to this group's
+connection. EverOS has no keys of its own ([Section 9.2](#92-identity)): the
+gateway in front of it maps the key to an identity and asserts it in the
+identity header. The group names that identity as its `deliverer_id`:
+
+```json
+{"app_id": "default", "project_id": "spring-offsite", "asker_id": "u_chen",
+ "deliverer_id": "gw:trip-team"}
+```
+
+- Set, rotated (a new key's identity) or cleared (`"deliverer_id": null`) by
+  `PUT /groups/{group_id}`: owners, admins and the deliverer itself may. A
+  field left out keeps the value; `GET /groups/{group_id}` returns it.
+- A group created by `/memory/add` (or by `PUT` without the field) has none,
+  and an implicit group never has one.
+- The deliverer is not a person and not a member: it has no interval, is never
+  listed in the roster and never appears in a prompt. It may be a member as
+  well (an assistant member, say); its rights as the deliverer do not depend
+  on that.
+- Once it is set, only the deliverer adds to the group's sessions or flushes
+  them ([Section 5.2](#52-add)), and it is the group's superadmin
+  ([Section 9.1](#91-rules)). Without one, a group takes anyone's batches, as
+  before.
 
 **Change the roster**: `POST /api/v2/groups/{group_id}/roster`
 
@@ -296,13 +323,15 @@ Updating meta requires an owner or admin.
 }
 ```
 
-Owners and admins may send any event; any member may send `leave` for
-themselves. The response returns the current roster and the number of events
-applied.
+Owners, admins and the group's deliverer may send any event, backdated ones
+included (the deliverer mirrors the chat platform's membership); any member
+may send `leave` for themselves. The response returns the current roster and
+the number of events applied.
 
 **Read a group**: `GET /api/v2/groups/{group_id}?app_id=&project_id=&asker_id=&include_history=false`
-returns the meta and the current roster (with every interval when
-`include_history=true`). Only current members may read it.
+returns the meta (`deliverer_id` among it) and the current roster (with every
+interval when `include_history=true`). Only current members and the group's
+deliverer may read it.
 
 **Read a project** (Step 2): `GET /api/v2/projects/{project_id}?app_id=&asker_id=`
 returns the groups the asker belongs to and the project members.
@@ -318,9 +347,9 @@ senders (configurable).
 | Field | Meaning |
 |---|---|
 | `group_id` | the group the session belongs to. The first batch that names it binds the session; a later batch without `group_id` inherits the binding; a batch naming a different group gets **409**. An unknown `group_id` creates the group (`[groups] implicit_create`). |
-| `roster` | roster events applied before the messages, same shape as the roster route. Lets an importer send membership with history. A batch that creates the group may set its initial roster; for an existing group the batch's `asker_id` must be an owner or admin. |
-| `messages[].message_id` | optional client id, unique within the session. Used by message-level forget and in source quotes. |
-| `asker_id` | needed only when the batch carries roster events for a group that already exists; must be an owner or admin of it (403 otherwise) |
+| `roster` | roster events applied before the messages, same shape as the roster route. Lets an importer send membership with history. A batch that creates the group may set its initial roster; for an existing group the batch's `asker_id` must be an owner or admin, or the group's deliverer. |
+| `messages[].message_id` | optional client id: the chat platform's id of the message, unique within the group. Used by message-level forget, in source quotes and to skip a message the group already holds (below). |
+| `asker_id` | who sends the batch: needed when it carries roster events for a group that already exists (an owner, an admin or the deliverer; 403 otherwise), and for every batch to a group with a deliverer. The gateway's identity header, when configured, is the asker instead. |
 
 A message from a sender who is not a member opens an interval at that message's
 timestamp with `source = "implicit"` and role `member` (or `assistant` for
@@ -347,8 +376,51 @@ with 422.
 }
 ```
 
-`/memory/flush` is unchanged: it names a session, and the session's binding
-gives the group.
+`/memory/flush` names a session, and the session's binding gives the group.
+
+**Delivery.** Once a group has a deliverer
+([Section 5.1](#51-groups-and-roster)), `/memory/add` to its sessions and
+`/memory/flush` of a session bound to it are accepted from that identity only
+(the identity header, else the body's `asker_id`; `/memory/flush` takes an
+optional `asker_id` for this). Anyone else gets **403** ("only the deliverer
+of group 'trip-team' may add messages to its sessions or flush them") before
+anything is queued, cut or written. A session of no group, an implicit group
+and a group without a deliverer take anyone's batches, as before: self-hosted
+single-user use and the evaluation harnesses are unchanged.
+
+**A group takes each message once.** When several clients forward the same
+chat (two members' clients, a deliverer that reconnects and sends the history
+again, a retry), the group would store and extract every message once per
+copy. A message is a **duplicate** when its group already holds it:
+
+- **Key.** The `message_id` when the client sent one; otherwise the sender,
+  the timestamp in epoch ms and the SHA-256 of the content as sent (a string,
+  or the content items without their unset fields).
+- **Holds.** Any session of the group: buffered messages not yet extracted,
+  messages cut into segments, and messages a live forget marked -- a
+  forgotten message sent again stays forgotten. A `/memory/delete` of a
+  session releases its messages: sending the conversation again is taken as
+  it was before dedupe (what the evaluation harnesses' `--replace-sessions`
+  does), and the session that takes them holds them from then on; undoing the
+  delete makes the old session hold them again. As before dedupe, copies that
+  come back into the deleted session under the same message ids stay hidden
+  by the delete's marks; a new session id is a new conversation. A batch is
+  taken as sent: two equal messages inside one batch are both kept.
+- **Effect.** Duplicates are skipped silently, before ingest: no parser,
+  boundary or extraction call is made for them. The answer's `duplicates`
+  counts them (present only when there are some); a queued batch logs them
+  (`memorize.duplicates_skipped`). A batch of nothing but duplicates answers
+  `accumulated` and makes no model call.
+- **Retries are safe.** A batch's keys are recorded once it is stored and its
+  own segments extracted, so a batch that failed recorded nothing and its
+  retry is taken in full. Two batches of one group that carry the same
+  message at the same time store it once: the second waits for the first.
+- **Where.** Explicit groups and implicit groups of three or more people.
+  Never a one-to-one session: its path is unchanged
+  ([Section 10](#10-one-to-one-conversations-stay-unchanged)).
+- **Cost.** One indexed `system.db` read per group batch (the `group_message`
+  ledger, [Section 6.2](#62-sqlite)), one write once it is stored; no model
+  call is added, and each duplicate removes the calls it would have made.
 
 ### 5.3 Search
 
@@ -609,18 +681,24 @@ New tables in `system.db`:
 | `group_member` | `(app_id, project_id, group_id, member_id, seq)` | `kind`, `display_name`, `aliases_json`, `role`, `title`, `joined_at`, `left_at`, `source`, `updated_at`; one row per interval, `seq` counts a member's intervals |
 | `session_binding` | `(app_id, project_id, session_id)` | `group_id`, `bound_at` |
 | `message_forget` (Step 2) | `(app_id, project_id, session_id, message_id, forget_id)` | `created_at`, `undone_at` |
+| `group_message` | `(app_id, project_id, group_id, key)` | `session_id`, `created_at`, `updated_at`; the group's dedupe ledger ([Section 5.2](#52-add)): one row per message the group took, `key` = `id:<message_id>` or `fp:<sender_id>:<epoch ms>:<sha256 of the content>` |
 
 Changed:
 
 | Table | Change |
 |---|---|
 | `forget_log` | `owner_type` takes `group`; new nullable column `requested_by` |
+| `group_meta` | new nullable column `deliverer_id` ([Section 5.1](#51-groups-and-roster)) |
 
 Roster writes go to `group.md` and to `group_meta` / `group_member` in the same
 locked operation, so a removed member loses access immediately rather than after
 the cascade catches up. `everos cascade rebuild` re-derives both tables from
-`group.md`. New columns are nullable and are added by the existing forward-only
-mechanism (`src/everos/infra/persistence/sqlite/schema.py:33`).
+`group.md` (`deliverer_id` is a `group.md` frontmatter field, written once a
+deliverer is set and `null` after it is cleared). `group_message` mirrors no
+markdown: like the memcells and the buffer it is system state, which a rebuild
+leaves as it is. New columns are nullable and are added by the existing
+forward-only mechanism (`src/everos/infra/persistence/sqlite/schema.py`,
+`_ADDED_COLUMNS`); a new table is created at startup.
 
 ### 6.3 LanceDB
 
@@ -643,6 +721,7 @@ new is embedded.
 |---|---|
 | Stores built by EverOS 1.x | 2.0 does not open them: the store-version gate (`.index/store_version`, [storage_layout.md](storage_layout.md#store-version)) refuses them before anything in the root changes. Nothing to migrate. |
 | 2.0 stores built before group support | Open as before. SQLite gains the new tables and nullable columns at startup; LanceDB gains the new columns in one versioned step of `migrate_table_schemas` (`src/everos/infra/persistence/lancedb/backend.py:257`), fail-loud, with `everos cascade rebuild` as recovery. Existing rows read `subject_ids = []`, `origin = null`, `source_start = source_end = timestamp`. The step is table schema version 4 (`_TABLE_SCHEMA_VERSION`). Milvus has no such step yet: a Milvus store reports schema drift and needs `everos cascade rebuild`. |
+| 2.0 stores built before the deliverer and the dedupe ledger | Open as before, without a rebuild: startup adds `group_meta.deliverer_id` (every group reads as having none) and creates `group_message`. The ledger starts empty: a message a group took before it is not known as held, so the same message sent again later is taken once more; everything taken from then on is deduplicated. |
 | Stores where a whole group chat was ingested under one user id (for example benchmark stores built with one owner per conversation) | Not converted. The per-sender copies and cross-owner items cannot be split back reliably, and a converter would have to guess membership. Rebuild from the raw conversations with `group_id`. |
 
 The cascade's owner resolution must learn `groups/` (owner type `group`, id from
@@ -1190,8 +1269,9 @@ Other kinds answer `422`.
 | Memory | Visible to |
 |---|---|
 | Personal memory (`users/<u>/`) | `u` only |
-| Group memory (`groups/<g>/`: episodes, picture memories, scenes, member-in-group profiles, group-profile items, buffered messages) | current members of `g`, and only records all of whose sources fall inside one of the asker's membership windows in `g` |
-| Roster and group meta | current members of `g` |
+| Group memory (`groups/<g>/`: episodes, picture memories, scenes, member-in-group profiles, group-profile items, buffered messages) | current members of `g`, and only records all of whose sources fall inside one of the asker's membership windows in `g`; the deliverer of `g` (below) |
+| Roster and group meta | current members of `g`; the deliverer of `g` |
+| Everything of `g`, as its superadmin | the deliverer of `g` ([Section 5.1](#51-groups-and-roster)): every right of an owner -- meta (its own `deliverer_id` included), any roster event (backdated too), forget, undo, edit and delete -- and alone to add to `g`'s sessions and flush them. It reads `g`'s whole history (search, get, history, picture bytes, the group read) with no membership window. Its **search without an `audience` reads as `audience = group`**: only the time every current member can see, so a reply it posts into the group cannot reveal to a newer member what was said before they joined; `audience = asker` gives it the whole history. It reads nothing of another group. |
 
 Consequences, stated explicitly:
 
@@ -1201,6 +1281,8 @@ Consequences, stated explicitly:
 - The window test for a record is `source_start >= from AND source_end < to` for one of the asker's windows (no upper bound for the open window).
 - Invisible records behave as absent: a get by id returns 404, a search omits them, a picture hash referenced only by invisible group memories returns 404.
 - An owner or admin role grants roster management and forgetting, not extra reading.
+- The deliverer is never a member: it is never one of the `audience = group` intersection (even when it is a member too), and a member's windows are the same with or without it. A human asker's default audience stays `asker`.
+- One rule decides the deliverer, `is_deliverer` in the access policy, which every `authorize_*` function and `read_scope` consult.
 
 ### 9.2 Identity
 
@@ -1210,6 +1292,13 @@ deployment that serves several people puts a gateway in front and sets
 `[access] identity_header`; EverOS then reads the asker from that header and
 rejects a request whose body `asker_id` differs (403). One-to-one requests
 without `asker_id` are read as asked by their owner, which is today's behaviour.
+
+The keys are the gateway's. A cloud deployment issues each group one key for
+its forwarding program; the gateway asserts the identity that key stands for,
+and the group names that identity as its `deliverer_id`
+([Section 5.1](#51-groups-and-roster)). Rotating the key is a new identity:
+the deliverer, an owner or an admin sets the new `deliverer_id`, and the old
+key's identity is nobody to the group from then on.
 
 The CLI runs in-process as the operator. Background strategies run with an
 internal identity scoped to the owner they work on. Neither is reachable through

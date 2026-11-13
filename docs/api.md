@@ -249,7 +249,7 @@ parsing the human-readable `message` field.
 | `error.code` | HTTP | Retryable? | When |
 |---|---|---|---|
 | `NOT_FOUND` | `404` | No | Requested resource does not exist -- or exists but the asker may not see it (a group picture outside their membership windows answers exactly as a missing one) |
-| `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin |
+| `FORBIDDEN` | `403` | No | The asker may not read the scope or perform the action: a group read by someone who is not a current member (or a group that does not exist), a personal read whose `asker_id` is another user, a body `asker_id` that disagrees with the gateway identity header, a roster change by a member who is not an owner or admin, a batch or a flush to a group with a deliverer from anyone else |
 | `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. a session bound to another group; a roster event that conflicts with the member's open interval; a group undo whose forget a later forget rewrote) |
 | `VERSION_CONFLICT` | `409` | No | `/memory/update` named a version that is no longer the current one; `message` names the current version. Read it (`/memory/history`) and decide again |
 | `MEMORY_FORGOTTEN` | `409` | No | `/memory/update` named a forgotten memory; undo the forget first |
@@ -578,6 +578,7 @@ the `status` field — see [Response body](#response-body) below.
 | `messages` | `array<MessageItem>` | yes | — | 1–500 items |
 | `defer_extraction` | `boolean` | no | `false` | buffer durably without boundary or extraction LLM calls |
 | `async_mode` | `boolean` | no | `false` | queue the batch and return `202` immediately; see [Asynchronous mode](#asynchronous-mode) |
+| `group_id`, `roster`, `asker_id` | | no | | the group fields; see [Groups](#groups) |
 
 **`session_id`** — Identifies the conversation buffer on the server.
 Messages POSTed with the same `(session_id, app_id, project_id)`
@@ -617,6 +618,7 @@ rule and how to poll progress.
 | `status` | `"accumulated" \| "extracted"` | What the server did with the batch |
 | `rejected` | `integer` | Pictures refused at ingest: over an `[images]` limit (bytes, per message, per request), not a picture, or unreadable |
 | `failed` | `integer` | Non-text items the parser could not read into text (its model call failed) |
+| `duplicates` | `integer`, absent when `0` | Messages of a group batch the group already held, skipped (see [Groups](#groups)) |
 
 **`rejected` / `failed`** — A dropped item never fails the request: the rest
 of its message is kept, and the item adds nothing to the memory. A refused
@@ -696,6 +698,7 @@ to make sure pending context becomes durable memory.
 | `session_id` | `string` | yes | — | length 1–128; one line: no line breaks or other control characters, no leading or trailing whitespace (stored as one trimmed markdown line; anything else would read back as another id) |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
+| `asker_id` | `string \| null` | no | `null` | who flushes; read only for a session of a group with a deliverer, which only the deliverer may flush (`403` otherwise). The identity header, when configured, is the asker instead |
 
 **`session_id`** — Identifies which buffer to flush. Must match the
 `session_id` of prior `/add` calls in the same `(app_id, project_id)`
@@ -1632,19 +1635,55 @@ intervals (`[joined_at, left_at)`, epoch ms) kept as an append-only log in
 
 | Route | Who may | What |
 |---|---|---|
-| `PUT /api/v2/groups/{group_id}` | anyone to create; owners and admins to update | Create the group (a roster that names no owner makes the asker its owner) or update `name` / `description` / `extra` / `history_visible_from`; `roster` events are appended |
-| `POST /api/v2/groups/{group_id}/roster` | owners and admins; a member for their own `leave` | Append `join` / `leave` / `update` events. The open buffers of the group's sessions are cut first, so no segment spans the change |
-| `GET /api/v2/groups/{group_id}?project_id=&asker_id=&include_history=` | current members | Meta and current roster; every interval with `include_history=true` |
+| `PUT /api/v2/groups/{group_id}` | anyone to create; owners, admins and the deliverer to update | Create the group (a roster that names no owner makes the asker its owner) or update `name` / `description` / `extra` / `history_visible_from` / `deliverer_id` (`null` clears it; a field left out is kept); `roster` events are appended |
+| `POST /api/v2/groups/{group_id}/roster` | owners, admins and the deliverer; a member for their own `leave` | Append `join` / `leave` / `update` events. The open buffers of the group's sessions are cut first, so no segment spans the change |
+| `GET /api/v2/groups/{group_id}?project_id=&asker_id=&include_history=` | current members and the deliverer | Meta (`deliverer_id` among it) and current roster; every interval with `include_history=true` |
 
 A roster event: `op`, `member_id`, optional `kind` (`human` / `assistant`),
 `display_name`, `aliases`, `role` (`owner` / `admin` / `member` /
 `assistant`), `title`, `at` (epoch ms, default now). A `join` for a member who
 is in the group, or a `leave` / `update` for one who is not, is `409`.
 
+**The deliverer.** One program forwards a group's chat, with one key per
+group: the gateway asserts the identity the key stands for, and the group
+names it as its `deliverer_id` (`PUT`). The deliverer is not a member and is
+never listed in the roster or shown to a model. Once it is set:
+
+- `/memory/add` to the group's sessions and `/memory/flush` of a session bound
+  to it are accepted from the deliverer only (identity header, else
+  `asker_id`); anyone else gets `403`, before anything is queued or written;
+- the deliverer is the group's superadmin: every right of an owner (meta, its
+  own key included; any roster event, backdated too; forget, undo, update and
+  delete of any record), and it reads the group's whole history through
+  `/memory/search`, `/memory/get`, `/memory/history`, picture bytes and
+  `GET /groups/{id}`, with no membership window;
+- its `/memory/search` without an `audience` reads as `audience: "group"`:
+  only what every current member can see, so a reply it posts into the group
+  shows a newer member nothing from before they joined; `audience: "asker"`
+  gives it the whole history. It is never counted among the members of that
+  intersection, a member's default stays `asker`, and it reads nothing of
+  another group.
+
+Without a deliverer a group takes anyone's batches, as before. See
+[group-memory.md, sections 5.1, 5.2 and 9.1](group-memory.md#51-groups-and-roster).
+
 `/memory/add` takes `group_id` (the first batch binds the session; later
 batches inherit it; another group is `409`), `roster` (events applied before
-the messages; for an existing group the `asker_id` must be an owner or admin)
-and `messages[].message_id`. A sender who is not a member joins at their first
+the messages; for an existing group the `asker_id` must be an owner, an admin
+or the deliverer) and `messages[].message_id` (the chat platform's id of the
+message, unique within the group).
+
+**Each message once.** A group skips a message it already holds, in any of
+its sessions -- buffered, segmented, or forgotten (a forgotten message sent
+again stays forgotten) -- keyed by `message_id`, or by sender, timestamp (ms)
+and the SHA-256 of the content when no id was sent. A skipped message costs no
+model call; the `200` answer counts them in `duplicates` (absent when none),
+and a queued batch logs them (`memorize.duplicates_skipped`). A retry is safe:
+a batch's messages count as held once it is stored and its own segments
+extracted, so a failed batch's retry is taken in full. A `/memory/delete` of a
+session releases its messages, so the conversation sent again is taken as
+before. Explicit groups and implicit groups of three or more people; never a
+one-to-one session. A sender who is not a member joins at their first
 message (`[groups] implicit_join`); an unknown group is created
 (`[groups] implicit_create`). Group messages never become per-sender personal
 memory. A batch without `group_id` whose session holds two or more people
@@ -1657,8 +1696,10 @@ on `/memory/add`, `PUT /groups/{id}` or the roster route (`422`). See
 
 `/memory/search` and `/memory/get` take `group_id` or `group_ids` (one pool)
 with `asker_id` and `audience` (`asker`, default; `group`: only what every
-current member can see). The asker must be a current member of each group, and
-sees only records whose sources lie inside one of their membership windows;
+current member can see; a group's deliverer that names none searches as
+`group`). The asker must be a current member of each group (or its
+deliverer), and sees only records whose sources lie inside one of their
+membership windows;
 the search response carries a `scope` block with those windows. A user's own
 search can cover the user's groups too (`include_groups`, off by default; see
 [`/memory/search`](#post-apiv2memorysearch)); `/memory/get` takes it for

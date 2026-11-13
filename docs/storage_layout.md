@@ -197,9 +197,12 @@ Implementation: [`infra/persistence/markdown/_base/entries.py`](../src/everos/in
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
   `conversation_status`, `cluster` / `cluster_member` (scene clusters),
   `memorize_inbox` (the `async_mode` queue), `forget_log` /
-  `message_forget`, `image_original` (picture metadata) and the group
-  roster mirror (`group_meta`, `group_member`, `session_binding`) — **not**
-  per-kind business rows.
+  `message_forget`, `image_original` (picture metadata), the group
+  roster mirror (`group_meta`, `group_member`, `session_binding`) and each
+  group's dedupe ledger (`group_message`: which messages the group already
+  holds, by `message_id` or by sender, time and content hash; system state
+  like the buffer, never derived from markdown, created at startup in a store
+  written before it) — **not** per-kind business rows.
 - The **derived index backend** holds the per-kind business rows, keyed by
   each table's declared `PRIMARY_KEY` — `(app_id, project_id, id)` for every
   business table, where `id` is `<owner_id>_<entry_id>` for the daily-log kinds
