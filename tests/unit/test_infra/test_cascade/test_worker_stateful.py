@@ -17,7 +17,11 @@ Invariants after every step, from the repo and worker docstrings:
 
 1. the table matches the model: status, retryable, retry_count, lsn, error;
 2. a re-enqueue during processing wins: the stale verdict is dropped and
-   the row is pending again with a fresh lsn;
+   the row is pending again with a fresh lsn. When the re-enqueue and the
+   verdict race (another row's handler re-saves this row), the verdict may be
+   written first: the row was briefly ``failed``, and a re-save with an
+   unchanged mtime then keeps its retry count. Both orders are valid, and
+   the table decides which one happened (``_settle_races``);
 3. retry bookkeeping: transient failures spend the budget (each attempt is
    persisted, so a mid-ladder restart keeps it), a row stays retryable only
    below ``MAX_TOTAL_RETRIES``, re-saves with new content reset it, ``fix``
@@ -136,6 +140,35 @@ class _ScriptedHandler(Handler):
         )
 
 
+def _verdict(m: dict[str, Any], outcome: str) -> dict[str, Any] | None:
+    """What _process_one writes for a claimed row with this scripted outcome:
+    the columns it sets, or ``None`` when it writes nothing (the crash)."""
+    if m["kind"] != "episode" or m["retry_count"] >= MAX_TOTAL:
+        return {"status": "failed", "retryable": False, "error": True}
+    if m["change"] == "deleted" or outcome in ("ok", "vanished"):
+        return {"status": "done", "retryable": None, "error": False}
+    if outcome == "transient_then_ok":
+        # The one retry it consumed is persisted before the successful
+        # second call, so the done row keeps that count (#549).
+        return {
+            "status": "done",
+            "retryable": None,
+            "error": False,
+            "retry_count": m["retry_count"] + 1,
+        }
+    if outcome == "boom":
+        return {"status": "failed", "retryable": False, "error": True}
+    if outcome == "transient":
+        r = m["retry_count"] + MAX_RETRY
+        return {
+            "status": "failed",
+            "retryable": r < MAX_TOTAL,
+            "retry_count": r,
+            "error": True,
+        }
+    return None  # crash: stays processing
+
+
 class CascadeMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
@@ -213,10 +246,12 @@ class CascadeMachine(RuleBasedStateMachine):
             and abs(old["mtime"] - mtime) < MTIME_TOLERANCE_SECONDS
         )
         retry_count = old["retry_count"] if (old is not None and keep) else 0
+        if_failed_first = None
         if old is not None and old["status"] == "processing":
             # Re-enqueued while its handler runs: the verdict about to be
             # written is stale and must be dropped (mark_* are guarded).
             old["shielded"] = True
+            if_failed_first = self._retry_count_if_failed_first(path, old, mtime)
             event("upsert: during processing")
         self.model[path] = {
             "status": "pending",
@@ -230,13 +265,40 @@ class CascadeMachine(RuleBasedStateMachine):
             "shielded": old["shielded"]
             if (old is not None and old.get("shielded"))
             else False,
+            "if_failed_first": if_failed_first,
         }
         self.next_lsn += 1
         where = " (in handler)" if in_handler else ""
         self.trace.append(
             f"upsert {path} kind={kind} change={change} same_mtime={same_mtime} "
             f"-> lsn={lsn} retry_count={retry_count}{where}"
+            + (
+                f" (or {if_failed_first} if the failure landed first)"
+                if if_failed_first is not None
+                else ""
+            )
         )
+
+    def _retry_count_if_failed_first(
+        self, path: str, claim: dict[str, Any], mtime: float
+    ) -> int | None:
+        """The retry count a re-save of this claimed row keeps if the claim's
+        failure is written before it; ``None`` when the order cannot matter.
+
+        Inside a handler, the re-save of another row of the batch races that
+        row's own terminal write (a row with no handler writes within a few
+        statements). A re-save that lands first finds the row ``processing``:
+        the count resets and the verdict is dropped. A failure that lands
+        first leaves the row ``failed``, and a re-save with an unchanged mtime
+        then keeps the count the failure recorded. A ``done`` verdict resets
+        the count either way, so only a failure can differ.
+        """
+        verdict = _verdict(claim, self.outcome_of.get(path, "ok"))
+        if verdict is None or verdict["status"] != "failed":
+            return None
+        if abs(claim["mtime"] - mtime) >= MTIME_TOLERANCE_SECONDS:
+            return None
+        return int(verdict.get("retry_count", claim["retry_count"]))
 
     async def _wait_until_alone(self, md_path: str) -> None:
         """Crash only when every other row of the batch has been marked."""
@@ -255,36 +317,39 @@ class CascadeMachine(RuleBasedStateMachine):
         if m.get("shielded"):
             m["shielded"] = False  # the stale verdict was dropped; row stays pending
             return
-        if m["kind"] != "episode":
-            m.update(status="failed", retryable=False, error=True)
+        verdict = _verdict(m, scripted.get(path, "ok"))
+        if verdict is not None:
+            m.update(verdict)
+
+    def _settle_races(self) -> None:
+        """Take the retry count each racing re-save left on its row.
+
+        The valid counts are the model's (the re-save landed first and reset
+        it) and ``if_failed_first`` (the failure landed first and the re-save
+        kept it); the table says which happened. Any other count is still a
+        mismatch, and every other column stays an exact comparison in
+        ``table_matches_model``.
+        """
+        racing = {
+            p: m for p, m in self.model.items() if m["if_failed_first"] is not None
+        }
+        if not racing:
             return
-        if m["retry_count"] >= MAX_TOTAL:
-            m.update(status="failed", retryable=False, error=True)
-            return
-        if m["change"] == "deleted":
-            m.update(status="done", retryable=None, error=False)
-            return
-        outcome = scripted.get(path, "ok")
-        if outcome in ("ok", "vanished"):
-            m.update(status="done", retryable=None, error=False)
-        elif outcome == "transient_then_ok":
-            # The one retry it consumed is persisted before the successful
-            # second call, so the done row keeps that count (#549).
-            m.update(
-                status="done",
-                retryable=None,
-                error=False,
-                retry_count=m["retry_count"] + 1,
+        rows = {r.md_path: r for r in self.run(self._rows())}
+        for path, m in racing.items():
+            reset, kept = m["retry_count"], m["if_failed_first"]
+            got = rows[path].retry_count
+            assert got in (reset, kept), (
+                f"{path}: retry_count={got}, valid: {reset} (re-save first) or "
+                f"{kept} (failure first)\n" + "\n".join(self.trace[-30:])
             )
-        elif outcome == "boom":
-            m.update(status="failed", retryable=False, error=True)
-        elif outcome == "transient":
-            r = m["retry_count"] + MAX_RETRY
-            m.update(
-                status="failed", retryable=r < MAX_TOTAL, retry_count=r, error=True
-            )
-        elif outcome == "crash":
-            pass  # stays processing
+            if kept != reset:
+                event(
+                    "re-save race: failure first"
+                    if got == kept
+                    else "re-save race: re-save first"
+                )
+            m["retry_count"], m["if_failed_first"] = got, None
 
     # ── rules ──────────────────────────────────────────────────────────────
 
@@ -348,6 +413,7 @@ class CascadeMachine(RuleBasedStateMachine):
         assert handled == len(batch), (handled, batch)
         for path in batch:
             self._apply_outcome(path, self.model[path], scripted)
+        self._settle_races()
 
     @precondition(lambda self: not self.crashed)
     @rule()
@@ -478,5 +544,57 @@ def test_machine_catches_a_stale_verdict_overwriting_a_re_enqueue() -> None:
         machine.drain(["ok"], [(PATHS[0], "episode", "modified", False)])
         with pytest.raises(AssertionError):
             machine.table_matches_model()
+    finally:
+        machine.teardown()
+
+
+def _pin_write_order(machine: CascadeMachine, *, failure_first: bool) -> None:
+    """Fix the order of the next re-save and the next failure verdict, which
+    naturally race on two connections."""
+    first_landed = asyncio.Event()
+    real_upsert, real_failed = machine.repo.upsert, machine.repo.mark_failed
+
+    async def upsert(*args: Any, **kw: Any) -> int:
+        if failure_first:
+            await first_landed.wait()
+        lsn = await real_upsert(*args, **kw)
+        first_landed.set()
+        return lsn
+
+    async def mark_failed(md_path: str, **kw: Any) -> None:
+        if not failure_first:
+            await first_landed.wait()
+        await real_failed(md_path, **kw)
+        first_landed.set()
+
+    machine.repo.upsert = upsert  # type: ignore[method-assign]
+    machine.repo.mark_failed = mark_failed  # type: ignore[method-assign]
+
+
+@pytest.mark.parametrize("failure_first", [False, True], ids=["re-save", "failure"])
+def test_machine_accepts_either_order_of_a_re_save_and_a_failure(
+    failure_first: bool,
+) -> None:
+    """A handler re-saves the path of a row with no handler, which fails at once.
+
+    Whichever write lands first is valid. Re-save first: the row is still
+    ``processing``, its count resets and the failure is dropped. Failure first:
+    the row is ``failed`` when it is re-saved with the same mtime, so it keeps
+    the count the failure recorded. The model takes whichever of the two the
+    table shows and no other; each order is pinned here, so both are known to
+    occur and each is held to its exact count.
+    """
+    orphan, worker_row = PATHS[0], PATHS[1]
+    machine = CascadeMachine()
+    try:
+        machine.upsert(orphan, "episode", "added", False)
+        machine.drain(["transient"], [])  # one retry spent: failed at count 1
+        machine.upsert(orphan, "orphan", "added", True)  # keeps the count, no handler
+        machine.upsert(worker_row, "episode", "added", False)
+        _pin_write_order(machine, failure_first=failure_first)
+        # batch [orphan, worker_row]: the worker row's handler re-saves the orphan
+        machine.drain(["ok", "ok"], [(orphan, "orphan", "modified", True)])
+        machine.table_matches_model()
+        assert machine.model[orphan]["retry_count"] == (1 if failure_first else 0)
     finally:
         machine.teardown()
