@@ -19,7 +19,8 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
   may still leave), and by the managers the deliverer adds;
 - a forgotten group picture's hash is quoted by no constraint;
 - with ``[access] identity_header`` set, a request without the header is
-  refused.
+  refused;
+- a read over the asker's groups reads only the asker's rosters.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ from everos.memory.ports import NoSourceCheck
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import ForgetTarget, GetRequest, SearchRequest
 from tests.fakes import make_application
-from tests.helpers.groups import APP, PROJECT, GroupWorld, join, png
+from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, png
 
 T0 = 1_772_323_200_000
 DAY = 86_400_000
@@ -610,3 +611,40 @@ async def test_without_the_identity_header_a_request_is_refused(
     assert served.status_code == 200 and "mk_secret" in served.text
     health = await client.get("/health")
     assert health.status_code != 403
+
+
+# -- reads over the asker's groups read only the asker's rosters -----------
+
+
+async def test_a_read_over_the_askers_groups_reads_only_their_rosters(
+    world: GroupWorld,
+) -> None:
+    for n in range(12):
+        members = [join("u_owner", T0, role="owner"), join(f"u_m{n}", T0)]
+        if n < 2:
+            members.append(join("u_x", T0))
+        await world.roster(f"g{n:02d}", members)
+    await world.project()
+    reads: list[str] = []
+    get = world.stores.groups.get
+
+    async def counted(scope: Any) -> Any:
+        reads.append(scope.owner_id)
+        return await get(scope)
+
+    world.stores.groups.get = counted  # type: ignore[method-assign]
+    base = {"app_id": APP, "project_id": PROJECT, "query": "plan", "top_k": 5}
+    await world.memory.search(SearchRequest(user_id="u_x", include_groups=True, **base))
+    assert sorted(set(reads)) == ["g00", "g01"]
+    reads.clear()
+    await world.memory.search(SearchRequest(project_scope=True, asker_id="u_x", **base))
+    assert sorted(set(reads)) == ["g00", "g01"]
+    reads.clear()
+    view = await world.memory.read_project(
+        app_id=APP, project_id=PROJECT, asker_id="u_x", asserted_asker=None
+    )
+    assert [g["group_id"] for g in view.groups] == ["g00", "g01"]
+    assert sorted(set(reads)) == ["g00", "g01"]
+    # A member who left a group is no longer counted in it.
+    await world.roster("g01", [leave("u_x", T0 + 10)])
+    assert await world.stores.groups.member_groups(APP, PROJECT, "u_x") == ["g00"]

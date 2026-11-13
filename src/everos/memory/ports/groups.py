@@ -84,6 +84,18 @@ class GroupStore(Protocol):
         """Every group of one ``(app_id, project_id)``, sorted by id."""
         ...
 
+    async def member_groups(
+        self, app_id: str, project_id: str, member_id: str
+    ) -> list[str]:
+        """The groups of one ``(app_id, project_id)`` that ``member_id`` is a
+        current member of (an open interval), sorted by id.
+
+        One indexed read of the mirror: a read over the asker's own groups
+        (a project scope, ``include_groups``) asks it first and then reads
+        only those rosters, whatever the number of groups in the space.
+        """
+        ...
+
     async def binding(self, session: SessionKey) -> str | None:
         """The group ``session`` is bound to, or ``None``."""
         ...

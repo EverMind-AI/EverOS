@@ -82,6 +82,25 @@ class GroupRosterRepo(RepoBase[GroupMeta]):
             )
             return [str(row) for row in rows.scalars().all()]
 
+    async def member_groups(
+        self, app_id: str, project_id: str, member_id: str
+    ) -> list[str]:
+        """The groups in ``(app_id, project_id)`` where ``member_id`` has an
+        open interval; served by ``ix_group_member_member``."""
+        async with session_scope(self._factory) as s:
+            rows = await s.execute(
+                select(GroupMember.group_id)  # type: ignore[call-overload]
+                .where(
+                    GroupMember.app_id == app_id,  # type: ignore[arg-type]
+                    GroupMember.project_id == project_id,  # type: ignore[arg-type]
+                    GroupMember.member_id == member_id,  # type: ignore[arg-type]
+                    GroupMember.left_at.is_(None),  # type: ignore[union-attr]
+                )
+                .distinct()
+                .order_by(GroupMember.group_id)  # type: ignore[arg-type]
+            )
+            return [str(row) for row in rows.scalars().all()]
+
     async def replace(
         self,
         meta: GroupMeta,

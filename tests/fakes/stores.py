@@ -1008,6 +1008,16 @@ class InMemoryGroupStore:
     async def group_ids(self, app_id: str, project_id: str) -> list[str]:
         return sorted(g for a, p, g in self.groups if (a, p) == (app_id, project_id))
 
+    async def member_groups(
+        self, app_id: str, project_id: str, member_id: str
+    ) -> list[str]:
+        return sorted(
+            g
+            for a, p, g in self.groups
+            if (a, p) == (app_id, project_id)
+            and self._record((a, p, g)).roster.is_current_member(member_id)
+        )
+
     async def save(
         self, scope: Scope, *, group: Group, events: Sequence[RosterEvent]
     ) -> GroupRecord:

@@ -73,6 +73,11 @@ class GroupRosterStore:
     async def group_ids(self, app_id: str, project_id: str) -> list[str]:
         return await self._repo.group_ids(app_id, project_id)
 
+    async def member_groups(
+        self, app_id: str, project_id: str, member_id: str
+    ) -> list[str]:
+        return await self._repo.member_groups(app_id, project_id, member_id)
+
     async def save(
         self, scope: Scope, *, group: Group, events: Sequence[RosterEvent]
     ) -> GroupRecord:

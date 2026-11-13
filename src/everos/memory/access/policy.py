@@ -20,7 +20,9 @@ One module decides every read (docs/group-memory.md, D9 and section 9):
   (:class:`~everos.memory.ports.ProjectLinkStore`, section 4.4), for a
   project scope and ``include_groups`` alike; the policy never lists a
   space's groups itself, and each group's roster still decides what the
-  asker sees.
+  asker sees. The asker's own groups are found first (one indexed read of
+  the roster mirror, :meth:`~everos.memory.ports.GroupStore.member_groups`),
+  and only their rosters are read.
 * :func:`visible` answers the same question for one record that does not come
   through the index (a markdown read); :meth:`AccessPolicy.picture_visible`
   for a picture's bytes, served by content hash.
@@ -744,13 +746,21 @@ class AccessPolicy:
     async def project_groups(
         self, app_id: str, project_id: str, asker: str
     ) -> list[str]:
-        """The groups of a project ``asker`` currently belongs to, sorted."""
-        found: list[str] = []
-        for group in await self._groups_of(app_id, project_id):
-            record = await self._groups.get(group)
-            if record is not None and record.roster.is_current_member(asker):
-                found.append(group.owner_id)
-        return sorted(found)
+        """The groups of a project ``asker`` currently belongs to, sorted.
+
+        The asker's own groups come first (one indexed read of the roster
+        mirror), so the answer costs no roster read at all, whatever the
+        number of groups in the space; the project links still decide which
+        of them are the project's.
+        """
+        mine = set(await self._groups.member_groups(app_id, project_id, asker))
+        if not mine:
+            return []
+        return sorted(
+            group.owner_id
+            for group in await self._groups_of(app_id, project_id)
+            if group.owner_id in mine
+        )
 
     async def _project_groups(
         self, identity: Identity, request: ScopeRequest
@@ -810,6 +820,10 @@ class AccessPolicy:
         not such a group is ignored, never refused, so the answer says
         nothing about it.
 
+        The owner's own groups are found first (one indexed read of the roster
+        mirror) and only their rosters are read, so the cost follows the
+        owner's groups, not the space's.
+
         Args:
             personal: The personal read scope :meth:`read_scope` compiled,
                 which already checked that the asker is its owner.
@@ -823,14 +837,21 @@ class AccessPolicy:
         if personal.owner_type != "user":
             raise ValueError("only a personal read covers its owner's groups")
         owner = personal.owner_id
-        wanted = None if only is None else set(only)
+        mine = set(
+            await self._groups.member_groups(
+                personal.app_id, personal.project_id, owner
+            )
+        )
+        if only is not None:
+            mine &= set(only)
         views: list[GroupView] = []
-        for group in await self._groups_of(personal.app_id, personal.project_id):
-            if wanted is not None and group.owner_id not in wanted:
-                continue
-            record = await self._groups.get(group)
-            if record is not None and record.roster.is_current_member(owner):
-                views.append(_view_of(record, owner, "asker"))
+        if mine:
+            for group in await self._groups_of(personal.app_id, personal.project_id):
+                if group.owner_id not in mine:
+                    continue
+                record = await self._groups.get(group)
+                if record is not None and record.roster.is_current_member(owner):
+                    views.append(_view_of(record, owner, "asker"))
         if not views:
             return None
         return _group_read_scope(
