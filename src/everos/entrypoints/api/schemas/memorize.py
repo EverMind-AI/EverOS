@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from everos.core.utils.datetime import MAX_EPOCH_MS
+
 from .groups import RosterEventDTO
 from .ids import (
     PATH_SAFE_CHARSET,
@@ -59,10 +61,13 @@ class MessageItemDTO(BaseModel):
     timestamp: int = Field(
         ...,
         gt=0,
+        le=MAX_EPOCH_MS,
         description=(
-            "Message event time as Unix epoch in **milliseconds** "
-            "(v1 API contract; the algo layer auto-detects sec vs ms "
-            "for backward compat but the contract is ms)."
+            "Message event time as Unix epoch in **milliseconds** (the "
+            "contract). For backward compatibility a value below 10^10 is "
+            "read as seconds (up to 2286-11-20); every larger value is "
+            "milliseconds, so an instant from 1970-04-26 on is sent in "
+            "milliseconds, before 2001-09-09 too."
         ),
     )
     content: str | list[ContentItemDTO]
@@ -186,9 +191,11 @@ class AddResponseData(BaseModel):
     duplicates: int | None = Field(
         default=None,
         description=(
-            "Messages of the batch its group already held, skipped: by "
-            "message_id when one was sent, else by sender, timestamp and "
-            "content. Present only when the batch had some."
+            "Messages of the batch that were sent before, skipped: ones its "
+            "group already held (by message_id when one was sent, else by "
+            "sender, timestamp and content), and ones its session already "
+            "held, buffered or segmented (the same sender, timestamp and "
+            "content). Present only when the batch had some."
         ),
     )
 

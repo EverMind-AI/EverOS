@@ -166,8 +166,8 @@ display timezone is set by `EVEROS_MEMORY__TIMEZONE` (env var) or
 
 | Direction | Format | Notes |
 |---|---|---|
-| **Request** — `messages[].timestamp` (`/add`) | Integer, **Unix epoch milliseconds (ms)** | Server auto-detects `>= 10^12` as ms for backward compat, but the contract is ms |
-| **Request** — `filters.timestamp.{gte,lt,…}` (`/search` / `/get`) | Integer, **Unix epoch ms** *or* ISO-8601 string | Same auto-detect; pick whichever you have |
+| **Request** — `messages[].timestamp` (`/add`) | Integer, **Unix epoch milliseconds (ms)** | For backward compat a value below `10^10` is read as seconds (up to 2286-11-20); every larger value is ms (from 1970-04-26 on, before 2001-09-09 too). Past 9999-12-30 is `422` |
+| **Request** — `filters.timestamp.{gte,lt,…}` (`/search` / `/get`) | Integer, **Unix epoch ms** *or* ISO-8601 string | Same rule for an integer; pick whichever you have |
 | **Response** — every `timestamp` field | ISO-8601 string with **explicit timezone offset** (`+HH:MM` or `Z`) | Always rendered in the configured display tz; never naive |
 
 With the default `EVEROS_MEMORY__TIMEZONE=UTC` an episode produced
@@ -289,10 +289,11 @@ message structure plus a stable `sender_id` for indexing.
 | `sender_id` | `string` | yes | — | `minLength=1` |
 | `sender_name` | `string \| null` | no | `null` | — |
 | `role` | `"user" \| "assistant" \| "tool"` | yes | — | — |
-| `timestamp` | `integer` | yes | — | `> 0` — **Unix epoch milliseconds (ms)** per v1 contract |
+| `timestamp` | `integer` | yes | — | `> 0`, at most `253402214399999` (9999-12-30) — **Unix epoch milliseconds (ms)** per v1 contract |
 | `content` | `string \| array<ContentItem>` | yes | — | — |
 | `tool_calls` | `array<ToolCall> \| null` | no | `null` | — |
 | `tool_call_id` | `string \| null` | no | `null` | — |
+| `message_id` | `string \| null` | no | `null` | the chat platform's id; kept and deduped by in a group only (see [Groups](#groups)) |
 
 **`sender_id`** — Stable identifier of the entity producing this turn.
 For `role: "user"`, this is the `user_id` the server will index the
@@ -323,9 +324,30 @@ per the v1 API contract. Used by extraction to anchor the resulting
 episode and by the daily-log writer to bucket the entry into the right
 file (`episode-<YYYY-MM-DD>.md` etc.).
 
-> Implementation note: the algo layer auto-detects seconds vs ms (values
-> `>= 10^12` are treated as ms, smaller as seconds) for backward compat,
-> but **clients should send ms** to honour the contract.
+> Implementation note: for backward compat a value below `10^10` is read
+> as seconds (dates up to 2286-11-20) and every larger value as ms (from
+> 1970-04-26 on), so a millisecond timestamp before 2001-09-09 is read as
+> milliseconds. **Clients should send ms** to honour the contract.
+
+**Message ids.** The server stores each message under an id of its own,
+`m_<session_id>_<timestamp ms>_<digest>`: `digest` is the first 12 hex
+digits of the SHA-256 of the `sender_id`, a line break and the content as
+sent (the string itself, or the content items as canonical JSON: sorted
+keys, no spaces, unset fields left out) -- and, for the second and later
+copies of the same message (same sender, timestamp and content) inside one
+batch, a line break and the copy's number (`1`, `2`, ...). Two different
+messages never share an id, even with one timestamp and each sent alone,
+and the same message sent again has the id it had. A one-to-one forget of a
+message names it by this id (see [`/memory/forget`](#post-apiv2memoryforget));
+the buffered ones are listed with it by a session-filtered search
+(`unprocessed_messages[].id`).
+
+**A message sent again.** A message the session still buffers, sent again
+(the same sender, timestamp and content), is one message: it is skipped and
+counted in the answer's `duplicates`. So is a message of a segment whose
+extraction failed and that waits to be extracted again (see
+[Failure](#asynchronous-mode)). A message of a segment that was extracted is
+taken again (a group skips it: see [Groups](#groups)).
 
 **`content`** — The message body.
 - A bare **string** is shorthand for a single text content item.
@@ -618,7 +640,7 @@ rule and how to poll progress.
 | `status` | `"accumulated" \| "extracted"` | What the server did with the batch |
 | `rejected` | `integer` | Pictures refused at ingest: over an `[images]` limit (bytes, per message, per request), not a picture, or unreadable |
 | `failed` | `integer` | Non-text items the parser could not read into text (its model call failed) |
-| `duplicates` | `integer`, absent when `0` | Messages of a group batch the group already held, skipped (see [Groups](#groups)) |
+| `duplicates` | `integer`, absent when `0` | Messages sent before and skipped: a group's batch skips those its group already holds (see [Groups](#groups)), any batch those its session still buffers or holds in a segment waiting to be extracted again ([MessageItem](#messageitem)) |
 
 **`rejected` / `failed`** — A dropped item never fails the request: the rest
 of its message is kept, and the item adds nothing to the memory. A refused
@@ -1498,7 +1520,7 @@ A user's body: `user_id`, `asker_id` (optional), `target`, `reason`,
 |---|---|---|
 | `record` | `record_ids` (1..100) | the records by id, of any kind: an episode, a picture memory (its current version), a scene (its current version, and its cluster, so it does not grow back), a profile item or a replaced value |
 | `session` | `session_id` | the conversation's current episodes and picture memories |
-| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations with the assistant (one bound to no group, with no other person in it: in two people's conversation it answers `422`, as forgetting a message would change the other person's copy too), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<index in its batch, 3 digits>`, not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, the profile items resting on such a segment go (below), and a buffered one is never read: it stays in the buffer, out of every cut and every model call, until the undo makes it an ordinary message of the next cut |
+| `message` | `session_id`, `message_ids` (1..100) | messages of one of the user's conversations with the assistant (one bound to no group, with no other person in it: in two people's conversation it answers `422`, as forgetting a message would change the other person's copy too), by the id the memory holds -- the server's, `m_<session_id>_<timestamp ms>_<digest of the sender and content>` ([MessageItem](#messageitem)), not the client's `message_id` (a group's batch keeps the client's): each segment that held one is extracted again without it (one model call per segment that keeps text; a segment left without text is forgotten), a picture only those messages carried is forgotten, the profile items resting on such a segment go (below), and a buffered one is never read: it stays in the buffer, out of every cut and every model call, until the undo makes it an ordinary message of the next cut |
 | `owner` | — | every current episode, picture memory and scene of the user, and the whole profile: items, replaced values, summary |
 | `condition` | `memory_types` (`episode`, `image_memory`, `scene`, `profile`), `start` and/or `end` (epoch ms, `[start, end)`) | the memories of those kinds whose time falls in the range (a profile item by when it was observed) |
 | `image` | `image_id` (content hash) | the picture's memories; the episodes and scenes that name it are written again without the reference (only the reference goes: every other character of the text, its line breaks included, stays); in a group, so is each group-profile item whose evidence quotes it, its versions that quote it marked forgotten |

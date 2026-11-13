@@ -39,11 +39,17 @@ def chat_rows(messages: Sequence[CanonicalMessage]) -> list[CanonicalMessage]:
 def merge_dedupe_sort(
     buffered: Sequence[CanonicalMessage], new: Sequence[CanonicalMessage]
 ) -> list[CanonicalMessage]:
-    """Union by ``message_id`` (a buffered row wins), sorted by ``(timestamp, id)``."""
+    """Union by ``message_id`` (a buffered row wins), sorted by timestamp.
+
+    Messages with one timestamp keep the order they arrived in -- the
+    buffered ones (as the buffer lists them), then the batch's: a reply sent in
+    the same second as its question stays after it. The id says nothing about
+    order (:func:`~everos.memory.extract.ingest.gen_message_id`).
+    """
     seen: dict[str, CanonicalMessage] = {m.message_id: m for m in buffered}
     for m in new:
         seen.setdefault(m.message_id, m)
-    return sorted(seen.values(), key=lambda m: (m.timestamp, m.message_id))
+    return sorted(seen.values(), key=lambda m: m.timestamp)
 
 
 def close_complete_tail(result: DetectionResult, *, is_final: bool) -> DetectionResult:

@@ -39,13 +39,14 @@ input, not pictures to store: they are neither stored nor refused.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from everos.component.images import ImageLimits
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.core.utils.datetime import from_timestamp
+from everos.core.utils.datetime import epoch_ms, from_timestamp_ms
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
 from everos.memory.extract.parser import (
     enrich_content_items,
@@ -96,8 +97,8 @@ async def process(
             parser into text instead of storing them.
         skip: Positions in ``payload["messages"]`` not to ingest -- a group's
             duplicates (section 5.2): nothing of them is stored, parsed or
-            counted, and the other messages keep their positions, so their
-            generated ids are the ones the full batch gives them.
+            counted, and the other messages keep the ids the full batch
+            gives them.
 
     Returns:
         The canonical messages, with ``rejected_count`` (pictures refused)
@@ -121,9 +122,12 @@ async def process(
     canonical: list[CanonicalMessage] = []
     failed = 0
     rejected = 0
+    ids = generated_ids(payload)
     for idx, m in enumerate(raw_messages):
         if idx in skip:
             continue
+        message_id = ids[idx]
+        ts_ms = epoch_ms(int(m["timestamp"]))
         content_items = coerce_items(m["content"])
         # With vision off a picture is parser input, like a pdf: not stored,
         # not refused.
@@ -148,9 +152,7 @@ async def process(
         rejected += refused
         failed += non_text - refused
 
-        ts_ms: int = int(m["timestamp"])
-        message_id = gen_message_id(session_id, ts_ms, idx)
-        ts = from_timestamp(ts_ms)
+        ts = from_timestamp_ms(ts_ms)
 
         canonical.append(
             CanonicalMessage(
@@ -188,6 +190,28 @@ async def process(
         group_id=group_id,
         skipped_count=len(skip),
     )
+
+
+def generated_ids(payload: dict[str, Any]) -> list[str]:
+    """The id each of the batch's messages is stored under, by position.
+
+    :func:`gen_message_id` over the message as sent; the copies of one message
+    inside the batch (same sender, time and content) are numbered, so each is
+    kept under its own id.
+    """
+    session_id: str = payload["session_id"]
+    copies: Counter[str] = Counter()
+    ids: list[str] = []
+    for m in payload["messages"]:
+        ts_ms = epoch_ms(int(m["timestamp"]))
+        first = gen_message_id(session_id, ts_ms, m["sender_id"], m["content"])
+        ids.append(
+            gen_message_id(
+                session_id, ts_ms, m["sender_id"], m["content"], copy=copies[first]
+            )
+        )
+        copies[first] += 1
+    return ids
 
 
 def _image_limits() -> ImageLimits:

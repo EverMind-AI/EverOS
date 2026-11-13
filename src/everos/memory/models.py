@@ -88,7 +88,9 @@ class IngestResult(BaseModel):
     not turn into text; ``unparsed_non_text_count`` is their sum. Each such
     item is counted once, stays on its message's content items, and adds
     nothing to its ``text``. ``skipped_count`` counts the batch's messages
-    ingest was told to leave out: the ones the group already held.
+    left out as already held: the ones the group's ledger held (ingest was
+    told to skip them), and the ones the session itself held, buffered or
+    cut into a memcell (the boundary stage found them).
     """
 
     session_id: str

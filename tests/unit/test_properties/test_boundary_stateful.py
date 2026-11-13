@@ -37,11 +37,10 @@ Invariants after every rule, from the module docstring and the repos:
    the quarantine track holds exactly those ids.
 
 Timestamps are unique per message, so ids are unique. ``gen_message_id`` is
-deterministic in ``(session, timestamp_ms, index)`` by design (retries of
-one payload dedupe through the buffer's primary key); two *different*
-messages sent in separate calls with the same millisecond and index share
-an id and the second is dropped as a duplicate -- a property of the id
-scheme, outside this machine's domain and recorded separately.
+deterministic in ``(session, timestamp_ms, sender, content)`` by design (a
+re-send of a message is the same id and is skipped); two *different*
+messages sent in separate calls with the same millisecond keep apart -- a
+property of the id scheme, tested with the ingest stage.
 
 A mid-call crash between the memcell insert and the buffer rewrite (the
 at-least-once case of #516) is not scripted either: the stage is not
@@ -249,16 +248,17 @@ class BoundaryMachine(RuleBasedStateMachine):
 
     def _fresh(self, session: str, msgs: list[tuple[str, str]]) -> list[dict[str, Any]]:
         out = []
-        for idx, (role, text) in enumerate(msgs):
+        for role, text in msgs:
             self.next_ts += 1
             ts = BASE_TS + self.next_ts
+            sender = "u" if role == "user" else "a"
             out.append(
                 {
-                    "id": ingest.gen_message_id(session, ts, idx),
+                    "id": ingest.gen_message_id(session, ts, sender, text),
                     "ts": ts,
                     "role": role,
                     "text": text,
-                    "sender": "u" if role == "user" else "a",
+                    "sender": sender,
                 }
             )
         return out

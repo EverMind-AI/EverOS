@@ -3327,7 +3327,7 @@
               }
             ],
             "title": "Duplicates",
-            "description": "Messages of the batch its group already held, skipped: by message_id when one was sent, else by sender, timestamp and content. Present only when the batch had some."
+            "description": "Messages of the batch that were sent before, skipped: ones its group already held (by message_id when one was sent, else by sender, timestamp and content), and ones its session already held, buffered or segmented (the same sender, timestamp and content). Present only when the batch had some."
           }
         },
         "type": "object",
@@ -6526,9 +6526,10 @@
           },
           "timestamp": {
             "type": "integer",
+            "maximum": 253402214399999.0,
             "exclusiveMinimum": 0.0,
             "title": "Timestamp",
-            "description": "Message event time as Unix epoch in **milliseconds** (v1 API contract; the algo layer auto-detects sec vs ms for backward compat but the contract is ms)."
+            "description": "Message event time as Unix epoch in **milliseconds** (the contract). For backward compatibility a value below 10^10 is read as seconds (up to 2286-11-20); every larger value is milliseconds, so an instant from 1970-04-26 on is sent in milliseconds, before 2001-09-09 too."
           },
           "content": {
             "anyOf": [

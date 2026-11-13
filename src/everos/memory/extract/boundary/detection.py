@@ -77,6 +77,9 @@ class BoundaryOutcome(NamedTuple):
             the cell's own text no longer holds. Defaulted so a caller that
             builds an outcome from its own cells does not have to know about
             pictures.
+        duplicates: Fresh chat rows already buffered, and so skipped: a
+            message sent again (:func:`~everos.memory.extract.ingest.gen_message_id`
+            gives it the id it had).
     """
 
     cells: list[MemCell]
@@ -87,6 +90,7 @@ class BoundaryOutcome(NamedTuple):
     message_count: int
     tail_complete: bool | None = None
     per_cell_picture_names: Sequence[dict[str, str]] = ()
+    duplicates: int = 0
 
 
 class BoundaryDetection:
@@ -131,9 +135,14 @@ class BoundaryDetection:
             return _empty_outcome("skipped", message_count=0)
         session = _session_of(ingested)
         buffered = chat_rows(await self._session_buffer.list(session))
+        fresh, duplicates = _new_only(fresh, buffered)
+        if not fresh:
+            return _empty_outcome("accumulated", message_count=0, duplicates=duplicates)
         merged = merge_dedupe_sort(buffered, fresh)
         await self._keep_buffered(session, merged)
-        return _empty_outcome("accumulated", message_count=len(fresh))
+        return _empty_outcome(
+            "accumulated", message_count=len(fresh), duplicates=duplicates
+        )
 
     async def detect(
         self, ingested: IngestResult, *, is_final: bool
@@ -161,9 +170,13 @@ class BoundaryDetection:
         if not fresh and not is_final:
             return _empty_outcome("skipped", message_count=0)
         buffered = await self._session_buffer.list(session)
+        fresh, duplicates = _new_only(fresh, chat_rows(buffered))
+        if not fresh and not is_final:
+            # Every message was one the session holds: nothing new to cut.
+            return _empty_outcome("accumulated", message_count=0, duplicates=duplicates)
         merged = merge_dedupe_sort(chat_rows(buffered), fresh)
         if not merged:
-            return _empty_outcome("accumulated", message_count=0)
+            return _empty_outcome("accumulated", message_count=0, duplicates=duplicates)
         held = await self._forgotten(session, merged)
         gone = {m.message_id for m in held}
         readable = [m for m in merged if m.message_id not in gone]
@@ -172,7 +185,9 @@ class BoundaryDetection:
         ):
             # Episode extraction needs a user message; wait for one.
             await self._keep_buffered(session, merged)
-            return _empty_outcome("accumulated", message_count=len(fresh))
+            return _empty_outcome(
+                "accumulated", message_count=len(fresh), duplicates=duplicates
+            )
         result = await self._segment_or_quarantine(
             session, readable, buffered=buffered, is_final=is_final
         )
@@ -183,10 +198,17 @@ class BoundaryDetection:
                 "accumulated",
                 message_count=len(fresh),
                 tail_complete=result.tail_complete,
+                duplicates=duplicates,
             )
-        return await self._commit_cells(
-            session, readable, result, message_count=len(fresh), held=held
+        outcome = await self._commit_cells(
+            session,
+            readable,
+            result,
+            message_count=len(fresh),
+            held=held,
+            arrival=merged,
         )
+        return outcome._replace(duplicates=duplicates)
 
     async def _forgotten(
         self, session: SessionKey, merged: Sequence[CanonicalMessage]
@@ -277,10 +299,12 @@ class BoundaryDetection:
         *,
         message_count: int,
         held: Sequence[CanonicalMessage] = (),
+        arrival: Sequence[CanonicalMessage] = (),
     ) -> BoundaryOutcome:
         """Record one memcell row per cell and keep only the tail buffered,
         in one transaction: a failure leaves the buffer as it was. ``held``
-        (forgotten rows) stays buffered beside the tail."""
+        (forgotten rows) stays buffered beside the tail, both in the order of
+        ``arrival`` (the whole merged buffer)."""
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
@@ -300,10 +324,7 @@ class BoundaryDetection:
                     memcell_ids, result.cells, message_ids, senders, strict=True
                 )
             ],
-            tail=sorted(
-                [*slice_tail(merged, result.tail), *held],
-                key=lambda m: (m.timestamp, m.message_id),
-            ),
+            tail=_in_arrival_order([*slice_tail(merged, result.tail), *held], arrival),
             last_memcell_ts=from_timestamp_ms(last_cell_ts) if last_cell_ts else None,
         )
         return BoundaryOutcome(
@@ -323,6 +344,29 @@ class BoundaryDetection:
         await self._session_buffer.keep(
             session, merged, last_message_ts=max(m.timestamp for m in merged)
         )
+
+
+def _in_arrival_order(
+    rows: Sequence[CanonicalMessage], arrival: Sequence[CanonicalMessage]
+) -> list[CanonicalMessage]:
+    """``rows`` in the order ``arrival`` has them (it is sorted by timestamp,
+    so this is too); a row ``arrival`` lacks goes last."""
+    position = {m.message_id: i for i, m in enumerate(arrival)}
+    return sorted(rows, key=lambda m: position.get(m.message_id, len(position)))
+
+
+def _new_only(
+    fresh: list[CanonicalMessage], buffered: Sequence[CanonicalMessage]
+) -> tuple[list[CanonicalMessage], int]:
+    """``fresh`` without the messages already buffered, and how many those were.
+
+    A message's id is made of its own sender, time and content
+    (:func:`~everos.memory.extract.ingest.gen_message_id`), so a buffered id
+    is that message sent again -- a client's retry -- and is taken once.
+    """
+    held = {m.message_id for m in buffered}
+    new = [m for m in fresh if m.message_id not in held]
+    return new, len(fresh) - len(new)
 
 
 def _per_cell_picture_names(
@@ -357,7 +401,11 @@ def _mint_memcell_id() -> str:
 
 
 def _empty_outcome(
-    status: Status, *, message_count: int, tail_complete: bool | None = None
+    status: Status,
+    *,
+    message_count: int,
+    tail_complete: bool | None = None,
+    duplicates: int = 0,
 ) -> BoundaryOutcome:
     return BoundaryOutcome(
         cells=[],
@@ -368,4 +416,5 @@ def _empty_outcome(
         status=status,
         message_count=message_count,
         tail_complete=tail_complete,
+        duplicates=duplicates,
     )

@@ -992,6 +992,29 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **Two messages with one timestamp, each sent alone, are both kept.** A
+  message's server id was `m_<session>_<timestamp>_<index in its batch>`, and
+  the buffer skips an id it holds: a user's message and the assistant's reply
+  sent one per request in the same millisecond (or the same second, with
+  timestamps in seconds) both got index `000`, and the second was dropped
+  while both answers said `accumulated`. The id is now
+  `m_<session>_<timestamp ms>_<digest>`, the digest of the sender and the
+  content as sent (and a copy number for equal messages inside one batch,
+  which are both kept), so two different messages never share one, and the
+  same message sent again -- in any batch, at any position -- has the id it
+  had: it is skipped and counted in the answer's `duplicates`, which a
+  one-to-one batch now reports too (a re-send of buffered messages no longer
+  makes a boundary call). Messages with one timestamp keep the order they
+  arrived in; before, the id's index ordered them. A one-to-one `message`
+  forget names a message by this id ([docs/api.md](docs/api.md#messageitem)).
+- **A millisecond timestamp before 2001-09-09 no longer answers `500`.** The
+  add API read every value below `10^12` as seconds, so `978307200000`
+  (2001-01-01 in ms) landed in year ~33,000 and raised. A value below `10^10`
+  is now seconds (up to 2286-11-20), every larger value milliseconds (from
+  1970-04-26 on), for `messages[].timestamp` and integer search filters
+  alike; a timestamp past 9999-12-30 is `422`. Every timestamp of a batch is
+  normalised to milliseconds before use, so a group's roster no longer
+  records a seconds value as milliseconds.
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's

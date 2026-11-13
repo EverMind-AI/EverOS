@@ -277,7 +277,8 @@ async def test_an_implicit_group_of_three_dedupes_two_people_do_not(
 
         solo = [_message("u_gus", 1, "note to self", "r-1")]
         await _add(world, _batch("v1", *solo))
-        assert (await _add(world, _batch("v1", *solo))).duplicates == 0
+        # Its own session holds it (buffered): a re-send there is one message.
+        assert (await _add(world, _batch("v1", *solo))).duplicates == 1
         assert (await _add(world, _batch("v2", *solo))).duplicates == 0
 
 
@@ -383,14 +384,17 @@ async def test_a_deleted_session_sent_again_is_taken(tmp_path: Path) -> None:
         assert (await _add(world, other | {"session_id": "s3"})).duplicates == 1
 
 
-async def test_a_one_to_one_session_never_dedupes(tmp_path: Path) -> None:
+async def test_a_one_to_one_session_has_no_group_ledger(tmp_path: Path) -> None:
+    """No group dedupe: only the session's own buffer holds a re-send."""
     async with GroupWorld.open(tmp_path, llm=FakeLLMClient(handler=_Model())) as world:
         batch = _batch(
             "solo",
             _message("u_amy", 1, "Lisbon trip", "x-1"),
             {**_message("bot", 2, "Noted."), "role": "assistant"},
         )
-        for _ in range(2):
-            result = await _add(world, batch, defer=False)
-            assert result.duplicates == 0
+        assert (await _add(world, batch, defer=False)).duplicates == 0
+        assert (await _add(world, batch, defer=False)).duplicates == 2
+        assert await _held_texts(world, "solo") == ["Lisbon trip", "Noted."]
         assert await world.stores.groups.binding(world.session("solo")) is None
+        # Another session takes the same messages: no ledger spans sessions.
+        assert (await _add(world, batch | {"session_id": "solo2"})).duplicates == 0

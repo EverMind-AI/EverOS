@@ -43,6 +43,7 @@ from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
 )
 from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
+from everos.memory.extract.ingest import gen_message_id
 from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from everos.memory.ports import SessionKey
@@ -167,6 +168,11 @@ class _Stage:
         }
 
 
+def _mid(start: int) -> str:
+    """The id ``s1``'s message ``m<start>`` is stored under."""
+    return gen_message_id("s1", BASE_TS + start, "u", f"m{start}")
+
+
 def _payload(session: str, start: int) -> dict[str, Any]:
     return {
         "session_id": session,
@@ -210,14 +216,14 @@ async def test_third_consecutive_unusable_call_quarantines_the_buffer() -> None:
         # The buffered poison and the quarantining call's own message are
         # kept; the two earlier calls' messages were never persisted.
         assert sorted(tracks["quarantine"]) == [
-            "m_s1_1700000000001_000",
-            "m_s1_1700000000004_000",
+            _mid(1),
+            _mid(4),
         ]
         assert stage.llm.call_count == OUTPUT_ATTEMPTS * POISON_CALLS
         # The session goes on: a healthy flush cuts a cell from an empty buffer.
         outcome = await stage.add("s1", 5, final=True)
         assert outcome.status == "extracted"
-        assert outcome.per_cell_message_ids == [["m_s1_1700000000005_000"]]
+        assert outcome.per_cell_message_ids == [[_mid(5)]]
         assert (await stage.tracks("s1"))["memorize"] == []
         assert len((await stage.tracks("s1"))["quarantine"]) == 2
 
@@ -269,10 +275,9 @@ async def test_a_refused_message_counts_without_reaching_the_model() -> None:
         assert stage.llm.call_count == 0, "never retried, never sent"
         tracks = await stage.tracks("s1")
         assert tracks["memorize"] == []
-        assert sorted(tracks["quarantine"]) == [
-            "m_s1_0_001",
-            "m_s1_1700000000003_000",
-        ]
+        assert sorted(tracks["quarantine"]) == sorted(
+            [gen_message_id("s1", 0, "u", "undated"), _mid(3)]
+        )
 
 
 async def test_a_tool_row_is_dropped_and_never_poisons_the_session() -> None:
@@ -286,7 +291,7 @@ async def test_a_tool_row_is_dropped_and_never_poisons_the_session() -> None:
             assert (outcome.status, outcome.message_count) == ("accumulated", 1)
         assert stage.llm.call_count == 3
         assert await stage.tracks("s1") == {
-            "memorize": [f"m_s1_170000000000{start}_000" for start in (1, 2, 3, 4)],
+            "memorize": sorted(_mid(start) for start in (1, 2, 3, 4)),
             "quarantine": [],
         }
 
@@ -294,10 +299,12 @@ async def test_a_tool_row_is_dropped_and_never_poisons_the_session() -> None:
 async def test_a_tool_row_an_older_build_buffered_is_dropped_too() -> None:
     async with _Stage() as stage:
         await stage.leave_tool_row_buffered("s1", 1)
-        assert (await stage.tracks("s1"))["memorize"] == ["m_s1_1700000000001_000"]
+        assert (await stage.tracks("s1"))["memorize"] == [
+            gen_message_id("s1", BASE_TS + 1, "tool", "tool output")
+        ]
 
         outcome = await stage.add("s1", 2, final=True)
 
         assert outcome.status == "extracted"
-        assert outcome.per_cell_message_ids == [["m_s1_1700000000002_000"]]
+        assert outcome.per_cell_message_ids == [[_mid(2)]]
         assert await stage.tracks("s1") == {"memorize": [], "quarantine": []}

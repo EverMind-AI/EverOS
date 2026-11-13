@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import random
 
 from hypothesis import given
@@ -76,8 +77,15 @@ def test_merge_dedupe_sort_laws(
     buffered: list[CanonicalMessage], new: list[CanonicalMessage]
 ) -> None:
     merged = merge_dedupe_sort(buffered, new)
-    keys = [(m.timestamp, m.message_id) for m in merged]
-    assert keys == sorted(keys)
+    stamps = [m.timestamp for m in merged]
+    assert stamps == sorted(stamps)
+    # One timestamp: the order they arrived in, buffered first, never by id.
+    arrival: dict[str, int] = {}
+    for i, m in enumerate([*buffered, *new]):
+        arrival.setdefault(m.message_id, i)
+    for a, b in itertools.pairwise(merged):
+        if a.timestamp == b.timestamp:
+            assert arrival[a.message_id] < arrival[b.message_id]
     ids = [m.message_id for m in merged]
     assert len(ids) == len(set(ids))
     assert set(ids) == {m.message_id for m in buffered} | {m.message_id for m in new}

@@ -57,7 +57,7 @@ from everos.core.errors import InvalidInputError, RosterConflictError
 from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
+from everos.core.utils.datetime import epoch_ms, get_utc_now, to_timestamp_ms
 from everos.memory import IngestResult as _IngestResult
 from everos.memory.access import authorize_delivery, resolve_identity
 from everos.memory.events import GroupFlushed
@@ -540,11 +540,13 @@ class Memorizer:
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested)
+            ingested = _held_too(ingested, buffered)
             if cut_first:
                 return ingested, cut_first
             return _result(payload, ingested, _status(buffered.status))
 
         boundary = await self._boundary.detect(ingested, is_final=is_final)
+        ingested = _held_too(ingested, boundary)
         boundaries = [*cut_first, boundary] if boundary.cells else cut_first
 
         if not boundaries:
@@ -847,13 +849,22 @@ def _result(
     )
 
 
+def _held_too(ingested: IngestResult, boundary: BoundaryOutcome) -> IngestResult:
+    """``ingested`` counting, as skipped, the messages its session already held."""
+    if not boundary.duplicates:
+        return ingested
+    return ingested.model_copy(
+        update={"skipped_count": ingested.skipped_count + boundary.duplicates}
+    )
+
+
 def _batch_messages(payload: dict[str, Any]) -> list[BatchMessage]:
     """The part of the batch's messages the roster cares about."""
     return [
         BatchMessage(
             sender_id=m["sender_id"],
             role=m["role"],
-            at=int(m["timestamp"]),
+            at=epoch_ms(int(m["timestamp"])),
             sender_name=m.get("sender_name"),
         )
         for m in payload.get("messages") or []

@@ -15,8 +15,10 @@ class MemorizeResult(BaseModel):
     ``rejected`` and ``failed`` count the batch's non-text items that were
     dropped at ingest -- pictures refused, and items the parser could not
     read (:class:`~everos.memory.IngestResult`); the messages themselves are
-    kept. ``duplicates`` counts the batch's messages its group already held,
-    which were skipped (docs/group-memory.md, section 5.2).
+    kept. ``duplicates`` counts the batch's messages that were skipped as
+    sent before: ones its group already held (docs/group-memory.md, section
+    5.2), and ones its session already held -- buffered, or cut into a
+    segment -- under the same generated id (a one-to-one re-send).
     """
 
     message_count: int

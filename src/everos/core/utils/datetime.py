@@ -37,7 +37,17 @@ from zoneinfo import ZoneInfo
 
 from pydantic import AfterValidator
 
-_MS_THRESHOLD = 1e12  # ts >= this is treated as milliseconds
+_MS_THRESHOLD = 10_000_000_000
+"""A Unix timestamp at or above this is milliseconds, below it seconds.
+
+10**10 seconds is 2286-11-20, so every seconds value a client sends is below
+it; 10**10 milliseconds is 1970-04-26, so a millisecond value from then on --
+before 2001-09-09 too, where the old 10**12 split read it as seconds past
+year 9999 -- is read as milliseconds."""
+
+MAX_EPOCH_MS = 253_402_214_399_999
+"""The last epoch millisecond any display timezone can render (9999-12-30
+23:59:59.999 UTC); a later instant is past the calendar's last year."""
 _EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
 
 
@@ -177,11 +187,21 @@ Usage::
 def from_timestamp(ts: int | float) -> _dt.datetime:
     """Parse a Unix timestamp into a timezone-aware datetime.
 
-    Auto-detects seconds vs milliseconds: values ``>= 1e12`` are treated as
-    milliseconds. Returned datetime is in the default timezone.
+    Auto-detects seconds vs milliseconds (:func:`epoch_ms`): values
+    ``>= 10**10`` are milliseconds. Returned datetime is in the default
+    timezone.
     """
-    seconds = ts / 1000.0 if ts >= _MS_THRESHOLD else float(ts)
-    return _dt.datetime.fromtimestamp(seconds, tz=_display_tz())
+    return from_timestamp_ms(epoch_ms(ts))
+
+
+def epoch_ms(ts: int | float) -> int:
+    """A Unix timestamp in seconds or milliseconds, as epoch milliseconds.
+
+    Values ``>= 10**10`` are milliseconds (from 1970-04-26 on), smaller ones
+    seconds (up to 2286-11-20): the two ranges a client's clock can give
+    overlap nowhere else.
+    """
+    return int(ts) if ts >= _MS_THRESHOLD else round(ts * 1000)
 
 
 def from_timestamp_ms(ts: int) -> _dt.datetime:

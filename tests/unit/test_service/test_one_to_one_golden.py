@@ -38,6 +38,13 @@ on 2026-11-13, when two people stopped being a group (docs/group-memory.md,
 D14): they are again the per-sender fan-out's, as recorded at the commit
 before (d4f1037), with the chat-only edits below.
 
+It was edited by hand a second time (2026-11-13) for the message id scheme,
+which names a message by its sender and content instead of its place in its
+batch (two messages with one timestamp, each sent alone, had the same id and
+the second was dropped): the three ids of the session-filtered search's
+buffered messages changed, ``m_<session>_<ms>_<index>`` to
+``m_<session>_<ms>_<digest>``, and nothing else.
+
 It was edited by hand once (2026-11-12) for the chat-only cut, which removed
 agent memory and Reflection: every event loses ``source`` (always
 ``"pipeline"``; it told a pipeline episode from a Reflection merge) and every

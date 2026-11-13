@@ -76,12 +76,17 @@ def test_merge_dedupe_sort_dedupes_by_message_id() -> None:
     assert m1.text == "hi"  # original, not "overwritten?"
 
 
-def test_merge_sorts_by_timestamp_then_id() -> None:
+def test_merge_sorts_by_timestamp_then_arrival() -> None:
+    """One timestamp: buffered first, then the batch's, each in its order --
+    never by id, which says nothing about order."""
     a = _msg("m_b", "user", ts_seconds=100)
     b = _msg("m_a", "user", ts_seconds=100)
     c = _msg("m_c", "user", ts_seconds=50)
     merged = merge_dedupe_sort([], [a, b, c])
-    assert [m.message_id for m in merged] == ["m_c", "m_a", "m_b"]
+    assert [m.message_id for m in merged] == ["m_c", "m_b", "m_a"]
+    d = _msg("m_0", "user", ts_seconds=100)
+    merged = merge_dedupe_sort([d], [a, b, c])
+    assert [m.message_id for m in merged] == ["m_c", "m_0", "m_b", "m_a"]
 
 
 # ── slice_tail ───────────────────────────────────────────────────────────
