@@ -1254,7 +1254,8 @@ class AccessSettings(_Section):
     EverOS trusts its caller. A deployment that serves several people puts a
     gateway in front and names the header it sets here; the asker is then read
     from that header and a request whose body ``asker_id`` disagrees is
-    refused (403). ``None`` (default): the body's ``asker_id`` is the asker.
+    refused (403), as is a request that does not carry the header at all.
+    ``None`` (default): the body's ``asker_id`` is the asker.
     """
 
     identity_header: str | None = None

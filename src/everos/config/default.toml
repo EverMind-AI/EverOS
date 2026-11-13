@@ -433,7 +433,8 @@ past_trigger_dates = true
 # authentication: the asker of a request is the caller's assertion. A
 # deployment serving several people sets the header its gateway writes; the
 # asker is then read from it, and a body asker_id that differs is refused
-# with 403. Unset (default): the body's asker_id is the asker.
+# with 403, as is a request without the header. Unset (default): the body's
+# asker_id is the asker.
 # identity_header = "X-EverOS-Asker"
 
 [logging]

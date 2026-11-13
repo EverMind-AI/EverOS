@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from everos.config import load_settings
+from everos.core.errors import ForbiddenError
 from everos.core.observability.tracing import gen_request_id
 from everos.service import Application
 
@@ -37,15 +38,27 @@ RequestIdDep = Annotated[str, Depends(extract_request_id)]
 def asserted_asker(request: Request) -> str | None:
     """The asker the gateway asserted, when ``[access] identity_header`` is set.
 
-    Read-only protocol translation: the header named in the settings, or
-    ``None`` when no header is configured or the request carries none. Whether
-    it agrees with the body's ``asker_id`` is the service's decision.
+    Protocol translation: the header named in the settings, or ``None`` when
+    no header is configured. A server that takes its askers from a gateway
+    serves no request the gateway did not vouch for: with the header
+    configured, a request that does not carry it (or carries it empty) is
+    refused (403) rather than read on its body's ``asker_id`` -- or, for a
+    personal read without one, as its owner. Whether the header agrees with
+    the body's ``asker_id`` is the service's decision.
+
+    Raises:
+        ForbiddenError: The header is configured and the request lacks it.
     """
     header = load_settings().access.identity_header
     if not header:
         return None
     value = request.headers.get(header)
-    return value or None
+    if not value:
+        raise ForbiddenError(
+            "this server takes the asker from the gateway's identity header "
+            "([access] identity_header), which the request does not carry"
+        )
+    return value
 
 
 AskerHeaderDep = Annotated[str | None, Depends(asserted_asker)]

@@ -8,7 +8,9 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
 - ``/memory/delete`` and ``/delete_by_ids`` take the asker as every other
   personal route does: a personal delete reaches the asker's own memory only
   (403 for someone else's, before anything is forgotten); a group delete is
-  an owner's, an admin's or the deliverer's.
+  an owner's, an admin's or the deliverer's;
+- with ``[access] identity_header`` set, a request without the header is
+  refused.
 """
 
 from __future__ import annotations
@@ -258,3 +260,41 @@ async def test_a_group_delete_is_a_managers_or_the_deliverers(
             "/api/v2/memory/delete", json={**body, "asker_id": asker}
         )
         assert answer.status_code == status, (asker, answer.text)
+
+
+# -- B-5: a gateway's server serves no request without its header ---------
+
+
+async def test_without_the_identity_header_a_request_is_refused(
+    world: GroupWorld, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _managed_group(world, deliverer=None)
+    await _diary(world, "u_chen", "mk_secret diary", session="s_chen", at=T0)
+    await world.project()
+    _gateway(monkeypatch)
+    personal = {"project_id": PROJECT, "user_id": "u_chen", "query": "mk_secret"}
+    group = {**personal, "user_id": None, "group_id": "trip", "asker_id": "u_chen"}
+    for method, path, body in (
+        ("POST", "/api/v2/memory/search", personal),
+        ("POST", "/api/v2/memory/search", group),
+        (
+            "POST",
+            "/api/v2/memory/get",
+            {"project_id": PROJECT, "user_id": "u_chen", "memory_type": "episode"},
+        ),
+        ("POST", "/api/v2/memory/delete", {"project_id": PROJECT, "user_id": "u_chen"}),
+    ):
+        for headers in ({}, {HEADER: ""}):
+            answer = await client.request(method, path, json=body, headers=headers)
+            assert answer.status_code == 403, (path, headers, answer.text)
+            assert "mk_secret" not in answer.text
+    read = await client.get(
+        "/api/v2/groups/trip", params={"project_id": PROJECT, "asker_id": "u_chen"}
+    )
+    assert read.status_code == 403
+    served = await client.post(
+        "/api/v2/memory/search", json=personal, headers=_as("u_chen")
+    )
+    assert served.status_code == 200 and "mk_secret" in served.text
+    health = await client.get("/health")
+    assert health.status_code != 403
