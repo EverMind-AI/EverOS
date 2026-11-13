@@ -1,4 +1,4 @@
-"""T8.1: the purged scope's async adds, before, during and after its purge."""
+"""T8.1: the purged scope's async adds, queued before and sent during its purge."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from .seed import scope_token
 pytestmark = pytest.mark.acceptance
 
 
-def _async_add(srv: Any, session: str, app: str, project: str, words: str) -> str:
-    resp = srv.post(
+def _send(srv: Any, session: str, app: str, project: str, words: str) -> Any:
+    return srv.post(
         "/memory/add",
         {
             "session_id": session,
@@ -28,6 +28,10 @@ def _async_add(srv: Any, session: str, app: str, project: str, words: str) -> st
             "async_mode": True,
         },
     )
+
+
+def _async_add(srv: Any, session: str, app: str, project: str, words: str) -> str:
+    resp = _send(srv, session, app, project, words)
     assert resp.status_code == 202, resp.text
     return resp.json()["request_id"]
 
@@ -41,7 +45,8 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
 ) -> None:
     """A8: the scope's adds queued before the purge fail as purge_in_progress;
     one in delivery is waited for (its data then purged with the rest); one
-    accepted while the purge runs is delivered; other scopes complete."""
+    sent while the purge runs is refused and never queued (D37); other
+    scopes complete."""
     world = make_world("T8.1", EVEROS_TEST_FAILPOINTS="purge.before_step8=pause")
     srv = world.srv
     s_token, o_token = scope_token("a1", "p1"), scope_token("a2", "p1")
@@ -62,13 +67,7 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
     waited = srv.job(job_id).json()["data"]["status"]
     hold.release.set()  # the delivery in flight ends: the wait is over
     time.sleep(2)
-    new_id = _async_add(srv, "new", "a1", "p1", s_token)  # while it runs
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        if _task(srv, new_id)["status"] == "success":
-            break
-        time.sleep(0.5)
-    new_task = _task(srv, new_id)
+    refused = _send(srv, "new", "a1", "p1", s_token)  # while it runs
     release(srv.fp_dir, "purge.before_step8")
     job = finish(srv, job_id, timeout=180)
     assert job["status"] == "succeeded", job
@@ -78,7 +77,7 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
             break
         time.sleep(0.5)
     held = srv.call("GET", f"/tasks/{held_id}")
-    tasks = {r: _task(srv, r) for r in [*s_ids, *o_ids, new_id]}
+    tasks = {r: _task(srv, r) for r in [*s_ids, *o_ids]}
     inbox = {
         r[0]: r[1:]
         for r in rows(
@@ -91,7 +90,7 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
         {
             "held": [held.status_code, held.text[:300]],
             "while_waiting": waited,
-            "new_while_running": new_task,
+            "refused_while_running": [refused.status_code, refused.text[:300]],
             **tasks,
         },
     )
@@ -105,8 +104,9 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
             "purge_in_progress",
         ), tasks[rid]
         assert inbox[rid] == ("failed", "")
-    assert new_task["status"] == "success", new_task
-    assert tasks[new_id]["status"] == "success", tasks[new_id]  # kept (D17')
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"]["code"] == "PURGE_IN_PROGRESS"
+    assert refused.json()["request_id"] not in inbox  # never queued
     for rid in o_ids:
         assert tasks[rid]["status"] == "success", tasks[rid]
     after_other = md_counts(srv.root, "a2", "p1")
