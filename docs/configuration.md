@@ -206,14 +206,13 @@ startup (`llm.task.resolved`; the key is never printed).
 
 **The decider's own defaults.** The decider runs inside a search request, so
 the time and retry budget of one round is bounded by the caller waiting on it,
-not by `[llm]`'s background-extraction values. These four fields, when
+not by `[llm]`'s background-extraction values. These three fields, when
 `[llm.decider]` leaves them unset, take the decider's own values instead of
 `[llm]`'s:
 
 | Field | Decider default | Why |
 |---|---|---|
 | `timeout_seconds` | `60.0` | A slow extraction endpoint must not stretch every search round. |
-| `max_tokens` | `512` | The reply is one small JSON object; the cap turns a model that will not stop into a visible failure instead of a timeout. |
 | `sdk_max_retries` | `0` | `[decider] retries` already retries; SDK retries would multiply with it. |
 | `invalid_reply_retries` | `1` | A raised `[llm]` value does not carry over: `[decider] retries` already covers an unusable reply. |
 
@@ -414,20 +413,21 @@ unaffected: nothing is probed, compared, or recorded.
 `step` keeps everalgo's own step limits; every other cutting parameter is
 everalgo's `BoundaryDetector` default.
 
-**Choosing a strategy.** Keep `batch` unless the extra cost of `step` is worth it
-for chat memory:
+**Choosing a strategy.** `batch` is faster; `step` scored higher on LoCoMo. Keep
+`batch` unless slower ingest is worth it for chat memory:
 
 | | `batch` (default) | `step` |
 |---|---|---|
 | Boundary calls | one per add (544 for all of LoCoMo) | one per message (about 5,250 for LoCoMo) |
 | LoCoMo ingest, 10 servers | about 4 minutes | about 17–22 minutes |
 | Episodes stored for LoCoMo | about 320 | about 550, each shorter |
-| Agent conversations (tool calls) | yes | no: chat messages only |
+| Agent conversations (tool calls) | supported | chat messages only |
 | LoCoMo `agentic`, best of three runs | 94.35%\* | 94.61%\* |
 
-The two scores are within LoCoMo's run-to-run spread of about one point. The
-`step` runs also set `[llm] response_format_mode = "prompt_only"` for every call;
-the benchmark config `locomo-step` reproduces them
+The two scores are within LoCoMo's run-to-run spread of about one point. They
+were measured with the reply format of each benchmark config: `batch` with the
+default `[llm] response_format_mode = "json_schema"`, which keeps every reply to
+its schema, and `step` with `"prompt_only"` for every call
 ([benchmarks/README.md](../benchmarks/README.md#batch-or-step)).
 
 \* Graded against the corrected answers of the LoCoMo gold audit for the 99

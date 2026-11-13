@@ -120,25 +120,13 @@ EverOS 从那里读取。LoCoMo 的配置还把每条消息都记在被提问的
 把整段对话当成一个 session，与 EverAlgo 参考评测框架的做法相同，于是一条记忆可能跨越两个
 数据集 session。session 自带 id 的数据集不接受 `"conversation"`。
 
-**可选：单独的检索 decider**（只用于 `llm_multiround`）。推荐使用已发表数字所用的 decider
-（见 [6. 结果](#6-结果) 的 decider 列，LoCoMo 见 [LoCoMo 各检索方式](#locomo-各检索方式)），
-各配置已预填各自推荐的那个。要使用它，把
-`BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，托管 API 还要填
-`BENCH_DECIDER_API_KEY`；只有想换成别的模型时才需要同时设 `BENCH_DECIDER_MODEL`。不设端点时
-由抽取模型担任 decider，运行会警告这不是已发表的配置。LoCoMo 的 decider 在 OpenRouter 上就有：
-设 `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，`BENCH_DECIDER_API_KEY` 填 OpenRouter 的 key。
-其余几个如何部署不在本指南范围内。
-
-推理型模型做 decider 时不能开思考。decider 的输出上限是 512 个 token（除非用
-`EVEROS_LLM__DECIDER__MAX_TOKENS` 另设），开着思考的模型可能在给出决定前就把它用完；decider
-始终没给出决定的那一轮会退回固定的结果，测的就成了另一种方法。LoCoMo 的配置为它的 decider
-关掉了思考（`[retrieval_env]` 里的 `EVEROS_LLM__DECIDER__EXTRA`，OpenRouter 的写法）。decider
-仍然退回的运行，会在该对话检索一结束就停下，不再为它付回答的钱，报错信息会写明修法。
-
-decider 以 `EVEROS_LLM__DECIDER__MODEL` / `__BASE_URL` / `__API_KEY`（即 EverOS 的
-`[llm.decider]`）传给运行启动的服务。`llm_multiround` 运行在第一道题之前，`run.py`
-按这些服务的方式解析 decider（`[llm.decider]` → 已弃用的 `[decider]` → decider
-自己的默认值 → `[llm]`），并通过同一个客户端发一次请求；decider 不回答则停止运行。
+**可选：单独的检索 decider**（只用于 `llm_multiround`）。各配置已预填已发表数字所用的 decider
+（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [LoCoMo 各检索方式](#locomo-各检索方式)）。
+要使用它，把 `BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，`BENCH_DECIDER_API_KEY`
+填它的 key；只有想换别的模型时才设 `BENCH_DECIDER_MODEL`。LoCoMo 的 decider 在 OpenRouter 上：
+`BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，key 填你的 OpenRouter key；它的配置让 decider 关着思考运行。不设端点时由
+抽取模型担任 decider，运行会提示这不是已发表的配置。运行通过 EverOS 的 `[llm.decider]` 使用它，
+并在第一道题之前先确认它能应答。
 
 **可选：自托管 embedding。** 把 `EVEROS_EMBEDDING__BASE_URL` 设为你的服务地址，
 `EVEROS_EMBEDDING__MODEL` 设为该服务实际提供的模型名，`EVEROS_EMBEDDING__API_KEY` 填任意非空值。
@@ -200,8 +188,7 @@ DATASET=locomo bash benchmarks/reproduce.sh
 且不超过对话数。每个 server 都是一个独立的 EverOS 实例，有自己的库；对话按序号分片到各个
 实例上（对话 `c` 分给第 `c mod N` 个 server）。EverOS 本身每个库只跑一个进程，所以这是在
 多个独立的库上并行，不是把一套部署水平扩展。`--servers N` 只影响跑得快慢，不影响结果。
-可以同时跑多次、跑不同的 benchmark：每次运行为自己的 server 挑空闲端口，并且只认自己启动的
-server 的应答（`/health` 返回应答进程的 `pid`），两次运行不会共用同一个库。
+可以同时跑多次、跑不同的 benchmark：每次运行只用自己启动的 server，两次运行不会共用同一个库。
 
 `locomo-step` 是用逐条边界检测、且 EverOS 每次调用都只在 prompt 里要求回复格式的 LoCoMo：
 `configs/locomo-step.toml` 就是 `locomo.toml` 改了这两项 server 设置。两者各自的分数和代价见
@@ -226,7 +213,7 @@ uv run python benchmarks/run.py locomo --run-name locomo_smoke --smoke
 
 ### 在已建好的库上给其他检索方式打分
 
-一次运行建好的库可以直接给任何检索方式用，不必重新写入。给新运行起一个自己的名字，跳过 ADD，
+一次运行建好的库可以直接给任何检索方式用，不必重新写入。每种检索方式单独起一个运行，跳过 ADD，
 指向那些库：
 
 ```bash
@@ -236,10 +223,9 @@ DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
 ```
 
 多个 server 时，`--everos-root` 写库的基础路径，运行会读它旁边的 `store_s0` 到
-`store_s<N-1>`；只跑检索的 server 关掉了 cascade，不会改动这些库。`DATASET` 要和建库时一致
-（step 建的库用 `locomo-step`）：运行不会拿配置去核对另一个结果目录里的库。不要在原运行名下
-直接换 `--methods`：结果目录换了读取设置重跑时，会把之前的检索、回答和判分文件挪成
-`*.superseded.jsonl`，报告里就只剩新的检索方式。
+`store_s<N-1>`；只跑检索不会改动这些库。`DATASET` 要和建库时一致（step 建的库用 `locomo-step`），
+每种检索方式用一个新的 `RUN`：结果目录换了检索设置重跑时，会把之前的检索、回答和判分文件归档成
+`*.superseded.jsonl`。
 
 ### 运行被拦下时
 
@@ -251,7 +237,7 @@ DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
 | `The embedding service did not answer the startup probe` | 检查 `EVEROS_EMBEDDING__BASE_URL` / `__MODEL` / `__API_KEY`，或改用 `--methods keyword`；对提示里给出的 server 日志 `grep embedding_` 可看到 server 自己报的原因 |
 | `No rerank provider is configured` | 设置 `EVEROS_RERANK__API_KEY`，或换一个不是 `agentic` 的方法 |
 | `decider ... did not answer` | `llm_multiround` 运行的 decider 没有回答探测请求，提示里写了原因；见 [3. 配置](#3-配置) 中的 decider 选项 |
-| `llm_multiround round(s) fell back to a fixed core` | decider 在这些轮里每次尝试都失败了；推理型模型按报错信息关掉思考，然后换一个新的 `RUN` 重新检索：在原运行名下续跑会保留已经退回的检索结果 |
+| `llm_multiround round(s) fell back to a fixed core` | decider 在这些轮里失败了，server 日志里的 `llm_multiround_decider_error` 写明了原因；处理好后换一个新的 `RUN` 重新检索 |
 | `decider  no endpoint for ...` | 是警告，不是错误（只在 `llm_multiround` 出现）：运行会继续，改用抽取模型，分数不能和 [6. 结果](#6-结果) 对比 |
 | `Refusing to start: these stores already hold memories` | 删除列出的库后重跑，或加 `--reuse-store` |
 | `No SubtleMemory personas under ...` | `bash benchmarks/download_data.sh subtlememory` |
@@ -339,13 +325,10 @@ ps -eo pid,command | grep "[e]veros server start"    # 查残留的 server
 
 > **准确率**——表中每个评测都是微平均准确率：所有已判分题目的 `sum(correct) / sum(total)`。
 > `report.txt` 里的分类目各行只做报告，从不平均进总分，所以题量少的类目对总分的影响小于
-> 题量大的类目。本说明以前写的是 EverMemBench 按九个类目列的均值计分——那是宏平均，
-> 是另一种统计量，也不是 `run.py` 的算法。
+> 题量大的类目。
 >
-> 由此有两点需要在与他人数字比较前知道。EverMemBench 已发表对比表的六行里，有五行是各自
-> 九列的宏平均，所以把我们的数字和那一列放在一起读，是在比较两种不同的统计量。另外，
-> 「九个类目」这一点本代码无法确认：adapter 只命名了三个（`adapters/evermembench.py` 中的
-> `F_SH`、`F_MH`、`F_TP`），其余由题目 id 前缀推导，未标注的 id 会以原始 key 报告。
+> **EverMemBench**——它已发表的对比表里，大多数行是各类目列的宏平均，和这里的微平均是两种
+> 不同的统计量。
 >
 > **SubtleMemory**——按事实抽取是否发现冲突，在两套答题契约之间逐题路由，
 > 适配器自动完成。
@@ -357,9 +340,9 @@ ps -eo pid,command | grep "[e]veros server start"    # 查残留的 server
 
 每份 LoCoMo 配置完整跑 3 次取最高的一次，再用这次运行建好的库跑其余每种检索方式各 1 次（做法见
 [在已建好的库上给其他检索方式打分](#在已建好的库上给其他检索方式打分)）。测量环境：everalgo-core 0.7.0、
-everalgo-boundary 0.5.0，提交 `ccb402af`；`llm_multiround` 在提交 `d278a2cb` 上测，那里的配置关掉了
-decider 的思考。抽取和答题用 `openai/gpt-4.1-mini`，判分用 `openai/gpt-4o-mini` 判 3 次，
-`llm_multiround` 的 decider 用 `deepseek/deepseek-v4-flash-0731`。
+everalgo-boundary 0.5.0，提交 `ccb402af`（`llm_multiround` 为 `d278a2cb`）。抽取和答题用
+`openai/gpt-4.1-mini`，判分用 `openai/gpt-4o-mini` 判 3 次，`llm_multiround` 的 decider 用
+`deepseek/deepseek-v4-flash-0731`，关着思考。
 
 | 检索方式 | `locomo-step` | `locomo`（默认） |
 |---|---|---|
@@ -373,23 +356,26 @@ decider 的思考。抽取和答题用 `openai/gpt-4.1-mini`，判分用 `openai
 
 ### batch 还是 step
 
-`locomo` 用 EverOS 默认的 batch 边界检测切 episode；`locomo-step` 对每条消息问一次它是否开始新的
-episode，并且 EverOS 的每次调用都只在 prompt 里要求回复格式（`response_format_mode = "prompt_only"`）。
-EverOS 的默认仍是 batch：
+两份 LoCoMo 配置只差两项 EverOS 设置，EverOS 的默认值是第一组：
 
-| | `locomo`（batch，默认） | `locomo-step`（step） |
+| | `locomo`（默认） | `locomo-step` |
 |---|---|---|
-| `agentic`，3 次运行取最高 | 94.35\* | 94.61\* |
-| 每次运行的边界检测调用 | 544 次 | 约 5,250 次，每条消息一次 |
+| 边界检测，`[boundary_detection] strategy` | `batch`：每次写入调用一次 | `step`：每条消息调用一次 |
+| 回复格式，`[llm] response_format_mode` | `json_schema`：由服务商保证每条回复符合 schema | `prompt_only`：只在 prompt 里要求 schema |
+| `agentic`，3 次运行取最高 | 94.35\* | **94.61\*** |
+| 每次运行的边界检测调用 | 544 次 | 约 5,250 次 |
 | ADD 耗时（10 个 server） | 约 4 分钟 | 约 17–22 分钟 |
 | 存下的 episode | 约 320 个 | 约 550 个 |
-| agent 对话（含工具调用） | 支持 | 不支持：只处理对话消息 |
+| agent 对话（含工具调用） | 支持 | 只处理对话消息 |
 
-用 `agentic` 时，step 的最高分高出 0.26 个百分点，小于 LoCoMo 单次运行之间的波动（每份配置的
-3 次运行相差约 1 个百分点）。其余检索方式各跑 1 次：`hybrid`、`vector` 上 step 领先，
-`llm_multiround` 上两者持平，`keyword` 上 step 落后。step 的代价是边界检测调用多约 10 倍、写入慢约
-5 倍。做对话记忆、能接受这个代价时选 step；agent 场景和需要快速写入时用 batch。在 EverOS 部署里
-对应的是 `[boundary_detection] strategy`（[docs/configuration.md](../docs/configuration.md)）。
+- **`locomo` 更快、更稳。** batch 的边界检测调用只有 step 的十分之一，写入快约 5 倍。strict 回复
+  一定符合所要求的 schema；需要服务商支持 `json_schema`。
+- **`locomo-step` 分数更高。** 它 `agentic` 的最高分比 batch 高 0.26 个百分点，在 LoCoMo 单次运行
+  之间约 1 个百分点的波动以内。`prompt_only` 的回复解析不了时会重新请求。
+
+做对话记忆、能接受较慢的写入时选 step；agent 场景和需要快速写入时保持默认。在 EverOS 部署里见
+[`[boundary_detection]`](../docs/configuration.md#boundary_detection) 和
+[`[llm]`](../docs/configuration.md#llm)。
 
 \* 重判口径，同上。
 

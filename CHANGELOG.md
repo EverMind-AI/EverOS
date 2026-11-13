@@ -69,8 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lacks a provider the retrieval method needs. Requirements follow the method, as
   EverOS's own search does: `keyword` runs on the LLM key alone, the vector-based
   methods need embedding, and `agentic` (LoCoMo's) needs rerank too. A missing
-  provider used to surface only at search, after ADD had paid for extraction. The
-  decider keeps its own startup probe.
+  provider is reported before ADD pays for extraction. The decider keeps its own
+  startup probe.
 - **Benchmark `flush_scope`**: `"session"` (the default, unchanged in every shipped
   config) flushes each dataset session apart; `"conversation"` sends a whole
   conversation as one EverOS session flushed once at its end, as the EverAlgo
@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`benchmarks/configs/locomo-step.toml`** (`DATASET=locomo-step`): LoCoMo with
   step boundary detection and prompt-only replies on every EverOS call, the
   configuration behind LoCoMo's published number. It is `locomo.toml` with
-  those two server settings changed, and a unit test keeps it so. The reply
+  those two server settings changed. The reply
   format (`EVEROS_LLM__RESPONSE_FORMAT_MODE`) is now part of the ingest
   identity, so a store built under one format is not reused under another.
 
@@ -146,9 +146,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`,
   `sdk_max_retries`, `response_format_mode` and `invalid_reply_retries` (and
   `EVEROS_DECIDER__*`) still apply, with a startup warning; `[llm.decider]` wins
-  when both set a field. Unset, `timeout_seconds` (60), `max_tokens` (512),
-  `sdk_max_retries` (0) and `invalid_reply_retries` (1) keep the decider's own
-  defaults rather than `[llm]`'s.
+  when both set a field. Unset, `timeout_seconds` (60), `sdk_max_retries` (0)
+  and `invalid_reply_retries` (1) keep the decider's own defaults rather than
+  `[llm]`'s.
+- **The decider has no output cap of its own.** Its replies used to stop at 512
+  tokens; it now inherits `[llm].max_tokens` like every task, so a decider that
+  thinks before it answers has room to. Set `[llm.decider] max_tokens` to cap it.
 - **The decider inherits `extra` and `response_format_mode` from `[llm]` field by
   field.** They used to follow whichever section named the model, so pointing
   the decider at another model dropped `[llm].extra` -- re-enabling thinking on a
@@ -239,13 +242,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of three full runs per config: 94.61% with `locomo-step` (step, prompt-only
   replies) and 94.35% with the default `locomo` (batch, strict), both `agentic`.
   `llm_multiround`, `hybrid`, `vector` and `keyword` are scored on those runs'
-  stores. A "Batch or step" section, and its counterpart under
-  `[boundary_detection]` in `docs/configuration.md`, set out what each strategy
-  costs: about ten times the boundary calls and five times the ingest time for
-  step, which handles chat messages only, for a score within LoCoMo's
-  run-to-run noise. EverOS keeps batch as its default. The guide also shows how
-  to score another retrieval method on stores a run already built. The previous
-  LoCoMo figure, 94.42%, is retired.
+  stores; both LoCoMo configs run the `llm_multiround` decider with thinking off. A "Batch or step" section, and its counterpart under
+  `[boundary_detection]` in `docs/configuration.md`, set out the choice: the
+  defaults (batch, strict) ingest about five times faster with every reply held
+  to its schema; step with prompt-only replies scores higher, within LoCoMo's
+  run-to-run spread, and handles chat messages only. The guide also shows how to
+  score another retrieval method on stores a run already built. These figures
+  replace 94.42%.
 - **Benchmark docs**: `benchmarks/README.md` (and its Chinese mirror) is a
   step-by-step guide with a quick start, a check per step, which keys each
   retrieval method needs, a troubleshooting table and the two scores;
@@ -260,28 +263,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Benchmark runs started together no longer share servers.** A run used to
-  take any answer on its port as its own server's, and EverOS binds its port
-  only after startup, so a run launched in the same seconds as another could
-  pick the same ports, read the other run's servers as ready and write its whole
-  ADD stage into the other run's stores while its own servers died at bind.
-  `GET /health` now reports `pid`, the answering process's id, and `run.py`
-  accepts an answer only when it comes from the server it started; otherwise it
-  moves to another port block, as for any lost port race. A start that lost a
-  block also kept the lost attempt's server logs and then crashed in its
-  capability check; each attempt now rebuilds its per-server lists.
-
-- **LoCoMo's `llm_multiround` decider no longer falls back.**
-  `deepseek-v4-flash-0731`, its decider on OpenRouter, thinks before it answers
-  and spent the decider's 512-token output cap doing so: about one question in
-  six fell back to a fixed core, which measures a different method, while the
-  startup probe's one short request passed. Both LoCoMo configs turn its
-  thinking off (`EVEROS_LLM__DECIDER__EXTRA`), and `run.py` now stops a
-  conversation right after SEARCH when any of its decider rounds fell back,
-  before paying for its answers, with the fix in the message. The configs'
-  decider comments, which had lost their first line and described the old
-  silent fallback, now say who uses the decider and where to serve it, and
-  `reproduce.sh` no longer names a pre-filled decider that has no endpoint.
+- **Benchmark runs started together no longer share servers.** `GET /health`
+  now reports `pid`, and `run.py` uses a server only when the answer comes from
+  the process it started; a start that loses a port race moves to another port
+  block and starts clean.
+- **`llm_multiround` runs stop at a decider fallback.** A conversation with a
+  round where every decider attempt failed is stopped right after SEARCH, before
+  its answers are paid for, since such a round measures a different method. The configs'
+  decider comments say which method uses the decider and where to serve it, and
+  `reproduce.sh` no longer names a decider that has no endpoint.
 
 - Deleting a session also removes its episodes from their clusters' members,
   and a retry after a partial deletion finishes that cleanup (#591). The
@@ -312,6 +302,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other script and every Latin text read as English: an English episode that
   used words such as "die", "Los Angeles" or "café" twice was read as German
   or Spanish, and its atomic facts were written in that language.
+
+### Upgrade
+
+Stop the old server normally (not `kill -9`), so it finishes its queued
+background runs, and check that its log has no `ome_stop_drain_timeout`. Profile
+updates now start from `EpisodeExtracted`; a profile run still queued under the
+old `ProfileClusterUpdated` event when the old server stopped is not resumed.
+That owner's profile catches up with their next episode, which also folds the
+earlier episodes the profile has not taken in yet.
 
 ## [1.6.0] - 2026-11-11
 

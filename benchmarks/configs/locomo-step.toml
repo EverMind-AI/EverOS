@@ -1,7 +1,7 @@
 # LoCoMo with step boundary detection and prompt-only replies: locomo.toml with the two
-# [retrieval_env] lines marked "step" below and nothing else changed (a unit test keeps
-# it so). Boundary detection asks once per message instead of once per add, and every
-# EverOS model call asks for its reply in the prompt alone, with no response_format.
+# [retrieval_env] lines marked "step" below. Boundary detection asks once per message
+# instead of once per add, and every EverOS model call asks for its reply format in the
+# prompt alone, with no response_format.
 # Category 5 is adversarial and ungradable by a contains-judge; the adapter drops it,
 # leaving 1540 of the 2432 questions.
 
@@ -58,6 +58,10 @@ google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitte
 
 [retrieval_env]                         # exported to the EverOS servers this harness starts
 EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
+EVEROS_LLM__DECIDER__EXTRA = '{"extra_body": {"reasoning": {"enabled": false}}}'
+                                        # llm_multiround: the decider answers without
+                                        # thinking (OpenRouter's spelling); thinking on
+                                        # long candidate lists can run to the output cap
 EVEROS_CASCADE__WATCHER_ENABLED = "false"  # inotify is exhausted by the IDE on this host;
                                             # the 30s scanner covers the same ground
 EVEROS_TOKENIZER__NAME = "nltk"         # keyword tokenizer of the EverAlgo LoCoMo harness;
