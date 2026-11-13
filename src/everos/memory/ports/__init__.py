@@ -19,9 +19,13 @@ from .events import CronTick as CronTick
 from .events import Event as Event
 from .events import IdleTick as IdleTick
 from .events import ManualTick as ManualTick
+from .forget_log import FORGETTING as FORGETTING
+from .forget_log import ROLLED_BACK as ROLLED_BACK
 from .forget_log import UNDO_FORMAT as UNDO_FORMAT
+from .forget_log import UNDOING as UNDOING
 from .forget_log import ForgetEntry as ForgetEntry
 from .forget_log import ForgetLogStore as ForgetLogStore
+from .forget_log import ForgetStage as ForgetStage
 from .forget_log import ForgetTarget as ForgetTarget
 from .forget_log import MessageForgetStore as MessageForgetStore
 from .forget_log import retired_in as retired_in
@@ -99,9 +103,12 @@ from .strength import StrengthKey as StrengthKey
 from .strength import StrengthStore as StrengthStore
 
 __all__ = [
+    "FORGETTING",
     "LOST_STATUS_WRITE",
     "NO_SOURCE_CHECK",
     "REPLAYS_EXHAUSTED_PREFIX",
+    "ROLLED_BACK",
+    "UNDOING",
     "UNDO_FORMAT",
     "All",
     "AnyOf",
@@ -120,6 +127,7 @@ __all__ = [
     "Filter",
     "ForgetEntry",
     "ForgetLogStore",
+    "ForgetStage",
     "ForgetTarget",
     "GroupMessageStore",
     "GroupProfileIndex",

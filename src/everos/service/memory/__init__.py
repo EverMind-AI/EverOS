@@ -946,6 +946,11 @@ class MemoryService:
         """Finish whole-owner deletions a crash cut short (startup)."""
         return await self._stores.owner_dir.sweep_trash()
 
+    async def finish_interrupted_forgets(self) -> int:
+        """Settle the forgets and undos a stopped process left in progress
+        (startup): a forget is reversed, an undo finished. How many."""
+        return await self._forgetter.recover()
+
     # ── async_mode queue ───────────────────────────────────────────────────
 
     @property

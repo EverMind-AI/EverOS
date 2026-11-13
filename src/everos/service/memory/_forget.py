@@ -20,9 +20,18 @@ The run, in order:
 3. every model call (re-extraction of a segment that keeps text, a group
    scene narrated again) is made before anything is written; a failure here
    leaves the memory as it was;
-4. the writes, then the profiles and the log entry; a failure part-way
-   reverses what the run did, or -- when that fails too -- logs the run as an
-   incomplete forget that its undo can finish.
+4. the writes, then the profiles, and the log entry is complete; a failure
+   part-way reverses what the run did, or -- when that fails too -- logs the
+   run as an incomplete forget that its undo can finish.
+
+**Durability.** The log entry is written before the first change, in the
+``forgetting`` stage, and the run saves into it -- ahead of each step -- the
+change the step makes (:class:`~._forget_apply.Applied`). No read counts the
+entry until the run completes it. A process that stops part-way leaves it in
+its stage: the next start, or the next forget or undo of the owner, reverses
+what it records (:mod:`._forget_rollback`) exactly as a failed run is
+reversed, and an undo cut short (the ``undoing`` stage) is finished
+(docs/api.md, "Forget durability").
 
 Who may: a user's memory is changed by its owner (the caller checks); inside
 a group the asker must be a current member allowed to forget what the target
@@ -35,7 +44,7 @@ from __future__ import annotations
 __all__ = ["ForgetManager"]
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Literal
 
 from everos.core.errors import (
@@ -48,11 +57,12 @@ from everos.core.locks import LOCKS, session_key
 from everos.core.observability.logging import get_logger
 from everos.memory import forget_lock
 from everos.memory.access import Identity, admits, authorize_forget
-from everos.memory.ports import ForgetEntry, Scope
+from everos.memory.ports import FORGETTING, UNDOING, ForgetEntry, Scope
 
 from ._forget_apply import Applied, ForgetWriter, Reextraction, applied_record
 from ._forget_models import ForgetResult, ForgetTarget, ForgottenPicture, UndoResult
 from ._forget_plan import ForgetPlan, ForgetPlanner
+from ._forget_rollback import Rollback
 from ._forget_undo import Undoer
 from ._records import memory_id
 
@@ -111,6 +121,7 @@ class ForgetManager:
             stores=stores, eraser=eraser, pipeline=pipeline, scenes=scenes
         )
         self._undoer = Undoer(stores=stores, eraser=eraser)
+        self._rollback = Rollback(stores=stores, eraser=eraser, undoer=self._undoer)
 
     # ── forget ───────────────────────────────────────────────────────────
 
@@ -141,6 +152,7 @@ class ForgetManager:
             raise InvalidInputError("asker_id is required for a group forget")
         async with forget_lock(scope):
             record = await self._member_record(scope, identity) if group else None
+            await self._recover(scope)
             plan = await self._planner.plan(scope, target, record, strict=strict)
             if record is not None:
                 authorize_forget(record.roster, identity.asker_id, sources=plan.sources)
@@ -148,9 +160,15 @@ class ForgetManager:
                 return plan_result(plan, forget_id="", dry_run=True)
             if plan.reextracts and not self._has_pipeline:
                 raise InvalidInputError("re-extraction is not available")
-            forget_id = _mint_forget_id()
+            intent = _Intent(
+                self._stores,
+                forget_id=_mint_forget_id(),
+                reason=reason,
+                requested_by=identity.asker_id,
+            )
+            forget_id = intent.forget_id
             already = dict(plan.already)
-            await self._record_messages(plan, forget_id)
+            await self._record_messages(plan, intent)
             try:
                 if plan.sessions:
                     await self._settle(scope, plan.sessions)
@@ -161,17 +179,19 @@ class ForgetManager:
                         already=already if plan.messages else None,
                         strict=strict,
                     )
-                    await self._record_messages(plan, forget_id)
+                    await self._record_messages(plan, intent)
                 prepared = await self._writer.prepare(plan)
             except BaseException:
                 await self._stores.message_forget.undo(forget_id)
+                await intent.abandon()
                 raise
-            applied = Applied()
+            applied = Applied(journal=intent.journal(plan))
             try:
+                await intent.begin(plan)
                 await self._writer.write(plan, prepared, applied)
                 async with self._writer.profile_guard(plan):
                     await self._writer.profiles(plan, applied)
-                    await self._log(plan, applied, forget_id, reason, identity)
+                    await intent.complete(plan, applied)
             except BaseException:
                 await self._roll_back(plan, applied, forget_id)
                 raise
@@ -197,67 +217,106 @@ class ForgetManager:
         )
         return result
 
-    async def _log(
-        self,
-        plan: ForgetPlan,
-        applied: Applied,
-        forget_id: str,
-        reason: str | None,
-        identity: Identity,
-    ) -> None:
-        scope = plan.scope
-        await self._stores.forget_log.record(
-            target=plan.target.kind,
-            target_id=plan.target.label(scope.owner_id),
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-            owner_id=scope.owner_id,
-            owner_type=scope.owner_type,
-            reason=reason,
-            requested_by=identity.asker_id,
-            undo=applied_record(plan, applied),
-            forget_id=forget_id,
-        )
-
     async def _roll_back(
         self, plan: ForgetPlan, applied: Applied, forget_id: str
     ) -> None:
-        """Reverse a run that failed part-way, or keep what an undo needs.
-
-        When the reversal fails too, the run is logged under its id as an
-        incomplete forget, so ``/memory/forget/undo`` can finish the job.
-        """
+        """Reverse a run that failed part-way, from what it recorded."""
         scope = plan.scope
-        record = applied_record(plan, applied)
-        entry = ForgetEntry(
-            forget_id=forget_id,
-            target=plan.target.kind,
-            target_id=plan.target.label(scope.owner_id),
-            owner_id=scope.owner_id,
-            owner_type=scope.owner_type,
-            undo={**record, "segments": []},
-            app_id=scope.app_id,
-            project_id=scope.project_id,
-        )
-        try:
-            await self._undoer.undo(scope, entry)
-        except Exception:
-            logger.exception("memory.forget_rollback_failed", forget_id=forget_id)
-            await self._stores.forget_log.record(
+        await self._reverse(
+            scope,
+            ForgetEntry(
+                forget_id=forget_id,
                 target=plan.target.kind,
                 target_id=plan.target.label(scope.owner_id),
-                app_id=scope.app_id,
-                project_id=scope.project_id,
                 owner_id=scope.owner_id,
                 owner_type=scope.owner_type,
-                reason="incomplete forget",
-                undo=record,
-                forget_id=forget_id,
+                undo=applied_record(plan, applied),
+                app_id=scope.app_id,
+                project_id=scope.project_id,
+                stage=FORGETTING,
+            ),
+        )
+
+    async def _reverse(self, scope: Scope, entry: ForgetEntry) -> None:
+        """Reverse a forget that did not complete, or keep what an undo needs.
+
+        When the reversal fails too, the run is logged under its id as an
+        incomplete forget -- a live forget of what it recorded as done -- so
+        ``/memory/forget/undo`` can finish the job.
+        """
+        try:
+            await self._rollback.run(scope, entry)
+        except Exception:
+            logger.exception("memory.forget_rollback_failed", forget_id=entry.forget_id)
+            done = {k: v for k, v in (entry.undo or {}).items() if k != "pending"}
+            await self._stores.forget_log.complete(
+                entry.forget_id, undo=done, reason="incomplete forget"
             )
 
-    async def _record_messages(self, plan: ForgetPlan, forget_id: str) -> None:
+    async def _recover(self, scope: Scope) -> dict[str, UndoResult]:
+        """Settle what a stopped run left of the owner's forgets: a forget in
+        progress is reversed, an undo in progress finished (its answer, by
+        forget id). The caller holds the owner's forget lock."""
+        finished: dict[str, UndoResult] = {}
+        for entry in await self._stores.forget_log.staged(
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+        ):
+            if entry.stage == FORGETTING:
+                await self._reverse(scope, entry)
+                logger.warning(
+                    "memory.forget_recovered",
+                    forget_id=entry.forget_id,
+                    owner_type=scope.owner_type,
+                    owner_id=scope.owner_id,
+                    outcome="reversed",
+                )
+            elif entry.stage == UNDOING:
+                try:
+                    finished[entry.forget_id] = await self._undoer.undo(
+                        scope, entry, mode="resume"
+                    )
+                except Exception:
+                    # Still live, still undoing: the next undo finishes it.
+                    logger.exception(
+                        "memory.undo_resume_failed", forget_id=entry.forget_id
+                    )
+                    continue
+                logger.warning(
+                    "memory.forget_recovered",
+                    forget_id=entry.forget_id,
+                    owner_type=scope.owner_type,
+                    owner_id=scope.owner_id,
+                    outcome="undone",
+                )
+        return finished
+
+    async def recover(self) -> int:
+        """Settle every forget and undo a stopped process left in progress
+        (startup); how many there were."""
+        staged = await self._stores.forget_log.staged()
+        for owner in dict.fromkeys(
+            Scope(
+                app_id=e.app_id,
+                project_id=e.project_id,
+                owner_id=e.owner_id,
+                owner_type=e.owner_type,  # type: ignore[arg-type]
+            )
+            for e in staged
+        ):
+            async with forget_lock(owner):
+                await self._recover(owner)
+        return len(staged)
+
+    async def _record_messages(self, plan: ForgetPlan, intent: _Intent) -> None:
+        if plan.messages:
+            await intent.begin(plan)
         for session, ids in plan.messages.items():
-            await self._stores.message_forget.record(session, ids, forget_id=forget_id)
+            await self._stores.message_forget.record(
+                session, ids, forget_id=intent.forget_id
+            )
 
     async def _member_record(self, scope: Scope, identity: Identity) -> GroupRecord:
         """The group, for a current member or its deliverer; a stranger is
@@ -306,6 +365,7 @@ class ForgetManager:
             raise InvalidInputError("asker_id is required for a group undo")
         async with forget_lock(scope):
             record = await self._member_record(scope, identity) if group else None
+            finished = await self._recover(scope)
             entry = await self._stores.forget_log.get(forget_id)
             if (
                 entry is None
@@ -323,6 +383,8 @@ class ForgetManager:
                     identity.asker_id,
                     sources=(entry.undo or {}).get("sources") or [],
                 )
+            if forget_id in finished:  # an undo of it cut short, finished now
+                return finished[forget_id]
             return await self._undoer.undo(scope, entry)
 
     async def undo_picture(self, *, scope: Scope, image_id: str) -> UndoResult:
@@ -365,6 +427,7 @@ class ForgetManager:
         self, scope: Scope, target: Literal["image", "session"], target_id: str
     ) -> UndoResult | None:
         async with forget_lock(scope):
+            await self._recover(scope)
             entry = await self._stores.forget_log.latest_live(
                 target=target,
                 target_id=target_id,
@@ -487,3 +550,61 @@ def _profile_answer(
 def _mint_forget_id() -> str:
     """A new forget's id (``fg_<16 hex>``), minted before anything is recorded."""
     return f"fg_{uuid.uuid4().hex[:16]}"
+
+
+class _Intent:
+    """A run's write-ahead log entry: written before the run's first change
+    (:meth:`begin`), kept ahead of each step (:meth:`journal`), completed
+    with the run's record (:meth:`complete`)."""
+
+    def __init__(
+        self,
+        stores: Stores,
+        *,
+        forget_id: str,
+        reason: str | None,
+        requested_by: str | None,
+    ) -> None:
+        self.forget_id = forget_id
+        self._log = stores.forget_log
+        self._reason = reason
+        self._requested_by = requested_by
+        self._begun = False
+
+    async def begin(self, plan: ForgetPlan) -> None:
+        """Write the entry, in the ``forgetting`` stage, unless it is."""
+        if self._begun:
+            return
+        scope = plan.scope
+        await self._log.begin(
+            forget_id=self.forget_id,
+            target=plan.target.kind,
+            target_id=plan.target.label(scope.owner_id),
+            app_id=scope.app_id,
+            project_id=scope.project_id,
+            owner_id=scope.owner_id,
+            owner_type=scope.owner_type,
+            undo=applied_record(plan, Applied()),
+            reason=self._reason,
+            requested_by=self._requested_by,
+        )
+        self._begun = True
+
+    def journal(self, plan: ForgetPlan) -> Callable[[Applied], Awaitable[None]]:
+        """What saves a run's record of ``plan`` into the entry."""
+
+        async def save(applied: Applied) -> None:
+            await self.begin(plan)
+            await self._log.journal(self.forget_id, applied_record(plan, applied))
+
+        return save
+
+    async def complete(self, plan: ForgetPlan, applied: Applied) -> None:
+        """The run is done: the entry counts, with its record."""
+        await self._log.complete(self.forget_id, undo=applied_record(plan, applied))
+
+    async def abandon(self) -> None:
+        """The run stopped before its first write but the message marks
+        (undone already): an entry written for them stands for nothing."""
+        if self._begun:
+            await self._log.mark_undone(self.forget_id, rolled_back=True)

@@ -20,9 +20,16 @@ markdown and wrote in its place -- the group's memory of a forgotten message
 must leave the files, so the log is the only place the previous versions are
 kept. Its undo names the entry by ``forget_id``.
 
-Entries are appended after the changes they describe are in place, so an entry
-exists only for a forget that completed. Undoing one stamps it; nothing is ever
-deleted, which keeps the log readable as an audit trail.
+A forget writes its entry **before** its first change, in the ``forgetting``
+stage: a write-ahead record no reader counts as a forget, which the run keeps
+up to date as it goes (:meth:`ForgetLogStore.journal`) -- every change is in it
+before it is made -- and moves out of the stage once every change is in place
+(:meth:`ForgetLogStore.complete`). A process that stops part-way leaves the
+entry in its stage, and the next start reverses what the record says the run
+did (the entry is then ``rolled_back``). An undo marks the entry ``undoing``
+before its first change, and the next start finishes an undo cut short.
+Undoing one stamps it; nothing is ever deleted, which keeps the log readable
+as an audit trail.
 
 :class:`MessageForgetStore` is the per-message half of a group forget: which
 messages of a session are forgotten (``message_forget``), so that every reader
@@ -33,9 +40,13 @@ them while the segment itself (the memcell payload) keeps them for an undo.
 from __future__ import annotations
 
 __all__ = [
+    "FORGETTING",
+    "ROLLED_BACK",
+    "UNDOING",
     "UNDO_FORMAT",
     "ForgetEntry",
     "ForgetLogStore",
+    "ForgetStage",
     "ForgetTarget",
     "MessageForgetStore",
     "retired_in",
@@ -53,6 +64,20 @@ type ForgetTarget = Literal[
 """What a forget was addressed by: one picture's hash or one conversation; a
 user's records by id, everything of the user, or a kind and a time range; and
 inside a group also messages, a member, or records by id."""
+
+type ForgetStage = Literal["forgetting", "undoing", "rolled_back"]
+"""Where an entry stands while it is not simply logged (``None``).
+
+* ``forgetting`` -- the forget is being applied; the entry is its write-ahead
+  record, read by no other forget and no read;
+* ``undoing`` -- an undo of the (live) forget is being applied;
+* ``rolled_back`` -- the forget was reversed before it completed: it is undone
+  and stands for nothing.
+"""
+
+FORGETTING: ForgetStage = "forgetting"
+UNDOING: ForgetStage = "undoing"
+ROLLED_BACK: ForgetStage = "rolled_back"
 
 
 @dataclass(frozen=True)
@@ -80,6 +105,8 @@ class ForgetEntry:
             keeps the exact entries it marked here. ``None`` otherwise.
         app_id / project_id: The space of ``owner_id``.
         created_at: Epoch ms the forget was recorded; ``None`` when unknown.
+        stage: :data:`ForgetStage` of an entry being applied, being undone,
+            or reversed before it completed; ``None`` otherwise.
     """
 
     forget_id: str
@@ -97,6 +124,7 @@ class ForgetEntry:
     app_id: str = "default"
     project_id: str = "default"
     created_at: int | None = None
+    stage: ForgetStage | None = None
 
 
 UNDO_FORMAT = 2
@@ -121,7 +149,11 @@ def retired_in(entry: ForgetEntry) -> set[str]:
 
 @runtime_checkable
 class ForgetLogStore(Protocol):
-    """The append-only log of forgets, per owner."""
+    """The append-only log of forgets, per owner.
+
+    Every read but :meth:`get` and :meth:`staged` leaves out an entry in the
+    ``forgetting`` stage: it is not a forget yet.
+    """
 
     async def record(
         self,
@@ -146,6 +178,54 @@ class ForgetLogStore(Protocol):
         first, because its messages are marked under that id before the log
         entry is written.
         """
+        ...
+
+    async def begin(
+        self,
+        *,
+        forget_id: str,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str,
+        undo: Mapping[str, Any],
+        reason: str | None = None,
+        requested_by: str | None = None,
+    ) -> ForgetEntry:
+        """Write a forget's entry before its first change, in the
+        ``forgetting`` stage: no reader counts it until :meth:`complete`."""
+        ...
+
+    async def journal(self, forget_id: str, undo: Mapping[str, Any]) -> None:
+        """Replace the record of a forget in the ``forgetting`` stage: what it
+        changed so far and the change it is making."""
+        ...
+
+    async def complete(
+        self, forget_id: str, *, undo: Mapping[str, Any], reason: str | None = None
+    ) -> None:
+        """Take a forget out of the ``forgetting`` stage with its final record,
+        stamped with the time it completed; ``reason`` replaces the caller's
+        when given."""
+        ...
+
+    async def staged(
+        self,
+        *,
+        app_id: str | None = None,
+        project_id: str | None = None,
+        owner_id: str | None = None,
+        owner_type: OwnerType | None = None,
+    ) -> list[ForgetEntry]:
+        """The entries a stopped run left ``forgetting`` or ``undoing``,
+        oldest first: every owner's, or one owner's."""
+        ...
+
+    async def set_undoing(self, forget_id: str, undoing: bool) -> None:
+        """Put a live forget in the ``undoing`` stage before an undo's first
+        change, or take it out again (an undo that changed nothing)."""
         ...
 
     async def latest_live(
@@ -212,17 +292,24 @@ class ForgetLogStore(Protocol):
         What the undo of an earlier forget follows when a later forget
         replaced what it wrote and was undone since: the later one's log says
         what it wrote, and its ``undo["restored"]`` what its undo wrote back.
+        A forget rolled back before it completed is not among them: what it
+        wrote left markdown with the rollback.
         """
         ...
 
     async def mark_undone(
-        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+        self,
+        forget_id: str,
+        *,
+        restored: Mapping[str, Any] | None = None,
+        rolled_back: bool = False,
     ) -> bool:
         """Stamp ``undone``; ``False`` when it already was (nothing restores twice).
 
         ``restored`` -- per kind, ``[replaced md_path, replaced entry_id, copy
         md_path, copy entry_id]`` of every version the undo wrote -- is kept
-        in the entry's ``undo`` under ``"restored"``.
+        in the entry's ``undo`` under ``"restored"``. The entry leaves its
+        stage, for ``rolled_back`` when the forget did not complete.
         """
         ...
 

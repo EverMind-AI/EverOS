@@ -40,8 +40,10 @@ from everos.memory.models import (
     ToolCall,
 )
 from everos.memory.ports import (
+    FORGETTING,
     FailedSegment,
     ForgetEntry,
+    ForgetStage,
     ForgetTarget,
     OwnerType,
     PageResult,
@@ -602,6 +604,64 @@ class SqliteForgetLogStore:
         )
         return _forget_entry(row)
 
+    async def begin(
+        self,
+        *,
+        forget_id: str,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str,
+        undo: Mapping[str, Any],
+        reason: str | None = None,
+        requested_by: str | None = None,
+    ) -> ForgetEntry:
+        row = await self._repo.append(
+            target_kind=target,
+            target_id=target_id,
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
+            reason=reason,
+            requested_by=requested_by,
+            undo_json=json.dumps(undo, ensure_ascii=False),
+            forget_id=forget_id,
+            stage=FORGETTING,
+        )
+        return _forget_entry(row)
+
+    async def journal(self, forget_id: str, undo: Mapping[str, Any]) -> None:
+        await self._repo.journal(forget_id, json.dumps(undo, ensure_ascii=False))
+
+    async def complete(
+        self, forget_id: str, *, undo: Mapping[str, Any], reason: str | None = None
+    ) -> None:
+        await self._repo.complete(
+            forget_id, undo_json=json.dumps(undo, ensure_ascii=False), reason=reason
+        )
+
+    async def staged(
+        self,
+        *,
+        app_id: str | None = None,
+        project_id: str | None = None,
+        owner_id: str | None = None,
+        owner_type: OwnerType | None = None,
+    ) -> list[ForgetEntry]:
+        rows = await self._repo.staged(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
+        )
+        return [_forget_entry(row) for row in rows]
+
+    async def set_undoing(self, forget_id: str, undoing: bool) -> None:
+        await self._repo.set_undoing(forget_id, undoing)
+
     async def get(self, forget_id: str) -> ForgetEntry | None:
         row = await self._repo.get(forget_id)
         return _forget_entry(row) if row is not None else None
@@ -669,9 +729,15 @@ class SqliteForgetLogStore:
         return [_forget_entry(row) for row in rows]
 
     async def mark_undone(
-        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+        self,
+        forget_id: str,
+        *,
+        restored: Mapping[str, Any] | None = None,
+        rolled_back: bool = False,
     ) -> bool:
-        return await self._repo.mark_undone(forget_id, restored=restored)
+        return await self._repo.mark_undone(
+            forget_id, restored=restored, rolled_back=rolled_back
+        )
 
 
 class SqliteMessageForgetStore:
@@ -745,6 +811,7 @@ def _forget_entry(row: ForgetLogRow) -> ForgetEntry:
         app_id=row.app_id,
         project_id=row.project_id,
         created_at=to_timestamp_ms(row.created_at) if row.created_at else None,
+        stage=cast("ForgetStage | None", row.stage),
     )
 
 

@@ -109,6 +109,10 @@ class StubMemoryService:
         self.lifecycle.append("memory.finish_interrupted_deletions")
         return 0
 
+    async def finish_interrupted_forgets(self) -> int:
+        self.lifecycle.append("memory.finish_interrupted_forgets")
+        return 0
+
     async def start(self) -> None:
         self.lifecycle.append("memory.start")
 

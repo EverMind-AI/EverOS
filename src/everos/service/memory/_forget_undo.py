@@ -31,12 +31,17 @@ still live replaced or marked it -- undo that one first -- and when a
 person's edit changed the very text the forget changed. Forgets of
 different records undo in any order.
 
-The log entry is stamped last, with the versions the undo wrote
-(``restored``), so an undo cut short can be sent again; a second undo of the
-same forget restores nothing. Rows logged before this
-format undo too: a user's are read into it, a group's (whose forget took
-records out of markdown) are reversed by putting them back
-(:func:`reverse_legacy_group`).
+The log entry is put in the ``undoing`` stage before the undo's first change
+and stamped last, with the versions the undo wrote (``restored``), so an undo
+cut short -- a failure, or a process that stopped -- is finished by the next
+start or the next undo of the owner (``resume``): it takes a copy it already
+wrote for written and a value already back for put back. A second undo of the
+same forget restores nothing. Rows logged before this format undo too: a
+user's are read into it, a group's (whose forget took records out of markdown)
+are reversed by putting them back (:func:`reverse_legacy_group`).
+
+The same steps reverse a forget that did not complete (``roll_back``, from
+:mod:`._forget_rollback`): its entry is stamped ``rolled_back``.
 """
 
 from __future__ import annotations
@@ -45,7 +50,7 @@ __all__ = ["Undoer"]
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from everos.core.errors import ConflictError
 from everos.core.observability.logging import get_logger
@@ -85,6 +90,10 @@ if TYPE_CHECKING:
 logger = get_logger("everos.service.memory")
 
 _KINDS = ("episode", "image_memory", "scene", "group_profile")
+
+type UndoMode = Literal["undo", "resume", "roll_back"]
+"""``undo``: a request; ``resume``: finishing an undo cut short; ``roll_back``:
+reversing a forget that did not complete."""
 
 
 @dataclass
@@ -179,7 +188,9 @@ class Undoer:
         self._eraser = eraser
         self._logs = Logs(stores)
 
-    async def undo(self, scope: Scope, entry: ForgetEntry) -> UndoResult:
+    async def undo(
+        self, scope: Scope, entry: ForgetEntry, *, mode: UndoMode = "undo"
+    ) -> UndoResult:
         """Put back what ``entry`` forgot; the caller holds the owner's forget lock.
 
         Raises:
@@ -189,16 +200,25 @@ class Undoer:
         if entry.undone:
             return UndoResult(forget_id=entry.forget_id, applied=False, target=target)
         if is_legacy_group(entry):
+            if mode == "undo":
+                await self._stores.forget_log.set_undoing(entry.forget_id, True)
             return await reverse_legacy_group(
                 self._stores, self._eraser, scope, entry, target=target
             )
         record = await self._record(scope, entry)
-        backs = await self._backs(scope, record)
-        keep = await self._logs.named_by_others(scope, except_id=entry.forget_id)
         done = _Done()
+        backs = await self._backs(scope, record, done, resume=mode == "resume")
+        keep = await self._logs.named_by_others(scope, except_id=entry.forget_id)
+        if mode == "undo":
+            await self._stores.forget_log.set_undoing(entry.forget_id, True)
         await self._rewrite_back(scope, backs, done)
         await self._unmark(scope, record, keep, done, forget_id=entry.forget_id)
-        if record.revive and done.episodes:
+        if mode != "undo":
+            # A run cut short may have put marks back without handing their
+            # files to the cascade: every file it may have changed goes again.
+            for kind, rows in record.marked.items():
+                done.paths.setdefault(kind, set()).update(md for md, _, _ in rows)
+        if record.revive and (done.episodes or mode != "undo"):
             revived = await restore_revived_scenes(
                 self._stores.episode, self._stores.scene, scope, keep=keep.scenes
             )
@@ -210,18 +230,21 @@ class Undoer:
             if paths:
                 await self._eraser.requeue(kind, paths)
         await self._group_queue(scope, record.group_queued)
+        rolled_back = mode == "roll_back"
         if scope.owner_type == "group":
-            await self._restore_members(scope, record, done)
+            await self._restore_members(scope, record, done, resume=mode != "undo")
             await self._stores.message_forget.undo(entry.forget_id)
             await self._stores.forget_log.mark_undone(
-                entry.forget_id, restored=done.restored
+                entry.forget_id, restored=done.restored, rolled_back=rolled_back
             )
         else:
             async with profile_lock(scope):
-                await self._restore_profile(scope, entry, record, done)
+                await self._restore_profile(
+                    scope, entry, record, done, resume=mode != "undo"
+                )
                 await self._stores.message_forget.undo(entry.forget_id)
                 await self._stores.forget_log.mark_undone(
-                    entry.forget_id, restored=done.restored
+                    entry.forget_id, restored=done.restored, rolled_back=rolled_back
                 )
         logger.info(
             "memory.undo_completed",
@@ -397,8 +420,13 @@ class Undoer:
 
     # ── the steps ────────────────────────────────────────────────────────
 
-    async def _backs(self, scope: Scope, record: _Record) -> list[_Back]:
+    async def _backs(
+        self, scope: Scope, record: _Record, done: _Done, *, resume: bool = False
+    ) -> list[_Back]:
         """What the undo writes again, each over the version current now.
+
+        ``resume``: a copy an undo cut short already wrote is taken as
+        written (:meth:`_written_back`), not written again.
 
         Raises:
             ConflictError: A later forget that is still live replaced or
@@ -422,6 +450,10 @@ class Undoer:
                     if kind == "episode":  # nothing left to supersede
                         backs.append(_Back(kind, old, None, item))
                     continue
+                if resume and await self._written_back(
+                    kind, scope, found[old], found[new], done
+                ):
+                    continue
                 if not (await store.deprecations(scope, new_md)).get(new):
                     backs.append(_Back(kind, old, found[new], item))
                     continue
@@ -441,6 +473,70 @@ class Undoer:
                     item = merged
                 backs.append(_Back(kind, old, head, item))
         return backs
+
+    async def _written_back(
+        self,
+        kind: str,
+        scope: Scope,
+        old: Stored[Any],
+        new: Stored[Any],
+        done: _Done,
+    ) -> bool:
+        """Whether an undo cut short already wrote ``old`` back over ``new``
+        (the version the forget wrote): a copy of ``old`` supersedes ``new``,
+        or stands beside it when the run stopped before marking ``new``. The
+        copy found is taken as this undo's own, ``new`` marked against it."""
+        store = self._store(kind)
+        mark = (await store.deprecations(scope, new.ref.md_path)).get(new.ref.entry_id)
+        if mark == FORGOTTEN_MARK:
+            return False
+        if kind == "episode":
+            candidates: Sequence[Stored[Any]] = (
+                await self._stores.episode.read_for_segments(
+                    scope, [old.item.parent_id]
+                )
+                if mark is None
+                else await self._stores.episode.read_many(scope, [mark])
+            )
+        elif kind == "scene":
+            candidates = [
+                v
+                for v, m in await self._stores.scene.read_all(scope)
+                if (m is None if mark is None else v.ref.entry_id == mark)
+            ]
+        else:
+            candidates = await self._stores.group_profile.items(scope)
+        copy = next(
+            (
+                c
+                for c in candidates
+                if c.ref.entry_id not in (old.ref.entry_id, new.ref.entry_id)
+                and (mark is None or c.ref.entry_id == mark)
+                and _same_text(kind, c, old, new)
+            ),
+            None,
+        )
+        if copy is None:
+            return False
+        if mark is None:
+            await store.deprecate(
+                scope,
+                entries=[(new.ref.md_path, new.ref.entry_id)],
+                replaced_by=copy.ref.entry_id,
+                only_if=NO_SOURCE_CHECK,
+            )
+        done.restored.setdefault(kind, []).append(
+            [new.ref.md_path, new.ref.entry_id, copy.ref.md_path, copy.ref.entry_id]
+        )
+        done.retired.append(new.ref.entry_id)
+        done.paths.setdefault(kind, set()).update({new.ref.md_path, copy.ref.md_path})
+        if kind == "episode":
+            done.episodes.append(copy.ref.entry_id)
+        elif kind == "scene":
+            done.scenes.append(copy.ref.entry_id)
+        else:
+            done.group_profile.append(copy.ref.entry_id)
+        return True
 
     async def _versions(
         self, kind: str, scope: Scope, entry_ids: Collection[str]
@@ -675,9 +771,10 @@ class Undoer:
                 await self._stores.group_profile.set_pending(scope, left)
 
     async def _restore_members(
-        self, scope: Scope, record: _Record, done: _Done
+        self, scope: Scope, record: _Record, done: _Done, *, resume: bool = False
     ) -> None:
-        """A group's member documents and items, each under the member's lock."""
+        """A group's member documents and items, each under the member's lock;
+        ``resume`` leaves out a replaced value already back in its history."""
         for removed in record.members_removed:
             member_id = str(removed["member_id"])
             async with profile_lock(scope, member_id):
@@ -696,6 +793,8 @@ class Undoer:
                 held = await self._stores.profile.read(scope, person)
                 if held is None:
                     continue
+                if resume:
+                    values = _not_back(held, values)
                 restored, ids, count = _put_back(held, values)
                 restored = _unqueue(restored or held, record.queued.get(person, ()))
                 if restored is held:
@@ -705,10 +804,17 @@ class Undoer:
             done.item_count += count
 
     async def _restore_profile(
-        self, scope: Scope, entry: ForgetEntry, record: _Record, done: _Done
+        self,
+        scope: Scope,
+        entry: ForgetEntry,
+        record: _Record,
+        done: _Done,
+        *,
+        resume: bool = False,
     ) -> None:
         """A user's values back, and what other forgets took that rests on a
-        segment remembered again; the caller holds the profile lock."""
+        segment remembered again; the caller holds the profile lock.
+        ``resume`` leaves out a replaced value already back in its history."""
         # A value another live forget covers stays out until that one is
         # undone too; one this forget covered comes back unless another live
         # forget still holds it.
@@ -726,6 +832,8 @@ class Undoer:
         if not values and not queued:
             return
         held = await self._stores.profile.read(scope)
+        if resume and held is not None:
+            values = _not_back(held, values)
         restored, ids, count = _put_back(held, values, owner_id=scope.owner_id)
         if held is not None and queued:
             # The segments a message forget queued for the next update leave
@@ -857,6 +965,32 @@ class _Chains:
                 continue
             break
         raise ConflictError(_LATER)
+
+
+_IDENTITY = frozenset(
+    {"version", "item_id", "supersedes", "superseded_by", "status", "edited_by"}
+)
+"""Fields a copy written back does not share with the version it copies."""
+
+
+def _same_text(
+    kind: str, copy: Stored[Any], old: Stored[Any], new: Stored[Any]
+) -> bool:
+    """Whether ``copy`` is an undo's copy of ``old`` written over ``new``."""
+    if kind == "scene" and copy.item.scene_id != old.item.scene_id:
+        return False
+    if kind == "group_profile" and copy.item.supersedes != new.ref.entry_id:
+        return False
+    return copy.item.model_dump(exclude=_IDENTITY) == old.item.model_dump(
+        exclude=_IDENTITY
+    )
+
+
+def _not_back(held: Profile, values: Sequence[Removed]) -> list[Removed]:
+    """``values`` but the replaced values ``held``'s history already holds (an
+    undo cut short put them back; items and the summary are never put back
+    twice anyway)."""
+    return [v for v in values if v.bucket != "history" or v.item not in held.history]
 
 
 def _copy_of(

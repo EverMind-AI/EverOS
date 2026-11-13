@@ -38,11 +38,14 @@ from tests.fakes import (
 )
 
 # Interrupted whole-owner deletions are finished right after the schema
-# exists, before the cascade or the OME engine can write anything.
+# exists, before the cascade or the OME engine can write anything; forgets a
+# stop cut short are settled once the index is up (their rows are erased),
+# before the cascade starts.
 _STARTED = [
     "sqlite.create",
     "memory.finish_interrupted_deletions",
     "index.start",
+    "memory.finish_interrupted_forgets",
     "ops.start",
     "ome.start",
     "memory.start",

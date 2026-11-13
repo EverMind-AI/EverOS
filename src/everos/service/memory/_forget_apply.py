@@ -3,7 +3,10 @@
 docs/api.md and docs/group-memory.md, section 9.4. Everything the run changes
 is appended or marked -- nothing leaves markdown -- and recorded as it goes
 (:class:`Applied`), which is both the forget log's ``undo_json`` and, when a
-step fails, what the run's own reversal reads:
+step fails or the process stops, what the run's reversal reads. The record is
+saved into the log's write-ahead entry before each step together with the
+change the step is about to make (:meth:`Applied.making`), so the entry always
+names everything the run may have changed:
 
 1. the model calls first, before anything is written: each segment that
    keeps text after a message forget is extracted again (the space's own
@@ -29,16 +32,21 @@ to change.
 from __future__ import annotations
 
 __all__ = [
+    "INDEX_TABLES",
     "Applied",
     "ForgetWriter",
+    "Journal",
     "Reextraction",
     "applied_record",
+    "index_ref",
     "strip_reference",
     "without_quoted_picture",
+    "writing_key",
 ]
 
+import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -74,7 +82,7 @@ if TYPE_CHECKING:
 _EPISODE_TABLE = "episode"
 """Episodes and scene versions share this index table."""
 
-_TABLES: Mapping[str, str] = {
+INDEX_TABLES: Mapping[str, str] = {
     "episode": _EPISODE_TABLE,
     "scene": _EPISODE_TABLE,
     "image_memory": "image_memory",
@@ -113,9 +121,17 @@ class Prepared:
     scenes: Mapping[str, Scene] = field(default_factory=dict)
 
 
+type Journal = Callable[["Applied"], Awaitable[None]]
+"""Saves what a run changed so far into its write-ahead log entry."""
+
+
 @dataclass
 class Applied:
     """What a run changed so far; it becomes the forget log's ``undo_json``.
+
+    The lists hold the changes made; ``pending`` the one being made, saved
+    before it is (:meth:`making`). A reversal reads both: undoing a change
+    that never happened finds nothing to undo.
 
     Attributes:
         marked: Per kind, ``[md_path, entry_id, previous mark]`` of every
@@ -129,6 +145,13 @@ class Applied:
         profiles: Per profile document, what went with each value's place.
         members_removed: Member documents removed whole.
         group_queued: Segments queued on the group profile's next update.
+        pending: The change being made, in the shape of the lists above
+            (``{"marked": {kind: rows}}``, ``{"files": [...]}``, ...), or
+            ``{"writing": [kind, old md_path, old entry_id, key]}`` while a
+            version is written in place of another and its id is not known
+            yet (:func:`writing_key` finds it); ``None`` between steps.
+        journal: Where :meth:`checkpoint` saves the record; ``None`` keeps it
+            in memory only.
     """
 
     marked: dict[str, list[list[Any]]] = field(default_factory=dict)
@@ -139,6 +162,31 @@ class Applied:
     profiles: list[dict[str, Any]] = field(default_factory=list)
     members_removed: list[dict[str, Any]] = field(default_factory=list)
     group_queued: list[str] = field(default_factory=list)
+    pending: dict[str, Any] | None = None
+    journal: Journal | None = field(default=None, repr=False, compare=False)
+
+    async def making(self, **change: Any) -> None:
+        """Name the change the next step makes and save the record, before
+        the step makes it."""
+        self.pending = change
+        await self.checkpoint()
+
+    async def checkpoint(self) -> None:
+        """Save the record into the run's write-ahead entry."""
+        if self.journal is not None:
+            await self.journal(self)
+
+
+def writing_key(kind: str, item: Any) -> str:
+    """What finds a version a run was writing when it stopped: a digest of
+    its text (spacing aside, which markdown may not keep), compared with what
+    the files hold after the stop."""
+    if kind == "scene":
+        parts = [item.scene_id, str(item.version), item.narrative]
+    else:
+        parts = [item.parent_id, item.episode, item.summary or ""]
+    text = "\x00".join(" ".join(str(part).split()) for part in parts)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def applied_record(plan: ForgetPlan, applied: Applied) -> dict[str, Any]:
@@ -176,6 +224,8 @@ def applied_record(plan: ForgetPlan, applied: Applied) -> dict[str, Any]:
     }
     if covered:
         record["covered"] = covered
+    if applied.pending is not None:
+        record["pending"] = applied.pending
     return record
 
 
@@ -287,9 +337,12 @@ class ForgetWriter:
         await self._scenes(plan, prepared, replaced, reached, applied)
         await self._group_profile(plan, applied)
         await self._group_quotes(plan, applied)
+        if plan.files:
+            await applied.making(files=list(plan.files))
         for image_id in plan.files:
             await self._stores.images.forget(image_id)
             applied.files.append(image_id)
+        applied.pending = None
         await self._erase(scope, applied)
 
     # ── episodes ─────────────────────────────────────────────────────────
@@ -307,15 +360,21 @@ class ForgetWriter:
             old = rewrite.old
             if episode is None:
                 assert rewrite.image_id is not None
-                ref = await self._stores.episode.append(
-                    scope, _without_picture(old.item, rewrite.image_id), only_if=_always
-                )
+                item = _without_picture(old.item, rewrite.image_id)
+                only_if: Any = _always
             else:
-                ref = await self._stores.episode.append(
-                    scope,
-                    episode,
-                    only_if=memcell_alive(self._stores.memcell, rewrite.memcell_id),
-                )
+                item = episode
+                only_if = memcell_alive(self._stores.memcell, rewrite.memcell_id)
+            await applied.making(
+                writing=[
+                    "episode",
+                    old.ref.md_path,
+                    old.ref.entry_id,
+                    writing_key("episode", item),
+                ]
+            )
+            ref = await self._stores.episode.append(scope, item, only_if=only_if)
+            applied.pending = None
             if ref is None:  # the segment is gone: nothing supersedes the old one
                 await self._mark(
                     "episode",
@@ -324,15 +383,16 @@ class ForgetWriter:
                     applied,
                 )
                 continue
+            row = [old.ref.md_path, old.ref.entry_id, ref.md_path, ref.entry_id]
+            await applied.making(written={"episode": [row]})
             await self._stores.episode.deprecate(
                 scope,
                 entries=[(old.ref.md_path, old.ref.entry_id)],
                 replaced_by=ref.entry_id,
                 only_if=_always,
             )
-            applied.written.setdefault("episode", []).append(
-                [old.ref.md_path, old.ref.entry_id, ref.md_path, ref.entry_id]
-            )
+            applied.written.setdefault("episode", []).append(row)
+            applied.pending = None
             replaced[old.ref.entry_id] = ref
         return replaced
 
@@ -346,14 +406,16 @@ class ForgetWriter:
         """Mark ``(md_path, entry_id, previous mark[, hash])`` forgotten."""
         if not entries:
             return
-        store = self._store(kind)
-        await store.deprecate(
+        rows = [list(row) for row in entries]
+        await applied.making(marked={kind: rows})
+        await self._store(kind).deprecate(
             scope,
             entries=[(row[0], row[1]) for row in entries],
             replaced_by=FORGOTTEN_MARK,
             only_if=NO_SOURCE_CHECK,
         )
-        applied.marked.setdefault(kind, []).extend(list(row) for row in entries)
+        applied.marked.setdefault(kind, []).extend(rows)
+        applied.pending = None
 
     # ── scenes ───────────────────────────────────────────────────────────
 
@@ -418,9 +480,18 @@ class ForgetWriter:
     async def _write_scene(
         self, scope: Scope, current: Stored[Any], scene: Any, applied: Applied
     ) -> None:
+        await applied.making(
+            writing=[
+                "scene",
+                current.ref.md_path,
+                current.ref.entry_id,
+                writing_key("scene", scene),
+            ]
+        )
         ref = await self._stores.scene.append(
             scope, scene, supersedes=current, only_if=NO_SOURCE_CHECK
         )
+        applied.pending = None
         if ref is not None:
             applied.written.setdefault("scene", []).append(
                 [current.ref.md_path, current.ref.entry_id, ref.md_path, ref.entry_id]
@@ -463,10 +534,10 @@ class ForgetWriter:
             if m in dropped or now in dropped:
                 continue
             members.append(replaced[now].entry_id if now in replaced else m)
-        applied.clusters.append(
-            {"cluster": cluster.model_dump(mode="json"), "whole": whole}
-        )
+        before = {"cluster": cluster.model_dump(mode="json"), "whole": whole}
+        await applied.making(clusters=[before])
         await self._stores.cluster.delete(scene_id)
+        applied.clusters.append(before)
         if not whole and members:
             await self._stores.cluster.upsert(
                 scope,
@@ -476,6 +547,7 @@ class ForgetWriter:
                 ),
                 member_type="episode",
             )
+        applied.pending = None
 
     # ── the group profile ────────────────────────────────────────────────
 
@@ -502,10 +574,12 @@ class ForgetWriter:
                 pending = await self._stores.group_profile.pending(scope)
                 added = [m for m in plan.group_queue if m not in pending]
                 if added:
+                    await applied.making(group_queued=added)
                     await self._stores.group_profile.set_pending(
                         scope, [*pending, *added]
                     )
                     applied.group_queued.extend(added)
+                    applied.pending = None
 
     async def _group_quotes(self, plan: ForgetPlan, applied: Applied) -> None:
         """Each group-profile item that quotes the forgotten picture, written
@@ -520,11 +594,21 @@ class ForgetWriter:
         marks: list[tuple[str, str, str | None]] = []
         async with group_profile_lock(scope.app_id, scope.project_id, scope.owner_id):
             for old in plan.group_rewrites:
+                # The new version names the version it supersedes: that finds it.
+                await applied.making(
+                    writing=[
+                        "group_profile",
+                        old.ref.md_path,
+                        old.ref.entry_id,
+                        old.ref.entry_id,
+                    ]
+                )
                 refs = await self._stores.group_profile.append(
                     scope,
                     [without_quoted_picture(old, image_id)],
                     only_if=NO_SOURCE_CHECK,
                 )
+                applied.pending = None
                 if not refs:
                     continue
                 (ref,) = refs
@@ -570,13 +654,23 @@ class ForgetWriter:
             return
         for member_id in plan.members_removed:
             async with profile_lock(scope, member_id):
+                held = await self._stores.profile.read(scope, member_id)
+                if held is None:
+                    continue
+                await applied.making(
+                    members_removed=[
+                        {"member_id": member_id, "profile": member_record(scope, held)}
+                    ]
+                )
                 removed = await self._stores.profile.remove(scope, member_id)
             if removed is None:
+                applied.pending = None
                 continue
             await self._eraser.erase(scope, {"user_profile": [removed.ref]})
             applied.members_removed.append(
                 {"member_id": member_id, "profile": member_record(scope, removed.item)}
             )
+            applied.pending = None
         for planned in plan.profiles:
             member_id = planned.person_id
             async with profile_lock(scope, member_id):
@@ -593,23 +687,25 @@ class ForgetWriter:
         kept, change = take_out_edit(held, edit)
         if change is None:
             return
+        await applied.making(profiles=[change])
         await self._stores.profile.write(scope, kept)
         applied.profiles.append(change)
+        applied.pending = None
 
     async def _erase(self, scope: Scope, applied: Applied) -> None:
         """The rows of what left default reads go at once (the cascade, when it
         projects the files again, writes them back with their marks)."""
         erased: dict[str, list[MemoryRef]] = {}
         for kind, rows in applied.marked.items():
-            erased.setdefault(_TABLES[kind], []).extend(
-                _ref(scope, row[0], row[1]) for row in rows
+            erased.setdefault(INDEX_TABLES[kind], []).extend(
+                index_ref(scope, row[0], row[1]) for row in rows
             )
         for kind, rows in applied.written.items():
-            erased.setdefault(_TABLES[kind], []).extend(
-                _ref(scope, row[0], row[1]) for row in rows
+            erased.setdefault(INDEX_TABLES[kind], []).extend(
+                index_ref(scope, row[0], row[1]) for row in rows
             )
         erased.setdefault(_EPISODE_TABLE, []).extend(
-            _ref(scope, row[0], row[1]) for row in applied.orphaned
+            index_ref(scope, row[0], row[1]) for row in applied.orphaned
         )
         erased = {table: refs for table, refs in erased.items() if refs}
         if erased:
@@ -794,7 +890,7 @@ async def _always() -> bool:
     return True
 
 
-def _ref(scope: Scope, md_path: str, entry_id: str) -> MemoryRef:
+def index_ref(scope: Scope, md_path: str, entry_id: str) -> MemoryRef:
     """The index row of one entry, keyed as the derived index keys it."""
     return MemoryRef(
         id=f"{scope.owner_id}_{entry_id}", entry_id=entry_id, md_path=md_path

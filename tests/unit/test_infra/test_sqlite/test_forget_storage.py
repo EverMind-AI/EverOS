@@ -9,8 +9,13 @@ docs/group-memory.md, sections 6.2 and 9.4. What these pin:
   record, finds an entry by id, and says whether a live group forget took a
   picture out -- an undone one does not count;
 - a user and a group with the same id never read each other's live forgets;
-- a ``system.db`` written before ``requested_by`` / ``undo_json`` existed gains
-  them at schema creation and keeps its rows.
+- a ``system.db`` written before ``requested_by`` / ``undo_json`` / ``stage``
+  existed gains them at schema creation and keeps its rows, which count as
+  complete forgets;
+- a forget's write-ahead entry (``forgetting``) is read by no live read until
+  it completes; ``staged`` lists it, and an undo's ``undoing`` stage, for the
+  next start; a rolled-back forget is undone and not among the undone forgets
+  an undo follows.
 """
 
 from __future__ import annotations
@@ -207,8 +212,101 @@ async def test_an_older_forget_log_gains_the_group_columns(tmp_path: Path) -> No
 
     async with database.engine.connect() as conn:
         rows = (await conn.execute(text("PRAGMA table_info(forget_log)"))).fetchall()
-    assert {"requested_by", "undo_json"} <= {row[1] for row in rows}
+    assert {"requested_by", "undo_json", "stage"} <= {row[1] for row in rows}
     log = SqliteForgetLogStore(SqliteRepos.over(database).forget_log)
     old = await log.get("fg_old")
     assert old is not None and old.requested_by is None and old.undo is None
+    assert old.stage is None
+    space = {"app_id": "app", "project_id": "proj", "owner_id": "u1"}
+    assert [
+        e.forget_id for e in await log.live_entries(owner_type="user", **space)
+    ] == ["fg_old"]
+    assert await log.staged() == []
     await database.dispose()
+
+
+async def test_a_forget_in_progress_counts_only_once_complete(
+    repos: SqliteRepos,
+) -> None:
+    log = SqliteForgetLogStore(repos.forget_log)
+    space = {"app_id": "app", "project_id": "proj", "owner_id": "trip"}
+    began = await log.begin(
+        forget_id="fg_wal",
+        target="image",
+        target_id=_HASH,
+        owner_type="group",
+        undo={"format": 2, "pictures": [{"image_id": _HASH}]},
+        reason="r",
+        requested_by="u_chen",
+        **space,
+    )
+    assert began.stage == "forgetting"
+    await log.journal("fg_wal", {"format": 2, "pending": {"files": [_HASH]}})
+
+    async def counted() -> list[object]:
+        return [
+            await log.live_entries(owner_type="group", **space),
+            await log.live_targets(target="image", owner_type="group", **space),
+            await log.latest_live(
+                target="image", target_id=_HASH, owner_type="group", **space
+            ),
+            await log.holds_picture(_HASH),
+        ]
+
+    assert await counted() == [[], [], None, False]
+    (staged,) = await log.staged()
+    assert (staged.forget_id, staged.stage, staged.undo) == (
+        "fg_wal",
+        "forgetting",
+        {"format": 2, "pending": {"files": [_HASH]}},
+    )
+    assert await log.staged(owner_type="user", **space) == []
+
+    final = {"format": 2, "pictures": [{"image_id": _HASH}]}
+    await log.complete("fg_wal", undo=final)
+    await log.journal("fg_wal", {"format": 2})  # a complete entry is not a journal
+    entry = await log.get("fg_wal")
+    assert entry is not None
+    assert (entry.stage, entry.undo, entry.reasons) == (None, final, "r")
+    live, targets, latest, held = await counted()
+    assert [e.forget_id for e in live] == ["fg_wal"]  # type: ignore[attr-defined]
+    assert (targets, held) == ([_HASH], True)
+    assert latest is not None
+    assert await log.staged() == []
+
+
+async def test_an_undo_in_progress_and_a_rolled_back_forget(repos: SqliteRepos) -> None:
+    log = SqliteForgetLogStore(repos.forget_log)
+    space = {"app_id": "app", "project_id": "proj", "owner_id": "u1"}
+    done = await log.record(target="session", target_id="s1", undo={}, **space)
+    await log.set_undoing(done.forget_id, True)
+    (staged,) = await log.staged(owner_type="user", **space)
+    assert staged.stage == "undoing"
+    # Still live while it is being undone: its marks partly stand.
+    assert [
+        e.forget_id for e in await log.live_entries(owner_type="user", **space)
+    ] == [done.forget_id]
+    await log.set_undoing(done.forget_id, False)
+    assert await log.staged() == []
+    await log.set_undoing(done.forget_id, True)
+    assert await log.mark_undone(done.forget_id, restored={"episode": []})
+    entry = await log.get(done.forget_id)
+    assert entry is not None and entry.undone and entry.stage is None
+
+    await log.begin(
+        forget_id="fg_cut",
+        target="session",
+        target_id="s2",
+        owner_type="user",
+        undo={"format": 2},
+        **space,
+    )
+    assert await log.mark_undone("fg_cut", rolled_back=True)
+    cut = await log.get("fg_cut")
+    assert cut is not None and cut.undone and cut.stage == "rolled_back"
+    assert await log.staged() == []
+    assert [
+        e.forget_id for e in await log.undone_entries(owner_type="user", **space)
+    ] == [done.forget_id]
+    await log.complete("fg_cut", undo={"format": 2})  # rolled back: stays so
+    assert (await log.get("fg_cut")).stage == "rolled_back"  # type: ignore[union-attr]

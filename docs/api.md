@@ -1605,6 +1605,22 @@ user's `image` target run at once.
 `404` for a record id that names nothing; `503` `SESSION_BUSY` when a
 conversation it touches stays busy (nothing was forgotten).
 
+**Durability.** A forget is all or nothing, also when the server stops in the
+middle of one (a crash, a kill, a power cut). Its log entry is written before
+its first change, as a write-ahead record that no read and no other forget
+counts, and the run records in it -- ahead of each step -- the change the step
+is about to make. A forget that fails part-way is reversed from that record;
+one the server did not finish is reversed the same way when it starts again,
+or by the next forget or undo of the same owner if that comes first: every
+mark goes back, every version it wrote leaves markdown (one it was writing is
+found by its text), every profile value comes back once, whether or not the
+document had taken the change, and the message marks are released. The
+client, which got no `forget_id`, sends the forget again and gets a complete
+one, which its undo reverses as any other. Only when even the reversal fails
+does the run stay, as an incomplete forget, a live forget of what it recorded
+as done, which `/memory/forget/undo` with its id finishes (the id is logged
+with `memory.forget_rollback_failed`).
+
 ### POST /api/v2/memory/forget/undo
 
 Undoes one forget: `user_id` + `forget_id` (any target of the user), or
@@ -1644,7 +1660,11 @@ edit changed the very text this forget changed: the message names the
 edited version; edit it back to what the forget wrote (`GET
 /memory/history` lists the versions) and undo again, or keep the edit.
 Forgets of different records undo in any order. `applied: false` when it was
-undone already. The picture body (`user_id` + `image_id`) undoes the
+undone already. An undo cut short -- a failure, or a server that stopped in
+the middle of one -- is finished by the next start, or by the next forget or
+undo of the owner (the same undo sent again answers with what was put back):
+what the first run already wrote back (a copy of a version, a profile value)
+is taken as written, never written twice. The picture body (`user_id` + `image_id`) undoes the
 picture's newest forget, and `/forget/session/undo` the conversation's
 newest.
 

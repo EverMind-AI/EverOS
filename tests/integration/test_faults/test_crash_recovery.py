@@ -158,15 +158,6 @@ async def _seed_two_sessions(client: httpx.AsyncClient) -> tuple[list[str], list
     return sent_one, sent_two
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a forget killed after its marks and before its log entry leaves those "
-        "entries forgotten under no forget id: the forget sent again logs them as "
-        "nothing to do, and no undo brings them back "
-        "(service/memory/_forget.py: the log is written last, no intent record)"
-    ),
-)
 async def test_killed_in_the_middle_of_a_forget(
     tmp_path: Path, servers: list[ChildServer], monkeypatch: pytest.MonkeyPatch
 ) -> None:

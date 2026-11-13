@@ -1107,6 +1107,22 @@ machinery that keeps a deleted memory from coming back.
   alike; a timestamp past 9999-12-30 is `422`. Every timestamp of a batch is
   normalised to milliseconds before use, so a group's roster no longer
   records a seconds value as milliseconds.
+- **A forget survives the server stopping in the middle of it.** A forget
+  wrote its log entry last, so a server killed after its marks and before
+  that entry left the entries forgotten under no forget id: sending the
+  forget again found nothing to do, and no undo brought them back. The entry
+  is now written first, in a `forgetting` stage no read counts, and the run
+  saves into it, ahead of each step, the change the step is about to make; it
+  is completed with the run. A run the server did not finish is reversed from
+  that record when the server starts again (or by the next forget or undo of
+  the owner): marks go back, versions it wrote leave markdown (one it was
+  writing is found by its text), profile values come back once whether or
+  not the document took the change, message marks are released, and the
+  entry ends `rolled_back`. A run that fails in-process is reversed by the
+  same steps (when even that fails it stays an incomplete forget, as
+  before). An undo is marked `undoing` before its first change and finished
+  the same way, a copy or a value it already wrote back taken as written,
+  never written twice.
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's

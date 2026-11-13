@@ -225,6 +225,11 @@ class Application:
         await self.memory.finish_interrupted_deletions()
 
         await self._admin.start_index()
+        # Before the cascade and the queue start: a forget a stop cut short is
+        # reversed (an undo finished), its index rows and files handed back.
+        settled = await self.memory.finish_interrupted_forgets()
+        if settled:
+            logger.warning("interrupted_forgets_settled", count=settled)
         # Rows without a vector are the normal state of a keyword-only store;
         # the hint is for one that has since gained an embedder.
         if self._admin.backend == "lancedb" and self.capabilities.embedding:

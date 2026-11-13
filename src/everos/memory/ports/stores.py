@@ -229,9 +229,10 @@ class EpisodeStore(Protocol):
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
-        Only the undo of a group forget logged when forgets took records out
-        of markdown uses it: it takes out the versions that forget wrote. An
-        entry whose mark named a removed one is current again.
+        Two callers: the undo of a group forget logged when forgets took
+        records out of markdown, and the reversal of a forget that did not
+        complete; each takes out the versions that forget wrote. An entry
+        whose mark named a removed one is current again.
         """
         ...
 
@@ -419,9 +420,10 @@ class SceneStore(Protocol):
     async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
         """Take entries out of the owner's files, keeping their exact text.
 
-        Only the undo of a group forget logged when forgets took records out
-        of markdown uses it: it takes out the versions that forget wrote. An
-        entry whose mark named a removed one is current again.
+        Two callers: the undo of a group forget logged when forgets took
+        records out of markdown, and the reversal of a forget that did not
+        complete; each takes out the versions that forget wrote. An entry
+        whose mark named a removed one is current again.
         """
         ...
 
@@ -504,6 +506,14 @@ class GroupProfileStore(Protocol):
 
     async def clear_deprecations(self, scope: Scope, keys: Collection[str]) -> None:
         """Drop ``keys`` from the owner's marks (an undo of a forget)."""
+        ...
+
+    async def withdraw(self, scope: Scope, entry_ids: Collection[str]) -> Withdrawal:
+        """Take entries out of the group's files, keeping their exact text.
+
+        What reverses a forget that did not complete: the versions it wrote
+        leave, and an entry whose mark named one of them is current again.
+        """
         ...
 
     async def reinstate(self, scope: Scope, withdrawal: Withdrawal) -> list[MemoryRef]:

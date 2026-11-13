@@ -106,6 +106,13 @@ class ForgetLog(BaseTable, table=True):
     said must be nowhere under the memory root -- so this column is the one
     place they are kept. Added after the first release."""
 
+    stage: str | None = None
+    """``forgetting`` while the forget is being applied (the row is its
+    write-ahead record, which no read counts), ``undoing`` while an undo of it
+    is, ``rolled_back`` once a forget that did not complete was reversed;
+    ``NULL`` otherwise -- and on every row written before the column existed
+    (``schema._ADDED_COLUMNS``)."""
+
 
 class MessageForget(BaseTable, table=True):
     """One message of a session marked forgotten by one forget.

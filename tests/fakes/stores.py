@@ -673,6 +673,92 @@ class InMemoryForgetLogStore:
         self.entries: list[ForgetEntry] = []
         self.undone: set[str] = set()
 
+    def _replace(self, forget_id: str, **changes: Any) -> None:
+        self.entries = [
+            dataclasses.replace(entry, **changes)
+            if entry.forget_id == forget_id
+            else entry
+            for entry in self.entries
+        ]
+
+    async def begin(
+        self,
+        *,
+        forget_id: str,
+        target: ForgetTarget,
+        target_id: str,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        owner_type: str,
+        undo: Mapping[str, Any],
+        reason: str | None = None,
+        requested_by: str | None = None,
+    ) -> ForgetEntry:
+        entry = await self.record(
+            target=target,
+            target_id=target_id,
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            owner_type=owner_type,
+            reason=reason,
+            requested_by=requested_by,
+            undo=dict(undo),
+            forget_id=forget_id,
+        )
+        self._replace(forget_id, stage="forgetting")
+        return dataclasses.replace(entry, stage="forgetting")
+
+    async def journal(self, forget_id: str, undo: Mapping[str, Any]) -> None:
+        for entry in self.entries:
+            if entry.forget_id == forget_id and entry.stage == "forgetting":
+                self._replace(forget_id, undo=json.loads(json.dumps(undo)))
+
+    async def complete(
+        self, forget_id: str, *, undo: Mapping[str, Any], reason: str | None = None
+    ) -> None:
+        for entry in self.entries:
+            if entry.forget_id == forget_id and entry.stage == "forgetting":
+                self._replace(
+                    forget_id,
+                    stage=None,
+                    undo=json.loads(json.dumps(undo)),
+                    reasons=entry.reasons if reason is None else reason,
+                )
+
+    async def staged(
+        self,
+        *,
+        app_id: str | None = None,
+        project_id: str | None = None,
+        owner_id: str | None = None,
+        owner_type: OwnerType | None = None,
+    ) -> list[ForgetEntry]:
+        wanted = (app_id, project_id, owner_id, owner_type)
+        return [
+            entry
+            for entry in self.entries
+            if entry.stage in ("forgetting", "undoing")
+            and all(
+                want is None or want == have
+                for want, have in zip(
+                    wanted,
+                    (entry.app_id, entry.project_id, entry.owner_id, entry.owner_type),
+                    strict=True,
+                )
+            )
+        ]
+
+    async def set_undoing(self, forget_id: str, undoing: bool) -> None:
+        for entry in self.entries:
+            if entry.forget_id != forget_id or forget_id in self.undone:
+                continue
+            if undoing and entry.stage is None:
+                self._replace(forget_id, stage="undoing")
+            elif not undoing and entry.stage == "undoing":
+                self._replace(forget_id, stage=None)
+
     async def record(
         self,
         *,
@@ -725,6 +811,7 @@ class InMemoryForgetLogStore:
             if (entry.app_id, entry.project_id, entry.owner_id, entry.owner_type)
             == (app_id, project_id, owner_id, owner_type)
             and entry.forget_id not in self.undone
+            and entry.stage != "forgetting"
         ]
 
     async def live_entries(
@@ -753,6 +840,7 @@ class InMemoryForgetLogStore:
         return any(
             entry.owner_type == "group"
             and entry.forget_id not in self.undone
+            and entry.stage != "forgetting"
             and f'"image_id": "{image_id}"' in json.dumps(entry.undo or {})
             for entry in self.entries
         )
@@ -781,14 +869,22 @@ class InMemoryForgetLogStore:
             if (entry.app_id, entry.project_id, entry.owner_id, entry.owner_type)
             == (app_id, project_id, owner_id, owner_type)
             and entry.forget_id in self.undone
+            and entry.stage != "rolled_back"
         ]
 
     async def mark_undone(
-        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+        self,
+        forget_id: str,
+        *,
+        restored: Mapping[str, Any] | None = None,
+        rolled_back: bool = False,
     ) -> bool:
-        if forget_id in self.undone:
+        if forget_id in self.undone or not any(
+            entry.forget_id == forget_id for entry in self.entries
+        ):
             return False
         self.undone.add(forget_id)
+        self._replace(forget_id, stage="rolled_back" if rolled_back else None)
         if restored:
             self.entries = [
                 dataclasses.replace(

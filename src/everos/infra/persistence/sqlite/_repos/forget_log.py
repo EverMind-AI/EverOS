@@ -1,11 +1,14 @@
 """Repository for ``forget_log`` — append a forget, read it back for its undo.
 
-Two operations, both trivial in isolation and both load-bearing:
+The operations, each trivial in isolation and each load-bearing:
 
-- :meth:`ForgetLogRepo.append` writes the record of one forget. It runs **last**
-  in a forget, after the marks and the rewrites: a row that exists while the
-  forget it describes is half done would make an undo restore material the
-  forget never removed.
+- :meth:`ForgetLogRepo.append` writes a forget's row **first**, before its
+  first change, in the ``forgetting`` stage: the write-ahead record a stopped
+  run is reversed from. :meth:`ForgetLogRepo.journal` keeps its record ahead of
+  every change and :meth:`ForgetLogRepo.complete` takes it out of the stage.
+  No read but :meth:`ForgetLogRepo.get` and :meth:`ForgetLogRepo.staged` sees a
+  row in that stage: a row that counted while the forget it describes is half
+  done would make an undo restore material the forget never removed.
 - :meth:`ForgetLogRepo.latest_live` finds the newest forget of one target that
   no undo has reversed. That is what an undo reverses — never an older one,
   because undoing a forget that a later forget superseded would bring back
@@ -15,8 +18,9 @@ Every lookup is keyed on the owner's id and type together: users and groups
 share one id space, so a user and a group with the same id must never read
 each other's forgets.
 
-Rows are never deleted and never edited except for ``undone_at``: the log is
-the audit trail of what was hidden and when it came back.
+Rows are never deleted. Once complete, a row is never edited except for
+``undone_at`` and its stage: the log is the audit trail of what was hidden and
+when it came back.
 """
 
 from __future__ import annotations
@@ -26,16 +30,25 @@ import uuid
 from collections.abc import Collection, Mapping
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, or_, select, update
 
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
+from everos.memory.ports import FORGETTING, ROLLED_BACK, UNDOING
 
 from .._tables import ForgetLog, Memcell, MessageForget
 
 _SQLITE_IN_CHUNK = 500
 """``IN (...)`` parameter cap, as the memcell repository chunks it."""
+
+
+def _counted() -> ColumnElement[bool]:
+    """A row the reads count: any but a forget still being applied."""
+    return or_(
+        ForgetLog.stage.is_(None),  # type: ignore[union-attr]
+        ForgetLog.stage != FORGETTING,  # type: ignore[arg-type]
+    )
 
 
 class ForgetLogRepo(RepoBase[ForgetLog]):
@@ -57,8 +70,10 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
         requested_by: str | None = None,
         undo_json: str | None = None,
         forget_id: str | None = None,
+        stage: str | None = None,
     ) -> ForgetLog:
-        """Record one forget and return the row (its id is the undo's handle)."""
+        """Record one forget and return the row (its id is the undo's handle);
+        ``stage`` ``forgetting`` writes a forget's write-ahead record."""
         row = ForgetLog(
             forget_id=forget_id or mint_forget_id(),
             target_kind=target_kind,
@@ -74,8 +89,89 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
             requested_by=requested_by,
             undo_json=undo_json,
             created_at=get_utc_now(),
+            stage=stage,
         )
         return await self.add(row)
+
+    async def journal(self, forget_id: str, undo_json: str) -> None:
+        """Replace the record of a row still in the ``forgetting`` stage."""
+        stmt = (
+            update(ForgetLog)
+            .where(
+                ForgetLog.forget_id == forget_id,  # type: ignore[arg-type]
+                ForgetLog.stage == FORGETTING,  # type: ignore[arg-type]
+            )
+            .values(undo_json=undo_json)
+        )
+        async with session_scope(self._factory) as s:
+            await s.execute(stmt)
+            await s.commit()
+
+    async def complete(
+        self, forget_id: str, *, undo_json: str, reason: str | None = None
+    ) -> None:
+        """Take a row out of the ``forgetting`` stage with its final record,
+        stamped with the time the forget completed."""
+        values: dict[str, Any] = {
+            "stage": None,
+            "undo_json": undo_json,
+            "created_at": get_utc_now(),
+        }
+        if reason is not None:
+            values["reason"] = reason
+        stmt = (
+            update(ForgetLog)
+            .where(
+                ForgetLog.forget_id == forget_id,  # type: ignore[arg-type]
+                ForgetLog.stage == FORGETTING,  # type: ignore[arg-type]
+            )
+            .values(**values)
+        )
+        async with session_scope(self._factory) as s:
+            await s.execute(stmt)
+            await s.commit()
+
+    async def staged(
+        self,
+        *,
+        app_id: str | None = None,
+        project_id: str | None = None,
+        owner_id: str | None = None,
+        owner_type: str | None = None,
+    ) -> list[ForgetLog]:
+        """Rows left ``forgetting`` or ``undoing``, oldest first; one owner's
+        when the owner is given."""
+        clauses = [ForgetLog.stage.in_((FORGETTING, UNDOING))]  # type: ignore[union-attr]
+        for column, value in (
+            (ForgetLog.app_id, app_id),
+            (ForgetLog.project_id, project_id),
+            (ForgetLog.owner_id, owner_id),
+            (ForgetLog.owner_type, owner_type),
+        ):
+            if value is not None:
+                clauses.append(column == value)  # type: ignore[arg-type]
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(ForgetLog).where(*clauses).order_by(ForgetLog.created_at)  # type: ignore[arg-type]
+            )
+            return list((await s.execute(stmt)).scalars().all())
+
+    async def set_undoing(self, forget_id: str, undoing: bool) -> None:
+        """Put a live, complete row in the ``undoing`` stage, or take it out."""
+        stmt = (
+            update(ForgetLog)
+            .where(
+                ForgetLog.forget_id == forget_id,  # type: ignore[arg-type]
+                ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                ForgetLog.stage.is_(None)  # type: ignore[union-attr]
+                if undoing
+                else ForgetLog.stage == UNDOING,  # type: ignore[arg-type]
+            )
+            .values(stage=UNDOING if undoing else None)
+        )
+        async with session_scope(self._factory) as s:
+            await s.execute(stmt)
+            await s.commit()
 
     async def get(self, forget_id: str) -> ForgetLog | None:
         """One forget by id, undone or not."""
@@ -102,6 +198,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
                     ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                    _counted(),
                 )
                 .order_by(ForgetLog.created_at)  # type: ignore[arg-type]
             )
@@ -120,6 +217,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
                     ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                    _counted(),
                 )
                 .order_by(ForgetLog.created_at.desc())
             )
@@ -138,6 +236,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                 .where(
                     ForgetLog.owner_type == "group",  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                    _counted(),
                     ForgetLog.undo_json.like(pattern),  # type: ignore[union-attr]
                 )
                 .limit(1)
@@ -166,6 +265,7 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
                     ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_(None),  # type: ignore[union-attr]
+                    _counted(),
                 )
                 .order_by(ForgetLog.created_at.desc())
                 .limit(1)
@@ -175,7 +275,8 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
     async def undone_rows(
         self, *, app_id: str, project_id: str, owner_id: str, owner_type: str
     ) -> list[ForgetLog]:
-        """The owner's forgets an undo reversed, newest first."""
+        """The owner's forgets an undo reversed, newest first; a forget rolled
+        back before it completed is not one."""
         async with session_scope(self._factory) as s:
             stmt = (
                 select(ForgetLog)
@@ -185,26 +286,36 @@ class ForgetLogRepo(RepoBase[ForgetLog]):
                     ForgetLog.owner_id == owner_id,  # type: ignore[arg-type]
                     ForgetLog.owner_type == owner_type,  # type: ignore[arg-type]
                     ForgetLog.undone_at.is_not(None),  # type: ignore[union-attr]
+                    or_(
+                        ForgetLog.stage.is_(None),  # type: ignore[union-attr]
+                        ForgetLog.stage != ROLLED_BACK,  # type: ignore[arg-type]
+                    ),
                 )
                 .order_by(ForgetLog.created_at.desc())
             )
             return list((await s.execute(stmt)).scalars().all())
 
     async def mark_undone(
-        self, forget_id: str, *, restored: Mapping[str, Any] | None = None
+        self,
+        forget_id: str,
+        *,
+        restored: Mapping[str, Any] | None = None,
+        rolled_back: bool = False,
     ) -> bool:
         """Stamp ``undone_at``; whether this call is the one that stamped it.
 
         A second undo of the same forget returns ``False`` and restores
         nothing, so a retried request cannot put back material a later forget
         removed. ``restored`` (what the undo wrote) joins the row's undo
-        record under ``"restored"``, in the same commit.
+        record under ``"restored"``, in the same commit, and the row leaves
+        its stage -- for ``rolled_back`` when the forget did not complete.
         """
         async with session_scope(self._factory) as s:
             row = await s.get(ForgetLog, forget_id)
             if row is None or row.undone_at is not None:
                 return False
             row.undone_at = get_utc_now()
+            row.stage = ROLLED_BACK if rolled_back else None
             if restored and row.undo_json:
                 undo = json.loads(row.undo_json)
                 undo["restored"] = dict(restored)

@@ -31,7 +31,7 @@ from everos.core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 _ADDED_COLUMNS: Mapping[str, tuple[str, ...]] = {
-    "forget_log": ("requested_by", "undo_json"),
+    "forget_log": ("requested_by", "undo_json", "stage"),
     "group_meta": ("deliverer_id",),
     "image_original": ("forgotten_at",),
     "md_change_state": ("unreadable_entries",),
