@@ -229,3 +229,41 @@ def test_dto_fields_match_cloud() -> None:
         "comment",
         "error",
     ]
+
+
+@pytest.mark.parametrize(
+    ("origin", "allowed"),
+    [
+        (None, True),  # curl, SDKs, MCP, plugins: no Origin
+        ("http://t", True),  # a page served by this server itself
+        ("HTTP://T", True),
+        ("https://evil.example", False),
+        ("http://t:8001", False),  # same host, another port: another site
+        ("null", False),  # a sandboxed or file:// page
+    ],
+)
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/v2/memory/purge", {"scope": "space"}),
+        ("/api/v1/memory/purge/confirm", {"nonce": "n" * 32}),
+    ],
+)
+async def test_a_browser_page_of_another_site_cannot_purge(
+    client: AsyncClient,
+    purge: StubPurgeService,
+    origin: str | None,
+    allowed: bool,
+    path: str,
+    body: dict[str, str],
+) -> None:
+    headers = {"origin": origin} if origin is not None else {}
+    resp = await client.post(path, json=body, headers=headers)
+    called = purge.request.await_count + purge.confirm.await_count
+    if allowed:
+        assert resp.status_code in (200, 202), resp.text
+        assert called == 1
+    else:
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+        assert called == 0

@@ -26,6 +26,7 @@ KEYWORDS = {
         "does not block",
         "PURGE_IN_PROGRESS",
         "A refused write wrote nothing",
+        "CROSS_SITE_REFUSED",
         "restart the server, then purge again",
         "only once",
         "If the `202` is lost",

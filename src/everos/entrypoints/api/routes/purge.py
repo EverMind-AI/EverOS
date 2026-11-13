@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, Path, Request
 
+from everos.core.errors import CrossSiteRefusedError
 from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
 from everos.entrypoints.api.schemas import (
     ErrorResponse,
@@ -27,12 +29,41 @@ REFUSED_DURING_PURGE: dict[int | str, dict[str, Any]] = {
 }
 """The answer of a write route while a purge clears the range it names."""
 
+
+def _refuse_cross_site(request: Request) -> None:
+    """Refuse a purge sent by a browser page of another site.
+
+    There is no authentication and CORS allows any origin by default, so any
+    page the user opens could read a nonce and confirm it. Browsers send
+    ``Origin`` with these requests; curl, SDKs, MCP and the plugins send
+    none and pass, and so does a page this server serves itself.
+    """
+    origin = request.headers.get("origin")
+    host = request.headers.get("host", "")
+    if origin is not None and urlsplit(origin).netloc.lower() != host.lower():
+        raise CrossSiteRefusedError(
+            "a purge is refused from a browser page of another site; "
+            "send it from curl, an SDK or a plugin"
+        )
+
+
+_CROSS_SITE_RESPONSE: dict[int | str, dict[str, Any]] = {
+    403: {
+        "model": ErrorResponse,
+        "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+    },
+}
+
 _PathJobId = Annotated[
     str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 ]
 
 
-@router.post("/purge")
+@router.post(
+    "/purge",
+    dependencies=[Depends(_refuse_cross_site)],
+    responses=_CROSS_SITE_RESPONSE,
+)
 async def request_purge(
     req: PurgeRequest, app: ApplicationDep, request_id: RequestIdDep
 ) -> SuccessEnvelope[PurgeRequestData]:
@@ -50,7 +81,9 @@ async def request_purge(
 @router.post(
     "/purge/confirm",
     status_code=202,
+    dependencies=[Depends(_refuse_cross_site)],
     responses={
+        **_CROSS_SITE_RESPONSE,
         404: {
             "model": ErrorResponse,
             "description": "PURGE_NONCE_INVALID: unknown, expired or used nonce",

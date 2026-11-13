@@ -417,6 +417,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -455,6 +465,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1712,6 +1732,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1750,6 +1780,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_PurgeJobData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3636,6 +3676,7 @@
           "QUEUE_SATURATED",
           "SESSION_BUSY",
           "PURGE_IN_PROGRESS",
+          "CROSS_SITE_REFUSED",
           "PURGE_NONCE_INVALID"
         ],
         "title": "ErrorCode",

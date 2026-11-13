@@ -87,6 +87,7 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     # A deletion that found its session busy deleted nothing: retry later.
     errors.SessionBusyError: _Rule(503, ErrorCode.SESSION_BUSY),
     errors.PurgeInProgressError: _Rule(409, ErrorCode.PURGE_IN_PROGRESS),
+    errors.CrossSiteRefusedError: _Rule(403, ErrorCode.CROSS_SITE_REFUSED),
     errors.PurgeNonceInvalidError: _Rule(404, ErrorCode.PURGE_NONCE_INVALID),
     errors.DeletionIncompleteError: _Rule(
         500,

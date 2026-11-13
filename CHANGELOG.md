@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app or one project while the server keeps serving, aligned with the Cloud
   API. Reads, other apps and projects and background work all proceed while
   a purge runs; only writes into the purged range answer `409`
-  `PURGE_IN_PROGRESS` until it ends. Background work on input taken in
+  `PURGE_IN_PROGRESS` until it ends; a browser page of another site cannot
+  purge (`403` `CROSS_SITE_REFUSED`). Background work on input taken in
   before the purge is dropped, and the purge waits for work in flight before
   it deletes a second time. New `[purge]` settings bound a job's running
   time. See `docs/api.md`.

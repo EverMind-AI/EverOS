@@ -173,3 +173,54 @@ def test_t11_1_second_scope_gets_the_active_job(make_world: Any) -> None:
     spent = srv.confirm(nonce_b)
     assert spent.status_code == 404
     world.ev.json("jobs", _jobs(root))
+
+
+def test_t43_1_a_cross_site_page_cannot_purge(make_world: Any) -> None:
+    """A43 (E8): a browser page of another site gets past CORS (its preflight
+    is answered) but its request and confirm are refused and start nothing;
+    a request without ``Origin`` (curl, plugins) or from this server's own
+    page is served."""
+    world = make_world("T43.1")
+    srv, root = world.srv, world.srv.root
+    before = nothing_deleted_snapshot(root)
+    evil = {"origin": "https://evil.example"}
+    preflight = srv.call(
+        "OPTIONS",
+        "/memory/purge",
+        headers={
+            **evil,
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "content-type",
+        },
+    )
+    asked = srv.call("POST", "/memory/purge", {"scope": "space"}, headers=evil)
+    nonce = srv.purge(scope="space").json()["data"]["nonce"]  # no Origin
+    confirmed = srv.call(
+        "POST", "/memory/purge/confirm", {"nonce": nonce}, headers=evil
+    )
+    own = srv.call("POST", "/memory/purge", EMPTY, headers={"origin": srv.base.lower()})
+    world.ev.json(
+        "responses",
+        {
+            "preflight": [preflight.status_code, dict(preflight.headers)],
+            "request_cross_site": [asked.status_code, asked.json()],
+            "confirm_cross_site": [confirmed.status_code, confirmed.json()],
+            "request_own_page": [own.status_code, own.json()],
+        },
+    )
+    # CORS alone would let the page through: the preflight is answered.
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] in ("*", evil["origin"])
+    for resp in (asked, confirmed):
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+    assert "nonce" not in asked.text
+    assert own.status_code == 200 and own.json()["data"]["nonce"]
+    assert _jobs(root) == []
+    after = nothing_deleted_snapshot(root)
+    world.ev.json("snapshot", {"before": before, "after": after})
+    assert after == before
+    # The nonce the refused confirm carried is still good for a real client.
+    job = srv.confirm(nonce)
+    assert job.status_code == 202, job.text
+    assert finish(srv, job.json()["data"]["job_id"])["status"] == "succeeded"

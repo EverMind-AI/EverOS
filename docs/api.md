@@ -1606,6 +1606,7 @@ mid-purge resumes the job when it starts again.
 | `404` | `PURGE_NONCE_INVALID` | The nonce is unknown, expired or already used; request a new one |
 | `503` | `EXTERNAL_SERVICE_UNAVAILABLE` | The job could not be recorded; nothing started and the nonce is still valid |
 | `404` | `NOT_FOUND` | `GET` of an unknown `job_id` |
+| `403` | `CROSS_SITE_REFUSED` | `POST /purge` or `/purge/confirm` sent by a browser page of another site (an `Origin` header that is not this server's address); nothing started |
 | `409` | `PURGE_IN_PROGRESS` | A write (`/add`, `/flush`, knowledge document upload, replace or patch) into the range a running purge is clearing; resend after the job ends |
 
 The Cloud API spells the same conditions in lower case
@@ -1641,6 +1642,12 @@ the code of a dropped queued request is the lower-case `purge_in_progress`.
   the port can clear the whole root: when the API is exposed beyond
   `127.0.0.1`, block `/api/*/memory/purge*` at your reverse proxy unless
   the caller is trusted.
+- **A browser page of another site cannot purge.** A request or confirm
+  carrying an `Origin` header that is not this server's own address
+  answers `403` `CROSS_SITE_REFUSED` and starts nothing, so a web page the
+  user happens to open cannot clear the local root. Clients that send no
+  `Origin` (curl, SDKs, MCP, the plugins) are not affected, nor is a page
+  this server serves itself (`/docs`).
 - To reset memory between tests, point each run at a fresh temporary
   memory root (`--root`) instead of purging a shared one: that is the
   deterministic reset.
