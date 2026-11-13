@@ -510,7 +510,9 @@ search reads the past does not depend on the decider's wording. An
   are full of them. The exceptions keep "used to" meaning "accustomed to"
   ("I'm used to it", "getting used to") or a passive ("what is the folder
   used to store"), a present-tense verb after "before I" ("before we
-  proceed") and a recent span ("in the past week") from firing.
+  proceed"), a recent span ("in the past week"), the previous conversation
+  ("you told me in our previous chat": what was said is current memory, not
+  an old version) and "for the last time" from firing.
 - **Chinese** (`past_triggers_zh.toml`, simplified and traditional): the
   words for before and previously, the past, once, originally and at first,
   at that time and back then, last time, the old one, the former holder, no
@@ -519,7 +521,8 @@ search reads the past does not depend on the decider's wording. An
   trigger without meaning the past: a direction after a verb ("walk over",
   "send over"), "go over" as a verb, the past tense, a recent span counted
   back from now ("the past week"), a deadline ("before tomorrow", "before
-  five o'clock"), "so that is how it is", and a handful of compounds.
+  five o'clock"), the previous conversation, "so that is how it is", and a
+  handful of compounds.
 - **Dates** (`past_trigger_dates`): an explicit date is a trigger when its
   whole period -- a year, a month or a day -- ended before the day the
   question is asked (`asked_at`, else now, in the display timezone): "in

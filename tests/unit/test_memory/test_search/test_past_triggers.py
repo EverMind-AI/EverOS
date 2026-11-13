@@ -114,6 +114,10 @@ def test_english_past_wording_fires(question: str, trigger: str) -> None:
         "How many 2000 calorie days did I log?",
         "Remind me about the unused tickets and the reused bags.",
         "What did I note about oldies music and the previousness of it?",
+        # What was said before is current memory, not an old version.
+        "What hotel did you recommend in our previous conversation?",
+        "Remind me of the vegan place from our previous chat.",
+        "When did I go to the farmers' market for the last time?",
     ],
 )
 def test_ordinary_english_questions_fire_nothing(question: str) -> None:
@@ -188,6 +192,8 @@ def test_chinese_past_wording_fires(question: str, trigger: str) -> None:
         "当时间到了提醒我出门。",
         "这个课程相当初级吗?",
         "他领先前三名多少分?",
+        # What was said before is current memory, not an old version.
+        "我们之前的对话里你推荐了哪家餐厅?",
         # Nothing past at all.
         "我的女儿今年几岁了?",
         "我最喜欢吃什么水果?",

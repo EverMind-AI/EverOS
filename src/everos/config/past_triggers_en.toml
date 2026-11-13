@@ -49,4 +49,9 @@ exceptions = [
   'in the past (?:(?:few|couple of|several|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) )?(?:minutes?|hours?|days?|weeks?|months?)',
   # "The former" as a pronoun.
   'the former (?:and|or) the latter',
+  # The previous conversation: what was said is current memory, not an old
+  # version ("you told me in our previous chat").
+  '(?:our|my|your|the|that) previous (?:conversations?|chats?|sessions?|discussions?|talks?|exchanges?)',
+  # The final time, not the time before.
+  'for the last time',
 ]

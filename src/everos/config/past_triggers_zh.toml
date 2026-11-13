@@ -45,6 +45,9 @@ exceptions = [
   # Before a time still to come is a deadline, not the past: before tomorrow,
   # before next week, before five o'clock.
   '(?:明天|后天|後天|明早|明晚|今晚|下周|下週|下星期|下礼拜|下禮拜|下个月|下個月|下月|下次|下回|明年|后年|後年|月底|年底|将来|將來|未来|未來|截止|到期|[0-9一二两兩三四五六七八九十]+[点點](?:半|钟|鐘)?)(?:之前|以前)',
+  # The previous conversation: what was said is current memory, not an old
+  # version ("in our previous chat you said").
+  '(?:之前|以前|先前)的?(?:对话|對話|聊天|会话|會話|谈话|談話)',
   # "So that is how it is", not "originally".
   '原[来來](?:如此|是这样|是這樣|这样|這樣|是这么回事|是這麼回事)',
   # Inside other words: "when the time comes", "at a proper time", "quite

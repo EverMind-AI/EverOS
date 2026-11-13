@@ -117,8 +117,9 @@ machinery that keeps a deleted memory from coming back.
   past-tense verb, "the old / previous / former" ...; no bare "before",
   "earlier" or "old") and their Chinese counterparts, each language with
   exceptions for the longer words and phrases that hold a trigger without
-  meaning the past ("is used to", "in the past week", a direction such as
-  "walk over" or a deadline such as "before tomorrow" in Chinese). With
+  meaning the past ("is used to", "in the past week", "our previous
+  conversation", a direction such as "walk over" or a deadline such as
+  "before tomorrow" in Chinese). With
   `past_trigger_dates` (on with the switch), an explicit year, month or date
   whose whole period ended before the day the question is asked is a
   trigger too ("in 2019", "March 2024", "2024-03-05", "the 1990s" and the
@@ -128,7 +129,11 @@ machinery that keeps a deleted memory from coming back.
   one and `[]` switches it off; an entry that is no regular expression or
   matches an empty question is refused at load. No model call; with the
   switch off, requests, results and model requests are byte-identical to
-  before ([docs/configuration.md](docs/configuration.md#search),
+  before. On the evaluation sets' questions alone, the built-in lists fire
+  on 25 of LongMemEval-S's 500 (9 of 78 knowledge-update questions) and on
+  173 of LoCoMo's 1,540 scored ones, 168 of them by a date the question
+  names; whether reading the past then helps an answer is not measured yet
+  ([docs/configuration.md](docs/configuration.md#search),
   [docs/api.md](docs/api.md#post-apiv2memorysearch)).
 - **One deliverer per group, and each message once.** A group names the
   identity its gateway asserts for the group's key as `deliverer_id`
