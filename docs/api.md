@@ -1029,9 +1029,11 @@ nothing.
 ISO-8601 time (one without an offset is read in the display timezone). The
 forgetting curve (`[search] forgetting_curve`,
 [configuration.md](configuration.md#search)) measures every memory's age up
-to it, and dates the reinforcements of this search at it. Unset: now.
-Nothing else reads it; with the curve off it changes nothing. A value that is
-neither is refused (`422`).
+to it, and dates the reinforcements of this search at it; with `[search]
+past_triggers`, a date the question names is in the past when it ended
+before that day (see `include_past`). Unset: now. Nothing else reads it;
+with both off it changes nothing. A value that is neither is refused
+(`422`).
 
 The `radius`, `min_score` and `enable_llm_rerank` fields of 1.x tuned the
 removed methods; a request that still sends them is refused as an unknown

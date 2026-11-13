@@ -229,7 +229,9 @@ class SearchRequest(BaseModel):
     """When the question is asked: epoch ms or an ISO-8601 time (one without
     an offset is read in the display timezone). The forgetting curve
     (``[search] forgetting_curve``) measures each memory's age up to it, and a
-    reinforcement is dated at it. Unset: now. Nothing else reads it."""
+    reinforcement is dated at it; with ``[search] past_triggers``, a date in
+    the question is in the past when it ended before that day. Unset: now.
+    Nothing else reads it."""
 
     @field_validator("asked_at", mode="before")
     @classmethod
