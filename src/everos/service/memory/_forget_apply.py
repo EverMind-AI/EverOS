@@ -645,31 +645,62 @@ def _without_picture(episode: Episode, image_id: str) -> Episode:
 
 
 def strip_reference(text: str, image_id: str) -> str:
-    """Remove every reference to ``image_id`` and the empty brackets it leaves.
+    """Remove every reference to ``image_id``; the rest of ``text`` stays as it is.
 
     The two spellings in use are ``(img-1: <id>)`` from the picture extractor
     and ``[IMAGE: <id>]`` from a text-only render; each shape is removed
     whole, outermost first, so no ``(img-1: )`` is left inside a sentence.
+    A span takes the spaces before it along (``a kite (img-1: <id>).`` reads
+    ``a kite.``), or the spaces after it when it opens a line; line breaks,
+    paragraphs and every other character of the body are kept.
     """
     if image_id not in text:
         return text
-    cleaned = text.replace(f"[IMAGE: {image_id}]", "")
-    for span in _parenthesised(text):
-        if image_id in span:
-            cleaned = cleaned.replace(span, "")
-    # A reference alone in its own parentheses leaves ``()``: drop the pair
-    # and the space before it, and close up a space left before punctuation.
-    spaced = " ".join(cleaned.replace("()", "").split())
-    return _before_punctuation.sub(r"\1", spaced)
+    spans = [
+        (found.start(), found.end())
+        for found in re.finditer(re.escape(f"[IMAGE: {image_id}]"), text)
+    ]
+    spans += [
+        (start, end)
+        for start, end in _parenthesised(text)
+        if image_id in text[start:end]
+    ]
+    kept: list[str] = []
+    last = 0
+    for start, end in _outermost(spans):
+        if start < last:
+            continue
+        cut = start
+        while cut > last and text[cut - 1] in _SPACES:
+            cut -= 1
+        kept.append(text[last:cut])
+        last = end
+        if cut == 0 or text[cut - 1] == "\n":
+            while last < len(text) and text[last] in _SPACES:
+                last += 1
+    kept.append(text[last:])
+    return "".join(kept)
 
 
-_before_punctuation = re.compile(r"\s+([.,;:!?])")
+_SPACES = " \t"
+"""The whitespace a removed reference takes along: never a line break."""
 
 
-def _parenthesised(text: str) -> list[str]:
-    """Every ``(...)`` span in ``text``, outermost and balanced (a scan: a
-    description may itself hold parentheses, which a greedy pattern eats)."""
-    spans: list[str] = []
+def _outermost(spans: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """``spans`` in order, each one inside another dropped."""
+    found: list[tuple[int, int]] = []
+    for start, end in sorted(spans, key=lambda span: (span[0], -span[1])):
+        if found and start < found[-1][1]:
+            continue
+        found.append((start, end))
+    return found
+
+
+def _parenthesised(text: str) -> list[tuple[int, int]]:
+    """``(start, end)`` of every ``(...)`` span in ``text``, outermost and
+    balanced (a scan: a description may itself hold parentheses, which a
+    greedy pattern eats)."""
+    spans: list[tuple[int, int]] = []
     depth = 0
     start = 0
     for index, char in enumerate(text):
@@ -680,7 +711,7 @@ def _parenthesised(text: str) -> list[str]:
         elif char == ")" and depth:
             depth -= 1
             if depth == 0:
-                spans.append(text[start : index + 1])
+                spans.append((start, index + 1))
     return spans
 
 
