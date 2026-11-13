@@ -45,6 +45,14 @@ later joiner and a member who was away get nothing said outside their
 windows, a forgotten record or message is absent, and another member's
 records -- personal memory, a profile in the group -- never come along.
 
+Who joins, who manages and who is served is held to the same mark: a
+stranger's message dated before the group's history makes them a member from
+after it, reading nothing said before; ``audience = group`` is what every
+current person can see (an assistant member is no audience); a late member of
+a group without an owner or admin cannot widen their own window; and behind a
+gateway (``[access] identity_header``) a request without the header reads
+nothing.
+
 A search that asks about the past (``include_past``) takes them all again:
 it adds a group's superseded versions inside the asker's windows and nothing
 else -- never a version outside them, never a forgotten record, never the
@@ -69,7 +77,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
-from everos.config import Settings
+from everos.config import Settings, load_settings
 from everos.core.errors import ForbiddenError, NotFoundError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import (
@@ -1724,6 +1732,149 @@ async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
         everything = json.dumps(listed_ann.model_dump(mode="json"))
         for said in (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID):
             assert said in everything, said
+
+
+# -- Who joins, who manages, who is served (access review, 2026-11-13) --------
+
+_GROUP_TEXTS = (
+    *GROUP_RECORDS,
+    PICTURE,
+    "buffered marker early",
+    "buffered marker late",
+)
+"""Everything the fixture's group holds, in the words a leak would show."""
+
+
+@pytest.mark.parametrize("asker", [None, "u_zoe"])
+async def test_a_backdated_message_opens_no_window_into_the_groups_past(
+    fixture: _Fixture, asker: str | None
+) -> None:
+    """A stranger's message dated before the group's history makes them a
+    member from just after its newest message (they are no owner, admin or
+    deliverer): no read path hands them anything said before."""
+    world = fixture.world
+    payload: dict[str, Any] = {
+        "session_id": "s_zoe",
+        "app_id": APP,
+        "project_id": PROJECT,
+        "group_id": "trip",
+        "messages": [
+            {"sender_id": "u_zoe", "role": "user", "timestamp": T0 - 86_400_000,
+             "content": "hello"},
+        ],
+    }  # fmt: skip
+    if asker is not None:
+        payload["asker_id"] = asker
+    await world.memory.add(
+        payload, request_id="r", async_mode=False, defer_extraction=True
+    )
+    record = await world.stores.groups.get(world.scope("trip"))
+    assert record is not None and record.roster.is_current_member("u_zoe")
+    everything = await _everything_read_by(fixture, "u_zoe")
+    for text in _GROUP_TEXTS:
+        assert text not in everything, text
+    picture = await fixture.client.get(
+        f"/api/v2/memory/images/{fixture.picture}", params={"asker_id": "u_zoe"}
+    )
+    assert picture.status_code == 404
+
+
+async def test_audience_group_is_what_every_person_sees_not_an_assistant(
+    fixture: _Fixture,
+) -> None:
+    """``audience = group`` keeps what every current person can see: an
+    assistant member's late window cuts nothing, and nothing outside a
+    person's window comes back."""
+    await fixture.world.roster(
+        "trip", [join("bot", T0 + 8500, kind="assistant", role="assistant")]
+    )
+    response = await fixture.world.memory.search(
+        _search(group_id="trip", asker_id="u_chen", audience="group")
+    )
+    blob = _everything_text(response)
+    people = ("u_chen", "u_evan", "u_dan")
+    for text, (start, end) in GROUP_RECORDS.items():
+        everyone = all(_visible(p, start, end) for p in people)
+        assert (text in blob) == everyone, text
+    assert PICTURE not in blob and "buffered marker early" not in blob
+
+
+async def test_a_member_of_a_group_without_managers_never_widens_their_window(
+    fixture: _Fixture,
+) -> None:
+    """In a group with no owner or admin a late member's ways to read what was
+    said before them -- the whole history for every member, themselves as
+    deliverer, a self-promotion and a backdated join -- are refused, and
+    their reads stay inside their window."""
+    world = fixture.world
+    await world.roster("club", [join("u_chen", T0), join("u_evan", T0 + 5000)])
+    for word, (start, end) in (("early", (1000, 2000)), ("late", (8000, 9000))):
+        await world.episode(
+            "club",
+            f"club {word} marker plan Lisbon offsite",
+            start=T0 + start,
+            end=T0 + end,
+            session_id="s_club",
+        )
+    await world.project()
+    body = {"project_id": PROJECT, "asker_id": "u_evan"}
+    for method, path, request in (
+        ("PUT", "/api/v2/groups/club", {**body, "history_visible_from": "creation"}),
+        ("PUT", "/api/v2/groups/club", {**body, "deliverer_id": "u_evan"}),
+        (
+            "POST",
+            "/api/v2/groups/club/roster",
+            {
+                **body,
+                "events": [
+                    {"op": "update", "member_id": "u_evan", "role": "owner",
+                     "at": T0 + 9500},
+                    {"op": "join", "member_id": "u_alt", "at": T0},
+                ],
+            },
+        ),
+    ):  # fmt: skip
+        answer = await fixture.client.request(method, path, json=request)
+        assert answer.status_code == 403, (path, answer.text)
+    response = await world.memory.search(
+        _search(group_id="club", asker_id="u_evan").model_copy(update={"filters": None})
+    )
+    blob = _everything_text(response)
+    assert "club late marker" in blob and "club early marker" not in blob
+    with pytest.raises(ForbiddenError):
+        await world.memory.search(_search(group_id="club", asker_id="u_alt"))
+
+
+async def test_behind_a_gateway_a_request_without_its_header_reads_nothing(
+    fixture: _Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``[access] identity_header`` set, a request that lacks the header
+    (or carries it empty) is refused on every read path, whatever its body
+    names as the asker."""
+    monkeypatch.setenv("EVEROS_ACCESS__IDENTITY_HEADER", "X-Asker")
+    load_settings.cache_clear()
+    query = {"query": "marker plan Lisbon offsite", "top_k": 20}
+    group = {"project_id": PROJECT, "group_id": "trip", "asker_id": "u_chen"}
+    personal = {"project_id": PROJECT, "user_id": "u_chen"}
+    reads: list[tuple[str, str, dict[str, Any]]] = [
+        ("POST", "/api/v2/memory/search", {**group, **query}),
+        ("POST", "/api/v2/memory/search", {**personal, **query}),
+        ("POST", "/api/v2/memory/get", {**group, "memory_type": "episode"}),
+        ("POST", "/api/v2/memory/get", {**personal, "memory_type": "episode"}),
+        ("GET", "/api/v2/groups/trip", group),
+        ("GET", f"/api/v2/memory/images/{fixture.picture}", {"asker_id": "u_chen"}),
+        ("GET", f"/api/v2/projects/{PROJECT}", {"asker_id": "u_chen"}),
+    ]
+    for method, path, body in reads:
+        for headers in ({}, {"X-Asker": ""}):
+            sent = {"params": body} if method == "GET" else {"json": body}
+            answer = await fixture.client.request(method, path, headers=headers, **sent)
+            assert answer.status_code == 403, (path, headers, answer.text)
+            assert "marker" not in answer.text
+    served = await fixture.client.post(
+        "/api/v2/memory/search", json={**group, **query}, headers={"X-Asker": "u_chen"}
+    )
+    assert served.status_code == 200 and ALPHA in served.text
 
 
 def test_no_other_question_of_the_suite_reads_the_past() -> None:
