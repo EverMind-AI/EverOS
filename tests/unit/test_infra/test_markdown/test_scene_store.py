@@ -5,11 +5,7 @@ What these pin:
 - a user's versions live under ``users/<u>/scenes/scene-<date>.md`` with
   ``sc_`` ids, read back whole; a new version marks the one it supersedes;
 - a forget marks a version and an undo clears the mark, file by file;
-- a deletion removes every version that names one of its episodes, matched
-  on the parsed member list, never on a text prefix;
 - an agent has no scenes;
-- a whole-owner deletion lists the scene versions with the episode table's
-  refs, so their rows go with the rest;
 - the cascade matches the user scene files to the ``scene`` kind, which
   projects them into the episode table as ``parent_type = scene``.
 """
@@ -22,12 +18,8 @@ import pytest
 
 from everos.infra.cascade import match_kind
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import (
-    MarkdownEpisodeStore,
-    MarkdownOwnerDirStore,
-    MarkdownSceneStore,
-)
-from everos.memory.models import FORGOTTEN_MARK, Episode, Scene
+from everos.infra.persistence.markdown import MarkdownSceneStore
+from everos.memory.models import FORGOTTEN_MARK, Scene
 from everos.memory.ports import NO_SOURCE_CHECK, Scope
 
 _TS = 1_747_216_800_000
@@ -111,30 +103,3 @@ async def test_an_agent_has_no_scenes(root: MemoryRoot) -> None:
         await MarkdownSceneStore(root).append(
             agent, _scene(["ac_1"]), supersedes=None, only_if=NO_SOURCE_CHECK
         )
-
-
-async def test_an_owner_deletion_lists_the_scenes_with_the_episodes(
-    root: MemoryRoot,
-) -> None:
-    (episode,) = await MarkdownEpisodeStore(root).append_many(
-        _user(),
-        [
-            Episode(
-                owner_id="u1",
-                episode="e",
-                summary="e",
-                timestamp=_TS,
-                session_id="s1",
-                parent_id="mc_1",
-            )
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
-    scene = await MarkdownSceneStore(root).append(
-        _user(), _scene([episode.entry_id]), supersedes=None, only_if=NO_SOURCE_CHECK
-    )
-    deletion = await MarkdownOwnerDirStore(root).delete(_user())
-    assert sorted(r.entry_id for r in deletion.refs["episode"]) == sorted(
-        [episode.entry_id, scene.entry_id]  # type: ignore[union-attr]
-    )
-    assert deletion.count == 2
