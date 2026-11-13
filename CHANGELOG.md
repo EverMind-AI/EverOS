@@ -1027,6 +1027,17 @@ machinery that keeps a deleted memory from coming back.
   makes a boundary call). Messages with one timestamp keep the order they
   arrived in; before, the id's index ordered them. A one-to-one `message`
   forget names a message by this id ([docs/api.md](docs/api.md#messageitem)).
+- **The prompt manifest covers every text sent to a model.** `everos prompts`
+  listed EverOS's own prompts and four of everalgo's, but not the
+  output-language rules every extraction prompt carries, the parser prompts
+  (a picture read into text when `[extraction] vision` is off, a document, a
+  recording) or the four custom-instruction files appended to the boundary,
+  episode, profile and scene prompts: two stores with one manifest could have
+  been built with different prompt text. The manifest (version 2) now lists
+  `everalgo.user_memory.language_rules`, `everalgo.parser.prompts` and one
+  `custom_instructions.<operator>` entry per file, with the prompt it is
+  appended to, whether it is on, and the fingerprint of its text when it is
+  ([docs/cli.md](docs/cli.md#everos-prompts)).
 - **A picture's copy is labelled as what it is.** The extraction model and
   the decider were sent every picture copy as `image/jpeg`, though a greyscale
   picture's copy is PNG; a strict endpoint may refuse the mismatch. The label

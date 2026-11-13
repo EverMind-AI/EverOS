@@ -70,9 +70,14 @@ version, fingerprint of its text, and when it is sent: `write` while a store is
 written, `read` by the multi-round decider on every round of every search,
 `search` by an optional search step) and the everalgo prompts it sends
 unchanged -- boundary detection, the episode rules, the profile update and
-consolidation (package, installed version, fingerprint). A prompt assembled by
-rule lists the fingerprint of each variant: `chat.episode` and
-`search.decider` have a `text` and a `pictures` one. It needs no memory root, no
+consolidation, the output-language rules every extraction prompt carries, and
+the parser prompts that read a picture, a document or a recording into text
+(package, installed version, fingerprint). A prompt assembled by rule lists
+the fingerprint of each variant: `chat.episode` and `search.decider` have a
+`text` and a `pictures` one. The four custom-instruction files
+(`config/custom_instructions/*.yaml`) are listed too, each with the prompt it
+is appended to, whether it is on, and the fingerprint of its text when it is
+(`null` while off: nothing is sent). It needs no memory root, no
 configuration and no model. Save it beside a store when the store is built
 (`everos prompts > <store>/prompts.json`): two stores built by the same
 prompts carry the same manifest, and a prompt change shows up as a new

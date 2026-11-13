@@ -25,9 +25,14 @@ from __future__ import annotations
 import hashlib
 import importlib
 import pkgutil
+from pathlib import Path
 
 import everos.memory
-from everos.memory.prompt_manifest import ALGO_PROMPTS, prompt_manifest
+from everos.memory.prompt_manifest import (
+    ALGO_PROMPTS,
+    CUSTOM_INSTRUCTIONS,
+    prompt_manifest,
+)
 from everos.memory.prompts import PromptTemplate
 from everos.memory.search import llm_multiround
 
@@ -88,6 +93,16 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
             "0.9.0rc6.dev6",
             "d70ed25f5e44ede3",
         ),
+        "everalgo.user_memory.language_rules": (
+            "everalgo-user-memory",
+            "0.9.0rc6.dev6",
+            "10d1df0535db08bf",
+        ),
+        "everalgo.parser.prompts": (
+            "everalgo-parser",
+            "0.3.0rc2",
+            "e076202ae1deaeed",
+        ),
     }
 
 
@@ -127,3 +142,39 @@ def test_the_decider_text_variant_is_the_prompt_constant_alone() -> None:
 
     assert llm_multiround.DECIDER.parts[0] is prompt
     assert text == hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def test_the_custom_instructions_are_recorded_off_or_by_their_text(
+    tmp_path: Path,
+) -> None:
+    """Off (the bundled files), an entry records that nothing is sent; on, the
+    fingerprint of the text appended to its prompt."""
+    bundled = prompt_manifest()["prompts"]
+    for operator, appended_to in CUSTOM_INSTRUCTIONS:
+        entry = bundled[f"custom_instructions.{operator}"]
+        assert entry == {
+            "owner": "config",
+            "used": "write",
+            "appended_to": appended_to,
+            "enabled": False,
+            "fingerprint": None,
+        }
+        assert appended_to in bundled
+
+    folder = tmp_path / "custom_instructions"
+    folder.mkdir()
+    (folder / "episode_extract.yaml").write_text(
+        'enabled: true\ninstructions: "Keep every date."\n', encoding="utf-8"
+    )
+    first = prompt_manifest(config_root=tmp_path)["prompts"]
+    (folder / "episode_extract.yaml").write_text(
+        'enabled: true\ninstructions: "Keep every price."\n', encoding="utf-8"
+    )
+    second = prompt_manifest(config_root=tmp_path)["prompts"]
+    on = first["custom_instructions.episode_extract"]
+    assert on["enabled"] is True and on["fingerprint"]
+    assert (
+        second["custom_instructions.episode_extract"]["fingerprint"]
+        != on["fingerprint"]
+    )
+    assert first["custom_instructions.reflect"]["enabled"] is False
