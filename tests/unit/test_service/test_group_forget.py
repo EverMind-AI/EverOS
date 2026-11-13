@@ -786,3 +786,33 @@ async def test_a_scene_holding_a_rewritten_episode_is_narrated_again(
     restored = await world.stores.cluster.get(scene_id)
     assert restored is not None
     assert restored.members == [first.ref.entry_id, second.ref.entry_id]
+
+
+async def test_a_cluster_member_named_by_an_old_id_follows_its_version(
+    chat: _Chat,
+) -> None:
+    """The undo puts the cluster back with the first ids; a second forget of
+    the message reaches that member through the copy the undo wrote."""
+    world = chat.world
+    first, second, scene_id = await _seed_scene(world)
+    result = await _forget(world, "u_betty", _message("m-1"))
+    await world.memory.undo_group_forget(
+        app_id=APP,
+        project_id=PROJECT,
+        group_id="trip",
+        asker_id="u_betty",
+        forget_id=result.forget_id,
+    )
+    await world.project()
+
+    again = await _forget(world, "u_betty", _message("m-1"))
+    await world.project()
+
+    (rewritten,) = again.new_episodes
+    cluster = await world.stores.cluster.get(scene_id)
+    assert cluster is not None
+    assert set(cluster.members) == {
+        rewritten.removeprefix("trip_"),
+        second.ref.entry_id,
+    }
+    assert first.ref.entry_id not in cluster.members

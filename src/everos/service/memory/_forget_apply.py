@@ -248,6 +248,7 @@ class ForgetWriter:
     ) -> None:
         """Every change of ``plan`` but the profiles."""
         scope = plan.scope
+        reached = await self._cluster_members(plan)
         replaced = await self._rewrite_episodes(plan, prepared.episodes, applied)
         await self._mark(
             "episode",
@@ -264,7 +265,7 @@ class ForgetWriter:
             ],
             applied,
         )
-        await self._scenes(plan, prepared, replaced, applied)
+        await self._scenes(plan, prepared, replaced, reached, applied)
         await self._group_profile(plan, applied)
         for image_id in plan.files:
             await self._stores.images.forget(image_id)
@@ -341,6 +342,7 @@ class ForgetWriter:
         plan: ForgetPlan,
         prepared: Prepared,
         replaced: Mapping[str, MemoryRef],
+        reached: Mapping[str, str],
         applied: Applied,
     ) -> None:
         """Each scene edit; then a user's scenes left without a live episode."""
@@ -384,7 +386,9 @@ class ForgetWriter:
                             applied,
                         )
                     if edit.whole or plan.is_group:
-                        await self._cluster(plan, edit.scene_id, replaced, applied)
+                        await self._cluster(
+                            plan, edit.scene_id, replaced, reached, applied
+                        )
         if not plan.is_group and plan.episodes:
             orphaned = await forget_orphaned_scenes(
                 self._stores.episode, self._stores.scene, scope
@@ -402,11 +406,28 @@ class ForgetWriter:
                 [current.ref.md_path, current.ref.entry_id, ref.md_path, ref.entry_id]
             )
 
+    async def _cluster_members(self, plan: ForgetPlan) -> dict[str, str]:
+        """Each member of the plan's scene clusters, by the version it leads to.
+
+        A member is named by the id it joined with; the forget reaches it
+        through the version that id leads to before anything is written.
+        """
+        members: set[str] = set()
+        for edit in plan.scenes:
+            cluster = await self._stores.cluster.get(edit.scene_id)
+            if cluster is not None:
+                members.update(cluster.members)
+        if not members:
+            return {}
+        now = await current_versions(self._stores.episode, plan.scope, members)
+        return {m: v.ref.entry_id for m, v in now.items() if v is not None}
+
     async def _cluster(
         self,
         plan: ForgetPlan,
         scene_id: str,
         replaced: Mapping[str, MemoryRef],
+        reached: Mapping[str, str],
         applied: Applied,
     ) -> None:
         """The scene's cluster follows its episodes; a forgotten scene's goes."""
@@ -416,17 +437,12 @@ class ForgetWriter:
             return
         whole = any(e.scene_id == scene_id and e.whole for e in plan.scenes)
         dropped = {e.ref.entry_id for e in plan.episodes}
-        # A member is reached through the version its id leads to now.
-        now = await current_versions(self._stores.episode, scope, cluster.members)
         members: list[str] = []
         for m in cluster.members:
-            found = now.get(m)
-            reached = found.ref.entry_id if found is not None else m
-            if m in dropped or reached in dropped:
+            now = reached.get(m, m)
+            if m in dropped or now in dropped:
                 continue
-            members.append(replaced[reached].entry_id if reached in replaced else m)
-        if not whole and members == list(cluster.members):
-            return
+            members.append(replaced[now].entry_id if now in replaced else m)
         applied.clusters.append(
             {"cluster": cluster.model_dump(mode="json"), "whole": whole}
         )
