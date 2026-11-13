@@ -80,6 +80,19 @@ machinery that keeps a deleted memory from coming back.
   session releases its messages, so sending it again works as before.
   `system.db` gains `group_meta.deliverer_id` and the `group_message` ledger
   at startup; no rebuild ([docs/group-memory.md](docs/group-memory.md#51-groups-and-roster)).
+- **`[decider] core_order` picks the order of the core in a search result.**
+  `score` (default, unchanged): each core item's best RRF score over the
+  sub-queries. `round`: the round in which the decider first kept the item,
+  earliest first, then that score; ties keep the decider's own order. With
+  more core than `top_k` the order also decides which core items are returned,
+  since the cap keeps its head. Replayed offline on the 2026-11-10 searches,
+  `round` raised hit@1 on HotpotQA / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 /
+  0.29 / 0.89 points for the RL-tuned 27B decider and by 0.03 / 0.63 / 0.66 /
+  0.06 for its base model; its effect on answer accuracy is not measured yet,
+  so it is opt-in (`EVEROS_DECIDER__CORE_ORDER=round`). No model call, no
+  change to the decider's input; with the default, requests, results and
+  traces are byte-identical to before
+  ([docs/configuration.md](docs/configuration.md#decider)).
 - **A personal search can cover the user's groups (`include_groups`, off by
   default).** `/memory/search` with `user_id` and `include_groups: true`
   searches the user's memory and every group of the space the user currently

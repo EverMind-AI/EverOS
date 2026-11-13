@@ -21,9 +21,11 @@ cross-encoder** anywhere — RRF is the only ranking (the CE was measured
 net-negative: it scored gold below RRF order and buried much of it past rank 20).
 
 The accumulated core also shapes the output: the final top-k is assembled
-**core-first** (a hard guarantee), then each sub-query's top non-core candidate
-is guaranteed a slot, then the rest is filled by MAX RRF score across sub-queries
-(max, not sum — a specialist that is #1 for one sub-query keeps that score).
+**core-first** (a hard guarantee, in the order ``[decider].core_order`` names:
+best RRF score, or the round the decider kept the item in), then each
+sub-query's top non-core candidate is guaranteed a slot, then the rest is filled
+by MAX RRF score across sub-queries (max, not sum — a specialist that is #1 for
+one sub-query keeps that score).
 Evidence selection therefore genuinely shapes what is injected — the lever a
 Phase-2 RL policy learns to control.
 
@@ -49,7 +51,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -67,7 +69,7 @@ from everalgo.llm import (
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
-from everos.config.settings import DeciderSettings
+from everos.config.settings import CoreOrder, DeciderSettings
 from everos.core.observability.logging import get_logger
 from everos.memory.models import Episode, ImageMemory
 from everos.memory.ports import Filter, Stored
@@ -1601,6 +1603,7 @@ async def _search_episodes_subq(
     core_by_id: dict[str, Candidate] = {}  # accumulated core (best-score candidate)
     core_ids: set[str] = set()
     core_order: list[str] = []  # core insertion order (drives core-first)
+    core_round: dict[str, int] = {}  # id -> round in which the decider first kept it
     core_source: dict[str, str] = {}  # id -> sub-query that first cored it (#4)
     subq_hits: dict[str, dict[str, float]] = {}  # id -> {sub_query: rrf_score}
     cand_by_id: dict[str, Candidate] = {}  # id -> best-score candidate ever seen
@@ -1781,6 +1784,7 @@ async def _search_episodes_subq(
                 continue
             core_ids.add(cid)
             core_order.append(cid)
+            core_round[cid] = round_idx
             core_by_id[cid] = cand_by_id.get(cid, global_cands[gi])
             core_source[cid] = str(index_meta[gi]["sub_query"])
             core_added.append(
@@ -1887,6 +1891,8 @@ async def _search_episodes_subq(
         top_k=top_k,
         core_ids=core_ids,
         core_order=core_order,
+        core_round=core_round,
+        order_core_by=tune.core_order,
         cand_by_id=cand_by_id,
         episodes_by_id=episodes_by_id,
         images_by_id=images_by_id,
@@ -1951,6 +1957,8 @@ def _finalize_injection(
     top_k: int,
     core_ids: set[str],
     core_order: list[str],
+    core_round: Mapping[str, int],
+    order_core_by: CoreOrder,
     cand_by_id: dict[str, Candidate],
     episodes_by_id: dict[str, Stored[Episode]],
     images_by_id: dict[str, Stored[ImageMemory]],
@@ -1964,9 +1972,9 @@ def _finalize_injection(
     """Assemble the final top_k and dump the final-injection trace (schema C).
 
     Assembly (post-loop, once):
-      1. CORE first — every accumulated core, pinned to the front (a hard
-         guarantee: kept even when ``len(core) > top_k``), ordered by max RRF
-         score.
+      1. CORE first — the accumulated core, pinned to the front and capped at
+         ``top_k`` unless ``[decider].core_overflow``, in the order
+         ``order_core_by`` names (:func:`_ordered_core`).
       2. GUARANTEE — each sub-query's top non-core candidate (its ``guarantee``
          entries) reserves a slot, so no facet loses coverage.
       3. FILL — remaining candidates by MAX RRF score across sub-queries. MAX, not
@@ -1989,14 +1997,14 @@ def _finalize_injection(
 
     slot_source: dict[str, str] = {}
     chosen: list[str] = []
-    # 1. core-first, ordered by max RRF score across sub-queries. Capped at top_k:
-    # steps 2 and 3 honour top_k, so leaving core uncapped silently returned MORE
-    # than the caller asked for — measured at 316/1522 questions (20.8%) on
-    # SubtleMemory, up to 68 items for a top_k of 20 (3.4x the budget). That breaks
-    # the top_k contract and any same-budget comparison across methods. Core beyond
-    # the budget is by definition the lowest-scored core, so it is what gets dropped.
+    # 1. core-first, in the configured order. Capped at top_k: steps 2 and 3 honour
+    # top_k, so leaving core uncapped silently returned MORE than the caller asked
+    # for — measured at 316/1522 questions (20.8%) on SubtleMemory, up to 68 items
+    # for a top_k of 20 (3.4x the budget). That breaks the top_k contract and any
+    # same-budget comparison across methods. Core beyond the budget is the core that
+    # sorts last, so it is what gets dropped.
     n_core_selected = 0
-    for cid in sorted(core_order, key=max_score, reverse=True):
+    for cid in _ordered_core(core_order, core_round, max_score, order_core_by):
         if cid in slot_source:
             continue
         n_core_selected += 1
@@ -2081,6 +2089,25 @@ def _finalize_injection(
             },
         )
     return episodes, images
+
+
+def _ordered_core(
+    core_order: Sequence[str],
+    core_round: Mapping[str, int],
+    score: Callable[[str], float],
+    order_by: CoreOrder,
+) -> list[str]:
+    """The core in the order core-first injects it.
+
+    ``score``: by ``score`` (each item's max RRF over the sub-queries), highest
+    first. ``round``: by the round the decider first kept the item, earliest
+    first, then by ``score``. Both sorts are stable over ``core_order`` (the
+    order the decider kept the items in), so items that tie keep that order.
+    """
+    by_score = sorted(core_order, key=score, reverse=True)
+    if order_by == "score":
+        return by_score
+    return sorted(by_score, key=core_round.__getitem__)
 
 
 def _dataset_from_owner(owner_id: str) -> str:

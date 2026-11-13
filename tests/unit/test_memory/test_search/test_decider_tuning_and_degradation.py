@@ -33,6 +33,7 @@ _TUNING = (
     "retries",
     "retry_backoff_seconds",
     "core_overflow",
+    "core_order",
     "fallback_core",
 )
 
@@ -59,6 +60,7 @@ def test_defaults_match_what_the_published_runs_used() -> None:
     assert (d.rrf_k, d.no_new_core_patience, d.per_subquery_guarantee) == (60, 1, 1)
     assert (d.retries, d.retry_backoff_seconds, d.fallback_core) == (3, 0.5, 3)
     assert d.core_overflow is False
+    assert d.core_order == "score"
     # The decider policy was trained and evaluated greedy (2026-11-10).
     assert d.temperature == 0.0
 

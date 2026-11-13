@@ -181,6 +181,24 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `temperature` | float | `0.0` | No | Sampling temperature of every extraction call that sets none of its own, so the same conversation cuts the same memcells. `"none"` leaves the field out of the request, for an endpoint that rejects it. |
 | `retry_temperature` | float | `0.3` | No | Temperature of a retry after an unusable reply, used only when above the first attempt's; at 0.0 the identical request tends to reproduce the identical bad reply. `"none"` resends the request unchanged. |
 
+### `[decider]`
+
+The model and the loop of multi-round search. Every field is listed, with a
+comment, in the shipped `config/default.toml`; this table covers the ones that
+decide what a search returns rather than how the decider is called.
+
+| Field | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `core_order` | string | `"score"` | No | Order of the decider's core at the front of the result. `score`: each item's best RRF score over the sub-queries that showed it, highest first. `round`: the round in which the decider first kept the item, earliest first, then that score. Items that tie keep the order the decider kept them in. With more core than `top_k`, the cap keeps the head of this order, so it also decides which core items are returned. No model call either way. |
+
+`round` stops a later round's item, recalled high by its own narrow
+sub-query, from going ahead of what the first round kept for the question
+itself. Replayed offline on recorded searches (2026-11-10, no decider call),
+it raised hit@1 on HotpotQA / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 / 0.29 /
+0.89 points with the RL-tuned 27B decider and by 0.03 / 0.63 / 0.66 / 0.06
+with its base model. It stays opt-in until its effect on answer accuracy is
+measured.
+
 ### `[multimodal]`
 
 | Field | Type | Default | Required | Description |

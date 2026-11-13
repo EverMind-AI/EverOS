@@ -81,6 +81,10 @@ ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
 """How an LLM section asks its endpoint for JSON; see
 :attr:`LLMSettings.response_format_mode`."""
 
+CoreOrder = Literal["score", "round"]
+"""How a multi-round search orders the decider's core; see
+:attr:`DeciderSettings.core_order`."""
+
 
 class _Section(BaseModel):
     """One configuration section: a key it does not declare is an error.
@@ -409,6 +413,22 @@ class DeciderSettings(_Section):
     Measured at 316/1522 questions (20.8%) returning more items than asked for on
     SubtleMemory, up to 68 for ``top_k=20`` -- which breaks the ``top_k`` contract and
     invalidates any same-budget comparison. Set only to reproduce a pre-fix run."""
+    core_order: CoreOrder = "score"
+    """How the core is ordered at the front of the result.
+
+    ``score`` orders it by each item's best RRF score over the sub-queries that showed
+    it. ``round`` orders it by the round in which the decider first kept the item,
+    earlier rounds first, and by that score within a round. Either way, items that tie
+    keep the order the decider kept them in.
+
+    The order is what the reader sees first, and when the core outgrows ``top_k`` it
+    also decides which core items are returned: the ones that sort last are dropped.
+    ``score`` lets a later round's item, recalled high by its own narrow sub-query, go
+    ahead of what round 0 kept for the question itself. Replayed offline on recorded
+    searches (the 2026-11-10 runs; no decider call), ``round`` raised hit@1 on HotpotQA
+    / 2Wiki / MuSiQue / NQ by 0.22 / 0.17 / 0.29 / 0.89 points for the RL-tuned 27B
+    decider and by 0.03 / 0.63 / 0.66 / 0.06 for its base model. ``score`` stays the
+    default until the change is measured on answer accuracy."""
     fallback_core: int = Field(default=3, ge=0)
     """Core size to fall back to when every decider attempt fails.
 

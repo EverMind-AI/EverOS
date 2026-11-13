@@ -134,6 +134,11 @@ per_subquery_guarantee = 1     # slots reserved per sub-query in the final fill
 retries = 3                    # decider retries before falling back
 retry_backoff_seconds = 0.5    # doubled per attempt
 core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
+# Order of the core at the front of the result, which with more core than top_k
+# also decides which core items are kept: "score" = best RRF score over the
+# sub-queries; "round" = the round the decider kept the item in, earlier first,
+# then that score.
+core_order = "score"
 fallback_core = 3              # core size when every decider attempt fails
 fit_to_window = true           # re-render a prompt rejected as too long
 salvage_truncated_core = true  # keep the core of a reply cut after it
