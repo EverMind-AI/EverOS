@@ -35,9 +35,10 @@ Propagation:
   written again over the ones left (or forgotten below ``[scenes]
   min_members``), since its narrative may say what was forgotten;
 * profiles follow their sources (:func:`user_edit`, :func:`member_edit`): an
-  item none of whose segments is remembered goes; in a group, one with
-  segments left goes too and is written again from them by the next update
-  (**stale**), and so do the group-profile items citing a forgotten message;
+  item none of whose segments is remembered goes; after a message forget, one
+  resting on a segment that lost a message goes too and is written again by
+  the person's next update from the segments it has left (**stale**), and in
+  a group so do the group-profile items citing a forgotten message;
 * a picture file is taken out of circulation when no live memory of any
   owner refers to it afterwards.
 """
@@ -1008,8 +1009,13 @@ def user_edit(
     An item or a replaced value goes when the target names it, when every
     segment it rests on is forgotten -- by this forget or one the user made
     before (``already``) -- and one of them by this forget, or when every
-    picture it was read off is gone. An item a remembered segment still
-    supports stays as it is: only its owner reads it. ``owner`` takes it all.
+    picture it was read off is gone. A message forget also takes out what
+    rests on a segment that lost a message while the owner still wrote in one
+    of its segments (**stale**, the rule a member's profile in a group
+    follows): it may state what the message said. A stale item's remaining
+    segments are queued, and the owner's next profile update writes it again
+    from what they still say; a stale replaced value is history, written
+    again by nothing. ``owner`` takes it all.
     """
     edit = ProfileEdit(person_id=plan.scope.owner_id, whole=plan.whole_profile)
     if plan.whole_profile:
@@ -1021,12 +1027,21 @@ def user_edit(
     these = set(plan.segments)
     forgotten = these | set(already)
     pictures = set(plan.pictures)
+    readable = plan.readable if plan.target.kind == "message" else {}
+    owner = plan.scope.owner_id
+    queue: list[str] = []
 
-    def by_segments(entry: Any) -> bool:
+    def sources_of(entry: Any) -> list[str]:
         extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
         raw = extra.get("source_memcell_ids")
-        sources = {str(s) for s in raw} if isinstance(raw, list) else set()
+        return [str(s) for s in raw] if isinstance(raw, list) else []
+
+    def by_segments(entry: Any) -> bool:
+        sources = set(sources_of(entry))
         return bool(sources) and sources <= forgotten and bool(sources & these)
+
+    def stale(entry: Any) -> bool:
+        return any(s in readable for s in sources_of(entry))
 
     def named(entry: Any) -> bool:
         extra = entry if isinstance(entry, Mapping) else (entry.model_extra or {})
@@ -1040,14 +1055,23 @@ def user_edit(
             edit.by_segments.append(place)
         elif profile_items.rests_on_pictures(item, pictures):
             edit.take(place, item)
+        elif stale(item):
+            edit.take(place, item, stale=True)
+            queue += [
+                s
+                for s in sources_of(item)
+                if s not in forgotten
+                and (s not in readable or wrote_in(readable[s], owner))
+            ]
     for position, old in enumerate(held.history):
         if named(old):
             edit.take_history(position, old)
         elif these and by_segments(old):
             edit.take_history(position, old)
             edit.by_segments.append(("history", position))
-        elif profile_items.rests_on_pictures(old, pictures):
+        elif profile_items.rests_on_pictures(old, pictures) or stale(old):
             edit.take_history(position, old)
+    edit.queue = [m for m in dict.fromkeys(queue) if m not in held.pending_memcell_ids]
     return edit
 
 

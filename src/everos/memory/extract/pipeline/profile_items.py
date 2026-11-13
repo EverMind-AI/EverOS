@@ -458,10 +458,12 @@ def put_back(profile: Profile, taken: Taken) -> tuple[Profile, list[str]]:
     """What :func:`take_out` took, back in its place; and the items' ids.
 
     An item comes back where it was unless the profile holds it again -- by
-    its id, or by its description when it has none (stored before items had
-    ids); a replaced value comes back at its position in the history; the
-    summary comes back while the profile has none (an update since has written
-    one over the items it had). An item without an id is named ``""``.
+    its id, or by its description (an update wrote the fact anew since, as
+    the one after a message forget does from the segments it queued, or the
+    item was stored before items had ids); a replaced value comes back at its
+    position in the history; the summary comes back while the profile has none
+    (an update since has written one over the items it had). An item without
+    an id is named ``""``.
     """
     held = (*profile.explicit_info, *profile.implicit_traits)
     present = {(i.model_extra or {}).get("item_id") for i in held} - {None}
@@ -469,10 +471,9 @@ def put_back(profile: Profile, taken: Taken) -> tuple[Profile, list[str]]:
     back: dict[str, list[tuple[int, _Item]]] = {bucket: [] for bucket in BUCKETS}
     for bucket, n, data in taken.items:
         item_id = data.get("item_id")
-        if item_id:
-            if item_id in present:
-                continue
-        elif normalised(str(data.get("description") or "")) in described:
+        if item_id and item_id in present:
+            continue
+        if normalised(str(data.get("description") or "")) in described:
             continue
         model = ImplicitTraitItem if bucket == "implicit_traits" else ExplicitInfoItem
         back[bucket].append((n, model.model_validate(data)))

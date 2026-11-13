@@ -14,9 +14,14 @@ segment, at once.
   triggers it; each of two people talking without a ``group_id`` has their
   own episode, so their own update.
 - **Input.** The event's segment, read from the SQLite ledger (the event
-  carries its id, so nothing waits for the index), and the pictures the owner
-  posted in it (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
-  none when ``[extraction] vision`` is off). A segment the profile already
+  carries its id, so nothing waits for the index) without the messages a live
+  forget names, and the pictures the owner posted in it
+  (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`; none
+  when ``[extraction] vision`` is off). With it come the segments a message
+  forget queued (``pending_memcell_ids``): the items it took out because they
+  rested on a segment that lost a message are written again from what the
+  owner's segments still say. A queued segment is read only while it has a
+  live episode and a message of the owner's. A segment the profile already
   rests on (a replayed event) is not read again, and neither is a segment
   whose episode the owner forgot -- by its conversation, by id, by a time
   range or with everything -- nor a picture they forgot: a forget leaves the
@@ -55,8 +60,10 @@ from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted
+from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.profile_items import already_read
-from everos.memory.models import FORGOTTEN_MARK, Profile
+from everos.memory.groups import readable_segments
+from everos.memory.models import FORGOTTEN_MARK, MemCell, Profile
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 from ._profiles import update_profile
@@ -98,6 +105,42 @@ async def _forgotten_segment(
     return marks.get(event.episode_entry_id) == FORGOTTEN_MARK
 
 
+async def _segments(
+    deps: MemoryDeps, scope: Scope, existing: Profile | None, memcell_id: str
+) -> list[tuple[str, MemCell]]:
+    """The segments one update reads, oldest first, each without the messages
+    a live forget names: the event's, and the ones a message forget queued.
+
+    Empty when the event's segment is gone (its session deleted since); the
+    queue then waits for the next update. A queued segment whose episodes
+    are all forgotten, or that keeps no message of the owner's, is not read.
+    """
+    queued = [
+        m for m in (existing.pending_memcell_ids if existing else []) if m != memcell_id
+    ]
+    cells = await readable_segments(
+        deps.stores.message_forget,
+        await deps.stores.memcell.cells_by_id([*queued, memcell_id]),
+    )
+    if memcell_id not in cells:
+        return []
+    alive = (
+        {
+            e.item.parent_id
+            for e in await deps.stores.episode.read_for_segments(scope, queued)
+        }
+        if queued
+        else set()
+    )
+    found = [
+        (m, cells[m])
+        for m in queued
+        if m in cells and m in alive and wrote_in(cells[m], scope.owner_id)
+    ]
+    found.append((memcell_id, cells[memcell_id]))
+    return sorted(found, key=lambda pair: pair[1].timestamp)
+
+
 async def extract_user_profile(
     event: EpisodeExtracted, deps: MemoryDeps
 ) -> list[Event]:
@@ -127,8 +170,8 @@ async def extract_user_profile(
                 memcell_id=event.memcell_id,
             )
             return []
-        found = await deps.stores.memcell.find_by_ids([event.memcell_id])
-        if not found:  # the session was deleted since
+        segments = await _segments(deps, scope, existing, event.memcell_id)
+        if not segments:  # the session was deleted since
             return []
         updated = await update_profile(
             deps,
@@ -136,8 +179,8 @@ async def extract_user_profile(
             person_id=event.owner_id,
             old=existing,
             history=existing.history if existing else [],
-            segments=[(event.memcell_id, found[0])],
-            shown=found,
+            segments=segments,
+            shown=[cell for _, cell in segments],
             language=_profile_language(existing, event),
         )
         if updated.held:

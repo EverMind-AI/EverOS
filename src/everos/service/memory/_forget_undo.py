@@ -186,6 +186,7 @@ class Undoer:
         else:
             async with profile_lock(scope):
                 await self._restore_profile(scope, entry, record, done)
+                await self._stores.message_forget.undo(entry.forget_id)
                 await self._stores.forget_log.mark_undone(entry.forget_id)
         logger.info(
             "memory.undo_completed",
@@ -560,10 +561,18 @@ class Undoer:
             values += await self._logs.removed_by_others(
                 scope, record.segments, except_id=entry.forget_id
             )
-        if not values:
+        queued = record.queued.get(scope.owner_id, [])
+        if not values and not queued:
             return
         held = await self._stores.profile.read(scope)
         restored, ids, count = _put_back(held, values, owner_id=scope.owner_id)
+        if held is not None and queued:
+            # The segments a message forget queued for the next update leave
+            # the queue: the items it took out are back.
+            base = restored or held
+            unqueued = _unqueue(base, queued)
+            if unqueued.pending_memcell_ids != base.pending_memcell_ids:
+                restored = unqueued
         if restored is None:
             return
         await self._stores.profile.write(scope, restored)

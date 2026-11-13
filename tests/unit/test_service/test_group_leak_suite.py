@@ -68,6 +68,7 @@ questions holds a trigger, so they are read as with the switch off.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -1879,6 +1880,182 @@ async def test_behind_a_gateway_a_request_without_its_header_reads_nothing(
 
 # ── a user's own forgets: the fact, the buffer, the picture bytes ─────
 
+PIN = "ZQFPINMARKER"
+"""A fact a user states in a message the user forgets."""
+
+HIKE = "ZQFHIKEMARKER"
+"""A fact of the same segment the user keeps."""
+
+ALLERGY = "ZQFALLERGYMARKER"
+"""A fact in a message forgotten while it waits in the buffer."""
+
+_FACTS = (PIN, HIKE, ALLERGY)
+
+
+class _OwnModel:
+    """A user's own conversation: episodes repeat the fact markers they were
+    shown, a profile update adds one item per fact marker of each segment it
+    reads; every prompt is kept."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def __call__(self, messages: Any, *, response_format: type, **_: Any) -> str:
+        name = response_format.__name__
+        prompt = "\n".join(str(getattr(m, "content", m)) for m in messages)
+        self.prompts.append(prompt)
+        said = [fact for fact in _FACTS if fact in prompt]
+        if name == "_BatchReply":
+            return json.dumps(
+                {"reasoning": "s", "boundaries": [], "tail_complete": False}
+            )
+        if name == "EpisodeReply":
+            text = f"Facts marker: {', '.join(said) or 'none'}."
+            return json.dumps({"title": "Facts", "summary": text, "content": text})
+        if name == "_ProfileUpdateReply":
+            stored, _, new = prompt.partition("<new_conversation>")
+            segments = re.findall(r'<segment id="(s\d+)">(.*?)</segment>', new, re.S)
+            ops = [
+                {
+                    "action": "add",
+                    "type": "explicit_info",
+                    "data": {
+                        "evidence": fact,
+                        "description": f"Holds {fact}",
+                        "category": "facts",
+                    },
+                    "sources": [segment],
+                    "pictures": [],
+                }
+                for segment, body in segments
+                for fact in _FACTS
+                if fact in body and f"Holds {fact}" not in stored
+            ]
+            return json.dumps({"operations": ops or [{"action": "none"}]})
+        if name == "_ConsolidateReply":
+            return json.dumps({"changes": [], "dropped": []})
+        if name == "_DecisionReply":
+            return json.dumps({"core": list(range(10)), "next_queries": []})
+        raise AssertionError(f"unexpected model call {name}")
+
+
+async def _own_lines(world: GroupWorld, *lines: tuple[str, int]) -> None:
+    await world.memory.add(
+        {"session_id": "s_own", "app_id": APP, "project_id": PROJECT,
+         "messages": [
+             {"sender_id": "u_amy", "role": "user", "timestamp": T0 + at,
+              "content": text}
+             for text, at in lines
+         ]},
+        request_id="r",
+        async_mode=False,
+        defer_extraction=True,
+    )  # fmt: skip
+
+
+async def _own_message(world: GroupWorld, text: str) -> str:
+    """The id a message of ``s_own`` is forgotten by, segments then buffer."""
+    session = world.session("s_own")
+    for cell in (await world.stores.memcell.cells_in_session(session)).values():
+        for item in cell.items:
+            if getattr(item, "content", None) == text:
+                return str(item.id)
+    for message in await world.stores.session_buffer.list(session):
+        if message.text == text:
+            return message.client_message_id or message.message_id
+    raise AssertionError(f"no message {text!r}")
+
+
+async def _own_reads(world: GroupWorld) -> str:
+    """Every read of the user's own memory, in one blob: search with the
+    profile, the profile listing, the buffer of the session."""
+    asked = {"app_id": APP, "project_id": PROJECT, "user_id": "u_amy"}
+    found = await world.memory.search(
+        SearchRequest(**asked, query="facts marker", include_profile=True)
+    )
+    buffered = await world.memory.search(
+        SearchRequest(**asked, query="facts marker", filters={"session_id": "s_own"})
+    )
+    listed = await world.memory.get(GetRequest(**asked, memory_type="profile"))
+    return (
+        _everything_text(found)
+        + _everything_text(buffered)
+        + json.dumps(listed.data.model_dump(mode="json"))
+    )
+
+
+async def test_a_users_forgotten_messages_fact_reaches_no_read(
+    tmp_path: Path,
+) -> None:
+    """A fact a user stated in a message they forgot: the profile item read
+    off its segment leaves ``user.md`` with the message, and no read of the
+    user's returns it; the rest of the segment is still remembered."""
+    model = _OwnModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
+        said = f"My door code is {PIN}, keep it"
+        await _own_lines(world, (said, 1000), (f"I like {HIKE}", 1001))
+        await world.memory.flush(
+            session_id="s_own", request_id="f", app_id=APP, project_id=PROJECT
+        )
+        await world.run(*STRATEGY_SPECS)
+        await world.project()
+        assert PIN in await _own_reads(world)  # the fact flows before the forget
+        await world.memory.forget(
+            app_id=APP,
+            project_id=PROJECT,
+            user_id="u_amy",
+            target=ForgetTarget(
+                kind="message",
+                session_id="s_own",
+                message_ids=(await _own_message(world, said),),
+            ),
+            dry_run=False,
+        )
+        await world.project()
+        blob = await _own_reads(world)
+        assert PIN not in blob
+        assert HIKE in blob  # the episode still says it
+        assert PIN not in "".join(live_markdown(world.root.root).values())
+
+
+async def test_a_users_forgotten_buffered_message_reaches_no_model_call(
+    tmp_path: Path,
+) -> None:
+    """A message forgotten while it waits in the buffer: no boundary,
+    episode or profile call reads it, no file holds it, no read returns it."""
+    model = _OwnModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(
+        tmp_path, llm=client, decider=client, settings=SETTINGS
+    ) as world:
+        private = f"Private: I am allergic to {ALLERGY}"
+        await _own_lines(world, (f"Hello, I like {HIKE}", 1000), (private, 1001))
+        await world.memory.forget(
+            app_id=APP,
+            project_id=PROJECT,
+            user_id="u_amy",
+            target=ForgetTarget(
+                kind="message",
+                session_id="s_own",
+                message_ids=(await _own_message(world, private),),
+            ),
+            dry_run=False,
+        )
+        await world.memory.flush(
+            session_id="s_own", request_id="f", app_id=APP, project_id=PROJECT
+        )
+        await world.run(*STRATEGY_SPECS)
+        await world.project()
+        assert model.prompts  # the boundary, episode and profile calls ran
+        assert not [p for p in model.prompts if ALLERGY in p]
+        files = "".join(p.read_text() for p in world.root.root.rglob("*.md"))
+        assert ALLERGY not in files
+        blob = await _own_reads(world)
+        assert ALLERGY not in blob and HIKE in blob
+
 
 async def test_a_users_forgotten_pictures_bytes_are_served_to_nobody(
     tmp_path: Path,
@@ -1940,6 +2117,7 @@ def test_no_other_question_of_the_suite_reads_the_past() -> None:
         "What does u_chen plan in Lisbon?",
         "locker code plan marker",
         "cabin marker",
+        "facts marker",
         *(f"What does u_chen plan? {text}" for text in OWN.values()),
     ]
     for question in questions:

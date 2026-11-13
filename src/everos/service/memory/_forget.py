@@ -475,9 +475,10 @@ def _profile_answer(
         for edit in plan.profiles:
             count += len(edit.items)
             forgotten += edit.forgotten
-            stale += edit.stale
-            if not plan.is_group:
-                forgotten += edit.history_ids
+            if plan.is_group:
+                stale += edit.stale
+            else:
+                forgotten += edit.stale + edit.history_ids
     return tuple(dict.fromkeys(forgotten)), tuple(dict.fromkeys(stale)), count
 
 

@@ -8,6 +8,10 @@ the pipeline references that row's ``memcell_id``.
 chat rows: tool rows are dropped before anything is buffered or cut
 (:func:`~.messages.chat_rows`), and so is a tool row an older build left in
 a session's buffer.
+
+A buffered row a live forget names (``message_forget``) is read by no
+model call: it stays buffered, out of every cut, while the forget stands,
+and an undo makes it an ordinary row of the next cut.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from everos.core.utils.datetime import from_timestamp_ms
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
-from everos.memory.ports import SessionBufferStore, SessionKey
+from everos.memory.ports import MessageForgetStore, SessionBufferStore, SessionKey
 
 from .messages import (
     chat_rows,
@@ -107,12 +111,14 @@ class BoundaryDetection:
         session_buffer: SessionBufferStore,
         limits: BoundaryDetectionSettings,
         attempt_timeout: float | None = None,
+        message_forget: MessageForgetStore | None = None,
     ) -> None:
         self._llm = llm
         self._instructions = instructions
         self._session_buffer = session_buffer
         self._limits = limits
         self._attempt_timeout = attempt_timeout
+        self._message_forget = message_forget
         self._quarantine = SessionQuarantine(session_buffer)
 
     async def buffer(self, ingested: IngestResult) -> BoundaryOutcome:
@@ -158,12 +164,17 @@ class BoundaryDetection:
         merged = merge_dedupe_sort(chat_rows(buffered), fresh)
         if not merged:
             return _empty_outcome("accumulated", message_count=0)
-        if not is_final and not any(m.role == "user" for m in merged):
+        held = await self._forgotten(session, merged)
+        gone = {m.message_id for m in held}
+        readable = [m for m in merged if m.message_id not in gone]
+        if not readable or (
+            not is_final and not any(m.role == "user" for m in readable)
+        ):
             # Episode extraction needs a user message; wait for one.
             await self._keep_buffered(session, merged)
             return _empty_outcome("accumulated", message_count=len(fresh))
         result = await self._segment_or_quarantine(
-            session, merged, buffered=buffered, is_final=is_final
+            session, readable, buffered=buffered, is_final=is_final
         )
         result = self._close_complete_tail(session, result, is_final=is_final)
         if not result.cells:
@@ -174,8 +185,21 @@ class BoundaryDetection:
                 tail_complete=result.tail_complete,
             )
         return await self._commit_cells(
-            session, merged, result, message_count=len(fresh)
+            session, readable, result, message_count=len(fresh), held=held
         )
+
+    async def _forgotten(
+        self, session: SessionKey, merged: Sequence[CanonicalMessage]
+    ) -> list[CanonicalMessage]:
+        """The rows a live forget names (docs/api.md, ``target.kind:
+        "message"``): they stay buffered, out of every cut, and no model call
+        reads them; an undo makes them ordinary rows of the next cut."""
+        if self._message_forget is None:
+            return []
+        forgotten = await self._message_forget.forgotten(session)
+        if not forgotten:
+            return []
+        return [m for m in merged if (m.client_message_id or m.message_id) in forgotten]
 
     @staticmethod
     def _close_complete_tail(
@@ -252,9 +276,11 @@ class BoundaryDetection:
         result: DetectionResult,
         *,
         message_count: int,
+        held: Sequence[CanonicalMessage] = (),
     ) -> BoundaryOutcome:
         """Record one memcell row per cell and keep only the tail buffered,
-        in one transaction: a failure leaves the buffer as it was."""
+        in one transaction: a failure leaves the buffer as it was. ``held``
+        (forgotten rows) stays buffered beside the tail."""
         memcell_ids = [_mint_memcell_id() for _ in result.cells]
         message_ids = split_message_ids(merged, result.cells)
         senders = [unique_senders(cell) for cell in result.cells]
@@ -274,7 +300,10 @@ class BoundaryDetection:
                     memcell_ids, result.cells, message_ids, senders, strict=True
                 )
             ],
-            tail=slice_tail(merged, result.tail),
+            tail=sorted(
+                [*slice_tail(merged, result.tail), *held],
+                key=lambda m: (m.timestamp, m.message_id),
+            ),
             last_memcell_ts=from_timestamp_ms(last_cell_ts) if last_cell_ts else None,
         )
         return BoundaryOutcome(

@@ -626,6 +626,7 @@ def _build_memory_service(
             session_buffer=stores.session_buffer,
             limits=settings.boundary_detection,
             attempt_timeout=settings.memorize.session_lock_timeout_seconds,
+            message_forget=stores.message_forget,
         ),
         multimodal_llm=providers.multimodal_llm,
         stores=stores,
