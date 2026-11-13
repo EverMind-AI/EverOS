@@ -201,6 +201,7 @@ class CascadeMachine(RuleBasedStateMachine):
         self.marked: set[str] = set()
         self.trace: list[str] = []
         real_done, real_failed = self.repo.mark_done, self.repo.mark_failed
+        real_read = self.repo.read_one
 
         async def done_counting(md_path: str, **kw: Any) -> None:
             await real_done(md_path, **kw)
@@ -210,8 +211,17 @@ class CascadeMachine(RuleBasedStateMachine):
             await real_failed(md_path, **kw)
             self.marked.add(md_path)
 
+        async def read_counting(md_path: str) -> Any:
+            row = await real_read(md_path)
+            if row is not None and row.status == "pending":
+                # Re-saved while its handler ran: the worker skips the stale
+                # claim and writes nothing, which is as finished as a verdict.
+                self.marked.add(md_path)
+            return row
+
         self.repo.mark_done = done_counting  # type: ignore[method-assign]
         self.repo.mark_failed = failed_counting  # type: ignore[method-assign]
+        self.repo.read_one = read_counting  # type: ignore[method-assign]
 
     async def _create_tables(self) -> None:
         async with self.engine.begin() as conn:
@@ -301,7 +311,8 @@ class CascadeMachine(RuleBasedStateMachine):
         return int(verdict.get("retry_count", claim["retry_count"]))
 
     async def _wait_until_alone(self, md_path: str) -> None:
-        """Crash only when every other row of the batch has been marked."""
+        """Crash only when every other row of the batch has finished: marked,
+        or skipped as stale (``read_counting``)."""
         deadline = time.perf_counter() + 30.0
         while time.perf_counter() < deadline:
             others = self.claimed - {md_path}
@@ -596,5 +607,38 @@ def test_machine_accepts_either_order_of_a_re_save_and_a_failure(
         machine.drain(["ok", "ok"], [(orphan, "orphan", "modified", True)])
         machine.table_matches_model()
         assert machine.model[orphan]["retry_count"] == (1 if failure_first else 0)
+    finally:
+        machine.teardown()
+
+
+def test_machine_crash_waits_for_a_row_skipped_as_stale() -> None:
+    """A crash waits for the rest of the batch to finish. A row re-saved while
+    its handler ran finishes with no terminal write (the worker skips a stale
+    claim), so waiting for writes alone never ends: the wait ran out its 30 s,
+    and the crash it was meant to stage became a failed row."""
+    crasher, other = PATHS[0], PATHS[1]
+    machine = CascadeMachine()
+    try:
+        machine.upsert(crasher, "episode", "added", False)
+        machine.upsert(other, "episode", "added", False)
+        # the other row reads the ledger only after the crasher's handler has
+        # re-saved it, so its claim is stale whatever the timing
+        resaved = asyncio.Event()
+        real_upsert, real_read = machine.repo.upsert, machine.repo.read_one
+
+        async def upsert(*args: Any, **kw: Any) -> int:
+            lsn = await real_upsert(*args, **kw)
+            resaved.set()
+            return lsn
+
+        async def read_one(md_path: str) -> Any:
+            await resaved.wait()
+            return await real_read(md_path)
+
+        machine.repo.upsert = upsert  # type: ignore[method-assign]
+        machine.repo.read_one = read_one  # type: ignore[method-assign]
+        machine.drain(["crash", "ok"], [(other, "episode", "modified", False)])
+        assert machine.crashed
+        machine.table_matches_model()
     finally:
         machine.teardown()
