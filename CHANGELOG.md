@@ -2603,7 +2603,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/EverMind-AI/EverOS/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/EverMind-AI/EverOS/compare/v1.5.1...v1.6.0
 [1.3.1]: https://github.com/EverMind-AI/everos/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/EverMind-AI/everos/compare/v1.2.3...v1.3.0
