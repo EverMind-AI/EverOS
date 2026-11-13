@@ -305,12 +305,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade
 
-Stop the old server normally (not `kill -9`), so it finishes its queued
-background runs, and check that its log has no `ome_stop_drain_timeout`. Profile
-updates now start from `EpisodeExtracted`; a profile run still queued under the
-old `ProfileClusterUpdated` event when the old server stopped is not resumed.
-That owner's profile catches up with their next episode, which also folds the
-earlier episodes the profile has not taken in yet.
+```bash
+pip install --upgrade everos
+# uv needs the flag for the pinned pre-release algorithm packages; without it
+# uv keeps the installed version and still reports success:
+uv pip install --upgrade --prerelease=allow everos
+```
+
+(`'everos[multimodal]'` or `'everos[milvus]'` if you installed those extras.)
+Check the version afterwards with `pip show everos` or the `version` field of
+`GET /health`.
+
+Stop the old server normally (not `kill -9`) so it finishes its queued
+background runs, and check that its log has no `ome_stop_drain_timeout`. Then
+start the new version on the same memory root. Nothing has to be migrated or
+rebuilt: the first start adds the `sender_name` table to `system.db`, and
+Markdown (including `user.md`), the index, the OME jobstore, the memorize queue
+and conversations left open are used as they are. The keyword tokenizer stays
+`jieba`; `everos cascade rebuild` is needed only if you later change
+`[tokenizer] name`.
+
+| If you | Then |
+|---|---|
+| have a key under `[llm]` that EverOS does not define, or an `EVEROS_LLM__*` variable that names none (such as `EVEROS_LLM__SEARCH_TIMEOUT_SECONDS`) | remove or correct it: startup now fails and lists the valid fields and tasks |
+| set the decider's LLM under `[decider]` (`model`, `api_key`, `base_url`, `timeout_seconds`, `extra`, `max_tokens`, `sdk_max_retries`, `response_format_mode`, `invalid_reply_retries`) or through `EVEROS_DECIDER__*` | move those keys to `[llm.decider]` (`EVEROS_LLM__DECIDER__*`); until then they still apply, with the startup warning `llm.decider.deprecated_section` |
+| run the decider on another model or gateway | it now takes `extra` and `response_format_mode` from `[llm]` unless `[llm.decider]` sets them; if that gateway rejects `[llm].extra`, set `extra = {}` under `[llm.decider]` |
+| want the decider's replies capped as before | set `[llm.decider] max_tokens = 512`; the decider has no cap of its own any more |
+| turned the user profile off by disabling `trigger_profile_clustering` | disable `extract_user_profile` in `ome.toml` instead; the profile no longer depends on clustering |
+| build `Providers` or `MemoryDeps` in Python, or import `resolve_llm_config`, `resolve_decider_config`, `DeciderClientConfig` or `ProfileClusterUpdated` | pass `llms` (an `LLMClients`) and use `resolve_llm_task`, `llm_client_config` and `build_llm_task_providers` |
+
+Profile updates now start from `EpisodeExtracted`. A profile run still queued
+under `ProfileClusterUpdated` when the old server stopped is not resumed; after
+a forced stop the new server logs one `TypeError` (`did not resolve to an Event
+subclass`) for each such run and carries on. An owner's profile catches up on
+their next episode: that run also folds the episodes newer than the stored
+profile, oldest first, up to `[profile] max_episodes_per_call` episodes in all
+(default 10, the new one included). Older episodes beyond that are not folded
+later, so if profile extraction was off or behind before the upgrade, raise
+`max_episodes_per_call` before those owners' next conversations arrive.
+
+Extraction output changes with this release, with no action needed: each
+memcell costs two extraction calls (the episode and its summary); a new profile
+item must quote the conversation and no new `implicit_traits` are added
+(stored ones are kept); `user.md` carries `do_not_record` and `pending` only
+when they are non-empty; text in a language other than Chinese, Japanese or
+English is read as English, so its atomic facts and new profiles are written in
+English (a stored profile keeps its language); and with a non-UTC
+`[memory] timezone` the model sees message times in that zone.
+
+Upgrading from 1.5.x: apply the 1.6.0 upgrade notes as well; the steps above
+come after them unchanged.
 
 ## [1.6.0] - 2026-11-11
 
