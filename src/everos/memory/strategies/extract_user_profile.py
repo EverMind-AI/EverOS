@@ -10,8 +10,9 @@ segment, at once.
 
 - **Trigger.** :class:`EpisodeExtracted` of a user's own episode (one per
   one-to-one segment), with or without an embedding provider. A group's
-  episode -- a session of two or more people is a group's -- never triggers
-  it.
+  episode -- a session of three or more people is a group's -- never
+  triggers it; each of two people talking without a ``group_id`` has their
+  own episode, so their own update.
 - **Input.** The event's segment, read from the SQLite ledger (the event
   carries its id, so nothing waits for the index), and the pictures the owner
   posted in it (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;

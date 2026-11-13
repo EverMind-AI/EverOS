@@ -25,15 +25,18 @@ attached profiles, the session buffer and picture bytes. Zero leaks is the
 pass mark. Read paths of section 9.3 that do not exist yet are listed in
 :data:`NOT_YET` with the reason, so the table is accounted for row by row.
 
-Two people talking without a ``group_id`` are an implicit group (section
-7.9), read by its people only: a stranger reads nothing of it, and a third
-person who joins later -- refused in the pair's session, a group of their own
-with the pair in a session of the three -- reads nothing of the pair's.
+Two people talking without a ``group_id`` are not a group (D14, amended
+2026-11-13): each keeps a copy of the conversation in their own memory, which
+a stranger never reads. Three or more are an implicit group (section 7.9),
+read by its people only: a stranger reads nothing of it, and a third person
+who joins two people's session -- it becomes the three's group from the open
+buffer on -- reads nothing of what the two said before, nor of their later
+sessions of their own.
 
 A forget marks rather than removes (one engine for users and groups): the
 version that held a forgotten message stays in markdown, marked, and no read
 reaches it -- no search or decider input, no listing, no version history of
-any member, no live index row; in an explicit group and in an implicit pair.
+any member, no live index row; in an explicit group and in an implicit one.
 
 A personal search with ``include_groups`` reads the user's groups the way a
 group search by the user does, so it takes the same cases: a former member
@@ -55,7 +58,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.errors import ForbiddenError, NotFoundError, RosterConflictError
+from everos.core.errors import ForbiddenError, NotFoundError
 from everos.entrypoints.api.app import create_app
 from everos.memory.models import (
     ExplicitInfoItem,
@@ -1309,25 +1312,27 @@ async def test_a_forgotten_message_reaches_no_version_and_no_live_row(
             assert SECRET_SAID not in "\n".join(model.decider_prompts), asker
 
 
-async def test_an_implicit_pairs_forgotten_message_is_read_by_neither(
+async def test_an_implicit_groups_forgotten_message_is_read_by_none(
     tmp_path: Path,
 ) -> None:
-    """A message forget inside two people's implicit group: neither reads it
-    again -- a group search, a personal search with ``include_groups``, a
-    version history -- and a stranger still reads nothing of them."""
+    """A message forget inside three people's implicit group: none of them
+    reads it again -- a group search, a personal search with
+    ``include_groups``, a version history -- and a stranger still reads
+    nothing of them."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
     async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
         await _talk(
             world,
-            "s_pair",
+            "s_trio",
             ("u_ann", f"Book the cabin, the code is {PAIR_SAID}"),
             ("u_bob", f"Done, and the boat is {LATER_PAIR_SAID}"),
+            ("u_cat", "Count me in"),
         )
-        pair = await world.stores.groups.binding(world.session("s_pair"))
+        pair = await world.stores.groups.binding(world.session("s_trio"))
         assert pair is not None and pair.startswith("implicit_")
         await world.project()
-        cells = await world.stores.memcell.cells_in_session(world.session("s_pair"))
+        cells = await world.stores.memcell.cells_in_session(world.session("s_trio"))
         (said,) = [
             item.id
             for cell in cells.values()
@@ -1340,13 +1345,13 @@ async def test_an_implicit_pairs_forgotten_message_is_read_by_neither(
             group_id=pair,
             asker_id="u_ann",
             target=ForgetTarget(
-                kind="message", session_id="s_pair", message_ids=(said,)
+                kind="message", session_id="s_trio", message_ids=(said,)
             ),
         )
         assert forgot.rewritten == 1
         await world.project()
 
-        for person in ("u_ann", "u_bob"):
+        for person in ("u_ann", "u_bob", "u_cat"):
             model.decider_prompts.clear()
             group = await world.memory.search(_people(group_id=pair, asker_id=person))
             mixed = await world.memory.search(_mixed(person, query="cabin marker"))
@@ -1363,14 +1368,13 @@ async def test_an_implicit_pairs_forgotten_message_is_read_by_neither(
 
 
 PAIR_SAID = "PAIRWALNUT31"
-"""Said by Ann and Bob, two people talking without a group_id."""
+"""Said by Ann to Bob, two people talking without a group_id (or, in a
+forget case, to Bob and Cat)."""
 LATER_PAIR_SAID = "PAIRHAZEL77"
 """Said by Ann and Bob again, in a later session of their own."""
 TRIO_SAID = "TRIOPECAN52"
 """Said by Ann, Bob and Cat together."""
-CAT_REFUSED = "CATALMOND09"
-"""Said by Cat into Ann and Bob's session: refused."""
-_SAID = (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID, CAT_REFUSED)
+_SAID = (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID)
 
 
 class _PeopleModel:
@@ -1432,23 +1436,24 @@ def _people(**fields: Any) -> SearchRequest:
 
 
 async def test_an_implicit_group_is_read_by_its_people_only(tmp_path: Path) -> None:
-    """Two people talking without a group_id are a group (section 7.9): both
-    read it, a stranger reads nothing of it on any path, and neither person's
-    own memory holds it."""
+    """Three people talking without a group_id are a group (section 7.9): all
+    of them read it, a stranger reads nothing of it on any path, and no
+    person's own memory holds it."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
     async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
         await _talk(
             world,
-            "s_pair",
+            "s_trio",
             ("u_ann", f"Book the cabin, the code is {PAIR_SAID}"),
             ("u_bob", "Done, cabin marker booked"),
+            ("u_cat", "Count me in"),
         )
-        pair = await world.stores.groups.binding(world.session("s_pair"))
+        pair = await world.stores.groups.binding(world.session("s_trio"))
         assert pair is not None and pair.startswith("implicit_")
         await world.project()
 
-        for person in ("u_ann", "u_bob"):
+        for person in ("u_ann", "u_bob", "u_cat"):
             model.decider_prompts.clear()
             group = await world.memory.search(_people(group_id=pair, asker_id=person))
             mixed = await world.memory.search(_mixed(person, query="cabin marker"))
@@ -1479,14 +1484,44 @@ async def test_an_implicit_group_is_read_by_its_people_only(tmp_path: Path) -> N
         assert PAIR_SAID not in "\n".join(model.decider_prompts)
 
 
+async def test_two_people_read_their_own_copies_and_a_stranger_nothing(
+    tmp_path: Path,
+) -> None:
+    """Two people talking without a group_id are not a group: each reads the
+    conversation from their own memory, a stranger reads nothing of it on any
+    path, and no group exists to ask for."""
+    model = _PeopleModel()
+    client = FakeLLMClient(handler=model)
+    async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
+        await _talk(
+            world,
+            "s_pair",
+            ("u_ann", f"Book the cabin, the code is {PAIR_SAID}"),
+            ("u_bob", "Done, cabin marker booked"),
+        )
+        assert await world.stores.groups.binding(world.session("s_pair")) is None
+        assert await world.stores.groups.group_ids(APP, PROJECT) == []
+        await world.project()
+
+        for person in ("u_ann", "u_bob"):
+            own = await world.memory.search(_people(user_id=person))
+            assert PAIR_SAID in _everything_text(own), person
+        model.decider_prompts.clear()
+        with pytest.raises(ForbiddenError):
+            await world.memory.search(_people(user_id="u_ann", asker_id="u_zoe"))
+        stranger = await world.memory.search(_mixed("u_zoe", query="cabin marker"))
+        listed = await world.memory.get(_mixed_listing("u_zoe"))
+        blob = _everything_text(stranger) + json.dumps(listed.model_dump(mode="json"))
+        assert PAIR_SAID not in blob
+        assert PAIR_SAID not in "\n".join(model.decider_prompts)
+
+
 async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
     tmp_path: Path,
 ) -> None:
-    """Cat speaking into Ann and Bob's session is refused: an implicit group's
-    people never change. The three of them in a session of their own are a
-    group of their own, which Cat reads; the pair's group -- what they said
-    before and what they say later in a session of their own -- Cat never
-    reads, on any path."""
+    """Cat joining Ann and Bob's session makes it the three's group from that
+    batch on: Cat reads what the three say, never what the two said before
+    (their own copies) nor what they say later in a session of their own."""
     model = _PeopleModel()
     client = FakeLLMClient(handler=model)
     async with GroupWorld.open(tmp_path, llm=client, decider=client) as world:
@@ -1496,49 +1531,38 @@ async def test_a_third_person_joining_later_reads_nothing_of_the_pair(
             ("u_ann", f"Cabin marker: the door code is {PAIR_SAID}"),
             ("u_bob", "Noted, cabin marker"),
         )
-        pair = await world.stores.groups.binding(world.session("s_pair"))
-        assert pair is not None
-        with pytest.raises(RosterConflictError):
-            await _talk(
-                world,
-                "s_pair",
-                ("u_ann", "Cat, meet Bob"),
-                ("u_cat", f"Hi both, cabin marker {CAT_REFUSED}"),
-            )
+        assert await world.stores.groups.binding(world.session("s_pair")) is None
         await _talk(
             world,
-            "s_trio",
-            ("u_ann", f"Cabin marker for three: {TRIO_SAID}"),
-            ("u_cat", "Great, cabin marker"),
+            "s_pair",
+            ("u_ann", "Cat, meet Bob"),
+            ("u_cat", f"Hi both, cabin marker for three: {TRIO_SAID}"),
             ("u_bob", "See you there"),
         )
+        trio = await world.stores.groups.binding(world.session("s_pair"))
+        assert trio is not None and trio.startswith("implicit_")
         await _talk(
             world,
             "s_pair_later",
             ("u_bob", f"Just us: cabin marker {LATER_PAIR_SAID}"),
             ("u_ann", "Sure"),
         )
-        assert await world.stores.groups.binding(world.session("s_pair_later")) == pair
-        trio = await world.stores.groups.binding(world.session("s_trio"))
-        assert trio is not None and trio != pair
+        assert await world.stores.groups.binding(world.session("s_pair_later")) is None
         await world.project()
 
         model.decider_prompts.clear()
-        with pytest.raises(ForbiddenError):
-            await world.memory.search(_people(group_id=pair, asker_id="u_cat"))
         found = await world.memory.search(_mixed("u_cat", query="cabin marker"))
         listed = await world.memory.get(_mixed_listing("u_cat"))
         blob = _everything_text(found) + json.dumps(listed.model_dump(mode="json"))
         seen = "\n".join(model.decider_prompts)
         assert TRIO_SAID in blob
-        for secret in (PAIR_SAID, LATER_PAIR_SAID, CAT_REFUSED):
+        for secret in (PAIR_SAID, LATER_PAIR_SAID):
             assert secret not in blob, secret
             assert secret not in seen, secret
         listed_ann = await world.memory.get(_mixed_listing("u_ann"))
         everything = json.dumps(listed_ann.model_dump(mode="json"))
         for said in (PAIR_SAID, LATER_PAIR_SAID, TRIO_SAID):
             assert said in everything, said
-        assert CAT_REFUSED not in everything
 
 
 def test_every_read_path_of_section_9_3_is_accounted_for() -> None:

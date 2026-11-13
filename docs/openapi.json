@@ -54,7 +54,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
+        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of three or more people (role ``user`` senders) is\ntheir implicit group; one or two people's conversation is their own\nmemory, each person keeping a copy of every segment.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
         "operationId": "add_memory_api_v1_memory_add_post",
         "requestBody": {
           "content": {
@@ -1651,7 +1651,7 @@
           "memory"
         ],
         "summary": "Add Memory",
-        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of two or more people (role ``user`` senders) is\ntheir implicit group; one person's conversation is their own memory.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
+        "description": "Add messages into the conversation pipeline (chat memory).\n\nWith ``group_id`` the session becomes (or already is) a group session:\nits messages become group memory, never per-sender personal memory.\nWithout it, a session of three or more people (role ``user`` senders) is\ntheir implicit group; one or two people's conversation is their own\nmemory, each person keeping a copy of every segment.\n``rejected`` / ``failed`` count the non-text items dropped at ingest; a\nqueued batch (202) is ingested later and logs them\n(``memorize.ingest_dropped``). A group takes each message once:\n``duplicates`` counts the messages it already held, which were skipped\n(a queued batch logs them, ``memorize.duplicates_skipped``).",
         "operationId": "add_memory_api_v2_memory_add_post",
         "requestBody": {
           "content": {

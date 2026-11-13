@@ -1,15 +1,16 @@
-"""The conversation pipeline -- one episode per segment, in the segment's space.
+"""The conversation pipeline -- one reading per segment, in the segment's space.
 
 Cells / memcell_ids / message_id-mapping / sender lists are produced by
 :mod:`everos.memory.extract.boundary` (which also writes the single ``memcell``
 sqlite row per cell). This pipeline writes what one cell is remembered as:
-**one** episode, one picture memory per picture the cell carried (written
-first, so an episode body's ``img-N`` references name records that exist),
-and the :class:`EpisodeExtracted` event that announces the episode. A segment
-is remembered in exactly one space (docs/group-memory.md, D3):
+**one** extraction call, its episode, one picture memory per picture the cell
+carried (written first, so an episode body's ``img-N`` references name records
+that exist), and the :class:`EpisodeExtracted` event that announces the
+episode. A segment is remembered in exactly one kind of space
+(docs/group-memory.md, D3):
 
 * **A group's** -- the session is bound to a group (``ingested.group_id``): a
-  declared group, or the implicit group of a session's people (two or more
+  declared group, or the implicit group of a session's people (three or more
   people talking without a ``group_id``). The episode goes under
   ``groups/<group_id>/``. The model is shown the segment with its speakers
   labelled by their roster names and the roster block after the operator's
@@ -18,10 +19,11 @@ is remembered in exactly one space (docs/group-memory.md, D3):
   and the segment's span, which every read compares with the asker's
   membership windows. A picture memory is dated by the message that carried
   it and attributed to its poster (section 7.3).
-* **A user's own** -- a one-to-one conversation (one person and the
-  assistant): the episode goes under ``users/<sender>/``, the prompt is
+* **A user's own** -- one person's conversation with the assistant, or two
+  people's without a ``group_id`` (D14, amended 2026-11-13): the prompt is
   everalgo's episode prompt byte for byte and the conversation alone, and
-  the picture memories are dated by the segment (section 10).
+  each human sender keeps a copy -- the episode, its picture memories (dated
+  by the segment, section 10) and its event -- under ``users/<sender>/``.
 
 In either space a message forgotten while it waited in the buffer is not read
 (section 9.4), and a forget of a segment already extracted re-runs the same
@@ -50,7 +52,7 @@ from __future__ import annotations
 __all__ = ["ConversationPipeline"]
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from everalgo.types import Episode as AlgoEpisode
@@ -190,29 +192,29 @@ class ConversationPipeline:
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
     ) -> CellOutcome:
-        """Extract the cell's episode (and pictures) and write it once.
+        """Extract the cell's episode (and pictures) and write it in its space.
 
-        Skipped, with nothing written: a user's cell without a human sender,
-        a group's cell left without a chat message once its forgotten
-        messages are taken out.
-
-        Raises:
-            ValueError: A cell outside any group with several human senders:
-                such a session is an implicit group's, decided before the
-                cell was cut.
+        A group's cell is written once, under the group. A cell outside any
+        group is written once per human sender, each a copy in that person's
+        own memory: one person, or two people talking without a ``group_id``
+        (D14, amended 2026-11-13) -- one call either way. Skipped, with
+        nothing written: a user's cell without a human sender, a cell left
+        without a chat message once its forgotten messages are taken out.
         """
         message_count = len(prepared.cell.items)
         session = SessionKey(ingested.app_id, ingested.project_id, ingested.session_id)
         if ingested.group_id is not None:
-            space = await self._group_space(
-                Scope(
-                    app_id=ingested.app_id,
-                    project_id=ingested.project_id,
-                    owner_id=ingested.group_id,
-                    owner_type="group",
-                ),
-                prepared.cell,
-            )
+            spaces = [
+                await self._group_space(
+                    Scope(
+                        app_id=ingested.app_id,
+                        project_id=ingested.project_id,
+                        owner_id=ingested.group_id,
+                        owner_type="group",
+                    ),
+                    prepared.cell,
+                )
+            ]
             cell = await self._readable(prepared.memcell_id, prepared.cell)
             if not _has_text(cell):
                 return CellOutcome(message_count=message_count)
@@ -220,33 +222,39 @@ class ConversationPipeline:
             humans = _human_senders(prepared.cell)
             if not humans:
                 return CellOutcome(message_count=message_count)
-            if len(humans) > 1:
-                raise ValueError(
-                    f"memcell {prepared.memcell_id} has several human senders "
-                    "outside any group"
+            spaces = [
+                _Space(
+                    scope=Scope(
+                        app_id=ingested.app_id,
+                        project_id=ingested.project_id,
+                        owner_id=human,
+                        owner_type="user",
+                    )
                 )
-            space = _Space(
-                scope=Scope(
-                    app_id=ingested.app_id,
-                    project_id=ingested.project_id,
-                    owner_id=humans[0],
-                    owner_type="user",
-                )
-            )
+                for human in humans
+            ]
             # A message its owner forgot while it waited in the buffer is not
             # read either; a cell that lost every text message to it is left.
             cell = await self._readable(prepared.memcell_id, prepared.cell)
             if cell is not prepared.cell and not _has_text(cell):
                 return CellOutcome(message_count=message_count)
         found = await self._extract_segment(
-            space, session, prepared.memcell_id, cell, senders=prepared.sender_ids
+            spaces[0], session, prepared.memcell_id, cell, senders=prepared.sender_ids
         )
-        md_paths = await self._persist_pictures(space, ingested, prepared, found)
-        ref = await self._persist(space, ingested, found.episode, prepared.memcell_id)
+        md_paths: list[str] = []
         events: list[Event] = []
-        if ref is not None:
+        for space in spaces:
+            # Each person's copy: the same reading of the segment, filed under
+            # its own owner, pictures first, as for one person.
+            mine = _owned_by(found, space.scope.owner_id)
+            md_paths += await self._persist_pictures(space, ingested, prepared, mine)
+            ref = await self._persist(
+                space, ingested, mine.episode, prepared.memcell_id
+            )
+            if ref is None:
+                continue
             md_paths.append(ref.md_path)
-            events.append(_announce(space, ingested, prepared, cell, found, ref))
+            events.append(_announce(space, ingested, prepared, cell, mine, ref))
         return CellOutcome(
             message_count=message_count, events=events, md_paths=md_paths
         )
@@ -538,6 +546,15 @@ def _announce(
         project_id=ingested.project_id,
         language=found.language,
         **group,
+    )
+
+
+def _owned_by(found: _Segment, owner_id: str) -> _Segment:
+    """``found`` as ``owner_id``'s copy (``found`` itself when it is theirs)."""
+    if found.episode.owner_id == owner_id:
+        return found
+    return replace(
+        found, episode=found.episode.model_copy(update={"owner_id": owner_id})
     )
 
 

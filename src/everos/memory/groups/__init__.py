@@ -34,6 +34,7 @@ from .dedupe import GroupDedupe as GroupDedupe
 from .dedupe import message_key as message_key
 from .forgotten import readable_segments as readable_segments
 from .forgotten import without_forgotten as without_forgotten
+from .implicit import IMPLICIT_GROUP_MIN_PEOPLE as IMPLICIT_GROUP_MIN_PEOPLE
 from .implicit import IMPLICIT_GROUP_PREFIX as IMPLICIT_GROUP_PREFIX
 from .implicit import implicit_group_id as implicit_group_id
 from .implicit import is_implicit_group as is_implicit_group
@@ -52,6 +53,7 @@ from .quotes import normalise_space as normalise_space
 from .quotes import verbatim_part as verbatim_part
 
 __all__ = [
+    "IMPLICIT_GROUP_MIN_PEOPLE",
     "IMPLICIT_GROUP_PREFIX",
     "BatchAdmission",
     "BatchMessage",

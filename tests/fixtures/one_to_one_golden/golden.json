@@ -30,26 +30,26 @@
   }
  ],
  "decider": {
-  "caroline+groups:cat": [
-   "ac8e1e239ae84872"
+  "caroline:cat": [
+   "62250d625d2bae97"
   ],
-  "caroline+groups:session_buffer": [
-   "dc860c59c513b10c"
+  "caroline:session_buffer": [
+   "e7d27f4851a8bf3d"
   ],
-  "caroline+groups:support group": [
-   "dc860c59c513b10c"
+  "caroline:support group": [
+   "e7d27f4851a8bf3d"
   ],
-  "caroline+groups:travel to Beijing": [
-   "1fb0b31f8dcc0803"
+  "caroline:travel to Beijing": [
+   "e0db7b60a8051224"
   ],
-  "melanie+groups:cat": [
-   "4d005bd410e35e77"
+  "melanie:cat": [
+   "62250d625d2bae97"
   ],
-  "melanie+groups:support group": [
-   "f793fcf650c65711"
+  "melanie:support group": [
+   "e7d27f4851a8bf3d"
   ],
-  "melanie+groups:travel to Beijing": [
-   "ecc1a10253dd50fa"
+  "melanie:travel to Beijing": [
+   "e0db7b60a8051224"
   ],
   "u_pic:cat": [
    "a00f70d668d9985c"
@@ -76,53 +76,91 @@
  "events": [
   {
    "app_id": "default",
-   "episode_entry_id": "gep_<TODAY>_00000001",
+   "episode_entry_id": "ep_<TODAY>_00000001",
    "episode_timestamp_ms": 1683554310000,
    "language": "English",
    "memcell_id": "mc_<1>",
-   "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
+   "owner_id": "caroline",
    "project_id": "default",
    "session_id": "s_locomo",
    "type": "EpisodeExtracted"
   },
   {
    "app_id": "default",
-   "episode_entry_id": "gep_<TODAY>_00000002",
+   "episode_entry_id": "ep_<TODAY>_00000001",
+   "episode_timestamp_ms": 1683554310000,
+   "language": "English",
+   "memcell_id": "mc_<1>",
+   "owner_id": "melanie",
+   "project_id": "default",
+   "session_id": "s_locomo",
+   "type": "EpisodeExtracted"
+  },
+  {
+   "app_id": "default",
+   "episode_entry_id": "ep_<TODAY>_00000002",
    "episode_timestamp_ms": 1683554490000,
    "language": "English",
    "memcell_id": "mc_<2>",
-   "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
+   "owner_id": "caroline",
    "project_id": "default",
    "session_id": "s_locomo",
    "type": "EpisodeExtracted"
   },
   {
    "app_id": "default",
-   "episode_entry_id": "gep_<TODAY>_00000003",
+   "episode_entry_id": "ep_<TODAY>_00000002",
+   "episode_timestamp_ms": 1683554490000,
+   "language": "English",
+   "memcell_id": "mc_<2>",
+   "owner_id": "melanie",
+   "project_id": "default",
+   "session_id": "s_locomo",
+   "type": "EpisodeExtracted"
+  },
+  {
+   "app_id": "default",
+   "episode_entry_id": "ep_<TODAY>_00000003",
    "episode_timestamp_ms": 1683554670000,
    "language": "English",
    "memcell_id": "mc_<3>",
-   "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
+   "owner_id": "caroline",
    "project_id": "default",
    "session_id": "s_locomo",
    "type": "EpisodeExtracted"
   },
   {
    "app_id": "default",
-   "episode_entry_id": "gep_<TODAY>_00000004",
+   "episode_entry_id": "ep_<TODAY>_00000003",
+   "episode_timestamp_ms": 1683554670000,
+   "language": "English",
+   "memcell_id": "mc_<3>",
+   "owner_id": "melanie",
+   "project_id": "default",
+   "session_id": "s_locomo",
+   "type": "EpisodeExtracted"
+  },
+  {
+   "app_id": "default",
+   "episode_entry_id": "ep_<TODAY>_00000004",
    "episode_timestamp_ms": 1685020920000,
    "language": "English",
    "memcell_id": "mc_<4>",
-   "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
+   "owner_id": "melanie",
    "project_id": "default",
    "session_id": "s_locomo",
    "type": "EpisodeExtracted"
   },
   {
    "app_id": "default",
+   "episode_entry_id": "ep_<TODAY>_00000004",
+   "episode_timestamp_ms": 1685020920000,
+   "language": "English",
+   "memcell_id": "mc_<4>",
+   "owner_id": "caroline",
    "project_id": "default",
    "session_id": "s_locomo",
-   "type": "GroupFlushed"
+   "type": "EpisodeExtracted"
   },
   {
    "app_id": "default",
@@ -181,126 +219,75 @@
   }
  ],
  "get": {
-  "caroline+groups:episode": {
+  "caroline:episode": {
    "count": 4,
    "episodes": [
     {
      "app_id": "default",
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
-     "origin": "member",
-     "owner_type": "group",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "id": "caroline_ep_<TODAY>_00000004",
      "project_id": "default",
      "sender_ids": [
       "melanie",
       "caroline"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
+     "summary": "17 lines (4322b78050db)",
      "timestamp": "2023-05-25T13:22:00Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "origin": "member",
-     "owner_type": "group",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "id": "caroline_ep_<TODAY>_00000003",
      "project_id": "default",
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
+     "summary": "6 lines (7b3bc03aed78)",
      "timestamp": "2023-05-08T14:04:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
-     "origin": "member",
-     "owner_type": "group",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "id": "caroline_ep_<TODAY>_00000002",
      "project_id": "default",
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
+     "summary": "6 lines (30824b938ddb)",
      "timestamp": "2023-05-08T14:01:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
-     "origin": "member",
-     "owner_type": "group",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "id": "caroline_ep_<TODAY>_00000001",
      "project_id": "default",
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
+     "summary": "6 lines (6dc4730b4193)",
      "timestamp": "2023-05-08T13:58:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     }
    ],
-   "group_profile": [],
-   "images": [],
    "profiles": [],
-   "scenes": [],
    "total_count": 4
   },
   "caroline:profile": {
@@ -417,8 +404,8 @@
   }
  },
  "markdown": {
-  "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/episodes/episode-<TODAY>.md": "---\nid: group_episode_log_implicit_3f9d005c471b1cb0490c320a27ce9060_<TODAY>\ntype: group_episode_daily\nfile_type: group_episode_daily\nschema_version: 1\ngroup_id: implicit_3f9d005c471b1cb0490c320a27ce9060\ntrack: group\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:gep_<TODAY>_00000001 -->\n## gep_<TODAY>_00000001\n\n**owner_id**: implicit_3f9d005c471b1cb0490c320a27ce9060\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n**source_start**: 2023-05-08T13:56:00+00:00\n**subject_ids**: [caroline, melanie]\n**origin**: member\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (50796b220a92)\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]\n<!-- /entry:gep_<TODAY>_00000001 -->\n<!-- entry:gep_<TODAY>_00000002 -->\n## gep_<TODAY>_00000002\n\n**owner_id**: implicit_3f9d005c471b1cb0490c320a27ce9060\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n**source_start**: 2023-05-08T13:59:00+00:00\n**subject_ids**: [caroline, melanie]\n**origin**: member\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (2dde808bca19)\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]\n<!-- /entry:gep_<TODAY>_00000002 -->\n<!-- entry:gep_<TODAY>_00000003 -->\n## gep_<TODAY>_00000003\n\n**owner_id**: implicit_3f9d005c471b1cb0490c320a27ce9060\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n**source_start**: 2023-05-08T14:02:00+00:00\n**subject_ids**: [caroline, melanie]\n**origin**: member\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (9bdfe0cc2ecb)\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]\n<!-- /entry:gep_<TODAY>_00000003 -->\n<!-- entry:gep_<TODAY>_00000004 -->\n## gep_<TODAY>_00000004\n\n**owner_id**: implicit_3f9d005c471b1cb0490c320a27ce9060\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n**source_start**: 2023-05-25T13:14:00+00:00\n**subject_ids**: [caroline, melanie]\n**origin**: member\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n17 lines (01678480b32e)\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]\n<!-- /entry:gep_<TODAY>_00000004 -->\n",
-  "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/group.md": "---\nid: group_implicit_3f9d005c471b1cb0490c320a27ce9060\ntype: group\nschema_version: 1\ngroup_id: implicit_3f9d005c471b1cb0490c320a27ce9060\ntrack: group\nname: ''\ndescription: ''\ncreated_at: '2023-05-08T13:56:00+00:00'\nhistory_visible_from: creation\nsessions:\n- session_id: s_locomo\n  bound_at: '2023-05-08T13:56:00+00:00'\nentry_count: 2\n---\n<!-- entry:gr_20230508_00000001 -->\n**op**: join\n**member_id**: caroline\n**kind**: human\n**display_name**: caroline\n**role**: member\n**at**: 2023-05-08T13:56:00+00:00\n**source**: implicit\n<!-- /entry:gr_20230508_00000001 -->\n<!-- entry:gr_20230508_00000002 -->\n**op**: join\n**member_id**: melanie\n**kind**: human\n**display_name**: melanie\n**role**: member\n**at**: 2023-05-08T13:56:00+00:00\n**source**: implicit\n<!-- /entry:gr_20230508_00000002 -->\n",
+  "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md": "---\nid: episode_log_caroline_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: caroline\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (6dc4730b4193)\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (30824b938ddb)\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (7b3bc03aed78)\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n17 lines (4322b78050db)\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
+  "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md": "---\nid: episode_log_melanie_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: melanie\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (6dc4730b4193)\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (30824b938ddb)\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n6 lines (7b3bc03aed78)\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\n17 lines (4322b78050db)\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
   "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md": "---\nid: episode_log_u_pic_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: u_pic\n**session_id**: s_picture\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**sender_ids**: [u_pic, bot_pic]\n**image_ids**: [b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99]\n**language**: English\n\n### Subject\nTalk between nobody\n\n### Summary\n0 lines (d2993d46a75a)\n\n### Content\n[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)\n<!-- /entry:ep_<TODAY>_00000001 -->\n",
   "default_app/default_project/users/u_pic/images/image-<TODAY>.md": "---\nid: image_log_u_pic_<TODAY>\ntype: image_memory_daily\nfile_type: image_memory_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:im_<TODAY>_00000001 -->\n## im_<TODAY>_00000001\n\n**owner_id**: u_pic\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**image_id**: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\n**original_path**: figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png\n**media_type**: png\n**width**: 48\n**height**: 32\n**name**: cat.png\n**session_id**: s_picture\n\n### Description\nA tabby cat on a sill (img-1)\n<!-- /entry:im_<TODAY>_00000001 -->\n",
   "default_app/default_project/users/user_001/episodes/episode-<TODAY>.md": "---\nid: episode_log_user_001_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: user_001\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-06-26T00:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<5>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (b33c3ced6691)\n\n### Content\nI will travel to Beijing next week. Could you give me some s | Of course! Beijing attractions: Forbidden City, Great Wall,  | I am very interested in the variety of foods you mentioned.  [b33c3ced6691]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-05T07:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<6>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (4427231cd4f7)\n\n### Content\nI will go with five or six of my friends. I really enjoy act | Entertainment suitable for groups of 6-8 people: 1. Hutong I | We will try immersive script murder games in the hutongs and [4427231cd4f7]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-07T06:03:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<7>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (ddd529e75d57)\n\n### Content\nThese past few days, to check in at all the attractions, I w | For your current physical and mental exhaustion and work anx | I feel like I've gained some weight. Are there any self-asse [ddd529e75d57]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-14T04:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<8>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\n6 lines (16dd80b2f5d7)\n\n### Content\nI ate a lot of greasy food for lunch today and now I feel a  | Causes: Excessive fat intake, delayed gastric emptying, bloo | Okay, I will take your advice, drink some warm water tonight [16dd80b2f5d7]\n<!-- /entry:ep_<TODAY>_00000004 -->\n"
@@ -427,18 +414,17 @@
   "episode": [
    {
     "app_id": "default",
-    "content_sha256": "294824bb4fab6a9e1c0a4d161de8042fe8521f5335b1603141cce8dab75e3a25",
+    "content_sha256": "a6d28fe6c892608befe6a60d28e001c3f5d4d2cb389e2651365d5e365276752b",
     "created_at": "<NOW>",
     "deprecated_by": null,
-    "entry_id": "gep_<TODAY>_00000001",
-    "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-    "episode_tokens": "hey mel good see you how you hey caroline good see you swamped kids went lgbtq support group yesterday so powe 50796b220a92 talk between caroline melanie",
-    "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
+    "entry_id": "ep_<TODAY>_00000001",
+    "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+    "episode_tokens": "hey mel good see you how you hey caroline good see you swamped kids went lgbtq support group yesterday so powe 6dc4730b4193 talk between caroline melanie",
+    "id": "caroline_ep_<TODAY>_00000001",
     "image_ids": [],
-    "md_path": "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/episodes/episode-<TODAY>.md",
-    "origin": "member",
-    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-    "owner_type": "group",
+    "md_path": "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md",
+    "owner_id": "caroline",
+    "owner_type": "user",
     "parent_id": "mc_<1>",
     "parent_type": "memcell",
     "project_id": "default",
@@ -447,33 +433,26 @@
      "melanie"
     ],
     "session_id": "s_locomo",
-    "source_end": "2023-05-08T13:58:30Z",
-    "source_start": "2023-05-08T13:56:00Z",
     "subject": "Talk between caroline, melanie",
-    "subject_ids": [
-     "caroline",
-     "melanie"
-    ],
     "subject_vector": "89fd4175b7c095af",
-    "summary": "6 lines (50796b220a92)",
+    "summary": "6 lines (6dc4730b4193)",
     "timestamp": "2023-05-08T13:58:30Z",
     "updated_at": "<NOW>",
-    "vector": "6083788b39168328"
+    "vector": "4688c5a0324b4518"
    },
    {
     "app_id": "default",
-    "content_sha256": "277b4dac52722160f88292cbba362cf35d9a030dcd2f93a3a7a8969b13d7d6a9",
+    "content_sha256": "45ee585fa8869f5f8cf8adf2c02b5acd212105410f8db24a3859626c0453fe5c",
     "created_at": "<NOW>",
     "deprecated_by": null,
-    "entry_id": "gep_<TODAY>_00000002",
-    "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-    "episode_tokens": "support group made me feel accepted given me cou really cool you ve got guts what now gonna continue my edu check out career options which 2dde808bca19 talk between caroline melanie",
-    "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
+    "entry_id": "ep_<TODAY>_00000002",
+    "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+    "episode_tokens": "support group made me feel accepted given me cou really cool you ve got guts what now gonna continue my edu check out career options which 30824b938ddb talk between caroline melanie",
+    "id": "caroline_ep_<TODAY>_00000002",
     "image_ids": [],
-    "md_path": "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/episodes/episode-<TODAY>.md",
-    "origin": "member",
-    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-    "owner_type": "group",
+    "md_path": "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md",
+    "owner_id": "caroline",
+    "owner_type": "user",
     "parent_id": "mc_<2>",
     "parent_type": "memcell",
     "project_id": "default",
@@ -482,33 +461,26 @@
      "melanie"
     ],
     "session_id": "s_locomo",
-    "source_end": "2023-05-08T14:01:30Z",
-    "source_start": "2023-05-08T13:59:00Z",
     "subject": "Talk between caroline, melanie",
-    "subject_ids": [
-     "caroline",
-     "melanie"
-    ],
     "subject_vector": "89fd4175b7c095af",
-    "summary": "6 lines (2dde808bca19)",
+    "summary": "6 lines (30824b938ddb)",
     "timestamp": "2023-05-08T14:01:30Z",
     "updated_at": "<NOW>",
-    "vector": "042319f079df3e48"
+    "vector": "cb6719f945a864bd"
    },
    {
     "app_id": "default",
-    "content_sha256": "969220b1c20ab154cd2cad016460dece7c7c4f1b9ac9b115f7fd125a65d461c7",
+    "content_sha256": "76998f7a9df26b52edb16877c678f0a02b280c53fd1e2ce6bd7b4618323772bb",
     "created_at": "<NOW>",
     "deprecated_by": null,
-    "entry_id": "gep_<TODAY>_00000003",
-    "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-    "episode_tokens": "thanks melanie really sweet your own paint yeah painted lake sunrise last year special wow melanie colors really blend nicely painting looks 9bdfe0cc2ecb talk between caroline melanie",
-    "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
+    "entry_id": "ep_<TODAY>_00000003",
+    "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+    "episode_tokens": "thanks melanie really sweet your own paint yeah painted lake sunrise last year special wow melanie colors really blend nicely painting looks 7b3bc03aed78 talk between caroline melanie",
+    "id": "caroline_ep_<TODAY>_00000003",
     "image_ids": [],
-    "md_path": "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/episodes/episode-<TODAY>.md",
-    "origin": "member",
-    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-    "owner_type": "group",
+    "md_path": "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md",
+    "owner_id": "caroline",
+    "owner_type": "user",
     "parent_id": "mc_<3>",
     "parent_type": "memcell",
     "project_id": "default",
@@ -517,33 +489,26 @@
      "melanie"
     ],
     "session_id": "s_locomo",
-    "source_end": "2023-05-08T14:04:30Z",
-    "source_start": "2023-05-08T14:02:00Z",
     "subject": "Talk between caroline, melanie",
-    "subject_ids": [
-     "caroline",
-     "melanie"
-    ],
     "subject_vector": "89fd4175b7c095af",
-    "summary": "6 lines (9bdfe0cc2ecb)",
+    "summary": "6 lines (7b3bc03aed78)",
     "timestamp": "2023-05-08T14:04:30Z",
     "updated_at": "<NOW>",
-    "vector": "46bd88d284251061"
+    "vector": "8397924a62948a88"
    },
    {
     "app_id": "default",
-    "content_sha256": "93356833bb09915da65957f23098b6eb5fefc7df4e9e90965d8ffc36fb95fd53",
+    "content_sha256": "fdc32e03afc66f4eef66a155a4354882d7bd52f21910e564450ab6fd49ec5ba6",
     "created_at": "<NOW>",
     "deprecated_by": null,
-    "entry_id": "gep_<TODAY>_00000004",
-    "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-    "episode_tokens": "hey caroline since we last chatted ve lot thing charity race sounds great mel making difference thanks caroline event really thought provoking 01678480b32e talk between caroline melanie",
-    "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
+    "entry_id": "ep_<TODAY>_00000004",
+    "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+    "episode_tokens": "hey caroline since we last chatted ve lot thing charity race sounds great mel making difference thanks caroline event really thought provoking 4322b78050db talk between caroline melanie",
+    "id": "caroline_ep_<TODAY>_00000004",
     "image_ids": [],
-    "md_path": "default_app/default_project/groups/implicit_3f9d005c471b1cb0490c320a27ce9060/episodes/episode-<TODAY>.md",
-    "origin": "member",
-    "owner_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-    "owner_type": "group",
+    "md_path": "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md",
+    "owner_id": "caroline",
+    "owner_type": "user",
     "parent_id": "mc_<4>",
     "parent_type": "memcell",
     "project_id": "default",
@@ -552,18 +517,124 @@
      "caroline"
     ],
     "session_id": "s_locomo",
-    "source_end": "2023-05-25T13:22:00Z",
-    "source_start": "2023-05-25T13:14:00Z",
     "subject": "Talk between caroline, melanie",
-    "subject_ids": [
+    "subject_vector": "89fd4175b7c095af",
+    "summary": "17 lines (4322b78050db)",
+    "timestamp": "2023-05-25T13:22:00Z",
+    "updated_at": "<NOW>",
+    "vector": "06a6b57ae8fe94c4"
+   },
+   {
+    "app_id": "default",
+    "content_sha256": "a6d28fe6c892608befe6a60d28e001c3f5d4d2cb389e2651365d5e365276752b",
+    "created_at": "<NOW>",
+    "deprecated_by": null,
+    "entry_id": "ep_<TODAY>_00000001",
+    "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+    "episode_tokens": "hey mel good see you how you hey caroline good see you swamped kids went lgbtq support group yesterday so powe 6dc4730b4193 talk between caroline melanie",
+    "id": "melanie_ep_<TODAY>_00000001",
+    "image_ids": [],
+    "md_path": "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md",
+    "owner_id": "melanie",
+    "owner_type": "user",
+    "parent_id": "mc_<1>",
+    "parent_type": "memcell",
+    "project_id": "default",
+    "sender_ids": [
      "caroline",
      "melanie"
     ],
+    "session_id": "s_locomo",
+    "subject": "Talk between caroline, melanie",
     "subject_vector": "89fd4175b7c095af",
-    "summary": "17 lines (01678480b32e)",
+    "summary": "6 lines (6dc4730b4193)",
+    "timestamp": "2023-05-08T13:58:30Z",
+    "updated_at": "<NOW>",
+    "vector": "4688c5a0324b4518"
+   },
+   {
+    "app_id": "default",
+    "content_sha256": "45ee585fa8869f5f8cf8adf2c02b5acd212105410f8db24a3859626c0453fe5c",
+    "created_at": "<NOW>",
+    "deprecated_by": null,
+    "entry_id": "ep_<TODAY>_00000002",
+    "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+    "episode_tokens": "support group made me feel accepted given me cou really cool you ve got guts what now gonna continue my edu check out career options which 30824b938ddb talk between caroline melanie",
+    "id": "melanie_ep_<TODAY>_00000002",
+    "image_ids": [],
+    "md_path": "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md",
+    "owner_id": "melanie",
+    "owner_type": "user",
+    "parent_id": "mc_<2>",
+    "parent_type": "memcell",
+    "project_id": "default",
+    "sender_ids": [
+     "caroline",
+     "melanie"
+    ],
+    "session_id": "s_locomo",
+    "subject": "Talk between caroline, melanie",
+    "subject_vector": "89fd4175b7c095af",
+    "summary": "6 lines (30824b938ddb)",
+    "timestamp": "2023-05-08T14:01:30Z",
+    "updated_at": "<NOW>",
+    "vector": "cb6719f945a864bd"
+   },
+   {
+    "app_id": "default",
+    "content_sha256": "76998f7a9df26b52edb16877c678f0a02b280c53fd1e2ce6bd7b4618323772bb",
+    "created_at": "<NOW>",
+    "deprecated_by": null,
+    "entry_id": "ep_<TODAY>_00000003",
+    "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+    "episode_tokens": "thanks melanie really sweet your own paint yeah painted lake sunrise last year special wow melanie colors really blend nicely painting looks 7b3bc03aed78 talk between caroline melanie",
+    "id": "melanie_ep_<TODAY>_00000003",
+    "image_ids": [],
+    "md_path": "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md",
+    "owner_id": "melanie",
+    "owner_type": "user",
+    "parent_id": "mc_<3>",
+    "parent_type": "memcell",
+    "project_id": "default",
+    "sender_ids": [
+     "caroline",
+     "melanie"
+    ],
+    "session_id": "s_locomo",
+    "subject": "Talk between caroline, melanie",
+    "subject_vector": "89fd4175b7c095af",
+    "summary": "6 lines (7b3bc03aed78)",
+    "timestamp": "2023-05-08T14:04:30Z",
+    "updated_at": "<NOW>",
+    "vector": "8397924a62948a88"
+   },
+   {
+    "app_id": "default",
+    "content_sha256": "fdc32e03afc66f4eef66a155a4354882d7bd52f21910e564450ab6fd49ec5ba6",
+    "created_at": "<NOW>",
+    "deprecated_by": null,
+    "entry_id": "ep_<TODAY>_00000004",
+    "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+    "episode_tokens": "hey caroline since we last chatted ve lot thing charity race sounds great mel making difference thanks caroline event really thought provoking 4322b78050db talk between caroline melanie",
+    "id": "melanie_ep_<TODAY>_00000004",
+    "image_ids": [],
+    "md_path": "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md",
+    "owner_id": "melanie",
+    "owner_type": "user",
+    "parent_id": "mc_<4>",
+    "parent_type": "memcell",
+    "project_id": "default",
+    "sender_ids": [
+     "melanie",
+     "caroline"
+    ],
+    "session_id": "s_locomo",
+    "subject": "Talk between caroline, melanie",
+    "subject_vector": "89fd4175b7c095af",
+    "summary": "17 lines (4322b78050db)",
     "timestamp": "2023-05-25T13:22:00Z",
     "updated_at": "<NOW>",
-    "vector": "61fdebb00e7ececc"
+    "vector": "06a6b57ae8fe94c4"
    },
    {
     "app_id": "default",
@@ -742,103 +813,145 @@
   "user_profile": []
  },
  "search": {
-  "caroline+groups:cat": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
+  "caroline:cat": {
    "episodes": [
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000004",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.032522,
+     "score": 0.016393,
      "sender_ids": [
       "melanie",
       "caroline"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
      "timestamp": "2023-05-25T13:22:00Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000002",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.032018,
+     "score": 0.016129,
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
      "timestamp": "2023-05-08T14:01:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000001",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015873,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
+     "timestamp": "2023-05-08T13:58:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000003",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015625,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    }
+   ],
+   "images": [],
+   "profiles": [],
+   "scope": null,
+   "unprocessed_messages": []
+  },
+  "caroline:session_buffer": {
+   "episodes": [
+    {
+     "app_id": "default",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000001",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.032522,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
+     "timestamp": "2023-05-08T13:58:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000002",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
      "score": 0.031754,
      "sender_ids": [
@@ -846,228 +959,42 @@
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
-     "timestamp": "2023-05-08T13:58:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031746,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
-     "type": "Conversation",
-     "user_id": null
-    }
-   ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
-   "images": [],
-   "profiles": [],
-   "scope": {
-    "asker_id": "caroline",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
-   "unprocessed_messages": []
-  },
-  "caroline+groups:session_buffer": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
-   "episodes": [
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032522,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
-     "timestamp": "2023-05-08T13:58:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032522,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
      "timestamp": "2023-05-08T14:01:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000003",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.031498,
+     "score": 0.016393,
      "sender_ids": [
-      "melanie",
-      "caroline"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
       "caroline",
       "melanie"
      ],
-     "summary": "17 lines (01678480b32e)",
-     "timestamp": "2023-05-25T13:22:00Z",
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     }
    ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
    "images": [],
    "profiles": [],
-   "scope": {
-    "asker_id": "caroline",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
+   "scope": null,
    "unprocessed_messages": [
     {
      "app_id": "default",
@@ -1110,27 +1037,17 @@
     }
    ]
   },
-  "caroline+groups:support group": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
+  "caroline:support group": {
    "episodes": [
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000001",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
      "score": 0.032522,
      "sender_ids": [
@@ -1138,37 +1055,311 @@
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
      "timestamp": "2023-05-08T13:58:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "caroline"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000002",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.031754,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
+     "timestamp": "2023-05-08T14:01:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000003",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.016393,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000004",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015873,
+     "sender_ids": [
+      "melanie",
+      "caroline"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
+     "timestamp": "2023-05-25T13:22:00Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    }
+   ],
+   "images": [],
+   "profiles": [],
+   "scope": null,
+   "unprocessed_messages": []
+  },
+  "caroline:travel to Beijing": {
+   "episodes": [
+    {
+     "app_id": "default",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000001",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.016393,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
+     "timestamp": "2023-05-08T13:58:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000004",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.016129,
+     "sender_ids": [
+      "melanie",
+      "caroline"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
+     "timestamp": "2023-05-25T13:22:00Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000002",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015873,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
+     "timestamp": "2023-05-08T14:01:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    },
+    {
+     "app_id": "default",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "caroline_ep_<TODAY>_00000003",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015625,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
+     "type": "Conversation",
+     "user_id": "caroline"
+    }
+   ],
+   "images": [],
+   "profiles": [],
+   "scope": null,
+   "unprocessed_messages": []
+  },
+  "melanie:cat": {
+   "episodes": [
+    {
+     "app_id": "default",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000004",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.016393,
+     "sender_ids": [
+      "melanie",
+      "caroline"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
+     "timestamp": "2023-05-25T13:22:00Z",
+     "type": "Conversation",
+     "user_id": "melanie"
+    },
+    {
+     "app_id": "default",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000002",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.016129,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
+     "timestamp": "2023-05-08T14:01:30Z",
+     "type": "Conversation",
+     "user_id": "melanie"
+    },
+    {
+     "app_id": "default",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000001",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015873,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
+     "timestamp": "2023-05-08T13:58:30Z",
+     "type": "Conversation",
+     "user_id": "melanie"
+    },
+    {
+     "app_id": "default",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000003",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015625,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
+     "type": "Conversation",
+     "user_id": "melanie"
+    }
+   ],
+   "images": [],
+   "profiles": [],
+   "scope": null,
+   "unprocessed_messages": []
+  },
+  "melanie:support group": {
+   "episodes": [
+    {
+     "app_id": "default",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000001",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
      "score": 0.032522,
      "sender_ids": [
@@ -1176,441 +1367,23 @@
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
-     "timestamp": "2023-05-08T14:01:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031498,
-     "sender_ids": [
-      "melanie",
-      "caroline"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
-     "timestamp": "2023-05-25T13:22:00Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031498,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
-     "type": "Conversation",
-     "user_id": null
-    }
-   ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
-   "images": [],
-   "profiles": [],
-   "scope": {
-    "asker_id": "caroline",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
-   "unprocessed_messages": []
-  },
-  "caroline+groups:travel to Beijing": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
-   "episodes": [
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032266,
-     "sender_ids": [
-      "melanie",
-      "caroline"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
-     "timestamp": "2023-05-25T13:22:00Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032258,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
      "timestamp": "2023-05-08T13:58:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000002",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032018,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
-     "timestamp": "2023-05-08T14:01:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031498,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
-     "type": "Conversation",
-     "user_id": null
-    }
-   ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
-   "images": [],
-   "profiles": [],
-   "scope": {
-    "asker_id": "caroline",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
-   "unprocessed_messages": []
-  },
-  "melanie+groups:cat": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
-   "episodes": [
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032266,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032018,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
-     "timestamp": "2023-05-08T14:01:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032002,
-     "sender_ids": [
-      "melanie",
-      "caroline"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
-     "timestamp": "2023-05-25T13:22:00Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
      "score": 0.031754,
      "sender_ids": [
@@ -1618,411 +1391,170 @@
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
-     "timestamp": "2023-05-08T13:58:30Z",
-     "type": "Conversation",
-     "user_id": null
-    }
-   ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
-   "images": [],
-   "profiles": [],
-   "scope": {
-    "asker_id": "melanie",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
-   "unprocessed_messages": []
-  },
-  "melanie+groups:support group": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
-   "episodes": [
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.032522,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
      "timestamp": "2023-05-08T14:01:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000003",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.032018,
+     "score": 0.016393,
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
-     "timestamp": "2023-05-08T13:58:30Z",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000004",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.031754,
+     "score": 0.015873,
      "sender_ids": [
       "melanie",
       "caroline"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
      "timestamp": "2023-05-25T13:22:00Z",
      "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031746,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
-     "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     }
    ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
    "images": [],
    "profiles": [],
-   "scope": {
-    "asker_id": "melanie",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
+   "scope": null,
    "unprocessed_messages": []
   },
-  "melanie+groups:travel to Beijing": {
-   "constraints": [],
-   "coverage": null,
-   "degraded": [],
+  "melanie:travel to Beijing": {
    "episodes": [
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [9bdfe0cc2ecb]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000003",
+     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [6dc4730b4193]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000001",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.032266,
+     "score": 0.016393,
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554520000,
-      "memcell_id": "mc_<3>",
-      "to": 1683554670000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (9bdfe0cc2ecb)",
-     "timestamp": "2023-05-08T14:04:30Z",
+     "subject_ids": [],
+     "summary": "6 lines (6dc4730b4193)",
+     "timestamp": "2023-05-08T13:58:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [01678480b32e]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000004",
+     "episode": "Hey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [4322b78050db]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000004",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.032266,
+     "score": 0.016129,
      "sender_ids": [
       "melanie",
       "caroline"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1685020440000,
-      "memcell_id": "mc_<4>",
-      "to": 1685020920000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "17 lines (01678480b32e)",
+     "subject_ids": [],
+     "summary": "17 lines (4322b78050db)",
      "timestamp": "2023-05-25T13:22:00Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
     },
     {
      "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "Hey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [50796b220a92]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000001",
+     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [30824b938ddb]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000002",
      "image_ids": [],
      "images": [],
-     "origin": "member",
-     "owner_type": "group",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
-     "score": 0.031754,
+     "score": 0.015873,
      "sender_ids": [
       "caroline",
       "melanie"
      ],
      "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554160000,
-      "memcell_id": "mc_<1>",
-      "to": 1683554310000
-     },
+     "source": null,
      "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (50796b220a92)",
-     "timestamp": "2023-05-08T13:58:30Z",
-     "type": "Conversation",
-     "user_id": null
-    },
-    {
-     "app_id": "default",
-     "audience": {
-      "joined_after": [],
-      "present": [
-       "caroline",
-       "melanie"
-      ]
-     },
-     "episode": "The support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [2dde808bca19]",
-     "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-     "id": "implicit_3f9d005c471b1cb0490c320a27ce9060_gep_<TODAY>_00000002",
-     "image_ids": [],
-     "images": [],
-     "origin": "member",
-     "owner_type": "group",
-     "project_id": "default",
-     "score": 0.031754,
-     "sender_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "session_id": "s_locomo",
-     "source": {
-      "from_": 1683554340000,
-      "memcell_id": "mc_<2>",
-      "to": 1683554490000
-     },
-     "subject": "Talk between caroline, melanie",
-     "subject_ids": [
-      "caroline",
-      "melanie"
-     ],
-     "summary": "6 lines (2dde808bca19)",
+     "subject_ids": [],
+     "summary": "6 lines (30824b938ddb)",
      "timestamp": "2023-05-08T14:01:30Z",
      "type": "Conversation",
-     "user_id": null
+     "user_id": "melanie"
+    },
+    {
+     "app_id": "default",
+     "episode": "Thanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [7b3bc03aed78]",
+     "group_id": null,
+     "id": "melanie_ep_<TODAY>_00000003",
+     "image_ids": [],
+     "images": [],
+     "origin": null,
+     "owner_type": null,
+     "project_id": "default",
+     "score": 0.015625,
+     "sender_ids": [
+      "caroline",
+      "melanie"
+     ],
+     "session_id": "s_locomo",
+     "source": null,
+     "subject": "Talk between caroline, melanie",
+     "subject_ids": [],
+     "summary": "6 lines (7b3bc03aed78)",
+     "timestamp": "2023-05-08T14:04:30Z",
+     "type": "Conversation",
+     "user_id": "melanie"
     }
    ],
-   "group_profile": {
-    "decisions": [],
-    "dissent": [],
-    "roles": [],
-    "topics": []
-   },
    "images": [],
    "profiles": [],
-   "scope": {
-    "asker_id": "melanie",
-    "audience": "asker",
-    "group_ids": [
-     "implicit_3f9d005c471b1cb0490c320a27ce9060"
-    ],
-    "owner_type": "user",
-    "windows": [
-     {
-      "from_": null,
-      "group_id": "implicit_3f9d005c471b1cb0490c320a27ce9060",
-      "to": null
-     }
-    ]
-   },
+   "scope": null,
    "unprocessed_messages": []
   },
   "u_pic:cat": {

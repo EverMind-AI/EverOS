@@ -1,9 +1,11 @@
-"""``ConversationPipeline.run_cell``: one episode per cell, in the cell's space.
+"""``ConversationPipeline.run_cell``: one call per cell, in the cell's space.
 
-A one-to-one cell is the one person's own memory; a group's cell is the
-group's, announced with its human speakers. Nothing is copied per sender.
-The episode call is real (``pipeline.episode``, everalgo's rules); the model
-answers from the user-track canned scripts.
+A cell outside any group is copied into each human sender's own memory -- one
+person, or two people talking without a ``group_id`` (D14, amended
+2026-11-13) -- from one call; a group's cell is written once, the group's,
+announced with its human speakers. The episode call is real
+(``pipeline.episode``, everalgo's rules); the model answers from the
+user-track canned scripts.
 """
 
 from __future__ import annotations
@@ -202,19 +204,32 @@ async def test_a_group_cell_is_one_episode_of_the_group() -> None:
     assert event.group_key == "default/default/trip"
 
 
-async def test_several_people_outside_a_group_are_never_copied_per_sender() -> None:
-    """A session of two or more people is an implicit group's, decided before
-    its cells are cut; a cell of several people without a group is refused
-    rather than copied into each sender's memory."""
+async def test_one_call_fans_out_to_every_user_sender() -> None:
+    """Two people without a group: one call, a copy of the episode and an
+    event for each, in the order they spoke, each the same reading."""
     llm = user_track_llm()
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
-    with pytest.raises(ValueError, match="several human senders"):
-        await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1", "u2"))
+    outcome = await _pipeline(llm, episode_store).run_cell(
+        _INGESTED, _prepared("u1", "u2")
+    )
 
-    assert llm.call_count == 0
-    episode_store.append.assert_not_awaited()
+    assert llm.call_count == 1
+    events = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    assert [e.owner_id for e in events] == ["u1", "u2"]
+    assert {(e.owner_type, e.group_key) for e in events} == {("user", None)}
+    scopes = [call.args[0] for call in episode_store.append.await_args_list]
+    written = [call.args[1] for call in episode_store.append.await_args_list]
+    assert [(s.owner_type, s.owner_id) for s in scopes] == [
+        ("user", "u1"),
+        ("user", "u2"),
+    ]
+    assert [w.owner_id for w in written] == ["u1", "u2"]
+    assert written[0].model_dump(exclude={"owner_id"}) == written[1].model_dump(
+        exclude={"owner_id"}
+    )
+    assert written[0].sender_ids == ["u1", "u2"]
 
 
 async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:

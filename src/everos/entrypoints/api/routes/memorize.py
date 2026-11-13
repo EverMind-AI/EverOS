@@ -100,8 +100,9 @@ async def add_memory(
 
     With ``group_id`` the session becomes (or already is) a group session:
     its messages become group memory, never per-sender personal memory.
-    Without it, a session of two or more people (role ``user`` senders) is
-    their implicit group; one person's conversation is their own memory.
+    Without it, a session of three or more people (role ``user`` senders) is
+    their implicit group; one or two people's conversation is their own
+    memory, each person keeping a copy of every segment.
     ``rejected`` / ``failed`` count the non-text items dropped at ingest; a
     queued batch (202) is ingested later and logs them
     (``memorize.ingest_dropped``). A group takes each message once:

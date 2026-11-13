@@ -24,20 +24,23 @@ anything is written (docs/group-memory.md, sections 7.1 and 7.9):
   the open buffer of every session of the group -- their locks held with the
   batch's, in sorted order (D18). A group with a deliverer takes batches and
   flushes from its deliverer only (403 otherwise, section 5.1);
-* a session of two or more people (role ``user`` senders, in the batch and
+* a session of three or more people (role ``user`` senders, in the batch and
   the open buffer together) without a ``group_id``: it becomes the implicit
   group of those people, created on first sight and bound like a declared
   one; a person who joins its session later is refused (409);
-* otherwise one person's conversation with the assistant: their own memory.
+* otherwise one or two people's conversation with the assistant: their own
+  memory, each person keeping a copy of every segment (D14, amended
+  2026-11-13: two people are not a group).
 
-The conversation pipeline writes each cell's one episode in that space, so
-group content is never filed as a sender's personal memory.
+The conversation pipeline writes each cell in that space: once in a group's,
+once per person in their own; group content is never filed as a sender's
+personal memory.
 
 A group takes each message once (section 5.2): the batch's messages the group
 already holds -- in any of its sessions, forgotten or not -- are skipped
 before ingest (:class:`~everos.memory.groups.GroupDedupe`), and the rest are
-recorded as held once they are stored. Explicit groups and implicit groups of
-three or more people only; a one-to-one session never.
+recorded as held once they are stored. Explicit groups and implicit groups
+(three or more people) only; a session of one or two people never.
 """
 
 from __future__ import annotations
@@ -61,6 +64,7 @@ from everos.memory.events import GroupFlushed
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
 from everos.memory.groups import (
+    IMPLICIT_GROUP_MIN_PEOPLE,
     BatchMessage,
     Claim,
     GroupDedupe,
@@ -554,8 +558,10 @@ class Memorizer:
         """Which of the batch's messages the group already holds (section 5.2).
 
         ``None`` -- every message taken -- for a flush, a build without the
-        ledger and an implicit group of fewer than three people (two people
-        are no group). Skipped messages are logged.
+        ledger and an implicit group of fewer than three people: two people
+        are no group (D14), and a session bound to two people's implicit
+        group by an earlier build is taken as it was. Skipped messages are
+        logged.
         """
         messages = payload.get("messages") or []
         if self._dedupe is None or not messages:
@@ -582,7 +588,11 @@ class Memorizer:
         return claim
 
     async def _three_or_more(self, scope: Scope) -> bool:
-        """Whether an implicit group has three or more people (its identity)."""
+        """Whether an implicit group has three or more people (its identity).
+
+        Every implicit group made now has (:data:`IMPLICIT_GROUP_MIN_PEOPLE`);
+        one of two people is an earlier build's.
+        """
         assert self._rosters is not None
         record = await self._rosters.store.get(scope)
         people = (
@@ -590,7 +600,7 @@ class Memorizer:
             if record is not None
             else set()
         )
-        return len(people) >= 3
+        return len(people) >= IMPLICIT_GROUP_MIN_PEOPLE
 
     async def _settle(self, claim: Claim | None, payload: dict[str, Any]) -> None:
         """Record the batch's messages as held by its group, and drop the claim.
@@ -622,7 +632,7 @@ class Memorizer:
             RosterConflictError: The batch names another group than the one
                 the session is bound to (409, D18).
             InvalidInputError: ``group_id`` on a build without group memory,
-                or an implicit group's id (reserved: a session of two or
+                or an implicit group's id (reserved: a session of three or
                 more people becomes its group without naming it).
         """
         named = payload.get("group_id") or None
@@ -645,15 +655,18 @@ class Memorizer:
     async def _people_of(
         self, payload: dict[str, Any], session: SessionKey
     ) -> tuple[str | None, list[BatchMessage]]:
-        """The implicit group of a session without one, when two or more people talk.
+        """The implicit group of a session without one, when three or more people talk.
 
         The people are the role ``user`` senders of the batch and of the
         session's open buffer together (a buffer is never cut for it: what it
-        holds goes with the group). Cells already cut stay what they were.
+        holds goes with the group). Cells already cut stay what they were:
+        a two-person session that a third person joins becomes the group of
+        the three from that batch, and its earlier segments stay the two
+        people's own copies.
 
         Returns:
             The implicit group's id and the buffer's messages (founders of a
-            group created now), or ``None`` and nothing for one person.
+            group created now), or ``None`` and nothing for one or two people.
         """
         if self._rosters is None:
             return None, []
@@ -669,7 +682,7 @@ class Memorizer:
         people = {
             m.sender_id for m in [*buffered, *_batch_messages(payload)] if _person(m)
         }
-        if len(people) < 2:
+        if len(people) < IMPLICIT_GROUP_MIN_PEOPLE:
             return None, []
         return implicit_group_id(people), buffered
 

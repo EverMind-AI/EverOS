@@ -626,9 +626,10 @@ def _build_memory_service(
         ),
         multimodal_llm=providers.multimodal_llm,
         stores=stores,
-        # One episode per segment, in its session's space: a group's
-        # (declared, or the implicit group of a session's people) or one
-        # person's own (docs/group-memory.md, sections 7 and 10).
+        # One extraction per segment, in its session's space: a group's
+        # (declared, or the implicit group of three or more people) or each
+        # person's own -- one person, or two without a group_id
+        # (docs/group-memory.md, sections 7 and 10, D14).
         conversation_pipeline=ConversationPipeline(
             episode_store=stores.episode,
             memcell_store=stores.memcell,
