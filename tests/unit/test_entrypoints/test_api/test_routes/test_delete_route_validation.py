@@ -85,7 +85,11 @@ async def test_ok_answers_filters_and_count_in_the_envelope(
         "forget_ids": ["fg_0123456789abcdef"],
     }
     memory.delete.assert_awaited_once_with(
-        app_id="default", project_id="p", user_id=None, session_id="s1"
+        app_id="default",
+        project_id="p",
+        user_id=None,
+        session_id="s1",
+        asserted_asker=None,
     )
 
 
@@ -185,4 +189,5 @@ async def test_by_ids_ok_dedupes_and_answers_cloud_shape(
         memory_type="episode",
         ids=[_OK_ID, other],
         reason_code="privacy",
+        asserted_asker=None,
     )

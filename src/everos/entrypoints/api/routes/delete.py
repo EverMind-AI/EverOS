@@ -4,7 +4,9 @@
 and answer with a forget of the same scope, run at once and reversible by the
 ``forget_ids`` they return (``POST /memory/forget/undo``). A delete naming
 ``group_id`` is the group's: an owner's or admin's forget, soft and
-propagated (docs/group-memory.md, section 15). EverOS 2.0 has no agent
+propagated (docs/group-memory.md, section 15). Behind a gateway (the
+identity header) a personal delete reaches only the asserted user's own
+memory, as every other personal route does. EverOS 2.0 has no agent
 memory, so a delete naming ``agent_id`` is refused (422).
 """
 
@@ -32,7 +34,9 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 _RESPONSES: dict[int | str, dict[str, object]] = {
     403: {
         "model": ErrorResponse,
-        "description": "Group-scoped: the asker is not an owner or admin",
+        "description": "Group-scoped: the asker is not an owner, an admin or the "
+        "group's deliverer. Personal: the identity header names another "
+        "user",
     },
     422: {
         "description": "No scope, an agent_id (2.0 has no agent memory), or a "
@@ -61,10 +65,13 @@ async def delete_memory(
 
     EverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an
     ``owner`` or ``session`` target, run at once. Nothing leaves markdown; the
-    answer's ``forget_ids`` (one per user reached) undo it. With ``group_id``
-    it is the group's delete (docs/group-memory.md, section 15): an owner's or
-    admin's forget of one session or one member's messages -- soft and
-    propagated -- whose ``forget_id`` undoes it.
+    answer's ``forget_ids`` (one per user reached) undo it. Behind a gateway
+    (the identity header) it reaches the asserted user's own memory only: a
+    ``user_id`` naming someone else is 403, and a ``session_id`` alone
+    forgets the asker's copy of the conversation. With
+    ``group_id`` it is the group's delete (docs/group-memory.md, section 15):
+    an owner's, admin's or the deliverer's forget of one session or one
+    member's messages -- soft and propagated -- whose ``forget_id`` undoes it.
     """
     if req.group_id is not None:
         deleted, forgotten = await app.memory.delete_in_group(
@@ -89,6 +96,7 @@ async def delete_memory(
         project_id=req.project_id,
         user_id=req.user_id,
         session_id=req.session_id,
+        asserted_asker=asker_header,
     )
     return SuccessEnvelope(
         request_id=request_id,
@@ -100,15 +108,30 @@ async def delete_memory(
     )
 
 
-@router.post("/delete_by_ids", responses={500: _RESPONSES[500]})
+@router.post(
+    "/delete_by_ids",
+    responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "An id names another user's episode than the "
+            "identity header's",
+        },
+        500: _RESPONSES[500],
+    },
+)
 async def delete_memories_by_ids(
-    req: DeleteByIdsRequest, app: ApplicationDep, request_id: RequestIdDep
+    req: DeleteByIdsRequest,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
+    asker_header: AskerHeaderDep,
 ) -> SuccessEnvelope[DeleteByIdsResponseData]:
     """Forget episodes by id (EverOS 2.0 has no hard delete).
 
     ``POST /memory/forget`` with a ``record`` target, per owner, run at once;
     the answer's ``forget_ids`` undo it. Ids that match nothing are skipped
-    (not 404); sending the same request again forgets nothing more.
+    (not 404); sending the same request again forgets nothing more. With the
+    identity header, every id must name the asserted user's own episode
+    (else 403, nothing forgotten).
     """
     forget_ids = await app.memory.delete_by_ids(
         app_id=req.app_id,
@@ -116,6 +139,7 @@ async def delete_memories_by_ids(
         memory_type=req.memory_type,
         ids=req.memory_ids,
         reason_code=req.reason.code if req.reason else None,
+        asserted_asker=asker_header,
     )
     return SuccessEnvelope(
         request_id=request_id,

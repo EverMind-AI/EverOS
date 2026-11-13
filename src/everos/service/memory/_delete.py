@@ -17,6 +17,14 @@ ones, and the profile reads them (it skips only what is forgotten).
 * ``/delete_by_ids`` -- the episodes by id, per owner (target ``record``); an id
   that names nothing is skipped, as before.
 
+A request whose asker a gateway asserts (``[access] identity_header``)
+reaches the asker's own memory only, as every personal read and forget does:
+a ``user_id`` that is someone else is refused (403), a conversation named
+alone is forgotten in the asker's memory only, and ``/delete_by_ids`` refuses
+(403, nothing forgotten) an id of another user's episode. The forget log
+records the asker. Without an asker nothing changes: a trusted caller (the
+evaluation harnesses) deletes as before.
+
 A group's delete is already a forget (``MemoryService.delete_in_group``).
 """
 
@@ -29,6 +37,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from everos.core.errors import ForbiddenError
 from everos.core.observability.logging import get_logger
 from everos.memory.access import Identity
 from everos.memory.ports import Scope
@@ -45,7 +54,7 @@ logger = get_logger("everos.service.memory")
 _MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
 
 _NOBODY = Identity(asker_id=None)
-"""A delete names no asker: the forget log records none."""
+"""A delete that names no asker: the forget log records none."""
 
 
 @dataclass(frozen=True)
@@ -83,19 +92,28 @@ class DeleteAlias:
         project_id: str,
         user_id: str | None,
         session_id: str | None,
+        identity: Identity = _NOBODY,
     ) -> DeleteResult:
         """Forget one user's memory, one conversation of it, or a conversation
-        everywhere.
+        everywhere -- in the asker's memory only, when ``identity`` names one.
 
         Raises:
+            ForbiddenError: The asker is not the user.
             SessionBusyError: The conversation stays busy (503).
         """
+        asker = identity.asker_id
+        if asker is not None and user_id not in (None, asker):
+            raise ForbiddenError("a personal memory is deleted by its owner only")
         if user_id is None:
             if session_id is None:
                 raise ValueError("a deletion needs user_id or session_id")
-            owners = await self._stores.owner_dir.owners_with_session(
-                app_id, project_id, session_id
-            )
+            owners = [
+                scope
+                for scope in await self._stores.owner_dir.owners_with_session(
+                    app_id, project_id, session_id
+                )
+                if asker is None or scope.owner_id == asker
+            ]
             filters = ["session_id"]
         else:
             owners = [
@@ -115,7 +133,7 @@ class DeleteAlias:
         done = [
             await self._forgetter.forget(
                 scope=scope,
-                identity=_NOBODY,
+                identity=identity,
                 target=target,
                 reason="delete",
                 dry_run=False,
@@ -145,11 +163,17 @@ class DeleteAlias:
         memory_type: str,
         ids: Sequence[str],
         reason_code: str | None,
+        identity: Identity = _NOBODY,
     ) -> tuple[str, ...]:
         """Forget episodes by memory id (``<owner_id>_<entry_id>``), per owner.
 
         Returns the forgets' ids. The caller's free-text note never reaches
-        here, so it is never logged.
+        here, so it is never logged. When ``identity`` names an asker, every
+        id must be the asker's own episode, or nothing is forgotten.
+
+        Raises:
+            ForbiddenError: An id names another user's episode than the
+                asker's.
         """
         if memory_type != "episode":
             raise ValueError(f"unsupported memory_type {memory_type!r}")
@@ -159,6 +183,9 @@ class DeleteAlias:
             if match is None:
                 raise ValueError(f"not an episode memory id: {memory_id!r}")
             by_owner.setdefault(match["owner"], []).append(match["entry"])
+        asker = identity.asker_id
+        if asker is not None and any(owner != asker for owner in by_owner):
+            raise ForbiddenError("a personal memory is deleted by its owner only")
         forget_ids: list[str] = []
         for owner_id, entry_ids in by_owner.items():
             done = await self._forgetter.forget(
@@ -168,7 +195,7 @@ class DeleteAlias:
                     owner_id=owner_id,
                     owner_type="user",
                 ),
-                identity=_NOBODY,
+                identity=identity,
                 target=ForgetTarget(kind="record", record_ids=tuple(entry_ids)),
                 reason=reason_code or "delete",
                 dry_run=False,

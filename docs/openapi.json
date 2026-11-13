@@ -677,7 +677,7 @@
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. With ``group_id``\nit is the group's delete (docs/group-memory.md, section 15): an owner's or\nadmin's forget of one session or one member's messages -- soft and\npropagated -- whose ``forget_id`` undoes it.",
+        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. Behind a gateway\n(the identity header) it reaches the asserted user's own memory only: a\n``user_id`` naming someone else is 403, and a ``session_id`` alone\nforgets the asker's copy of the conversation. With\n``group_id`` it is the group's delete (docs/group-memory.md, section 15):\nan owner's, admin's or the deliverer's forget of one session or one\nmember's messages -- soft and propagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v1_memory_delete_post",
         "requestBody": {
           "content": {
@@ -701,7 +701,7 @@
             }
           },
           "403": {
-            "description": "Group-scoped: the asker is not an owner or admin",
+            "description": "Group-scoped: the asker is not an owner, an admin or the group's deliverer. Personal: the identity header names another user",
             "content": {
               "application/json": {
                 "schema": {
@@ -742,7 +742,7 @@
           "memory"
         ],
         "summary": "Delete Memories By Ids",
-        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more.",
+        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more. With the\nidentity header, every id must name the asserted user's own episode\n(else 403, nothing forgotten).",
         "operationId": "delete_memories_by_ids_api_v1_memory_delete_by_ids_post",
         "requestBody": {
           "content": {
@@ -761,6 +761,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DeleteByIdsResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "An id names another user's episode than the identity header's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2916,7 +2926,7 @@
           "memory"
         ],
         "summary": "Delete Memory",
-        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. With ``group_id``\nit is the group's delete (docs/group-memory.md, section 15): an owner's or\nadmin's forget of one session or one member's messages -- soft and\npropagated -- whose ``forget_id`` undoes it.",
+        "description": "Forget one user's memories, one session's, or one user's of a session.\n\nEverOS 2.0 has no hard delete: this is ``POST /memory/forget`` with an\n``owner`` or ``session`` target, run at once. Nothing leaves markdown; the\nanswer's ``forget_ids`` (one per user reached) undo it. Behind a gateway\n(the identity header) it reaches the asserted user's own memory only: a\n``user_id`` naming someone else is 403, and a ``session_id`` alone\nforgets the asker's copy of the conversation. With\n``group_id`` it is the group's delete (docs/group-memory.md, section 15):\nan owner's, admin's or the deliverer's forget of one session or one\nmember's messages -- soft and propagated -- whose ``forget_id`` undoes it.",
         "operationId": "delete_memory_api_v2_memory_delete_post",
         "requestBody": {
           "content": {
@@ -2940,7 +2950,7 @@
             }
           },
           "403": {
-            "description": "Group-scoped: the asker is not an owner or admin",
+            "description": "Group-scoped: the asker is not an owner, an admin or the group's deliverer. Personal: the identity header names another user",
             "content": {
               "application/json": {
                 "schema": {
@@ -2981,7 +2991,7 @@
           "memory"
         ],
         "summary": "Delete Memories By Ids",
-        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more.",
+        "description": "Forget episodes by id (EverOS 2.0 has no hard delete).\n\n``POST /memory/forget`` with a ``record`` target, per owner, run at once;\nthe answer's ``forget_ids`` undo it. Ids that match nothing are skipped\n(not 404); sending the same request again forgets nothing more. With the\nidentity header, every id must name the asserted user's own episode\n(else 403, nothing forgotten).",
         "operationId": "delete_memories_by_ids_api_v2_memory_delete_by_ids_post",
         "requestBody": {
           "content": {
@@ -3000,6 +3010,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DeleteByIdsResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "An id names another user's episode than the identity header's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3974,13 +3994,13 @@
               }
             ],
             "title": "Asker Id",
-            "description": "Who asks, for a group-scoped delete (an owner or admin)."
+            "description": "Who asks, for a group-scoped delete (an owner, an admin or the group's deliverer)."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "DeleteRequest",
-        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id`` and ``session_id``. EverOS 2.0 has no hard\ndelete: a delete is a forget of the same scope (``POST /memory/forget``,\nrun at once), reversible by the ``forget_ids`` it answers with. EverOS 2.0\nhas no agent memory: an ``agent_id`` is refused (422).\n\nWith ``group_id`` the delete is the group's (docs/group-memory.md,\nsection 15): an owner's or admin's forget -- soft, propagated, undone by\nthe returned ``forget_id`` -- of one of the group's sessions\n(``session_id``) or of one member's messages (``user_id``, the member).\n``asker_id`` names the owner or admin."
+        "description": "Which memories to delete: an owner, a session, or one owner's session.\n\nAt least one of ``user_id`` and ``session_id``. EverOS 2.0 has no hard\ndelete: a delete is a forget of the same scope (``POST /memory/forget``,\nrun at once), reversible by the ``forget_ids`` it answers with. EverOS 2.0\nhas no agent memory: an ``agent_id`` is refused (422).\n\nWith ``group_id`` the delete is the group's (docs/group-memory.md,\nsection 15): an owner's, an admin's or the group's deliverer's forget --\nsoft, propagated, undone by the returned ``forget_id`` -- of one of the\ngroup's sessions (``session_id``) or of one member's messages\n(``user_id``, the member). ``asker_id`` names who asks. Without\n``group_id`` the request takes no ``asker_id``; behind a gateway\n(``[access] identity_header``) the asserted asker deletes in their own\nmemory only: ``user_id`` must be the asker (else 403), and a\n``session_id`` alone forgets the asker's copy of the conversation."
       },
       "DeleteResponseData": {
         "properties": {

@@ -30,10 +30,14 @@ class DeleteRequest(BaseModel):
     has no agent memory: an ``agent_id`` is refused (422).
 
     With ``group_id`` the delete is the group's (docs/group-memory.md,
-    section 15): an owner's or admin's forget -- soft, propagated, undone by
-    the returned ``forget_id`` -- of one of the group's sessions
-    (``session_id``) or of one member's messages (``user_id``, the member).
-    ``asker_id`` names the owner or admin.
+    section 15): an owner's, an admin's or the group's deliverer's forget --
+    soft, propagated, undone by the returned ``forget_id`` -- of one of the
+    group's sessions (``session_id``) or of one member's messages
+    (``user_id``, the member). ``asker_id`` names who asks. Without
+    ``group_id`` the request takes no ``asker_id``; behind a gateway
+    (``[access] identity_header``) the asserted asker deletes in their own
+    memory only: ``user_id`` must be the asker (else 403), and a
+    ``session_id`` alone forgets the asker's copy of the conversation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -57,7 +61,8 @@ class DeleteRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=128,
-        description="Who asks, for a group-scoped delete (an owner or admin).",
+        description="Who asks, for a group-scoped delete (an owner, an admin or "
+        "the group's deliverer).",
     )
 
     @model_validator(mode="before")

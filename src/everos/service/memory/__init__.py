@@ -572,15 +572,20 @@ class MemoryService:
         project_id: str,
         user_id: str | None,
         session_id: str | None,
+        asserted_asker: str | None = None,
     ) -> DeleteResult:
         """``/delete``, which 2.0 answers with a forget (no hard delete).
 
         A user's memory, one conversation of it, or a conversation in every
         user's memory is forgotten; the answer carries the forgets' ids, which
         the undo takes (:mod:`._delete`). Runs to completion even if the
-        caller goes away.
+        caller goes away. The gateway's ``asserted_asker`` deletes in their
+        own memory only, as they read and forget there: a ``user_id`` naming
+        someone else is refused, and a conversation named alone is forgotten
+        in the asker's memory.
 
         Raises:
+            ForbiddenError: The asserted asker is not the user.
             InvalidInputError: The session belongs to a group (inside a group
                 a delete is an owner's or admin's propagated forget,
                 :meth:`delete_in_group`).
@@ -592,6 +597,7 @@ class MemoryService:
                 project_id=project_id,
                 user_id=user_id,
                 session_id=session_id,
+                identity=resolve_identity(header=asserted_asker, body_asker=None),
             ),
             label="memory_delete",
         )
@@ -603,6 +609,7 @@ class MemoryService:
         project_id: str,
         user_id: str | None,
         session_id: str | None,
+        identity: Identity,
     ) -> DeleteResult:
         """Refuse a session of a group, then forget; one supervised step.
 
@@ -625,6 +632,7 @@ class MemoryService:
             project_id=project_id,
             user_id=user_id,
             session_id=session_id,
+            identity=identity,
         )
 
     async def delete_by_ids(
@@ -635,9 +643,17 @@ class MemoryService:
         memory_type: str,
         ids: list[str],
         reason_code: str | None,
+        asserted_asker: str | None = None,
     ) -> tuple[str, ...]:
         """``/delete_by_ids``: the episodes are forgotten, per owner; the
-        forgets' ids. Shielded like :meth:`delete`."""
+        forgets' ids. Shielded like :meth:`delete`.
+
+        With an ``asserted_asker`` every id must be the asker's own episode.
+
+        Raises:
+            ForbiddenError: An id names another user's episode than the
+                asserted asker's (nothing is forgotten).
+        """
         return await self._run_to_completion(
             self._deleter.delete_by_ids(
                 app_id=app_id,
@@ -645,6 +661,7 @@ class MemoryService:
                 memory_type=memory_type,
                 ids=ids,
                 reason_code=reason_code,
+                identity=resolve_identity(header=asserted_asker, body_asker=None),
             ),
             label="memory_delete_by_ids",
         )
