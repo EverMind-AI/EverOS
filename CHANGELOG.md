@@ -1027,6 +1027,20 @@ machinery that keeps a deleted memory from coming back.
   makes a boundary call). Messages with one timestamp keep the order they
   arrived in; before, the id's index ordered them. A one-to-one `message`
   forget names a message by this id ([docs/api.md](docs/api.md#messageitem)).
+- **A picture's copy is labelled as what it is.** The extraction model and
+  the decider were sent every picture copy as `image/jpeg`, though a greyscale
+  picture's copy is PNG; a strict endpoint may refuse the mismatch. The label
+  is now read off the bytes, as the image route already did.
+- **A search result's `thumbnail_path` names a file that exists.** Only the
+  answering model's copy was rendered on demand; the decider's copy was named
+  but written only when a decider was shown the picture, which by default
+  (`image_candidates_per_round = 0`) is never. Both copies are now rendered
+  when a result names them, and a picture the store cannot copy names no file
+  (both paths empty).
+- **`[images] thumbnail_edge` is retired.** It was accepted and had no
+  effect: the thumbnail is the decider's copy, `[decider]
+  image_thumbnail_edge`. The key is now ignored with a `config_key_ignored`
+  warning, and gone from the shipped `default.toml`.
 - **A bad configuration value exits `3` with the key, not a traceback.** A
   value no setting accepts, an unknown timezone, a past-trigger pattern that
   is not a regular expression and an `everos.toml` that is not TOML raised a

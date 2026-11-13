@@ -93,6 +93,7 @@ an older `everos init` wrote, and exported `EVEROS_RERANK__*` or
 | `[decider] code_pin` | A label evaluation launchers export (`EVEROS_DECIDER__CODE_PIN`); EverOS does not read it |
 | `[decider] full_text` | Removed: the decider always reads the full episode text |
 | `[decider] invalid_reply_retries` | Removed: an unusable reply is one failed attempt of `[decider] retries` |
+| `[images] thumbnail_edge` | Never read: the thumbnail a search result names and `GET /memory/images/{id}?variant=thumbnail` serves is the decider's copy, `[decider] image_thumbnail_edge` |
 | `[knowledge]` (section, with `[knowledge.search]`) | Removed in EverOS 2.0 with the knowledge base |
 | `[llm] search_timeout_seconds` | Not read by EverOS 2; a decider round's deadline is `[decider] timeout_seconds` |
 | `[memorize] mode` | Removed in EverOS 2.0 with agent memory: memory is chat memory, and a tool row is dropped before segmentation |
@@ -279,8 +280,10 @@ the model's input recipe. Empty `model`: no picture vectors (text-only).
 
 ### `[images]`
 
-Picture content items: how they are stored and how big the two derived copies
-are. Pictures are content-addressed and stored once, so these bound **ingress**,
+Picture content items: how they are stored and how big the model's derived
+copy is (the decider's copy, the thumbnail, is `[decider]
+image_thumbnail_edge`). Pictures are content-addressed and stored once, so these
+bound **ingress**,
 not the store — the same picture arriving twice costs one file and one more
 reference. A picture over a limit is rejected and counted; it never fails the
 message it arrived in.
@@ -291,7 +294,6 @@ message it arrived in.
 | `max_per_message` | int | `4` | No | Pictures one message may carry; the rest are rejected. `0` disables pictures. |
 | `max_request_bytes` | int | `33554432` | No | Decoded picture bytes one add request may carry. |
 | `max_per_request` | int | `16` | No | Pictures one add request may carry. |
-| `thumbnail_edge` | int | `448` | No | Long side of the decider's copy, px. |
 | `model_edge` | int | `1024` | No | Long side of the extraction / answer model's copy, px. A search result names this copy as `model_path`; `GET /memory/images/{id}?variant=model` serves it. |
 | `cache_quality` | int | `85` | No | JPEG quality of both derived copies. |
 | `formats` | list[string] | `["png","jpeg","webp","gif"]` | No | Accepted formats, by Pillow's name in lowercase. |

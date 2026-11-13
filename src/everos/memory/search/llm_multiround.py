@@ -69,6 +69,7 @@ from everalgo.llm import (
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
+from everos.component.images import copy_media_type
 from everos.config.settings import CoreOrder, DeciderSettings
 from everos.core.observability.logging import get_logger
 from everos.memory.models import Episode, ImageMemory
@@ -1425,7 +1426,7 @@ async def _round_pictures(
                 )
                 continue
             picked.append(
-                Picture(label="", data=data, mime="image/jpeg", question=True)
+                Picture(label="", data=data, mime=copy_media_type(data), question=True)
             )
     if k <= 0 or store is None:
         return picked
@@ -1447,7 +1448,7 @@ async def _round_pictures(
                 error=f"{type(err).__name__}: {err}"[:160],
             )
             continue
-        picked.append(Picture(label=str(gi), data=data, mime="image/jpeg"))
+        picked.append(Picture(label=str(gi), data=data, mime=copy_media_type(data)))
     return picked
 
 

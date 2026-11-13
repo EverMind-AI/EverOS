@@ -762,12 +762,14 @@ class SearchManager:
         self, episodes: Sequence[SearchEpisodeItem], images: list[SearchImageItem]
     ) -> list[SearchImageItem]:
         """Every returned picture's copies, named by the store (:func:`name_copies`)."""
+        tune = self._tuning_source()
         return await name_copies(
             episodes,
             images,
             store=self._image_store,
             limits=self._image_limits,
-            thumbnail_edge=self._tuning_source().image_thumbnail_edge,
+            thumbnail_edge=tune.image_thumbnail_edge,
+            thumbnail_quality=tune.image_quality,
         )
 
     # ── Profile ─────────────────────────────────────────────────────

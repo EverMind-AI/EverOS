@@ -473,9 +473,9 @@ class DeciderSettings(_Section):
     """``detail`` hint on each picture part. ``low`` matches the 448px
     thumbnail: requesting ``high`` on a thumbnail only multiplies tokens."""
     image_thumbnail_edge: int = Field(default=448, ge=16)
-    """Long side of the decider's copy, in pixels. Separate from
-    ``[images] thumbnail_edge`` because the two answer to different owners:
-    this one is the loop's own cost knob, the other is the store's."""
+    """Long side of the decider's copy, in pixels -- the thumbnail a search
+    result's ``thumbnail_path`` names and ``GET /memory/images/{id}?variant=
+    thumbnail`` serves. The loop's own cost knob."""
     image_quality: int = Field(default=85, ge=1, le=100)
     """JPEG quality of the decider's copy."""
 
@@ -531,15 +531,15 @@ class ImagesSettings(_Section):
     whole request the same way, because a hundred small pictures cost the
     extraction model a hundred image tokens each.
 
-    ``thumbnail_edge`` and ``model_edge`` are the long-side caps of the two
-    derived copies under ``figures/.cache/``. The decider sees the
-    thumbnail; the extraction and answer models see the model copy. Both
-    are derived, never the truth: they can be rebuilt from the original at
-    any time, which is why nothing records their hashes.
+    ``model_edge`` is the long-side cap of the copy under ``figures/.cache/``
+    the extraction and answer models see; the decider's copy (the thumbnail)
+    is ``[decider] image_thumbnail_edge``. Both are derived, never the truth:
+    they can be rebuilt from the original at any time, which is why nothing
+    records their hashes.
 
     Env binding (via parent ``Settings``):
         EVEROS_IMAGES__MAX_BYTES / __MAX_PER_MESSAGE / __MAX_REQUEST_BYTES /
-        __MAX_PER_REQUEST / __THUMBNAIL_EDGE / __MODEL_EDGE / __CACHE_QUALITY
+        __MAX_PER_REQUEST / __MODEL_EDGE / __CACHE_QUALITY
     """
 
     max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
@@ -550,9 +550,6 @@ class ImagesSettings(_Section):
     """Decoded picture bytes one add request may carry in total."""
     max_per_request: int = Field(default=16, ge=0)
     """Pictures one add request may carry in total; the rest are rejected."""
-    thumbnail_edge: int = Field(default=448, ge=16)
-    """Long-side cap of the decider's copy, in pixels. The spec pins 448:
-    at patch 16 with 2x2 merging that is ~200 visual tokens per picture."""
     model_edge: int = Field(default=1024, ge=16)
     """Long-side cap of the copy handed to the extraction / answer model."""
     cache_quality: int = Field(default=85, ge=1, le=100)
@@ -1388,6 +1385,10 @@ IGNORED_KEYS: Mapping[str, str] = {
     "decider.full_text": "removed: the decider always reads the full episode text",
     "decider.invalid_reply_retries": (
         "removed: an unusable decider reply is one failed attempt of [decider] retries"
+    ),
+    "images.thumbnail_edge": (
+        "never read: the thumbnail is the decider's copy, [decider] "
+        "image_thumbnail_edge"
     ),
     "knowledge": "removed in EverOS 2.0 with the knowledge base",
     "llm.search_timeout_seconds": (

@@ -11,8 +11,11 @@ What these pin:
 - A picture the store cannot copy keeps an empty ``model_path``; the search
   still answers, and the picture still carries its description.
 - Without ``[images]`` limits nothing is asked and the field stays empty.
-- ``thumbnail_path`` carries the extension the decider's copy really has: PNG
-  for a greyscale picture, as its model copy says, never a ``.jpeg`` guess.
+- ``thumbnail_path`` names the decider's copy, asked of the store the same way
+  (``[decider] image_thumbnail_edge`` / ``image_quality``), so the file is
+  there even when the decider was never shown the picture; it carries the
+  extension that copy really has (PNG for a greyscale picture).
+- A picture the store cannot copy names no file: both paths stay empty.
 """
 
 from __future__ import annotations
@@ -216,7 +219,9 @@ async def test_ranked_and_attached_pictures_name_the_answer_copy() -> None:
     assert attached.image_id == _LATTE
     assert attached.model_path == f"figures/.cache/{_LATTE}-1024.jpeg"
     # Asked once per picture, at the configured size.
-    assert sorted(store.asked) == [(_SIGN, 1024, 85), (_LATTE, 1024, 85)]
+    assert sorted(store.asked) == sorted(
+        [(_SIGN, 1024, 85), (_LATTE, 1024, 85), (_SIGN, 448, 85), (_LATTE, 448, 85)]
+    )
 
 
 async def test_a_picture_without_a_copy_keeps_its_description() -> None:
@@ -252,13 +257,13 @@ async def test_a_greyscale_picture_s_thumbnail_is_named_png() -> None:
     assert ranked.thumbnail_path == f"figures/.cache/{_SIGN}-448.jpeg"
 
 
-async def test_a_picture_without_a_copy_keeps_its_first_thumbnail_name() -> None:
+async def test_a_picture_without_a_copy_names_no_file() -> None:
     store = _CopyStore(missing={_LATTE}, grey={_LATTE})
 
     response = await _manager(store=store).search(_request())
 
     [attached] = response.data.episodes[0].images
-    assert attached.thumbnail_path == f"figures/.cache/{_LATTE}-448.jpeg"
+    assert attached.thumbnail_path == ""
 
 
 def _encoded(mode: str) -> bytes:
@@ -270,7 +275,7 @@ def _encoded(mode: str) -> bytes:
 
 
 async def test_the_names_are_the_files_a_real_store_writes(tmp_path: Path) -> None:
-    """Through the filesystem store: each name is a file once its copy is made."""
+    """Through the filesystem store: each name is a file when the result is read."""
     root = MemoryRoot(tmp_path)
     root.ensure()
     database = SqliteDatabase(root, SqliteSettings())
@@ -302,7 +307,8 @@ async def test_the_names_are_the_files_a_real_store_writes(tmp_path: Path) -> No
     assert grey.thumbnail_path == derived_relpath(grey.image_id, 448, "png")
     assert colour.model_path.endswith("-1024.jpeg")
     assert colour.thumbnail_path == derived_relpath(colour.image_id, 448, "jpeg")
+    # Both files are there for the caller who resolves a path -- the
+    # thumbnail too, though no decider was ever shown the picture (A-6).
     for item in (grey, colour):
         assert (tmp_path / item.model_path).is_file()
-        await store.read_derived(item.image_id, edge=448, quality=85)
         assert (tmp_path / item.thumbnail_path).is_file()

@@ -153,29 +153,30 @@ async def name_copies(
     store: ImageStore | None,
     limits: ImageLimits | None,
     thumbnail_edge: int,
+    thumbnail_quality: int = 85,
 ) -> list[SearchImageItem]:
     """Name every returned picture's two copies after the files the store has.
 
     ``model_path`` is the answering model's copy (``[images] model_edge``), the
     one to show an answering model: the original can be many times its size
-    and visual tokens. It is usually on disk already, written when extraction
-    read the picture at that size; a store that has none renders it now, once.
+    and visual tokens. ``thumbnail_path`` is the decider's copy (``[decider]
+    image_thumbnail_edge``). Either is usually on disk already -- written when
+    extraction read the picture, or when the decider was shown it; a store
+    that has none renders it now, once, so a caller resolving a path finds the
+    file (a decider shown no picture, the default, never wrote a thumbnail).
 
-    ``thumbnail_path``, the decider's copy, takes the extension that copy
-    really has. A stored record does not say it, but the model copy does: a
-    copy's format follows the picture and never its edge (PNG for a greyscale
-    picture, JPEG for any other), so both copies of one picture share it.
-
-    A picture the store cannot copy keeps an empty ``model_path`` and its first
-    thumbnail name, and is logged: its description still answers. Without a
-    store or ``[images]`` limits nothing is named.
+    A picture the store cannot copy keeps empty paths and is logged: its
+    description still answers. Without a store or ``[images]`` limits nothing
+    is named.
 
     Args:
         episodes: The selected episodes (mutated: their ``images`` named).
         images: The ranked pictures.
         store: The picture store.
         limits: ``[images]``: the model copy's edge and quality.
-        thumbnail_edge: The decider's copy size the thumbnail is named at.
+        thumbnail_edge: The decider's copy size.
+        thumbnail_quality: The decider's copy quality (``[decider]
+            image_quality``).
 
     Returns:
         ``images`` with both copies named.
@@ -190,17 +191,24 @@ async def name_copies(
     )
     if not ids:
         return images
-    found = await asyncio.gather(*(_model_copy(store, limits, i) for i in ids))
+    found = await asyncio.gather(
+        *(
+            _copy(store, i, edge=limits.model_edge, quality=limits.cache_quality)
+            for i in ids
+        )
+    )
     model_paths = dict(zip(ids, found, strict=True))
+    found = await asyncio.gather(
+        *(_copy(store, i, edge=thumbnail_edge, quality=thumbnail_quality) for i in ids)
+    )
+    thumbnails = dict(zip(ids, found, strict=True))
 
     def named(image: SearchImageItem) -> SearchImageItem:
-        model_path = model_paths[image.image_id]
-        if not model_path:
-            return image.model_copy(update={"model_path": ""})
-        extension = model_path.rsplit(".", 1)[-1]
-        thumbnail = derived_relpath(image.image_id, thumbnail_edge, extension)
         return image.model_copy(
-            update={"model_path": model_path, "thumbnail_path": thumbnail}
+            update={
+                "model_path": model_paths[image.image_id],
+                "thumbnail_path": thumbnails[image.image_id],
+            }
         )
 
     for episode in episodes:
@@ -208,12 +216,10 @@ async def name_copies(
     return [named(image) for image in images]
 
 
-async def _model_copy(store: ImageStore, limits: ImageLimits, image_id: str) -> str:
-    """One picture's answering-model copy, root-relative; "" when none can be made."""
+async def _copy(store: ImageStore, image_id: str, *, edge: int, quality: int) -> str:
+    """One picture's ``edge``-sized copy, root-relative; "" when none can be made."""
     try:
-        return await store.ensure_derived(
-            image_id, edge=limits.model_edge, quality=limits.cache_quality
-        )
+        return await store.ensure_derived(image_id, edge=edge, quality=quality)
     except (FileNotFoundError, OSError, ValueError) as err:
         logger.warning(
             "search_answer_copy_unavailable",

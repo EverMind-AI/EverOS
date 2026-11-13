@@ -37,7 +37,7 @@ from everalgo.llm import image_url_part_from_bytes
 from everalgo.types import ChatMessage
 from everalgo.user_memory.profile import ProfilePicture
 
-from everos.component.images import ImageLimits
+from everos.component.images import ImageLimits, copy_media_type
 from everos.core.observability.logging import get_logger
 from everos.memory.models import MemCell
 from everos.memory.ports import MemcellStore, SourceCheck
@@ -121,7 +121,7 @@ async def pictures_of(
                     label=label,
                     image_id=image_id,
                     data=data,
-                    mime="image/jpeg",
+                    mime=copy_media_type(data),
                     poster=poster,
                     sender_id=sender,
                     at=int(getattr(item, "timestamp", 0) or 0),

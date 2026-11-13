@@ -174,7 +174,6 @@ max_bytes = 10485760        # 10 MiB per picture, after the content item decodes
 max_per_message = 4         # pictures one message may carry; the rest are reported rejected
 max_request_bytes = 33554432  # 32 MiB of pictures per add request
 max_per_request = 16        # pictures per add request
-thumbnail_edge = 448        # long side of the decider's copy (patches 16, 2x2 merge: ~200 tokens)
 model_edge = 1024           # long side of the copy the extraction / answer model sees
 cache_quality = 85          # JPEG quality of both derived copies
 formats = ["png", "jpeg", "webp", "gif"]

@@ -36,6 +36,7 @@ __all__ = [
     "ImageRejectedError",
     "StoredImage",
     "StoredImageInfo",
+    "copy_media_type",
     "decode_image",
     "dedupe",
     "derived_relpath",
@@ -292,6 +293,16 @@ def scaled_copy(data: bytes, *, edge: int, quality: int) -> tuple[bytes, str]:
     buffer = io.BytesIO()
     frame.save(buffer, format=out_format, quality=quality, optimize=True)
     return buffer.getvalue(), _EXTENSIONS[out_format]
+
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def copy_media_type(data: bytes) -> str:
+    """A derived copy's media type, read off its bytes: ``image/png`` for a
+    greyscale picture's copy (:func:`scaled_copy` writes PNG), else
+    ``image/jpeg``."""
+    return "image/png" if data.startswith(_PNG_SIGNATURE) else "image/jpeg"
 
 
 def _opaque(frame: Image.Image) -> Image.Image:
