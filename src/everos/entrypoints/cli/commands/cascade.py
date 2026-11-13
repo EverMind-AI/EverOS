@@ -312,6 +312,14 @@ def status(
                     else ""
                 )
             )
+            if summary.unreadable_entries:
+                typer.echo(
+                    f"  unreadable entries:       {summary.unreadable_entries}"
+                    f" in {summary.files_with_unreadable_entries} file(s)"
+                    "     (skipped; fix the entry in md and re-save)"
+                )
+                for md_path, count in status.unreadable:
+                    typer.echo(f"    {md_path}: {count}")
             typer.echo("lsn:")
             typer.echo(f"  max:           {summary.max_lsn}")
             typer.echo(f"  last_processed: {summary.last_processed_lsn}")

@@ -695,7 +695,14 @@ Roster writes go to `group.md` and to `group_meta` / `group_member` in the same
 locked operation, so a removed member loses access immediately rather than after
 the cascade catches up. `everos cascade rebuild` re-derives both tables from
 `group.md` (`deliverer_id` is a `group.md` frontmatter field, written once a
-deliverer is set and `null` after it is cleared). `group_message` mirrors no
+deliverer is set and `null` after it is cleared). A roster entry a hand edit
+broke (a time that no longer parses, a deleted close marker) is skipped when
+the tables are re-derived, like any unreadable markdown entry, but it never
+widens who may read the group: the member it names is left out of the roster
+until the entry is fixed -- an unreadable `leave` must not let someone who left
+read on -- while every other member's events fold as written. An unreadable
+entry that names no member fails the file as before, and a roster write is
+refused while `group.md` holds an entry it cannot read. `group_message` mirrors no
 markdown: like the memcells and the buffer it is system state, which a rebuild
 leaves as it is. New columns are nullable and are added by the existing
 forward-only mechanism (`src/everos/infra/persistence/sqlite/schema.py`,

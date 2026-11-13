@@ -892,6 +892,33 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **One broken markdown entry costs that entry only.** A hand edit that
+  broke one entry -- a timestamp that no longer parses, a deleted close
+  marker -- failed the projection of its whole file (no entry of it was
+  indexed again, `failed (retryable=FALSE)`), and a missing close marker
+  silently dropped every entry after it, from the index as from history.
+  Now the readers skip that entry and read the rest: the cascade indexes
+  every other entry of the file (a row it already held for the broken one
+  keeps its content) and marks the file done; `read_all`, a group's profile
+  items and a scene's newest version skip it; a read that asks for that
+  entry by id, segment or picture -- a forget of a session, a message, a
+  picture or a record does -- still fails on it, so such a forget never
+  misses what it was asked to forget (a forget of a whole owner walks every
+  entry and skips it, as it did before). Each skipped entry
+  is logged as `markdown_entry_unreadable` with its file, entry id, line and
+  reason (it replaces the group profile's own `group_profile_entry_unreadable`;
+  a profile item is still `profile_entry_dropped`, now with the file, its
+  bucket position and the reason), counted on the file's ledger row (new
+  nullable column `md_change_state.unreadable_entries`, added at startup),
+  and reported: `everos cascade status` prints `unreadable entries: N in M
+  file(s)` and names the files, and `GET /health` carries
+  `cascade.unreadable_entries`, informational like `failed_permanent`. In
+  `group.md` an unreadable roster entry never widens who may read the group:
+  the member it names is left out of the roster until it is fixed, an entry
+  that names no member still fails the file, and a roster change is refused
+  while the log holds an entry it cannot read. An entry left without its
+  close marker keeps its id: the next append never reuses it. Well-formed
+  files read, index and answer exactly as before.
 - **A search over several groups attaches each group's own profile items.**
   An item id (`gp_<date>_<seq>`) is unique within its group only, and the
   group profile a `group_ids` or `project_scope` search attaches was folded

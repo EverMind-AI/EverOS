@@ -4,6 +4,14 @@ Each ``Markdown*Store`` wraps one Reader / Writer and owns the domain <->
 markdown-entry conversion, so the domain hands over domain objects and gets
 back a :class:`~everos.memory.ports.MemoryRef`. Paths in refs are relative
 to the memory root, the same convention as the index rows' ``md_path``.
+
+An entry a hand edit broke costs that entry only. A read that walks an
+owner's entries (``read_all``, a group's profile ``items``, a scene's
+``latest`` version) skips it; a read that asks for particular entries (by
+id, by segment, by picture, every scene version) fails only when one of them
+is the broken one -- a forget of a session, a message or a picture must not
+miss what it was asked to forget. Either way the entry is logged as
+``markdown_entry_unreadable`` with its file, id, line and reason.
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ __all__ = [
 from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import anyio
 from everalgo.user_memory import OutputLanguage
@@ -53,7 +61,14 @@ from everos.memory.ports import (
     WithdrawnEntry,
 )
 
-from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
+from ._base import (
+    Entry,
+    EntryId,
+    MarkdownReader,
+    MarkdownWriter,
+    ParsedMarkdown,
+    warn_unreadable_entry,
+)
 from ._mds import (
     GroupMemberProfileFrontmatter,
     GroupProfileDailyFrontmatter,
@@ -75,6 +90,36 @@ logger = get_logger(__name__)
 
 type EntryBody = tuple[dict[str, object], dict[str, str]]
 """``(inline, sections)`` of one rendered daily-log entry."""
+
+_UNREADABLE = (KeyError, TypeError, ValueError)
+"""What turning a malformed entry into a domain record raises."""
+
+
+class _Found(NamedTuple):
+    """An entry a read selected: its file, the entry, its mark, and the parsed
+    file it came from (for the line a warning about it names)."""
+
+    md_path: str
+    entry: Entry
+    mark: str | None
+    parsed: ParsedMarkdown
+
+
+def _unreadable(found: _Found, exc: Exception, kind: str) -> None:
+    """Log one entry that does not convert (``markdown_entry_unreadable``)."""
+    warn_unreadable_entry(
+        found.md_path,
+        found.entry.id,
+        reason=f"{type(exc).__name__}: {exc}",
+        line=found.parsed.line_of(found.entry.start),
+        kind=kind,
+    )
+
+
+def _found(
+    md_path: str, parsed: ParsedMarkdown, entry: Entry, marks: Mapping[str, str]
+) -> _Found:
+    return _Found(md_path, entry, marks.get(entry.id), parsed)
 
 
 def owner_lock(scope: Scope) -> str:
@@ -255,12 +300,12 @@ class _DailyLogStore[T]:
 
     async def _entries_where(
         self, scope: Scope, needles: Sequence[str], keep: Callable[[Entry], bool]
-    ) -> list[tuple[str, Entry, str | None]]:
-        """``(md_path, entry, mark)`` of the entries ``keep`` selects.
+    ) -> list[_Found]:
+        """The entries ``keep`` selects, each with its file and mark.
 
         Only the files whose text holds one of ``needles`` are parsed.
         """
-        found: list[tuple[str, Entry, str | None]] = []
+        found: list[_Found] = []
         for path in await self._files_mentioning(scope, *needles):
             try:
                 parsed = await MarkdownReader.read(path)
@@ -274,8 +319,26 @@ class _DailyLogStore[T]:
                 except Exception:  # a hand-edited entry that does not parse
                     continue
                 if selected:
-                    found.append((md_path, entry, marks.get(entry.id)))
+                    found.append(_found(md_path, parsed, entry, marks))
         return found
+
+    def _asked[R](self, found: _Found, convert: Callable[[_Found], R]) -> R:
+        """``convert(found)`` for an entry a read asked for: an unreadable
+        one is logged and its error raised again."""
+        try:
+            return convert(found)
+        except _UNREADABLE as exc:
+            _unreadable(found, exc, self._KIND)
+            raise
+
+    def _walked[R](self, found: _Found, convert: Callable[[_Found], R]) -> R | None:
+        """``convert(found)`` for an entry a walk came across: an unreadable
+        one is logged and skipped (``None``)."""
+        try:
+            return convert(found)
+        except _UNREADABLE as exc:
+            _unreadable(found, exc, self._KIND)
+            return None
 
     # ── Marks ─────────────────────────────────────────────────────────────
 
@@ -418,20 +481,10 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
     async def read_many(
         self, scope: Scope, entry_ids: Collection[str]
     ) -> list[Stored[Episode]]:
-        found: list[Stored[Episode]] = []
-        for path, entry in await self._entries_with_paths(scope, entry_ids):
-            found.append(
-                Stored(
-                    ref=MemoryRef(
-                        id=f"{scope.owner_id}_{entry.id}",
-                        entry_id=entry.id,
-                        md_path=_relative(self._root, path),
-                    ),
-                    scope=scope,
-                    item=_episode_from_entry(entry, owner_id=scope.owner_id),
-                )
-            )
-        return found
+        return [
+            self._asked(found, lambda x: _stored_episode(scope, x))
+            for found in await self._entries_with_paths(scope, entry_ids)
+        ]
 
     async def read_for_segments(
         self, scope: Scope, memcell_ids: Collection[str]
@@ -454,9 +507,9 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             ),
         )
         return [
-            self._stored(scope, md_path, entry)
-            for md_path, entry, mark in found
-            if not mark
+            self._asked(f, lambda x: _stored_episode(scope, x))
+            for f in found
+            if not f.mark
         ]
 
     async def read_referring(
@@ -469,55 +522,49 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             lambda e: image_id in e.body,
         )
         return [
-            self._stored(scope, md_path, entry)
-            for md_path, entry, mark in found
-            if not mark
+            self._asked(f, lambda x: _stored_episode(scope, x))
+            for f in found
+            if not f.mark
         ]
 
     async def read_all(self, scope: Scope) -> list[tuple[Stored[Episode], str | None]]:
         """Every entry of the owner's episode files, with its mark, in file order.
 
-        An entry that no longer parses (a hand edit) is skipped.
+        An entry that no longer parses (a hand edit) is logged and skipped.
         """
         found: list[tuple[Stored[Episode], str | None]] = []
-        for md_path, entry, mark in await self._entries_where(
-            scope, [""], lambda e: True
-        ):
-            try:
-                found.append((self._stored(scope, md_path, entry), mark))
-            except (KeyError, TypeError, ValueError):
-                continue
+        for entry in await self._entries_where(scope, [""], lambda e: True):
+            stored = self._walked(entry, lambda x: _stored_episode(scope, x))
+            if stored is not None:
+                found.append((stored, entry.mark))
         return found
 
-    def _stored(self, scope: Scope, md_path: str, entry: Entry) -> Stored[Episode]:
-        return Stored(
-            ref=MemoryRef(
-                id=f"{scope.owner_id}_{entry.id}",
-                entry_id=entry.id,
-                md_path=md_path,
-            ),
-            scope=scope,
-            item=_episode_from_entry(entry, owner_id=scope.owner_id),
-        )
-
     async def _entries(self, scope: Scope, entry_ids: Collection[str]) -> list[Entry]:
-        return [entry for _, entry in await self._entries_with_paths(scope, entry_ids)]
+        return [
+            found.entry for found in await self._entries_with_paths(scope, entry_ids)
+        ]
 
     async def _entries_with_paths(
         self, scope: Scope, entry_ids: Collection[str]
-    ) -> list[tuple[Path, Entry]]:
+    ) -> list[_Found]:
         wanted: dict[Path, set[str]] = defaultdict(set)
         for entry_id in entry_ids:
             path = self._path_of(scope, entry_id)
             if path is not None:
                 wanted[path].add(entry_id)
-        found: list[tuple[Path, Entry]] = []
+        found: list[_Found] = []
         for path, ids in wanted.items():
             try:
                 parsed = await MarkdownReader.read(path)
             except FileNotFoundError:
                 continue
-            found += [(path, entry) for entry in parsed.entries if entry.id in ids]
+            marks = _marks(parsed.frontmatter)
+            md_path = _relative(self._root, path)
+            found += [
+                _found(md_path, parsed, entry, marks)
+                for entry in parsed.entries
+                if entry.id in ids
+            ]
         return found
 
 
@@ -636,7 +683,12 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
                             md_path=md_path,
                         ),
                         scope=scope,
-                        item=_image_memory_from(entry, owner_id=scope.owner_id),
+                        item=self._asked(
+                            _found(md_path, parsed, entry, marks),
+                            lambda x: _image_memory_from(
+                                x.entry, owner_id=scope.owner_id
+                            ),
+                        ),
                     )
                 )
                 item = found[-1].item
@@ -659,8 +711,11 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
             lambda e: e.as_structured().inline.get("parent_id") in wanted,
         )
         stored: list[Stored[ImageMemory]] = []
-        for md_path, entry, mark in found:
-            item = _image_memory_from(entry, owner_id=scope.owner_id)
+        for one in found:
+            md_path, entry, mark = one.md_path, one.entry, one.mark
+            item = self._asked(
+                one, lambda x: _image_memory_from(x.entry, owner_id=scope.owner_id)
+            )
             item.superseded_by = mark
             item.status = "superseded" if mark else "current"
             stored.append(
@@ -696,7 +751,10 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
             for entry in parsed.entries:
                 if entry.id not in ids:
                     continue
-                item = _image_memory_from(entry, owner_id=scope.owner_id)
+                item = self._asked(
+                    _found(md_path, parsed, entry, marks),
+                    lambda x: _image_memory_from(x.entry, owner_id=scope.owner_id),
+                )
                 item.superseded_by = marks.get(entry.id)
                 item.status = "superseded" if item.superseded_by else "current"
                 found.append(
@@ -715,15 +773,15 @@ class MarkdownImageMemoryStore(_DailyLogStore[ImageMemory]):
     async def read_all(self, scope: Scope) -> list[Stored[ImageMemory]]:
         """Every picture memory of the owner, in file order, marks included.
 
-        An entry that no longer parses (a hand edit) is skipped.
+        An entry that no longer parses (a hand edit) is logged and skipped.
         """
         found: list[Stored[ImageMemory]] = []
-        for md_path, entry, mark in await self._entries_where(
-            scope, [""], lambda e: True
-        ):
-            try:
-                item = _image_memory_from(entry, owner_id=scope.owner_id)
-            except (KeyError, TypeError, ValueError):
+        for one in await self._entries_where(scope, [""], lambda e: True):
+            md_path, entry, mark = one.md_path, one.entry, one.mark
+            item = self._walked(
+                one, lambda x: _image_memory_from(x.entry, owner_id=scope.owner_id)
+            )
+            if item is None:
                 continue
             item.superseded_by = mark
             item.status = (
@@ -784,6 +842,7 @@ class MarkdownProfileStore:
             primary_language=_known_language(fm.primary_language, owner_id=owner_id),
             history=list(fm.history),
             pending_memcell_ids=list(fm.pending_memcell_ids),
+            md_path=_relative(self._root, path),
         )
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
@@ -908,7 +967,12 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
             for entry in parsed.entries:
                 if entry.as_structured().inline.get("scene_id") != scene_id:
                     continue
-                scene = _scene_from_entry(entry, owner_id=scope.owner_id)
+                scene = self._walked(
+                    _found(md_path, parsed, entry, {}),
+                    lambda x: _scene_from_entry(x.entry, owner_id=scope.owner_id),
+                )
+                if scene is None:
+                    continue
                 if newest is None or scene.version > newest.item.version:
                     newest = Stored(
                         ref=MemoryRef(
@@ -929,33 +993,39 @@ class MarkdownSceneStore(_DailyLogStore[Scene]):
         return [
             Stored(
                 ref=MemoryRef(
-                    id=f"{scope.owner_id}_{entry.id}",
-                    entry_id=entry.id,
-                    md_path=md_path,
+                    id=f"{scope.owner_id}_{one.entry.id}",
+                    entry_id=one.entry.id,
+                    md_path=one.md_path,
                 ),
                 scope=scope,
-                item=_scene_from_entry(entry, owner_id=scope.owner_id),
+                item=self._asked(
+                    one, lambda x: _scene_from_entry(x.entry, owner_id=scope.owner_id)
+                ),
             )
-            for md_path, entry, _mark in found
+            for one in found
         ]
 
     async def read_all(self, scope: Scope) -> list[tuple[Stored[Scene], str | None]]:
         """Every version of every scene of the owner with its mark, in file order.
 
-        An entry that no longer parses (a hand edit) is skipped.
+        An entry that no longer parses (a hand edit) is logged and skipped.
         """
         found: list[tuple[Stored[Scene], str | None]] = []
-        for md_path, entry, mark in await self._entries_where(
+        for one in await self._entries_where(
             scope, ["**scene_id**: "], lambda e: bool(e.as_structured().inline)
         ):
-            try:
-                scene = _scene_from_entry(entry, owner_id=scope.owner_id)
-            except (KeyError, TypeError, ValueError):
-                continue
-            ref = MemoryRef(
-                id=f"{scope.owner_id}_{entry.id}", entry_id=entry.id, md_path=md_path
+            scene = self._walked(
+                one, lambda x: _scene_from_entry(x.entry, owner_id=scope.owner_id)
             )
-            found.append((Stored(ref=ref, scope=scope, item=scene), mark))
+            if scene is None:
+                continue
+            entry = one.entry
+            ref = MemoryRef(
+                id=f"{scope.owner_id}_{entry.id}",
+                entry_id=entry.id,
+                md_path=one.md_path,
+            )
+            found.append((Stored(ref=ref, scope=scope, item=scene), one.mark))
         return found
 
     async def append(
@@ -1037,15 +1107,14 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
             marks = _marks(parsed.frontmatter)
             md_path = _relative(self._root, path)
             for entry in parsed.entries:
-                try:
-                    item = group_profile_item_from_entry(entry, owner_id=scope.owner_id)
-                except ValueError as exc:  # a hand edit; the rest stays readable
-                    logger.warning(
-                        "group_profile_entry_unreadable",
-                        md_path=md_path,
-                        entry_id=entry.id,
-                        error=str(exc)[:200],
-                    )
+                # A hand edit costs that entry only; the rest stays readable.
+                item = self._walked(
+                    _found(md_path, parsed, entry, marks),
+                    lambda x: group_profile_item_from_entry(
+                        x.entry, owner_id=scope.owner_id
+                    ),
+                )
+                if item is None:
                     continue
                 item = item.read_back(item_id=entry.id, mark=marks.get(entry.id))
                 found.append(
@@ -1198,6 +1267,20 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
             / GroupProfilePendingFrontmatter.DIR_NAME
             / GroupProfilePendingFrontmatter.FILENAME
         )
+
+
+def _stored_episode(scope: Scope, found: _Found) -> Stored[Episode]:
+    """The episode an entry of ``scope``'s files holds, with its ref."""
+    entry = found.entry
+    return Stored(
+        ref=MemoryRef(
+            id=f"{scope.owner_id}_{entry.id}",
+            entry_id=entry.id,
+            md_path=found.md_path,
+        ),
+        scope=scope,
+        item=_episode_from_entry(entry, owner_id=scope.owner_id),
+    )
 
 
 def _image_memory_from(entry: Entry, *, owner_id: str) -> ImageMemory:

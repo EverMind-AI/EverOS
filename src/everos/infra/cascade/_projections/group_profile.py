@@ -6,8 +6,9 @@ format is the markdown package's (``render_group_profile_entry`` /
 ``group_profile_item_from_entry``, documented in
 ``infra/persistence/markdown/_mds/group_profile.py``); this handler reads it
 through that one parser, never field by field, so the row and the store's own
-read agree by construction. An entry the parser refuses raises ``ValueError``:
-the worker records the file as unrecoverable instead of indexing half an item.
+read agree by construction. An entry the parser refuses raises ``ValueError``,
+and the base skips that entry -- never half an item -- and indexes the rest of
+the file.
 
 What the row takes from the entry:
 

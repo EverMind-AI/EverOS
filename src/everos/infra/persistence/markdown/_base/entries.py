@@ -16,7 +16,10 @@ sees the whole entry surface in one file:
 
    :func:`split_entries` and :func:`find_entry` locate these spans
    without interpreting the inner content. Higher layers (writers,
-   cascade) parse it per record type.
+   cascade) parse it per record type. An open marker whose close marker
+   is missing (a hand edit) is an :class:`UnreadableEntry`: the scan
+   skips it and goes on, so the entries after it are still found
+   (:func:`scan_entries` returns both).
 
 3. :class:`StructuredEntry` — :class:`Entry` extended with the parsed
    audit-form body fields (header / inline / sections). Built either
@@ -158,14 +161,34 @@ class Entry:
         return parse_structured_entry(self.body, _origin=self)
 
 
-def split_entries(body: str) -> list[Entry]:
-    """Scan ``body`` and return every entry in order.
+@dataclass(frozen=True)
+class UnreadableEntry:
+    """An entry the scan found but could not take out of the body.
 
-    Unmatched / unterminated open markers stop the scan at the first
-    such marker — partial entries are not returned. Callers needing
-    strict validation should layer a dedicated check on top.
+    Attributes:
+        id: The id its open marker names.
+        start: Offset of that open marker in the scanned body.
+        reason: Why it is unreadable.
+        text: What follows its open marker, up to the next open marker (or
+            the end of the body): the entry as far as it can be told apart.
+    """
+
+    id: str
+    start: int
+    reason: str
+    text: str = ""
+
+
+def scan_entries(body: str) -> tuple[list[Entry], list[UnreadableEntry]]:
+    """Every entry of ``body`` in order, and every open marker left unclosed.
+
+    An open marker with no close marker of its id after it is skipped --
+    its text belongs to no entry -- and the scan goes on right after that
+    marker, so one broken entry costs that entry only. A body whose every
+    entry is closed scans exactly as it always has.
     """
     entries: list[Entry] = []
+    unreadable: list[UnreadableEntry] = []
     pos = 0
     while True:
         open_match = _OPEN_RE.search(body, pos)
@@ -174,8 +197,19 @@ def split_entries(body: str) -> list[Entry]:
         entry_id = open_match.group(1)
         close_match = _close_re_for(entry_id).search(body, open_match.end())
         if close_match is None:
-            # Unterminated entry — abort further scanning.
-            break
+            following = _OPEN_RE.search(body, open_match.end())
+            unreadable.append(
+                UnreadableEntry(
+                    id=entry_id,
+                    start=open_match.start(),
+                    reason="no closing marker",
+                    text=body[
+                        open_match.end() : following.start() if following else None
+                    ],
+                )
+            )
+            pos = open_match.end()
+            continue
         entries.append(
             Entry(
                 id=entry_id,
@@ -185,7 +219,17 @@ def split_entries(body: str) -> list[Entry]:
             )
         )
         pos = close_match.end()
-    return entries
+    return entries, unreadable
+
+
+def split_entries(body: str) -> list[Entry]:
+    """Scan ``body`` and return every entry in order.
+
+    An unterminated open marker is skipped, not the rest of the body: the
+    entries after it are returned (:func:`scan_entries` also names the
+    skipped ones). Partial entries are never returned.
+    """
+    return scan_entries(body)[0]
 
 
 def find_entry(body: str, entry_id: str) -> Entry | None:

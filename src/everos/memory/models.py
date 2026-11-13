@@ -394,21 +394,26 @@ class Profile(BaseModel):
         primary_language: str | None = None,
         history: Sequence[object] = (),
         pending_memcell_ids: Sequence[str] = (),
+        md_path: str | None = None,
     ) -> Profile:
         """A stored profile, without the items that are no longer items.
 
-        Early profiles could hold an item with no ``description``; one bad
-        item must not fail every read of its profile, nor reach everalgo on
-        the next update. Each such item is dropped with a
-        ``profile_entry_dropped`` warning.
+        Early profiles could hold an item with no ``description``, and a hand
+        edit can break one; one bad item must not fail every read of its
+        profile, nor reach everalgo on the next update. Each such item is
+        dropped with a ``profile_entry_dropped`` warning naming the file
+        (``md_path``, when the caller read one), the bucket, the item's
+        position in it and why it was dropped.
         """
         return cls(
             owner_id=owner_id,
             summary=summary,
             timestamp=timestamp,
-            explicit_info=_readable_items(ExplicitInfoItem, explicit_info, owner_id),
+            explicit_info=_readable_items(
+                ExplicitInfoItem, explicit_info, owner_id, md_path
+            ),
             implicit_traits=_readable_items(
-                ImplicitTraitItem, implicit_traits, owner_id
+                ImplicitTraitItem, implicit_traits, owner_id, md_path
             ),
             primary_language=primary_language,
             history=[dict(entry) for entry in history if isinstance(entry, dict)],
@@ -754,20 +759,31 @@ def _item_data(item: object) -> object:
 
 
 def _readable_items[ItemT: BaseModel](
-    model: type[ItemT], items: Sequence[object], owner_id: str
+    model: type[ItemT], items: Sequence[object], owner_id: str, md_path: str | None
 ) -> list[ItemT]:
     kept: list[ItemT] = []
-    for item in items:
+    for index, item in enumerate(items):
         try:
             kept.append(model.model_validate(_item_data(item)))
-        except ValidationError:
+        except ValidationError as exc:
             logger.warning(
                 "profile_entry_dropped",
                 owner_id=owner_id,
+                md_path=md_path,
                 bucket=model.__name__,
+                index=index,
+                reason=_validation_reason(exc),
                 entry=_preview(item),
             )
     return kept
+
+
+def _validation_reason(exc: ValidationError) -> str:
+    """What a dropped item failed, one ``field: message`` per error."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or 'item'}: {error['msg']}"
+        for error in exc.errors()
+    )[:200]
 
 
 def _preview(item: object) -> str:

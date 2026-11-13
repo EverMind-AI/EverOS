@@ -312,10 +312,11 @@ async def test_handle_deleted_wipes_md_path_rows(
 # ── error path ───────────────────────────────────────────────────────────
 
 
-async def test_missing_timestamp_raises_value_error(
+async def test_missing_timestamp_skips_only_that_entry(
     memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
 ) -> None:
-    """Malformed inline surfaces as ValueError — worker treats unrecoverable."""
+    """A malformed inline costs its entry, not the file: the entry is left
+    out and counted, the file's other entry is projected."""
     writer = EpisodeWriter(memory_root)
     # Manually bypass the writer to drop timestamp.
     today = _dt.date(2026, 5, 14)
@@ -325,11 +326,23 @@ async def test_missing_timestamp_raises_value_error(
         sections={"Content": "x"},
         date=today,
     )
+    await writer.append_entry(
+        "u1",
+        inline={
+            "owner_id": "u1",
+            "session_id": "s1",
+            "timestamp": "2026-05-14T10:00:00+00:00",
+        },
+        sections={"Content": "y"},
+        date=today,
+    )
     rel = "default_app/default_project/users/u1/episodes/episode-2026-05-14.md"
 
     handler = _build_handler(memory_root)
-    with pytest.raises(ValueError, match="timestamp"):
-        await handler.handle_added_or_modified(rel)
+    outcome = await handler.handle_added_or_modified(rel)
+
+    assert (outcome.upserted, outcome.unreadable) == (1, 1)
+    assert [row.entry_id for row in fake_repo.rows] == ["ep_20260514_00000002"]
 
 
 # ── unused noqa suppressor (keep imports tidy) ──────────────────────────

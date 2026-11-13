@@ -31,13 +31,16 @@ from ._base import MarkdownWriter as MarkdownWriter
 from ._base import ParsedMarkdown as ParsedMarkdown
 from ._base import ProfilePathMixin as ProfilePathMixin
 from ._base import StructuredEntry as StructuredEntry
+from ._base import UnreadableEntry as UnreadableEntry
 from ._base import UserScopedFrontmatter as UserScopedFrontmatter
 from ._base import dump_frontmatter as dump_frontmatter
 from ._base import find_entry as find_entry
 from ._base import parse_frontmatter as parse_frontmatter
 from ._base import parse_structured_entry as parse_structured_entry
 from ._base import render_structured_entry as render_structured_entry
+from ._base import scan_entries as scan_entries
 from ._base import split_entries as split_entries
+from ._base import warn_unreadable_entry as warn_unreadable_entry
 from ._mds import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from ._mds import GroupEpisodeDailyFrontmatter as GroupEpisodeDailyFrontmatter
 from ._mds import GroupFrontmatter as GroupFrontmatter
@@ -107,6 +110,7 @@ __all__ = [
     "SceneDailyFrontmatter",
     "SceneWriter",
     "StructuredEntry",
+    "UnreadableEntry",
     "UserProfileFrontmatter",
     "UserScopedFrontmatter",
     "dump_frontmatter",
@@ -116,5 +120,7 @@ __all__ = [
     "parse_structured_entry",
     "render_group_profile_entry",
     "render_structured_entry",
+    "scan_entries",
     "split_entries",
+    "warn_unreadable_entry",
 ]

@@ -19,6 +19,13 @@ and the recaller decodes them back at the DTO boundary. The items keep their
 provenance keys there, so a group read can drop those outside an asker's
 windows.
 
+An item that is no longer an item (a hand edit broke it) stays in the
+column as the file holds it, and every read drops it, exactly as it drops it
+from the markdown (:meth:`~everos.memory.models.Profile.from_stored`, which
+logs ``profile_entry_dropped`` with the file and the item's position). The
+projection counts such items in :attr:`HandlerOutcome.unreadable`, so
+``everos cascade status`` reports them; the rest of the profile is indexed.
+
 ``history`` and ``pending_memcell_ids`` are not projected: the second is the
 update cadence's bookkeeping, the first is read from markdown when it is
 needed. What a read needs of the history goes onto the items instead: an item
@@ -35,7 +42,7 @@ from typing import Any, ClassVar
 from everos.infra.persistence.index import IndexRepository, primary_key
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.infra.persistence.records import UserProfile, member_profile_row_id
-from everos.memory.models import with_previous_values
+from everos.memory.models import Profile, with_previous_values
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -77,6 +84,7 @@ class ProfileHandler(Handler):
         replaced = history if isinstance(history, list) else []
         explicit_info_json = _items_json(fm.get("explicit_info", []), replaced)
         implicit_traits_json = _items_json(fm.get("implicit_traits", []), replaced)
+        unreadable = _unreadable_items(fm, owner, md_path)
         digest = compute_content_sha256(
             {
                 "frontmatter:summary": summary,
@@ -89,7 +97,12 @@ class ProfileHandler(Handler):
         )
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(
-                md_path=md_path, kind=self.kind, upserted=0, deleted=0, skipped=1
+                md_path=md_path,
+                kind=self.kind,
+                upserted=0,
+                deleted=0,
+                skipped=1,
+                unreadable=unreadable,
             )
         await self.index_repo.upsert(
             [
@@ -107,7 +120,12 @@ class ProfileHandler(Handler):
             ]
         )
         return HandlerOutcome(
-            md_path=md_path, kind=self.kind, upserted=1, deleted=0, skipped=0
+            md_path=md_path,
+            kind=self.kind,
+            upserted=1,
+            deleted=0,
+            skipped=0,
+            unreadable=unreadable,
         )
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:
@@ -139,6 +157,26 @@ def _owner(fm: dict[str, Any], md_path: str) -> dict[str, str]:
             f"user_profile md missing required frontmatter user_id: {md_path}"
         )
     return {"id": owner_id, "owner_id": owner_id, "owner_type": "user"}
+
+
+def _unreadable_items(fm: dict[str, Any], owner: dict[str, str], md_path: str) -> int:
+    """How many items of the two buckets a read drops (each one is logged)."""
+    explicit = fm.get("explicit_info")
+    implicit = fm.get("implicit_traits")
+    explicit = explicit if isinstance(explicit, list) else []
+    implicit = implicit if isinstance(implicit, list) else []
+    if not explicit and not implicit:
+        return 0
+    profile = Profile.from_stored(
+        owner_id=owner.get("subject_id") or owner["owner_id"],
+        summary="",
+        timestamp=0,
+        explicit_info=explicit,
+        implicit_traits=implicit,
+        md_path=md_path,
+    )
+    kept = len(profile.explicit_info) + len(profile.implicit_traits)
+    return len(explicit) + len(implicit) - kept
 
 
 def _items_json(items: Any, history: list[Any]) -> str:

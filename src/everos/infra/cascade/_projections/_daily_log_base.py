@@ -8,6 +8,17 @@ three-way reconcile against the derived index:
 3. ``content_sha256`` mismatch → tokenise + embed + upsert; no diff
    → skip; row gone from md → delete.
 
+One unreadable entry costs that entry only. An entry whose row cannot be
+built (a hand edit left a malformed timestamp, say) and an entry left
+without its close marker are skipped: no row is written for either, a row
+the index already holds for it keeps its content -- the file's
+``deprecated_entries`` still reach it, since the frontmatter was read -- and
+every other entry of the file is projected. Each is logged as
+``markdown_entry_unreadable`` (path, entry id, line, reason) and counted in
+:attr:`HandlerOutcome.unreadable`, which the worker records on the file's
+ledger row for ``everos cascade status``. An unreadable entry's texts may
+have been embedded before its row failed.
+
 The hash covers **only content-bearing fields** declared by each
 subclass in :attr:`content_change_keys` (a tuple of ``"section:Name"``
 / ``"inline:name"`` strings). Audit inline fields (owner_id /
@@ -31,7 +42,12 @@ from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import IndexRepository, all_of, eq, one_of
-from everos.infra.persistence.markdown import MarkdownReader, StructuredEntry
+from everos.infra.persistence.markdown import (
+    MarkdownReader,
+    ParsedMarkdown,
+    StructuredEntry,
+    warn_unreadable_entry,
+)
 
 from ..models import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -51,6 +67,9 @@ class ParsedEntry:
     entry_id: str
     structured: StructuredEntry
     content_sha256: str
+    start: int = 0
+    """Offset of the entry's open marker in the file's body, which a warning
+    about the entry turns into its line."""
 
 
 class BaseDailyLogHandler(Handler):
@@ -122,6 +141,7 @@ class BaseDailyLogHandler(Handler):
                 entry_id=entry.id,
                 structured=entry.as_structured(),
                 content_sha256=self._content_sha256(entry.as_structured()),
+                start=entry.start,
             )
             for entry in parsed.entries
         ]
@@ -142,15 +162,18 @@ class BaseDailyLogHandler(Handler):
             app_id,
             project_id,
             md_path,
+            parsed=parsed,
         )
+        unbuilt = len(to_build) - len(to_upsert)  # entries whose row failed
         # Rows a memory deletion fenced while this run was going stay out.
         fence = self._deps.fence
         if fence is not None:
             to_upsert = [row for row in to_upsert if not fence.blocks(row)]
         new_by_id = {e.entry_id for e in new_entries}
-        to_delete_ids = [
-            row.entry_id for row in existing if row.entry_id not in new_by_id
-        ]
+        # An entry the file still holds but this run could not read keeps the
+        # row it has: it is skipped, not deleted.
+        kept = new_by_id | {u.id for u in parsed.unreadable}
+        to_delete_ids = [row.entry_id for row in existing if row.entry_id not in kept]
 
         await self._apply_lance_changes(to_upsert, to_delete_ids, md_path)
         await self._propagate_deprecations(
@@ -158,7 +181,7 @@ class BaseDailyLogHandler(Handler):
             owner_id,
             app_id,
             project_id,
-            entry_ids=new_by_id,
+            entry_ids=kept,
         )
         return HandlerOutcome(
             md_path=md_path,
@@ -166,6 +189,7 @@ class BaseDailyLogHandler(Handler):
             upserted=len(to_upsert),
             deleted=len(to_delete_ids),
             skipped=skipped,
+            unreadable=len(parsed.unreadable) + unbuilt,
         )
 
     @staticmethod
@@ -193,6 +217,8 @@ class BaseDailyLogHandler(Handler):
         app_id: str,
         project_id: str,
         md_path: str,
+        *,
+        parsed: ParsedMarkdown | None = None,
     ) -> list[Any]:
         """Build LanceDB rows for changed entries.
 
@@ -210,6 +236,11 @@ class BaseDailyLogHandler(Handler):
         same soft-degrade a missing provider produces, so the row is written
         without a vector and ``vector_backfill`` re-embeds it once the md
         carries content.
+
+        An entry whose row cannot be built (:meth:`_build_row` raises
+        ``ValueError``, ``KeyError`` or ``TypeError``: a malformed field) is
+        logged -- with its line when ``parsed``, the file the entries come
+        from, is given -- and left out of the rows returned.
         """
         if not to_build:
             return []
@@ -250,8 +281,8 @@ class BaseDailyLogHandler(Handler):
         for entry, texts in zip(to_build, texts_per_entry, strict=True):
             entry_vectors = vectors[cursor : cursor + len(texts)]
             cursor += len(texts)
-            rows.append(
-                await self._build_row(
+            try:
+                row = await self._build_row(
                     owner_id=owner_id,
                     owner_type=owner_type,
                     app_id=app_id,
@@ -260,7 +291,16 @@ class BaseDailyLogHandler(Handler):
                     entry=entry,
                     vectors=entry_vectors,
                 )
-            )
+            except (KeyError, TypeError, ValueError) as exc:
+                warn_unreadable_entry(
+                    md_path,
+                    entry.entry_id,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    line=parsed.line_of(entry.start) if parsed else None,
+                    kind=self.kind,
+                )
+                continue
+            rows.append(row)
         return await self._attach_side_vectors(rows)
 
     async def _attach_side_vectors(self, rows: list[Any]) -> list[Any]:

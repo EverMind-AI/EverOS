@@ -162,13 +162,23 @@ async def status(admin: CascadeAdmin, *, duplicates: bool = False) -> CascadeSta
 
     ``duplicates`` adds the O(N) duplicate-primary-key scan; it stays off
     the default path because an embedded root does not need it on every
-    status call.
+    status call. The files holding unreadable entries are listed only when
+    the summary counts some.
     """
+    summary = await admin.queue_summary()
     return CascadeStatus(
-        summary=await admin.queue_summary(),
+        summary=summary,
         index_rows=await admin.count_index_rows(),
         live_sources=await admin.count_live_sources(),
         duplicate_keys=(await admin.count_duplicate_keys() if duplicates else None),
+        unreadable=(
+            [
+                (row.md_path, row.unreadable_entries or 0)
+                for row in await admin.list_unreadable()
+            ]
+            if summary.unreadable_entries
+            else []
+        ),
     )
 
 

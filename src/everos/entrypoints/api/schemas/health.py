@@ -124,6 +124,17 @@ class CascadeHealthBlock(BaseModel):
             "is a startup snapshot that could not clear until a restart."
         ),
     )
+    unreadable_entries: int = Field(
+        default=0,
+        description=(
+            "Entries of indexed markdown files that the projection skipped "
+            "because they no longer parse (a hand edit broke them); the rest "
+            "of each file is indexed. Each is logged as "
+            "`markdown_entry_unreadable`, and `everos cascade status` names "
+            "the files. Informational like failed_permanent: it does not "
+            "flip `healthy`."
+        ),
+    )
 
 
 class MemorizeQueueHealthBlock(BaseModel):

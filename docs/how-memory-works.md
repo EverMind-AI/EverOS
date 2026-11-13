@@ -197,7 +197,11 @@ not as a separate OS daemon.
 
 Because markdown is the source of truth, **editing a file directly is
 fully supported** — open an episode in VSCode / Obsidian / Vim, change an
-entry, save, and the daemon re-indexes just that entry. Operate the queue
+entry, save, and the daemon re-indexes just that entry. An entry an edit
+breaks costs that entry only: it is skipped and logged
+(`markdown_entry_unreadable`, with the file, entry id, line and reason),
+the rest of the file is indexed and searchable, and `everos cascade
+status` names the file until the entry is fixed. Operate the queue
 with `everos cascade` ([Operating it](#operating-it)); deeper runbook in
 [cascade_runbook.md](cascade_runbook.md).
 
@@ -296,7 +300,7 @@ The CLI ([cli.md](cli.md)) is intentionally small:
 |---|---|
 | `everos init` | generate starter config files (`everos.toml` + `ome.toml`) |
 | `everos server start` | run the HTTP API (cascade + OME start with it) |
-| `everos cascade status` | queue / LSN summary |
+| `everos cascade status` | queue / LSN summary, and the files holding entries a hand edit broke (skipped; the rest of each file is indexed) |
 | `everos cascade sync` | drain the cascade queue now (force md → LanceDB) |
 | `everos cascade fix` | list failed rows / re-enqueue retryable ones |
 | `everos cascade rebuild` | rebuild the whole index from markdown (drift / corruption recovery) |

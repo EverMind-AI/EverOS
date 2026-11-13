@@ -30,7 +30,7 @@ from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.ports import Scope
 
-from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter
+from ._base import Entry, EntryId, MarkdownReader, MarkdownWriter, UnreadableEntry
 from ._writers import (
     BaseDailyWriter,
     EpisodeWriter,
@@ -178,11 +178,17 @@ class MarkdownOwnerDirStore:
             if not old.is_file():
                 continue
             parsed = await MarkdownReader.read(old)
-            count = _counter(parsed.frontmatter.get("entry_count"), parsed.entries)
+            count = _counter(
+                parsed.frontmatter.get("entry_count"),
+                [*parsed.entries, *parsed.unreadable],
+            )
             if live.is_file():  # written to since (only after a crash)
                 current = await MarkdownReader.read(live)
                 if (
-                    _counter(current.frontmatter.get("entry_count"), current.entries)
+                    _counter(
+                        current.frontmatter.get("entry_count"),
+                        [*current.entries, *current.unreadable],
+                    )
                     < count
                 ):
                     await self._md.patch_frontmatter(live, {"entry_count": count})
@@ -194,8 +200,9 @@ class MarkdownOwnerDirStore:
             await self._md.write_markdown(live, frontmatter=frontmatter, body="")
 
 
-def _counter(raw: object, entries: Sequence[Entry]) -> int:
-    """The id counter a daily-log file stands at: never below its ids."""
+def _counter(raw: object, entries: Sequence[Entry | UnreadableEntry]) -> int:
+    """The id counter a daily-log file stands at: never below its ids, those of
+    entries left without a close marker included."""
     count = raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
     seqs = []
     for entry in entries:

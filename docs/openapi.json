@@ -3393,6 +3393,12 @@
             "title": "Index Emptied",
             "description": "True when the cascade ledger says every file is indexed, nothing is pending, and every index table is empty -- the state left behind by deleting the index directory, which the ledger in .index/sqlite survives. Searches return nothing while every other signal here reads healthy. Recover with `everos cascade rebuild`; markdown is untouched. Informational like failed_permanent: it does not flip `healthy`, because it is a startup snapshot that could not clear until a restart.",
             "default": false
+          },
+          "unreadable_entries": {
+            "type": "integer",
+            "title": "Unreadable Entries",
+            "description": "Entries of indexed markdown files that the projection skipped because they no longer parse (a hand edit broke them); the rest of each file is indexed. Each is logged as `markdown_entry_unreadable`, and `everos cascade status` names the files. Informational like failed_permanent: it does not flip `healthy`.",
+            "default": 0
           }
         },
         "type": "object",

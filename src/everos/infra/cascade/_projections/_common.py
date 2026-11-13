@@ -5,8 +5,8 @@ The inline-block parsers undo
 the writer stringifies values with ``str()`` (and list / tuple as
 ``[a, b, c]``), so callers that need a typed value back must reverse
 the rendering here. Each helper raises ``ValueError`` on malformed
-input so the worker classifies the failure as unrecoverable (no point
-retrying a YAML / format error).
+input; a daily-log handler then skips that one entry (no point retrying
+a format error) and projects the rest of its file.
 """
 
 from __future__ import annotations

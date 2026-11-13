@@ -29,6 +29,7 @@ from .._base import (
     EntryId,
     MarkdownReader,
     MarkdownWriter,
+    ParsedMarkdown,
     render_structured_entry,
 )
 from .._mds import GroupFrontmatter, GroupProfileDailyFrontmatter
@@ -62,10 +63,17 @@ class GroupWriter:
 
     async def read(self, path: Path) -> tuple[dict[str, Any], list[Entry]] | None:
         """The frontmatter and the log entries, or ``None`` for no file."""
+        parsed = await self.read_parsed(path)
+        if parsed is None:
+            return None
+        return dict(parsed.frontmatter), list(parsed.entries)
+
+    async def read_parsed(self, path: Path) -> ParsedMarkdown | None:
+        """The parsed file, entries left without a close marker included, or
+        ``None`` for no file."""
         if not await anyio.Path(path).is_file():
             return None
-        parsed = await MarkdownReader.read(path)
-        return dict(parsed.frontmatter), list(parsed.entries)
+        return await MarkdownReader.read(path)
 
     async def append(
         self,
@@ -83,9 +91,11 @@ class GroupWriter:
             The ids of the appended entries, in order.
         """
         async with self._writer.locked(path):
-            existing = await self.read(path)
+            existing = await self.read_parsed(path)
+            # An entry left without its close marker still holds its id.
+            held = [*existing.entries, *existing.unreadable] if existing else []
             seqs: dict[_dt.date, int] = {}
-            for entry in existing[1] if existing else []:
+            for entry in held:
                 try:
                     parsed = EntryId.parse(entry.id)
                 except ValueError:
@@ -100,7 +110,7 @@ class GroupWriter:
                 )
                 ids.append(eid)
                 rendered.append((render_structured_entry(inline=inline), eid))
-            count = (len(existing[1]) if existing else 0) + len(rendered)
+            count = len(held) + len(rendered)
             await self._writer._append_entries_unlocked(
                 path,
                 rendered,

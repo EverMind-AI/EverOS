@@ -11,6 +11,12 @@ Reads come from the mirror. A group whose ``group.md`` exists but whose rows do
 not (a wiped index not yet rebuilt) is re-mirrored from the file on first read
 rather than reported missing: answering "no such group" there would let an
 implicit create overwrite the real group's meta.
+
+A roster entry a hand edit broke is skipped when the mirror is re-derived
+(:func:`~.projection.readable_events`): every other member's events fold, and
+the member it names is left out of the roster until the entry is fixed. A
+write never builds on such a log: :meth:`GroupRosterStore.save` refuses while
+``group.md`` holds an entry it cannot read.
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ from .projection import (
     group_from_frontmatter,
     group_frontmatter,
     mirror_rows,
+    readable_events,
     record_from_rows,
     sessions_from_frontmatter,
 )
@@ -60,7 +67,8 @@ class GroupRosterStore:
             return record_from_rows(*rows)
         if await self._writer.read(self._path(scope)) is None:
             return None
-        return await self.remirror(scope)
+        record, _ = await self.remirror(scope)
+        return record
 
     async def group_ids(self, app_id: str, project_id: str) -> list[str]:
         return await self._repo.group_ids(app_id, project_id)
@@ -70,7 +78,17 @@ class GroupRosterStore:
     ) -> GroupRecord:
         path = self._path(scope)
         async with LOCKS.hold("owner", self._lock(scope)):
-            existing = await self._writer.read(path)
+            parsed = await self._writer.read_parsed(path)
+            existing = (
+                (dict(parsed.frontmatter), list(parsed.entries)) if parsed else None
+            )
+            if parsed is not None and parsed.unreadable:
+                raise ValueError(
+                    f"{self._relative(path)}: roster entry "
+                    f"{parsed.unreadable[0].id!r} is unreadable "
+                    f"({parsed.unreadable[0].reason}); fix it before changing "
+                    "the roster"
+                )
             old_events = [event_from_entry(e) for e in existing[1]] if existing else []
             sessions = sessions_from_frontmatter(existing[0]) if existing else []
             intervals = fold_roster([*old_events, *events])
@@ -135,24 +153,29 @@ class GroupRosterStore:
                     )
         return group_id
 
-    async def remirror(self, scope: Scope) -> GroupRecord | None:
+    async def remirror(self, scope: Scope) -> tuple[GroupRecord | None, int]:
         """Re-derive the group's rows from ``group.md``; ``None`` without one.
+
+        Returns the record and how many roster entries could not be read: each
+        is skipped, and the member it names is left out of the roster
+        (:func:`~.projection.readable_events`).
 
         Raises:
             ValueError: The log no longer folds (a hand edit broke it), or an
-                entry is unreadable.
+                unreadable entry names no member.
         """
         path = self._path(scope)
         async with LOCKS.hold("owner", self._lock(scope)):
-            existing = await self._writer.read(path)
-            if existing is None:
+            parsed = await self._writer.read_parsed(path)
+            if parsed is None:
                 await self._repo.remove(scope.app_id, scope.project_id, scope.owner_id)
-                return None
-            meta_fm, entries = existing
+                return None, 0
+            meta_fm = dict(parsed.frontmatter)
             group = group_from_frontmatter(meta_fm, group_id=scope.owner_id)
             sessions = sessions_from_frontmatter(meta_fm)
+            log = readable_events(parsed, md_path=self._relative(path))
             try:
-                intervals = fold_roster([event_from_entry(e) for e in entries])
+                intervals = fold_roster(log.events)
             except RosterConflictError as exc:  # a hand edit broke the log
                 raise ValueError(f"{self._relative(path)}: {exc}") from exc
             meta, members, bindings = mirror_rows(
@@ -164,11 +187,12 @@ class GroupRosterStore:
                 md_path=self._relative(path),
             )
             await self._repo.replace(meta, members, bindings)
-        return GroupRecord(
+        record = GroupRecord(
             group=group,
             roster=Roster(intervals=intervals),
             sessions=tuple(b.session_id for b in bindings),
         )
+        return record, log.unreadable
 
     def _path(self, scope: Scope) -> Path:
         return self._writer.path_for(

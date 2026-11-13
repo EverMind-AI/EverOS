@@ -7,9 +7,13 @@ both under one lock); this handler is what re-derives them afterwards -- after
 a hand edit of the file, and on ``everos cascade rebuild`` -- through the same
 projection, so a rebuilt mirror reads exactly as the written one did.
 
-No LanceDB table, no embedding: this kind writes SQLite only. A log that no
-longer folds (a hand edit introduced a second open interval, say) raises
-``ValueError``, which the worker records as unrecoverable instead of retrying.
+No LanceDB table, no embedding: this kind writes SQLite only. A roster entry
+a hand edit broke is skipped and counted in ``unreadable``, and the member it
+names is left out of the roster until it is fixed (the roster decides who may
+read the group, so an unreadable entry never widens that). A log that no
+longer folds (a hand edit introduced a second open interval, say), or an
+unreadable entry that names no member, raises ``ValueError``, which the
+worker records as unrecoverable instead of retrying.
 """
 
 from __future__ import annotations
@@ -30,13 +34,14 @@ class GroupRosterHandler(Handler):
     kind = "group_roster"
 
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
-        record = await self._store().remirror(_scope(md_path))
+        record, unreadable = await self._store().remirror(_scope(md_path))
         return HandlerOutcome(
             md_path=md_path,
             kind=self.kind,
             upserted=1 if record is not None else 0,
             deleted=0 if record is not None else 1,
             skipped=0,
+            unreadable=unreadable,
         )
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:

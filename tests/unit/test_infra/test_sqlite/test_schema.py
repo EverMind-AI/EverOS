@@ -116,3 +116,24 @@ async def test_a_fresh_database_is_created_without_the_case_columns(
     assert tables > 0
     assert not _CASE_COLUMNS & await _memcell_columns(database)
     await database.dispose()
+
+
+async def test_an_older_ledger_gains_the_unreadable_entries_column(
+    tmp_path: Path,
+) -> None:
+    database = SqliteDatabase(MemoryRoot(tmp_path), SqliteSettings())
+    await database.create_schema()
+    async with database.engine.begin() as conn:  # a system.db from before it
+        await conn.execute(
+            text("ALTER TABLE md_change_state DROP COLUMN unreadable_entries")
+        )
+
+    await database.create_schema()
+    await database.create_schema()  # idempotent
+
+    async with database.engine.connect() as conn:
+        rows = (
+            await conn.execute(text("PRAGMA table_info(md_change_state)"))
+        ).fetchall()
+    assert "unreadable_entries" in {row[1] for row in rows}
+    await database.dispose()

@@ -376,6 +376,7 @@ def _stored_profile(fields: Row, *, subject: str) -> Stored[Profile]:
             timestamp=fields["profile_timestamp_ms"],
             explicit_info=_json_list(fields["explicit_info_json"]),
             implicit_traits=_json_list(fields["implicit_traits_json"]),
+            md_path=fields.get("md_path"),
         ),
     )
 

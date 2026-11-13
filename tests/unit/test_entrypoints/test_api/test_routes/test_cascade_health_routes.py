@@ -156,3 +156,19 @@ async def test_health_probe_exception_stays_200_and_flags_unhealthy() -> None:
     assert body["cascade"]["healthy"] is False
     assert any("probe failed" in r for r in body["cascade"]["reasons"])
     assert any("database is locked" in r for r in body["cascade"]["reasons"])
+
+
+async def test_health_reports_unreadable_entries_without_flipping_healthy() -> None:
+    """Entries a hand edit broke are a data-quality count, like
+    ``failed_permanent``: the files they sit in are indexed, the entries are
+    skipped, and ``everos cascade status`` names the files."""
+    health = _healthy()
+    broken = CascadeHealth(**{**health.__dict__, "unreadable_entries": 2})
+    async with _client(_orch(broken)) as c:
+        body = (await c.get("/health")).json()
+    assert body["cascade"]["healthy"] is True
+    assert body["cascade"]["unreadable_entries"] == 2
+
+    async with _client(_orch(health)) as c:
+        body = (await c.get("/health")).json()
+    assert body["cascade"]["unreadable_entries"] == 0

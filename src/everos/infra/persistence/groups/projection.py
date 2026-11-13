@@ -26,11 +26,19 @@ the one the write produced (docs/group-memory.md, section 14, task 1).
 Times are ISO-8601 in UTC in markdown and epoch milliseconds everywhere else.
 ``aliases`` is a JSON list, because a name may contain the comma the plain
 inline list form splits on.
+
+A roster entry a hand edit broke (:func:`readable_events`) is skipped like any
+unreadable entry, but the roster decides who may read the group, so it never
+widens that: the member the entry names is left out of the roster -- an
+unreadable ``leave`` must not let someone who left read on -- and an entry that
+names no readable member fails the read as before. Every other member's
+events fold as written.
 """
 
 from __future__ import annotations
 
 __all__ = [
+    "ReadableLog",
     "binding_entry",
     "event_date",
     "event_from_entry",
@@ -38,6 +46,7 @@ __all__ = [
     "group_from_frontmatter",
     "group_frontmatter",
     "mirror_rows",
+    "readable_events",
     "record_from_rows",
     "sessions_from_frontmatter",
 ]
@@ -45,15 +54,21 @@ __all__ = [
 import datetime as _dt
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
+from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import (
     ensure_utc,
     from_iso_format,
     from_timestamp_ms,
     to_timestamp_ms,
 )
-from everos.infra.persistence.markdown import Entry
+from everos.infra.persistence.markdown import (
+    Entry,
+    ParsedMarkdown,
+    parse_structured_entry,
+    warn_unreadable_entry,
+)
 from everos.infra.persistence.sqlite import GroupMember, GroupMeta, SessionBinding
 from everos.memory.models import (
     Group,
@@ -62,6 +77,8 @@ from everos.memory.models import (
     RosterEvent,
 )
 from everos.memory.ports import GroupRecord
+
+logger = get_logger(__name__)
 
 _EVENT_FIELDS = ("kind", "display_name", "role", "title")
 
@@ -122,6 +139,79 @@ def event_from_entry(entry: Entry) -> RosterEvent:
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise ValueError(f"unreadable roster entry {entry.id!r}: {exc}") from exc
+
+
+class ReadableLog(NamedTuple):
+    """``group.md``'s log as a reader may use it.
+
+    Attributes:
+        events: The events of every entry that reads, in log order, minus
+            those of a member in ``left_out``.
+        left_out: Members an unreadable entry names, left out of the roster.
+        unreadable: Entries that could not be read.
+    """
+
+    events: list[RosterEvent]
+    left_out: frozenset[str]
+    unreadable: int
+
+
+def readable_events(parsed: ParsedMarkdown, *, md_path: str) -> ReadableLog:
+    """The roster events ``group.md`` holds, an unreadable entry skipped.
+
+    Each unreadable entry -- one :func:`event_from_entry` refuses, or one left
+    without its close marker -- is logged (``markdown_entry_unreadable``, with
+    the entry's id and line; the reader already logged an unclosed one), and
+    the member it names is left out of the roster (``group_roster_member_left_out``):
+    an entry that cannot be read may have been the member's ``leave``.
+
+    Raises:
+        ValueError: An unreadable entry names no readable member: whose
+            membership it changes cannot be told, so nothing is folded.
+    """
+    events: list[RosterEvent] = []
+    left_out: set[str] = set()
+    unreadable = 0
+
+    def leave_out(entry_id: str, member_id: str | None, reason: str) -> None:
+        if not member_id:
+            raise ValueError(
+                f"{md_path}: roster entry {entry_id!r} is unreadable and names "
+                f"no member: {reason}"
+            )
+        left_out.add(member_id)
+        logger.warning(
+            "group_roster_member_left_out",
+            path=md_path,
+            entry_id=entry_id,
+            member_id=member_id,
+            reason="an unreadable roster entry names the member",
+        )
+
+    for entry in parsed.entries:
+        try:
+            events.append(event_from_entry(entry))
+            continue
+        except ValueError as exc:
+            reason = str(exc)
+        unreadable += 1
+        warn_unreadable_entry(
+            md_path,
+            entry.id,
+            reason=reason,
+            line=parsed.line_of(entry.start),
+            kind="group_roster",
+        )
+        leave_out(entry.id, entry.as_structured().inline.get("member_id"), reason)
+    for skipped in parsed.unreadable:
+        unreadable += 1
+        member = parse_structured_entry(skipped.text).inline.get("member_id")
+        leave_out(skipped.id, member, skipped.reason)
+    return ReadableLog(
+        events=[e for e in events if e.member_id not in left_out],
+        left_out=frozenset(left_out),
+        unreadable=unreadable,
+    )
 
 
 def group_frontmatter(

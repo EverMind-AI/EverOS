@@ -380,7 +380,7 @@ class BaseDailyWriter:
         if not await anyio.Path(path).is_file():
             return 0
         parsed = await MarkdownReader.read(path)
-        return len(parsed.entries)
+        return len(parsed.entries) + len(parsed.unreadable)
 
     async def _count_from_frontmatter(self, path: Path) -> int:
         """``entry_count`` from the frontmatter, never behind the file's ids.
@@ -397,7 +397,8 @@ class BaseDailyWriter:
             return 0
         parsed = await MarkdownReader.read(path)
         highest = 0
-        for entry in parsed.entries:
+        # An entry left without its close marker still holds its id.
+        for entry in [*parsed.entries, *parsed.unreadable]:
             try:
                 highest = max(highest, EntryId.parse(entry.id).seq)
             except ValueError:

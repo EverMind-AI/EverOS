@@ -10,7 +10,9 @@ Each cycle:
    the row's ``change_type``.
 3. On success: ``mark_done`` with the change the handler actually
    applied (a vanished file folds into a deletion and is recorded as
-   ``deleted``, so the reconciler re-adds it if it comes back).
+   ``deleted``, so the reconciler re-adds it if it comes back), and the
+   number of entries the handler skipped as unreadable when there were
+   any (``cascade status`` reports them; the file itself is done).
 4. On :class:`~everos.core.errors.ExternalServiceError`: retry inline
    up to ``MAX_RETRY``; if all attempts fail,
    ``mark_failed(retryable=True)`` — unless the cross-cycle retry
@@ -489,6 +491,7 @@ class CascadeWorker:
                 upserted=outcome.upserted,
                 deleted=outcome.deleted,
                 skipped=outcome.skipped,
+                unreadable=outcome.unreadable,
             )
             # The handler may have run long enough for another drainer to
             # claim a newer version of this path. Its index write is already
@@ -500,11 +503,19 @@ class CascadeWorker:
             if current is None:
                 return None
             if current.lsn == row.lsn and current.status == "processing":
+                # A run that skipped no entry writes what it always wrote (the
+                # ledger clears an earlier count by default).
+                skipped_entries: dict[str, object] = (
+                    {"unreadable_entries": outcome.unreadable}
+                    if outcome.unreadable
+                    else {}
+                )
                 await self._write_terminal(
                     self._ledger.mark_done,
                     row.md_path,
                     kind=row.kind,
                     change_type=applied,
+                    **skipped_entries,
                 )
             elif current.status == "pending":
                 # Already queued; whoever claims it next writes after us.

@@ -167,6 +167,10 @@ class CascadeAdmin:
     async def list_failed(self) -> list[MdChangeState]:
         return await self._ledger.list_failed()
 
+    async def list_unreadable(self) -> list[MdChangeState]:
+        """Indexed files whose last projection skipped unreadable entries."""
+        return await self._ledger.list_unreadable()
+
     async def reset_retryable(self) -> int:
         return await self._ledger.reset_retryable_to_pending()
 

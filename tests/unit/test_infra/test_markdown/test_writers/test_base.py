@@ -16,6 +16,7 @@ import pytest
 from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
+    EpisodeWriter,
     GroupScopedFrontmatter,
     MarkdownReader,
     UserScopedFrontmatter,
@@ -180,3 +181,26 @@ async def test_explicit_frontmatter_updates_skip_hook(root: MemoryRoot) -> None:
     path = root.users_dir() / "u_jason" / "demos" / "demo-2026-04-22.md"
     parsed = await MarkdownReader.read(path)
     assert parsed.frontmatter["marker"] == "explicit"
+
+
+async def test_an_entry_left_without_its_close_marker_keeps_its_id(
+    root: MemoryRoot,
+) -> None:
+    """A hand edit deletes the last entry's close marker and lowers the count:
+    the next entry still gets a new id, never the broken entry's."""
+    writer = EpisodeWriter(root)
+    day = dt.date(2026, 5, 14)
+    for text in ("one", "two"):
+        await writer.append_entry(
+            "u1", inline={"owner_id": "u1"}, sections={"Content": text}, date=day
+        )
+    path = writer.path_for("u1", day)
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("<!-- /entry:ep_20260514_00000002 -->\n", "")
+    path.write_text(text.replace("entry_count: 2", "entry_count: 1"), encoding="utf-8")
+
+    eid = await writer.append_entry(
+        "u1", inline={"owner_id": "u1"}, sections={"Content": "three"}, date=day
+    )
+
+    assert eid.format() == "ep_20260514_00000003"

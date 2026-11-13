@@ -15,15 +15,13 @@ a real LanceDB and read through the index port. What these pin:
   one of its segments, BM25 by its words, ``entry_id`` by its id, and
   ``find`` lists newest first;
 - an edit of a window field reaches the row, and an entry the parser refuses
-  fails the file instead of indexing half an item.
+  is skipped -- never half an item -- while the rest of its file is indexed.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-
-import pytest
 
 from everos.component.tokenizer import build_tokenizer
 from everos.core.utils.datetime import to_timestamp_ms, today_with_timezone
@@ -305,7 +303,7 @@ async def test_an_edit_of_a_window_field_reaches_the_row(tmp_path: Path) -> None
         assert to_timestamp_ms(row.source_start) == 1_000
 
 
-async def test_an_entry_the_parser_refuses_fails_the_file(tmp_path: Path) -> None:
+async def test_an_entry_the_parser_refuses_is_skipped_alone(tmp_path: Path) -> None:
     async with GroupWorld.open(tmp_path) as world:
         await GroupProfileWriter(world.root).append_entries(
             "trip",
@@ -313,15 +311,19 @@ async def test_an_entry_the_parser_refuses_fails_the_file(tmp_path: Path) -> Non
             app_id="default",
             project_id="p",
         )
+        good = await world.profile_item("trip", "Book the hotel", start=1, end=2)
         assert (
             world.root.root
             / "default_app/p/groups/trip/profile"
             / f"group_profile-{today_with_timezone().isoformat()}.md"
         ).is_file()
 
-        with pytest.raises(ValueError, match=r"has no 'source_start'"):
-            await world.project()
-        assert await world.storage.repos.group_profile_item.count() == 0
+        await world.project()
+
+        rows = await world.storage.repos.group_profile_item.find_where(
+            eq("owner_id", "trip"), limit=10
+        )
+        assert [row.entry_id for row in rows] == [good.entry_id]
 
 
 def _edit(path: Path, old: str, new: str) -> None:

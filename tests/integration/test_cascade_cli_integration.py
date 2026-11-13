@@ -151,6 +151,34 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     assert "pending:                  1" in result.stdout
 
 
+def test_status_names_the_files_holding_unreadable_entries(cli_runtime: Path) -> None:
+    """A file whose projection skipped entries a hand edit broke is done; status
+    counts the entries and names the file. With none, the line is absent."""
+    broken = "default_app/default_project/users/u1/episodes/episode-2026-01-01.md"
+
+    async def seed(unreadable: int) -> None:
+        storage = make_storage(cli_runtime)
+        try:
+            await storage.create_schema()
+            ledger = storage.sqlite.md_change_state
+            await ledger.force_enqueue(broken, "episode")
+            await ledger.claim_one(broken)
+            await ledger.mark_done(broken, unreadable_entries=unreadable)
+        finally:
+            await storage.aclose()
+
+    asyncio.run(seed(2))
+    result = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert result.exit_code == 0, result.stdout
+    assert "unreadable entries:       2 in 1 file(s)" in result.stdout
+    assert f"    {broken}: 2" in result.stdout
+
+    asyncio.run(seed(0))
+    result = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert result.exit_code == 0, result.stdout
+    assert "unreadable entries" not in result.stdout
+
+
 def test_rebuild_recovers_drifted_index_and_reindexes(
     cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

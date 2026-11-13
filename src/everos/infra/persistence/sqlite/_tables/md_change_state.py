@@ -116,3 +116,9 @@ class MdChangeState(BaseTable, table=True):
 
     error: str | None = Field(default=None)
     """Most recent failure message (truncated upstream if needed)."""
+
+    unreadable_entries: int | None = Field(default=None)
+    """Meaningful only when ``status='done'``: entries the last projection of
+    the file skipped because they no longer parse (a hand edit), each logged
+    as ``markdown_entry_unreadable``; the rest of the file was projected.
+    ``NULL`` when it skipped none. ``cascade status`` sums it."""

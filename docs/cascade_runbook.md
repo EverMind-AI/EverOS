@@ -56,6 +56,31 @@ lsn:
   facts or foresight of a store an earlier build wrote) fails with
   `no handler registered for kind ...`; its markdown is a leftover nothing
   reads ([storage_layout.md](storage_layout.md), section 5).
+- `unreadable entries` appears only when an indexed file holds entries a
+  hand edit broke: a timestamp that no longer parses, a deleted close
+  marker, a profile item that is no longer an item, a group-profile entry
+  its parser refuses. Such an entry costs that entry only: the projection
+  skips it -- no row is written for it, and a row the index already held
+  for it keeps its content -- indexes the rest of the file and marks the
+  file `done`, so it is not a failed row. Each skipped entry is logged as
+  `markdown_entry_unreadable` (file, entry id, line, reason; a profile
+  item as `profile_entry_dropped` with its bucket and position), and the
+  status names the files with their counts:
+
+  ```
+    unreadable entries:       2 in 1 file(s)     (skipped; fix the entry in md and re-save)
+      default_app/default_project/users/u1/episodes/episode-2026-05-14.md: 2
+  ```
+
+  Fix the entry and save; the next projection reads it and the count
+  clears. An entry's content is checked when its row has to be built (a
+  new or changed entry, every entry on `cascade rebuild`); an entry whose
+  digest still matches its row is not re-read. In `group.md` the roster
+  decides who may read the group, so an unreadable roster entry never
+  widens that: the member it names is left out of the roster until it is
+  fixed (`group_roster_member_left_out`), an entry that names no member
+  still fails the file, and a roster change is refused while the log holds
+  an entry it cannot read.
 - `status --duplicates` additionally scans every business table and
   reports duplicate `(app_id, project_id, id)` rows. LanceDB has no
   unique constraint, so a write path that bypasses the merge helper can
@@ -75,7 +100,8 @@ for an app built without the cascade lifespan). **Alert on
   "reasons": ["version cleanup stalled for kind 'episode' (1200s since its last prune — that table's index dir may grow)"],
   "pending": 3, "failed_permanent": 1, "failed_retryable": 0,
   "drain_consecutive_failures": 0, "unrecoverable_total": 4,
-  "optimize_failure_streak": 0, "prune_stale_seconds": 1200.0}}
+  "optimize_failure_streak": 0, "prune_stale_seconds": 1200.0,
+  "unreadable_entries": 2}}
 ```
 
 What flips `healthy` false — and nothing else does:
@@ -89,6 +115,9 @@ What flips `healthy` false — and nothing else does:
 `failed_permanent` is **informational only** — it is a data-quality
 backlog awaiting `cascade fix`, so it never flips `healthy` (otherwise
 the signal sits red until a human edits md). Watch it separately.
+`unreadable_entries` is informational the same way: entries of indexed
+files that a hand edit broke, skipped while the rest of each file is
+indexed (`cascade status` names the files).
 
 The HTTP code is a *liveness* signal and stays 200 even when the block
 says `healthy: false` — a degraded projection must not trigger a
@@ -114,7 +143,9 @@ start.
 
 `retryable=FALSE` rows require the user to edit the md (typically a
 YAML frontmatter issue) and re-save; the watcher picks the change up
-naturally.
+naturally. A single malformed entry no longer fails its file: it is
+skipped and reported under `unreadable entries` instead (see `cascade
+status` above).
 
 ## One-shot replay: `everos cascade sync [PATH]`
 

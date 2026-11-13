@@ -69,6 +69,7 @@ class CascadeHealthReport:
     prune_stale_seconds: float
     index_rows: dict[str, int] = dataclasses.field(default_factory=dict)
     index_emptied: bool = False
+    unreadable_entries: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +98,9 @@ class CascadeStatus:
     index_rows: dict[str, int]
     live_sources: int
     duplicate_keys: dict[str, int] | None = None
+    unreadable: list[tuple[str, int]] = dataclasses.field(default_factory=list)
+    """``(md_path, entries)`` of each indexed file whose last projection
+    skipped entries a hand edit broke; empty when there are none."""
 
 
 @dataclasses.dataclass(frozen=True)

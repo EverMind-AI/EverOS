@@ -85,6 +85,13 @@ class QueueSummary:
     """Largest ``lsn`` whose row has reached a terminal state
     (``done`` or ``failed``); 0 if no terminal rows yet."""
 
+    unreadable_entries: int = 0
+    """Entries the ``done`` files' last projections skipped as unreadable
+    (a hand edit broke them; the rest of each file is indexed)."""
+
+    files_with_unreadable_entries: int = 0
+    """``done`` files holding at least one such entry."""
+
 
 class MdChangeStateRepo(RepoBase[MdChangeState]):
     model = MdChangeState
@@ -278,7 +285,13 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
 
     # ── Worker result reporting ────────────────────────────────────────────
 
-    async def mark_done(self, md_path: str, *, change_type: str | None = None) -> None:
+    async def mark_done(
+        self,
+        md_path: str,
+        *,
+        change_type: str | None = None,
+        unreadable_entries: int | None = None,
+    ) -> None:
         """Transition the row to ``done`` after a successful handler run.
 
         ``change_type`` records what the handler actually applied when it
@@ -287,6 +300,9 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
         deletion, and the row must say ``deleted`` so the reconciler does
         not take the next scan's "file present, same mtime" as "already
         indexed" (#541). ``None`` leaves the enqueued value.
+
+        ``unreadable_entries`` is how many entries the run skipped as
+        unreadable; ``None`` or ``0`` clears what an earlier run recorded.
 
         Guarded by ``WHERE status='processing'`` so the call is a no-op
         if a concurrent :meth:`upsert` (watcher / scanner re-enqueue)
@@ -307,6 +323,7 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_attempt_at=now,
                     error=None,
                     retryable=None,
+                    unreadable_entries=unreadable_entries or None,
                     **({} if change_type is None else {"change_type": change_type}),
                 )
             )
@@ -435,6 +452,24 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
             )
             return list(rows)
 
+    async def list_unreadable(self) -> list[MdChangeState]:
+        """Every ``done`` row whose last projection skipped an unreadable
+        entry, oldest LSN first: the files ``cascade status`` names."""
+        async with session_scope(self._factory) as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(MdChangeState)
+                        .where(MdChangeState.status == "done")
+                        .where(MdChangeState.unreadable_entries > 0)
+                        .order_by(MdChangeState.lsn)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return list(rows)
+
     async def list_all(self) -> list[MdChangeState]:
         """Return every row regardless of status, oldest LSN first.
 
@@ -540,6 +575,19 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     )
                 ).scalar_one()
             )
+            unreadable_done = (MdChangeState.status == "done") & (
+                MdChangeState.unreadable_entries > 0
+            )
+            unreadable_entries = int(
+                (
+                    await s.execute(
+                        select(
+                            func.coalesce(func.sum(MdChangeState.unreadable_entries), 0)
+                        ).where(unreadable_done)
+                    )
+                ).scalar_one()
+            )
+            files_with_unreadable = await _count_where(s, unreadable_done)
         return QueueSummary(
             pending=pending,
             done=done,
@@ -547,6 +595,8 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
             failed_permanent=failed_permanent,
             max_lsn=max_lsn,
             last_processed_lsn=last_processed_lsn,
+            unreadable_entries=unreadable_entries,
+            files_with_unreadable_entries=files_with_unreadable,
         )
 
 

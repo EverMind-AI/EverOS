@@ -51,7 +51,9 @@ class HandlerOutcome:
     The worker uses ``upserted`` / ``deleted`` to log how much work
     each md change translated into downstream. ``skipped`` counts
     entries whose ``content_sha256`` matched the existing row — the
-    no-op case the diff is meant to optimise.
+    no-op case the diff is meant to optimise. ``unreadable`` counts the
+    entries the run could not read and left out (a hand edit broke them);
+    the worker records it on the file's ledger row.
     """
 
     md_path: str
@@ -59,3 +61,4 @@ class HandlerOutcome:
     upserted: int
     deleted: int
     skipped: int
+    unreadable: int = 0

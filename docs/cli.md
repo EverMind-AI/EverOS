@@ -34,7 +34,7 @@ everos
 ├── server
 │   └── start [--host] [--port] [--root] [--reload] [--log-level]   Start the HTTP API server (uvicorn)
 ├── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
-│   ├── status [--duplicates]       Queue / LSN summary; opt-in duplicate-key scan
+│   ├── status [--duplicates]       Queue / LSN summary, files with unreadable entries; opt-in duplicate-key scan
 │   ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
 │   ├── fix [--apply]               List failed rows / re-enqueue retryable ones
 │   ├── rebuild [--yes]             Drop the index tables and re-index every md file
@@ -57,7 +57,11 @@ markdown file without re-embedding what is unchanged run `everos cascade
 sync --force-all` (the first full pass after upgrading from before 1.4.2
 does this by itself); to rebuild the whole index from markdown (recovery
 from drift / corruption, and once after upgrading a Milvus root to 1.4.2)
-run `everos cascade rebuild`.
+run `everos cascade rebuild`. `everos cascade status` also counts the
+entries a hand edit broke and names their files: each such entry is skipped
+(and logged as `markdown_entry_unreadable`) while the rest of its file is
+indexed, until the entry is fixed and saved
+([cascade_runbook.md](cascade_runbook.md)).
 
 ## `everos prompts`
 

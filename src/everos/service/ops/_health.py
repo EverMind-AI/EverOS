@@ -148,6 +148,7 @@ def cascade_report(health: CascadeHealth) -> CascadeHealthReport:
         prune_stale_seconds=round(health.prune_stale_seconds, 1),
         index_rows=health.index_rows,
         index_emptied=health.index_emptied,
+        unreadable_entries=health.unreadable_entries,
     )
 
 

@@ -299,6 +299,39 @@ async def test_mark_done_transitions_processing_to_done(
     assert row.retryable is None
 
 
+async def test_mark_done_records_unreadable_entries_for_status(
+    repo: MdChangeStateRepo,
+) -> None:
+    """A projection that skipped entries a hand edit broke is still done; the
+    count reaches ``queue_summary`` and ``list_unreadable`` until a later run
+    of the file skips none."""
+    broken = "users/u/episodes/episode-2026-05-12.md"
+    clean = "users/u/episodes/episode-2026-05-13.md"
+    for path in (broken, clean):
+        await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
+        await repo.claim_one(path)
+    await repo.mark_done(broken, unreadable_entries=2)
+    await repo.mark_done(clean, unreadable_entries=0)
+
+    summary = await repo.queue_summary()
+    assert (summary.done, summary.unreadable_entries) == (2, 2)
+    assert summary.files_with_unreadable_entries == 1
+    assert [row.md_path for row in await repo.list_unreadable()] == [broken]
+    row = await repo.get_by_id(broken)
+    assert row is not None and row.status == "done" and row.unreadable_entries == 2
+
+    await repo.upsert(broken, kind="episode", change_type="modified", mtime=2.0)
+    await repo.claim_one(broken)
+    await repo.mark_done(broken)  # the entry was fixed
+
+    summary = await repo.queue_summary()
+    assert (summary.unreadable_entries, summary.files_with_unreadable_entries) == (
+        0,
+        0,
+    )
+    assert await repo.list_unreadable() == []
+
+
 async def test_mark_failed_records_retryable_flag(
     repo: MdChangeStateRepo,
 ) -> None:

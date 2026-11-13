@@ -10,6 +10,13 @@ The reader is purely parsing; it does not validate frontmatter shape,
 entry content, or cross-references. Higher layers add business-aware
 checks. The :class:`ParsedMarkdown` data type lives in :mod:`.parsed`.
 
+One broken entry costs that entry only. An open marker without its close
+marker is skipped and the entries after it are still read
+(:func:`~.entries.scan_entries`); :meth:`MarkdownReader.read` reports each
+such entry with :func:`warn_unreadable_entry`, the one structured warning
+(``markdown_entry_unreadable``: path, entry id, line, reason) every reader
+that skips an entry -- the cascade, the stores -- logs.
+
 ``parse`` is sync (pure in-memory string processing). ``read`` and
 ``read_text`` are async and run the file I/O in a worker thread so it does
 not block the event loop. Every read of a markdown file under the memory
@@ -28,7 +35,7 @@ import anyio
 
 from everos.core.observability.logging import get_logger
 
-from .entries import split_entries
+from .entries import scan_entries
 from .frontmatter import parse_frontmatter
 from .parsed import ParsedMarkdown
 
@@ -73,6 +80,33 @@ def _read_text_with_retry(path: Path) -> str:
     return path.read_text(encoding="utf-8")  # the last attempt lets the error out
 
 
+def warn_unreadable_entry(
+    path: os.PathLike[str] | str,
+    entry_id: str,
+    *,
+    reason: str,
+    line: int | None = None,
+    kind: str | None = None,
+) -> None:
+    """Log one skipped entry as ``markdown_entry_unreadable``.
+
+    Args:
+        path: The file, relative to the memory root where the caller knows it.
+        entry_id: The id its open marker names.
+        reason: Why it could not be read, on one line, cut to 200 characters.
+        line: The line of its open marker, when the caller has the file.
+        kind: The memory kind the caller reads it as (``episode``, ...).
+    """
+    logger.warning(
+        "markdown_entry_unreadable",
+        path=str(path),
+        entry_id=entry_id,
+        line=line,
+        reason=" ".join(reason.split())[:200],
+        kind=kind,
+    )
+
+
 class MarkdownReader:
     """Parse markdown files / strings into :class:`ParsedMarkdown`."""
 
@@ -80,8 +114,14 @@ class MarkdownReader:
     def parse(text: str) -> ParsedMarkdown:
         """Parse already-loaded text (no IO)."""
         meta, body = parse_frontmatter(text)
-        entries = split_entries(body)
-        return ParsedMarkdown(frontmatter=meta, body=body, entries=entries)
+        entries, unreadable = scan_entries(body)
+        return ParsedMarkdown(
+            frontmatter=meta,
+            body=body,
+            entries=entries,
+            unreadable=unreadable,
+            body_line=text.count("\n", 0, len(text) - len(body)) + 1,
+        )
 
     @staticmethod
     async def read_text(path: os.PathLike[str] | str) -> str:
@@ -91,5 +131,17 @@ class MarkdownReader:
 
     @staticmethod
     async def read(path: Path) -> ParsedMarkdown:
-        """Read the file at ``path`` and parse its content."""
-        return MarkdownReader.parse(await MarkdownReader.read_text(path))
+        """Read the file at ``path`` and parse its content.
+
+        Each entry left without its close marker is logged
+        (:func:`warn_unreadable_entry`) and left out; the rest are read.
+        """
+        parsed = MarkdownReader.parse(await MarkdownReader.read_text(path))
+        for skipped in parsed.unreadable:
+            warn_unreadable_entry(
+                path,
+                skipped.id,
+                reason=skipped.reason,
+                line=parsed.line_of(skipped.start),
+            )
+        return parsed

@@ -10,7 +10,8 @@ External usage (IO + parse):
         Entry, EntryId, StructuredEntry,
         MarkdownReader, MarkdownWriter, ParsedMarkdown,
         parse_frontmatter, dump_frontmatter,
-        split_entries, find_entry,
+        split_entries, scan_entries, find_entry, UnreadableEntry,
+        warn_unreadable_entry,
         parse_structured_entry, render_structured_entry,
     )
 
@@ -24,9 +25,11 @@ External usage (frontmatter schema chassis):
 from .entries import Entry as Entry
 from .entries import EntryId as EntryId
 from .entries import StructuredEntry as StructuredEntry
+from .entries import UnreadableEntry as UnreadableEntry
 from .entries import find_entry as find_entry
 from .entries import parse_structured_entry as parse_structured_entry
 from .entries import render_structured_entry as render_structured_entry
+from .entries import scan_entries as scan_entries
 from .entries import split_entries as split_entries
 from .frontmatter import BaseFrontmatter as BaseFrontmatter
 from .frontmatter import DailyLogPathMixin as DailyLogPathMixin
@@ -37,6 +40,7 @@ from .frontmatter import dump_frontmatter as dump_frontmatter
 from .frontmatter import parse_frontmatter as parse_frontmatter
 from .parsed import ParsedMarkdown as ParsedMarkdown
 from .reader import MarkdownReader as MarkdownReader
+from .reader import warn_unreadable_entry as warn_unreadable_entry
 from .writer import MarkdownWriter as MarkdownWriter
 
 __all__ = [
@@ -50,11 +54,14 @@ __all__ = [
     "ParsedMarkdown",
     "ProfilePathMixin",
     "StructuredEntry",
+    "UnreadableEntry",
     "UserScopedFrontmatter",
     "dump_frontmatter",
     "find_entry",
     "parse_frontmatter",
     "parse_structured_entry",
     "render_structured_entry",
+    "scan_entries",
     "split_entries",
+    "warn_unreadable_entry",
 ]

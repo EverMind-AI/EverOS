@@ -157,6 +157,10 @@ class CascadeHealth:
     signal than a number an operator can read. Recovery is ``everos
     cascade rebuild``; markdown is untouched throughout.
     """
+    unreadable_entries: int = 0
+    """Informational, like ``failed_permanent``: entries of indexed files
+    the projection skipped because a hand edit broke them; the rest of each
+    file is indexed. ``cascade status`` names the files."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -457,4 +461,5 @@ class CascadeOrchestrator:
             prune_stale_seconds=wh.prune_stale_seconds,
             index_rows=dict(self._index_rows),
             index_emptied=self._index_emptied,
+            unreadable_entries=summary.unreadable_entries,
         )
