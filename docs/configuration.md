@@ -148,7 +148,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `token` | string | `""` | Authentication token, when required. |
 | `db_name` | string | `""` | Optional Milvus database name. |
 | `consistency_level` | string | `"Session"` | Milvus consistency level used by collections. |
-| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. |
+| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. Give every memory root its own prefix: roots that share one share the collections, and a purge in one deletes the other's rows at any scope. |
 
 ### `[llm]`
 
@@ -499,6 +499,19 @@ strategies and is hot-reloaded; these require a restart.
 |---|---|---|---|
 | `max_concurrent_runs` | int | `20` | Cap on concurrent strategy runs. Each slot mostly waits on a remote extraction call, so a bulk ingest can afford far more. |
 | `run_timeout_seconds` | float | `1800.0` | Wall-clock ceiling on one strategy attempt — a deadlock backstop, not a latency target; too low kills slow-but-healthy extractions. `0` disables it. |
+
+### `[purge]`
+
+Online clearing ([`POST /api/v2/memory/purge`](api.md#post-apiv2memorypurge)).
+A purge blocks nothing; it waits for the work that was in flight when it
+was confirmed before it deletes a second time, and these bound how long a
+job can take.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `run_budget_seconds` | float | `7200.0` | Total running time of one purge across retries, its wait for in-flight work included; past it the job ends `failed`. Time the server is stopped or the machine sleeps is not counted. |
+| `nonce_ttl_seconds` | float | `300.0` | How long the nonce from `POST /memory/purge` can be confirmed. |
+| `count_timeout_seconds` | float | `30.0` | Per-store limit on counting the summary; a slower store reads `null` and the summary says `complete: false`. |
 
 ### `[knowledge]`
 

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Response
 from starlette.status import HTTP_202_ACCEPTED
 
 from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.routes.purge import REFUSED_DURING_PURGE
 from everos.entrypoints.api.schemas import (
     AcceptedResponseData,
     AddResponseData,
@@ -47,6 +48,7 @@ _ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
     },
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
+    **REFUSED_DURING_PURGE,
 }
 _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
     202: {
@@ -54,6 +56,7 @@ _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": "Queued behind the session's backlog, how a flush is queued",
     },
     429: {"description": "Queue at its per-session or global cap"},
+    **REFUSED_DURING_PURGE,
 }
 
 
@@ -65,6 +68,7 @@ async def add_memory(
     request_id: RequestIdDep,
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
+    app.purge.refuse_writes_to(req.app_id, req.project_id)
     result = await app.memory.add(
         req.model_dump(exclude={"async_mode", "defer_extraction"}),
         request_id=request_id,
@@ -94,6 +98,7 @@ async def flush_memory(
     Runs inline unless the session still has queued batches, in which case
     the flush joins the queue behind them and answers 202.
     """
+    app.purge.refuse_writes_to(req.app_id, req.project_id)
     result = await app.memory.flush(
         session_id=req.session_id,
         request_id=request_id,

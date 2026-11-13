@@ -43,8 +43,10 @@ from ._repos import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
 from ._repos import MdChangeStateRepo as MdChangeStateRepo
 from ._repos import MemcellRepo as MemcellRepo
 from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
+from ._repos import PurgeJobRepo as PurgeJobRepo
 from ._repos import QueueSummary as QueueSummary
 from ._repos import ReflectionReportRepo as ReflectionReportRepo
+from ._repos import ScopePurgeRepo as ScopePurgeRepo
 from ._repos import TopicUpsertPayload as TopicUpsertPayload
 from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
 from ._tables import Cluster as Cluster
@@ -55,6 +57,7 @@ from ._tables import KnowledgeTopicRow as KnowledgeTopicRow
 from ._tables import MdChangeState as MdChangeState
 from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
+from ._tables import PurgeJob as PurgeJob
 from ._tables import ReflectionReport as ReflectionReport
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
 from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
@@ -88,12 +91,15 @@ __all__ = [
     "MemcellRepo",
     "MemorizeInbox",
     "MemorizeInboxRepo",
+    "PurgeJob",
+    "PurgeJobRepo",
     "QueueSummary",
     "ReflectionReport",
     "ReflectionReportRepo",
     "Relationship",
     "RepoBase",
     "SQLModel",
+    "ScopePurgeRepo",
     "SqliteClusterStore",
     "SqliteDatabase",
     "SqliteKnowledgeCatalog",

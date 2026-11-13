@@ -28,6 +28,7 @@ from everos.entrypoints.api.middleware import (
     ProfileMiddleware,
     PrometheusMiddleware,
     RequestIdMiddleware,
+    WriteTrackingMiddleware,
 )
 from everos.service import Application, build_application
 
@@ -41,6 +42,7 @@ from .routes import (
     memorize,
     metrics,
     ome,
+    purge,
     search,
     tasks,
 )
@@ -109,7 +111,9 @@ def create_app(
     register_handlers(app)
 
     # Middleware order: earlier `add_middleware` calls become inner, later ones outer.
-    # CORS innermost (matches base_app.py legacy pattern).
+    # Write tracking innermost: it stamps the request the handler runs in.
+    app.add_middleware(WriteTrackingMiddleware)
+    # CORS next (matches base_app.py legacy pattern).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins or DEFAULT_CORS_ORIGINS,
@@ -138,6 +142,7 @@ def create_app(
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(get.router, prefix="/api/v1")
     app.include_router(delete.router, prefix="/api/v1")
+    app.include_router(purge.router, prefix="/api/v1")
     app.include_router(ome.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
     # Operational, not a memory API: it stops a background subsystem. Mounted on
@@ -149,6 +154,7 @@ def create_app(
     app.include_router(search.router, prefix="/api/v2")
     app.include_router(get.router, prefix="/api/v2")
     app.include_router(delete.router, prefix="/api/v2")
+    app.include_router(purge.router, prefix="/api/v2")
     app.include_router(ome.router, prefix="/api/v2")
     app.include_router(knowledge.router, prefix="/api/v2")
     app.include_router(cascade.router, prefix="/api/v2")

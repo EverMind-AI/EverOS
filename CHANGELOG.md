@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`POST /api/v2/memory/purge`**, **`/purge/confirm`** and
+  **`GET /api/v2/memory/purge/{job_id}`**: clear the whole memory root, one
+  app or one project while the server keeps serving, aligned with the Cloud
+  API. Reads, other apps and projects and background work all proceed while
+  a purge runs; only writes into the purged range answer `409`
+  `PURGE_IN_PROGRESS` until it ends; a browser page of another site cannot
+  purge (`403` `CROSS_SITE_REFUSED`). Background work on input taken in
+  before the purge is dropped, and the purge waits for work in flight before
+  it deletes a second time. New `[purge]` settings bound a job's running
+  time. See `docs/api.md`.
 - **`[boundary_detection] strategy`**: `batch` (the default) cuts the whole
   buffer in one model call per add; `step` asks once per message whether it
   starts a new episode, as the EverAlgo LoCoMo reference run does (chat

@@ -1,8 +1,9 @@
 """Application assembly: the one place EverOS's objects are built and wired.
 
 :func:`build_application` turns :class:`~everos.config.Settings` into an
-:class:`Application` -- three facades (:class:`MemoryService`,
-:class:`KnowledgeService`, :class:`OpsService`) plus the snapshot of which
+:class:`Application` -- four facades (:class:`MemoryService`,
+:class:`KnowledgeService`, :class:`OpsService`, :class:`PurgeService`) plus
+the snapshot of which
 optional providers were configured. Everything below the facades is built
 here and nowhere else: providers, storage adapters, the OME engine with every
 strategy registered, the event bus, the cascade orchestrator, the domain
@@ -75,6 +76,7 @@ from everos.core.observability.tracing import (
     shutdown_score_sink,
     shutdown_tracing,
 )
+from everos.core.purge_marks import MARKS, PurgeMarks
 from everos.infra.cascade import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
     CascadeAdmin,
@@ -89,7 +91,7 @@ from everos.infra.ome import (
     OmeLock,
     to_ome_strategy,
 )
-from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence import MemoryRoot, purge_scope
 from everos.infra.persistence.factories import (
     build_derived_index,
     build_indexes,
@@ -102,6 +104,7 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownKnowledgeStore,
+    MarkdownScopePurger,
 )
 from everos.infra.persistence.sqlite import (
     SqliteDatabase,
@@ -130,6 +133,7 @@ from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
+from everos.service.purge import PurgeRunGate, PurgeService
 
 logger = get_logger(__name__)
 
@@ -160,10 +164,11 @@ class _Lifecycle:
 
 @dataclasses.dataclass(frozen=True)
 class Application:
-    """What an entry point holds: three facades plus the provider snapshot.
+    """What an entry point holds: four facades plus the provider snapshot.
 
-    ``start`` brings up what a long-running server needs -- system DB,
-    index, cascade, OME, the ``async_mode`` queue -- in that order.
+    ``start`` brings up what a long-running server needs -- system DB (and
+    the purge tombstones, before anything replays), index, cascade, OME, the
+    ``async_mode`` queue, the purge runner -- in that order.
     ``aclose`` stops whatever was started in reverse, closes the storage
     connections whether or not ``start`` ran (a CLI command opens them
     without starting), and shuts tracing down; it is idempotent and safe
@@ -173,6 +178,7 @@ class Application:
     memory: MemoryService
     knowledge: KnowledgeService
     ops: OpsService
+    purge: PurgeService
     capabilities: Capabilities
     _settings: Settings = dataclasses.field(repr=False)
     _root: MemoryRoot = dataclasses.field(repr=False)
@@ -223,9 +229,13 @@ class Application:
         self._root.ensure()
         tables = await self._admin.create_schema()
         logger.info("sqlite_schema_ready", tables=tables)
+        # Before anything replays: every purge's tombstone is known before
+        # OME crash recovery and the async queue re-run what they hold.
+        await self.purge.restore()
         # Before anything writes: a whole-owner deletion a crash cut short
-        # still has today's id counters to put back.
-        await self.memory.finish_interrupted_deletions()
+        # still has today's id counters to put back; one inside a running
+        # purge's scope is left to that purge.
+        await self.memory.finish_interrupted_deletions(skip=self.purge.covers_trash)
 
         await self._admin.start_index()
         if self._admin.backend == "lancedb":
@@ -242,6 +252,9 @@ class Application:
 
         await self.memory.start()
         self._stack.push_async_callback(_shielded("memory", self.memory.aclose))
+
+        self.purge.start()
+        self._stack.push_async_callback(_shielded("purge", self.purge.stop))
         logger.info("application_started")
 
     async def aclose(self) -> None:
@@ -372,8 +385,22 @@ def build_application(
         fence=fence,
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
+    marks = MARKS.for_root(root.root)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser
+        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser, marks
+    )
+    engine.set_run_gate(PurgeRunGate(marks))
+    purge = PurgeService(
+        settings=settings.purge,
+        root=root.root,
+        scope_of=purge_scope,
+        jobs=sqlite.purge_job,
+        scope_repo=sqlite.scope_purge,
+        markdown=MarkdownScopePurger(root, stores.owner_dir),
+        index=index.repositories,
+        index_store=settings.index.backend,
+        engine=engine,
+        fence=fence,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -413,6 +440,7 @@ def build_application(
             capabilities=capabilities,
             queue_health=memory.queue_health,
         ),
+        purge=purge,
         capabilities=capabilities,
         _settings=settings,
         _root=root,
@@ -566,11 +594,13 @@ def _build_memory_service(
     tokenizer: Tokenizer,
     bus: EventBus,
     index_eraser: IndexEraser,
+    purge_marks: PurgeMarks,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
+        purge_marks=purge_marks,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(

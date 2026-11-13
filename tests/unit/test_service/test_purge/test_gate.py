@@ -1,0 +1,81 @@
+"""The purge gate's verdict for every kind of event, and the origin it binds."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from everos.core.purge_marks import MARKS, ORIGIN, PurgeScope, Tombstone
+from everos.memory.ports import CronTick, Event
+from everos.service.purge import PurgeRunGate
+
+T = datetime(2026, 11, 11, 10, 0, tzinfo=UTC)
+BEFORE, AFTER = T - timedelta(minutes=1), T + timedelta(minutes=1)
+S = PurgeScope("project", "a1", "p1", "a1", "p1")
+
+
+class _Scoped(Event):
+    app_id: str = "a1"
+    project_id: str = "p1"
+
+
+@pytest.fixture(autouse=True)
+def _clean() -> Iterator[None]:
+    MARKS.reset()
+    yield
+    MARKS.reset()
+
+
+# (event, tombstone of S at T?, another job active?) -> verdict, by hand.
+TABLE = [
+    (_Scoped(ts=BEFORE), False, False, "run"),
+    (_Scoped(ts=BEFORE), False, True, "run"),
+    (_Scoped(ts=BEFORE), True, False, "discard"),
+    (_Scoped(ts=BEFORE), True, True, "discard"),
+    (_Scoped(ts=AFTER), True, False, "run"),
+    (_Scoped(ts=AFTER), True, True, "run"),
+    (_Scoped(ts=BEFORE, project_id="p2"), True, False, "run"),
+    (_Scoped(ts=BEFORE, project_id="p2"), True, True, "run"),
+    (CronTick(strategy_name="s", ts=BEFORE), True, False, "run"),
+    (CronTick(strategy_name="s", ts=BEFORE), True, True, "run"),
+]
+
+
+@pytest.mark.parametrize(("event", "tombstone", "active", "expected"), TABLE)
+def test_gate_verdict_table(
+    tmp_path: Path, event: Event, tombstone: bool, active: bool, expected: str
+) -> None:
+    marks = MARKS.for_root(tmp_path)
+    if tombstone:
+        marks.add_tombstone(Tombstone(S, T))
+    if active:  # a purge running elsewhere holds nothing back
+        marks.raise_mark("j1", PurgeScope("project", "a9", "p9", "a9", "p9"))
+    assert PurgeRunGate(marks).verdict(event) == expected
+
+
+def test_bind_makes_the_event_ts_the_origin(tmp_path: Path) -> None:
+    """Events emitted while a run handles a scoped event carry its time."""
+    gate = PurgeRunGate(MARKS.for_root(tmp_path))
+    with gate.bind(_Scoped(ts=BEFORE)):
+        assert ORIGIN.get() == BEFORE
+        assert _Scoped().ts == BEFORE
+    assert ORIGIN.get() is None
+
+
+def test_a_tick_run_stamps_what_it_emits_with_its_start(tmp_path: Path) -> None:
+    """A tick fired before a purge but run after it reads the new data: what
+    it emits must not look older than the purge."""
+    gate = PurgeRunGate(MARKS.for_root(tmp_path))
+    with gate.bind(CronTick(strategy_name="s", ts=BEFORE)):
+        started = ORIGIN.get()
+        first = _Scoped()
+        time.sleep(0.01)
+        later = _Scoped()
+    # Both stamped with the run's start, not when each is made (D34): a tick
+    # that starts before a purge and emits after it is old work.
+    assert started is not None and started > BEFORE
+    assert first.ts == later.ts == started

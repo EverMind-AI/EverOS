@@ -14,6 +14,8 @@ test drives the HTTP layer without storage, providers or background loops::
 
 from __future__ import annotations
 
+import contextlib
+
 __all__ = [
     "FakeOmeLock",
     "StubAdmin",
@@ -121,9 +123,15 @@ class StubMemoryService:
         self.delete = AsyncMock()
         self.delete_by_ids = AsyncMock(return_value=0)
 
-    async def finish_interrupted_deletions(self) -> int:
+    async def finish_interrupted_deletions(self, *, skip: Any = None) -> int:
         self.lifecycle.append("memory.finish_interrupted_deletions")
         return 0
+
+    def extraction_snapshot(self) -> frozenset[Any]:
+        return frozenset()
+
+    def wake_queue(self) -> None:
+        self.lifecycle.append("memory.wake_queue")
 
     async def start(self) -> None:
         self.lifecycle.append("memory.start")
@@ -304,6 +312,42 @@ class StubOpsService:
 def StubKnowledgeService() -> Any:  # noqa: N802 - reads as the class it doubles
     """A :class:`KnowledgeService` whose every method is an ``AsyncMock``."""
     return AsyncMock(spec=KnowledgeService)
+
+
+class StubPurgeService:
+    """Purge double: ``tracked`` lists the origin of each write request seen,
+    ``checked_writes`` the range of each write a route asked about; set
+    ``refusing`` to the error that check raises."""
+
+    def __init__(self, lifecycle: list[str] | None = None) -> None:
+        self.lifecycle = lifecycle if lifecycle is not None else []
+        self.tracked: list[Any] = []
+        self.checked_writes: list[tuple[str, str]] = []
+        self.refusing: Exception | None = None
+        self.request = AsyncMock()
+        self.confirm = AsyncMock()
+        self.get = AsyncMock()
+
+    def track(self, origin: Any) -> contextlib.AbstractContextManager[None]:
+        self.tracked.append(origin)
+        return contextlib.nullcontext()
+
+    def refuse_writes_to(self, app_id: str, project_id: str) -> None:
+        self.checked_writes.append((app_id, project_id))
+        if self.refusing is not None:
+            raise self.refusing
+
+    def covers_trash(self, scope: Any) -> bool:
+        return False
+
+    async def restore(self) -> None:
+        self.lifecycle.append("purge.restore")
+
+    def start(self) -> None:
+        self.lifecycle.append("purge.start")
+
+    async def stop(self) -> None:
+        self.lifecycle.append("purge.stop")
 
 
 class StubAdmin:
@@ -564,6 +608,7 @@ def make_application(
     memory: Any = None,
     knowledge: Any = None,
     ops: Any = None,
+    purge: Any = None,
     capabilities: Capabilities = _ALL_CAPABILITIES,
     lifecycle: list[str] | None = None,
 ) -> Application:
@@ -582,6 +627,7 @@ def make_application(
             if ops is not None
             else StubOpsService(capabilities, events, memory.queue_health)
         ),
+        purge=purge if purge is not None else StubPurgeService(events),
         capabilities=capabilities,
         _settings=load_settings(),
         _root=MemoryRoot(root) if root is not None else MemoryRoot.resolve(),

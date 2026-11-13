@@ -231,8 +231,13 @@ async def test_deleted_entry_never_stays_in_the_index(
 
     async def run() -> None:
         await gates.stop("c_read")
-        with contextlib.suppress(VectorStoreBusyError):  # the worker retries it
-            await handler.handle_added_or_modified(md_path)
+        # Registered as the cascade worker registers every run it dispatches.
+        token = fence.register_run()
+        try:
+            with contextlib.suppress(VectorStoreBusyError):  # the worker retries it
+                await handler.handle_added_or_modified(md_path)
+        finally:
+            fence.end_run(token)
 
     async def delete() -> None:
         await gates.stop("d_rewrite")

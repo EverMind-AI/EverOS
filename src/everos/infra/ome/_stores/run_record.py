@@ -10,6 +10,7 @@ Every status update atomically keeps the most recently finished
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -120,6 +121,29 @@ class RunRecordStore:
                     self._max,
                 ),
             )
+
+    async def redact_payloads(self, match: Callable[[str], bool], marker: str) -> int:
+        """Replace the payload of finished, unsuccessful rows ``match`` accepts.
+
+        A SUCCESS row's payload is already empty and a RUNNING row is live
+        recovery state; every other row must keep a non-empty payload, so it
+        gets ``marker`` instead of the original. Returns rows rewritten.
+        """
+        async with self._storage.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT run_id, event_payload FROM run_record "
+                "WHERE status NOT IN (?, ?) AND event_payload != ?",
+                (RunStatus.RUNNING.value, RunStatus.SUCCESS.value, marker),
+            )
+            hits = [
+                run_id for run_id, payload in await cur.fetchall() if match(payload)
+            ]
+            for run_id in hits:
+                await conn.execute(
+                    "UPDATE run_record SET event_payload = ? WHERE run_id = ?",
+                    (marker, run_id),
+                )
+        return len(hits)
 
     async def get(self, run_id: str) -> RunRecord | None:
         """Return the record for ``run_id`` (``None`` if absent)."""

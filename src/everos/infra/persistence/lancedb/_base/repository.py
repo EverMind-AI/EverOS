@@ -1035,6 +1035,12 @@ class LanceRepoBase[T: IndexRecord]:
             table = await self._table()
             await table.delete(predicate)
 
+    async def delete_all(self) -> None:
+        """Delete every row; the table, its schema and its indexes stay."""
+        async with self._locked(self._timeouts.write, "delete_all"):
+            table = await self._table()
+            await table.delete("true")
+
     async def delete_by_md_path(self, md_path: str) -> int:
         """Delete every row whose ``md_path`` matches; return rows deleted.
 

@@ -77,6 +77,7 @@ from ._writers import KnowledgeWriter as KnowledgeWriter
 from ._writers import ProfileWriter as ProfileWriter
 from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
 from .owner_dir import MarkdownOwnerDirStore as MarkdownOwnerDirStore
+from .scope_purge import MarkdownScopePurger as MarkdownScopePurger
 from .stores import MarkdownAgentCaseStore as MarkdownAgentCaseStore
 from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
 from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
@@ -122,6 +123,7 @@ __all__ = [
     "MarkdownOwnerDirStore",
     "MarkdownProfileStore",
     "MarkdownReader",
+    "MarkdownScopePurger",
     "MarkdownWriter",
     "ParsedMarkdown",
     "ProfilePathMixin",

@@ -55,6 +55,7 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "profile_init": "_EpisodeInitOutput",
     "profile_update": "_UpdateOutput",
     "reflect": "_ReflectOutput",
+    "foresights": "_ForesightsReply",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""
 

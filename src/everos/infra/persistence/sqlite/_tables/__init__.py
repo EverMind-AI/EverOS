@@ -15,6 +15,7 @@ from .knowledge import KnowledgeTopicRow as KnowledgeTopicRow
 from .md_change_state import MdChangeState as MdChangeState
 from .memcell import Memcell as Memcell
 from .memorize_inbox import MemorizeInbox as MemorizeInbox
+from .purge_job import PurgeJob as PurgeJob
 from .reflection_report import ReflectionReport as ReflectionReport
 from .sender_name import SenderName as SenderName
 from .unprocessed_buffer import UnprocessedBuffer as UnprocessedBuffer
@@ -28,6 +29,7 @@ __all__ = [
     "MdChangeState",
     "Memcell",
     "MemorizeInbox",
+    "PurgeJob",
     "ReflectionReport",
     "SenderName",
     "UnprocessedBuffer",

@@ -86,3 +86,58 @@ async def test_lifespan_drains_running_extractions() -> None:
     gate.set()
     await asyncio.wait_for(shutdown, timeout=2.0)
     assert supervisor.in_flight == 0
+
+
+async def test_extraction_is_tracked_with_the_purge_past_a_cancel(
+    tmp_path: Any,
+) -> None:
+    """A purge of the scope must wait for an extraction whose request is gone:
+    the extraction is registered (origin = the request's, scope = its
+    payload's) from hand-off to end, cancel or not."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from everos.core.purge_marks import MARKS, ORIGIN, PurgeScope
+    from everos.core.utils.datetime import get_utc_now
+
+    marks = MARKS.for_root(tmp_path)
+    service = make_memory_service(purge_marks=marks)
+    memorizer = service._memorizer
+    gate = asyncio.Event()
+
+    async def cut(*_: Any, **__: Any) -> Any:
+        return object(), SimpleNamespace(memcell_ids=["mc_1"])
+
+    async def extract(*_: Any, **__: Any) -> Any:
+        await gate.wait()
+        return MemorizeResult(message_count=1, status="extracted")
+
+    memorizer._cut = cut  # type: ignore[method-assign]
+    memorizer._extract = extract  # type: ignore[method-assign]
+    arrived = get_utc_now() - timedelta(seconds=5)
+    s = PurgeScope("project", "a1", "p1", "a1", "p1")
+    other = PurgeScope("project", "a2", "p1", "a2", "p1")
+    later = get_utc_now() + timedelta(hours=1)
+
+    async def request() -> Any:
+        ORIGIN.set(arrived)  # what the write-tracking middleware sets
+        payload = {"session_id": "s", "app_id": "a1", "project_id": "p1"}
+        return await memorizer.run(payload)
+
+    req = asyncio.create_task(request())
+    for _ in range(50):
+        if marks.tracked_before(later, s):
+            break
+        await asyncio.sleep(0.01)
+    assert marks.tracked_before(later, s) == 1
+    assert marks.tracked_before(arrived + timedelta(seconds=1), s) == 1
+    assert marks.tracked_before(arrived, s) == 0  # its origin is the arrival
+    assert marks.tracked_before(later, other) == 0  # its scope is the payload's
+    req.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await req
+    assert marks.tracked_before(later, s) == 1, "the request is gone, not the work"
+    gate.set()
+    await service._extractions.drain(wait_seconds=2.0)
+    assert marks.tracked_before(later, s) == 0
+    MARKS.reset()

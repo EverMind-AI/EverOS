@@ -33,6 +33,7 @@ from typing import Any
 
 from everos.config import AsyncQueueSettings
 from everos.core.observability.logging import get_logger
+from everos.core.purge_marks import PurgeMarks
 from everos.core.utils.datetime import get_utc_now
 from everos.memory.models import MemorizeTask
 from everos.memory.ports import MemorizeInboxStore, SessionKey
@@ -86,8 +87,10 @@ class MemorizeQueueWorker:
         accept_async: bool = True,
         stop_grace_seconds: float = _STOP_GRACE_SECONDS,
         mark_retry_seconds: float = _MARK_RETRY_SECONDS,
+        marks: PurgeMarks | None = None,
     ) -> None:
         self._cfg = settings
+        self._marks = marks
         self._stop_grace = stop_grace_seconds
         self._mark_retry = mark_retry_seconds
         self._inbox = inbox
@@ -359,7 +362,27 @@ class MemorizeQueueWorker:
                 logger.exception("memorize_queue_loop_error")
 
     async def _process(self, row: MemorizeTask) -> None:
-        await deliver_row(row, deliver=self._deliver, mark=self._mark, cfg=self._cfg)
+        # Tracked so a purge confirmed meanwhile waits for this delivery.
+        tracked = (
+            self._marks.track(row.created_at, (row.app_id, row.project_id))
+            if self._marks
+            else contextlib.nullcontext()
+        )
+        with tracked:
+            await deliver_row(
+                row,
+                deliver=self._deliver,
+                mark=self._mark,
+                cfg=self._cfg,
+                should_discard=self._discarding,
+            )
+
+    def _discarding(self, row: MemorizeTask) -> bool:
+        """The row was accepted before the latest purge of its scope."""
+        if self._marks is None:
+            return False
+        purged_at = self._marks.tombstone_at(row.app_id, row.project_id)
+        return purged_at is not None and purged_at > row.created_at
 
     async def _mark(self, row_id: int, **values: Any) -> None:
         """Write a row's status; retry a failing write a few times.

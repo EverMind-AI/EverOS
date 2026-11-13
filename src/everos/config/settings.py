@@ -1130,6 +1130,26 @@ class ObservabilitySettings(BaseModel):
     recall_hit_threshold: float = 0.6
 
 
+class PurgeSettings(BaseModel):
+    """``[purge]`` — online clearing of a project, an app or the whole root.
+
+    Nothing is blocked while a purge runs; the budget bounds how long one can
+    take, its wait for in-flight work included.
+
+    Env binding:
+        EVEROS_PURGE__RUN_BUDGET_SECONDS
+        EVEROS_PURGE__NONCE_TTL_SECONDS
+        EVEROS_PURGE__COUNT_TIMEOUT_SECONDS
+    """
+
+    run_budget_seconds: float = Field(default=7200.0, gt=0)
+    """Total running time across attempts before the job ends ``failed``."""
+    nonce_ttl_seconds: float = Field(default=300.0, gt=0)
+    """How long a confirmation nonce from ``POST /memory/purge`` stays valid."""
+    count_timeout_seconds: float = Field(default=30.0, gt=0)
+    """Per-store limit on counting a purge summary; a slow store reads null."""
+
+
 class Settings(BaseSettings):
     """Top-level application settings."""
 
@@ -1155,6 +1175,7 @@ class Settings(BaseSettings):
     knowledge: KnowledgeSettings = KnowledgeSettings()
     logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
+    purge: PurgeSettings = PurgeSettings()
 
     model_config = SettingsConfigDict(
         env_prefix="EVEROS_",

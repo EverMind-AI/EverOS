@@ -23,6 +23,7 @@ from everos.core.errors import (
     MultimodalNotEnabledError,
     PathTraversalError,
     PayloadTooLargeError,
+    PurgeNonceInvalidError,
     QueueSaturatedError,
     StorageError,
     UnsupportedModalityError,
@@ -45,6 +46,10 @@ def _make_app() -> FastAPI:
     @app.get("/raise/not-found")
     async def _not_found() -> None:
         raise DocumentNotFoundError("doc_abc123")
+
+    @app.get("/raise/purge-nonce-invalid")
+    async def _purge_nonce_invalid() -> None:
+        raise PurgeNonceInvalidError("unknown nonce")
 
     @app.get("/raise/conflict")
     async def _conflict() -> None:
@@ -169,6 +174,14 @@ async def test_queue_saturated_returns_429(client: AsyncClient) -> None:
     data = resp.json()
     assert data["error"]["code"] == "QUEUE_SATURATED"
     _assert_envelope(data, path="/raise/queue-saturated")
+
+
+async def test_purge_nonce_invalid_returns_404(client: AsyncClient) -> None:
+    resp = await client.get("/raise/purge-nonce-invalid")
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["error"]["code"] == "PURGE_NONCE_INVALID"
+    _assert_envelope(data, path="/raise/purge-nonce-invalid")
 
 
 async def test_conflict_returns_409(client: AsyncClient) -> None:
