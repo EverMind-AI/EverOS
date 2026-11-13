@@ -10,6 +10,9 @@ these pin, for a user's memory and a group's alike:
   and goes through once that change is undone;
 - a user's message forget re-extracts the segment without the message, and a
   buffered message forgotten before its segment was cut is never read;
+- in two people's conversation each forget acts on the asker's own copies
+  only, and a message forget is refused (it would change the other person's
+  memory, read from the same segments and buffer);
 - forgets logged before this engine -- a user's in the log's columns or in an
   ``undo`` of records, a group's that took records out of markdown -- still
   undo.
@@ -25,7 +28,7 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage
 
-from everos.core.errors import ConflictError
+from everos.core.errors import ConflictError, InvalidInputError
 from everos.memory.models import FORGOTTEN_MARK, Episode, ExplicitInfoItem, Profile
 from everos.memory.ports import NoSourceCheck
 from everos.service import ForgetTarget, SearchRequest
@@ -283,6 +286,48 @@ async def test_a_users_message_forget_reextracts_and_skips_the_buffer(
             if mark is None
         ]
         assert live == [f"{SECRET}, {KEPT}"]
+
+
+async def test_two_peoples_forgets_act_on_the_askers_copies_only(
+    tmp_path: Path,
+) -> None:
+    model = _Model()
+    async with await _open(tmp_path, model) as world:
+        await _send(
+            world,
+            ("amy", f"The safe code is {SECRET}", 1_000),
+            ("ben", f"I keep the {KEPT} by the door", 2_000),
+        )
+        await world.project()
+        ids = await _message_ids(world)
+        model.calls.clear()
+
+        message = ForgetTarget(
+            kind="message",
+            session_id="s_amy",
+            message_ids=(ids[f"The safe code is {SECRET}"],),
+        )
+        with pytest.raises(InvalidInputError, match="two people"):
+            await _forget(world, message)
+        assert model.calls == []
+        assert (
+            await world.stores.message_forget.forgotten(world.session("s_amy"))
+            == frozenset()
+        )
+
+        done = await _forget(world, ForgetTarget(kind="session", session_id="s_amy"))
+        assert len(done.episodes) == 1 and model.calls == []
+        for person, alive in (("amy", []), ("ben", [f"{SECRET}, {KEPT}"])):
+            live = [
+                s.item.episode
+                for s, mark in await world.stores.episode.read_all(
+                    world.personal(person)
+                )
+                if mark is None
+            ]
+            assert live == alive, person
+        undone = await _undo(world, done.forget_id)
+        assert undone.applied
 
 
 # ── forgets logged before the one engine ─────────────────────────────────

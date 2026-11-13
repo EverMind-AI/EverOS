@@ -60,7 +60,7 @@ from typing import TYPE_CHECKING, Any
 
 from everalgo.types import ChatMessage
 
-from everos.core.errors import NotFoundError
+from everos.core.errors import InvalidInputError, NotFoundError
 from everos.memory.extract.pipeline import profile_items
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.pictures import image_ids_in, without_pictures
@@ -275,6 +275,8 @@ class _Messages:
     sender: dict[tuple[SessionKey, str], str] = field(default_factory=dict)
     segment: dict[tuple[SessionKey, str], str] = field(default_factory=dict)
     order: dict[SessionKey, list[str]] = field(default_factory=dict)
+    people: dict[SessionKey, set[str]] = field(default_factory=dict)
+    """The role ``user`` senders of each session."""
 
 
 class ForgetPlanner:
@@ -317,7 +319,8 @@ class ForgetPlanner:
 
         Raises:
             NotFoundError: The target names nothing the owner holds.
-            InvalidInputError: A record id of no kind of the owner's.
+            InvalidInputError: A record id of no kind of the owner's; a
+                user's message target in a conversation of two people.
         """
         plan = ForgetPlan(scope=scope, target=target)
         if already is not None:
@@ -404,6 +407,17 @@ class ForgetPlanner:
             raise NotFoundError(
                 f"no session {target.session_id!r} of user {scope.owner_id!r}"
             )
+        if not plan.is_group and found.people.get(sessions[0], set()) - {
+            scope.owner_id
+        }:
+            # Two people each keep a copy of the session, read from one
+            # buffer and one set of segments: forgetting a message there would
+            # take it from the other person's memory too.
+            raise InvalidInputError(
+                f"session {target.session_id!r} is a conversation of two people: "
+                "a message forget would change the other person's memory too; "
+                "forget your own records of it by id, or the session"
+            )
         if target.kind == "message":
             (session,) = sessions
             missing = [
@@ -446,6 +460,7 @@ class ForgetPlanner:
         found = _Messages()
         for session in sessions:
             order = found.order.setdefault(session, [])
+            people = found.people.setdefault(session, set())
             cells = await self._stores.memcell.cells_in_session(session)
             for memcell_id, cell in cells.items():
                 found.cells[memcell_id] = cell
@@ -455,8 +470,12 @@ class ForgetPlanner:
                         found.sender[(session, item.id)] = item.sender_id
                         found.segment[(session, item.id)] = memcell_id
                         order.append(item.id)
+                        if item.role == "user":
+                            people.add(item.sender_id)
             for message in await self._stores.session_buffer.list(session):
                 message_id = message.client_message_id or message.message_id
+                if message.role == "user":
+                    people.add(message.sender_id)
                 if (session, message_id) not in found.sender:
                     found.sender[(session, message_id)] = message.sender_id
                     order.append(message_id)
