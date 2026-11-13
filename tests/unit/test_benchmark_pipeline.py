@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import threading
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +37,19 @@ from config import BenchmarkConfig  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def backoffs(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+def backoffs(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[float]]:
     """The retry backoffs a test's calls asked for, recorded instead of slept:
-    a failing stub is retried with the real policy and takes no wall time."""
-    waits: list[float] = []
-    monkeypatch.setattr(run_mod, "_backoff_sleep", waits.append)
+    a failing stub is retried with the real policy and takes no wall time.
+
+    Keyed by the worker thread that waited. Questions run concurrently, so their
+    waits interleave in a single list in no fixed order; a thread serves one
+    question at a time, so what it recorded is whole schedules back to back."""
+    waits: dict[str, list[float]] = defaultdict(list)
+
+    def record(seconds: float) -> None:
+        waits[threading.current_thread().name].append(seconds)
+
+    monkeypatch.setattr(run_mod, "_backoff_sleep", record)
     return waits
 
 
@@ -286,7 +296,7 @@ def test_transport_error_is_retried_then_recorded(
 
 
 def test_persistent_transport_error_is_recorded(
-    tmp_path: Path, cfg: BenchmarkConfig, backoffs: list[float]
+    tmp_path: Path, cfg: BenchmarkConfig, backoffs: dict[str, list[float]]
 ) -> None:
     """When it never recovers, the question is kept and marked, not dropped."""
     conv = tmp_path / "conv0"
@@ -299,8 +309,16 @@ def test_persistent_transport_error_is_recorded(
     searches = _search(conv, cfg, Dead())
     assert len(searches) == len(QA)
     assert all(s.search_error for s in searches)
-    # Every question was retried on the real schedule (2, 4, 8, 16 s), unslept.
-    assert backoffs == [2.0, 4.0, 8.0, 16.0] * len(QA)
+    # Every question was retried on the real schedule (2, 4, 8, 16 s), unslept. Which
+    # worker served which question is up to the scheduler, so read each thread's waits
+    # as consecutive schedules: one per question, none missing, none doubled.
+    schedule = [2.0, 4.0, 8.0, 16.0]
+    served = [
+        waits[i : i + len(schedule)]
+        for waits in backoffs.values()
+        for i in range(0, len(waits), len(schedule))
+    ]
+    assert served == [schedule] * len(QA)
 
 
 def test_report_writes_and_prints(
