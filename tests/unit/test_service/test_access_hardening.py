@@ -13,6 +13,8 @@ matters. What these pin (docs/group-memory.md, sections 4.3, 5.1, 5.2, 9.1 and
   history opens no earlier than the newest message the group holds, so one
   backdated message reads nothing of the past; owners, admins and the
   deliverer still backdate, and a time-ordered import joins as before;
+- ``audience = group`` intersects the windows of current people only: an
+  assistant's implicit join hides nothing;
 - with ``[access] identity_header`` set, a request without the header is
   refused.
 """
@@ -386,6 +388,36 @@ async def test_a_group_with_no_messages_takes_the_first_message_join(
     await _managed_group(world, deliverer=None)
     await _add(world, "s_main", _message("u_kim", T0 - DAY, "first words"))
     assert await _joined_at(world, "u_kim") == T0 - DAY
+
+
+# -- B-2: audience = group counts people, not assistants -------------------
+
+
+async def test_an_assistants_implicit_join_hides_nothing_from_audience_group(
+    world: GroupWorld,
+) -> None:
+    await _managed_group(world)
+    await world.episode(
+        "trip", "mk_first decision made", start=T0 + 6000, end=T0 + 6500
+    )
+    await world.project()
+    await _add(
+        world,
+        "s_main",
+        _message("u_chen", T0 + 8000, "a question"),
+        _message("bot", T0 + 8100, "an answer", role="assistant"),
+        asker=BOT,
+    )
+    record = await world.stores.groups.get(world.scope("trip"))
+    assert record is not None and record.roster.is_current_member("bot")
+    for asker, fields in ((BOT, {}), ("u_chen", {"audience": "group"})):
+        read = await world.memory.search(_search("trip", asker, **fields))
+        assert "mk_first" in _said(read), asker
+    # A person's window still bounds it: Evan joined at T0 + 5000.
+    await world.episode("trip", "mk_before evan", start=T0 + 1000, end=T0 + 2000)
+    await world.project()
+    read = await world.memory.search(_search("trip", "u_chen", audience="group"))
+    assert "mk_before" not in _said(read)
 
 
 # -- B-5: a gateway's server serves no request without its header ---------

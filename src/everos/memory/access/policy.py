@@ -40,7 +40,8 @@ Rules the implementation must keep (section 9.1):
   of whose sources lie in one of the asker's windows: ``source_start >= from``
   and ``source_end < to`` (no upper bound for the open window);
 * ``history_visible_from = creation`` gives a current member the whole history;
-* ``audience = group`` keeps only what every current member can see;
+* ``audience = group`` keeps only what every current human member can see
+  (an assistant member is no audience);
 * an owner or admin role grants roster management and forgetting, never extra
   reading; a member may forget only what rests on their own messages;
 * a forgotten message is absent from every read of a session's buffer, as it
@@ -91,6 +92,7 @@ from everos.memory.models import (
     Group,
     ImageMemory,
     ImplicitTraitItem,
+    MembershipInterval,
     Profile,
     Roster,
     RosterEvent,
@@ -319,8 +321,9 @@ def _view_of(record: GroupRecord, asker: str, audience: Audience) -> GroupView:
     """One group of a read scope: the asker's windows in it, cut by ``audience``.
 
     The group's deliverer reads the whole history. ``audience = group`` keeps
-    only the time every current member can see; the deliverer is never one
-    of them, even when it is a member too.
+    only the time every current human member can see: an assistant member
+    and the deliverer are never one of them (an assistant's implicit join at
+    its first reply would otherwise hide everything said before it).
     """
     roster = record.roster
     windows = (
@@ -330,12 +333,22 @@ def _view_of(record: GroupRecord, asker: str, audience: Audience) -> GroupView:
     )
     if audience == "group":
         for member in roster.current_members():
-            if is_deliverer(roster, member.member_id):
+            if not _in_audience(roster, member):
                 continue
             windows = intersect_windows(
                 windows, _member_windows(record.group, roster, member.member_id)
             )
     return GroupView(group=record.group, roster=roster, windows=windows)
+
+
+def _in_audience(roster: Roster, member: MembershipInterval) -> bool:
+    """Whether a current member counts in ``audience = group``: a person who
+    is not the group's deliverer (an assistant is no audience)."""
+    return (
+        member.kind == "human"
+        and member.role != "assistant"
+        and not is_deliverer(roster, member.member_id)
+    )
 
 
 def _group_read_scope(
