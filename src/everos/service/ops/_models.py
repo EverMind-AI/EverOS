@@ -70,6 +70,7 @@ class CascadeHealthReport:
     index_rows: dict[str, int] = dataclasses.field(default_factory=dict)
     index_emptied: bool = False
     unreadable_entries: int = 0
+    waiting_for_space: int = 0
 
 
 @dataclasses.dataclass(frozen=True)

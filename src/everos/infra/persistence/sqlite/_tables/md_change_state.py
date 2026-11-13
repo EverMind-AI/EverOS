@@ -117,6 +117,17 @@ class MdChangeState(BaseTable, table=True):
     error: str | None = Field(default=None)
     """Most recent failure message (truncated upstream if needed)."""
 
+    retry_at: UtcDatetime | None = Field(default=None, sa_type=UtcDateTimeColumn)
+    """Meaningful only on a ``failed`` retryable row whose index write found
+    the disk full: when its next attempt is due. The scanner leaves the row
+    alone until then (a capped back-off); ``NULL`` otherwise. Added after the
+    first release (``schema._ADDED_COLUMNS``)."""
+
+    wait_steps: int | None = Field(default=None)
+    """How many back-off waits in a row the row has taken for a full disk:
+    each one twice as long as the one before, up to the cap. Kept while the
+    file is unchanged, cleared once the write lands; ``NULL`` when none."""
+
     unreadable_entries: int | None = Field(default=None)
     """Meaningful only when ``status='done'``: entries the last projection of
     the file skipped because they no longer parse (a hand edit), each logged

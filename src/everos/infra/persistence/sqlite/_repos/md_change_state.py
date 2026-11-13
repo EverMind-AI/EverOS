@@ -92,6 +92,11 @@ class QueueSummary:
     files_with_unreadable_entries: int = 0
     """``done`` files holding at least one such entry."""
 
+    waiting_for_space: int = 0
+    """Of ``failed_retryable``, the rows whose index write found the disk
+    full, each waiting out its back-off: they are retried until the write
+    lands, never filed as permanent."""
+
 
 class MdChangeStateRepo(RepoBase[MdChangeState]):
     model = MdChangeState
@@ -323,6 +328,8 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_attempt_at=now,
                     error=None,
                     retryable=None,
+                    retry_at=None,
+                    wait_steps=None,
                     unreadable_entries=unreadable_entries or None,
                     **({} if change_type is None else {"change_type": change_type}),
                 )
@@ -372,6 +379,45 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_attempt_at=now,
                     error=error,
                     retry_count=new_retry_count,
+                    retry_at=None,
+                    wait_steps=None,
+                )
+            )
+            await s.commit()
+
+    async def mark_waiting(
+        self, md_path: str, *, error: str, retry_at: datetime, wait_steps: int
+    ) -> None:
+        """Park a row whose index write found the disk full until ``retry_at``.
+
+        The row is a retryable failure (``cascade status`` counts it, and
+        ``cascade fix --apply`` retries it at once) that the scanner leaves
+        alone until ``retry_at``, then re-enqueues as it does any retryable
+        row. ``retry_count`` is untouched: a full disk is waited out, so it
+        never spends the budget that files a row as permanent.
+
+        Guarded by ``WHERE status='processing'`` for the same reason as
+        :meth:`mark_failed`.
+
+        Args:
+            md_path: The row's primary key.
+            error: The failure message.
+            retry_at: When the next attempt is due.
+            wait_steps: Back-off waits in a row, this one included.
+        """
+        now = get_utc_now()
+        async with session_scope(self._factory) as s:
+            await s.execute(
+                update(MdChangeState)
+                .where(MdChangeState.md_path == md_path)
+                .where(MdChangeState.status == "processing")
+                .values(
+                    status="failed",
+                    retryable=True,
+                    last_attempt_at=now,
+                    error=error,
+                    retry_at=retry_at,
+                    wait_steps=wait_steps,
                 )
             )
             await s.commit()
@@ -503,6 +549,8 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                     status="pending",
                     retryable=None,
                     retry_count=0,
+                    retry_at=None,
+                    wait_steps=None,
                     error=None,
                     last_changed_at=now,
                 )
@@ -588,6 +636,12 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
                 ).scalar_one()
             )
             files_with_unreadable = await _count_where(s, unreadable_done)
+            waiting_for_space = await _count_where(
+                s,
+                (MdChangeState.status == "failed")
+                & (MdChangeState.retryable.is_(True))
+                & MdChangeState.retry_at.is_not(None),  # type: ignore[union-attr]
+            )
         return QueueSummary(
             pending=pending,
             done=done,
@@ -597,6 +651,7 @@ class MdChangeStateRepo(RepoBase[MdChangeState]):
             last_processed_lsn=last_processed_lsn,
             unreadable_entries=unreadable_entries,
             files_with_unreadable_entries=files_with_unreadable,
+            waiting_for_space=waiting_for_space,
         )
 
 
@@ -629,6 +684,8 @@ def _enqueue_stmt(
             retryable=None,
             last_attempt_at=None,
             retry_count=0,
+            retry_at=None,
+            wait_steps=None,
             error=None,
         )
         .on_conflict_do_update(
@@ -654,6 +711,20 @@ def _enqueue_stmt(
                     " ELSE 0"
                     " END"
                 ).bindparams(new_mtime=mtime),
+                # Due again: the next wait for a full disk doubles the last
+                # one while the file is unchanged.
+                "retry_at": None,
+                "wait_steps": None
+                if reset_retry_count
+                else text(
+                    "CASE"
+                    " WHEN md_change_state.status = 'failed'"
+                    " AND ABS(md_change_state.mtime - :wait_mtime)"
+                    f" < {MTIME_TOLERANCE_SECONDS}"
+                    " THEN md_change_state.wait_steps"
+                    " ELSE NULL"
+                    " END"
+                ).bindparams(wait_mtime=mtime),
             },
         )
     )

@@ -304,6 +304,11 @@ def status(
                     else ""
                 )
             )
+            if summary.waiting_for_space:
+                typer.echo(
+                    f"    waiting for disk space: {summary.waiting_for_space}"
+                    "     (retried with back-off until the index write lands)"
+                )
             typer.echo(
                 f"  failed (retryable=FALSE): {summary.failed_permanent}"
                 + (

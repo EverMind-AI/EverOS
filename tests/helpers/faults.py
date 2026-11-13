@@ -95,6 +95,9 @@ BASE_ENV: Mapping[str, str] = {
     "EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS": "0",
     # A failed projection is retried on the next sweep: keep sweeps short.
     "EVEROS_CASCADE__SCAN_INTERVAL_SECONDS": "1",
+    # An index write on a full disk waits 1 s, then 2 s, before its next try.
+    "EVEROS_CASCADE__STORAGE_FULL_RETRY_SECONDS": "1",
+    "EVEROS_CASCADE__STORAGE_FULL_RETRY_MAX_SECONDS": "2",
     "EVEROS_DECIDER__RETRY_BACKOFF_SECONDS": "0",
     "EVEROS_MEMORIZE__ASYNC_QUEUE__SCAN_INTERVAL_SECONDS": "0.2",
     "EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS": "0.1",
@@ -692,7 +695,8 @@ class FaultServer:
     # ── waiting and reading ──
 
     async def settle(self, seconds: float = 30.0) -> None:
-        """Wait until nothing runs: extractions, the queue, OME and the cascade.
+        """Wait until nothing runs: extractions, the queue, OME and the cascade
+        (a file waiting for disk space included).
 
         Three idle samples in a row, since a file written a moment ago may not
         have reached the cascade's ledger yet.
@@ -708,6 +712,7 @@ class FaultServer:
                 busy = (
                     not idle
                     or ledger.pending > 0
+                    or ledger.waiting_for_space > 0
                     or memory._extractions.in_flight > 0
                     or (queue is not None and queue.pending > 0)
                 )

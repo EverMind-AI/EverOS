@@ -49,6 +49,10 @@ lsn:
 
 - `lag > 0` means the worker is behind. Steady state should hover near
   zero; sustained lag points at a slow handler or a stuck retry.
+- `waiting for disk space` appears under the retryable count while index
+  writes find the disk full (see [Disk full](#disk-full-enospc)): those
+  files are retried by themselves with a back-off and land once space is
+  freed; nothing to run.
 - `failed (retryable=FALSE)` is always user-actionable. Cascade will
   never auto-clear these — they represent malformed md the user must
   edit. One exception needs no edit: a row of a kind this build no longer
@@ -111,6 +115,7 @@ What flips `healthy` false — and nothing else does:
 | Writes accepted but not projected to LanceDB | `drain_consecutive_failures` | ≥ 3 in a row |
 | Index maintenance wedged | `optimize_failure_streak` | ≥ 5 in a row (lost commit races excluded — they are expected under churn) |
 | Version cleanup stopped, that table's disk will grow | `prune_stale_seconds` (worst kind, named in `reasons`) | ≥ 900s (3 missed 300s beats) |
+| Index writes find the disk full; the index is behind markdown | `waiting_for_space` | ≥ 1 file |
 
 `failed_permanent` is **informational only** — it is a data-quality
 backlog awaiting `cascade fix`, so it never flips `healthy` (otherwise
@@ -368,6 +373,28 @@ No operator action required; the structured log line
 `cascade_recovered_orphan_processing` reports the count when it
 fires.
 
+### Disk full (ENOSPC)
+
+An index write that finds the disk full -- lance's `No space left on device
+(os error 28)`, or an `OSError` with `ENOSPC` -- is **transient**: the same
+write lands once space is freed. The worker files the row as a retryable
+failure waiting for a set time (`retry_at`), takes no immediate retry and
+spends none of the retry budget that files other failures as permanent: the
+scanner hands the row back once its time has come, and each further full disk
+doubles the wait, from `[cascade] storage_full_retry_seconds` (30 s) up to
+`storage_full_retry_max_seconds` (15 min). One attempt and one
+`cascade_worker_disk_full` warning per wait -- no storm -- for as long as the
+disk stays full; the row is never filed as `failed_permanent` for it.
+
+Meanwhile `cascade status` counts the rows (`waiting for disk space`, under the
+retryable failures) and `GET /health` reads `cascade.healthy: false` with a
+reason and `cascade.waiting_for_space` set: markdown keeps every write, the
+index is behind it. Free space (prune old versions, move the root, grow the
+volume); within one wait of that each row is indexed and searchable, with no
+`cascade fix`. `cascade fix --apply` retries them at once if waiting is not
+an option. An md file edited meanwhile is tried at once, its wait starting
+over.
+
 ### FD exhaustion (`os error 24` / EMFILE)
 
 Symptoms (any of these on a long-running daemon):
@@ -418,6 +445,8 @@ and `everos.infra.cascade._worker.CascadeWorker`:
 | `worker_max_retry` | 3 | Inline retries before `mark_failed(retryable=TRUE)` |
 | `worker_poll_interval_seconds` | 1 | Idle wait between empty drain attempts |
 | `worker_retry_backoff_seconds` | 2 | Linear backoff seed; doubles per attempt |
+| `storage_full_retry_seconds` | 30 | First wait of a row whose index write found the disk full; doubles per full disk -- settable under `[cascade]` |
+| `storage_full_retry_max_seconds` | 900 | The longest such wait -- settable under `[cascade]` |
 
 Tuning surface is intentionally not in `Settings` yet — once we have
 wall-clock numbers from real workloads, the values that need

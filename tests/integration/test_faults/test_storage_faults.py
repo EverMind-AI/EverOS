@@ -154,22 +154,21 @@ async def test_a_read_only_root_refuses_writes_and_serves_reads(tmp_path: Path) 
 # ── LanceDB ─────────────────────────────────────────────────────────────────
 
 
+async def _clean(srv: FaultServer) -> None:
+    """Nothing left behind: no staging file, markdown and the index agree,
+    nothing filed as unrecoverable."""
+    assert srv.staging() == []
+    await srv.consistent()
+    health = await srv.health()
+    assert health["cascade"]["failed_permanent"] == 0, health["cascade"]
+
+
 FULL_INDEX_DISK = RuntimeError(
     "LanceError(IO): Generic LocalFileSystem error: Unable to write: "
     "No space left on device (os error 28)"
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "by design an index write that fails for a full disk is unrecoverable "
-        "(infra/persistence/lancedb/_base/repository.py, "
-        "_TRANSIENT_EXECUTION_MARKERS): the row stays failed_permanent after the "
-        "disk is freed, so the memory stays unsearchable until `cascade fix` or "
-        "the file changes again, while /health still says healthy"
-    ),
-)
 @pytest.mark.parametrize(
     "error",
     [FULL_INDEX_DISK, OSError(errno.ENOSPC, "No space left on device")],
@@ -194,3 +193,35 @@ async def test_an_index_write_failure_is_reported_and_retried(
         await srv.settle()
         assert await srv.searchable("u1") >= set(sent)
         await srv.consistent()
+
+
+async def test_a_full_index_disk_backs_off_and_lands_once_space_is_freed(
+    tmp_path: Path,
+) -> None:
+    """While the disk stays full the file waits out a growing back-off -- a
+    few attempts, not a storm -- and ``/health`` says so; once space is freed
+    the next attempt indexes it and the memory is searchable, no `cascade fix`."""
+    async with FaultServer.open(tmp_path / "root") as srv:
+        _resp, sent = await srv.say("s1", "u1", "W")
+        with index_write_fails(FULL_INDEX_DISK) as failed:
+            assert (await srv.flush("s1")).status_code == 200
+
+            async def waiting() -> bool:
+                return (await srv.health())["cascade"]["waiting_for_space"] > 0
+
+            await wait_until(waiting)
+            cascade = (await srv.health())["cascade"]
+            assert not cascade["healthy"], cascade
+            assert any("disk space" in r for r in cascade["reasons"]), cascade
+            assert cascade["failed_permanent"] == 0
+            attempts = len(failed)
+            await asyncio.sleep(4.0)  # back-off 1 s, doubling to 2 s (BASE_ENV)
+            # One write per attempt and table: a handful, not a storm.
+            assert len(failed) - attempts <= 4 * len(set(failed)), failed
+            assert (await srv.health())["cascade"]["failed_permanent"] == 0
+        await srv.settle()
+        assert await srv.searchable("u1") >= set(sent)
+        cascade = (await srv.health())["cascade"]
+        assert cascade["healthy"] and cascade["waiting_for_space"] == 0, cascade
+        await srv.consistent()
+        await _clean(srv)

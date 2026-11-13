@@ -84,7 +84,10 @@ without `/health` calling a model. The other capability flags are
 provider). `disabled_features` lists at most two features the configured
 providers leave off: `vector_recall` (no embedder: multi-round search
 recalls by keyword only) and `multimodal_upload` (no multimodal LLM or no
-parser: a non-text chat item is not read into text).
+parser: a non-text chat item is not read into text). In the `cascade` block,
+`waiting_for_space` counts the markdown files whose index write found the disk
+full: each is retried with a back-off until the write lands, never filed as
+`failed_permanent`, and while any waits `healthy` is `false` with a reason.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy

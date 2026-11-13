@@ -34,7 +34,7 @@ _ADDED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "forget_log": ("requested_by", "undo_json", "stage"),
     "group_meta": ("deliverer_id",),
     "image_original": ("forgotten_at",),
-    "md_change_state": ("unreadable_entries",),
+    "md_change_state": ("unreadable_entries", "retry_at", "wait_steps"),
     "memcell": ("extraction_retry",),
     "unprocessed_buffer": ("client_message_id",),
 }

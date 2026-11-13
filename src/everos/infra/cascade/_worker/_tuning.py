@@ -142,6 +142,22 @@ Once exhausted, ``mark_failed(retryable=False)`` so the reconciler
 stops re-enqueuing. Recover via ``cascade fix --apply`` (resets
 retry_count) or editing the md (mtime change resets retry_count)."""
 
+DEFAULT_STORAGE_FULL_RETRY_SECONDS = 30.0
+"""The first wait of a row whose index write found the disk full
+(``[cascade] storage_full_retry_seconds``); each further full disk doubles it.
+
+A full disk is not unrecoverable -- the same write lands once space is freed --
+but retrying at once only finds it full again, and the inline ladder would
+burn ``MAX_TOTAL_RETRIES`` in two minutes and file the row as permanent. So the
+row takes no inline retries and no budget: it waits, one attempt (and one
+warning) per wait, until the write lands. Half a minute is short against the
+time an operator takes to free space, long against a storm of failed writes."""
+
+DEFAULT_STORAGE_FULL_RETRY_MAX_SECONDS = 900.0
+"""The longest wait between two attempts of a row on a full disk
+(``[cascade] storage_full_retry_max_seconds``): a store that sat full for a day
+indexes its backlog within a quarter of an hour of being freed."""
+
 MAINTENANCE_TASK_TIMEOUT_SECONDS = 180.0
 """Last-resort deadline on one whole maintenance call (compact or prune).
 

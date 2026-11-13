@@ -33,13 +33,16 @@ flag is ``False`` (unrecoverable) and whose mtime is unchanged — those
 must not be auto-re-enqueued; the user has to edit the md (which
 changes mtime) to get another attempt. ``failed`` rows with
 ``retryable=True`` (transient) are re-emitted on a stable mtime so the
-worker auto-retries on the next scanner sweep.
+worker auto-retries on the next scanner sweep -- except one waiting out a
+back-off (its index write found the disk full, ``retry_at``), which is
+re-emitted only once its time has come.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 
 from everos.infra.persistence.sqlite import MTIME_TOLERANCE_SECONDS
 
@@ -65,11 +68,16 @@ class PriorState:
     unrecoverable, ``None`` for non-``failed`` rows."""
     retry_count: int = 0
     """Total retry attempts across scanner re-enqueue cycles."""
+    retry_at: datetime | None = None
+    """When a retryable row waiting out a back-off is due again; ``None``
+    for any other row."""
 
 
 def reconcile(
     scan: Iterable[ScanInput],
     state: Mapping[str, PriorState],
+    *,
+    now: datetime | None = None,
 ) -> list[ReconcileDecision]:
     """Compute the UPSERT plan for one scanner sweep.
 
@@ -78,6 +86,8 @@ def reconcile(
             kind (scanner output).
         state: ``{md_path: PriorState}`` — the current
             ``md_change_state`` snapshot keyed by path.
+        now: The sweep's clock, which a row waiting out a back-off is
+            compared with; ``None`` takes every such row as due.
 
     Returns:
         Ordered :class:`ReconcileDecision` list — ``added`` /
@@ -120,6 +130,14 @@ def reconcile(
             continue
         if mtime_stable and prior.status == "failed" and prior.retryable is False:
             continue
+        if (
+            mtime_stable
+            and prior.status == "failed"
+            and prior.retry_at is not None
+            and now is not None
+            and prior.retry_at > now
+        ):
+            continue  # waiting out its back-off
         decisions.append(
             ReconcileDecision(
                 md_path=item.md_path,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import errno
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
@@ -22,7 +23,11 @@ from typing import Any, ClassVar, Protocol
 import pyarrow as pa
 from lancedb import AsyncTable
 
-from everos.core.errors import IndexSchemaMismatchError, VectorStoreBusyError
+from everos.core.errors import (
+    IndexDiskFullError,
+    IndexSchemaMismatchError,
+    VectorStoreBusyError,
+)
 from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now
@@ -268,12 +273,33 @@ idle box, and the same row projected fine on the next attempt — yet the worker
 filed every one as unrecoverable, so ~200 md files per run needed a manual
 ``cascade fix``. The traceback frames put it in ``merge_insert`` (the write
 path, under :meth:`_locked`); the read path is covered as well. Match the
-exact phrase: a generic IO error (disk full, file gone) must stay permanent."""
+exact phrase: a generic IO error (a file gone) must stay permanent. A full
+disk is transient too, but has its own error and retry (:data:`_DISK_FULL_MARKERS`)."""
 
 
 def _is_transient_execution_error(exc: BaseException) -> bool:
     text = str(exc)
     return any(marker in text for marker in _TRANSIENT_EXECUTION_MARKERS)
+
+
+_DISK_FULL_MARKERS = ("No space left on device", "os error 28")
+"""How lance names a full disk in the ``RuntimeError`` it raises (its IO layer
+reports the OS error, ``ENOSPC``, by its text and number). A write that fails
+this way succeeds once space is freed, so it is not unrecoverable: it becomes
+:class:`~everos.core.errors.IndexDiskFullError`, which the cascade worker
+retries with a capped back-off until it lands."""
+
+
+def _is_disk_full(exc: BaseException) -> bool:
+    """A full disk: an ``OSError`` with ``ENOSPC``, or lance's error naming it."""
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return True
+    text = str(exc)
+    return isinstance(exc, RuntimeError) and any(m in text for m in _DISK_FULL_MARKERS)
+
+
+def _disk_full(table: str, op: str, exc: BaseException) -> IndexDiskFullError:
+    return IndexDiskFullError(f"{op} on table {table!r}: the disk is full: {exc}")
 
 
 class TableSource(Protocol):
@@ -368,7 +394,9 @@ class LanceRepoBase[T: IndexRecord]:
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its {budget:g}s deadline"
             ) from exc
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
+            if _is_disk_full(exc):
+                raise _disk_full(self.table_name, op, exc) from exc
             if not _is_transient_execution_error(exc):
                 raise
             logger.warning(
@@ -435,7 +463,11 @@ class LanceRepoBase[T: IndexRecord]:
                 f"{op} on table {self.table_name!r} exceeded its "
                 f"{budget:g}s write-lock deadline"
             ) from exc
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
+            # A full disk fails the write the same way whatever wrote it; it
+            # is retried, with the back-off its own error carries.
+            if _is_disk_full(exc):
+                raise _disk_full(self.table_name, op, exc) from exc
             # The soak's spill failures came out of ``merge_insert`` (this
             # path), not the reads: worker -> upsert -> execute_merge_insert.
             # The write is idempotent by id, so a retry is the right answer.

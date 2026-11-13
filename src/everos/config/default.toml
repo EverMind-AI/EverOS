@@ -341,6 +341,11 @@ scan_interval_seconds = 30.0
 # that started before it end; above this many entries it logs
 # memory_delete_fence_large (some run is not ending).
 delete_fence_warn_entries = 100000
+# An index write that finds the disk full is retried until it lands, never
+# filed as unrecoverable: the file waits this long (seconds) before its next
+# attempt, twice that after the next full disk, up to the maximum.
+storage_full_retry_seconds = 30.0
+storage_full_retry_max_seconds = 900.0
 
 [ome]
 # Offline memory engine tunables. Not to be confused with <memory-root>/ome.toml,

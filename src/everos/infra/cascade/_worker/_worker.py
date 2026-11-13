@@ -22,7 +22,13 @@ Each cycle:
    Each consumed inline attempt is persisted on the row before its
    backoff sleep, so a restart inside the ladder keeps the budget
    rather than restarting it (#549).
-5. On any other exception: ``mark_failed(retryable=False)`` (treated
+5. On :class:`~everos.core.errors.IndexDiskFullError` (the disk is
+   full): no inline retry and no budget spent -- ``mark_waiting``
+   parks the row as a retryable failure with a ``retry_at``, the
+   scanner re-enqueues it once that time has come, and every further
+   full disk doubles the wait up to a cap. One attempt and one warning
+   per wait, until the write lands; never permanent.
+6. On any other exception: ``mark_failed(retryable=False)`` (treated
    as unrecoverable, surfaces in ``cascade fix`` for the user to
    triage by editing the md).
 
@@ -53,9 +59,11 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import timedelta
 
-from everos.core.errors import ExternalServiceError
+from everos.core.errors import ExternalServiceError, IndexDiskFullError
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite import MdChangeState, MdChangeStateRepo
 
 from .._projections import Handler
@@ -74,6 +82,8 @@ from ._tuning import (
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_RETRY_BACKOFF_SECONDS,
+    DEFAULT_STORAGE_FULL_RETRY_MAX_SECONDS,
+    DEFAULT_STORAGE_FULL_RETRY_SECONDS,
     DRAIN_STALL_ALERT_SECONDS,
     LOOP_RESTART_BACKOFF_SECONDS,
     MAINTENANCE_TASK_TIMEOUT_SECONDS,
@@ -111,6 +121,10 @@ class CascadeWorker:
         max_retry: int = DEFAULT_MAX_RETRY,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+        storage_full_retry_seconds: float = DEFAULT_STORAGE_FULL_RETRY_SECONDS,
+        storage_full_retry_max_seconds: float = (
+            DEFAULT_STORAGE_FULL_RETRY_MAX_SECONDS
+        ),
         optimize_min_interval_seconds: float = DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS,
         optimize_heartbeat_seconds: float = DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS,
         optimize_prune_interval_seconds: float = (
@@ -140,6 +154,8 @@ class CascadeWorker:
         self._max_retry = max_retry
         self._poll_interval = poll_interval_seconds
         self._retry_backoff = retry_backoff_seconds
+        self._full_wait = storage_full_retry_seconds
+        self._full_wait_max = max(storage_full_retry_max_seconds, self._full_wait)
         self._stop = asyncio.Event()
         self._maintenance = IndexMaintainer(
             handlers,
@@ -359,6 +375,33 @@ class CascadeWorker:
                 )
                 await asyncio.sleep(self._retry_backoff * (attempt + 1))
 
+    async def _wait_for_space(self, row: MdChangeState, exc: Exception) -> None:
+        """Park a row whose index write found the disk full.
+
+        The next attempt is due after ``storage_full_retry_seconds``, twice
+        that after the next full disk, and so on up to the cap; the warning
+        is logged once per wait, by the attempt that starts it.
+        """
+        waits = (row.wait_steps or 0) + 1
+        wait = min(self._full_wait * 2 ** min(waits - 1, 32), self._full_wait_max)
+        error = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "cascade_worker_disk_full",
+            md_path=row.md_path,
+            kind=row.kind,
+            waits=waits,
+            retry_in_seconds=wait,
+            error=error,
+        )
+        await self._write_terminal(
+            self._ledger.mark_waiting,
+            row.md_path,
+            kind=row.kind,
+            error=error,
+            retry_at=get_utc_now() + timedelta(seconds=wait),
+            wait_steps=waits,
+        )
+
     async def _process_one(self, row: MdChangeState) -> str | None:
         """Process one ``md_change_state`` row.
 
@@ -417,6 +460,11 @@ class CascadeWorker:
                         # record the fold: the row must describe the index.
                         outcome = await handler.handle_deleted(row.md_path)
                         applied = "deleted"
+            except IndexDiskFullError as exc:
+                # Retrying now would find the disk full again: the row waits,
+                # as long as it takes, outside the retry budget.
+                await self._wait_for_space(row, exc)
+                return None
             except ExternalServiceError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(

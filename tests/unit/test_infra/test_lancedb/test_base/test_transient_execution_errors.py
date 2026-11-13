@@ -1,15 +1,21 @@
 """A lance query-execution failure that a retry clears must reach the cascade
 worker as :class:`VectorStoreBusyError` (retried with backoff), not as a bare
 ``RuntimeError`` (filed as unrecoverable, needing a manual ``cascade fix``).
+
+A full disk is transient too: once space is freed the same write lands. In
+either form -- lance's ``RuntimeError`` naming it, or an ``OSError`` with
+``ENOSPC`` -- it reaches the worker as :class:`IndexDiskFullError`, which the
+worker waits out with a back-off instead of filing the row as permanent.
 """
 
 from __future__ import annotations
 
+import errno
 from typing import ClassVar
 
 import pytest
 
-from everos.core.errors import VectorStoreBusyError
+from everos.core.errors import IndexDiskFullError, VectorStoreBusyError
 from everos.infra.persistence.lancedb import LanceRepoBase
 from everos.infra.persistence.lancedb._base import repository as repo_mod
 from everos.infra.persistence.records import IndexRecord
@@ -36,11 +42,22 @@ def _repo() -> _Repo:
     return _Repo(source=UnusedPort("table source"), dim=TEST_DIM)
 
 
-def test_only_the_spill_phrase_counts_as_transient() -> None:
+_FULL = (
+    "LanceError(IO): Generic LocalFileSystem error: Unable to write: "
+    "No space left on device (os error 28)"
+)
+
+
+def test_only_the_spill_phrase_counts_as_an_execution_error() -> None:
     assert repo_mod._is_transient_execution_error(RuntimeError(_SPILL))
-    assert not repo_mod._is_transient_execution_error(
-        RuntimeError("lance error: LanceError(IO): No space left on device")
-    )
+    assert not repo_mod._is_transient_execution_error(RuntimeError(_FULL))
+
+
+def test_a_full_disk_is_named_in_either_form() -> None:
+    assert repo_mod._is_disk_full(RuntimeError(_FULL))
+    assert repo_mod._is_disk_full(OSError(errno.ENOSPC, "No space left on device"))
+    assert not repo_mod._is_disk_full(OSError(errno.EACCES, "Permission denied"))
+    assert not repo_mod._is_disk_full(RuntimeError("LanceError(IO): file not found"))
 
 
 async def test_spill_failure_inside_a_read_becomes_a_busy_error() -> None:
@@ -56,7 +73,31 @@ async def test_spill_failure_inside_a_write_becomes_a_busy_error() -> None:
             raise RuntimeError(_SPILL)
 
 
-async def test_other_runtime_errors_still_propagate_unchanged() -> None:
-    with pytest.raises(RuntimeError, match="No space left"):
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError(_FULL), OSError(errno.ENOSPC, "No space left on device")],
+    ids=["lance-runtime-error", "oserror"],
+)
+async def test_a_full_disk_inside_a_write_is_a_disk_full_error(
+    error: BaseException,
+) -> None:
+    with pytest.raises(IndexDiskFullError, match="the disk is full") as raised:
+        async with _repo()._locked(1.0, "upsert"):
+            raise error
+    assert isinstance(raised.value, VectorStoreBusyError)  # transient, retried
+    assert raised.value.__cause__ is error
+
+
+async def test_a_full_disk_inside_a_read_is_a_disk_full_error() -> None:
+    with pytest.raises(IndexDiskFullError):
         async with _repo()._deadline(1.0, "find_where"):
-            raise RuntimeError("lance error: LanceError(IO): No space left on device")
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+
+async def test_other_errors_still_propagate_unchanged() -> None:
+    with pytest.raises(RuntimeError, match="file not found"):
+        async with _repo()._deadline(1.0, "find_where"):
+            raise RuntimeError("lance error: LanceError(IO): file not found")
+    with pytest.raises(PermissionError):
+        async with _repo()._locked(1.0, "upsert"):
+            raise PermissionError(errno.EACCES, "Permission denied")

@@ -149,6 +149,7 @@ def cascade_report(health: CascadeHealth) -> CascadeHealthReport:
         index_rows=health.index_rows,
         index_emptied=health.index_emptied,
         unreadable_entries=health.unreadable_entries,
+        waiting_for_space=health.waiting_for_space,
     )
 
 

@@ -26,6 +26,7 @@ from pathlib import Path
 from sqlmodel import select
 
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     MdChangeState,
@@ -96,7 +97,7 @@ class CascadeScanner:
             for path, row in (await _load_state_snapshot(self._ledger)).items()
             if row.kind in known
         }
-        decisions = reconcile(scan_inputs, state)
+        decisions = reconcile(scan_inputs, state, now=get_utc_now())
         decisions = await asyncio.to_thread(
             _recheck_deletions, self._memory_root.root, decisions
         )
@@ -235,6 +236,7 @@ async def _load_state_snapshot(ledger: MdChangeStateRepo) -> dict[str, PriorStat
                 change_type=row.change_type,
                 retryable=row.retryable,
                 retry_count=row.retry_count,
+                retry_at=row.retry_at,
             )
             for row in rows
         }

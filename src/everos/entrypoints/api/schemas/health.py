@@ -135,6 +135,18 @@ class CascadeHealthBlock(BaseModel):
             "flip `healthy`."
         ),
     )
+    waiting_for_space: int = Field(
+        default=0,
+        description=(
+            "Of failed_retryable, the markdown files whose index write found "
+            "the disk full: each is retried with a back-off "
+            "(`[cascade] storage_full_retry_seconds`, doubling up to "
+            "`storage_full_retry_max_seconds`) until the write lands once "
+            "space is freed, never filed as permanent. Unlike "
+            "failed_permanent it flips `healthy` (with a reason): the index "
+            "is behind markdown meanwhile."
+        ),
+    )
 
 
 class MemorizeQueueHealthBlock(BaseModel):

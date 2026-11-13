@@ -38,6 +38,8 @@ from ._worker import (
     DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
+    DEFAULT_STORAGE_FULL_RETRY_MAX_SECONDS,
+    DEFAULT_STORAGE_FULL_RETRY_SECONDS,
     CascadeWorker,
 )
 from .registry import build_handlers
@@ -161,6 +163,11 @@ class CascadeHealth:
     """Informational, like ``failed_permanent``: entries of indexed files
     the projection skipped because a hand edit broke them; the rest of each
     file is indexed. ``cascade status`` names the files."""
+    waiting_for_space: int = 0
+    """Of ``failed_retryable``, the files whose index write found the disk
+    full, each waiting out its back-off. Unlike ``failed_permanent`` it does
+    flip :attr:`healthy`: the index is behind markdown for as long as the
+    disk stays full, and each file lands on its own once space is freed."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,6 +194,8 @@ class CascadeConfig:
     worker_max_retry: int = 3
     worker_poll_interval_seconds: float = 1.0
     worker_retry_backoff_seconds: float = 2.0
+    storage_full_retry_seconds: float = DEFAULT_STORAGE_FULL_RETRY_SECONDS
+    storage_full_retry_max_seconds: float = DEFAULT_STORAGE_FULL_RETRY_MAX_SECONDS
     optimize_heartbeat_seconds: float = DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS
     optimize_prune_interval_seconds: float = DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS
     optimize_prune_retention_seconds: float = DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
@@ -205,6 +214,8 @@ class CascadeConfig:
                 cascade.optimize_rebuild_interval_seconds
             ),
             scan_interval_seconds=cascade.scan_interval_seconds,
+            storage_full_retry_seconds=cascade.storage_full_retry_seconds,
+            storage_full_retry_max_seconds=cascade.storage_full_retry_max_seconds,
         )
 
 
@@ -267,6 +278,10 @@ class CascadeOrchestrator:
             max_retry=self._config.worker_max_retry,
             poll_interval_seconds=self._config.worker_poll_interval_seconds,
             retry_backoff_seconds=self._config.worker_retry_backoff_seconds,
+            storage_full_retry_seconds=self._config.storage_full_retry_seconds,
+            storage_full_retry_max_seconds=(
+                self._config.storage_full_retry_max_seconds
+            ),
             optimize_heartbeat_seconds=self._config.optimize_heartbeat_seconds,
             optimize_prune_interval_seconds=(
                 self._config.optimize_prune_interval_seconds
@@ -449,6 +464,12 @@ class CascadeOrchestrator:
         wh = self._worker.health()
         summary = await self.queue_summary()
         reasons = wh.reasons()  # operational only
+        if summary.waiting_for_space:
+            # Operational too: no index write lands while the disk is full.
+            reasons.append(
+                f"{summary.waiting_for_space} md file(s) wait for disk space to be "
+                "indexed (retried with back-off until the write lands)"
+            )
         return CascadeHealth(
             healthy=not reasons,
             reasons=reasons,
@@ -462,4 +483,5 @@ class CascadeOrchestrator:
             index_rows=dict(self._index_rows),
             index_emptied=self._index_emptied,
             unreadable_entries=summary.unreadable_entries,
+            waiting_for_space=summary.waiting_for_space,
         )

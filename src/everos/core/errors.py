@@ -227,6 +227,17 @@ class VectorStoreBusyError(ExternalServiceError):
     """
 
 
+class IndexDiskFullError(VectorStoreBusyError):
+    """A LanceDB operation failed because the disk is full.
+
+    Transient by nature -- once space is freed the same write succeeds -- so it
+    is a :class:`VectorStoreBusyError`, never an unrecoverable failure. The
+    cascade worker gives it its own retry: no immediate retries (the disk is
+    still full), then a capped back-off for as long as it takes, outside the
+    retry budget that files other failures as permanent.
+    """
+
+
 class MemoryRootLockedError(InfrastructureError):
     """Another process holds this memory root's exclusive lock.
 

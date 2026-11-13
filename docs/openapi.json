@@ -3419,6 +3419,12 @@
             "title": "Unreadable Entries",
             "description": "Entries of indexed markdown files that the projection skipped because they no longer parse (a hand edit broke them); the rest of each file is indexed. Each is logged as `markdown_entry_unreadable`, and `everos cascade status` names the files. Informational like failed_permanent: it does not flip `healthy`.",
             "default": 0
+          },
+          "waiting_for_space": {
+            "type": "integer",
+            "title": "Waiting For Space",
+            "description": "Of failed_retryable, the markdown files whose index write found the disk full: each is retried with a back-off (`[cascade] storage_full_retry_seconds`, doubling up to `storage_full_retry_max_seconds`) until the write lands once space is freed, never filed as permanent. Unlike failed_permanent it flips `healthy` (with a reason): the index is behind markdown meanwhile.",
+            "default": 0
           }
         },
         "type": "object",

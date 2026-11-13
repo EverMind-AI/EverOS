@@ -476,6 +476,8 @@ The cascade projects the markdown truth into the search index (see
 | `optimize_rebuild_interval_seconds` | float | `43200.0` | Full index rebuild per kind (12 h), collapsing the index fragments every optimize grows. |
 | `scan_interval_seconds` | float | `30.0` | How often the scanner walks the memory root for changes the watcher missed; on a mount without filesystem events this is the edit-to-searchable latency. |
 | `delete_fence_warn_entries` | int | `100000` | A memory deletion keeps the index rows it removed from being written back by cascade runs that started before it, until those runs end; holding more entries than this logs `memory_delete_fence_large` (some run is not ending). Gauges: `everos_memory_delete_fence_entries`, `everos_memory_delete_fence_runs`. |
+| `storage_full_retry_seconds` | float | `30.0` | An index write that finds the disk full is retried, never filed as unrecoverable: the md file waits this long before its next attempt, twice that after each further full disk. `GET /health` reads the cascade unhealthy and counts the files (`cascade.waiting_for_space`) meanwhile; see [cascade_runbook.md](cascade_runbook.md#disk-full-enospc). |
+| `storage_full_retry_max_seconds` | float | `900.0` | The longest of those waits: a store that sat full for a day indexes its backlog within this long of being freed. |
 
 ### `[ome]`
 

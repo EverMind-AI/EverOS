@@ -330,6 +330,10 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
         "scan_interval_seconds",
         # A warning threshold, not a deadline: crossing it only logs.
         "delete_fence_warn_entries",
+        # Retry cadences of a row on a full disk, not deadlines: how long it
+        # waits between attempts, never how long one may take.
+        "storage_full_retry_seconds",
+        "storage_full_retry_max_seconds",
     }
     assert not any("timeout" in f or "deadline" in f for f in exposed)
 

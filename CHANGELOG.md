@@ -1123,6 +1123,16 @@ machinery that keeps a deleted memory from coming back.
   before). An undo is marked `undoing` before its first change and finished
   the same way, a copy or a value it already wrote back taken as written,
   never written twice.
+- **An index write that finds the disk full is retried until it lands.** It
+  was filed as unrecoverable: the file stayed `failed_permanent` after the
+  disk was freed, unsearchable until `cascade fix`, while `/health` stayed
+  healthy. A full disk (lance's `No space left on device`, or `ENOSPC`) is now
+  transient: the file waits out a back-off -- `[cascade]
+  storage_full_retry_seconds` (30 s), doubling up to
+  `storage_full_retry_max_seconds` (15 min), one attempt and one warning per
+  wait, outside the retry budget -- and is indexed with no manual step once
+  space is freed. `cascade status` and `/health` count the files
+  (`waiting_for_space`), and the cascade reads unhealthy meanwhile.
 - **An assistant's implicit join no longer hides a group's history from
   `audience = group`.** The intersection counted assistant members, so an
   assistant's first reply cut everything said before it from the deliverer's

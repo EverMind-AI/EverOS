@@ -1008,6 +1008,13 @@ class CascadeSettings(_Section):
       cascade runs are still in flight, so they cannot write them back. The
       fence empties as those runs end; holding more entries than this logs
       ``memory_delete_fence_large``, a sign that some run is not ending.
+
+    ``storage_full_retry_seconds`` / ``storage_full_retry_max_seconds``:
+      An index write that finds the disk full is retried, never filed as
+      unrecoverable: the file waits this long before its next attempt, twice
+      that after the next full disk, up to the maximum, until the write lands
+      once space is freed. ``/health`` reads the cascade unhealthy and counts
+      the files meanwhile (``waiting_for_space``).
     """
 
     enabled: bool = True
@@ -1018,6 +1025,8 @@ class CascadeSettings(_Section):
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
     scan_interval_seconds: float = Field(default=30.0, gt=0)
     delete_fence_warn_entries: int = Field(default=100_000, gt=0)
+    storage_full_retry_seconds: float = Field(default=30.0, gt=0)
+    storage_full_retry_max_seconds: float = Field(default=900.0, gt=0)
 
 
 class OmeSettings(_Section):
