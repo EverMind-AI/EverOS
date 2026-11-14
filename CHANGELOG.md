@@ -118,6 +118,16 @@ machinery that keeps a deleted memory from coming back.
   ([docs/api.md](docs/api.md#post-apiv2memoryforget),
   [docs/group-memory.md](docs/group-memory.md#94-forget-and-delete-propagation)).
 
+### Fixed
+
+- **A group search no longer fails on a profile item rewritten into a role.**
+  The constraint block follows each linked decision, dissent or topic to its
+  newest visible version, and an update may rewrite an item into another
+  kind; a chain that ended in a `role` item reached the constraint model,
+  which has no `role` kind, and the search answered 500. Such a chain is now
+  left out of the block. On the EverMemBench slice of 11-14 it failed 23 of
+  115 searches.
+
 ### Removed
 
 - **Hard-delete storage nothing called any more**: the stores'

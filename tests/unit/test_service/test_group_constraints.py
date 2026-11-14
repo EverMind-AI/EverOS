@@ -247,6 +247,51 @@ async def test_without_dissent_the_decision_is_current(tmp_path: Path) -> None:
         assert decision.status == "current"
 
 
+async def test_a_chain_rewritten_into_a_role_is_no_constraint(tmp_path: Path) -> None:
+    """A decision whose newest version is a role item is left out; the search answers.
+
+    An update may rewrite an item into another kind. The chain's newest
+    version then names a role, which the constraint block does not carry;
+    the search used to fail on it (EverMemBench 11-14: 23 of 115 searches).
+    """
+    async for world in _world(tmp_path, _Model(), dissent=False):
+        old = await world.profile_item(
+            "trip",
+            "I booked the Lisbon venue for the offsite",
+            start=T0 + 3_000,
+            end=T0 + 3_000,
+            memcell_id="mc_venue",
+            statement="The offsite is in Lisbon.",
+            sources=_cites("mc_venue", "I booked the Lisbon venue for the offsite"),
+        )
+        await world.profile_item(
+            "trip",
+            "I booked the Lisbon venue for the offsite",
+            kind="role",
+            start=T0 + 3_000,
+            end=T0 + 3_000,
+            memcell_id="mc_venue",
+            member_id="u_chen",
+            role="coordinator",
+            confidence="strong",
+            supersedes=old.entry_id,
+            sources=_cites("mc_venue", "I booked the Lisbon venue for the offsite"),
+        )
+        await world.project()
+
+        constraints = await _constraints(world, "u_chen")
+
+        assert constraints
+        assert {c.kind for c in constraints} <= {
+            "decision",
+            "dissent",
+            "topic",
+            "episode",
+            "picture",
+        }
+        assert "The offsite is in Lisbon." not in {c.statement for c in constraints}
+
+
 async def test_a_constraint_that_fails_its_check_is_absent(
     rules: tuple[GroupWorld, _Model],
 ) -> None:

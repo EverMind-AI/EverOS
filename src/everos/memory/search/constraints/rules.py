@@ -109,7 +109,9 @@ async def build_constraints(
     seen: set[str] = set()
     for stored in sorted(linked, key=lambda s: _KINDS.index(s.item.kind)):
         item, chain = await _newest(profile, scope, stored.item)
-        if item.item_id in seen:
+        # An update may rewrite an item into another kind: a chain whose
+        # newest visible version is a role is no longer a constraint.
+        if item.item_id in seen or item.kind not in _KINDS:
             continue
         seen.add(item.item_id or "")
         built.append((item, stored.scope.owner_id, chain))
