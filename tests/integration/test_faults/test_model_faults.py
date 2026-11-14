@@ -270,8 +270,12 @@ async def test_a_failed_group_profile_update_is_kept_and_caught_up(
     tmp_path: Path,
 ) -> None:
     """A group profile update that fails keeps its batch and backs off
-    (``group_profile_idle_seconds``, here 2 s); the next update reads it."""
-    env = {"EVEROS_GROUPS__GROUP_PROFILE_IDLE_SECONDS": "2"}
+    (``group_profile_idle_seconds``, here 2 s); the next update reads it. A
+    flush runs the update here (``profile_on_flush``)."""
+    env = {
+        "EVEROS_GROUPS__GROUP_PROFILE_IDLE_SECONDS": "2",
+        "EVEROS_GROUPS__PROFILE_ON_FLUSH": "true",
+    }
     async with FaultServer.open(tmp_path / "root", env=env) as srv:
         await _group(srv, "trip")
         srv.upstream.down.add("GroupProfileReply")
@@ -329,6 +333,49 @@ async def test_a_failed_group_profile_update_fails_its_run_and_is_counted(
         # found the batch waiting out its back-off.
         assert all(status == "dead_letter" for status, _ in runs), runs
         assert all("DeferredFailure" in (error or "") for _, error in runs), runs
+        await _clean(srv)
+
+
+async def test_a_catch_up_brings_a_groups_profiles_up_to_date(
+    tmp_path: Path,
+) -> None:
+    """A flush no longer reads the profiles (``profile_on_flush`` off, the
+    default): ``POST /api/v2/ome/trigger`` with ``catch_up_profiles`` reads
+    both batches -- one batched call for every member who spoke, one
+    group-profile call -- and returns once every run it started settled."""
+    async with FaultServer.open(tmp_path / "root") as srv:
+        await _group(srv, "trip")
+        resp, chen = await srv.say("s1", "u1", "C", 2, group="trip", fact=True)
+        assert resp.status_code == 200, resp.text
+        resp, betty = await srv.say(
+            "s1", "u2", "B", 2, group="trip", fact=True, at=5_000
+        )
+        assert resp.status_code == 200, resp.text
+        await _flushed(srv, "s1")
+        assert srv.upstream.count("_ProfileUpdateManyReply") == 0
+        assert srv.upstream.count("GroupProfileReply") == 0
+
+        resp = await srv.client.post(
+            "/api/v2/ome/trigger", json={"name": "catch_up_profiles", "timeout": 30}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "ok", resp.json()
+        assert srv.upstream.count("_ProfileUpdateManyReply") == 1
+        assert srv.upstream.count("_ProfileUpdateReply") == 0
+        assert srv.upstream.count("GroupProfileReply") == 1
+        await srv.settle()
+        members = {p.stem: p.read_text("utf-8") for p in srv.root.rglob("members/*.md")}
+        assert sorted(members) == ["u1", "u2"]
+        assert all(m in members["u1"] for m in chen)
+        assert all(m in members["u2"] for m in betty)
+        assert not any(m in members["u1"] for m in betty)
+
+        resp = await srv.client.post(
+            "/api/v2/ome/trigger", json={"name": "catch_up_profiles", "timeout": 30}
+        )
+        assert resp.json()["status"] == "ok"  # nothing queued: no call
+        assert srv.upstream.count("_ProfileUpdateManyReply") == 1
+        assert srv.upstream.unexpected == []
         await _clean(srv)
 
 

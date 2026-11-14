@@ -18,10 +18,16 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.memory.strategies import UPDATE_MEMBER_PROFILES_SPEC
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join
+
+pytestmark = pytest.mark.usefixtures("per_member_profiles")
+"""These pin the one-member-per-call update with a flush reading it (``per_member``
+and ``profile_on_flush``), as EverOS ran it until 2026-11-14; the batched default
+has tests of its own (test_update_member_profiles_batched.py)."""
 
 T0 = 1_772_323_200_000
 

@@ -32,6 +32,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence.index import eq
@@ -275,6 +276,7 @@ async def test_a_former_member_named_in_the_text_is_a_subject(tmp_path: Path) ->
         assert episode.origin == "member"
 
 
+@pytest.mark.usefixtures("per_member_profiles")
 async def test_a_picture_is_one_group_memory_and_reaches_only_its_poster(
     tmp_path: Path,
 ) -> None:

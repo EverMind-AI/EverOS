@@ -428,3 +428,29 @@ async def test_a_group_profile_needs_a_group_scope(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="group scope"):
         await store.set_pending(_USER, ["mc_1"])
     assert not (tmp_path / "default_app").exists()
+
+
+async def test_the_members_batch_has_a_file_of_its_own(tmp_path: Path) -> None:
+    """``members_pending.md``: the member-in-group profiles' batch, beside the
+    group profile's and apart from it; no daily log, no cascade kind."""
+    store = MarkdownGroupProfileStore(MemoryRoot(tmp_path))
+    assert await store.member_pending_batch(_GROUP) == PendingBatch()
+
+    await store.set_pending(_GROUP, ["mc_1"])
+    await store.set_member_pending(_GROUP, ["mc_1", "mc_2"], failures=1, retry_at=9)
+    await store.append(_GROUP, [_decision()], only_if=NoSourceCheck())
+
+    assert await store.member_pending_batch(_GROUP) == PendingBatch(
+        memcell_ids=("mc_1", "mc_2"), failures=1, retry_at=9
+    )
+    assert await store.pending(_GROUP) == ["mc_1"]  # the group profile's own
+    path = tmp_path / _PROFILE_DIR / "members_pending.md"
+    parsed = await MarkdownReader.read(path)
+    assert parsed.entries == []
+    assert parsed.frontmatter["type"] == "member_profiles_pending"
+    assert parsed.frontmatter["group_id"] == "trip"
+    assert len(await store.items(_GROUP)) == 1
+    assert match_kind(str(path.relative_to(tmp_path))) is None
+    await store.set_member_pending(_GROUP, [])
+    assert await store.member_pending_batch(_GROUP) == PendingBatch()
+    assert await store.pending(_GROUP) == ["mc_1"]

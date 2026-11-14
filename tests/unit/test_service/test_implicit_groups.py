@@ -384,6 +384,7 @@ async def test_one_person_stays_one_to_one(tmp_path: Path) -> None:
         assert (episode.owner_type, episode.owner_id) == ("user", "u_ann")
 
 
+@pytest.mark.usefixtures("per_member_profiles")
 async def test_its_segments_feed_the_group_s_profiles_never_a_personal_one(
     tmp_path: Path,
 ) -> None:

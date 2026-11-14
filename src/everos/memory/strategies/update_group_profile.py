@@ -6,9 +6,10 @@ dissent, roles -- kept by one model call per batch of the group's segments
 
 - **Batch.** Each group's :class:`EpisodeExtracted` queues its segment on the
   group (``GroupProfileStore.pending``; a replay queues it once). The batch is
-  read after ``[groups] group_profile_batch`` segments, on
-  :class:`GroupFlushed`, and on the idle tick ``[groups]
-  group_profile_idle_seconds`` after the group's last segment. A tick with
+  read after ``[groups] group_profile_batch`` segments, on the idle tick
+  ``[groups] group_profile_idle_seconds`` after the group's last segment, on
+  :class:`GroupFlushed` only with ``[groups] profile_on_flush`` (always until
+  2026-11-14), and on a catch-up's :class:`GroupProfilesDue`. A tick with
   nothing queued does nothing.
 - **Input.** Only this group's queued segments, never another group's and
   never a member's personal memory; a segment that is gone (its session
@@ -30,7 +31,8 @@ dissent, roles -- kept by one model call per batch of the group's segments
   is counted (``everos_group_profile_update_failures_total`` by reason and
   outcome) and fails its run (:class:`~everos.memory.ports.DeferredFailure`):
   the engine records the run as failed, with the reason and what became of
-  the batch, and does not retry it -- the back-off does.
+  the batch, and does not retry it -- the back-off does. A catch-up reads a
+  batch waiting out its back-off at once.
 - **Lock.** One per group (:func:`group_profile_lock`): an update reads the
   items the previous one wrote, and a segment queued meanwhile waits.
 - **Language.** Named to the model, resolved in code from the batch's human
@@ -52,7 +54,12 @@ from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory._partition_locks import group_profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, GroupFlushed, parse_group_key
+from everos.memory.events import (
+    EpisodeExtracted,
+    GroupFlushed,
+    GroupProfilesDue,
+    parse_group_key,
+)
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.group_profile import (
     MAX_TOPICS,
@@ -98,14 +105,17 @@ _failures = MetricCounter(
 )
 
 
-def _applies(event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps) -> bool:
-    """A group's episode, or a group's flush; never a user's own episode."""
+def _applies(
+    event: EpisodeExtracted | GroupFlushed | GroupProfilesDue, deps: MemoryDeps
+) -> bool:
+    """A group's episode, flush or catch-up; never a user's own episode."""
     del deps
     return not isinstance(event, EpisodeExtracted) or event.owner_type == "group"
 
 
 async def update_group_profile(
-    event: EpisodeExtracted | GroupFlushed | IdleTick, deps: MemoryDeps
+    event: EpisodeExtracted | GroupFlushed | GroupProfilesDue | IdleTick,
+    deps: MemoryDeps,
 ) -> list[Event]:
     """Queue a new segment on the group's batch, or read the batch when due.
 
@@ -115,6 +125,8 @@ async def update_group_profile(
     """
     groups = load_settings().groups
     if not groups.group_profile:
+        return []
+    if isinstance(event, GroupFlushed) and not groups.profile_on_flush:
         return []
     if isinstance(event, IdleTick):
         key = parse_group_key(event.bucket_key)
@@ -132,7 +144,7 @@ async def update_group_profile(
     async with group_profile_lock(app_id, project_id, group_id):
         batch = await deps.stores.group_profile.pending_batch(scope)
         pending = list(batch.memcell_ids)
-        waiting = batch.retry_at > _now_ms()
+        waiting = batch.retry_at > _now_ms() and not isinstance(event, GroupProfilesDue)
         if isinstance(event, EpisodeExtracted):
             if event.memcell_id in pending:
                 return []
@@ -300,7 +312,7 @@ def _has_messages(cell: MemCell) -> bool:
 UPDATE_GROUP_PROFILE_SPEC = StrategySpec(
     name="update_group_profile",
     fn=update_group_profile,
-    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed]),
+    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed, GroupProfilesDue]),
     applies_to=_applies,
     max_retries=2,
 )

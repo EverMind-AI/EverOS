@@ -6,6 +6,14 @@ commitments, expertise. It is a document of its own (D6): the member's
 personal ``users/<m>/user.md`` is never read or written here, and no other
 group's segments are.
 
+``[groups] member_profile_mode`` picks how. ``batched`` (the default) queues
+the group's segments on the group and reads every member who spoke in a
+batch with one call, on the group profile's cadence (:mod:`._member_batch`).
+``per_member`` is the update EverOS ran until 2026-11-14, described below;
+with ``[groups] profile_on_flush`` it sends the same requests. Either way a
+flush reads nothing without ``profile_on_flush``, and a catch-up
+(:class:`GroupProfilesDue`) reads everything queued.
+
 - **Operator.** The update ``user.md`` runs (:mod:`._profiles`): everalgo's
   ``ProfileExtractor.aupdate`` -- the same two prompts as the one-to-one
   profile (update, then a consolidation only for a part over its cap that has
@@ -23,8 +31,9 @@ group's segments are.
   forget that queued a segment again has its rewrite read the rest only.
 - **Throttle.** A segment is queued on the member's profile
   (``pending_memcell_ids``); the profile is updated after
-  ``[groups] member_profile_every`` of them, and on :class:`GroupFlushed`
-  for every member with something pending. A replayed event queues its
+  ``[groups] member_profile_every`` of them, and -- for every member with
+  something pending -- on :class:`GroupFlushed` with ``profile_on_flush``
+  and on :class:`GroupProfilesDue`. A replayed event queues its
   segment once, and not at all once an item rests on it (it was read): no
   segment is read twice, as on ``user.md``. A forget that needs a segment
   read again queues it itself.
@@ -65,42 +74,59 @@ from everos.config import SqliteSettings, load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, GroupFlushed
+from everos.memory.events import (
+    EpisodeExtracted,
+    GroupFlushed,
+    GroupProfilesDue,
+    parse_group_key,
+)
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.profile_items import already_read
 from everos.memory.groups import readable_segments
 from everos.memory.models import MemCell, Profile, Roster
-from everos.memory.ports import Event, Immediate, Scope, StrategySpec
+from everos.memory.ports import Event, Idle, IdleTick, Immediate, Scope, StrategySpec
 
+from ._member_batch import update_batched
 from ._profiles import update_profile
 
 logger = get_logger(__name__)
 
+type _Trigger = EpisodeExtracted | GroupFlushed | GroupProfilesDue | IdleTick
 
-def _applies(event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps) -> bool:
-    """A group's episode, or a group's flush; never a user's own episode."""
+
+def _applies(event: _Trigger, deps: MemoryDeps) -> bool:
+    """A group's episode, flush or catch-up; never a user's own episode."""
     del deps
     return not isinstance(event, EpisodeExtracted) or event.owner_type == "group"
 
 
-async def update_member_profiles(
-    event: EpisodeExtracted | GroupFlushed, deps: MemoryDeps
-) -> list[Event]:
-    """Queue a new segment on its speakers' profiles, or bring them up to date."""
-    scope = Scope(
-        app_id=event.app_id,
-        project_id=event.project_id,
-        owner_id=event.owner_id
-        if isinstance(event, EpisodeExtracted)
-        else event.group_id,
-        owner_type="group",
-    )
+async def update_member_profiles(event: _Trigger, deps: MemoryDeps) -> list[Event]:
+    """Queue a new segment for its speakers' profiles, or bring them up to date."""
+    scope = _scope(event)
+    if scope is None:
+        return []
     settings = load_settings()
-    every = settings.groups.member_profile_every
+    groups = settings.groups
+    if isinstance(event, GroupFlushed) and not groups.profile_on_flush:
+        return []
     reads = asyncio.Semaphore(read_fanout(settings.sqlite))
+    if groups.member_profile_mode == "batched":
+        await update_batched(
+            deps,
+            scope,
+            settings=settings,
+            new_segment=event if isinstance(event, EpisodeExtracted) else None,
+            force=isinstance(event, GroupProfilesDue),
+            own_queues=lambda: _update_every_pending(deps, scope, reads=reads),
+            queues_always=isinstance(event, GroupFlushed | GroupProfilesDue),
+        )
+        return []
+    if isinstance(event, IdleTick):  # per_member keeps no idle clock
+        return []
     if isinstance(event, EpisodeExtracted):
+        every = groups.member_profile_every
         await asyncio.gather(
             *(
                 _queue(deps, scope, member, event, every=every, reads=reads)
@@ -108,11 +134,35 @@ async def update_member_profiles(
             )
         )
     else:
-        members = await deps.stores.profile.people(scope)
-        await asyncio.gather(
-            *(_update_pending(deps, scope, m, reads=reads) for m in members)
-        )
+        await _update_every_pending(deps, scope, reads=reads)
     return []
+
+
+def _scope(event: _Trigger) -> Scope | None:
+    """The group the event is about; ``None`` for an idle key naming none."""
+    if isinstance(event, IdleTick):
+        key = parse_group_key(event.bucket_key)
+        if key is None:
+            logger.warning("member_profiles_bad_idle_key", key=event.bucket_key)
+            return None
+        app_id, project_id, group_id = key
+    elif isinstance(event, EpisodeExtracted):
+        app_id, project_id, group_id = event.app_id, event.project_id, event.owner_id
+    else:
+        app_id, project_id, group_id = event.app_id, event.project_id, event.group_id
+    return Scope(
+        app_id=app_id, project_id=project_id, owner_id=group_id, owner_type="group"
+    )
+
+
+async def _update_every_pending(
+    deps: MemoryDeps, scope: Scope, *, reads: asyncio.Semaphore
+) -> None:
+    """Every member's own queue read, one member per call: what a flush did."""
+    members = await deps.stores.profile.people(scope)
+    await asyncio.gather(
+        *(_update_pending(deps, scope, m, reads=reads) for m in members)
+    )
 
 
 def read_fanout(sqlite: SqliteSettings) -> int:
@@ -253,7 +303,24 @@ def _language_of(segments: list[tuple[str, MemCell]]) -> str | None:
 UPDATE_MEMBER_PROFILES_SPEC = StrategySpec(
     name="update_member_profiles",
     fn=update_member_profiles,
-    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed]),
+    trigger=Immediate(on=[EpisodeExtracted, GroupFlushed, GroupProfilesDue]),
     applies_to=_applies,
     max_retries=2,
 )
+
+UPDATE_MEMBER_PROFILES_IDLE_SPEC = StrategySpec(
+    name="update_member_profiles_idle",
+    fn=update_member_profiles,
+    trigger=Idle(
+        on=[EpisodeExtracted],
+        event_field="group_key",
+        idle_seconds=600,
+        scan_interval_seconds=60,
+    ),
+    max_retries=2,
+)
+"""The idle half of the ``batched`` cadence: ``[groups] group_profile_idle_seconds``
+after a group's last segment (the bootstrap sets the configured value, and
+keeps it off in ``per_member`` mode, which has no idle clock). The
+scheduler fires a tick on every scan while the group stays idle; one with
+nothing queued reads nothing."""

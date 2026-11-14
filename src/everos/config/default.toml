@@ -375,19 +375,31 @@ implicit_create = true
 # A message from a sender who is not a member opens an interval at that
 # message (source = implicit); false refuses such a batch with 422.
 implicit_join = true
-# A member's profile in a group is updated after this many new segments in
-# which they spoke, and at every flush of the group (section 7.4).
+# How the members' profiles in a group are updated (section 7.4): "batched"
+# queues the group's segments on the group and updates every member who spoke
+# in a batch with one model call, on the group profile's cadence below;
+# "per_member" queues each segment on each speaker and updates one member per
+# call after member_profile_every new segments in which they spoke (the update
+# EverOS ran until 2026-11-14; with profile_on_flush = true it sends the same
+# requests).
+member_profile_mode = "batched"
 member_profile_every = 5
 # A group search's multi-round question names the asker:
 # "<display name>: <question>" (section 8.2).
 asker_in_question = true
 # The group profile (section 7.5): topics, decisions, dissent and roles,
-# append-only, updated by one model call per batch of segments -- after
-# group_profile_batch new segments, after group_profile_idle_seconds without
-# one, and at every flush of the group. false keeps no group profile.
+# append-only, updated by one model call per batch of segments. A batch -- the
+# group profile's, and in "batched" mode the members' -- is read after
+# group_profile_batch new segments, or after group_profile_idle_seconds
+# without one. false keeps no group profile.
 group_profile = true
 group_profile_batch = 5
 group_profile_idle_seconds = 600
+# A flush of the group also reads both batches (and, in "per_member" mode,
+# every member's queue), as until 2026-11-14. false: a flush cuts segments only;
+# POST /api/v2/ome/trigger {"name": "catch_up_profiles"} brings every profile
+# up to date at once (an evaluation does it before it searches).
+profile_on_flush = false
 
 [search]
 # What a group search adds around its ranking (docs/group-memory.md, 8.3-8.5).

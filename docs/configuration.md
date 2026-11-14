@@ -520,11 +520,13 @@ Group memory ([group-memory.md](group-memory.md), sections 5.2, 7.4 and
 |---|---|---|---|
 | `implicit_create` | bool | `true` | A `/memory/add` naming an unknown `group_id` creates the group, with its first message's time as the creation time. `false` refuses such a batch with 422. |
 | `implicit_join` | bool | `true` | A message from a sender who is not a member opens a membership interval at that message (`source = implicit`). `false` refuses such a batch with 422. |
-| `member_profile_every` | int | `5` | A member's profile in a group is updated after this many new segments in which they spoke, and at every flush of the group. Episodes are searchable at once; only the profile lags. |
+| `member_profile_mode` | str | `"batched"` | How the members' profiles in a group are updated (section 7.4). `batched`: the group's new segments are queued on the group, and one model call updates every member who spoke in a batch, on the group profile's cadence (`group_profile_batch`, `group_profile_idle_seconds`). `per_member`: each segment is queued on each speaker's profile and one call updates one member, after `member_profile_every` new segments in which they spoke -- the update EverOS ran until 2026-11-14, request for request when `profile_on_flush` is `true`. |
+| `member_profile_every` | int | `5` | In `per_member` mode, a member's profile is updated after this many new segments in which they spoke. Episodes are searchable at once; only the profile lags. |
 | `asker_in_question` | bool | `true` | A group search's multi-round question names the asker, as `"<display name>: <question>"`, for the decider and the first round's recall. `false` keeps the question as asked. |
 | `group_profile` | bool | `true` | Keep each group's profile (section 7.5): topics, decisions, dissent and roles, one model call per batch of segments. |
-| `group_profile_batch` | int | `5` | A batch is read after this many new segments of the group. |
-| `group_profile_idle_seconds` | int | `600` | Or after the group has had no new segment for this long; and at every flush of the group. |
+| `group_profile_batch` | int | `5` | A batch -- the group profile's, and in `batched` mode the members' -- is read after this many new segments of the group. |
+| `group_profile_idle_seconds` | int | `600` | Or after the group has had no new segment for this long. |
+| `profile_on_flush` | bool | `false` | A flush of the group also reads both batches (and, in `per_member` mode, every member's queue), as until 2026-11-14. `false`: a flush cuts segments only, and the profiles follow their cadence; `POST /api/v2/ome/trigger` with `{"name": "catch_up_profiles"}` brings every profile up to date at once, which an evaluation does before it searches. |
 
 ### `[search]`
 

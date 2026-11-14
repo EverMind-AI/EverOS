@@ -265,6 +265,8 @@ class Upstream:
             return json.dumps(reply)
         if name == "_ProfileUpdateReply":
             return json.dumps({"operations": _profile_operations(prompt)})
+        if name == "_ProfileUpdateManyReply":
+            return json.dumps({"people": _people_operations(prompt)})
         if name == "_ConsolidateReply":
             return json.dumps({"changes": [], "dropped": []})
         if name == "GroupProfileReply":
@@ -347,6 +349,39 @@ def _profile_operations(prompt: str) -> list[dict[str, Any]]:
         if f"Holds {fact}" not in stored
     ]
     return ops or [{"action": "none"}]
+
+
+_TARGET = re.compile(r"^- (p\d+): .+?, lines tagged user_id:(\S+),", re.MULTILINE)
+_PERSON = re.compile(r'<person label="(p\d+)" user_id="[^"]*">(.*?)</person>', re.S)
+
+
+def _people_operations(prompt: str) -> list[dict[str, Any]]:
+    """For each target user of a batched update, one item per fact marker of
+    their own lines in each segment, unless their profile holds it."""
+    stored = dict(_PERSON.findall(prompt.split("<new_conversation>")[0]))
+    people = []
+    for label, user_id in _TARGET.findall(prompt):
+        ops = [
+            {
+                "action": "add",
+                "type": "explicit_info",
+                "data": {
+                    "evidence": fact,
+                    "description": f"Holds {fact}",
+                    "category": "facts",
+                },
+                "sources": [segment],
+                "pictures": [],
+            }
+            for segment, body in _SEGMENT.findall(prompt)
+            for said in body.splitlines()
+            if f"(user_id:{user_id}):" in said
+            for fact in dict.fromkeys(_FACT.findall(said))
+            if f"Holds {fact}" not in stored.get(label, "")
+        ]
+        if ops:
+            people.append({"user_id": user_id, "operations": ops})
+    return people
 
 
 _BLANK_GROUP_OP: Mapping[str, Any] = {

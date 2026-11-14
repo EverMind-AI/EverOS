@@ -837,13 +837,21 @@ async def test_a_read_naming_an_agent_is_refused(fixture: _Fixture) -> None:
     assert not fixture.decider.prompts
 
 
+@pytest.mark.parametrize("mode", ["batched", "per_member"])
 async def test_group_strategies_read_only_the_groups_own_segments(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     """Row 10: group strategies read only the group's segments, member
     profiles never read ``users/<m>/``, personal strategies never see a group
-    segment, and the group profile's update reads only the group's own."""
+    segment, and the group profile's update reads only the group's own -- in
+    either member-profile mode: ``batched`` (the default; a catch-up reads
+    the batches) and ``per_member`` (a flush reads them, as until
+    2026-11-14)."""
+    monkeypatch.setenv("EVEROS_GROUPS__MEMBER_PROFILE_MODE", mode)
+    monkeypatch.setenv("EVEROS_GROUPS__PROFILE_ON_FLUSH", str(mode == "per_member"))
+    load_settings.cache_clear()
     profile_prompts: list[str] = []
+    member_prompts: list[str] = []
 
     def model(messages: Any, *, response_format: type, **_kw: Any) -> str:
         name = response_format.__name__
@@ -856,17 +864,18 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             )
         if name == "EpisodeReply":
             return json.dumps({"title": "Plan", "summary": "Plan.", "content": "Plan."})
+        item = {"evidence": "x", "description": "Plans", "category": "plans"}
+        add = {"action": "add", "type": "explicit_info", "data": item}
+        prompt = "\n".join(str(m.content) for m in messages)
+        member_prompts.append(prompt)
+        assert "personal marker" not in prompt
         if name == "_ProfileUpdateReply":
-            prompt = "\n".join(str(m.content) for m in messages)
-            assert "personal marker" not in prompt
-            item = {"evidence": "x", "description": "Plans", "category": "plans"}
-            return json.dumps(
-                {
-                    "operations": [
-                        {"action": "add", "type": "explicit_info", "data": item}
-                    ]
-                }
-            )
+            return json.dumps({"operations": [add]})
+        if name == "_ProfileUpdateManyReply":
+            people = [
+                {"user_id": m, "operations": [add]} for m in ("u_chen", "u_betty")
+            ]
+            return json.dumps({"people": people})
         raise AssertionError(name)
 
     async with GroupWorld.open(
@@ -894,11 +903,15 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             session_id="s_group", request_id="f", app_id=APP, project_id=PROJECT
         )
         await world.run(*STRATEGY_SPECS)
+        if mode == "batched":  # the flush read no profile: the catch-up does
+            assert member_prompts == [] and profile_prompts == []
+            await world.catch_up(*STRATEGY_SPECS)
         episodes = [
             e for e in world.bus.events if type(e).__name__ == "EpisodeExtracted"
         ]
         assert {e.owner_type for e in episodes} == {"group"}  # no user's episode
         group_cells = {e.memcell_id for e in episodes}
+        assert len(member_prompts) == (1 if mode == "batched" else 2)
         for member in ("u_chen", "u_betty"):
             profile = await world.stores.profile.read(world.scope("trip"), member)
             assert profile is not None
@@ -907,7 +920,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
                     set((item.model_extra or {})["source_memcell_ids"]) <= group_cells
                 )
         assert user_md.read_bytes() == before
-        (prompt,) = profile_prompts  # the flush ran the group profile's batch
+        (prompt,) = profile_prompts  # one read of the group profile's batch
         assert "personal marker" not in prompt
         assert "group marker: book the venue" in prompt
         assert [m for m in group_cells if f"=== SEGMENT {m} ===" in prompt] == list(

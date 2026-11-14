@@ -112,13 +112,28 @@ class SessionFlushed(Event):
 class GroupFlushed(Event):
     """Fired when a flush of a session bound to a group has run.
 
-    The member-in-group profiles waiting on ``[groups] member_profile_every``
-    are brought up to date on it (docs/group-memory.md, section 7.4): episodes
-    are searchable at once, and a flush is where a client says it wants the
-    rest current too. Fired whether or not the flush cut a segment.
+    With ``[groups] profile_on_flush`` the group's profile batches (and, in
+    ``per_member`` mode, the members' queues) are read on it
+    (docs/group-memory.md, sections 7.4 and 7.5), as they were until
+    2026-11-14; off, it changes no profile. Fired whether or not the flush
+    cut a segment.
     """
 
     group_id: str
     session_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+
+
+class GroupProfilesDue(Event):
+    """A group's profiles are to be brought up to date now, whatever their cadence.
+
+    The catch-up (``catch_up_profiles``, ``POST /api/v2/ome/trigger``) emits
+    one per group: the member-in-group profiles read every segment queued for
+    them, the group profile its batch, a batch waiting out a back-off
+    included (docs/group-memory.md, sections 7.4 and 7.5).
+    """
+
+    group_id: str
     app_id: str = "default"
     project_id: str = "default"

@@ -118,6 +118,7 @@ from everos.memory.strategies import (
     STRATEGY_SPECS,
     UPDATE_GROUP_PROFILE_IDLE_SPEC,
     UPDATE_GROUP_PROFILE_SPEC,
+    UPDATE_MEMBER_PROFILES_IDLE_SPEC,
 )
 from everos.service._warmup import warm_token_counter
 from everos.service.memory import MemoryService, StrengthWriter
@@ -579,21 +580,29 @@ def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
 
     The group profile's idle trigger fires ``[groups] group_profile_idle_seconds``
     after a group's last segment (scanned at most every minute), and both group
-    profile strategies are off with ``[groups] group_profile = false``.
-    ``ome.toml`` overrides still apply on top, by strategy name.
+    profile strategies are off with ``[groups] group_profile = false``. The
+    member profiles' idle trigger fires on the same clock, and only in
+    ``[groups] member_profile_mode = "batched"``. ``ome.toml`` overrides still
+    apply on top, by strategy name.
     """
     groups = settings.groups
-    if spec.name == UPDATE_GROUP_PROFILE_IDLE_SPEC.name:
+    if spec.name in (
+        UPDATE_GROUP_PROFILE_IDLE_SPEC.name,
+        UPDATE_MEMBER_PROFILES_IDLE_SPEC.name,
+    ):
         idle = groups.group_profile_idle_seconds
         trigger = Idle(
-            on=list(UPDATE_GROUP_PROFILE_IDLE_SPEC.trigger.on),  # type: ignore[union-attr]
+            on=list(spec.trigger.on),  # type: ignore[union-attr]
             event_field="group_key",
             idle_seconds=idle,
             scan_interval_seconds=max(1, min(60, idle // 2)),
         )
-        return dataclasses.replace(
-            spec, trigger=trigger, enabled=spec.enabled and groups.group_profile
+        on = (
+            groups.group_profile
+            if spec.name == UPDATE_GROUP_PROFILE_IDLE_SPEC.name
+            else groups.member_profile_mode == "batched"
         )
+        return dataclasses.replace(spec, trigger=trigger, enabled=spec.enabled and on)
     if spec.name == UPDATE_GROUP_PROFILE_SPEC.name:
         return dataclasses.replace(spec, enabled=spec.enabled and groups.group_profile)
     return spec

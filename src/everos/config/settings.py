@@ -1132,25 +1132,41 @@ class GroupsSettings(_Section):
     ``implicit_join``: a message from a sender who is not a member opens an
     interval at that message (``source = implicit``); off, such a batch is
     refused with 422.
-    ``member_profile_every``: a member's profile in a group is updated after
-    this many new segments in which they spoke, and at every flush of the
-    group; episodes are searchable at once, only the profile lags.
+    ``member_profile_mode``: how the members' profiles in a group are
+    updated. ``batched`` (default) queues the group's new segments on the
+    group and updates every member who spoke in a batch with one model call,
+    on the group profile's cadence; ``per_member`` queues each segment on
+    each speaker's profile and updates one member per call, after
+    ``member_profile_every`` new segments in which they spoke (the update
+    EverOS ran until 2026-11-14; with ``profile_on_flush`` it sends the same
+    requests).
     ``asker_in_question``: a group scope's multi-round question names the
     asker, ``"<display name>: <question>"`` (section 8.2).
     ``group_profile``: keep the group profile (section 7.5) -- topics,
     decisions, dissent and roles, one model call per batch of segments.
-    ``group_profile_batch``: a batch is read after this many new segments;
+    ``group_profile_batch``: a batch -- the group profile's, and in
+    ``batched`` mode the members' -- is read after this many new segments;
     ``group_profile_idle_seconds``: or after the group has had no new segment
-    for this long; and at every flush of the group.
+    for this long. ``profile_on_flush``: a flush of the group also reads both
+    batches (and, in ``per_member`` mode, every member's queue), as until
+    2026-11-14; off, a flush cuts segments only. Episodes are searchable at
+    once; only the profiles lag. ``POST /api/v2/ome/trigger`` with ``{"name":
+    "catch_up_profiles"}`` brings every profile up to date at once.
+
+    Env binding:
+        EVEROS_GROUPS__MEMBER_PROFILE_MODE
+        EVEROS_GROUPS__PROFILE_ON_FLUSH
     """
 
     implicit_create: bool = True
     implicit_join: bool = True
+    member_profile_mode: Literal["batched", "per_member"] = "batched"
     member_profile_every: int = Field(default=5, ge=1)
     asker_in_question: bool = True
     group_profile: bool = True
     group_profile_batch: int = Field(default=5, ge=1)
     group_profile_idle_seconds: int = Field(default=600, ge=2)
+    profile_on_flush: bool = False
 
 
 @cache

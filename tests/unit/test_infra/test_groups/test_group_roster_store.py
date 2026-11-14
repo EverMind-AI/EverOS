@@ -273,3 +273,19 @@ async def test_missing_rows_re_mirror_from_the_file_on_read(
 async def test_an_unknown_group_reads_as_none(store: Any) -> None:
     groups, _ = store
     assert await groups.get(_SCOPE) is None
+
+
+async def test_every_group_of_the_root_is_listed_once(store: Any) -> None:
+    groups, _ = store
+    for project, group_id in (("p2", "ops"), ("p1", "trip"), ("p1", "art")):
+        scope = Scope(
+            app_id="default", project_id=project, owner_id=group_id, owner_type="group"
+        )
+        group = Group(group_id=group_id, created_at=_T0)
+        await groups.save(scope, group=group, events=_roster())
+
+    assert await groups.group_keys() == [
+        ("default", "p1", "art"),
+        ("default", "p1", "trip"),
+        ("default", "p2", "ops"),
+    ]

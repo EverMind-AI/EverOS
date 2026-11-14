@@ -41,6 +41,11 @@ from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import ForgetTarget, GetRequest, SearchRequest
 from tests.helpers.groups import APP, PROJECT, GroupWorld, join, leave, live_markdown
 
+pytestmark = pytest.mark.usefixtures("per_member_profiles")
+"""These pin the one-member-per-call update with a flush reading it (``per_member``
+and ``profile_on_flush``), as EverOS ran it until 2026-11-14; the batched default
+has tests of its own (test_update_member_profiles_batched.py)."""
+
 T0 = 1_772_323_200_000
 SECRET = "ZEBRA4417"
 """The forgotten message's own words: every derived record echoes it."""

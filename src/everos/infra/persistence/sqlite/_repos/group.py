@@ -82,6 +82,20 @@ class GroupRosterRepo(RepoBase[GroupMeta]):
             )
             return [str(row) for row in rows.scalars().all()]
 
+    async def group_keys(self) -> list[tuple[str, str, str]]:
+        """Every group with a meta row, as ``(app_id, project_id, group_id)``."""
+        async with session_scope(self._factory) as s:
+            rows = await s.execute(
+                select(  # type: ignore[call-overload]
+                    GroupMeta.app_id, GroupMeta.project_id, GroupMeta.group_id
+                ).order_by(
+                    GroupMeta.app_id,  # type: ignore[arg-type]
+                    GroupMeta.project_id,  # type: ignore[arg-type]
+                    GroupMeta.group_id,  # type: ignore[arg-type]
+                )
+            )
+            return [(str(a), str(p), str(g)) for a, p, g in rows.all()]
+
     async def member_groups(
         self, app_id: str, project_id: str, member_id: str
     ) -> list[str]:

@@ -151,7 +151,8 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         handler_factory=ProfileHandler,
     ),
     # A group's profile items (Step 2): their own table, no vector; the
-    # pending batch beside the logs (``profile/pending.md``) matches no glob.
+    # pending batches beside the logs (``profile/pending.md``,
+    # ``profile/members_pending.md``) match no glob.
     KindSpec(
         name="group_profile",
         frontmatter_schema=GroupProfileDailyFrontmatter,

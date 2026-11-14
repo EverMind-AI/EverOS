@@ -435,14 +435,15 @@ class SceneStore(Protocol):
 
 @runtime_checkable
 class GroupProfileStore(Protocol):
-    """A group's profile items and its pending batch (docs/group-memory.md, 7.5).
+    """A group's profile items and its pending batches (docs/group-memory.md, 7.5).
 
     Items live in ``groups/<g>/profile/group_profile-<YYYY-MM-DD>.md``, one
     entry per item, append-only (D7): a new version is a new entry, and the
     entry it supersedes is marked against it in the same locked write. The
     pending batch -- the segments the next update reads -- is state beside
-    them. ``scope`` is the group's (``owner_type = group``); any other scope
-    is refused.
+    them, and so is the members' (the segments the next update of the
+    member-in-group profiles reads, section 7.4). ``scope`` is the group's
+    (``owner_type = group``); any other scope is refused.
     """
 
     async def items(self, scope: Scope) -> list[Stored[GroupProfileItem]]:
@@ -498,6 +499,23 @@ class GroupProfileStore(Protocol):
         retry_at: int = 0,
     ) -> None:
         """Replace the queued segments and their failure record (none by default)."""
+        ...
+
+    async def member_pending_batch(self, scope: Scope) -> PendingBatch:
+        """The segments queued for the members' next profile update, with the
+        record of its failed tries (``[groups] member_profile_mode =
+        "batched"``, docs/group-memory.md, section 7.4)."""
+        ...
+
+    async def set_member_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        """Replace the members' queued segments and their failure record."""
         ...
 
     async def deprecations(self, scope: Scope, md_path: str) -> dict[str, str]:

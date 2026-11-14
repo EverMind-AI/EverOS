@@ -846,26 +846,77 @@ single-sender result.
 say about one member: preferences, constraints, commitments, expertise.
 
 - **Operator.** The profile operator every profile shares (everalgo
-  `ProfileExtractor.aupdate`, two prompts): one update call reads the stored
-  profile and only the member's new segments and replies `add` / `modify` /
-  `deprecate` / `none`, each operation naming the segments and pictures it
-  rests on; a consolidation call follows only for a part of the profile over
-  its cap (60 items, 10 traits, 8 under one name) that has grown since it was
-  last consolidated (15 items, 3 traits, 4 under the name). It is called with
-  `sender_id = member_id`; its prompt scopes extraction to the target speaker
-  and tells the model not to treat assistant suggestions as the person's
-  traits.
+  `ProfileExtractor`, two prompts): an update call reads the stored profile
+  and only new segments and replies `add` / `modify` / `deprecate` / `none`,
+  each operation naming the segments and pictures it rests on; a
+  consolidation call follows only for a part of the profile over its cap (60
+  items, 10 traits, 8 under one name) that has grown since it was last
+  consolidated (15 items, 3 traits, 4 under the name). Its prompt scopes
+  extraction to the target speaker and tells the model not to treat assistant
+  suggestions as the person's traits.
+- **Batched (the default, `[groups] member_profile_mode = "batched"`).** The
+  group is read like one more person. Its new segments are queued on the
+  group (`groups/<g>/profile/members_pending.md`, state beside the group
+  profile's `pending.md`, never indexed), not on each speaker. When the batch
+  is due, one call (`ProfileExtractor.aupdate_many`) updates every member who
+  spoke in it: the batch's segments are read once, speakers labelled by their
+  roster names; every speaking member's stored profile goes in under a label
+  their refs carry (`<person label="p2">`, refs `p2.e3`); and the reply is
+  grouped per member by user_id, a member with nothing new left out (their
+  document is not written). The update rules are the one-person prompt's,
+  word for word; only the target block and the reply shape differ. Each
+  member's operations then apply to their own document exactly as a
+  one-person update's do (item ids and sources, `supersedes` / `since` and
+  the history, held items, picture items for the poster only), and a
+  consolidation runs per member and part, only over its cap and grown.
+  Members whose stored languages differ are read in one call per language.
+- **Attribution check.** One call for several people can put a fact on the
+  wrong one, so everalgo checks each operation before it applies and leaves
+  out one whose ref names another member's item, one resting only on
+  segments without a line of the member's (or only on a segment their profile
+  already read), one read only off someone else's picture, and one whose
+  evidence or basis quotes lines only other members (or the assistant) wrote.
+  A quote found in no line keeps the operation -- quotes are often lightly
+  paraphrased, or come from an earlier batch -- and so does an operation that
+  quotes nothing. Every outcome is counted in
+  `everos_member_profile_attribution_total` (`outcome`: `own`, `unmatched`,
+  `unquoted`, `other_speaker`, `other_segment`, `other_picture`,
+  `other_ref`).
+- **Per member (`member_profile_mode = "per_member"`).** The update EverOS ran
+  until 2026-11-14: a segment is queued on each speaker's profile, and one
+  call (`aupdate`, `sender_id = member_id`) reads one member's queued
+  segments after `[groups] member_profile_every` of them. With
+  `profile_on_flush = true` it sends the same requests as then (a test holds
+  it to requests recorded at ea7d2570).
 - **Input.** Only this group's segments in which the member spoke, and the
   pictures the member posted in them (D17). Never the member's personal
   memory, never another group.
-- **Throttle.** A member's profile is updated after `[groups] member_profile_every`
-  new segments in which they spoke (default 5), and when the group's buffer is
-  flushed. Episodes are searchable immediately; only the profile lags. The
-  update itself is the one `user.md` runs (`memory/strategies/_profiles.py`:
-  pictures, the update call, stamping, held items, the bounded history); a
-  one-to-one space's cadence is every segment.
-- **Lock.** One lock per `(group_id, member_id)`, so updates for different members
-  run in parallel and two updates for one member never lose each other's items.
+- **Cadence.** In batched mode, the group profile's: a batch is read after
+  `[groups] group_profile_batch` new segments of the group (default 5), or
+  `group_profile_idle_seconds` (600) after its last one. A flush reads it only
+  with `[groups] profile_on_flush` (default `false`; `true` restores the
+  behaviour until 2026-11-14, a flush reading both batches and, per member,
+  every queue). Episodes are searchable immediately; only the profile lags.
+  `POST /api/v2/ome/trigger` with `{"name": "catch_up_profiles"}` brings every
+  group's profiles up to date at once (one `GroupProfilesDue` per group; a
+  batch waiting out a back-off is read too): an evaluation calls it after
+  ingesting and before it searches. The update itself is the one `user.md`
+  runs (`memory/strategies/_profiles.py`: pictures, the update call, stamping,
+  held items, the bounded history).
+- **Failures.** A batched call that yields nothing usable keeps the batch with
+  the group profile's back-off (section 7.5): no automatic try before
+  `group_profile_idle_seconds`, then twice that, and the third failure in a
+  row drops the batch (its segments stay searchable); counted in
+  `everos_member_profile_batch_failures_total`.
+- **Lock.** One lock per `(group_id, member_id)`, so two updates for one member
+  never lose each other's items. A batch takes the group's batch lock, then
+  the lock of every member who spoke in it, in sorted order, across its call;
+  every other writer holds one member's lock at a time.
+- **Forget queues.** A forget that needs a segment read again for one member
+  queues it on that member's document in either mode; in batched mode those
+  queues are read one member per call after the group's batch is read, and at
+  a catch-up (or a flush with `profile_on_flush`). An idle tick with nothing
+  queued reads no member's document.
 - **Sources.** Every item records its source memcells (the 2.0 profile format):
   the segments its operation named, not every segment of the update, and the
   pictures it was read off (`source_image_ids`). Fresh evidence for an item adds
@@ -922,8 +973,9 @@ quote), `subject_ids`, `sender_ids`, `origin`, `source_start`, `source_end` and
 
 **Update call.** A background strategy runs per group after
 `[groups] group_profile_batch` new segments (default 5) or after
-`[groups] group_profile_idle_seconds` without new segments (default 600), and at
-flush. One call per batch. Its input:
+`[groups] group_profile_idle_seconds` without new segments (default 600), at a
+flush only with `[groups] profile_on_flush` (default `false`), and on a
+catch-up (`catch_up_profiles`, section 7.4). One call per batch. Its input:
 
 - the roster block;
 - the current items, rendered with their ids: active topics (at most 20, most
@@ -1006,11 +1058,17 @@ group's, and an implicit group's of three or more people):
 | Episode embeddings (body and subject) | `2s` | 2 |
 | Picture memories per picture | `s` | 1 |
 | Scene updates | `s` | 1 |
-| Profile update calls | `s` | `s / member_profile_every`, amortised |
+| Profile update calls | `s` | `1 / group_profile_batch`, amortised, for all `s` speakers (batched; per member: `s / member_profile_every`) |
 | Group-profile calls (Step 2) | none | `1 / group_profile_batch`, amortised |
 
 The [GroupAssistBench](#131-groupassistbench) cost probe measures the real
-numbers per message before any full build.
+numbers per message before any full build. Measured on 2026-11-14 (DeepSeek
+V4.1 Flash, an EverMemBench slice of 2,855 messages, before batching): the
+member profiles were $0.207 and the group profile $0.158 of $0.493 per 1,000
+messages -- 1,830 member updates for 371 segments, each re-reading its whole
+segment, 48% of them changing nothing, and both profiles forced at every
+flush the harness sent per session. Batched, one call reads each batch of
+segments once for every speaker, and a flush forces nothing.
 
 ### 7.9 Implicit groups: three or more people
 
@@ -1506,7 +1564,7 @@ the same path:
 |---|---|---|---|
 | Group episode | 1 | No new prompt: the one-to-one episode prompt, `chat.episode`, for every segment, pictures or not. Group information enters as data: speaker labels and the roster block. | unchanged |
 | Roster block | 1 | `chat.group_roster_block`, a rendering template in the EverOS prompt registry | moves with the operators below |
-| Member-in-group profile | 1 | No new prompt: everalgo `ProfileExtractor` with `sender_id = member_id` | unchanged |
+| Member-in-group profile | 1 | everalgo `ProfileExtractor`: `aupdate_many`'s update of several people (`everalgo.user_memory.profile_update_many`: the one-person update rules word for word, a target block and a reply shape for several) in batched mode, `aupdate` with `sender_id = member_id` per member | unchanged |
 | Group-profile update | 2 | `chat.group_profile_update` in EverOS: `src/everos/memory/extract/group_profile/` (prompt, reply schema, verifier, fold) | an everalgo-user-memory operator (`GroupProfileUpdater`) under the same registry id |
 | Constraint binding (optional model layer) | 2 | `search.constraint_bind` in EverOS: `src/everos/memory/search/constraints/` | an everalgo operator under the same registry id, if the model layer becomes the default |
 
@@ -1515,7 +1573,8 @@ and can be overridden like the other 2.0 prompts. Keeping the registry id when a
 prompt moves to everalgo keeps data built from the registry valid. `everos
 prompts` prints them all, with the fingerprints of the everalgo prompts a store
 is written with -- boundary detection, the original episode request, the profile
-update and consolidation (`src/everos/memory/prompt_manifest.py`). Each entry
+update (of one person, and of several in one call) and consolidation
+(`src/everos/memory/prompt_manifest.py`). Each entry
 says when it is sent: `write` while a store is written, `read` on every round of
 every search (the decider), `search` by an optional search step (the constraint
 binding). Step 1 needs no everalgo release at all.
@@ -1872,7 +1931,8 @@ The second half of Step 1 differs from the text above in these places:
   every item, so it is shown only when every item is.
 - **Throttle on flush.** A flush of a session bound to a group publishes
   `GroupFlushed`, whether or not it cut a segment. Every member with pending
-  segments is then updated.
+  segments is then updated. (Since 2026-11-14 only with `[groups]
+  profile_on_flush`; see the notes on batched member profiles below.)
 - **Named members.** `include_profile` attaches the asker's profile and those
   of up to three members the query names, from each group of the scope.
 - **Subjects.** Only human members are subjects; an assistant the text names
@@ -2121,6 +2181,28 @@ Step 2 differs from the text above in these places:
   every cell, group or not.
 
 ---
+
+### Implementation notes (batched member profiles, 2026-11-14)
+
+- **Why.** Measured on the 2026-11-14 small builds (DeepSeek V4.1 Flash, fresh
+  cache): on the EverMemBench slice the member profiles were $0.207 and the
+  group profile $0.158 of a $0.493 write per 1,000 messages. 1,830 member
+  updates for 371 segments, 1.21 segments each, each re-reading its whole
+  segment while a member's own lines were 12% of it (99% of the evidence
+  quotes came from those lines); 48% of the updates changed nothing
+  (GroupAssistBench: 344 updates, 44%). The causes: one call per member, and
+  both profiles forced at every flush, which the benchmark harnesses send per
+  session.
+- **What.** `[groups] member_profile_mode = "batched"` (default) queues the
+  group's segments on the group and reads every speaker of a batch with one
+  `aupdate_many` call on the group profile's cadence; the attribution check
+  guards the one-call design; `[groups] profile_on_flush = false` (default)
+  stops a flush from forcing either profile; `catch_up_profiles` (a manual
+  OME trigger) brings them up to date on demand. Its providers are a registry
+  (`everos.memory.strategies.CATCH_UP_PROVIDERS`), so the one-to-one
+  profile's catch-up registers beside the groups'.
+- **A/B.** `member_profile_mode = "per_member"` with `profile_on_flush = true`
+  is the update before this change, request for request.
 
 ## 15. Risks
 

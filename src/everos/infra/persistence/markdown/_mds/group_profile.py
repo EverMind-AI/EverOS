@@ -4,6 +4,7 @@ Paths (docs/group-memory.md, sections 6.1 and 7.5)::
 
     groups/<group_id>/profile/group_profile-<YYYY-MM-DD>.md   one entry per item
     groups/<group_id>/profile/pending.md                      the pending batch
+    groups/<group_id>/profile/members_pending.md              the members' pending batch
 
 The daily logs are append-only (D7). A new version of an item is a new entry;
 the entry it replaces is listed in *its own* file's ``deprecated_entries``
@@ -15,7 +16,9 @@ written), so an id alone locates its file. The cascade projects the logs into
 the ``group_profile_item`` table. ``pending.md`` is state, not memory: it is
 frontmatter only (``type: group_profile_pending``, ``group_id``,
 ``track: group``, ``pending_memcell_ids``) and matches no cascade kind's glob,
-so it is never indexed.
+so it is never indexed. ``members_pending.md`` is the same state for the
+member-in-group profiles' batch (``type: member_profiles_pending``,
+``[groups] member_profile_mode = "batched"``, docs/group-memory.md, 7.4).
 
 Entry format -- :func:`render_group_profile_entry` writes it and
 :func:`group_profile_item_from_entry` reads it back, for the store and for the
@@ -77,6 +80,7 @@ from __future__ import annotations
 __all__ = [
     "GroupProfileDailyFrontmatter",
     "GroupProfilePendingFrontmatter",
+    "MemberProfilesPendingFrontmatter",
     "group_profile_item_from_entry",
     "render_group_profile_entry",
 ]
@@ -137,6 +141,24 @@ class GroupProfilePendingFrontmatter(GroupScopedFrontmatter):
     FILENAME: ClassVar[str] = "pending.md"
 
     type: Literal["group_profile_pending"] = "group_profile_pending"
+    pending_memcell_ids: list[str] = Field(default_factory=list)
+    failures: int = 0
+    retry_at: int = 0
+
+
+class MemberProfilesPendingFrontmatter(GroupScopedFrontmatter):
+    """``groups/<g>/profile/members_pending.md``: the segments the members'
+    next profile update reads (docs/group-memory.md, section 7.4).
+
+    Frontmatter only, rewritten whole, never indexed -- as ``pending.md``,
+    whose fields it shares: ``failures`` and ``retry_at`` (epoch ms) record
+    the batch's failed updates and when the next may try.
+    """
+
+    DIR_NAME: ClassVar[str] = _DIR_NAME
+    FILENAME: ClassVar[str] = "members_pending.md"
+
+    type: Literal["member_profiles_pending"] = "member_profiles_pending"
     pending_memcell_ids: list[str] = Field(default_factory=list)
     failures: int = 0
     retry_at: int = 0

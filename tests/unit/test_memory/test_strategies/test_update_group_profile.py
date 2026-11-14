@@ -41,7 +41,7 @@ from everos.component.llm import LLMCallError
 from everos.config import load_settings
 from everos.core.observability.metrics import get_metrics_registry
 from everos.core.utils.datetime import from_timestamp_ms, to_timestamp_ms
-from everos.memory.events import EpisodeExtracted, GroupFlushed
+from everos.memory.events import EpisodeExtracted, GroupFlushed, GroupProfilesDue
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.models import Group, RosterEvent
 from everos.memory.ports import DeferredFailure, IdleTick, PendingBatch, Scope
@@ -197,7 +197,7 @@ async def test_a_batch_runs_at_the_batch_size_once_per_segment(groups: Any) -> N
 
 
 async def test_a_flush_and_the_idle_tick_run_what_is_queued(groups: Any) -> None:
-    groups(group_profile_batch=5)
+    groups(group_profile_batch=5, profile_on_flush=True)
     model = _Model()
     deps = _deps(model)
     _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
@@ -218,6 +218,39 @@ async def test_a_flush_and_the_idle_tick_run_what_is_queued(groups: Any) -> None
     assert len(model.prompts) == 2 and "SEGMENT mc_2" in model.prompts[1]
     await update_group_profile(tick, deps)  # still idle, nothing queued
     assert len(model.prompts) == 2
+
+
+async def test_a_flush_reads_nothing_unless_profile_on_flush(groups: Any) -> None:
+    groups(group_profile_batch=5)
+    model = _Model()
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
+    await update_group_profile(_extracted("mc_1"), deps)
+
+    await update_group_profile(_FLUSHED, deps)
+
+    assert model.prompts == []
+    assert await deps.stores.group_profile.pending(_SCOPE) == ["mc_1"]
+
+
+async def test_a_catch_up_reads_the_batch_even_in_its_back_off(
+    groups: Any, clock: list[datetime]
+) -> None:
+    groups(group_profile_batch=1, group_profile_idle_seconds=600)
+    failing = _Failing(ok_after=1)
+    deps = _deps(failing)
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "note"))
+    with pytest.raises(DeferredFailure):
+        await update_group_profile(_extracted("mc_1"), deps)
+    await update_group_profile(_tick(), deps)  # waits out the back-off
+    assert failing.calls == 1
+
+    await update_group_profile(
+        GroupProfilesDue(group_id="trip", app_id="default", project_id="p"), deps
+    )
+
+    assert failing.calls == 2
+    assert await deps.stores.group_profile.pending(_SCOPE) == []
 
 
 async def test_the_switch_turns_it_off(groups: Any) -> None:

@@ -56,6 +56,9 @@ from ._mds import (
 )
 from ._mds import GroupSceneDailyFrontmatter as GroupSceneDailyFrontmatter
 from ._mds import ImageMemoryDailyFrontmatter as ImageMemoryDailyFrontmatter
+from ._mds import (
+    MemberProfilesPendingFrontmatter as MemberProfilesPendingFrontmatter,
+)
 from ._mds import SceneDailyFrontmatter as SceneDailyFrontmatter
 from ._mds import UserProfileFrontmatter as UserProfileFrontmatter
 from ._mds import group_profile_item_from_entry as group_profile_item_from_entry
@@ -105,6 +108,7 @@ __all__ = [
     "MarkdownReader",
     "MarkdownSceneStore",
     "MarkdownWriter",
+    "MemberProfilesPendingFrontmatter",
     "ParsedMarkdown",
     "ProfilePathMixin",
     "SceneDailyFrontmatter",

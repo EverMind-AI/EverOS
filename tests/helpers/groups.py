@@ -220,6 +220,16 @@ class GroupWorld:
                     continue
                 queue.extend(await spec.fn(event, self.deps))
 
+    async def catch_up(self, *specs: StrategySpec) -> None:
+        """Trigger ``catch_up_profiles`` as ``POST /api/v2/ome/trigger`` does,
+        then run ``specs`` on what it emits and on every event since."""
+        from everos.memory.ports import ManualTick
+        from everos.memory.strategies import CATCH_UP_PROFILES_SPEC
+
+        tick = ManualTick(strategy_name=CATCH_UP_PROFILES_SPEC.name)
+        self.bus.events.extend(await CATCH_UP_PROFILES_SPEC.fn(tick, self.deps))
+        await self.run(*specs)
+
     # ── seeding ──────────────────────────────────────────────────────────
 
     def scope(self, group_id: str) -> Scope:

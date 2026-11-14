@@ -73,6 +73,7 @@ from ._mds import (
     GroupMemberProfileFrontmatter,
     GroupProfileDailyFrontmatter,
     GroupProfilePendingFrontmatter,
+    MemberProfilesPendingFrontmatter,
     ProfileFrontmatter,
     UserProfileFrontmatter,
     group_profile_item_from_entry,
@@ -1081,7 +1082,9 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
     into a supersession, which would bring the entry back into history. A
     named entry that is not in its file (gone, or never this group's) is
     logged and left alone. ``pending.md`` beside the logs holds the batch the
-    next update reads; it is no daily log, and no cascade kind matches it.
+    next update reads, and ``members_pending.md`` the batch the members' next
+    profile update reads; neither is a daily log, and no cascade kind matches
+    either.
 
     Every read and write is the group's: any other scope is refused.
 
@@ -1209,6 +1212,41 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
                 path, frontmatter=frontmatter.model_dump(mode="json")
             )
 
+    async def member_pending_batch(self, scope: Scope) -> PendingBatch:
+        path = self._member_pending_path(scope)
+        if not await anyio.Path(path).is_file():
+            return PendingBatch()
+        parsed = await MarkdownReader.read(path)
+        frontmatter = MemberProfilesPendingFrontmatter.model_validate(
+            parsed.frontmatter
+        )
+        return PendingBatch(
+            memcell_ids=tuple(frontmatter.pending_memcell_ids),
+            failures=frontmatter.failures,
+            retry_at=frontmatter.retry_at,
+        )
+
+    async def set_member_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        path = self._member_pending_path(scope)
+        frontmatter = MemberProfilesPendingFrontmatter(
+            id=f"member_profiles_pending_{scope.owner_id}",
+            group_id=scope.owner_id,
+            pending_memcell_ids=list(memcell_ids),
+            failures=failures,
+            retry_at=retry_at,
+        )
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            await self._markdown.write_markdown(
+                path, frontmatter=frontmatter.model_dump(mode="json")
+            )
+
     async def _mark_replaced(
         self, scope: Scope, replaced: Sequence[tuple[str, str]]
     ) -> None:
@@ -1266,6 +1304,15 @@ class MarkdownGroupProfileStore(_DailyLogStore[GroupProfileItem]):
             / scope.owner_id
             / GroupProfilePendingFrontmatter.DIR_NAME
             / GroupProfilePendingFrontmatter.FILENAME
+        )
+
+    def _member_pending_path(self, scope: Scope) -> Path:
+        _require_group(scope)
+        return (
+            self._root.groups_dir(scope.app_id, scope.project_id)
+            / scope.owner_id
+            / MemberProfilesPendingFrontmatter.DIR_NAME
+            / MemberProfilesPendingFrontmatter.FILENAME
         )
 
 

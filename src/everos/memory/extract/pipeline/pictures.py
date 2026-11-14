@@ -14,7 +14,8 @@ says about a person the same way (docs/group-memory.md, section 7.3 and D17):
   user at all;
 * :func:`profile_pictures` hands a profile update the pictures one person
   posted in its segments, and nobody else's: a picture says something about
-  its poster only (D17);
+  its poster only (D17); :func:`members_pictures` does it for the several
+  people of one update, each picture handed to its poster;
 * :func:`without_pictures` takes forgotten pictures out of a cell's text, for
   every reader alike: the one-to-one profile, and a group's re-extraction and
   profiles.
@@ -25,6 +26,7 @@ from __future__ import annotations
 __all__ = [
     "Picture",
     "image_ids_in",
+    "members_pictures",
     "memcell_alive",
     "pictures_of",
     "profile_pictures",
@@ -156,15 +158,48 @@ async def profile_pictures(
     Without a picture store or limits (the extraction model reads no images),
     no picture is attached.
     """
+    shown, pictures, _ = await members_pictures(
+        cells,
+        [owner_id],
+        images=images,
+        limits=limits,
+        forgotten=forgotten,
+        detail=detail,
+    )
+    return shown, pictures
+
+
+async def members_pictures(
+    cells: Sequence[MemCell],
+    members: Collection[str],
+    *,
+    images: ImageStore | None,
+    limits: ImageLimits | None,
+    forgotten: Collection[str] = (),
+    detail: str = "high",
+) -> tuple[list[MemCell], list[ProfilePicture], dict[str, list[str]]]:
+    """:func:`profile_pictures` for several people read in one update.
+
+    Every picture one of ``members`` posted is labelled once for the whole
+    batch, in conversation order, whoever posted it; a picture anyone else
+    posted (an assistant, someone who is not among ``members``) or one that
+    cannot be read becomes a bare ``[IMAGE]``.
+
+    Returns:
+        ``(cells, pictures, posted)``: the cells as the update reads them, the
+        pictures to attach in label order, and each member's labels (D17: a
+        picture says something about its poster only).
+    """
     if forgotten:
         cells = [without_pictures(cell, forgotten) for cell in cells]
     if images is None or limits is None:
-        return list(cells), []
+        return list(cells), [], {}
     labels: dict[str, str] = {}
     pictures: list[ProfilePicture] = []
+    posted: dict[str, list[str]] = {}
     for cell in cells:
         for picture in await pictures_of(cell, images=images, limits=limits):
-            if picture.poster != owner_id or picture.image_id in labels:
+            if picture.poster not in members or picture.image_id in labels:
                 continue
             label = f"img-{len(labels) + 1}"
             labels[picture.image_id] = label
@@ -178,7 +213,8 @@ async def profile_pictures(
                     }
                 )
             pictures.append(ProfilePicture(label=label, id=picture.image_id, part=part))
-    return [_relabelled(cell, labels) for cell in cells], pictures
+            posted.setdefault(picture.poster, []).append(label)
+    return [_relabelled(cell, labels) for cell in cells], pictures, posted
 
 
 def _relabelled(cell: MemCell, labels: dict[str, str]) -> MemCell:

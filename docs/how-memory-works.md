@@ -230,9 +230,11 @@ and write their markdown when ready:
   embedding provider: places each new episode among the owner's scene
   clusters and, when it joins a scene, writes the scene's next version with
   one capped narrative call ([scenes.md](scenes.md))
-- the group strategies — `update_member_profiles`, `update_group_profile` /
+- the group strategies — `update_member_profiles` /
+  `update_member_profiles_idle`, `update_group_profile` /
   `update_group_profile_idle` and `update_group_scenes`
-  ([group-memory.md](group-memory.md))
+  ([group-memory.md](group-memory.md)), and `catch_up_profiles`, the manual
+  trigger that brings every profile kept on a cadence up to date at once
 
 Strategies are configurable without a code change via **`ome.toml`** at the
 memory root (hot-reloaded within ~2 s). Example — turn one off:

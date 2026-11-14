@@ -40,6 +40,9 @@ from .group_profile import (
     GroupProfilePendingFrontmatter as GroupProfilePendingFrontmatter,
 )
 from .group_profile import (
+    MemberProfilesPendingFrontmatter as MemberProfilesPendingFrontmatter,
+)
+from .group_profile import (
     group_profile_item_from_entry as group_profile_item_from_entry,
 )
 from .group_profile import (
@@ -61,6 +64,7 @@ __all__ = [
     "GroupProfilePendingFrontmatter",
     "GroupSceneDailyFrontmatter",
     "ImageMemoryDailyFrontmatter",
+    "MemberProfilesPendingFrontmatter",
     "ProfileFrontmatter",
     "SceneDailyFrontmatter",
     "UserProfileFrontmatter",

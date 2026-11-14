@@ -464,11 +464,18 @@ them.
 
 - `extract_user_profile` / `update_member_profiles` — a person's profile in
   a space, one update core (`strategies/_profiles.py`, everalgo's two profile
-  prompts): the owner's `user.md` on each new segment, a member's profile in a
-  group every `[groups] member_profile_every` segments and on `GroupFlushed`
+  prompts): the owner's `user.md` on its cadence, a group's members together,
+  one call per batch of the group's segments (`strategies/_member_batch.py`;
+  `[groups] member_profile_mode = "per_member"`: one member per call, every
+  `member_profile_every` segments), idle-ticked by
+  `update_member_profiles_idle`
+- `catch_up_profiles` — every profile kept on a cadence brought up to date at
+  once, on a manual OME trigger; each kind registers a provider in
+  `CATCH_UP_PROVIDERS`
 - `update_group_profile` / `update_group_profile_idle` — a group's profile
   ([group-memory.md](group-memory.md), section 7.5): a batch of segments, a
-  flush, or a quiet group's idle window
+  quiet group's idle window, a catch-up (a flush with `[groups]
+  profile_on_flush`)
 - `update_user_scenes` / `update_group_scenes` — a user's and a group's
   scenes ([scenes.md](scenes.md)), one core (`strategies/_scenes.py`): on
   each episode, placed among the owner's scene clusters, one capped narrative

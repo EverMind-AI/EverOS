@@ -84,6 +84,10 @@ class GroupStore(Protocol):
         """Every group of one ``(app_id, project_id)``, sorted by id."""
         ...
 
+    async def group_keys(self) -> list[tuple[str, str, str]]:
+        """Every group of the root, ``(app_id, project_id, group_id)``, sorted."""
+        ...
+
     async def member_groups(
         self, app_id: str, project_id: str, member_id: str
     ) -> list[str]:

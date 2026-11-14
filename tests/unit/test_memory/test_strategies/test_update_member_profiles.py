@@ -50,6 +50,11 @@ from everos.memory.ports import Scope
 from everos.memory.strategies import update_member_profiles
 from tests.fakes import make_deps
 
+pytestmark = pytest.mark.usefixtures("per_member_profiles")
+"""These pin the one-member-per-call update with a flush reading it (``per_member``
+and ``profile_on_flush``), as EverOS ran it until 2026-11-14; the batched default
+has tests of its own (test_update_member_profiles_batched.py)."""
+
 _SCOPE = Scope(app_id="default", project_id="p", owner_id="trip", owner_type="group")
 
 

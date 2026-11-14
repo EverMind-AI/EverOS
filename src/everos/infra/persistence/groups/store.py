@@ -73,6 +73,9 @@ class GroupRosterStore:
     async def group_ids(self, app_id: str, project_id: str) -> list[str]:
         return await self._repo.group_ids(app_id, project_id)
 
+    async def group_keys(self) -> list[tuple[str, str, str]]:
+        return await self._repo.group_keys()
+
     async def member_groups(
         self, app_id: str, project_id: str, member_id: str
     ) -> list[str]:

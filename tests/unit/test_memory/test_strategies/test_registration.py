@@ -11,6 +11,7 @@ from everos.config import Settings
 from everos.memory.events import EpisodeExtracted
 from everos.memory.ports import Idle, Immediate, StrategySpec
 from everos.memory.strategies import (
+    CATCH_UP_PROFILES_SPEC,
     STRATEGY_SPECS,
     extract_user_profile,
     update_group_profile,
@@ -28,9 +29,11 @@ def test_every_strategy_function_has_one_spec_under_its_name() -> None:
         "extract_user_profile": extract_user_profile,
         "update_user_scenes": update_user_scenes,
         "update_member_profiles": update_member_profiles,
+        "update_member_profiles_idle": update_member_profiles,
         "update_group_scenes": update_group_scenes,
         "update_group_profile": update_group_profile,
         "update_group_profile_idle": update_group_profile,
+        "catch_up_profiles": CATCH_UP_PROFILES_SPEC.fn,
     }
 
 
@@ -84,8 +87,11 @@ def test_an_episode_reaches_the_strategies_of_its_space_only(
     }
 
 
-def test_only_a_group_episode_starts_the_group_profile_s_idle_clock() -> None:
-    idle = next(s for s in STRATEGY_SPECS if s.name == "update_group_profile_idle")
+@pytest.mark.parametrize(
+    "name", ["update_group_profile_idle", "update_member_profiles_idle"]
+)
+def test_only_a_group_episode_starts_a_group_idle_clock(name: str) -> None:
+    idle = next(s for s in STRATEGY_SPECS if s.name == name)
     assert isinstance(idle.trigger, Idle)
     field = idle.trigger.event_field
     assert getattr(_episode("user"), field) is None

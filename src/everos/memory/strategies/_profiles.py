@@ -6,9 +6,11 @@ A user's profile in their own space (``users/<u>/user.md``,
 updated one way; the strategies differ only in when they update it and what
 they hand it:
 
-- **Cadence.** A one-to-one space reads every new segment at once; a group
-  queues a member's segments and reads them every ``[groups]
-  member_profile_every`` and at each flush.
+- **Cadence.** A one-to-one space reads its segments on ``[profile]
+  update_every``; a group either queues each member's segments and reads
+  them every ``[groups] member_profile_every`` (``per_member``), or queues
+  the group's segments and reads every member who spoke in a batch with one
+  call (``batched``, the default: :mod:`._member_batch`).
 - **Input.** The segments to read, as the model is shown them -- a group's
   with its speakers labelled by their roster names -- and the language the
   space resolved.
@@ -21,12 +23,14 @@ stamped with its sources and versions
 (:func:`~everos.memory.extract.pipeline.profile_items.stamp_update`), what a
 person holds kept as they left it
 (:func:`~everos.memory.extract.pipeline.profile_items.keep_held`), and the
-replaced items moved to the bounded history.
+replaced items moved to the bounded history. A batched group update calls
+everalgo's ``ProfileExtractor.aupdate_many`` once for every member instead,
+and keeps each member's result the same way (:func:`finish_update`).
 """
 
 from __future__ import annotations
 
-__all__ = ["ProfileUpdated", "update_profile"]
+__all__ = ["ProfileUpdated", "finish_update", "update_profile"]
 
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
@@ -34,6 +38,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from everalgo.user_memory import ProfileExtractor
+from everalgo.user_memory.profile import ProfileUpdate
 
 from everos.memory.deps import MemoryDeps
 from everos.memory.extract.pipeline.pictures import profile_pictures
@@ -121,6 +126,38 @@ async def update_profile(
         custom_instructions=deps.instructions.load("profile_extract"),
         output_language=language,
     )
+    return finish_update(
+        old,
+        update,
+        history=history,
+        segments=segments,
+        language=language,
+        pictures=len(pictures),
+    )
+
+
+def finish_update(
+    old: Profile | None,
+    update: ProfileUpdate,
+    *,
+    history: Sequence[Mapping[str, Any]],
+    segments: Sequence[tuple[str, MemCell]],
+    language: str | None,
+    pictures: int,
+) -> ProfileUpdated:
+    """What EverOS keeps of one person's update: every item stamped with its
+    sources and versions, what a person holds kept as they left it, the
+    replaced items moved to the bounded history.
+
+    Args:
+        old: The profile the update was given; ``None`` for a first one.
+        update: What everalgo returned for the person.
+        history: The stored history the replaced items join.
+        segments: ``(memcell_id, cell)`` the person was read from, oldest
+            first: each item's span is read off them.
+        language: The language the profile is written in.
+        pictures: How many pictures of theirs the model was shown.
+    """
     stamped, replaced = stamp_update(
         old,
         update,
@@ -132,7 +169,7 @@ async def update_profile(
     stamped.history = bounded_history(replaced, history, stamped)
     return ProfileUpdated(
         profile=stamped,
-        pictures=len(pictures),
+        pictures=pictures,
         retired=len(update.retired),
         replaced=len(replaced),
         superseded=sum(1 for entry in replaced if "superseded_by" in entry),

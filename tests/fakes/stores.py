@@ -433,6 +433,7 @@ class InMemoryGroupProfileStore:
         self.rows: list[Stored[GroupProfileItem]] = []
         self.marks: dict[str, str] = {}
         self.queued: dict[Scope, PendingBatch] = {}
+        self.member_queued: dict[Scope, PendingBatch] = {}
 
     @staticmethod
     def _check(scope: Scope) -> None:
@@ -521,6 +522,23 @@ class InMemoryGroupProfileStore:
     ) -> None:
         self._check(scope)
         self.queued[scope] = PendingBatch(
+            memcell_ids=tuple(memcell_ids), failures=failures, retry_at=retry_at
+        )
+
+    async def member_pending_batch(self, scope: Scope) -> PendingBatch:
+        self._check(scope)
+        return self.member_queued.get(scope, PendingBatch())
+
+    async def set_member_pending(
+        self,
+        scope: Scope,
+        memcell_ids: Sequence[str],
+        *,
+        failures: int = 0,
+        retry_at: int = 0,
+    ) -> None:
+        self._check(scope)
+        self.member_queued[scope] = PendingBatch(
             memcell_ids=tuple(memcell_ids), failures=failures, retry_at=retry_at
         )
 
@@ -1156,6 +1174,9 @@ class InMemoryGroupStore:
 
     async def group_ids(self, app_id: str, project_id: str) -> list[str]:
         return sorted(g for a, p, g in self.groups if (a, p) == (app_id, project_id))
+
+    async def group_keys(self) -> list[tuple[str, str, str]]:
+        return sorted(self.groups)
 
     async def member_groups(
         self, app_id: str, project_id: str, member_id: str

@@ -124,6 +124,19 @@ def _reset_settings_cache() -> Iterator[None]:
 
 
 @pytest.fixture
+def per_member_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``[groups]`` as EverOS ran until 2026-11-14: one member per profile
+    update (``member_profile_mode = "per_member"``) and every flush of the
+    group reading the profiles (``profile_on_flush``). For the tests that pin
+    that behaviour; the batched default has tests of its own."""
+    from everos.config import load_settings
+
+    monkeypatch.setenv("EVEROS_GROUPS__MEMBER_PROFILE_MODE", "per_member")
+    monkeypatch.setenv("EVEROS_GROUPS__PROFILE_ON_FLUSH", "true")
+    load_settings.cache_clear()
+
+
+@pytest.fixture
 async def storage(tmp_path: Path) -> AsyncIterator[Storage]:
     """Real storage (system DB + LanceDB index) over the test's memory root."""
     built = make_storage(tmp_path)

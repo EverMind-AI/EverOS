@@ -12,6 +12,37 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A group's member profiles are read in batches, and a flush no longer
+  forces a profile.** Measured on 2026-11-14 (DeepSeek V4.1 Flash, an
+  EverMemBench slice): the member profiles were $0.207 and the group profile
+  $0.158 of a $0.493 write per 1,000 messages -- 1,830 member updates for 371
+  segments, each re-reading its whole segment while a member's own lines were
+  12% of it, 48% of them changing nothing (GroupAssistBench: 344 updates,
+  44%), every one forced at the flush the harness sent per session. Now, by
+  default (`[groups] member_profile_mode = "batched"`), a group's segments
+  are queued on the group (`groups/<g>/profile/members_pending.md`) and one
+  call updates every member who spoke in a batch, on the group profile's
+  cadence (`group_profile_batch`, `group_profile_idle_seconds`; a new
+  `update_member_profiles_idle` strategy). The call is everalgo's new
+  `ProfileExtractor.aupdate_many`: the batch once, every speaker's stored
+  profile under a label their refs carry, the one-person update rules word
+  for word, and a reply grouped per member (a member with nothing new is
+  left out and not written). Each member's operations apply to their own
+  document exactly as before; an operation resting on another member -- their
+  item's ref, segments without the member's line, someone else's picture, a
+  quote only of others' lines -- is left out, and every outcome is counted
+  (`everos_member_profile_attribution_total`). A failed batch keeps the group
+  profile's back-off (`everos_member_profile_batch_failures_total`).
+  `[groups] profile_on_flush = false` (new) stops a flush from reading either
+  profile; `true` restores the behaviour until 2026-11-14. The new
+  `catch_up_profiles` strategy, `POST /api/v2/ome/trigger` with `{"name":
+  "catch_up_profiles"}`, brings every group's profiles up to date at once --
+  what an evaluation does before it searches -- over a registry of catch-up
+  providers (`CATCH_UP_PROVIDERS`) the one-to-one profile can join.
+  `member_profile_mode = "per_member"` with `profile_on_flush = true` sends the
+  requests of ea7d2570 byte for byte (a test holds it there).
+  everalgo-user-memory is the local build `0.9.0rc6.dev9+v031episode`; the
+  prompt manifest records `everalgo.user_memory.profile_update_many`.
 - **Every chat cell is sent the original episode request again.** everalgo's
   rewritten episode rules (2026-10) told the model not to copy a message's
   time into the content: with GPT-4.1-mini extraction 1% of LoCoMo episodes

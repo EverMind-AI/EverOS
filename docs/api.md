@@ -160,8 +160,11 @@ and a group's profile. `/flush` returns once the episode is on disk; the
 `memory_type: "profile"` can legitimately return the profile as it was
 before that conversation (or `total_count: 0` for a new user) for seconds
 after a flush that returned `"extracted"`. A member's profile in a group
-waits longer: it is updated every `[groups] member_profile_every` segments
-and on each flush of the group. `GET /health`'s `cascade.pending` does
+waits longer: it is updated with the group's batch, every `[groups]
+group_profile_batch` segments or `group_profile_idle_seconds` after the
+group's last one, and not on a flush (unless `[groups] profile_on_flush`);
+`POST /api/v2/ome/trigger` with `{"name": "catch_up_profiles"}` brings it up
+to date at once. `GET /health`'s `cascade.pending` does
 **not** cover this window — it only tracks the md → index queue, which is
 empty while the strategy is still thinking. Poll `/get` with a budget
 instead. The same "seconds later" rule for every OME-produced kind is
@@ -1762,11 +1765,18 @@ five dispatch gates (event-class subscription / `_routes_to` / `enabled` /
 `applies_to` / `Counter`). A manual trigger sends a `ManualTick`, which
 reaches only a strategy that subscribes to it or runs on a `Cron` schedule,
 and only with `"force": true` when the strategy is `enabled=false` in
-`ome.toml`. Every strategy EverOS 2.0 ships runs on an event instead -- a
-new episode (`extract_user_profile`, `update_user_scenes`), a group segment
-or flush (`update_member_profiles`, `update_group_scenes`,
+`ome.toml`. One strategy EverOS 2.0 ships subscribes to it:
+`catch_up_profiles`, which brings every profile kept on a cadence up to date
+at once -- every group's member profiles and group profile (one
+`GroupProfilesDue` per group; a batch waiting out a back-off is read too).
+It returns `"ok"` once every run it started has settled; an evaluation calls
+it after ingesting, with a `timeout` long enough for its groups, before it
+searches. Every other strategy runs on an event -- a new episode
+(`extract_user_profile`, `update_user_scenes`), a group segment, flush or
+catch-up (`update_member_profiles`, `update_group_scenes`,
 `update_group_profile`) or a group's idle window
-(`update_group_profile_idle`) -- so triggering one of them returns
+(`update_member_profiles_idle`, `update_group_profile_idle`) -- so
+triggering one of them returns
 `{"status": "not_dispatched", "dispatched": 0, "runs": []}` instead of an
 error.
 
@@ -1906,8 +1916,11 @@ forget.
 (the members it names, else the human senders) and `origin` (`member`,
 `assistant` or `mixed`). Each picture becomes one picture memory with
 `sender_ids = [poster]`. In the background, each member who spoke gets a
-profile in the group, `groups/<group_id>/members/<member_id>.md`. It is
-updated after `[groups] member_profile_every` segments and on every flush.
+profile in the group, `groups/<group_id>/members/<member_id>.md`. The
+members of a batch are updated together, one call per batch of `[groups]
+group_profile_batch` segments or after `group_profile_idle_seconds` without
+one; a flush reads nothing unless `[groups] profile_on_flush`, and the
+`catch_up_profiles` trigger reads everything queued.
 With `[scenes] groups = true` (off by default), the group's scenes are
 written to `groups/<group_id>/scenes/`, as a user's are with `[scenes] users`.
 

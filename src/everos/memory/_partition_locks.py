@@ -32,7 +32,8 @@ layers a distributed coordinator on top.
 
 from __future__ import annotations
 
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Iterable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import TYPE_CHECKING
 
 from everos.core.locks import LOCKS
@@ -72,6 +73,37 @@ def profile_lock(
     if scope.owner_type == "group" and person_id is None:
         raise ValueError("a profile in a group belongs to one member")
     return get_partition_lock("profile", _key(scope, person_id or scope.owner_id))
+
+
+@asynccontextmanager
+async def profile_locks(scope: Scope, people: Iterable[str]) -> AsyncIterator[None]:
+    """Every one of ``people``'s profile locks in ``scope``, taken in sorted order.
+
+    A batched update of a group's members (docs/group-memory.md, section 7.4)
+    holds them all across its one model call. Every other writer holds one
+    member's lock at a time, so taking several in one order deadlocks with
+    nothing; the sorted order keeps two batches of one group from deadlocking
+    with each other too.
+    """
+    async with AsyncExitStack() as stack:
+        for person in sorted(set(people)):
+            await stack.enter_async_context(profile_lock(scope, person))
+        yield
+
+
+def member_profiles_lock(
+    app_id: str, project_id: str, group_id: str
+) -> AbstractAsyncContextManager[None]:
+    """The lock of one group's member-profile batch (``[groups]
+    member_profile_mode = "batched"``, docs/group-memory.md, section 7.4).
+
+    One per group: a segment queued while the batch is read waits for it, so
+    no segment is read twice or dropped from the batch. Taken before the
+    members' profile locks.
+    """
+    return get_partition_lock(
+        "update_member_profiles", f"{app_id}:{project_id}:{group_id}"
+    )
 
 
 def scenes_lock(scope: Scope) -> AbstractAsyncContextManager[None]:
