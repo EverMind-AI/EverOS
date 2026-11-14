@@ -26,7 +26,11 @@ machinery that keeps a deleted memory from coming back.
   picture cell's `<pictures>` block (the picture rules, the `images` field,
   the labels in order; the pictures follow the text, each after its label),
   then the `<output_language>` block naming the conversation's language. The
-  reply is `title` and `content` (and `images`); the summary is the content's
+  reply is `title` and `content` (and `images`), read as the original read
+  it: any other top-level key is ignored (DeepSeek V4.1 Flash added keys of
+  its own -- `type`, `_meta`, `_comment`, ... -- to 123 of 127 replies on a
+  LoCoMo probe; the names are logged at debug level and counted in
+  `everos_episode_reply_keys_ignored_total`). The summary is the content's
   first 200 characters, cut in code. `chat.episode` is version 4;
   everalgo-user-memory is the local build `0.9.0rc6.dev7+v031episode`, which
   carries the original prompt and its renderer

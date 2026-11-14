@@ -55,7 +55,8 @@ update, which reads the segment's pictures itself
 call writes no profile item.
 
 The reply is read leniently in form and strictly in meaning
-(:mod:`everos.memory.extract.reply_form`): an unknown key left empty reads as
+(:mod:`everos.memory.extract.reply_form`): a top-level key the reply model does
+not define is ignored, an unknown key left empty in a picture entry reads as
 absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images``
 (one entry given bare reads as a list of it), and a reply with an array
 element left open or split in two objects is mended before it is validated. A
@@ -63,8 +64,9 @@ cell is never given a picture it did not send: a text cell's reply loses any
 ``images`` it writes, and a reference ``(img-N)`` to a label the cell did not
 attach is taken out of the episode. A reply that leaves ``title`` or
 ``content`` blank is rejected (the guard ``EpisodeExtractor`` applies,
-imported from everalgo so the two cannot drift apart), and a ``summary`` it
-writes anyway is dropped: the summary is cut in code. The reply models' names
+imported from everalgo so the two cannot drift apart); any other top-level key
+it writes -- a ``summary``, or a key of the model's own -- is ignored, as the
+original read its reply. The reply models' names
 and docstrings are part of the JSON schema a ``json_schema``-mode call sends.
 
 The call's output is capped by what it reads (:func:`reply_token_cap`), and a
@@ -126,6 +128,7 @@ from everalgo.utils import paragraphs, tagged
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from everos.core.observability.logging import get_logger
+from everos.core.observability.metrics import Counter as MetricCounter
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 from everos.memory.prompts import PromptTemplate
@@ -134,6 +137,16 @@ if TYPE_CHECKING:
     from everos.memory.extract.pipeline.pictures import Picture
 
 logger = get_logger(__name__)
+
+_ignored_keys = MetricCounter(
+    name="episode_reply_keys_ignored_total",
+    description=(
+        "Top-level keys an episode reply carried beyond its model's fields, "
+        "dropped unread, by reply model."
+    ),
+    labelnames=("reply",),
+    namespace="everos",
+)
 
 
 _PICTURE_RULES = """\
@@ -289,12 +302,35 @@ class ImageFact(StrictOutputModel):
 
 
 class _LenientReply(StrictOutputModel):
-    """How every episode reply is read: lenient in form, strict in meaning."""
+    """How every episode reply is read: lenient in form, strict in meaning.
+
+    Only the fields the reply model defines are read. Any other top-level
+    key, empty or not -- a ``summary`` included, since the summary is cut in
+    code -- is dropped, as everalgo-user-memory 0.3.1 read the original's
+    reply (it required ``title`` and ``content`` and ignored the rest): on
+    the LoCoMo probe of 2026-11-14 DeepSeek V4.1 Flash added keys of its own
+    (``type``, ``_meta``, ``_comment``, ``emotional_tone``,
+    ``_time_resolution``, ...) to 123 of its 127 replies. The names are
+    logged at debug level and counted. A picture entry is still read
+    strictly (:class:`ImageFact`).
+    """
 
     @model_validator(mode="before")
     @classmethod
-    def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
-        return drop_empty_unknown_keys(cls, value)
+    def _read_only_known_keys(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        known = set(cls.model_fields) | {
+            field.alias for field in cls.model_fields.values() if field.alias
+        }
+        ignored = sorted(key for key in value if key not in known)
+        if not ignored:
+            return value
+        _ignored_keys.labels(reply=cls.__name__).inc(len(ignored))
+        logger.debug(
+            "memory.episode.reply_keys_ignored", reply=cls.__name__, keys=ignored
+        )
+        return {key: item for key, item in value.items() if key in known}
 
     @classmethod
     def model_validate_json(
@@ -328,19 +364,6 @@ class EpisodeReply(_LenientReply):
     title: str
     content: str
 
-    @model_validator(mode="before")
-    @classmethod
-    def _only_title_and_content(cls, value: object) -> object:
-        # The summary is cut in code, and the cell attached no picture: a
-        # summary or picture entries the model writes anyway are dropped.
-        if isinstance(value, dict):
-            return {
-                key: item
-                for key, item in value.items()
-                if key not in ("summary", "images")
-            }
-        return value
-
 
 class ImageEpisodeReply(_LenientReply):
     """The one reply that carries the episode and every picture's memory."""
@@ -348,14 +371,6 @@ class ImageEpisodeReply(_LenientReply):
     title: str
     content: str
     images: list[ImageFact] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _no_summary(cls, value: object) -> object:
-        # The summary is cut in code: one the model writes anyway is dropped.
-        if isinstance(value, dict) and "summary" in value:
-            return {key: item for key, item in value.items() if key != "summary"}
-        return value
 
     @field_validator("images", mode="before")
     @classmethod
@@ -480,12 +495,11 @@ def to_episode(
 ) -> AlgoEpisode:
     """The algo Episode the reply describes.
 
-    The mapping everalgo's extractor applies (``title`` → ``subject``,
-    ``content`` → ``episode`` verbatim, ``summary`` through its width guard,
-    ``timestamp`` from the cell), so an episode reads the same downstream
-    whichever cell it came from. The model writes no summary: it is the
-    content's first 200 characters, as the original filled it, taken before
-    the labels gain their ids.
+    The mapping the original extractor applied (``title`` → ``subject``,
+    ``content`` → ``episode`` verbatim, ``timestamp`` from the cell), so an
+    episode reads the same downstream whichever cell it came from. The model
+    writes no summary: it is the content's first 200 characters, as the
+    original filled it, taken before the labels gain their ids.
 
     ``owner_id`` is ``None``: the episode is extracted once for the whole
     cell and fanned out to one md per user sender by the caller, which is

@@ -8,8 +8,11 @@ profile operations (the profile update reads the pictures itself), so a reply
 that still writes an empty ``profile`` reads as one without it. What these
 pin:
 
-- an unknown key left empty reads as absent, in a picture's entry and at the
-  top;
+- a top-level key the reply model does not define is ignored, empty or not
+  -- the keys DeepSeek V4.1 Flash added to the original's reply on the LoCoMo
+  probe of 2026-11-14 (``type``, ``_meta``, ``_comment``, ``emotional_tone``,
+  ``_time_resolution``) included -- as everalgo-user-memory 0.3.1 read it;
+  in a picture's entry an unknown key left empty reads as absent;
 - an array element left open, and a reply split in two objects, are mended
   before validation -- in the provider's check and in the operator's parse
   alike, so the call is answered by its first reply;
@@ -20,8 +23,8 @@ pin:
   a reply that leaves ``title`` or ``content`` blank is unusable
   (``LLMOutputError``, which the pipeline retries), as it is for everalgo;
 - what is not a slip of form still fails: an unknown key that carries
-  something (profile operations included), a missing description or episode,
-  a wrong type, a form slip the repair does not know;
+  something inside a picture's entry (profile operations included), a missing
+  description or episode, a wrong type, a form slip the repair does not know;
 - the JSON schema the call sends is pinned.
 """
 
@@ -168,7 +171,6 @@ def test_a_text_cell_s_reply_is_mended_like_a_picture_cell_s() -> None:
             + _OP
             + "]}]"
         ),
-        _reply()[:-1] + f', "profile": [{_OP}]}}',  # the route writes no profile
         _reply(images='[{"ref": "img-1", "ocr": ""}]'),  # no description
         _reply(images='[{"ref": "img-1", "description": "a latte", "ocr": 7}]'),
         '{"summary": "s", "title": "t", "images": []}',  # no episode
@@ -202,6 +204,102 @@ def test_the_schema_sent_is_pinned() -> None:
     assert to_openai_response_format(ImageEpisodeReply, "json_object") == {
         "type": "json_object"
     }
+
+
+# ---------------------------------------------------------------------------
+# Keys a model adds at the top: ignored, as the original read its reply
+# ---------------------------------------------------------------------------
+
+# Five replies DeepSeek V4.1 Flash wrote to the original request on the LoCoMo
+# probe of 2026-11-14 (2.0 c785d98, conversation 0), cut to their shape: 123 of
+# its 127 replies carried keys of their own, and the strict reading rejected
+# all but 4. The keys and their values are the model's, verbatim.
+_TITLE = "Caroline and Melanie Discuss LGBTQ Support Group, Career Goals, and Painting"
+_CONTENT = "On May 8, 2023 at 1:56 PM UTC, Caroline and Melanie greeted each other."
+_ADDED_KEYS = [
+    {"type": "json_object"},
+    {
+        "_meta": {
+            "timestamps": {
+                "start": "2023-05-08T13:56:00Z",
+                "end": "2023-05-08T14:04:00Z",
+            }
+        }
+    },
+    {
+        "_comment": (
+            "The content field is a string, not an object. The JSON object "
+            "contains only title and content as required."
+        )
+    },
+    {"emotional_tone": "supportive, reflective, encouraging"},
+    {"_time_resolution": {"yesterday": "May 7, 2023", "last year": "2022"}},
+]
+
+
+@pytest.mark.parametrize("added", _ADDED_KEYS, ids=lambda d: next(iter(d)))
+def test_a_key_the_model_adds_at_the_top_is_ignored(added: dict[str, Any]) -> None:
+    text = json.dumps({"title": _TITLE, "content": _CONTENT} | added)
+
+    text_reply = EpisodeReply.model_validate_json(text)
+    picture_reply = ImageEpisodeReply.model_validate_json(
+        json.dumps({"title": _TITLE, "content": _CONTENT, "images": []} | added)
+    )
+
+    assert (text_reply.title, text_reply.content) == (_TITLE, _CONTENT)
+    assert text_reply.model_dump() == {"title": _TITLE, "content": _CONTENT}
+    assert (picture_reply.title, picture_reply.content) == (_TITLE, _CONTENT)
+
+
+def test_every_added_key_at_once_and_a_summary_are_ignored() -> None:
+    added = {k: v for d in _ADDED_KEYS for k, v in d.items()} | {"summary": "s"}
+    text = json.dumps({"title": _TITLE, "content": _CONTENT} | added)
+
+    assert EpisodeReply.model_validate_json(text).model_dump() == {
+        "title": _TITLE,
+        "content": _CONTENT,
+    }
+
+
+def test_profile_operations_at_the_top_are_ignored() -> None:
+    reply = ImageEpisodeReply.model_validate_json(
+        _reply()[:-1] + f', "profile": [{_OP}]}}'
+    )
+
+    assert [f.ref for f in reply.images] == ["img-1"]
+    assert "profile" not in reply.model_dump()
+
+
+@pytest.mark.parametrize("missing", ["title", "content"])
+def test_a_reply_without_title_or_content_still_fails(missing: str) -> None:
+    fields = {"title": _TITLE, "content": _CONTENT, "type": "json_object"}
+    fields.pop(missing)
+
+    with pytest.raises(ValidationError):
+        EpisodeReply.model_validate_json(json.dumps(fields))
+
+
+async def test_a_probe_reply_with_added_keys_answers_the_call() -> None:
+    """The probe's failure: a reply with keys of its own failed validation."""
+    seen: list[dict[str, Any]] = []
+    reply = json.dumps({"title": _TITLE, "content": _CONTENT, "_meta": {"a": 1}})
+    llm = _provider([reply], seen)
+    message = ChatMessage(
+        id="m_1",
+        role="user",
+        content="Hey Mel! Good to see you!",
+        timestamp=1_683_554_160_000,
+        sender_id="caroline",
+        sender_name="Caroline",
+    )
+    cell = MemCell(items=[message], timestamp=1_683_554_160_000)
+
+    got = await episode.extract(
+        llm, cell, pictures=[], custom_instructions=None, output_language=None
+    )
+
+    assert len(seen) == 1
+    assert (got.title, got.content) == (_TITLE, _CONTENT)
 
 
 # ---------------------------------------------------------------------------
