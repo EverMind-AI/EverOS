@@ -220,12 +220,20 @@ async def test_attribution_of_a_mixed_segment(tmp_path: Path) -> None:
         assert episode.timestamp == T0 + 3_000
 
         # The model saw roster names, the assistant labelled as such, and the
-        # roster block where the operator's custom instructions go.
+        # roster block after the original episode request.
         (prompt,) = model.episode_prompts
-        assert "] Chen: May 1 is sold out" in prompt
-        assert "] Ava (assistant): Two flights" in prompt
-        assert "u_chen:" not in prompt
-        assert "This conversation is a group chat. People in this part: " in prompt
+        assert '"speaker": Chen,\n                    "content": May 1 is sold out' in (
+            prompt
+        )
+        assert (
+            '"speaker": Ava (assistant),\n                    "content": Two flights'
+            in prompt
+        )
+        assert "u_chen" not in prompt
+        assert (
+            "<group_chat>\nThis conversation is a group chat. People in this part: "
+            in (prompt)
+        )
         assert "Chen (owner, Organiser), Betty (member)" in prompt
         assert '"Ava (assistant)" is the group\'s AI assistant.' in prompt
 

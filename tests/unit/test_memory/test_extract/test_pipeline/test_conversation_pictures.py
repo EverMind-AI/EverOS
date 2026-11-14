@@ -24,7 +24,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 from everalgo.types import ChatMessage, MemCell
-from everalgo.user_memory.prompts.en.episode import EPISODE_SYSTEM_PROMPT
+from everalgo.user_memory.prompts.en.episode_original import (
+    EPISODE_GENERATION_PROMPT,
+)
 
 from everos.component.images import ImageLimits
 from everos.memory import IngestResult
@@ -196,12 +198,14 @@ async def test_a_text_cell_is_sent_everalgo_s_prompt_and_shares_its_rules() -> N
         )
 
     (text_call,), (picture_call,) = text_llm.calls, picture_llm.calls
-    text_system, picture_system = text_call[0].content, picture_call[0].content
-    assert text_system.startswith(EPISODE_SYSTEM_PROMPT + "\n\n<output_language>\n")
-    assert "<pictures>" not in text_system
+    # A one-to-one text cell: the original request, one user message.
+    (text_user,) = text_call
+    assert text_user.role == "user"
+    assert text_user.content.startswith(EPISODE_GENERATION_PROMPT[:60])
+    assert "<pictures>" not in text_user.content
+    assert text_user.content.endswith("</output_language>")
+    picture_system = picture_call[0].content
     assert picture_system.startswith(EPISODE_RULES + "\n\n<pictures>\n")
-    assert isinstance(text_call[1].content, str)
-    assert text_call[1].content.startswith('<conversation count="1">')
     assert not isinstance(picture_call[1].content, str)
 
 

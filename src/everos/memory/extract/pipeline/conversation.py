@@ -13,15 +13,16 @@ episode. A segment is remembered in exactly one kind of space
   declared group, or the implicit group of a session's people (three or more
   people talking without a ``group_id``). The episode goes under
   ``groups/<group_id>/``. The model is shown the segment with its speakers
-  labelled by their roster names and the roster block after the operator's
-  custom instructions (:mod:`.group_render`, section 7.2); after the call,
+  labelled by their roster names and the roster block (:mod:`.group_render`,
+  section 7.2); after the call,
   code sets the attribution (``sender_ids`` / ``subject_ids`` / ``origin``)
   and the segment's span, which every read compares with the asker's
   membership windows. A picture memory is dated by the message that carried
   it and attributed to its poster (section 7.3).
 * **A user's own** -- one person's conversation with the assistant, or two
-  people's without a ``group_id`` (D14, amended 2026-11-13): the prompt is
-  everalgo's episode prompt byte for byte and the conversation alone, and
+  people's without a ``group_id`` (D14, amended 2026-11-13): a segment
+  without pictures is sent the original episode request (everalgo-user-memory
+  0.3.1's, one user message) with the language block appended, and
   each human sender keeps a copy -- the episode, its picture memories (dated
   by the segment, section 10) and its event -- under ``users/<sender>/``.
 
@@ -71,7 +72,6 @@ from everos.memory.extract.pipeline.group_render import (
     attribution,
     label_cell,
     roster_block,
-    with_roster_block,
 )
 from everos.memory.extract.pipeline.pictures import (
     Picture,
@@ -377,14 +377,12 @@ class ConversationPipeline:
             cell, images=self._images, limits=self._image_limits
         )
         custom = self._instructions.load("episode_extract")
-        shown = cell
+        shown, roster = cell, None
         if space.group is not None:
-            custom = with_roster_block(
-                custom, roster_block(space.group, space.roster, cell)
-            )
+            roster = roster_block(space.group, space.roster, cell)
             shown = label_cell(cell, space.roster)
         algo_ep, described = await self._extract(
-            space, session, memcell_id, shown, pictures, custom, named
+            space, session, memcell_id, shown, pictures, custom, named, roster
         )
         # That language pins every extraction downstream of this episode.
         # Only a conversation without a letter in it left the choice to the
@@ -438,11 +436,13 @@ class ConversationPipeline:
         pictures: Sequence[Picture],
         custom_instructions: str | None,
         language: OutputLanguage | None,
+        roster: str | None = None,
     ) -> _Extraction:
         """One whole-cell episode (and picture descriptions).
 
         An unusable reply is tried again (:func:`.episode.extract_cell`).
         ``language`` is named to the model; ``None`` leaves it the choice.
+        ``roster`` is a group cell's roster block.
         """
         metadata: dict[str, Any] = {
             "app_id": space.scope.app_id,
@@ -466,6 +466,7 @@ class ConversationPipeline:
                 custom_instructions=custom_instructions,
                 output_language=language,
                 memcell_id=memcell_id,
+                roster=roster,
             )
             capture_output(extract_span, extraction[0].episode)
         return extraction

@@ -86,9 +86,10 @@ async def _episode(**scripts: str) -> AlgoEpisode:
 async def test_episode_script() -> None:
     episode = await _episode()
     want = json.loads(user_track_script("episode"))
+    # The original request's summary is the content's first 200 characters.
     assert (episode.episode, episode.summary, episode.subject) == (
         want["content"],
-        want["summary"],
+        want["content"][:200],
         want["title"],
     )
 

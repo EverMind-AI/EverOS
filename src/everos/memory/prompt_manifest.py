@@ -10,8 +10,9 @@ fingerprint of their text:
   decider every search round sends.
 * everalgo's, sent as the installed package wrote them
   (:class:`~everos.memory.prompts.AlgoPrompt`): the boundary detection that
-  cuts a conversation into segments, the episode rules the episode prompt
-  opens with, the profile update and consolidation, the output-language rules
+  cuts a conversation into segments, the original episode request a text
+  cell is sent, the episode rules a picture cell's episode prompt opens
+  with, the profile update and consolidation, the output-language rules
   every extraction prompt carries in its ``<output_language>`` block, and the
   parser prompts that read a picture, a document or a recording into text
   (``[extraction] vision = false``, ``[multimodal]``).
@@ -51,6 +52,10 @@ import everalgo.user_memory._language as language_rules
 from everalgo.boundary.prompts.en.chat import (
     BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT,
     BATCH_BOUNDARY_DETECT_USER_PROMPT,
+)
+from everalgo.user_memory.prompts.en.episode_original import (
+    DEFAULT_CUSTOM_INSTRUCTIONS,
+    EPISODE_GENERATION_PROMPT,
 )
 from everalgo.user_memory.prompts.en.profile import (
     PROFILE_CONSOLIDATE_SYSTEM_PROMPT,
@@ -92,6 +97,11 @@ ALGO_PROMPTS: tuple[AlgoPrompt, ...] = (
         parts=(BATCH_BOUNDARY_DETECT_SYSTEM_PROMPT, BATCH_BOUNDARY_DETECT_USER_PROMPT),
     ),
     AlgoPrompt(
+        id="everalgo.user_memory.episode_original",
+        package="everalgo-user-memory",
+        parts=(EPISODE_GENERATION_PROMPT, DEFAULT_CUSTOM_INSTRUCTIONS),
+    ),
+    AlgoPrompt(
         id="everalgo.user_memory.episode_rules",
         package="everalgo-user-memory",
         parts=(EPISODE_RULES,),
@@ -125,9 +135,10 @@ ALGO_PROMPTS: tuple[AlgoPrompt, ...] = (
 )
 """The everalgo prompts a chat store is written with, all sent while it is
 written: the boundary detection is ``adetect_boundaries``' batch call, which
-every buffered conversation goes through before it is extracted; the episode
-rules open ``chat.episode``; the two profile prompts are everalgo
-``ProfileExtractor.aupdate``'s; the language rules fill the
+every buffered conversation goes through before it is extracted; the original
+episode request (everalgo-user-memory 0.3.1's) is what ``chat.episode`` sends
+a text cell, and the episode rules open its picture rendering; the two
+profile prompts are everalgo ``ProfileExtractor.aupdate``'s; the language rules fill the
 ``<output_language>`` block of every extraction prompt (the episode's, the
 profile's, a group profile's, a scene's, the constraint binding's); the parser
 prompts read a picture (when the extraction model reads none), a document or

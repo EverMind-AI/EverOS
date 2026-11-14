@@ -5,13 +5,15 @@ only what it is given changes, and the change is code, not prompt text (D15):
 
 * **Speaker labels** (:func:`label_cell`). Each message's speaker becomes the
   sender's roster ``display_name`` at the message's time, an assistant member
-  ``"<display_name> (assistant)"``. The transcript line format is unchanged:
-  it already names the speaker on every line.
+  ``"<display_name> (assistant)"``. The transcript format is unchanged: it
+  already names the speaker of every message.
 * **Roster block** (:func:`roster_block`). :data:`ROSTER_BLOCK`, registered
-  as ``chat.group_roster_block``, is appended after the operator's custom
-  instructions: who speaks in this part and who it names, with access roles
-  and titles, and the rule that what the assistant says is its own reply,
-  never something the group agreed.
+  as ``chat.group_roster_block``: who speaks in this part and who it names,
+  with access roles and titles, and the rule that what the assistant says is
+  its own reply, never something the group agreed. A text segment gets it in
+  a ``<group_chat>`` block after the original episode request
+  (:func:`.episode.build_original_prompt`); a picture segment after the
+  operator's custom instructions (:func:`with_roster_block`).
 * **Speaker with id** (:func:`speaker_with_id`). The group-profile and
   constraint-binding prompts (sections 7.5 and 8.4) show a labelled
   speaker's member id next to the name, ``Chen (u_chen)``: the id is what

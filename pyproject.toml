@@ -99,10 +99,11 @@ dependencies = [
     # `pip install everos` would otherwise mix lines the suite has never run
     # together. Pin every one with `==` and raise them together, with a run of
     # the release smoke against a PyPI-resolved install.
-    # Test phase: everalgo-user-memory is a local build of the 2.0 profile
-    # (everalgo feat/profile-two-prompts), vendored in vendor/wheels/ and named
-    # in [tool.uv.sources]; it goes back to a PyPI pin once everalgo publishes.
-    "everalgo-user-memory==0.9.0rc6.dev6",
+    # Test phase: everalgo-user-memory is a local build of the 2.0 profile and
+    # the original episode request (everalgo feat/episode-prompt-original),
+    # vendored in vendor/wheels/ and named in [tool.uv.sources]; it goes back
+    # to a PyPI pin once everalgo publishes.
+    "everalgo-user-memory==0.9.0rc6.dev7+v031episode",
     "everalgo-rank==0.5.0rc3",
     # Reads a chat message's non-text items (pdf, docs, html, ...) into text
     # at ingest, and brings Pillow, which the picture store needs. It came in
@@ -137,7 +138,7 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 # Test phase only (vendor/wheels/README.md): the vendored local build, until
 # everalgo publishes it; uv installs it from this path, pip cannot.
-everalgo-user-memory = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" }
+everalgo-user-memory = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev7+v031episode-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/everos"]

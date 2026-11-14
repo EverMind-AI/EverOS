@@ -7,8 +7,9 @@ What these pin:
   registered later cannot be left out of what a store records;
 - the everalgo prompts a chat store is written with are recorded by
   fingerprint against the vendored everalgo builds: the batch boundary
-  detection (everalgo-boundary) every conversation is cut with, the episode
-  rules ``chat.episode`` opens with, and the profile update and consolidation
+  detection (everalgo-boundary) every conversation is cut with, the original
+  episode request a text cell is sent, the episode rules a picture cell's
+  episode prompt opens with, and the profile update and consolidation
   of ``ProfileExtractor.aupdate`` (everalgo-user-memory). An everalgo change to
   any of them fails here, on purpose, before it reaches a store;
 - each entry says when its prompt is sent: while a store is written, on every
@@ -78,24 +79,29 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
             "0.4.1",
             "db589ab87364c7db",
         ),
+        "everalgo.user_memory.episode_original": (
+            "everalgo-user-memory",
+            "0.9.0rc6.dev7+v031episode",
+            "f9c003f109a466ea",
+        ),
         "everalgo.user_memory.episode_rules": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev6",
+            "0.9.0rc6.dev7+v031episode",
             "0c173343b7149d58",
         ),
         "everalgo.user_memory.profile_update": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev6",
+            "0.9.0rc6.dev7+v031episode",
             "6cc9e75ee44c2c98",
         ),
         "everalgo.user_memory.profile_consolidate": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev6",
+            "0.9.0rc6.dev7+v031episode",
             "d70ed25f5e44ede3",
         ),
         "everalgo.user_memory.language_rules": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev6",
+            "0.9.0rc6.dev7+v031episode",
             "10d1df0535db08bf",
         ),
         "everalgo.parser.prompts": (
@@ -109,9 +115,9 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
 def test_the_episode_prompt_is_recorded_with_its_two_variants() -> None:
     episode = prompt_manifest()["prompts"]["chat.episode"]
 
-    assert (episode["version"], episode["used"]) == (2, "write")
+    assert (episode["version"], episode["used"]) == (3, "write")
     assert episode["variants"] == {
-        "text": "2117ea4fa75e421a",
+        "text": "f9c003f109a466ea",
         "pictures": "bae4c0c544622565",
     }
 

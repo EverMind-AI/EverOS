@@ -137,7 +137,8 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert (extracted.owner_type, extracted.speaker_ids) == ("user", [])
     assert extracted.group_key is None
     (written,) = [call.args[1] for call in episode_store.append.await_args_list]
-    assert written.summary == _EPISODE["summary"]
+    # A one-to-one cell is sent the original request: its summary is cut in code.
+    assert written.summary == _EPISODE["content"][:200]
     assert written.subject == _EPISODE["title"]
     assert written.parent_id == "mc_a"
 

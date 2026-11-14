@@ -536,8 +536,8 @@ wheels = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.9.0rc6.dev6"
-source = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" }
+version = "0.9.0rc6.dev7+v031episode"
+source = { path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev7+v031episode-py3-none-any.whl" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-boundary" },
@@ -545,7 +545,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl", hash = "sha256:9e3150194751e3ecc8f695dd3e2de66bb21074d85ffa8bb336c6c0f751518d34" },
+    { filename = "everalgo_user_memory-0.9.0rc6.dev7+v031episode-py3-none-any.whl", hash = "sha256:6acffed3568053cf99b292680f3f723547db48f365c00a927ff139c88f6130f2" },
 ]
 
 [package.metadata]
@@ -636,7 +636,7 @@ requires-dist = [
     { name = "everalgo-parser", specifier = "==0.3.0rc2" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = "==0.3.0rc2" },
     { name = "everalgo-rank", specifier = "==0.5.0rc3" },
-    { name = "everalgo-user-memory", path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev6-py3-none-any.whl" },
+    { name = "everalgo-user-memory", path = "vendor/wheels/everalgo_user_memory-0.9.0rc6.dev7+v031episode-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "jieba", specifier = ">=0.42.1,<1.0" },

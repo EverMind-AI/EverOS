@@ -185,8 +185,9 @@ def test_the_schema_sent_is_pinned() -> None:
 
     The reply models' names and docstrings are part of it; a change here is a
     change to what every json_schema-mode picture call sends. Unchanged by the
-    rule-assembled prompt (2026-11-12); a text cell's ``EpisodeReply`` is
-    pinned beside it.
+    rule-assembled prompt (2026-11-12) and by the original request
+    (2026-11-14); a text cell's ``EpisodeReply`` (``title`` and ``content``)
+    is pinned beside it.
     """
     sent = to_openai_response_format(ImageEpisodeReply, "json_schema")
     text = json.dumps(sent, sort_keys=True)
@@ -195,7 +196,7 @@ def test_the_schema_sent_is_pinned() -> None:
     )
 
     assert hashlib.sha256(text.encode()).hexdigest()[:16] == "2e848a4bc74cae48"
-    assert hashlib.sha256(text_cell.encode()).hexdigest()[:16] == "069791f7e1c15613"
+    assert hashlib.sha256(text_cell.encode()).hexdigest()[:16] == "0b226fcf3ff40d51"
     assert "profile" not in json.dumps(sent)
     assert to_openai_response_format(ImageEpisodeReply, "json_object") == {
         "type": "json_object"

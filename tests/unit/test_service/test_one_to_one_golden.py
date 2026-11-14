@@ -31,6 +31,14 @@ regenerated once more for the episode prompt assembled by rule
 (``chat.episode``, 2026-11-12): a text cell is still sent everalgo's prompt
 byte for byte, so only the picture chat's prompt digest changed, and with it
 what is derived from its text -- its fixed embedding -- and nothing else.
+The LoCoMo excerpt's and the solo chat's sections were regenerated on
+2026-11-14, when a text cell started being sent the original episode request
+(everalgo-user-memory 0.3.1's, one user message, the language block after
+it): the deterministic model reads that request's message blocks, so the
+episode text and what derives from it changed -- the prompt digest, the
+summary (now the content's first 200 characters), content hashes, fixed
+embeddings, search scores and order, the decider's prompt digests -- and
+nothing else. The picture chat's sections were kept as they were.
 
 The LoCoMo excerpt's sections were regenerated on 2026-11-12, when two
 people talking without a ``group_id`` became an implicit group, and restored
@@ -173,6 +181,11 @@ named after the golden picture's hash) is listed with that value.
 # ── the deterministic model ──────────────────────────────────────────────
 
 _LINE = re.compile(r"^\[[^\]]+\]\s+([^:\n]{1,64}):\s+(.+)$", re.MULTILINE)
+_BLOCK = re.compile(
+    r'^ {20}"speaker": (.*?),\n {20}"content": (.*?)\n {16}\}$',
+    re.MULTILINE | re.DOTALL,
+)
+"""A message of the original episode request (one pseudo-JSON block)."""
 
 
 def _text_of(messages: Sequence[Any]) -> str:
@@ -212,12 +225,18 @@ def _transcript(prompt: str) -> str:
 def _episode_from(prompt: str) -> dict[str, str]:
     """An episode that depends on the transcript the model was shown.
 
-    The speaker lines are what the extraction renders from the cell, so a
+    The speaker lines (or, in the original request a text cell is sent, the
+    message blocks) are what the extraction renders from the cell, so a
     change to how a one-to-one cell is rendered changes the episode, and the
     golden catches it. The digest covers the whole prompt, instructions
     included: a one-to-one prompt that changes anywhere changes the episode.
     """
-    lines = _LINE.findall(_transcript(prompt))
+    if "Conversation content:\n" in prompt:
+        conversation = prompt.split("Conversation content:\n", 1)[1]
+        conversation = conversation.split("\n\nCustom instructions:\n", 1)[0]
+        lines = _BLOCK.findall(conversation)
+    else:
+        lines = _LINE.findall(_transcript(prompt))
     digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
     speakers = sorted({name.strip() for name, _ in lines})
     said = " | ".join(text.strip()[:60] for _, text in lines[:3])

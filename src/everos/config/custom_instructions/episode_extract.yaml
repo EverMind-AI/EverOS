@@ -1,10 +1,13 @@
 # Custom instructions for episode extraction (``chat.episode``, every chat cell).
 #
 # What it does
-#   When enabled, ``instructions`` is appended verbatim after the
-#   operator's bundled rules as its ``custom_instructions`` block. It adds
-#   requirements; it cannot replace a bundled rule or change the output shape.
-#   The text is never rendered as a template, so braces stay literal.
+#   When enabled, ``instructions`` is placed verbatim in the episode prompt.
+#   A text cell is sent the original episode request (everalgo-user-memory
+#   0.3.1's): the text fills its "Custom instructions" slot, in place of the
+#   five default principles that slot holds otherwise. A picture cell gets it
+#   as the last block of its system message, after the bundled rules. Either
+#   way it adds requirements; it cannot change the output shape. The text is
+#   never rendered as a template, so braces stay literal.
 #
 # To use it
 #   1. Write the requirement below, e.g.
