@@ -53,7 +53,6 @@ logger = get_logger("everos.service.memory")
 _QUEUED = "queued work for this session; nothing was deleted, retry later"
 _LOCKED = "session is busy; nothing was deleted, retry later"
 _MEMORY_ID = re.compile(r"(?P<owner>.+)_(?P<entry>ep_\d{8}_\d+)")
-_DETACH_ATTEMPTS = 3
 _PREVIEW_CAP = 5
 """A cluster's preview length, as everalgo clustering keeps it (``preview_cap``
 default, everalgo-clustering 0.2.1 ``clustering/algorithm.py:41``)."""
@@ -321,39 +320,38 @@ class Deleter:
         return [ref.entry_id for ref in first]
 
     async def _detach_from_clusters(self, scope: Scope, gone: set[str]) -> None:
-        """Take ``gone`` out of their clusters (and members no longer in md).
+        """Take ``gone`` out of their clusters.
 
-        Members and their texts are read without the clustering lock; under
-        it the member list is read again and, if it moved, the round starts
-        over (at most three times, then the md is read under the lock).
+        The reverse lookup and the membership rewrite both happen under the
+        owner's clustering lock. A clustering pass may have checked that the
+        episode was alive before step 1 removed its markdown and may still be
+        waiting to commit a cluster; looking up outside the lock would miss
+        that cluster and leave the deleted episode in it.
         """
-        clusters = self._stores.cluster
-        cluster_ids: set[str] = set()
-        for entry_id in sorted(gone):
-            found = await clusters.find_cluster_for_member(scope, "episode", entry_id)
-            if found is not None:
-                cluster_ids.add(found)
-        await self._prune_clusters(scope, cluster_ids, gone)
+        await self._prune_clusters(scope, set(), gone)
 
     async def _prune_clusters(
         self, scope: Scope, cluster_ids: set[str], gone: set[str]
     ) -> None:
-        """Reconcile membership with markdown, using the existing delete lock."""
+        """Reconcile membership with markdown, under the owner's clustering lock.
+
+        ``cluster_ids`` may carry clusters found by a caller's retry scan;
+        ``gone`` is re-resolved here so a cluster committed after that scan is
+        included. Every writer of one owner's clusters holds the same lock, so
+        the member list cannot move between the lookup and the rewrite.
+        """
         clusters = self._stores.cluster
-        for cluster_id in sorted(cluster_ids):
-            for attempt in range(_DETACH_ATTEMPTS):
+        async with user_cluster_lock(scope.app_id, scope.project_id, scope.owner_id):
+            for entry_id in sorted(gone):
+                found = await clusters.find_cluster_for_member(
+                    scope, "episode", entry_id
+                )
+                if found is not None:
+                    cluster_ids.add(found)
+            for cluster_id in sorted(cluster_ids):
                 ids = [m for m, _ in await clusters.members(cluster_id)]
                 alive = await self._alive(scope, ids)
-                async with user_cluster_lock(
-                    scope.app_id, scope.project_id, scope.owner_id
-                ):
-                    now = [m for m, _ in await clusters.members(cluster_id)]
-                    if now != ids:
-                        if attempt < _DETACH_ATTEMPTS - 1:
-                            continue
-                        ids, alive = now, await self._alive(scope, now)
-                    await self._restamp(cluster_id, ids, alive, gone)
-                break
+                await self._restamp(cluster_id, ids, alive, gone)
 
     async def _alive(self, scope: Scope, ids: Sequence[str]) -> dict[str, Episode]:
         stored = await self._stores.episode.read_many(scope, ids)
