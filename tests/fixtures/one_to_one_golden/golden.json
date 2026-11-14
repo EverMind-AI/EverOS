@@ -52,16 +52,16 @@
    "b2a7a42404ef9e47"
   ],
   "u_pic:cat": [
-   "a00f70d668d9985c"
+   "88fbb9d510a3cb2a"
   ],
   "u_pic:profile": [
-   "a00f70d668d9985c"
+   "88fbb9d510a3cb2a"
   ],
   "u_pic:support group": [
-   "4a7dff4e09b2da2b"
+   "bf199c033df212ed"
   ],
   "u_pic:travel to Beijing": [
-   "3627079a20285262"
+   "d88367406bd0279f"
   ],
   "user_001:cat": [
    "2e5b543bca9b5dae"
@@ -345,28 +345,39 @@
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
+     "origin": null,
+     "owner_type": null,
      "project_id": "default",
      "sender_ids": [
       "u_pic",
       "bot_pic"
      ],
      "session_id": "s_picture",
-     "subject": "Talk between nobody",
-     "summary": "0 lines (d2993d46a75a)",
+     "source": null,
+     "subject": "Talk between Ava, Pia",
+     "subject_ids": [],
+     "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
     }
    ],
+   "group_profile": [],
+   "images": [],
    "profiles": [],
+   "scenes": [],
    "total_count": 1
   },
   "u_pic:profile": {
    "count": 0,
    "episodes": [],
+   "group_profile": [],
+   "images": [],
    "profiles": [],
+   "scenes": [],
    "total_count": 0
   },
   "user_001:episode": {
@@ -476,7 +487,7 @@
  "markdown": {
   "default_app/default_project/users/caroline/episodes/episode-<TODAY>.md": "---\nid: episode_log_caroline_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: caroline\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [b485efbad046]\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [b485efbad046]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [62fa8401ee0e]\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [62fa8401ee0e]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [62cf391d5097\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [62cf391d5097]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: caroline\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [e6ce489ff89f\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [e6ce489ff89f]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
   "default_app/default_project/users/melanie/episodes/episode-<TODAY>.md": "---\nid: episode_log_melanie_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: melanie\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T13:58:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<1>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [b485efbad046]\n\n### Content\nHey Mel! Good to see you! How have you been? | Hey Caroline! Good to see you! I'm swamped with the kids & w | I went to a LGBTQ support group yesterday and it was so powe [b485efbad046]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:01:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<2>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [62fa8401ee0e]\n\n### Content\nThe support group has made me feel accepted and given me cou | That's really cool. You've got guts. What now? | Gonna continue my edu and check out career options, which is [62fa8401ee0e]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-08T14:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<3>\n**sender_ids**: [caroline, melanie]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [62cf391d5097\n\n### Content\nThanks, Melanie! That's really sweet. Is this your own paint | Yeah, I painted that lake sunrise last year! It's special to | Wow, Melanie! The colors really blend nicely. Painting looks [62cf391d5097]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: melanie\n**session_id**: s_locomo\n**timestamp**: 2023-05-25T13:22:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<4>\n**sender_ids**: [melanie, caroline]\n**language**: English\n\n### Subject\nTalk between caroline, melanie\n\n### Summary\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [e6ce489ff89f\n\n### Content\nHey Caroline, since we last chatted, I've had a lot of thing | That charity race sounds great, Mel! Making a difference & r | Thanks, Caroline! The event was really thought-provoking. I' [e6ce489ff89f]\n<!-- /entry:ep_<TODAY>_00000004 -->\n",
-  "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md": "---\nid: episode_log_u_pic_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: u_pic\n**session_id**: s_picture\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**sender_ids**: [u_pic, bot_pic]\n**image_ids**: [b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99]\n**language**: English\n\n### Subject\nTalk between nobody\n\n### Summary\n0 lines (d2993d46a75a)\n\n### Content\n[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)\n<!-- /entry:ep_<TODAY>_00000001 -->\n",
+  "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md": "---\nid: episode_log_u_pic_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: u_pic\n**session_id**: s_picture\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**sender_ids**: [u_pic, bot_pic]\n**image_ids**: [b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99]\n**language**: English\n\n### Subject\nTalk between Ava, Pia\n\n### Summary\nMeet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)\n\n### Content\nMeet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)\n<!-- /entry:ep_<TODAY>_00000001 -->\n",
   "default_app/default_project/users/u_pic/images/image-<TODAY>.md": "---\nid: image_log_u_pic_<TODAY>\ntype: image_memory_daily\nfile_type: image_memory_daily\nschema_version: 1\nuser_id: u_pic\ntrack: user\ndate: '<TODAY>'\nentry_count: 1\nlast_appended_at: '<NOW>'\n---\n<!-- entry:im_<TODAY>_00000001 -->\n## im_<TODAY>_00000001\n\n**owner_id**: u_pic\n**timestamp**: 2025-10-20T22:42:00+00:00\n**parent_type**: memcell\n**parent_id**: mc_<9>\n**image_id**: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99\n**original_path**: figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png\n**media_type**: png\n**width**: 48\n**height**: 32\n**name**: cat.png\n**session_id**: s_picture\n\n### Description\nA tabby cat on a sill (img-1)\n<!-- /entry:im_<TODAY>_00000001 -->\n",
   "default_app/default_project/users/user_001/episodes/episode-<TODAY>.md": "---\nid: episode_log_user_001_<TODAY>\ntype: episode_daily\nfile_type: episode_daily\nschema_version: 1\nuser_id: user_001\ntrack: user\ndate: '<TODAY>'\nentry_count: 4\nlast_appended_at: '<NOW>'\n---\n<!-- entry:ep_<TODAY>_00000001 -->\n## ep_<TODAY>_00000001\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-06-26T00:04:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<5>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\nI will travel to Beijing next week. Could you give me some s | Of course! Beijing attractions: Forbidden City, Great Wall,  | I am very interested in the variety of foods you mentioned.  [e894c94932b4\n\n### Content\nI will travel to Beijing next week. Could you give me some s | Of course! Beijing attractions: Forbidden City, Great Wall,  | I am very interested in the variety of foods you mentioned.  [e894c94932b4]\n<!-- /entry:ep_<TODAY>_00000001 -->\n<!-- entry:ep_<TODAY>_00000002 -->\n## ep_<TODAY>_00000002\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-05T07:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<6>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\nI will go with five or six of my friends. I really enjoy act | Entertainment suitable for groups of 6-8 people: 1. Hutong I | We will try immersive script murder games in the hutongs and [bd52d13a2b3c\n\n### Content\nI will go with five or six of my friends. I really enjoy act | Entertainment suitable for groups of 6-8 people: 1. Hutong I | We will try immersive script murder games in the hutongs and [bd52d13a2b3c]\n<!-- /entry:ep_<TODAY>_00000002 -->\n<!-- entry:ep_<TODAY>_00000003 -->\n## ep_<TODAY>_00000003\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-07T06:03:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<7>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\nThese past few days, to check in at all the attractions, I w | For your current physical and mental exhaustion and work anx | I feel like I've gained some weight. Are there any self-asse [8d070a829469\n\n### Content\nThese past few days, to check in at all the attractions, I w | For your current physical and mental exhaustion and work anx | I feel like I've gained some weight. Are there any self-asse [8d070a829469]\n<!-- /entry:ep_<TODAY>_00000003 -->\n<!-- entry:ep_<TODAY>_00000004 -->\n## ep_<TODAY>_00000004\n\n**owner_id**: user_001\n**session_id**: s_solo\n**timestamp**: 2025-07-14T04:00:30+00:00\n**parent_type**: memcell\n**parent_id**: mc_<8>\n**sender_ids**: [user_001, robot_001]\n**language**: English\n\n### Subject\nTalk between assistant, user\n\n### Summary\nI ate a lot of greasy food for lunch today and now I feel a  | Causes: Excessive fat intake, delayed gastric emptying, bloo | Okay, I will take your advice, drink some warm water tonight [84116f892273\n\n### Content\nI ate a lot of greasy food for lunch today and now I feel a  | Causes: Excessive fat intake, delayed gastric emptying, bloo | Okay, I will take your advice, drink some warm water tonight [84116f892273]\n<!-- /entry:ep_<TODAY>_00000004 -->\n"
  },
@@ -740,17 +751,18 @@
    },
    {
     "app_id": "default",
-    "content_sha256": "0cb87c80f2747088792c968c989d5ced39fb9f334334c21e700d97bf7705c768",
+    "content_sha256": "2752f92b4b964939be1de11be94b253daeb4dcbf3877ff1746fa11e303e44955",
     "created_at": "<NOW>",
     "deprecated_by": null,
     "entry_id": "ep_<TODAY>_00000001",
-    "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
-    "episode_tokens": "d2993d46a75a photo img photo img img b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99 talk between nobody",
+    "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+    "episode_tokens": "meet my cat she sits here all day image b649328550c2651e3 what calm cat what her name her name biscuit eb13f69d8c09 photo img photo img img b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99 talk between ava pia",
     "id": "u_pic_ep_<TODAY>_00000001",
     "image_ids": [
      "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99"
     ],
     "md_path": "default_app/default_project/users/u_pic/episodes/episode-<TODAY>.md",
+    "origin": null,
     "owner_id": "u_pic",
     "owner_type": "user",
     "parent_id": "mc_<9>",
@@ -761,12 +773,15 @@
      "bot_pic"
     ],
     "session_id": "s_picture",
-    "subject": "Talk between nobody",
-    "subject_vector": "d5a92ac8ec2a5721",
-    "summary": "0 lines (d2993d46a75a)",
+    "source_end": null,
+    "source_start": null,
+    "subject": "Talk between Ava, Pia",
+    "subject_ids": [],
+    "subject_vector": "060ad4d9e876d4e0",
+    "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
     "timestamp": "2025-10-20T22:42:00Z",
     "updated_at": "<NOW>",
-    "vector": "f061c830c048e5ac"
+    "vector": "c534b9d53c12d44a"
    },
    {
     "app_id": "default",
@@ -914,13 +929,18 @@
     "name": "cat.png",
     "ocr": "",
     "ocr_tokens": "",
+    "origin": null,
     "original_path": "figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png",
     "owner_id": "u_pic",
     "owner_type": "user",
     "parent_id": "mc_<9>",
     "parent_type": "memcell",
     "project_id": "default",
+    "sender_ids": [],
     "session_id": "s_picture",
+    "source_end": null,
+    "source_start": null,
+    "subject_ids": [],
     "timestamp": "2025-10-20T22:42:00Z",
     "updated_at": "<NOW>",
     "vector": "eccf8c6a61dd9ac1",
@@ -1731,10 +1751,14 @@
    "unprocessed_messages": []
   },
   "u_pic:cat": {
+   "constraints": [],
+   "coverage": null,
+   "degraded": [],
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "audience": null,
+     "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1744,24 +1768,26 @@
      "origin": null,
      "owner_type": null,
      "project_id": "default",
-     "score": 0.016393,
+     "score": 0.032787,
      "sender_ids": [
       "u_pic",
       "bot_pic"
      ],
      "session_id": "s_picture",
      "source": null,
-     "subject": "Talk between nobody",
+     "subject": "Talk between Ava, Pia",
      "subject_ids": [],
-     "summary": "0 lines (d2993d46a75a)",
+     "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
     }
    ],
+   "group_profile": null,
    "images": [
     {
      "app_id": "default",
+     "audience": null,
      "description": "A tabby cat on a sill (img-1)",
      "entry_id": "im_<TODAY>_00000001",
      "group_id": null,
@@ -1770,14 +1796,16 @@
      "image_id": "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99",
      "label": "",
      "media_type": "png",
+     "model_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-1024.jpeg",
      "name": "cat.png",
      "ocr": "",
      "origin": null,
      "original_path": "figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png",
      "project_id": "default",
-     "score": 0.032522,
+     "score": 0.032258,
      "sender_ids": [],
      "session_id": "s_picture",
+     "source": null,
      "status": "current",
      "subject_ids": [],
      "thumbnail_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-448.jpeg",
@@ -1791,10 +1819,14 @@
    "unprocessed_messages": []
   },
   "u_pic:profile": {
+   "constraints": [],
+   "coverage": null,
+   "degraded": [],
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "audience": null,
+     "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1804,24 +1836,26 @@
      "origin": null,
      "owner_type": null,
      "project_id": "default",
-     "score": 0.016393,
+     "score": 0.032787,
      "sender_ids": [
       "u_pic",
       "bot_pic"
      ],
      "session_id": "s_picture",
      "source": null,
-     "subject": "Talk between nobody",
+     "subject": "Talk between Ava, Pia",
      "subject_ids": [],
-     "summary": "0 lines (d2993d46a75a)",
+     "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
     }
    ],
+   "group_profile": null,
    "images": [
     {
      "app_id": "default",
+     "audience": null,
      "description": "A tabby cat on a sill (img-1)",
      "entry_id": "im_<TODAY>_00000001",
      "group_id": null,
@@ -1830,14 +1864,16 @@
      "image_id": "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99",
      "label": "",
      "media_type": "png",
+     "model_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-1024.jpeg",
      "name": "cat.png",
      "ocr": "",
      "origin": null,
      "original_path": "figures/b6/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99.png",
      "project_id": "default",
-     "score": 0.032522,
+     "score": 0.032258,
      "sender_ids": [],
      "session_id": "s_picture",
+     "source": null,
      "status": "current",
      "subject_ids": [],
      "thumbnail_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-448.jpeg",
@@ -1851,10 +1887,14 @@
    "unprocessed_messages": []
   },
   "u_pic:support group": {
+   "constraints": [],
+   "coverage": null,
+   "degraded": [],
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "audience": null,
+     "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1871,17 +1911,19 @@
      ],
      "session_id": "s_picture",
      "source": null,
-     "subject": "Talk between nobody",
+     "subject": "Talk between Ava, Pia",
      "subject_ids": [],
-     "summary": "0 lines (d2993d46a75a)",
+     "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
     }
    ],
+   "group_profile": null,
    "images": [
     {
      "app_id": "default",
+     "audience": null,
      "description": "A tabby cat on a sill (img-1)",
      "entry_id": "im_<TODAY>_00000001",
      "group_id": null,
@@ -1890,6 +1932,7 @@
      "image_id": "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99",
      "label": "",
      "media_type": "png",
+     "model_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-1024.jpeg",
      "name": "cat.png",
      "ocr": "",
      "origin": null,
@@ -1898,6 +1941,7 @@
      "score": 0.016129,
      "sender_ids": [],
      "session_id": "s_picture",
+     "source": null,
      "status": "current",
      "subject_ids": [],
      "thumbnail_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-448.jpeg",
@@ -1911,10 +1955,14 @@
    "unprocessed_messages": []
   },
   "u_pic:travel to Beijing": {
+   "constraints": [],
+   "coverage": null,
+   "degraded": [],
    "episodes": [
     {
      "app_id": "default",
-     "episode": "[d2993d46a75a] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
+     "audience": null,
+     "episode": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2) (img-1: b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99)",
      "group_id": null,
      "id": "u_pic_ep_<TODAY>_00000001",
      "image_ids": [
@@ -1931,17 +1979,19 @@
      ],
      "session_id": "s_picture",
      "source": null,
-     "subject": "Talk between nobody",
+     "subject": "Talk between Ava, Pia",
      "subject_ids": [],
-     "summary": "0 lines (d2993d46a75a)",
+     "summary": "Meet my cat, she sits here all day\n[IMAGE: b649328550c2651e3 | What a calm cat! What is her name? | Her name is Biscuit. [eb13f69d8c09] (a photo, img-1) (a photo, img-2)",
      "timestamp": "2025-10-20T22:42:00Z",
      "type": "Conversation",
      "user_id": "u_pic"
     }
    ],
+   "group_profile": null,
    "images": [
     {
      "app_id": "default",
+     "audience": null,
      "description": "A tabby cat on a sill (img-1)",
      "entry_id": "im_<TODAY>_00000001",
      "group_id": null,
@@ -1950,6 +2000,7 @@
      "image_id": "b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99",
      "label": "",
      "media_type": "png",
+     "model_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-1024.jpeg",
      "name": "cat.png",
      "ocr": "",
      "origin": null,
@@ -1958,6 +2009,7 @@
      "score": 0.016129,
      "sender_ids": [],
      "session_id": "s_picture",
+     "source": null,
      "status": "current",
      "subject_ids": [],
      "thumbnail_path": "figures/.cache/b649328550c2651e3d4df10af4cba95c0a8dbc39b7eae4aa86bc57881dedfa99-448.jpeg",

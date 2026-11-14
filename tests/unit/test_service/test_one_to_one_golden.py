@@ -38,7 +38,11 @@ it): the deterministic model reads that request's message blocks, so the
 episode text and what derives from it changed -- the prompt digest, the
 summary (now the content's first 200 characters), content hashes, fixed
 embeddings, search scores and order, the decider's prompt digests -- and
-nothing else. The picture chat's sections were kept as they were.
+nothing else. The picture chat's sections were kept as they were, then
+regenerated alone when a picture cell started being sent the same request
+with the picture block after it (``chat.episode`` version 4): its prompt
+digest, summary, content hash, fixed embedding and search order changed, and
+the deterministic model now reads the prompt from the message's text part.
 
 The LoCoMo excerpt's sections were regenerated on 2026-11-12, when two
 people talking without a ``group_id`` became an implicit group, and restored
@@ -196,7 +200,11 @@ def _text_of(messages: Sequence[Any]) -> str:
             parts.append(content)
             continue
         for part in content or []:
-            text = part.get("text") if isinstance(part, dict) else None
+            text = (
+                part.get("text")
+                if isinstance(part, dict)
+                else getattr(part, "text", None)
+            )
             if isinstance(text, str):
                 parts.append(text)
     return "\n".join(parts)

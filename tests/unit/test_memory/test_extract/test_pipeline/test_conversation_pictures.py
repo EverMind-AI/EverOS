@@ -13,9 +13,10 @@ attachment:
   reply used (``img-1``). (A group's picture memory, dated by its message and
   attributed to its poster, is pinned by
   ``tests/unit/test_service/test_group_write_path.py``.)
-- A text-only cell makes the same call, sent everalgo's episode prompt byte
-  for byte and the conversation alone; it writes no picture memory. A cell
-  with pictures shares everalgo's rules as the prefix of its system prompt.
+- A text-only cell makes the same call, sent the original episode request
+  (everalgo-user-memory 0.3.1's) and the language block; it writes no picture
+  memory. A cell with pictures is sent the same request first, then the
+  picture block, then the pictures.
 """
 
 from __future__ import annotations
@@ -32,7 +33,6 @@ from everos.component.images import ImageLimits
 from everos.memory import IngestResult
 from everos.memory.events import EpisodeExtracted
 from everos.memory.extract.pipeline import ConversationPipeline, PreparedCell
-from everos.memory.extract.pipeline.episode import EPISODE_RULES
 from everos.memory.ports import MemoryRef
 from tests.fakes import bundled_instructions, user_track_llm, user_track_script
 from tests.fakes.stores import (
@@ -184,7 +184,7 @@ async def test_a_picture_cell_writes_one_memory_per_picture() -> None:
     assert memory.parent_id == "mc_a"
 
 
-async def test_a_text_cell_is_sent_everalgo_s_prompt_and_shares_its_rules() -> None:
+async def test_a_text_cell_and_a_picture_cell_share_the_original_request() -> None:
     """One prompt by rule: the picture block only where pictures are attached."""
     text_llm, picture_llm = _RecordingLLM(_EPISODE_REPLY), _RecordingLLM(_image_reply())
     for llm, items in (
@@ -204,9 +204,11 @@ async def test_a_text_cell_is_sent_everalgo_s_prompt_and_shares_its_rules() -> N
     assert text_user.content.startswith(EPISODE_GENERATION_PROMPT[:60])
     assert "<pictures>" not in text_user.content
     assert text_user.content.endswith("</output_language>")
-    picture_system = picture_call[0].content
-    assert picture_system.startswith(EPISODE_RULES + "\n\n<pictures>\n")
-    assert not isinstance(picture_call[1].content, str)
+    (picture_user,) = picture_call
+    picture_text = picture_user.content[0].text
+    assert picture_text.startswith(EPISODE_GENERATION_PROMPT[:60])
+    assert "\n<pictures>\nThis message carries pictures" in picture_text
+    assert picture_text.endswith("</output_language>")
 
 
 async def test_one_call_answers_for_the_episode_and_the_pictures() -> None:
@@ -221,7 +223,7 @@ async def test_one_call_answers_for_the_episode_and_the_pictures() -> None:
     )
 
     assert len(llm.calls) == 1
-    parts = llm.calls[0][1].content
+    parts = llm.calls[0][0].content
     assert any(getattr(p, "type", "") == "image_url" for p in parts)
 
 
@@ -319,8 +321,8 @@ async def test_the_picture_call_writes_no_profile_item() -> None:
         _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a", sender_ids=["u1"])
     )
 
-    system = str(llm.calls[0][0].content)
-    assert "<profile>" not in system and '"profile"' not in system
+    prompt = llm.calls[0][0].content[0].text
+    assert "<profile>" not in prompt and '"profile"' not in prompt
     assert len(memories.items_for("u1")) == 1
 
 

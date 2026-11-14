@@ -24,7 +24,6 @@ from everos.memory.extract.pipeline.group_render import (
     attribution,
     label_cell,
     roster_block,
-    with_roster_block,
 )
 from everos.memory.models import Group, Roster, RosterEvent, fold_roster
 
@@ -99,10 +98,6 @@ def test_the_roster_block_lists_speakers_named_members_and_assistants() -> None:
         "group's AI assistant."
     )
     assert rule.startswith("Attribute every statement to the person who made it.")
-    assert with_roster_block("Write in English.", block) == (
-        f"Write in English.\n\n{block}"
-    )
-    assert with_roster_block(None, block) == block
 
 
 def test_attribution_of_a_mixed_segment() -> None:

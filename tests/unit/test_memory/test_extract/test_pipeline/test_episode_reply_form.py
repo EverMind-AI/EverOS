@@ -16,7 +16,8 @@ pin:
 - ``null`` reads as empty (``ocr``) or as no entries (``images``), and one
   entry given bare as a list of it; a text cell's reply (``EpisodeReply``)
   keeps no ``images`` at all, whatever it wrote, and is mended the same way;
-- a reply that leaves ``content``, ``summary`` or ``title`` blank is unusable
+- a ``summary`` the reply writes is dropped (the summary is cut in code), and
+  a reply that leaves ``title`` or ``content`` blank is unusable
   (``LLMOutputError``, which the pipeline retries), as it is for everalgo;
 - what is not a slip of form still fails: an unknown key that carries
   something (profile operations included), a missing description or episode,
@@ -184,9 +185,9 @@ def test_the_schema_sent_is_pinned() -> None:
     """sha256 of the json_schema request format: the reply without the profile.
 
     The reply models' names and docstrings are part of it; a change here is a
-    change to what every json_schema-mode picture call sends. Unchanged by the
-    rule-assembled prompt (2026-11-12) and by the original request
-    (2026-11-14); a text cell's ``EpisodeReply`` (``title`` and ``content``)
+    change to what every json_schema-mode picture call sends. Changed by the
+    original request (2026-11-14): ``title``, ``content`` and ``images``, no
+    ``summary``; a text cell's ``EpisodeReply`` (``title`` and ``content``)
     is pinned beside it.
     """
     sent = to_openai_response_format(ImageEpisodeReply, "json_schema")
@@ -195,7 +196,7 @@ def test_the_schema_sent_is_pinned() -> None:
         to_openai_response_format(EpisodeReply, "json_schema"), sort_keys=True
     )
 
-    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "2e848a4bc74cae48"
+    assert hashlib.sha256(text.encode()).hexdigest()[:16] == "019f7f82befff2be"
     assert hashlib.sha256(text_cell.encode()).hexdigest()[:16] == "0b226fcf3ff40d51"
     assert "profile" not in json.dumps(sent)
     assert to_openai_response_format(ImageEpisodeReply, "json_object") == {

@@ -3,29 +3,28 @@
 A chat cell, one-to-one or group, with pictures or without, is remembered by
 one model call that returns its episode and, when the cell carries pictures,
 one record per picture. Every such call sends the one registered prompt,
-:data:`CHAT_EPISODE` (``chat.episode``), assembled by one rule:
+:data:`CHAT_EPISODE` (``chat.episode``), and its core is the original episode
+request, everalgo-user-memory 0.3.1's, byte for byte, as EverOS 1.2.0 sent it:
+one user message holding the whole-memcell prompt with the conversation start
+time, one pseudo-JSON block per message, and the operator's custom
+instructions in their slot -- the original's five default principles when
+none are set (everalgo ``episode._render._render_original_prompt``). What a
+cell adds follows the original's text, in this order, after one blank line:
 
-* **A one-to-one cell without pictures** (a user's own conversation) is sent
-  the original episode request, everalgo-user-memory 0.3.1's, byte for byte:
-  one user message, the whole-memcell prompt with the conversation start
-  time, each message as a pseudo-JSON block, and the custom instructions or
-  the five default principles in its slot, exactly as EverOS 1.2.0 sent it
-  (everalgo ``episode._render._render_original_prompt``). The language block
-  is appended after everything the original sends. The reply is ``title`` and
-  ``content``; the summary is the content's first 200 characters, cut in code.
-* **A group cell without pictures** is sent the same original request, its
-  speakers labelled by their roster names (:mod:`.group_render`), then the
-  roster block in a ``<group_chat>`` block, then the language block.
-* **A cell with pictures**, one-to-one or group, is sent everalgo's
-  rule-based episode rules (:data:`EPISODE_RULES`), then the ``<pictures>``
-  block, then the reply format with ``images``, then the language block and
-  the custom instructions (in a group, with the roster block after them).
-  Its user message is the cell's ``<conversation>``, rendered as everalgo's
-  rule-based extractor renders it, then a ``<pictures>`` element naming the
-  labels, then each picture after a ``<picture>`` element with its label.
+* **A group cell** -- its speakers already labelled by their roster names in
+  the messages (:mod:`.group_render`) -- adds the roster block, in a
+  ``<group_chat>`` block.
+* **A cell with pictures** adds the ``<pictures>`` block: the picture rules,
+  the ``images`` field the reply carries beside ``title`` and ``content``, and
+  the labels in order. Each picture then follows the text as an image part
+  after a ``<picture>`` element naming its label.
+* **Every cell** ends with the ``<output_language>`` block naming the
+  conversation's language.
 
-The two renderings are the template's variants ``text`` and ``pictures``, each
-with its own fingerprint. A picture cannot travel through
+The reply is ``title`` and ``content`` (and ``images`` with pictures); the
+summary is the content's first 200 characters, cut in code, as the original
+filled it. The two renderings are the template's variants ``text`` and
+``pictures``, each with its own fingerprint. A picture cannot travel through
 ``EpisodeExtractor`` (its message content is text by contract), which is why
 the call is EverOS's own.
 
@@ -35,12 +34,11 @@ plus the picture rules, a second language block and a second reply format.
 Version 1 of ``chat.episode`` (2026-11-12) sent the picture block to every
 cell; two of 43 LoCoMo text cells then wrote picture records with nothing
 attached, and text cells paid for 769 prompt tokens they never used. Version 2
-assembled the prompt by rule. Version 3 (2026-11-14) sends one-to-one text
-cells the original request again: everalgo's rewritten rules (2026-10) forbid
-copying a message's time into the content, and with GPT-4.1-mini only 1% of
-LoCoMo episodes carried a date (temporal questions 53% against 90% on the
-original's stores). Group text cells get it too, with the roster block after
-it.
+assembled the prompt by rule around everalgo's rewritten rules (2026-10).
+Those rules forbid copying a message's time into the content: with
+GPT-4.1-mini only 1% of LoCoMo episodes carried a date, and temporal
+questions fell to 53% against 90% on the stores the original built. Version 3
+(2026-11-14) sent text cells the original again, version 4 every cell.
 
 Two rules keep a picture's record and its episode apart:
 
@@ -63,14 +61,11 @@ absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images``
 element left open or split in two objects is mended before it is validated. A
 cell is never given a picture it did not send: a text cell's reply loses any
 ``images`` it writes, and a reference ``(img-N)`` to a label the cell did not
-attach is taken out of the episode. A picture reply that leaves ``content``,
-``summary`` or ``title`` blank is rejected, and a ``summary`` wider than 400
-units is cut at a sentence boundary: the two guards ``EpisodeExtractor``
-applies, imported from everalgo so the two cannot drift apart. A text reply
-is held to ``title`` and ``content``; a ``summary`` it writes anyway is
-dropped, since the original's summary is cut in code. The reply models'
-names and docstrings are part of the JSON schema a ``json_schema``-mode call
-sends.
+attach is taken out of the episode. A reply that leaves ``title`` or
+``content`` blank is rejected (the guard ``EpisodeExtractor`` applies,
+imported from everalgo so the two cannot drift apart), and a ``summary`` it
+writes anyway is dropped: the summary is cut in code. The reply models' names
+and docstrings are part of the JSON schema a ``json_schema``-mode call sends.
 
 The call's output is capped by what it reads (:func:`reply_token_cap`), and a
 reply cut at that cap is sampled again once, warmer, before the cell fails:
@@ -84,7 +79,6 @@ from __future__ import annotations
 
 __all__ = [
     "CHAT_EPISODE",
-    "EPISODE_RULES",
     "REPLY_CHARS_PER_TOKEN",
     "REPLY_TOKENS_BASE",
     "REPLY_TOKENS_CEILING",
@@ -94,10 +88,8 @@ __all__ = [
     "ImageFact",
     "build_messages",
     "build_original_prompt",
-    "build_system_prompt",
     "extract",
     "extract_cell",
-    "render_conversation",
     "reply_token_cap",
     "to_episode",
 ]
@@ -125,23 +117,16 @@ from everalgo.user_memory.episode._render import (
     _render_original_prompt,
 )
 from everalgo.user_memory.episode._replies import _check_fields_written
-from everalgo.user_memory.episode._summary import _cap_summary, _original_summary
-from everalgo.user_memory.prompts.en.episode import EPISODE_SYSTEM_PROMPT
+from everalgo.user_memory.episode._summary import _original_summary
 from everalgo.user_memory.prompts.en.episode_original import (
     DEFAULT_CUSTOM_INSTRUCTIONS,
     EPISODE_GENERATION_PROMPT,
 )
-from everalgo.utils import (
-    append_custom_instructions,
-    paragraphs,
-    render_chat_line,
-    tagged,
-)
+from everalgo.utils import paragraphs, tagged
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from everos.core.observability.logging import get_logger
 from everos.memory.extract.llm_retry import retry_llm_output
-from everos.memory.extract.pipeline.group_render import with_roster_block
 from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 from everos.memory.prompts import PromptTemplate
 
@@ -151,34 +136,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _split_reply_format(system: str) -> tuple[str, str]:
-    """``system`` as its rules and its last block, which must be its reply format.
-
-    Raises:
-        RuntimeError: The prompt does not end with exactly one ``<reply_format>``
-            block -- everalgo changed its layout, and :data:`CHAT_EPISODE`
-            needs review.
-    """
-    rules, opening, rest = system.rpartition("\n\n<reply_format>\n")
-    closing = "\n</reply_format>"
-    if not opening or rest.count(closing) != 1 or not rest.endswith(closing):
-        raise RuntimeError(
-            "everalgo's EPISODE_SYSTEM_PROMPT no longer ends with one "
-            "<reply_format> block; review chat.episode"
-        )
-    return rules, rest.removesuffix(closing)
-
-
-EPISODE_RULES, _ = _split_reply_format(EPISODE_SYSTEM_PROMPT)
-"""everalgo's rule-based episode rules as it sends them, the role through the
-worked examples: ``EPISODE_SYSTEM_PROMPT`` without its reply format."""
-
 _PICTURE_RULES = """\
-The user message carries pictures: after <conversation>, a <pictures> element
-lists their labels, and each image follows a <picture> element naming its
-label. In <conversation> a picture is an [IMAGE: ...] reference where it was
-sent, and the labels follow those references in order: the first is img-1, the
-second img-2, and so on.
+This message carries pictures: they follow this text, each image after a
+<picture> element naming its label. In the conversation content a picture is
+an [IMAGE: ...] reference where it was sent, and the labels follow those
+references in order: the first is img-1, the second img-2, and so on.
 - Write the episode as you would without the pictures: the conversation is the
   record.
 - In "content", refer to a picture by its label — "the user sent a photo of a
@@ -186,7 +148,7 @@ second img-2, and so on.
   own memory; the episode only points at it.
 - This holds for every fact you can only know by looking: a year, a price, a
   name or brand, an address, a menu line, a label on an object. None of them
-  belongs in "content" or "summary". Say "a photo of the shop's signboard
+  belongs in "content". Say "a photo of the shop's signboard
   (img-2)" — not what the signboard says. The reason is exact: forgetting that
   picture must remove its content from the memory, and text you copied into the
   episode is no longer the picture's.
@@ -210,44 +172,43 @@ Worked example. Conversation:
   [2026-10-30 09:15 UTC (Friday)] Wang Lei: here is the sign [IMAGE: img-2]
 Pictures: img-1 a latte with heart-shaped foam; img-2 a chalkboard reading
 "DOU SHE COFFEE / EST. 2019 / blend latte 22".
-Right answer for "content": "Wang Lei went to a new cafe and shared a photo of
-her latte (img-1), then a photo of the cafe's chalkboard sign (img-2)."
+Right answer for "content": "On October 30, 2026 at 9:12 AM UTC, Wang Lei went
+to a new cafe and shared a photo of her latte (img-1), then a photo of the
+cafe's chalkboard sign (img-2)."
 Wrong answer, and why: "she shared a photo of the sign, which says DOU SHE
 COFFEE, EST. 2019, blend latte 22" - it copied the sign's text into the episode,
 so the words would survive after the photo is forgotten. The sign's text belongs
 in that picture's own "ocr", nowhere else."""
 
 _PICTURE_REPLY_FORMAT = """\
-Reply with one JSON object, nothing else.
-{"content": "...", "summary": "...", "title": "...", "images": [{"ref": "img-1", \
+The JSON object carries a third field, "images", one entry per picture:
+{"title": "...", "content": "...", "images": [{"ref": "img-1", \
 "description": "...", "ocr": "..."}]}"""
 
 CHAT_EPISODE = PromptTemplate(
     id="chat.episode",
-    version=3,
+    version=4,
     parts=(
-        # 0: the original request (everalgo-user-memory 0.3.1) every text
-        # cell is sent; 1: the default principles it fills its custom
-        # instructions with when the operator sets none.
+        # 0: the original request (everalgo-user-memory 0.3.1) every cell is
+        # sent; 1: the default principles it fills its custom instructions
+        # with when the operator sets none.
         EPISODE_GENERATION_PROMPT,
         DEFAULT_CUSTOM_INSTRUCTIONS,
-        # 2: everalgo's rule-based rules (picture cells).
-        EPISODE_RULES,
-        # 3: the picture rules; 4: the reply format with "images".
+        # 2: the picture rules; 3: the "images" field of the reply; 4: the
+        # labels in order, the <pictures> block's last line; 5: the <picture>
+        # element before each image.
         _PICTURE_RULES,
         _PICTURE_REPLY_FORMAT,
-        # 5: the user message's <pictures> element; 6: the <picture> element
-        # before each image.
         "Labels in order: {labels}. Read every attached picture.",
         "label: {label}",
     ),
-    variants=(("text", (0, 1)), ("pictures", (2, 3, 4, 5, 6))),
+    variants=(("text", (0, 1)), ("pictures", (0, 1, 2, 3, 4, 5))),
 )
-"""The episode prompt of every chat cell, by rule (:func:`build_messages`):
-``text`` sends parts 0-1 (one user message ending with the
-``<output_language>`` block), ``pictures`` parts 2-6 (a system message ending
-with the ``<output_language>`` block and the caller's
-``<custom_instructions>``)."""
+"""The episode prompt of every chat cell, by rule (:func:`build_messages`): one
+user message, the original (parts 0-1), then a group's ``<group_chat>`` block,
+then -- in the ``pictures`` variant -- the ``<pictures>`` block (parts 2-4) and
+each image after its ``<picture>`` element (part 5), and last the
+``<output_language>`` block."""
 
 REPLY_TOKENS_BASE = 2_048
 """Output budget of an episode call before its pictures and its conversation
@@ -361,14 +322,6 @@ class _LenientReply(StrictOutputModel):
             return super().model_validate_json(mended, **kwargs)
 
 
-class _EpisodeFields(_LenientReply):
-    """The fields every rule-based episode reply carries."""
-
-    content: str
-    summary: str
-    title: str
-
-
 class EpisodeReply(_LenientReply):
     """The episode of a cell without pictures: title and content."""
 
@@ -389,10 +342,20 @@ class EpisodeReply(_LenientReply):
         return value
 
 
-class ImageEpisodeReply(_EpisodeFields):
+class ImageEpisodeReply(_LenientReply):
     """The one reply that carries the episode and every picture's memory."""
 
+    title: str
+    content: str
     images: list[ImageFact] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_summary(cls, value: object) -> object:
+        # The summary is cut in code: one the model writes anyway is dropped.
+        if isinstance(value, dict) and "summary" in value:
+            return {key: item for key, item in value.items() if key != "summary"}
+        return value
 
     @field_validator("images", mode="before")
     @classmethod
@@ -404,66 +367,41 @@ class ImageEpisodeReply(_EpisodeFields):
         return value
 
 
-def build_system_prompt(
-    *,
-    custom_instructions: str | None,
-    output_language: OutputLanguage | None,
-) -> str:
-    """The system message of a picture cell.
-
-    everalgo's rules open it and the language block and the custom
-    instructions close it, so every static block comes first.
-    """
-    rules, picture_rules, picture_format = CHAT_EPISODE.parts[2:5]
-    blocks = [
-        rules,
-        tagged("pictures", picture_rules),
-        tagged("reply_format", picture_format),
-        tagged(
-            "output_language",
-            build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE),
-        ),
-    ]
-    return append_custom_instructions(paragraphs(*blocks), custom_instructions)
-
-
 def build_original_prompt(
     memcell: MemCell,
     *,
     custom_instructions: str | None,
     output_language: OutputLanguage | None,
     roster: str | None = None,
+    labels: Sequence[str] = (),
 ) -> str:
-    """A text cell's one user message: the original, then what this cell adds.
+    """A cell's prompt text: the original, then what this cell adds.
 
     everalgo-user-memory 0.3.1's request byte for byte, as EverOS 1.2.0 sent
     it (the operator's custom instructions in their slot, or the five default
     principles when none are set), then one blank line and the blocks that
-    follow it: a group's roster block in ``<group_chat>``, then the
-    ``<output_language>`` block every route sends -- the conversation's
-    language, resolved in code, or the participant rule when none is.
+    follow it: a group's roster block in ``<group_chat>``; with pictures, the
+    ``<pictures>`` block (the picture rules, the ``images`` field, the labels
+    in order); then the ``<output_language>`` block every cell is sent -- the
+    conversation's language, resolved in code, or the participant rule when
+    none is.
+
+    Args:
+        memcell: The cell being extracted.
+        custom_instructions: The operator's instructions.
+        output_language: The language to write in.
+        roster: A group cell's roster block; ``None`` for a user's own cell.
+        labels: The labels of the pictures the cell attaches, in order.
     """
     original = _render_original_prompt(memcell, custom_instructions=custom_instructions)
-    language = build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE)
     blocks = [tagged("group_chat", roster)] if roster is not None else []
+    if labels:
+        rules, reply_field, labels_line = CHAT_EPISODE.parts[2:5]
+        names = labels_line.format(labels=", ".join(labels))
+        blocks.append(tagged("pictures", paragraphs(rules, reply_field, names)))
+    language = build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE)
     blocks.append(tagged("output_language", language))
     return f"{original}\n{paragraphs(*blocks)}"
-
-
-def render_conversation(memcell: MemCell) -> str:
-    """The cell as ``[time UTC (weekday)] speaker: text`` lines.
-
-    Everalgo's episode rendering, byte for byte: the chat messages with text,
-    in a ``<conversation count="N">`` element. A message that carried a
-    picture keeps its ``[IMAGE: <id>]`` reference in its text, which ties the
-    picture to its time and speaker.
-    """
-    lines = [
-        render_chat_line(message)
-        for message in memcell.items
-        if getattr(message, "kind", None) == "text" and getattr(message, "content", "")
-    ]
-    return tagged("conversation", "\n".join(lines), count=str(len(lines)))
 
 
 def build_messages(
@@ -475,18 +413,14 @@ def build_messages(
     roster: str | None = None,
     detail: str = "high",
 ) -> list[LLMMessage]:
-    """The messages of the call: by rule, the original request or a picture pair.
-
-    A cell without pictures is sent one user message,
-    :func:`build_original_prompt`. A cell with pictures is sent the
-    ``[system, user]`` pair: the rules, then the rendered cell and the
-    pictures.
+    """The call's one user message: the prompt text, then each picture after its label.
 
     Args:
         memcell: The cell being extracted.
         pictures: ``(label, bytes, mime)`` per picture, in conversation order.
             The label is the one the reply refers to the picture by
-            (``img-1``). Empty for a cell without pictures.
+            (``img-1``). Empty for a cell without pictures, whose message is
+            the prompt text alone.
         custom_instructions: The host's instructions.
         output_language: Language to write in. The pipeline names the
             conversation's, resolved in code; ``None`` leaves the model to
@@ -498,34 +432,17 @@ def build_messages(
             has to read small text out of a picture; the decider's
             thumbnail-only default is set separately.
     """
-    if not pictures:
-        prompt = build_original_prompt(
-            memcell,
-            custom_instructions=custom_instructions,
-            output_language=output_language,
-            roster=roster,
-        )
-        return [LLMMessage(role="user", content=prompt)]
-    system = LLMMessage(
-        role="system",
-        content=build_system_prompt(
-            custom_instructions=custom_instructions
-            if roster is None
-            else with_roster_block(custom_instructions, roster),
-            output_language=output_language,
-        ),
+    prompt = build_original_prompt(
+        memcell,
+        custom_instructions=custom_instructions,
+        output_language=output_language,
+        roster=roster,
+        labels=[label for label, _, _ in pictures],
     )
-    conversation = render_conversation(memcell)
-    labels_line, label_line = CHAT_EPISODE.parts[5:7]
-    names = ", ".join(label for label, _, _ in pictures)
-    parts: list[Any] = [
-        {
-            "type": "text",
-            "text": paragraphs(
-                conversation, tagged("pictures", labels_line.format(labels=names))
-            ),
-        }
-    ]
+    if not pictures:
+        return [LLMMessage(role="user", content=prompt)]
+    label_line = CHAT_EPISODE.parts[5]
+    parts: list[Any] = [{"type": "text", "text": prompt}]
     for label, data, mime in pictures:
         parts.append(
             {"type": "text", "text": tagged("picture", label_line.format(label=label))}
@@ -538,7 +455,7 @@ def build_messages(
                 }
             )
         parts.append(part.model_dump())
-    return [system, LLMMessage(role="user", content=parts)]
+    return [LLMMessage(role="user", content=parts)]
 
 
 def _without_unattached(text: str, attached: Collection[str]) -> tuple[str, int]:
@@ -566,8 +483,9 @@ def to_episode(
     The mapping everalgo's extractor applies (``title`` → ``subject``,
     ``content`` → ``episode`` verbatim, ``summary`` through its width guard,
     ``timestamp`` from the cell), so an episode reads the same downstream
-    whichever cell it came from. An original reply writes no summary: it is
-    the stored content's first 200 characters, as the original filled it.
+    whichever cell it came from. The model writes no summary: it is the
+    content's first 200 characters, as the original filled it, taken before
+    the labels gain their ids.
 
     ``owner_id`` is ``None``: the episode is extracted once for the whole
     cell and fanned out to one md per user sender by the caller, which is
@@ -579,7 +497,7 @@ def to_episode(
     still naming the picture a forget or a result can address: the label means
     nothing outside this cell, and the hash is the only thing that survives it.
     A reference to a label the cell did not attach names no picture and is
-    taken out of the content, summary and title -- every reference, on a cell
+    taken out of the content and the title -- every reference, on a cell
     without pictures.
 
     A label the reply never referenced is appended as a reference of its own.
@@ -590,8 +508,7 @@ def to_episode(
     """
     attached = dict(labels or {})
     body, _ = _without_unattached(reply.content, attached)
-    written = "" if isinstance(reply, EpisodeReply) else reply.summary
-    summary, _ = _without_unattached(written, attached)
+    summary = _original_summary(body)
     title, _ = _without_unattached(reply.title, attached)
     if attached:
         for label, image_id in sorted(attached.items(), key=lambda kv: -len(kv[0])):
@@ -608,9 +525,7 @@ def to_episode(
         owner_id=None,
         episode=body,
         subject=title,
-        summary=_original_summary(body)
-        if isinstance(reply, EpisodeReply)
-        else _cap_summary(summary),
+        summary=summary,
         timestamp=memcell.timestamp,
     )
 
@@ -653,9 +568,8 @@ async def extract(
     the configured temperature.
 
     Raises:
-        everalgo.llm.LLMOutputError: The reply leaves a field it must write
-            blank: ``content`` or ``title``, and a picture reply's
-            ``summary``.
+        everalgo.llm.LLMOutputError: The reply leaves ``content`` or
+            ``title`` blank.
         everos.component.llm.errors.LLMCallError: The upstream failed, no
             attempt produced a reply that validates, or every attempt was cut
             at the cap (``cut_short``).
@@ -667,9 +581,7 @@ async def extract(
         output_language=output_language,
         roster=roster,
     )
-    conversation = (
-        render_conversation(memcell) if pictures else _original_conversation(memcell)
-    )
+    conversation = _original_conversation(memcell)
     cap = (
         reply_token_cap(pictures=len(pictures), conversation_chars=len(conversation))
         if max_tokens is None
@@ -682,8 +594,7 @@ async def extract(
         messages, response_format=model, max_tokens=cap, retry_cut=True
     )
     reply = parse_reply(model, text, operator="episode")
-    written = ("content", "summary", "title") if pictures else ("content", "title")
-    _check_fields_written(reply, written, operator="episode")
+    _check_fields_written(reply, ("content", "title"), operator="episode")
     dropped = 0 if pictures else _picture_entries_written(text)
     if dropped:
         logger.warning("memory.episode.unattached_pictures_dropped", entries=dropped)
@@ -738,7 +649,7 @@ async def extract_cell(
         )
         unattached = sum(
             _without_unattached(text, by_label)[1]
-            for text in (reply.content, getattr(reply, "summary", ""), reply.title)
+            for text in (reply.content, reply.title)
         )
         if unattached:
             logger.warning(

@@ -1,22 +1,19 @@
-"""The one episode prompt, assembled by rule (``chat.episode`` version 3).
+"""The one episode prompt, assembled by rule (``chat.episode`` version 4).
 
 What these pin:
 
 - the prompt is registered: id, version, and a fingerprint for the whole
   template and for each of its two variants, ``text`` and ``pictures``;
-- a cell without pictures is sent the original request (everalgo-user-memory
-  0.3.1's) byte for byte, one user message, then one blank line and the
-  blocks it adds -- a group's roster block, then the language block --
-  whatever the language and the custom instructions; it asks for
-  ``EpisodeReply`` (``title`` and ``content``) and its summary is the
-  content's first 200 characters;
-- a cell with pictures is sent everalgo's rule-based rules first, then the
-  ``<pictures>`` block, one reply format (with ``images``) and one language
-  block, the custom instructions last (a group's with the roster block after
-  them); its user message adds the labels, then each picture after its label;
-- each call asks for its output cap; a reply that leaves a field it must
-  write blank is unusable and a picture reply's summary over 400 units is cut
-  at a sentence, as everalgo's extractor holds them;
+- every cell is sent one user message whose text is the original request
+  (everalgo-user-memory 0.3.1's) byte for byte, then one blank line and the
+  blocks the cell adds -- a group's roster block, a picture cell's
+  ``<pictures>`` block, then the language block -- whatever the language and
+  the custom instructions; a picture cell's message then carries each
+  picture after its label;
+- a text cell asks for ``EpisodeReply`` (``title`` and ``content``), a
+  picture cell for ``ImageEpisodeReply`` (and ``images``); each call asks for
+  its output cap; a reply that leaves ``title`` or ``content`` blank is
+  unusable, and the summary is the content's first 200 characters;
 - a cell is never given a picture it did not send: a text cell's reply loses
   any picture entries, and a reference to a label the cell did not attach is
   taken out of the episode.
@@ -25,7 +22,6 @@ What these pin:
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 from everalgo.llm import LLMOutputError
@@ -38,10 +34,8 @@ from everalgo.user_memory._language import (
 )
 from everalgo.user_memory.episode._render import (
     _original_conversation,
-    _render_conversation,
     _render_original_prompt,
 )
-from everalgo.user_memory.prompts.en.episode import EPISODE_SYSTEM_PROMPT
 from everalgo.user_memory.prompts.en.episode_original import (
     DEFAULT_CUSTOM_INSTRUCTIONS,
     EPISODE_GENERATION_PROMPT,
@@ -50,14 +44,11 @@ from everalgo.utils import tagged
 
 from everos.memory.extract.pipeline.episode import (
     CHAT_EPISODE,
-    EPISODE_RULES,
     EpisodeReply,
     ImageEpisodeReply,
     build_messages,
-    build_system_prompt,
     extract,
     extract_cell,
-    render_conversation,
     reply_token_cap,
     to_episode,
 )
@@ -88,30 +79,20 @@ _TEXT = _cell("I'm hiking at Mount Rainier this weekend.", "", "Can't wait!")
 _PICTURES = _cell("here is my latte", f"[IMAGE: {_IMAGE_ID}]")
 
 
-def _blocks(system: str) -> list[str]:
-    """The top-level blocks of a system message, in order."""
-    return re.findall(r"^<([a-z_]+)>$", system, flags=re.MULTILINE)
-
-
 def test_the_prompt_and_its_two_variants_are_registered_and_pinned() -> None:
     assert CHAT_EPISODE.id == "chat.episode"
-    assert CHAT_EPISODE.version == 3
+    assert CHAT_EPISODE.version == 4
     # Pinned: a change to its text -- everalgo's included -- is a new version.
-    assert CHAT_EPISODE.fingerprint == "a25cf8ae7cbbb8f7"
+    assert CHAT_EPISODE.fingerprint == "b7c8031efa943152"
     assert CHAT_EPISODE.variant_fingerprint("text") == "f9c003f109a466ea"
-    assert CHAT_EPISODE.variant_fingerprint("pictures") == "bae4c0c544622565"
+    assert CHAT_EPISODE.variant_fingerprint("pictures") == "b7c8031efa943152"
 
 
-def test_the_text_parts_are_everalgo_s_0_3_1_prompt() -> None:
+def test_the_core_parts_are_everalgo_s_0_3_1_prompt() -> None:
     assert CHAT_EPISODE.parts[:2] == (
         EPISODE_GENERATION_PROMPT,
         DEFAULT_CUSTOM_INSTRUCTIONS,
     )
-
-
-def test_the_picture_rules_are_everalgo_s_rules_byte_for_byte() -> None:
-    assert CHAT_EPISODE.parts[2] == EPISODE_RULES
-    assert EPISODE_SYSTEM_PROMPT.startswith(EPISODE_RULES + "\n\n<reply_format>\n")
 
 
 @pytest.mark.parametrize(
@@ -168,46 +149,26 @@ def test_a_text_cell_drops_an_empty_message() -> None:
     assert user.content.count('"speaker": Caroline') == 2
 
 
-@pytest.mark.parametrize("language", [None, OutputLanguage("English")])
-def test_a_picture_cell_shares_the_rules_then_gets_one_of_each_block(
-    language: OutputLanguage | None,
+def _picture_block(*labels: str) -> str:
+    rules, reply_field, labels_line = CHAT_EPISODE.parts[2:5]
+    names = labels_line.format(labels=", ".join(labels))
+    return tagged("pictures", f"{rules}\n\n{reply_field}\n\n{names}")
+
+
+@pytest.mark.parametrize("roster", [None, _ROSTER])
+def test_a_picture_cell_is_sent_the_original_then_its_blocks_then_each_picture(
+    roster: str | None,
 ) -> None:
-    system = build_system_prompt(custom_instructions=_ROSTER, output_language=language)
-
-    assert system.startswith(EPISODE_RULES + "\n\n<pictures>\n")
-    assert _blocks(system.removeprefix(EPISODE_RULES)) == [
-        "pictures",
-        "reply_format",
-        "output_language",
-        "custom_instructions",
-    ]
-    assert system.count("Reply with one JSON object") == 1
-    assert system.endswith(f"<custom_instructions>\n{_ROSTER}\n</custom_instructions>")
-
-
-def test_a_group_picture_cell_gets_the_roster_after_the_custom_instructions() -> None:
-    system, _ = build_messages(
-        _PICTURES,
-        pictures=[("img-1", _PNG, "image/png")],
-        custom_instructions="Write tersely.",
-        output_language=None,
-        roster=_ROSTER,
-    )
-
-    assert system.content.endswith(
-        f"<custom_instructions>\nWrite tersely.\n\n{_ROSTER}\n</custom_instructions>"
-    )
-
-
-def test_a_picture_cell_adds_the_labels_then_each_picture() -> None:
-    _, user = build_messages(
+    (user,) = build_messages(
         _PICTURES,
         pictures=[("img-1", _PNG, "image/png"), ("img-2", _PNG, "image/png")],
-        custom_instructions=None,
-        output_language=None,
+        custom_instructions="Write tersely.",
+        output_language=OutputLanguage("English"),
+        roster=roster,
     )
 
     parts = [part.model_dump() for part in user.content]
+    assert user.role == "user"
     assert [part["type"] for part in parts] == [
         "text",
         "text",
@@ -215,14 +176,24 @@ def test_a_picture_cell_adds_the_labels_then_each_picture() -> None:
         "text",
         "image_url",
     ]
+    rule = build_language_rule(OutputLanguage("English"))
+    blocks = [tagged("group_chat", roster)] if roster else []
+    blocks += [_picture_block("img-1", "img-2"), tagged("output_language", rule)]
     assert parts[0]["text"] == (
-        render_conversation(_PICTURES)
-        + "\n\n<pictures>\nLabels in order: img-1, img-2. "
-        "Read every attached picture.\n</pictures>"
+        _render_original_prompt(_PICTURES, custom_instructions="Write tersely.")
+        + "\n"
+        + "\n\n".join(blocks)
     )
-    assert parts[0]["text"].startswith(_render_conversation(_PICTURES))
     assert parts[1]["text"] == "<picture>\nlabel: img-1\n</picture>"
     assert parts[2]["image_url"]["detail"] == "high"
+    assert parts[3]["text"] == "<picture>\nlabel: img-2\n</picture>"
+
+
+def test_the_picture_block_asks_for_no_summary() -> None:
+    block = _picture_block("img-1")
+
+    assert "summary" not in block
+    assert '"images"' in block and "<conversation>" not in block
 
 
 _REPLY = {"content": "Caroline plans a hike.", "summary": "A hike.", "title": "Hike"}
@@ -287,14 +258,15 @@ async def test_a_picture_cell_asks_for_image_episode_reply() -> None:
     (call,) = llm.calls
     assert call.response_format is ImageEpisodeReply
     assert call.max_tokens == reply_token_cap(
-        pictures=1, conversation_chars=len(render_conversation(_PICTURES))
+        pictures=1, conversation_chars=len(_original_conversation(_PICTURES))
     )
+    assert [message.role for message in call.messages] == ["user"]
     assert isinstance(got, ImageEpisodeReply)
     assert [fact.ref for fact in got.images] == ["img-1"]
 
 
 @pytest.mark.parametrize("blank", ["content", "title"])
-async def test_a_text_reply_with_a_blank_field_is_unusable(blank: str) -> None:
+async def test_a_reply_with_a_blank_field_is_unusable(blank: str) -> None:
     llm = FakeLLMClient(responses=[json.dumps(_REPLY | {blank: "  "})])
 
     with pytest.raises(LLMOutputError, match=blank):
@@ -303,7 +275,7 @@ async def test_a_text_reply_with_a_blank_field_is_unusable(blank: str) -> None:
         )
 
 
-@pytest.mark.parametrize("blank", ["content", "summary", "title"])
+@pytest.mark.parametrize("blank", ["content", "title"])
 async def test_a_picture_reply_with_a_blank_field_is_unusable(blank: str) -> None:
     reply = _REPLY | {blank: "  ", "images": [{"ref": "img-1", "description": "x"}]}
     llm = FakeLLMClient(responses=[json.dumps(reply)])
@@ -318,15 +290,14 @@ async def test_a_picture_reply_with_a_blank_field_is_unusable(blank: str) -> Non
         )
 
 
-def test_a_summary_over_its_width_is_cut_at_a_sentence() -> None:
-    summary = "Caroline planned a sunrise hike at Mount Rainier. " * 12
-    reply = ImageEpisodeReply(content="c", summary=summary, title="t", images=[])
+def test_a_picture_reply_s_summary_is_its_content_s_start_with_labels() -> None:
+    content = "Caroline sent her latte (img-1). " * 10
+    reply = ImageEpisodeReply(title="t", content=content, images=[])
 
-    episode = to_episode(reply, _PICTURES)
+    episode = to_episode(reply, _PICTURES, labels={"img-1": _IMAGE_ID})
 
-    assert len(episode.summary) < len(summary)
-    assert episode.summary.endswith("…")
-    assert episode.summary.startswith("Caroline planned a sunrise hike")
+    assert episode.summary == content[:200]
+    assert f"(img-1: {_IMAGE_ID})" in episode.episode
 
 
 async def test_a_text_cell_is_given_no_picture_it_did_not_send() -> None:
@@ -378,3 +349,4 @@ async def test_a_reference_to_a_label_not_attached_is_taken_out() -> None:
 
     assert described == {"img-1": ("a latte", "")}
     assert episode.episode == f"Caroline sent her latte (img-1: {_IMAGE_ID}), then."
+    assert episode.summary == "Caroline sent her latte (img-1), then."

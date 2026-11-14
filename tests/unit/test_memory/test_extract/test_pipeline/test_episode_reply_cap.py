@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 import pytest
 from everalgo.types import ChatMessage, MemCell
+from everalgo.user_memory.episode._render import _original_conversation
 
 from everos.component.llm import LLMCallError, OpenAIProvider
 from everos.memory.extract.pipeline import episode
@@ -139,7 +140,7 @@ def _cell() -> MemCell:
 
 
 _CAP = reply_token_cap(
-    pictures=1, conversation_chars=len(episode.render_conversation(_cell()))
+    pictures=1, conversation_chars=len(_original_conversation(_cell()))
 )
 
 

@@ -10,10 +10,9 @@ only what it is given changes, and the change is code, not prompt text (D15):
 * **Roster block** (:func:`roster_block`). :data:`ROSTER_BLOCK`, registered
   as ``chat.group_roster_block``: who speaks in this part and who it names,
   with access roles and titles, and the rule that what the assistant says is
-  its own reply, never something the group agreed. A text segment gets it in
-  a ``<group_chat>`` block after the original episode request
-  (:func:`.episode.build_original_prompt`); a picture segment after the
-  operator's custom instructions (:func:`with_roster_block`).
+  its own reply, never something the group agreed. It goes in a
+  ``<group_chat>`` block after the original episode request
+  (:func:`.episode.build_original_prompt`).
 * **Speaker with id** (:func:`speaker_with_id`). The group-profile and
   constraint-binding prompts (sections 7.5 and 8.4) show a labelled
   speaker's member id next to the name, ``Chen (u_chen)``: the id is what
@@ -34,7 +33,6 @@ __all__ = [
     "label_cell",
     "roster_block",
     "speaker_with_id",
-    "with_roster_block",
 ]
 
 from collections.abc import Sequence
@@ -114,13 +112,6 @@ def speaker_with_id(message: ChatMessage) -> str:
     if not message.sender_id or name == message.sender_id:
         return name
     return f"{name} ({message.sender_id})"
-
-
-def with_roster_block(custom_instructions: str | None, block: str) -> str:
-    """The operator's custom instructions, then the roster block."""
-    if custom_instructions and custom_instructions.strip():
-        return f"{custom_instructions.rstrip()}\n\n{block}"
-    return block
 
 
 def roster_block(group: Group, roster: Roster, cell: MemCell) -> str:

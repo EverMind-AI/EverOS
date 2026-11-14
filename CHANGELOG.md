@@ -12,22 +12,25 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
-- **Text cells are sent the original episode request again.** everalgo's
+- **Every chat cell is sent the original episode request again.** everalgo's
   rewritten episode rules (2026-10) told the model not to copy a message's
   time into the content: with GPT-4.1-mini extraction 1% of LoCoMo episodes
   carried a date, and temporal questions fell to 53% (90% on the stores the
-  original built). A cell without pictures, one-to-one or group, is now sent
-  everalgo-user-memory 0.3.1's request byte for byte, as EverOS 1.2.0 sent
-  it: one user message holding the conversation start time, one pseudo-JSON
-  block per message and the operator's custom instructions in their slot (the
-  original's five default principles when none are set). The blocks EverOS
-  adds follow it: a group's roster block (`<group_chat>`), then the
-  `<output_language>` block naming the conversation's language. The reply is
-  `title` and `content`; the summary is the content's first 200 characters,
-  cut in code. A cell with pictures is sent what it was. `chat.episode` is
-  version 3; everalgo-user-memory is the local build
-  `0.9.0rc6.dev7+v031episode`, which carries the original prompt and its
-  renderer ([vendor/wheels/README.md](vendor/wheels/README.md)).
+  original built). Every cell -- one-to-one or group, with pictures or
+  without -- is now sent everalgo-user-memory 0.3.1's request byte for byte,
+  as EverOS 1.2.0 sent it: one user message holding the conversation start
+  time, one pseudo-JSON block per message and the operator's custom
+  instructions in their slot (the original's five default principles when
+  none are set). The blocks EverOS adds follow it: a group's roster block
+  (`<group_chat>`, its speakers labelled by roster name in the messages), a
+  picture cell's `<pictures>` block (the picture rules, the `images` field,
+  the labels in order; the pictures follow the text, each after its label),
+  then the `<output_language>` block naming the conversation's language. The
+  reply is `title` and `content` (and `images`); the summary is the content's
+  first 200 characters, cut in code. `chat.episode` is version 4;
+  everalgo-user-memory is the local build `0.9.0rc6.dev7+v031episode`, which
+  carries the original prompt and its renderer
+  ([vendor/wheels/README.md](vendor/wheels/README.md)).
 - **A multi-round search lists each memory once per round.** A round after the
   first shows the decider one block per sub-query, and a memory that several
   sub-queries retrieved was listed in each of their blocks, under an index of
