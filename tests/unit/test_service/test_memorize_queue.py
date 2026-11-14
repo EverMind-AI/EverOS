@@ -31,7 +31,11 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.config.settings import AsyncQueueSettings
-from everos.core.errors import PayloadTooLargeError, QueueSaturatedError
+from everos.core.errors import (
+    BoundaryLLMError,
+    PayloadTooLargeError,
+    QueueSaturatedError,
+)
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
@@ -108,9 +112,14 @@ def _payload(session_id: str = "s1", n_messages: int = 1) -> dict[str, Any]:
 class _FakeMemorize:
     """Records calls; raises for sessions listed in ``failing``."""
 
-    def __init__(self, failing: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        failing: set[str] | None = None,
+        boundary_failing: set[str] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, bool, bool]] = []
         self.failing = failing or set()
+        self.boundary_failing = boundary_failing or set()
         self.called = asyncio.Event()
 
     async def __call__(
@@ -122,6 +131,8 @@ class _FakeMemorize:
     ) -> MemorizeResult:
         self.calls.append((payload["session_id"], is_final, defer_extraction))
         self.called.set()
+        if payload["session_id"] in self.boundary_failing:
+            raise BoundaryLLMError("llm down")
         if payload["session_id"] in self.failing:
             raise RuntimeError("boom")
         return MemorizeResult(
@@ -271,6 +282,28 @@ async def test_failing_row_is_retried_then_marked_failed_and_skipped(
     good = await repo.find_one(request_id="r2")
     assert good is not None and good.status == "success"
     assert await repo.count_pending() == 0
+
+
+async def test_boundary_llm_failure_has_its_own_retry_budget(
+    repo: MemorizeInboxRepo,
+) -> None:
+    """Boundary failures run before state is written, so they retry even
+    when the generic max_attempts stays at 1.
+    """
+    fake = _FakeMemorize(boundary_failing={"bad"})
+    _wiring["deliver"] = fake
+    w = _worker(_settings(max_concurrency=1, max_attempts=1, boundary_max_attempts=3))
+    await w.enqueue(
+        _payload("bad"), request_id="r1", is_final=False, defer_extraction=False
+    )
+
+    await w.drain_once()
+
+    assert [c[0] for c in fake.calls] == ["bad", "bad", "bad"]
+    bad = await repo.find_one(request_id="r1")
+    assert bad is not None
+    assert (bad.status, bad.attempt) == ("failed", 3)
+    assert bad.last_error is not None and "llm down" in bad.last_error
 
 
 # ── lifecycle ──────────────────────────────────────────────────────────────
