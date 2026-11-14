@@ -10,7 +10,8 @@ What these pin:
   detection (everalgo-boundary) every conversation is cut with, the original
   episode request every episode prompt is built on, and the profile update
   and consolidation
-  of ``ProfileExtractor.aupdate`` (everalgo-user-memory). An everalgo change to
+  of ``ProfileExtractor.aupdate`` and the update of several people of
+  ``aupdate_many`` (everalgo-user-memory). An everalgo change to
   any of them fails here, on purpose, before it reaches a store;
 - each entry says when its prompt is sent: while a store is written, on every
   round of every search (the multi-round decider, ``read``), or by an optional
@@ -81,22 +82,27 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
         ),
         "everalgo.user_memory.episode_original": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev8+v031episode",
+            "0.9.0rc6.dev9+v031episode",
             "f9c003f109a466ea",
         ),
         "everalgo.user_memory.profile_update": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev8+v031episode",
+            "0.9.0rc6.dev9+v031episode",
             "6cc9e75ee44c2c98",
+        ),
+        "everalgo.user_memory.profile_update_many": (
+            "everalgo-user-memory",
+            "0.9.0rc6.dev9+v031episode",
+            "686858869fef3228",
         ),
         "everalgo.user_memory.profile_consolidate": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev8+v031episode",
+            "0.9.0rc6.dev9+v031episode",
             "d70ed25f5e44ede3",
         ),
         "everalgo.user_memory.language_rules": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev8+v031episode",
+            "0.9.0rc6.dev9+v031episode",
             "10d1df0535db08bf",
         ),
         "everalgo.parser.prompts": (

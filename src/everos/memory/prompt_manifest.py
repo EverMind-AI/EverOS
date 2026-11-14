@@ -11,7 +11,8 @@ fingerprint of their text:
 * everalgo's, sent as the installed package wrote them
   (:class:`~everos.memory.prompts.AlgoPrompt`): the boundary detection that
   cuts a conversation into segments, the original episode request every
-  episode prompt is built on, the profile update and consolidation, the
+  episode prompt is built on, the profile update (of one person, and of
+  several in one call) and consolidation, the
   output-language rules every extraction prompt carries in its
   ``<output_language>`` block, and the
   parser prompts that read a picture, a document or a recording into text
@@ -60,6 +61,8 @@ from everalgo.user_memory.prompts.en.episode_original import (
 from everalgo.user_memory.prompts.en.profile import (
     PROFILE_CONSOLIDATE_SYSTEM_PROMPT,
     PROFILE_CONSOLIDATE_USER_PROMPT,
+    PROFILE_UPDATE_MANY_SYSTEM_PROMPT,
+    PROFILE_UPDATE_MANY_USER_PROMPT,
     PROFILE_UPDATE_SYSTEM_PROMPT,
     PROFILE_UPDATE_USER_PROMPT,
 )
@@ -107,6 +110,11 @@ ALGO_PROMPTS: tuple[AlgoPrompt, ...] = (
         parts=(PROFILE_UPDATE_SYSTEM_PROMPT, PROFILE_UPDATE_USER_PROMPT),
     ),
     AlgoPrompt(
+        id="everalgo.user_memory.profile_update_many",
+        package="everalgo-user-memory",
+        parts=(PROFILE_UPDATE_MANY_SYSTEM_PROMPT, PROFILE_UPDATE_MANY_USER_PROMPT),
+    ),
+    AlgoPrompt(
         id="everalgo.user_memory.profile_consolidate",
         package="everalgo-user-memory",
         parts=(PROFILE_CONSOLIDATE_SYSTEM_PROMPT, PROFILE_CONSOLIDATE_USER_PROMPT),
@@ -133,7 +141,10 @@ written: the boundary detection is ``adetect_boundaries``' batch call, which
 every buffered conversation goes through before it is extracted; the original
 episode request (everalgo-user-memory 0.3.1's) is the core of every
 ``chat.episode`` request; the two profile prompts are everalgo
-``ProfileExtractor.aupdate``'s; the language rules fill the
+``ProfileExtractor.aupdate``'s, and the update of several people
+(``aupdate_many``'s, sharing UPDATE's rules) is what a group's batched
+member profiles send (``[groups] member_profile_mode = "batched"``); the
+language rules fill the
 ``<output_language>`` block of every extraction prompt (the episode's, the
 profile's, a group profile's, a scene's, the constraint binding's); the parser
 prompts read a picture (when the extraction model reads none), a document or
@@ -145,7 +156,9 @@ CUSTOM_INSTRUCTIONS: tuple[tuple[Operator, str], ...] = (
     ("profile_extract", "everalgo.user_memory.profile_update"),
     ("reflect", "chat.scene_update"),
 )
-"""Each custom-instruction file and the prompt it is appended to."""
+"""Each custom-instruction file and the prompt it is appended to
+(``profile_extract`` closes the update of several people too, and every
+consolidation: one text for every profile prompt)."""
 
 
 def prompt_manifest(*, config_root: Path | None = None) -> dict[str, Any]:
