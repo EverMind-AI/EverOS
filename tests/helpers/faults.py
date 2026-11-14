@@ -256,11 +256,7 @@ class Upstream:
             )
         if name in {"EpisodeReply", "ImageEpisodeReply"}:
             found = " ".join(dict.fromkeys(markers(said))) or "nothing"
-            reply: dict[str, Any] = {
-                "title": "Notes",
-                "summary": f"Notes on {found}",
-                "content": found,
-            }
+            reply: dict[str, Any] = {"title": "Notes", "content": found}
             if name == "ImageEpisodeReply":
                 reply["images"] = [
                     {"ref": ref, "description": f"picture {ref} of {found}", "ocr": ""}
@@ -301,7 +297,11 @@ def _prompt(body: Mapping[str, Any]) -> str:
 
 
 def _conversation(body: Mapping[str, Any]) -> str:
-    """The non-system messages: what the conversation shows, without rules."""
+    """The non-system messages: what the conversation shows.
+
+    An episode request is one user message, the original's rules with the
+    conversation in them; the markers are what the conversation adds.
+    """
     return "\n".join(
         t
         for m in body.get("messages", [])

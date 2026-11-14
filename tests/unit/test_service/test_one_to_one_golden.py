@@ -184,7 +184,6 @@ named after the golden picture's hash) is listed with that value.
 
 # ── the deterministic model ──────────────────────────────────────────────
 
-_LINE = re.compile(r"^\[[^\]]+\]\s+([^:\n]{1,64}):\s+(.+)$", re.MULTILINE)
 _BLOCK = re.compile(
     r'^ {20}"speaker": (.*?),\n {20}"content": (.*?)\n {16}\}$',
     re.MULTILINE | re.DOTALL,
@@ -217,40 +216,24 @@ def _window(prompt: str) -> int:
     return int(found.group(1))
 
 
-def _transcript(prompt: str) -> str:
-    """The cell's own transcript: the last ``<conversation>`` block.
-
-    The instructions before it carry worked examples with speaker lines of
-    their own; only the block the cell was rendered into is the input.
-    """
-    start = prompt.rfind("<conversation")
-    if start < 0:
-        return prompt
-    end = prompt.find("</conversation>", start)
-    return prompt[start : end if end >= 0 else len(prompt)]
-
-
 def _episode_from(prompt: str) -> dict[str, str]:
     """An episode that depends on the transcript the model was shown.
 
-    The speaker lines (or, in the original request a text cell is sent, the
-    message blocks) are what the extraction renders from the cell, so a
-    change to how a one-to-one cell is rendered changes the episode, and the
-    golden catches it. The digest covers the whole prompt, instructions
-    included: a one-to-one prompt that changes anywhere changes the episode.
+    The message blocks of the original request are what the extraction
+    renders from the cell, so a change to how a one-to-one cell is rendered
+    changes the episode, and the golden catches it. The digest covers the
+    whole prompt, instructions included: a one-to-one prompt that changes
+    anywhere changes the episode. The reply is the original's ``title`` and
+    ``content``; the summary is cut from the content in code.
     """
-    if "Conversation content:\n" in prompt:
-        conversation = prompt.split("Conversation content:\n", 1)[1]
-        conversation = conversation.split("\n\nCustom instructions:\n", 1)[0]
-        lines = _BLOCK.findall(conversation)
-    else:
-        lines = _LINE.findall(_transcript(prompt))
+    conversation = prompt.split("Conversation content:\n", 1)[1]
+    conversation = conversation.split("\n\nCustom instructions:\n", 1)[0]
+    lines = _BLOCK.findall(conversation)
     digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
     speakers = sorted({name.strip() for name, _ in lines})
     said = " | ".join(text.strip()[:60] for _, text in lines[:3])
     return {
         "title": f"Talk between {', '.join(speakers) or 'nobody'}",
-        "summary": f"{len(lines)} lines ({digest})",
         "content": f"{said} [{digest}]",
     }
 
@@ -262,7 +245,6 @@ def _picture_reply(prompt: str) -> str:
     return json.dumps(
         {
             "title": episode["title"],
-            "summary": episode["summary"],
             "content": f"{episode['content']} {refs}".strip(),
             "images": [
                 {"ref": label, "description": f"A tabby cat on a sill ({label})"}

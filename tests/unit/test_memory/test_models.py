@@ -45,9 +45,9 @@ def test_episode_from_algo_drops_algo_side_parent_id() -> None:
 def test_episode_from_algo_owner_id_caller_supplied() -> None:
     """Caller supplies ``owner_id``; algo's value (None or otherwise) is dropped.
 
-    The pipeline runs the algo once with ``sender_id=None`` (generic
-    EPISODE_GENERATION_PROMPT) and then fans the same algo Episode out
-    to one domain Episode per user sender, each rooted at its own owner.
+    The pipeline extracts one algo Episode per cell with no owner (the
+    episode call narrates the whole memcell) and then fans it out to one
+    domain Episode per user sender, each rooted at its own owner.
     """
     algo = AlgoEpisode(
         owner_id=None, summary="summary", episode="hello", timestamp=1_700_000_000_000

@@ -69,10 +69,10 @@ Prints the prompt manifest as JSON: every prompt EverOS registers (id,
 version, fingerprint of its text, and when it is sent: `write` while a store is
 written, `read` by the multi-round decider on every round of every search,
 `search` by an optional search step) and the everalgo prompts it sends
-unchanged -- boundary detection, the episode rules, the profile update and
-consolidation, the output-language rules every extraction prompt carries, and
-the parser prompts that read a picture, a document or a recording into text
-(package, installed version, fingerprint). A prompt assembled by rule lists
+unchanged -- boundary detection, the original episode request, the profile
+update and consolidation, the output-language rules every extraction prompt
+carries, and the parser prompts that read a picture, a document or a recording
+into text (package, installed version, fingerprint). A prompt assembled by rule lists
 the fingerprint of each variant: `chat.episode` and `search.decider` have a
 `text` and a `pictures` one. The four custom-instruction files
 (`config/custom_instructions/*.yaml`) are listed too, each with the prompt it

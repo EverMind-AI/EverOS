@@ -24,9 +24,11 @@ cell adds follows the original's text, in this order, after one blank line:
 The reply is ``title`` and ``content`` (and ``images`` with pictures); the
 summary is the content's first 200 characters, cut in code, as the original
 filled it. The two renderings are the template's variants ``text`` and
-``pictures``, each with its own fingerprint. A picture cannot travel through
-``EpisodeExtractor`` (its message content is text by contract), which is why
-the call is EverOS's own.
+``pictures``, each with its own fingerprint. The call is EverOS's own because
+of what a cell adds: everalgo's episode operator sends the original and the
+language block and nothing else (a one-to-one text cell's request is byte for
+byte the operator's), and carries no picture and no roster. The original's
+text and its rendering stay everalgo's (``_render_original_prompt``).
 
 History. Until 2026-11-12 a picture cell's prompt carried everalgo's whole
 system prompt -- its reply format and an empty language block included --
@@ -63,11 +65,11 @@ element left open or split in two objects is mended before it is validated. A
 cell is never given a picture it did not send: a text cell's reply loses any
 ``images`` it writes, and a reference ``(img-N)`` to a label the cell did not
 attach is taken out of the episode. A reply that leaves ``title`` or
-``content`` blank is rejected (the guard ``EpisodeExtractor`` applies,
-imported from everalgo so the two cannot drift apart); any other top-level key
-it writes -- a ``summary``, or a key of the model's own -- is ignored, as the
-original read its reply. The reply models' names
-and docstrings are part of the JSON schema a ``json_schema``-mode call sends.
+``content`` blank is rejected (everalgo's own blank-field guard, imported so
+the two cannot drift apart); any other top-level key it writes -- a
+``summary``, or a key of the model's own -- is ignored, as the original read
+its reply. The reply models' names and docstrings are part of the JSON schema
+a ``json_schema``-mode call sends.
 
 The call's output is capped by what it reads (:func:`reply_token_cap`), and a
 reply cut at that cap is sampled again once, warmer, before the cell fails:

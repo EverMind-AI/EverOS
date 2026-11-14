@@ -539,8 +539,11 @@ the `everalgo` namespace, providing memory algorithms, parsing, and their
 data contracts:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
-- `everalgo.user_memory` — ConvMemCell / Episode / Profile extractors (the package
-  also ships atomic-fact and foresight extractors; EverOS 2.0 does not call them)
+- `everalgo.user_memory` — the profile extractor, the output-language rules, and
+  the original episode request (everalgo-user-memory 0.3.1's) with its renderer,
+  on which EverOS's own episode call (`chat.episode`) builds every chat cell's
+  request (the package also ships episode, atomic-fact and foresight extractors
+  and an episode reflector; EverOS 2.0 does not call them)
 - `everalgo.boundary` — boundary detection (conversation -> MemCells)
 - `everalgo.clustering` — the scene placement (`cluster_by_geometry`)
 - `everalgo.rank` — fusion (multi-round RRF)

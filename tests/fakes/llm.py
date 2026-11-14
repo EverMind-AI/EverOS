@@ -92,7 +92,7 @@ def memorize_llm(
             (``[]`` once empty), or a function of the window size returning
             the cuts.
         episode_title: Every episode reply's ``title``.
-        episode_content: Every episode reply's ``content`` (and ``summary``).
+        episode_content: Every episode reply's ``content``.
         calls: When given, the requested reply model's name is appended per
             call.
         tail_complete: Every boundary reply's verdict on the uncut tail.
@@ -108,9 +108,7 @@ def memorize_llm(
     background strategy logs and gives up).
     """
     queue = None if callable(boundaries) else [list(b) for b in boundaries]
-    episode = json.dumps(
-        {"content": episode_content, "summary": episode_content, "title": episode_title}
-    )
+    episode = json.dumps({"title": episode_title, "content": episode_content})
     canned = _user(scripts)
 
     def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:

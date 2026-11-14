@@ -1514,10 +1514,10 @@ Every prompt and template is registered with an id, a version and a fingerprint
 and can be overridden like the other 2.0 prompts. Keeping the registry id when a
 prompt moves to everalgo keeps data built from the registry valid. `everos
 prompts` prints them all, with the fingerprints of the everalgo prompts a store
-is written with -- boundary detection, the episode rules, the profile update and
-consolidation (`src/everos/memory/prompt_manifest.py`). Each entry says when it
-is sent: `write` while a store is written, `read` on every round of every
-search (the decider), `search` by an optional search step (the constraint
+is written with -- boundary detection, the original episode request, the profile
+update and consolidation (`src/everos/memory/prompt_manifest.py`). Each entry
+says when it is sent: `write` while a store is written, `read` on every round of
+every search (the decider), `search` by an optional search step (the constraint
 binding). Step 1 needs no everalgo release at all.
 
 ---

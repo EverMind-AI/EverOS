@@ -64,9 +64,7 @@ class ForgetModel:
             )
         if name == "EpisodeReply":
             said = " ".join(sorted(set(_MARK.findall(prompt)))) or "nothing"
-            return json.dumps(
-                {"title": "Notes", "summary": f"Notes on {said}", "content": said}
-            )
+            return json.dumps({"title": "Notes", "content": said})
         if name == "_ProfileUpdateReply":
             stored = prompt.split("<new_conversation>")[0]
             ops = [

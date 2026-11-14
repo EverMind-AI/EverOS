@@ -32,9 +32,13 @@ machinery that keeps a deleted memory from coming back.
   LoCoMo probe; the names are logged at debug level and counted in
   `everos_episode_reply_keys_ignored_total`). The summary is the content's
   first 200 characters, cut in code. `chat.episode` is version 4;
-  everalgo-user-memory is the local build `0.9.0rc6.dev7+v031episode`, which
-  carries the original prompt and its renderer
-  ([vendor/wheels/README.md](vendor/wheels/README.md)).
+  everalgo-user-memory is the local build `0.9.0rc6.dev8+v031episode`, whose
+  only episode prompt is the original: the rewritten rules and
+  `EpisodeSummarizer` are deleted there, and everalgo's own episode operator
+  sends what a one-to-one text cell is sent
+  ([vendor/wheels/README.md](vendor/wheels/README.md)). A test fails if an
+  EverOS module imports that operator or a rewrite module again, or if an
+  episode request does not open with the original's role sentence.
 - **A multi-round search lists each memory once per round.** A round after the
   first shows the decider one block per sub-query, and a memory that several
   sub-queries retrieved was listed in each of their blocks, under an index of
