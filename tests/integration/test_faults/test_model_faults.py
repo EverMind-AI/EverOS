@@ -379,6 +379,43 @@ async def test_a_catch_up_brings_a_groups_profiles_up_to_date(
         await _clean(srv)
 
 
+async def test_a_catch_up_brings_a_users_profile_up_to_date(
+    tmp_path: Path,
+) -> None:
+    """A user's profile reads its queue every ``[profile] update_every``
+    segments, not at a flush (``update_on_flush`` off, the default): the same
+    ``catch_up_profiles`` trigger reads what is queued -- one update call, of
+    the messages the episode call marked -- and a second finds nothing."""
+    async with FaultServer.open(tmp_path / "root") as srv:
+        resp, first = await srv.say("s1", "u1", "A", 2, fact=True)
+        assert resp.status_code == 200, resp.text
+        await _flushed(srv, "s1")
+        assert srv.upstream.count("_ProfileUpdateReply") == 1  # a first segment
+        resp, second = await srv.say("s1", "u1", "B", 2, fact=True, at=60_000)
+        assert resp.status_code == 200, resp.text
+        await _flushed(srv, "s1")
+        assert srv.upstream.count("_ProfileUpdateReply") == 1  # queued
+
+        resp = await srv.client.post(
+            "/api/v2/ome/trigger", json={"name": "catch_up_profiles", "timeout": 30}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "ok", resp.json()
+        assert srv.upstream.count("_ProfileUpdateReply") == 2
+        await srv.settle()
+        (profile,) = srv.root.rglob("users/u1/user.md")
+        text = profile.read_text("utf-8")
+        assert all(m in text for m in [*first, *second]), text
+
+        resp = await srv.client.post(
+            "/api/v2/ome/trigger", json={"name": "catch_up_profiles", "timeout": 30}
+        )
+        assert resp.json()["status"] == "ok"  # nothing queued: no call
+        assert srv.upstream.count("_ProfileUpdateReply") == 2
+        assert srv.upstream.unexpected == []
+        await _clean(srv)
+
+
 # ── the decider ─────────────────────────────────────────────────────────────
 
 

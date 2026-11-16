@@ -152,3 +152,16 @@ class GroupProfilesDue(Event):
     group_id: str
     app_id: str = "default"
     project_id: str = "default"
+
+
+class UserProfileDue(Event):
+    """A user's own profile is to be brought up to date now, whatever its cadence.
+
+    The catch-up (``catch_up_profiles``, ``POST /api/v2/ome/trigger``) emits
+    one per user whose profile has segments queued: ``extract_user_profile``
+    reads every one of them, as the idle tick does.
+    """
+
+    user_id: str
+    app_id: str = "default"
+    project_id: str = "default"

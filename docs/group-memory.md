@@ -840,13 +840,14 @@ else's (section 7.4). The same routing (poster only) applies on the one-to-one
 path, which removes the leak at `user_memory.py:163-170` without changing any
 single-sender result.
 
-While the member profiles run (`update_member_profiles`), a group cell's
-episode call also carries the `<profile_cues>` block (2026-11-14): per human
-speaker, the messages and pictures that say something lasting about them,
-kept per segment and member in `system.db` (`profile_cue`), never the
-assistant's. A member's profile update can read only those
-(`select_profile_input`, as a user's does with `[profile] input = "cues"`);
-on 2026-11-14 the member profiles still read their segments in full.
+While the member profiles run batched with `[profile] input = "cues"` (both
+defaults), a group cell's episode call also carries the `<profile_cues>`
+block: per human speaker, the messages and pictures that say something
+lasting about them, kept per segment and member in `system.db`
+(`profile_cue`), never the assistant's. The batched member update reads only
+those (`select_members_input`, section 7.4), as a user's update does. With
+`input = "full"`, or in `per_member` mode (which reads every message), no
+group cell is asked for cues.
 
 ### 7.4 Member-in-group profile
 
@@ -878,6 +879,23 @@ say about one member: preferences, constraints, commitments, expertise.
   the history, held items, picture items for the poster only), and a
   consolidation runs per member and part, only over its cap and grown.
   Members whose stored languages differ are read in one call per language.
+- **Cues (`[profile] input = "cues"`, the default).** The batched call reads
+  what the batch's episode calls marked about each member, not the whole
+  batch: a member with no cue in the batch is not a target (no label, no
+  operation, no token, their document not written); the conversation is
+  rendered once from the union of the targets' marked messages, each after
+  the nearest earlier message by someone other than the member it was marked
+  for, cut to 200 characters (a message marked for one member and another's
+  context is shown whole; a segment with nothing marked for anyone is left
+  out; a segment never marked -- extracted before cues -- is shown whole);
+  the marked pictures are attached as their picture memories' text
+  (`[profile] picture_pixels` attaches the pictures). When no member has a
+  cue there is no call. Every segment a member's update read with a cue
+  record is marked read once the batch is written, so neither a replayed
+  segment nor a batch read again after a crash is read for them twice.
+  `input = "full"` sends the batched request as it was before cues. A
+  forget's re-read of one member (below) reads that member's segments in
+  full.
 - **Attribution check.** One call for several people can put a fact on the
   wrong one, so everalgo checks each operation before it applies and leaves
   out one whose ref names another member's item, one resting only on
@@ -907,8 +925,9 @@ say about one member: preferences, constraints, commitments, expertise.
   every queue). Episodes are searchable immediately; only the profile lags.
   `POST /api/v2/ome/trigger` with `{"name": "catch_up_profiles"}` brings every
   group's profiles up to date at once (one `GroupProfilesDue` per group; a
-  batch waiting out a back-off is read too): an evaluation calls it after
-  ingesting and before it searches. The update itself is the one `user.md`
+  batch waiting out a back-off is read too), and every user's own profile
+  with segments queued (one `UserProfileDue` per user): an evaluation calls
+  it after ingesting and before it searches. The update itself is the one `user.md`
   runs (`memory/strategies/_profiles.py`: pictures, the update call, stamping,
   held items, the bounded history).
 - **Failures.** A batched call that yields nothing usable keeps the batch with
@@ -2207,8 +2226,13 @@ Step 2 differs from the text above in these places:
   guards the one-call design; `[groups] profile_on_flush = false` (default)
   stops a flush from forcing either profile; `catch_up_profiles` (a manual
   OME trigger) brings them up to date on demand. Its providers are a registry
-  (`everos.memory.strategies.CATCH_UP_PROVIDERS`), so the one-to-one
-  profile's catch-up registers beside the groups'.
+  (`everos.memory.strategies.CATCH_UP_PROVIDERS`): the one-to-one profile's
+  (`USER_PROFILES`) registers beside the groups' (`GROUP_PROFILES`).
+- **Cues.** With `[profile] input = "cues"` the batched call reads only what
+  the batch's episode calls marked about its members
+  (`profile_input.select_members_input`, the one-person rules of
+  `select_profile_input` over several people, rendered once); `full` keeps
+  the batched request byte for byte (a test holds it there).
 - **A/B.** `member_profile_mode = "per_member"` with `profile_on_flush = true`
   is the update before this change, request for request.
 

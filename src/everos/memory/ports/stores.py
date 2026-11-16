@@ -360,6 +360,11 @@ class ProfileStore(Protocol):
         """The people of the space that have a profile document, sorted."""
         ...
 
+    async def user_keys(self) -> list[tuple[str, str, str]]:
+        """Every user of the root with a profile in their own space,
+        ``(app_id, project_id, user_id)``, sorted."""
+        ...
+
     async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
         """Delete the person's document; what it held, or ``None``.
 

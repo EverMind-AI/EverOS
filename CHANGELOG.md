@@ -38,7 +38,8 @@ machinery that keeps a deleted memory from coming back.
   `catch_up_profiles` strategy, `POST /api/v2/ome/trigger` with `{"name":
   "catch_up_profiles"}`, brings every group's profiles up to date at once --
   what an evaluation does before it searches -- over a registry of catch-up
-  providers (`CATCH_UP_PROVIDERS`) the one-to-one profile can join.
+  providers (`CATCH_UP_PROVIDERS`), which the one-to-one profile joins (see
+  below).
   `member_profile_mode = "per_member"` with `profile_on_flush = true` sends the
   requests of ea7d2570 byte for byte (a test holds it there).
   everalgo-user-memory is the local build `0.9.0rc6.dev9+v031episode`; the
@@ -62,8 +63,9 @@ machinery that keeps a deleted memory from coming back.
   block is sent only when a profile of the cell's space reads it, as the
   picture block reaches only picture cells: a user's own space while
   `extract_user_profile` runs with `input = "cues"`, a group's while
-  `update_member_profiles` runs (decided at startup, `ome.toml` included);
-  with no such profile the episode request is unchanged, byte for byte. The
+  `update_member_profiles` runs batched with `input = "cues"` (decided at
+  startup, `ome.toml` included); with no such profile the episode request is
+  unchanged, byte for byte. The
   cues are mapped in code to one message of their speaker (a quote compared
   without case, extra whitespace or curly quotation marks) and to the
   pictures that speaker posted, and kept in `system.db` (`profile_cue`, one
@@ -82,9 +84,30 @@ machinery that keeps a deleted memory from coming back.
   mechanism, strategy `extract_user_profile_idle`), and its first segment at
   once; `everos.memory.strategies.update_pending_profile` brings one user's
   queue up to date on demand. The selection is
-  `everos.memory.extract.pipeline.profile_input.select_profile_input`, which a
-  member's profile in a group can call too
+  `everos.memory.extract.pipeline.profile_input.select_profile_input`
   ([docs/configuration.md](docs/configuration.md#profile)).
+- **The batched member profiles read the cues, and the catch-up brings the
+  users' profiles up to date too.** With `[profile] input = "cues"` the one
+  call that updates a group's members reads what the batch's episode calls
+  marked about each of them (`select_members_input`): a member with no cue in
+  the batch is not a target (no operations, no tokens); the batch's
+  conversation is rendered once from the union of the targets' marked
+  messages, each after the nearest earlier message by someone other than the
+  member it was marked for, cut to 200 characters (a message marked for one
+  member and another's context is shown whole; a segment never marked is
+  shown whole); the marked pictures are attached as their picture memories'
+  text (`[profile] picture_pixels` attaches the pictures); when no member has
+  a cue there is no call, and the segments read are marked read, so a batch
+  read again reads them no more. `input = "full"` sends the batched request
+  of before, byte for byte, and no episode request carries the cue block
+  then; a group cell is asked for cues only while its members' profiles run
+  batched (`per_member` reads every message). `catch_up_profiles` now also
+  emits one `UserProfileDue` per user whose own profile has segments queued
+  (`USER_PROFILES`, beside `GROUP_PROFILES`), which `extract_user_profile`
+  reads with `update_pending_profile`: one `POST /api/v2/ome/trigger` brings
+  the users' profiles, the member profiles and the group profiles up to
+  date. `ProfileStore.user_keys()` lists the users of the root that have a
+  profile of their own.
 - **Every chat cell is sent the original episode request again.** everalgo's
   rewritten episode rules (2026-10) told the model not to copy a message's
   time into the content: with GPT-4.1-mini extraction 1% of LoCoMo episodes

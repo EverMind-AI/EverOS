@@ -22,10 +22,13 @@ update is the one a member's profile in a group runs (:mod:`._profiles`):
   event's included), so a later update -- the engine's retry, the next
   segment past the cadence, the idle tick -- reads them: a failed window is
   never skipped. :func:`update_pending_profile` brings one user's queue up to
-  date on demand.
+  date on demand: the catch-up (``catch_up_profiles``,
+  ``POST /api/v2/ome/trigger``) does so for every user with a queue
+  (:class:`UserProfileDue`).
 - **Trigger.** :class:`EpisodeExtracted` of a user's own episode (one per
   one-to-one segment), with or without an embedding provider, the idle tick
-  of a user's space, and -- with ``update_on_flush`` -- :class:`SessionFlushed`.
+  of a user's space, a catch-up's :class:`UserProfileDue`, and -- with
+  ``update_on_flush`` -- :class:`SessionFlushed`.
   A group's episode -- a session of three or more people is a group's --
   never triggers it; each of two people talking without a ``group_id`` has
   their own episode, so their own update.
@@ -89,7 +92,12 @@ from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, SessionFlushed, parse_user_key
+from everos.memory.events import (
+    EpisodeExtracted,
+    SessionFlushed,
+    UserProfileDue,
+    parse_user_key,
+)
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.profile_input import select_profile_input
@@ -119,9 +127,10 @@ logger = get_logger(__name__)
 
 
 def _profile_applies(event: Event, deps: MemoryDeps) -> bool:
-    """A user's segment episode, or a flush of a session bound to no group."""
+    """A user's segment episode, a flush of a session bound to no group, or a
+    catch-up of a user's profile."""
     del deps
-    if isinstance(event, SessionFlushed):
+    if isinstance(event, SessionFlushed | UserProfileDue):
         return True
     return isinstance(event, EpisodeExtracted) and event.owner_type == "user"
 
@@ -207,11 +216,23 @@ async def _segments(
 
 
 async def extract_user_profile(
-    event: EpisodeExtracted | SessionFlushed | IdleTick, deps: MemoryDeps
+    event: EpisodeExtracted | SessionFlushed | UserProfileDue | IdleTick,
+    deps: MemoryDeps,
 ) -> list[Event]:
     """Queue the event's segment on its owner's profile and read the queue
     when it is due; at a flush, read what each sender's profile queued; at a
-    user's idle tick, read what their profile queued."""
+    user's idle tick or catch-up, read what their profile queued."""
+    if isinstance(event, UserProfileDue):
+        await update_pending_profile(
+            deps,
+            Scope(
+                app_id=event.app_id,
+                project_id=event.project_id,
+                owner_id=event.user_id,
+                owner_type="user",
+            ),
+        )
+        return []
     if isinstance(event, IdleTick):
         key = parse_user_key(event.bucket_key)
         if key is None:
@@ -281,9 +302,9 @@ async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
 
     What a due update reads, under the profile's lock: every queued segment,
     as ``[profile] input`` shows them -- the cadence's own reads, the idle
-    tick's and a flush's (``update_on_flush``) all go through it, and so can a
-    caller that needs the profile current now (an evaluation's catch-up at
-    the end of an ingest). A profile with nothing queued is left as it is.
+    tick's, a flush's (``update_on_flush``) and a catch-up's
+    (:class:`UserProfileDue`, at the end of an evaluation's ingest) all go
+    through it. A profile with nothing queued is left as it is.
 
     Args:
         deps: The strategies' dependencies.
@@ -452,12 +473,12 @@ async def _keep_queued(
 EXTRACT_USER_PROFILE_SPEC = StrategySpec(
     name="extract_user_profile",
     fn=extract_user_profile,
-    trigger=Immediate(on=[EpisodeExtracted, SessionFlushed]),
+    trigger=Immediate(on=[EpisodeExtracted, SessionFlushed, UserProfileDue]),
     applies_to=_profile_applies,
     max_retries=2,
 )
-"""The segment half, and the flush: the bootstrap drops :class:`SessionFlushed`
-from the trigger unless ``[profile] update_on_flush``."""
+"""The segment half, the flush and the catch-up: the bootstrap drops
+:class:`SessionFlushed` from the trigger unless ``[profile] update_on_flush``."""
 
 EXTRACT_USER_PROFILE_IDLE_SPEC = StrategySpec(
     name="extract_user_profile_idle",

@@ -2,18 +2,19 @@
 
 What these pin:
 
-- the episode call carries the ``<profile_cues>`` block for a user's own
-  space only while ``extract_user_profile`` runs with ``[profile] input =
-  "cues"``, and for a group's only while ``update_member_profiles`` runs; an
-  ``ome.toml`` that turns either off at startup turns its block off, a file
-  that cannot be read changes nothing, and a server without its engine asks
-  for no cue;
+- the episode call carries the ``<profile_cues>`` block only with
+  ``[profile] input = "cues"``: for a user's own space while
+  ``extract_user_profile`` runs, and for a group's while
+  ``update_member_profiles`` runs in ``[groups] member_profile_mode =
+  "batched"`` (``per_member`` reads every message); an ``ome.toml`` that
+  turns either off at startup turns its block off, a file that cannot be
+  read changes nothing, and a server without its engine asks for no cue;
 - ``build_application`` hands the conversation pipeline that decision and the
   strategies the ``[profile]`` input, and the memory service built without
   its engine asks for none;
 - a user's profile updates at a flush only with ``[profile]
-  update_on_flush``, and on its own idle trigger after ``[profile]
-  idle_seconds``.
+  update_on_flush``, on its own idle trigger after ``[profile]
+  idle_seconds``, and on a catch-up's ``UserProfileDue`` either way.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import pytest
 
 from everos.config import Settings, load_settings
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, SessionFlushed
+from everos.memory.events import EpisodeExtracted, SessionFlushed, UserProfileDue
 from everos.memory.extract.pipeline import CueConsumers
 from everos.memory.ports import Idle, Immediate, StrategySpec
 from everos.memory.strategies import (
@@ -47,11 +48,22 @@ def test_by_default_both_spaces_read_cues(tmp_path: Path) -> None:
     )
 
 
-def test_a_full_profile_reads_no_cue_and_the_member_profiles_still_do(
-    tmp_path: Path,
-) -> None:
+def test_a_full_profile_reads_no_cue_in_either_space(tmp_path: Path) -> None:
     consumers = profile_cue_consumers(_profile(input="full"), tmp_path / "ome.toml")
-    assert consumers == CueConsumers(users=False, groups=True)
+    assert consumers == CueConsumers(users=False, groups=False)
+
+
+def test_per_member_profiles_read_no_cue(tmp_path: Path) -> None:
+    base = Settings()
+    per_member = base.model_copy(
+        update={
+            "groups": base.groups.model_copy(
+                update={"member_profile_mode": "per_member"}
+            )
+        }
+    )
+    consumers = profile_cue_consumers(per_member, tmp_path / "ome.toml")
+    assert consumers == CueConsumers(users=True, groups=False)
 
 
 @pytest.mark.parametrize(
@@ -106,7 +118,7 @@ def test_the_application_hands_the_pipeline_and_the_strategies_their_choice(
         load_settings.cache_clear()
 
     pipeline = application.memory._memorizer._conversation_pipeline
-    assert pipeline._cue_consumers == CueConsumers(users=False, groups=True)  # type: ignore[attr-defined]
+    assert pipeline._cue_consumers == CueConsumers()  # type: ignore[attr-defined]
     assert pipeline._profile_cues is not None  # type: ignore[attr-defined]
     assert {(d.profile_input, d.profile_picture_pixels) for d in bound} == {
         ("full", True)
@@ -120,7 +132,11 @@ def test_a_flush_updates_a_user_s_profile_only_when_configured(on_flush: bool) -
         EXTRACT_USER_PROFILE_SPEC, _profile(update_on_flush=on_flush)
     )
     assert isinstance(spec.trigger, Immediate)
-    expected = [EpisodeExtracted, SessionFlushed] if on_flush else [EpisodeExtracted]
+    expected = (
+        [EpisodeExtracted, SessionFlushed, UserProfileDue]
+        if on_flush
+        else [EpisodeExtracted, UserProfileDue]
+    )
     assert list(spec.trigger.on) == expected
 
 

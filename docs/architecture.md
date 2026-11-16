@@ -471,7 +471,8 @@ them.
   `update_member_profiles_idle`
 - `catch_up_profiles` — every profile kept on a cadence brought up to date at
   once, on a manual OME trigger; each kind registers a provider in
-  `CATCH_UP_PROVIDERS`
+  `CATCH_UP_PROVIDERS` (the users' own profiles, `UserProfileDue`; the
+  groups' profiles, `GroupProfilesDue`)
 - `update_group_profile` / `update_group_profile_idle` — a group's profile
   ([group-memory.md](group-memory.md), section 7.5): a batch of segments, a
   quiet group's idle window, a catch-up (a flush with `[groups]

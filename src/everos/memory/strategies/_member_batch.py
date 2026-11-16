@@ -14,6 +14,18 @@ without one, on a flush with ``profile_on_flush``, and when a catch-up asks
   their refs carry, and the pictures they posted (D17: a picture is evidence
   about its poster only). The reply is grouped per member; a member it
   leaves out has nothing new, and their document is not written.
+- **What the call reads.** ``[profile] input = "cues"`` (the default) reads
+  what the batch's episode calls marked about each member
+  (:func:`~everos.memory.extract.pipeline.profile_input.select_members_input`):
+  a member with no cue in the batch is not read (no operation, no token), the
+  conversation is rendered once from the union of the members' marked
+  messages -- each after the nearest earlier message by someone else, cut to
+  200 characters -- and a marked picture is attached as its picture memory's
+  text (``[profile] picture_pixels`` attaches the picture); a batch that
+  marked nothing for anyone makes no call. Every segment a member's update
+  read with a cue record is marked read once the batch is written, so a
+  batch read again reads it no more. ``full`` shows the whole batch and every
+  picture its members posted, as before cues.
 - **Each member as before.** A named member's operations apply to their own
   document as a one-person update's do (:func:`~._profiles.finish_update`):
   item ids, sources and spans, ``supersedes`` / ``since`` and the history,
@@ -55,7 +67,8 @@ from __future__ import annotations
 
 __all__ = ["update_batched"]
 
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 
 from everalgo.types import ChatMessage
 from everalgo.user_memory import ProfileExtractor
@@ -79,6 +92,7 @@ from everos.memory.extract.llm_retry import (
 from everos.memory.extract.pipeline.group_render import label_cell
 from everos.memory.extract.pipeline.member_profile import wrote_in
 from everos.memory.extract.pipeline.pictures import members_pictures
+from everos.memory.extract.pipeline.profile_input import select_members_input
 from everos.memory.extract.pipeline.profile_items import already_read
 from everos.memory.groups import readable_segments
 from everos.memory.mappers import profile as profile_mapper
@@ -192,13 +206,14 @@ async def update_batched(
 async def _read_by_every_speaker(
     deps: MemoryDeps, scope: Scope, event: EpisodeExtracted
 ) -> bool:
-    """Whether every speaker's profile already rests on the segment (a replay)."""
+    """Whether every speaker's profile already rests on the segment, or read
+    it (its cue record says so): a replay."""
     if not event.speaker_ids:
         return False
     for member_id in dict.fromkeys(event.speaker_ids):
         if not already_read(
             await deps.stores.profile.read(scope, member_id), event.memcell_id
-        ):
+        ) and not await _cue_read(deps, member_id, event.memcell_id):
             return False
     logger.info(
         "member_profile_segment_already_read",
@@ -282,16 +297,28 @@ async def _read_batch(
             owner_type=scope.owner_type,
         )
         written: dict[str, tuple[Profile, ProfileUpdated]] = {}
+        marks: dict[str, list[str]] = {}
+        calls = 0
         try:
             for language, members in by_language.items():
-                written |= await _call(
+                read = await _what_to_read(
                     deps,
                     scope,
                     segments=segments,
                     shown=shown,
                     members=members,
-                    stored=stored,
                     targets=targets,
+                    forgotten=forgotten,
+                    marks=marks,
+                )
+                if read is None:
+                    continue
+                calls += 1
+                written |= await _call(
+                    deps,
+                    scope,
+                    read,
+                    stored=stored,
                     language=language,
                     forgotten=forgotten,
                 )
@@ -312,6 +339,7 @@ async def _read_batch(
             _log_member(
                 scope, member_id, targets[member_id], stored[member_id], updated
             )
+        await _mark_read(deps, marks)
     logger.info(
         "member_profiles_batch_read",
         group_id=scope.owner_id,
@@ -319,34 +347,112 @@ async def _read_batch(
         speakers=len(speakers),
         targets=len(targets),
         written=len(written),
-        calls=len(by_language),
+        calls=calls,
     )
     return None
 
 
-async def _call(
+@dataclass(frozen=True)
+class _Read:
+    """What one call of a batch reads.
+
+    Attributes:
+        segments: ``(memcell_id, cell)`` the call shows, oldest first.
+        shown: The same segments as the model is shown them.
+        members: The members the call updates, in label order.
+        targets: Each member's segments, of ``segments``.
+        only: Attach only these pictures (content hashes); ``None``, every
+            picture a member posted.
+        as_text: Attach each picture as this text instead of its pixels.
+    """
+
+    segments: Sequence[tuple[str, MemCell]]
+    shown: Sequence[MemCell]
+    members: Sequence[str]
+    targets: _Targets
+    only: Collection[str] | None = None
+    as_text: Mapping[str, str] | None = None
+
+
+async def _what_to_read(
     deps: MemoryDeps,
     scope: Scope,
     *,
     segments: Sequence[tuple[str, MemCell]],
     shown: Sequence[MemCell],
     members: Sequence[str],
-    stored: dict[str, Profile | None],
     targets: _Targets,
+    forgotten: Collection[str],
+    marks: dict[str, list[str]],
+) -> _Read | None:
+    """What the call for ``members`` reads; ``None`` for no call.
+
+    ``full`` reads the whole batch. ``cues`` reads what the episode calls
+    marked about each member (:func:`select_members_input`): a member with
+    nothing marked is left out, and with nobody left there is no call. The
+    segments each member's update reads with a cue record are added to
+    ``marks``, to be marked read once the batch is written.
+    """
+    cues = deps.stores.profile_cues
+    if deps.profile_input != "cues" or cues is None:
+        return _Read(segments=segments, shown=shown, members=members, targets=targets)
+    chosen = await select_members_input(
+        segments,
+        {m: [memcell_id for memcell_id, _ in targets[m]] for m in members},
+        cues=cues,
+        shown=shown,
+        image_memory=deps.stores.image_memory,
+        scope=scope,
+        picture_pixels=deps.profile_picture_pixels,
+        forgotten_pictures=forgotten,
+    )
+    for member_id, memcell_ids in chosen.read.items():
+        marks.setdefault(member_id, []).extend(memcell_ids)
+    if not chosen.people:
+        logger.info(
+            "member_profiles_no_cues",
+            group_id=scope.owner_id,
+            members=len(members),
+            segments=len(segments),
+        )
+        return None
+    cells_of = dict(chosen.segments)
+    return _Read(
+        segments=chosen.segments,
+        shown=chosen.shown,
+        members=[m for m in members if m in chosen.people],
+        targets={
+            m: [(memcell_id, cells_of[memcell_id]) for memcell_id in memcell_ids]
+            for m, memcell_ids in chosen.people.items()
+        },
+        only=chosen.pictures,
+        as_text=chosen.picture_text,
+    )
+
+
+async def _call(
+    deps: MemoryDeps,
+    scope: Scope,
+    read: _Read,
+    *,
+    stored: dict[str, Profile | None],
     language: str | None,
     forgotten: Collection[str],
 ) -> dict[str, tuple[Profile, ProfileUpdated]]:
-    """One ``aupdate_many`` call for ``members``, who share ``language``.
+    """One ``aupdate_many`` call for ``read.members``, who share ``language``.
 
     Returns each member the reply named: the document to write (its forget
     queue kept as stored) and what the update took.
     """
+    segments, targets = read.segments, read.targets
     cells, pictures, posted = await members_pictures(
-        shown,
-        members,
+        read.shown,
+        read.members,
         images=deps.stores.images,
         limits=deps.picture_limits,
         forgotten=forgotten,
+        only=read.only,
+        as_text=read.as_text,
     )
     # A forgotten picture leaves the text with its message when the message
     # held nothing else: a member is read from the segments where a message
@@ -356,9 +462,9 @@ async def _call(
     }
     own = {
         m: [pair for pair in targets[m] if wrote_in(read_as[pair[0]], m)]
-        for m in members
+        for m in read.members
     }
-    members = [m for m in members if own[m]]
+    members = [m for m in read.members if own[m]]
     if not members:
         return {}
     olds = {m: _items_of(stored[m]) for m in members}
@@ -432,6 +538,25 @@ async def _call(
             },
         )
     return out
+
+
+async def _cue_read(deps: MemoryDeps, member_id: str, memcell_id: str) -> bool:
+    """Whether the member's profile read the segment (its cue record says so)."""
+    cues = deps.stores.profile_cues
+    if cues is None:
+        return False
+    found = await cues.of_person(member_id, [memcell_id])
+    return memcell_id in found and found[memcell_id].read
+
+
+async def _mark_read(deps: MemoryDeps, marks: Mapping[str, Sequence[str]]) -> None:
+    """Record that each member's profile read these segments."""
+    cues = deps.stores.profile_cues
+    if cues is None:
+        return
+    for member_id, memcell_ids in marks.items():
+        if memcell_ids:
+            await cues.mark_read(member_id, memcell_ids)
 
 
 def _items_of(profile: Profile | None) -> Profile | None:

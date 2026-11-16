@@ -32,18 +32,23 @@ a cue of a message that is gone selects nothing, and a forgotten picture is
 taken out before anything is chosen (and by the picture read,
 :func:`~.pictures.profile_pictures`).
 
-:func:`select_profile_input` is the one selection both kinds of profile can
-call: the one-to-one strategy does (:mod:`everos.memory.strategies.
-extract_user_profile`); a member's profile in a group can, with its
-segments as the model is shown them (speakers labelled) in ``shown``.
+:func:`select_profile_input` is the selection of one person's update: the
+one-to-one strategy calls it (:mod:`everos.memory.strategies.
+extract_user_profile`). :func:`select_members_input` applies the same rules
+to the several people one batched update of a group reads
+(:mod:`everos.memory.strategies._member_batch`), and renders the
+conversation once: in each segment, the union of what every person reads
+there.
 """
 
 from __future__ import annotations
 
 __all__ = [
     "CONTEXT_CHARS",
+    "MembersInput",
     "ProfileInput",
     "picture_texts",
+    "select_members_input",
     "select_profile_input",
 ]
 
@@ -90,6 +95,34 @@ class ProfileInput:
     picture_text: Mapping[str, str] | None = None
     read: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MembersInput:
+    """What one update of several people's profiles reads (``cues`` mode).
+
+    Attributes:
+        segments: ``(memcell_id, cell)`` the update shows, oldest first, each
+            cell readable and whole. Empty when nothing is to be shown: no
+            call.
+        shown: The same segments as the model is shown them, one per entry
+            of ``segments``: in each, what every person reads there.
+        people: Each person the update reads, with the segments they are read
+            from (ids, oldest first). A person with nothing to read is not
+            here: no operation of theirs, no token.
+        pictures: The pictures to attach, by content hash.
+        picture_text: Content hash -> the text to attach a picture as;
+            ``None`` attaches the pictures themselves.
+        read: Per person, every segment with a cue record the update reads
+            for them, shown or not: the ones to mark read once it is done.
+    """
+
+    segments: list[tuple[str, MemCell]]
+    shown: list[MemCell]
+    people: dict[str, list[str]]
+    pictures: frozenset[str] = frozenset()
+    picture_text: Mapping[str, str] | None = None
+    read: dict[str, list[str]] = field(default_factory=dict)
 
 
 async def select_profile_input(
@@ -149,7 +182,7 @@ async def select_profile_input(
         if not chosen:
             skipped.append(memcell_id)
             continue
-        reduced = _cued_cell(view, person_id, chosen)
+        reduced = _cued_cell(view, {person_id: chosen})
         kept.append((memcell_id, cell))
         kept_views.append(reduced)
         attach.update(i for i in record.image_ids if i in _posted(reduced, person_id))
@@ -173,6 +206,122 @@ async def select_profile_input(
         picture_text=texts,
         read=read,
         skipped=skipped,
+    )
+
+
+async def select_members_input(
+    segments: Sequence[tuple[str, MemCell]],
+    people: Mapping[str, Sequence[str]],
+    *,
+    cues: ProfileCueStore,
+    shown: Sequence[MemCell] | None = None,
+    image_memory: ImageMemoryStore | None = None,
+    scope: Scope | None = None,
+    picture_pixels: bool = False,
+    forgotten_pictures: Collection[str] = (),
+) -> MembersInput:
+    """What one update of several people's profiles reads of ``segments``.
+
+    :func:`select_profile_input`'s ``cues`` rules for each person, over the
+    segments they are read from, with the conversation rendered once: a
+    segment shows every message a cue of one of its people marks, each after
+    its context -- the nearest earlier message by someone other than the
+    person it was marked for, cut to :data:`CONTEXT_CHARS`, pictures bare --
+    and a message one person's cue marks while it is another's context is
+    shown whole. A segment never marked for one of its people is shown whole
+    and read for them in full, their pictures included; a segment with
+    nothing to show for anyone is not shown. A person whose segments marked
+    nothing for them is not read at all. A segment a person's profile has
+    read already (its record says so: a batch read again) is not read for
+    them again.
+
+    Args:
+        segments: ``(memcell_id, cell)`` of the batch, oldest first, readable
+            (without the messages a live forget names).
+        people: Each person to read, with the ids of the segments of
+            ``segments`` holding a message of theirs that their profile has
+            not read.
+        cues: The cue records.
+        shown: ``segments`` as the model is shown them (speakers labelled);
+            the cells themselves when omitted.
+        image_memory: Where the pictures' memories are read, for pictures
+            attached as text.
+        scope: The space the profiles belong to, where those memories are.
+        picture_pixels: Attach the marked pictures themselves.
+        forgotten_pictures: Pictures a live forget names (content hashes),
+            taken out of the segments before anything is chosen.
+    """
+    views = list(shown) if shown is not None else [cell for _, cell in segments]
+    if forgotten_pictures:
+        views = [without_pictures(view, forgotten_pictures) for view in views]
+    view_of = {
+        memcell_id: view for (memcell_id, _), view in zip(segments, views, strict=True)
+    }
+    whole: set[str] = set()
+    marked: dict[str, dict[str, set[str]]] = {}
+    chosen: dict[str, list[str]] = {}
+    read: dict[str, list[str]] = {}
+    attach: set[str] = set()
+    for person_id, memcell_ids in people.items():
+        records = await cues.of_person(person_id, memcell_ids)
+        for memcell_id in memcell_ids:
+            view = view_of[memcell_id]
+            record = records.get(memcell_id)
+            if record is None:
+                # Never marked: every message, and every picture the person
+                # posted, as select_profile_input reads such a segment.
+                whole.add(memcell_id)
+                chosen.setdefault(person_id, []).append(memcell_id)
+                attach.update(_posted(view, person_id))
+                continue
+            if record.read:
+                continue
+            read.setdefault(person_id, []).append(memcell_id)
+            mine = _chosen_messages(
+                view, person_id, record.message_ids, record.image_ids
+            )
+            if not mine:
+                continue
+            marked.setdefault(memcell_id, {})[person_id] = mine
+            chosen.setdefault(person_id, []).append(memcell_id)
+            reduced = _cued_cell(view, {person_id: mine})
+            attach.update(
+                i for i in record.image_ids if i in _posted(reduced, person_id)
+            )
+    kept: list[tuple[str, MemCell]] = []
+    kept_views: list[MemCell] = []
+    for (memcell_id, cell), view in zip(segments, views, strict=True):
+        if memcell_id in whole:
+            kept.append((memcell_id, cell))
+            kept_views.append(view)
+        elif memcell_id in marked:
+            kept.append((memcell_id, cell))
+            kept_views.append(_cued_cell(view, marked[memcell_id]))
+    order = {memcell_id: n for n, (memcell_id, _) in enumerate(kept)}
+    targets = {
+        person_id: sorted(ids, key=order.__getitem__)
+        for person_id, ids in chosen.items()
+    }
+    if picture_pixels or not attach:
+        return MembersInput(
+            segments=kept,
+            shown=kept_views,
+            people=targets,
+            pictures=frozenset(attach),
+            read=read,
+        )
+    texts = (
+        await picture_texts(image_memory, scope, [m for m, _ in kept], attach)
+        if image_memory is not None and scope is not None
+        else {}
+    )
+    return MembersInput(
+        segments=kept,
+        shown=kept_views,
+        people=targets,
+        pictures=frozenset(texts),
+        picture_text=texts,
+        read=read,
     )
 
 
@@ -243,27 +392,34 @@ def _chosen_messages(
     }
 
 
-def _cued_cell(cell: MemCell, person_id: str, chosen: Collection[str]) -> MemCell:
-    """``cell`` with only the chosen messages, each after its context: the
-    nearest earlier message by someone else, cut to :data:`CONTEXT_CHARS`,
-    its pictures shown as bare references (they are not the person's)."""
+def _cued_cell(cell: MemCell, chosen: Mapping[str, Collection[str]]) -> MemCell:
+    """``cell`` with only the chosen messages (by person, by id), each after
+    its context: the nearest earlier message by someone other than the person
+    it was chosen for, cut to :data:`CONTEXT_CHARS`, its pictures shown as
+    bare references (they are not the person's). A message chosen for one
+    person and another's context is shown whole."""
     messages = [item for item in cell.items if isinstance(item, ChatMessage)]
-    shown: dict[int, ChatMessage] = {}
-    for index, message in enumerate(messages):
-        if message.id not in chosen:
-            continue
-        before = next(
-            (
-                position
-                for position in range(index - 1, -1, -1)
-                if messages[position].sender_id != person_id
-                and messages[position].content
-            ),
-            None,
-        )
-        if before is not None and before not in shown:
-            shown[before] = _context(messages[before])
-        shown[index] = message
+    whole: set[int] = set()
+    context: set[int] = set()
+    for person_id, ids in chosen.items():
+        for index, message in enumerate(messages):
+            if message.id not in ids:
+                continue
+            whole.add(index)
+            before = next(
+                (
+                    position
+                    for position in range(index - 1, -1, -1)
+                    if messages[position].sender_id != person_id
+                    and messages[position].content
+                ),
+                None,
+            )
+            if before is not None:
+                context.add(before)
+    shown = {i: messages[i] for i in whole} | {
+        i: _context(messages[i]) for i in context - whole
+    }
     return cell.model_copy(update={"items": [shown[i] for i in sorted(shown)]})
 
 

@@ -23,7 +23,7 @@ from everos.component.images import ImageLimits
 from everos.config import Settings
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, SessionFlushed
+from everos.memory.events import EpisodeExtracted, SessionFlushed, UserProfileDue
 from everos.memory.models import FORGOTTEN_MARK, Episode, ExplicitInfoItem, Profile
 from everos.memory.ports import NO_SOURCE_CHECK, Scope, SessionKey
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
@@ -179,6 +179,7 @@ def test_spec_listens_to_a_users_own_episodes_only() -> None:
     assert list(spec.trigger.on) == [  # type: ignore[union-attr]
         EpisodeExtracted,
         SessionFlushed,
+        UserProfileDue,
     ]
     assert spec.applies_to is not None
     assert spec.applies_to(_event(), make_deps())

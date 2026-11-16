@@ -158,7 +158,9 @@ class CueConsumers:
     Attributes:
         users: A user's own space: ``extract_user_profile`` is enabled and
             ``[profile] input = "cues"``.
-        groups: A group's space: ``update_member_profiles`` is enabled.
+        groups: A group's space: ``update_member_profiles`` is enabled in
+            ``[groups] member_profile_mode = "batched"`` and ``[profile]
+            input = "cues"``.
     """
 
     users: bool = False

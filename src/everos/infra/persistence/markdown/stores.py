@@ -40,7 +40,11 @@ from everos.core.utils.datetime import (
     to_iso_format,
     to_timestamp_ms,
 )
-from everos.infra.persistence.memory_root import MemoryRoot
+from everos.infra.persistence.memory_root import (
+    MemoryRoot,
+    app_id_from_dir,
+    project_id_from_dir,
+)
 from everos.infra.persistence.records import member_profile_row_id
 from everos.memory.models import (
     FORGOTTEN_MARK,
@@ -887,6 +891,26 @@ class MarkdownProfileStore:
         if not await folder.is_dir():
             return []
         return sorted([Path(str(f)).stem async for f in folder.glob("*.md")])
+
+    async def user_keys(self) -> list[tuple[str, str, str]]:
+        """Every ``users/<u>/user.md`` of every app and project of the root."""
+        return await anyio.to_thread.run_sync(self._user_keys)
+
+    def _user_keys(self) -> list[tuple[str, str, str]]:
+        found: list[tuple[str, str, str]] = []
+        pattern = f"*/*/users/*/{UserProfileFrontmatter.PROFILE_FILENAME}"
+        for path in self._root.root.glob(pattern):
+            user_dir = path.parent
+            project_dir = user_dir.parent.parent
+            app_id = app_id_from_dir(project_dir.parent.name)
+            project_id = project_id_from_dir(project_dir.name)
+            # Only a folder a user's space maps to: a folder name the
+            # partition naming would never write is no app or project.
+            if user_dir.parent != self._root.users_dir(app_id, project_id):
+                continue
+            if path.is_file():
+                found.append((app_id, project_id, user_dir.name))
+        return sorted(found)
 
     async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
         """Delete the person's document; what it held and its row, or ``None``.

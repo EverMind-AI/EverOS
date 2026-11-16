@@ -239,8 +239,11 @@ and write their markdown when ready:
 - the group strategies — `update_member_profiles` /
   `update_member_profiles_idle`, `update_group_profile` /
   `update_group_profile_idle` and `update_group_scenes`
-  ([group-memory.md](group-memory.md)), and `catch_up_profiles`, the manual
-  trigger that brings every profile kept on a cadence up to date at once
+  ([group-memory.md](group-memory.md)); a group's batched member profiles
+  read their members' cues the same way, one call per batch
+- `catch_up_profiles` — the manual trigger (`POST /api/v2/ome/trigger`) that
+  brings every profile kept on a cadence up to date at once: every user's
+  queued segments and every group's batches
 
 Strategies are configurable without a code change via **`ome.toml`** at the
 memory root (hot-reloaded within ~2 s). Example — turn one off:

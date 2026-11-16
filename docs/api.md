@@ -165,8 +165,8 @@ been idle for `[profile] idle_seconds` (a flush updates it only with
 `[profile] update_on_flush`). A member's profile in a group waits for the
 group's batch, every `[groups] group_profile_batch` segments or
 `group_profile_idle_seconds` after the group's last one, and not on a flush
-(unless `[groups] profile_on_flush`); `POST /api/v2/ome/trigger` with
-`{"name": "catch_up_profiles"}` brings it up to date at once.
+(unless `[groups] profile_on_flush`). `POST /api/v2/ome/trigger` with
+`{"name": "catch_up_profiles"}` brings every one of them up to date at once.
 `GET /health`'s `cascade.pending` does
 **not** cover this window — it only tracks the md → index queue, which is
 empty while the strategy is still thinking. Poll `/get` with a budget
@@ -1770,14 +1770,18 @@ reaches only a strategy that subscribes to it or runs on a `Cron` schedule,
 and only with `"force": true` when the strategy is `enabled=false` in
 `ome.toml`. One strategy EverOS 2.0 ships subscribes to it:
 `catch_up_profiles`, which brings every profile kept on a cadence up to date
-at once -- every group's member profiles and group profile (one
-`GroupProfilesDue` per group; a batch waiting out a back-off is read too).
-It returns `"ok"` once every run it started has settled; an evaluation calls
-it after ingesting, with a `timeout` long enough for its groups, before it
-searches. Every other strategy runs on an event -- a new episode
-(`extract_user_profile`, `update_user_scenes`), a group segment, flush or
-catch-up (`update_member_profiles`, `update_group_scenes`,
-`update_group_profile`) or a group's idle window
+at once -- every user's own profile with segments queued (one
+`UserProfileDue` per user) and every group's member profiles and group
+profile (one `GroupProfilesDue` per group; a batch waiting out a back-off is
+read too). It returns `"ok"` once every run it started has settled; an
+evaluation calls it after ingesting, once the engine has settled (a segment
+whose episode event is still on its way is queued after the catch-up read
+the queues: a second trigger reads it), with a `timeout` long enough for its
+users and groups, before it searches. Every other strategy runs on an event
+-- a new episode or a user's catch-up (`extract_user_profile`,
+`update_user_scenes`), a user's idle window (`extract_user_profile_idle`), a
+group segment, flush or catch-up (`update_member_profiles`,
+`update_group_scenes`, `update_group_profile`) or a group's idle window
 (`update_member_profiles_idle`, `update_group_profile_idle`) -- so
 triggering one of them returns
 `{"status": "not_dispatched", "dispatched": 0, "runs": []}` instead of an

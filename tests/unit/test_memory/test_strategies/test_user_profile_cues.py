@@ -12,8 +12,8 @@ What these pin (``[profile] input = "cues"``, the default):
 - a marked message forgotten since is not shown, and when it was the only
   cue no call is made;
 - ``full`` sends the update of 2026-11-13 whatever cues are recorded;
-- the idle tick of a user's space, and :func:`update_pending_profile`, read
-  what the profile has queued.
+- the idle tick of a user's space, :func:`update_pending_profile` and a
+  catch-up's ``UserProfileDue`` read what the profile has queued.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from everos.component.images import ImageLimits
 from everos.config import Settings
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtracted, UserProfileDue
 from everos.memory.models import Episode, ExplicitInfoItem, ImageMemory, Profile
 from everos.memory.ports import (
     NO_SOURCE_CHECK,
@@ -420,3 +420,34 @@ async def test_an_idle_tick_and_the_catch_up_read_the_queue(
     assert await update_pending_profile(deps, _scope()) == 0
     await extract_user_profile(tick, deps)
     assert len(model.sent) == 2  # nothing left to read
+
+
+async def test_a_catch_up_reads_the_queue_and_then_finds_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _every(monkeypatch, 5)
+    model = _Model(_none())
+    deps = _deps(model, profile_input="cues")
+    deps.stores.memcell.seed("mc_1", _TALK)
+    await _cue(deps, "mc_1", u_alice=PersonCues(message_ids=("m1",)))
+    await deps.stores.profile.write(
+        _scope(),
+        Profile(
+            owner_id="u_alice",
+            summary="s",
+            timestamp=_TS,
+            explicit_info=[ExplicitInfoItem(description="Lives in Lyon.")],
+        ),
+    )
+    await extract_user_profile(_event("mc_1"), deps)
+    assert model.sent == []  # queued: one segment of five
+
+    due = UserProfileDue(user_id="u_alice", app_id="default", project_id="default")
+    await extract_user_profile(due, deps)
+    assert len(model.sent) == 1
+    assert "pediatric nurse" in model.user_text()
+    stored = await deps.stores.profile.read(_scope())
+    assert stored is not None and stored.pending_memcell_ids == []
+
+    await extract_user_profile(due, deps)
+    assert len(model.sent) == 1  # nothing queued: no call

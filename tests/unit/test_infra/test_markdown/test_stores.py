@@ -285,6 +285,33 @@ async def test_profile_round_trips(root: MemoryRoot) -> None:
     assert ref.md_path == "app/proj/users/u1/user.md"
 
 
+async def test_user_keys_lists_every_user_profile_of_the_root(
+    root: MemoryRoot,
+) -> None:
+    """Every ``users/<u>/user.md`` of every app and project, the default
+    partition by its ids; a member's profile in a group is not a user's."""
+    store = MarkdownProfileStore(root)
+    assert await store.user_keys() == []
+    for app_id, project_id, user_id in (
+        ("app", "proj", "u2"),
+        ("default", "default", "u1"),
+        ("app", "proj", "u1"),
+    ):
+        scope = Scope(
+            app_id=app_id, project_id=project_id, owner_id=user_id, owner_type="user"
+        )
+        await store.write(scope, Profile(owner_id=user_id, summary="s", timestamp=_TS))
+    group = Scope(app_id="app", project_id="proj", owner_id="g1", owner_type="group")
+    await store.write(group, Profile(owner_id="u3", summary="s", timestamp=_TS))
+    (root.users_dir("app", "proj") / "u9").mkdir()  # a folder without user.md
+
+    assert await store.user_keys() == [
+        ("app", "proj", "u1"),
+        ("app", "proj", "u2"),
+        ("default", "default", "u1"),
+    ]
+
+
 async def test_profile_history_round_trips_and_is_left_out_while_empty(
     root: MemoryRoot,
 ) -> None:

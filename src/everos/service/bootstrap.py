@@ -642,16 +642,19 @@ def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
 def profile_cue_consumers(settings: Settings, ome_config: Path) -> CueConsumers:
     """Which spaces' profiles read the episode call's cues, so get the cue block.
 
-    A user's own space when ``extract_user_profile`` runs and ``[profile]
-    input = "cues"``; a group's when ``update_member_profiles`` runs. A
-    strategy runs when the engine does (``[ome] enabled``), its spec as
-    configured (:func:`configured_spec`) enables it and ``ome.toml``, as it
-    reads at startup, does not turn it off. Decided once: an ``ome.toml``
-    edit that turns a profile on or off later reaches the episode request at
-    the next start (a profile turned on meanwhile reads the segments its
-    cells did not mark in full).
+    Only a profile that reads cues asks for them, and only with ``[profile]
+    input = "cues"`` (``full`` reads every message, so no request carries the
+    block): a user's own space when ``extract_user_profile`` runs; a group's
+    when ``update_member_profiles`` runs in ``[groups] member_profile_mode =
+    "batched"`` (a ``per_member`` update reads every message of its
+    segments). A strategy runs when the engine does (``[ome] enabled``), its
+    spec as configured (:func:`configured_spec`) enables it and ``ome.toml``,
+    as it reads at startup, does not turn it off. Decided once: an
+    ``ome.toml`` edit that turns a profile on or off later reaches the
+    episode request at the next start (a profile turned on meanwhile reads
+    the segments its cells did not mark in full).
     """
-    if not settings.ome.enabled:
+    if not settings.ome.enabled or settings.profile.input != "cues":
         return CueConsumers()
     overrides = _enabled_overrides(ome_config)
 
@@ -660,8 +663,9 @@ def profile_cue_consumers(settings: Settings, ome_config: Path) -> CueConsumers:
         return overrides.get(spec.name, enabled)
 
     return CueConsumers(
-        users=settings.profile.input == "cues" and runs(EXTRACT_USER_PROFILE_SPEC),
-        groups=runs(UPDATE_MEMBER_PROFILES_SPEC),
+        users=runs(EXTRACT_USER_PROFILE_SPEC),
+        groups=settings.groups.member_profile_mode == "batched"
+        and runs(UPDATE_MEMBER_PROFILES_SPEC),
     )
 
 

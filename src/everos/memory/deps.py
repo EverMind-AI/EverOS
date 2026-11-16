@@ -110,10 +110,11 @@ class MemoryDeps:
         picture_limits: ``[images]``, the scale a profile update reads a
             segment's pictures at; ``None`` when ``llm`` reads no images
             (``[extraction] vision`` off), and the update then reads text only.
-        profile_input: ``[profile] input``, what a user's profile update
-            reads: ``cues`` (the marked messages and pictures,
+        profile_input: ``[profile] input``, what a user's profile update and
+            a group's batched member update read: ``cues`` (the marked
+            messages and pictures,
             :mod:`everos.memory.extract.pipeline.profile_input`) or ``full``
-            (every message of its segments). ``full`` unless the bootstrap
+            (every message of their segments). ``full`` unless the bootstrap
             says otherwise.
         profile_picture_pixels: ``[profile] picture_pixels``: in ``cues``
             mode, attach the cued pictures themselves instead of their

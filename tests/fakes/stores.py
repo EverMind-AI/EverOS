@@ -310,6 +310,13 @@ class InMemoryProfileStore:
     async def people(self, scope: Scope) -> list[str]:
         return sorted(person for (s, person) in self.profiles if s == scope)
 
+    async def user_keys(self) -> list[tuple[str, str, str]]:
+        return sorted(
+            (s.app_id, s.project_id, person)
+            for (s, person) in self.profiles
+            if s.owner_type == "user"
+        )
+
     async def remove(self, scope: Scope, person_id: str) -> Stored[Profile] | None:
         held = self.profiles.pop((scope, person_id), None)
         if held is None:

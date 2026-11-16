@@ -837,18 +837,21 @@ async def test_a_read_naming_an_agent_is_refused(fixture: _Fixture) -> None:
     assert not fixture.decider.prompts
 
 
-@pytest.mark.parametrize("mode", ["batched", "per_member"])
+@pytest.mark.parametrize("mode", ["batched", "per_member", "batched_cues"])
 async def test_group_strategies_read_only_the_groups_own_segments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     """Row 10: group strategies read only the group's segments, member
     profiles never read ``users/<m>/``, personal strategies never see a group
     segment, and the group profile's update reads only the group's own -- in
-    either member-profile mode: ``batched`` (the default; a catch-up reads
-    the batches) and ``per_member`` (a flush reads them, as until
-    2026-11-14)."""
-    monkeypatch.setenv("EVEROS_GROUPS__MEMBER_PROFILE_MODE", mode)
-    monkeypatch.setenv("EVEROS_GROUPS__PROFILE_ON_FLUSH", str(mode == "per_member"))
+    either member-profile mode: ``batched`` (a catch-up reads the batches),
+    also reading the episode call's cues (``batched_cues``, the server's
+    default), and ``per_member`` (a flush reads them, as until 2026-11-14)."""
+    batched = mode.startswith("batched")
+    monkeypatch.setenv(
+        "EVEROS_GROUPS__MEMBER_PROFILE_MODE", "batched" if batched else "per_member"
+    )
+    monkeypatch.setenv("EVEROS_GROUPS__PROFILE_ON_FLUSH", str(not batched))
     load_settings.cache_clear()
     profile_prompts: list[str] = []
     member_prompts: list[str] = []
@@ -864,6 +867,18 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             )
         if name == "EpisodeReply":
             return json.dumps({"title": "Plan", "summary": "Plan.", "content": "Plan."})
+        if name == "CuedEpisodeReply":  # each member's line marked for them
+            said = "\n".join(str(m.content) for m in messages)
+            cues = [
+                {"speaker": speaker.strip(), "quote": quote.strip()}
+                for speaker, quote in re.findall(
+                    r'"speaker": (.+?),\s*"content": (group marker: [^\n]+)', said
+                )
+            ]
+            assert len(cues) == 2, said
+            return json.dumps(
+                {"title": "Plan", "content": "Plan.", "profile_cues": cues}
+            )
         item = {"evidence": "x", "description": "Plans", "category": "plans"}
         add = {"action": "add", "type": "explicit_info", "data": item}
         prompt = "\n".join(str(m.content) for m in messages)
@@ -879,7 +894,10 @@ async def test_group_strategies_read_only_the_groups_own_segments(
         raise AssertionError(name)
 
     async with GroupWorld.open(
-        tmp_path, llm=FakeLLMClient(handler=model), settings=SETTINGS
+        tmp_path,
+        llm=FakeLLMClient(handler=model),
+        settings=SETTINGS,
+        profile_cues=mode == "batched_cues",
     ) as world:
         await world.roster("trip", [join("u_chen", T0), join("u_betty", T0)])
         await world.personal_episode("u_chen", "personal marker Porto", at=T0 + 100)
@@ -903,7 +921,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
             session_id="s_group", request_id="f", app_id=APP, project_id=PROJECT
         )
         await world.run(*STRATEGY_SPECS)
-        if mode == "batched":  # the flush read no profile: the catch-up does
+        if batched:  # the flush read no profile: the catch-up does
             assert member_prompts == [] and profile_prompts == []
             await world.catch_up(*STRATEGY_SPECS)
         episodes = [
@@ -911,7 +929,7 @@ async def test_group_strategies_read_only_the_groups_own_segments(
         ]
         assert {e.owner_type for e in episodes} == {"group"}  # no user's episode
         group_cells = {e.memcell_id for e in episodes}
-        assert len(member_prompts) == (1 if mode == "batched" else 2)
+        assert len(member_prompts) == (1 if batched else 2)
         for member in ("u_chen", "u_betty"):
             profile = await world.stores.profile.read(world.scope("trip"), member)
             assert profile is not None

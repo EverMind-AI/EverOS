@@ -14,6 +14,7 @@ from __future__ import annotations
 from everos.memory.ports import StrategySpec
 
 from .catch_up_profiles import GROUP_PROFILES as GROUP_PROFILES
+from .catch_up_profiles import USER_PROFILES as USER_PROFILES
 from .catch_up_profiles import CatchUpProvider as CatchUpProvider
 from .catch_up_profiles import catch_up_spec as catch_up_spec
 from .extract_user_profile import (
@@ -43,10 +44,10 @@ from .update_member_profiles import update_member_profiles as update_member_prof
 from .update_user_scenes import UPDATE_USER_SCENES_SPEC as UPDATE_USER_SCENES_SPEC
 from .update_user_scenes import update_user_scenes as update_user_scenes
 
-CATCH_UP_PROVIDERS: tuple[CatchUpProvider, ...] = (GROUP_PROFILES,)
-"""Every kind of profile ``catch_up_profiles`` brings up to date. A strategy
-that keeps profiles on a cadence registers its provider here -- the groups'
-today, the one-to-one profile's once it has a cadence of its own."""
+CATCH_UP_PROVIDERS: tuple[CatchUpProvider, ...] = (USER_PROFILES, GROUP_PROFILES)
+"""Every kind of profile ``catch_up_profiles`` brings up to date: a strategy
+that keeps profiles on a cadence registers its provider here -- the users'
+own profiles, and the groups' member profiles and group profile."""
 
 CATCH_UP_PROFILES_SPEC: StrategySpec = catch_up_spec(CATCH_UP_PROVIDERS)
 """``POST /api/v2/ome/trigger {"name": "catch_up_profiles"}``."""
@@ -77,6 +78,7 @@ __all__ = [
     "UPDATE_MEMBER_PROFILES_IDLE_SPEC",
     "UPDATE_MEMBER_PROFILES_SPEC",
     "UPDATE_USER_SCENES_SPEC",
+    "USER_PROFILES",
     "CatchUpProvider",
     "catch_up_spec",
     "extract_user_profile",

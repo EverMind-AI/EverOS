@@ -1117,14 +1117,18 @@ class ProfileSettings(_Section):
     searchable at once, only the profile lags. ``1`` updates at every segment.
     ``idle_seconds``: or once the user has had no new segment for this long.
     ``update_on_flush``: and at every flush of one of the user's
-    conversations, as before 2026-11-14.
+    conversations, as before 2026-11-14. The ``catch_up_profiles`` trigger
+    reads every user's queue at once.
 
-    ``input``: what an update reads. ``cues`` -- the messages and pictures the
-    episode call marked as saying something lasting about the person (the
-    episode request then carries the ``<profile_cues>`` block), each message
-    after the message before it by someone else; a person with no cue in the
-    segments read gets no update call. ``full`` -- every message of the
-    segments and every picture the person posted, the request of 2026-11-13.
+    ``input``: what an update reads -- a user's, and a group's batched member
+    update. ``cues`` -- the messages and pictures the episode call marked as
+    saying something lasting about the person (the episode request then
+    carries the ``<profile_cues>`` block), each message after the nearest
+    earlier message by someone else; a person with no cue in the segments
+    read gets no update call (a batch renders its members' cues once).
+    ``full`` -- every message of the segments and every picture the person
+    posted, the requests from before cues; no episode request carries the
+    cue block.
     ``picture_pixels``: in ``cues`` mode, attach the cued pictures themselves
     instead of their picture memories' text (description and visible text).
 
