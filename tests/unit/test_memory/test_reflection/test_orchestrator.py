@@ -360,12 +360,14 @@ async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
     assert merged.session_id is None
     assert merged.reflection is not None
     assert merged.reflection.mode == "init"
+    (copy,) = merged.copies  # one merged episode, under the reflected owner
+    assert copy.owner_id == "u_alice"
     # Nothing is retired before the merged episode's facts exist.
     ports.episode_store.deprecate.assert_not_called()
 
     report = await ports.finisher().finish(
         scope=_SCOPE,
-        merged_entry_id=merged.episode_entry_id,
+        merged_entry_id=copy.entry_id,
         context=merged.reflection,
     )
 

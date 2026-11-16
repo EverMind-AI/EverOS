@@ -37,6 +37,7 @@ from everos.infra.persistence.markdown._base.entries import (
     Entry,
     EntryId,
     render_structured_entry,
+    section_value_span,
     split_entries,
 )
 from everos.infra.persistence.markdown._base.frontmatter import (
@@ -273,6 +274,31 @@ class BaseDailyWriter:
                 body = body[: entry.start] + body[end:]
             await self._writer.write_markdown(path, frontmatter=meta, body=body)
             return [entry.id for entry in gone]
+
+    async def replace_section(
+        self, path: Path, entry_id: str, title: str, *, expected: str, value: str
+    ) -> bool:
+        """Replace one entry's ``### title`` value if it still reads ``expected``.
+
+        Under the file's lock, atomically. Only that value changes: every
+        other byte of the file, the frontmatter included, is written back as
+        read. A missing file, entry or section changes nothing. ``value`` is
+        right-stripped, as :func:`render_structured_entry` writes a section.
+
+        Returns:
+            Whether the value was replaced.
+        """
+        async with self._writer.locked(path):
+            try:
+                raw = await MarkdownReader.read_text(path)
+            except FileNotFoundError:
+                return False
+            span = section_value_span(raw, entry_id, title)
+            if span is None or raw[span[0] : span[1]] != expected:
+                return False
+            start, end = span
+            await self._writer.write(path, raw[:start] + value.rstrip() + raw[end:])
+            return True
 
     async def drop_deprecations(self, path: Path, keys: Collection[str]) -> bool:
         """Remove ``keys`` from the file's ``deprecated_entries``; whether any was."""

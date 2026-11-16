@@ -76,7 +76,12 @@ def test_the_fleet_writes_it_before_a_server_starts(
     assert tomllib.loads(text) == {"strategies": off}
 
 
-def test_locomo_runs_without_the_profile() -> None:
-    config = BenchmarkConfig.from_toml("locomo")
+@pytest.mark.parametrize("name", ["locomo", "locomo-step"])
+def test_locomo_runs_without_the_profile(name: str) -> None:
+    """The profile is off, and so is the per-owner split that only feeds it."""
+    config = BenchmarkConfig.from_toml(name)
     assert config.include_profile is False
-    assert config.ome_strategies == {"extract_user_profile": {"enabled": False}}
+    assert config.ome_strategies == {
+        "extract_user_profile": {"enabled": False},
+        "split_episode_by_owner": {"enabled": False},
+    }

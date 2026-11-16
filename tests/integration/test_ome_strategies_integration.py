@@ -22,6 +22,7 @@ from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    EpisodeCopy,
     EpisodeExtracted,
     UserPipelineStarted,
 )
@@ -225,10 +226,11 @@ async def test_emit_dispatches_both_strategies_to_success(
             await engine.emit(
                 EpisodeExtracted(
                     memcell_id="mc_a",
-                    episode_entry_id="ep_20260517_0001",
+                    copies=[
+                        EpisodeCopy(owner_id="u_alice", entry_id="ep_20260517_0001")
+                    ],
                     episode_text="alice likes hiking",
                     episode_timestamp_ms=1_700_000_000_000,
-                    owner_id="u_alice",
                     session_id="s1",
                 )
             )
@@ -422,8 +424,8 @@ async def test_skill_chain_e2e(
 async def test_episode_fans_out_to_clustering_and_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
-    """One EpisodeExtracted → trigger_profile_clustering (sqlite) and
-    extract_user_profile, both SUCCESS.
+    """One EpisodeExtracted → trigger_profile_clustering (sqlite) and, through
+    split_episode_by_owner, extract_user_profile, both SUCCESS.
 
     Real ``cluster_by_geometry`` (cosine + time-window) with a hash-based
     deterministic embedder so the geometry stage operates on well-spread
@@ -520,10 +522,11 @@ async def test_episode_fans_out_to_clustering_and_profile(
             await engine.emit(
                 EpisodeExtracted(
                     memcell_id="mc_aaaaaaaaaaa1",
-                    episode_entry_id="ep_20260517_0001",
+                    copies=[
+                        EpisodeCopy(owner_id="u_alice", entry_id="ep_20260517_0001")
+                    ],
                     episode_text="alice likes hiking",
                     episode_timestamp_ms=1_700_000_001_000,
-                    owner_id="u_alice",
                     session_id="s_integration",
                 )
             )

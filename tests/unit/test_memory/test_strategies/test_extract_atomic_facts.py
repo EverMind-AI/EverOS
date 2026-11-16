@@ -1,20 +1,30 @@
+"""``extract_atomic_facts``: one extraction per episode, written under every copy.
+
+The fan-out cases run the real everalgo ``AtomicFactExtractor`` over the
+repo's fake LLM; the others stub the extractor to pin its arguments.
+"""
+
 from __future__ import annotations
 
 from datetime import timedelta, timezone
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import structlog.testing
 from everalgo.types import AtomicFact
 
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AtomicFactsExtracted,
+    EpisodeCopy,
     EpisodeExtracted,
     ReflectedEpisode,
     ReflectionContext,
 )
 from everos.memory.strategies import EXTRACT_ATOMIC_FACTS_SPEC, extract_atomic_facts
-from tests.fakes import make_deps, seed_sources
+from tests.fakes import make_deps, seed_sources, user_track_llm, user_track_script
+from tests.fakes.stores import InMemoryAtomicFactStore
 
 _EXTRACTOR = "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
 
@@ -26,6 +36,7 @@ def _fact(text: str) -> AtomicFact:
 def _event(
     *,
     owner_id: str = "u_alice",
+    entry_id: str = "ep_20260517_0001",
     memcell_id: str = "mc_a",
     session_id: str = "s1",
     episode_text: str = "alice likes hiking and lives in tokyo",
@@ -34,12 +45,27 @@ def _event(
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
-        episode_entry_id="ep_20260517_0001",
         episode_text=episode_text,
         episode_timestamp_ms=episode_timestamp_ms,
-        owner_id=owner_id,
+        copies=[EpisodeCopy(owner_id=owner_id, entry_id=entry_id)],
         session_id=session_id,
         **extra,
+    )
+
+
+_COPIES = [
+    EpisodeCopy(owner_id="u_alice", entry_id="ep_20260517_0001"),
+    EpisodeCopy(owner_id="u_bob", entry_id="ep_20260517_0007"),
+]
+
+
+def _two_owner_event() -> EpisodeExtracted:
+    return EpisodeExtracted(
+        memcell_id="mc_a",
+        episode_text="Alice and Bob planned a Kyoto trip.",
+        episode_timestamp_ms=1_700_000_000_000,
+        copies=_COPIES,
+        session_id="s1",
     )
 
 
@@ -95,7 +121,7 @@ async def test_extracts_from_episode_text_and_writes_under_event_owner() -> None
 
     record = next(e for e in captured if e.get("event") == "atomic_facts_extracted")
     assert record["count"] == 2
-    assert record["owner_id"] == "u_alice"
+    assert record["owners"] == 1
 
 
 async def test_no_facts_writes_nothing_but_still_reports() -> None:
@@ -154,8 +180,7 @@ async def test_reflection_fact_skips_memcell_check() -> None:
     memcell carries the id."""
     merged = "ep_20260517_0009"
     deps = seed_sources(make_deps(), memcell_id="mc_other", episode_entry_id=merged)
-    event = _event(memcell_id=merged, source="reflection")
-    event = event.model_copy(update={"episode_entry_id": merged})
+    event = _event(memcell_id=merged, entry_id=merged, source="reflection")
     with patch(_EXTRACTOR) as extractor_cls:
         extractor_cls.return_value.aextract_from_text = AsyncMock(
             return_value=[_fact("x")]
@@ -185,3 +210,63 @@ async def test_facts_see_times_in_the_configured_zone() -> None:
         await extract_atomic_facts(_event(), make_deps(tz=zone))
 
     assert extractor_cls.return_value.aextract_from_text.call_args.kwargs["tz"] is zone
+
+
+def _fact_store(deps: MemoryDeps) -> InMemoryAtomicFactStore:
+    store = deps.stores.atomic_fact
+    assert isinstance(store, InMemoryAtomicFactStore)
+    return store
+
+
+def _two_owner_deps(**kwargs: Any) -> MemoryDeps:
+    """Both copies of ``mc_a`` in md, and the memcell."""
+    deps = make_deps(**kwargs)
+    for copy in _COPIES:
+        seed_sources(
+            deps,
+            memcell_id="mc_a",
+            episode_entry_id=copy.entry_id,
+            owner_id=copy.owner_id,
+        )
+    return deps
+
+
+async def test_one_extraction_is_written_under_every_copys_owner() -> None:
+    """One model call; each owner gets every fact, parented to their own copy,
+    and one ``AtomicFactsExtracted`` per copy, in the event's order."""
+    llm = user_track_llm()
+    deps = _two_owner_deps(llm=llm)
+    scripted = user_track_script("atomic_facts")
+
+    events = await extract_atomic_facts(_two_owner_event(), deps)
+
+    assert [c.response_format.__name__ for c in llm.calls] == ["_AtomicFactsReply"]
+    stored = _fact_store(deps).records
+    for copy in _COPIES:
+        own = [s for s in stored if s.scope.owner_id == copy.owner_id]
+        assert len(own) == 3
+        assert {s.item.parent_id for s in own} == {copy.entry_id}
+        assert all(s.item.content in scripted for s in own)
+    assert [(e.owner_id, e.episode_entry_id) for e in events] == [
+        (c.owner_id, c.entry_id) for c in _COPIES
+    ]
+    assert all(isinstance(e, AtomicFactsExtracted) for e in events)
+    assert [len(e.fact_entry_ids) for e in events] == [3, 3]
+
+
+async def test_a_copy_deleted_meanwhile_gets_no_facts_the_others_do() -> None:
+    """Each owner's write keeps its own source check."""
+    deps = _two_owner_deps(llm=user_track_llm())
+    event = _two_owner_event()
+    await deps.stores.episode.remove(
+        event.owner_scope(_COPIES[1]), ["ep_20260517_0007"]
+    )
+
+    events = await extract_atomic_facts(event, deps)
+
+    owners = {s.scope.owner_id for s in _fact_store(deps).records}
+    assert owners == {"u_alice"}
+    assert [(e.owner_id, len(e.fact_entry_ids)) for e in events] == [
+        ("u_alice", 3),
+        ("u_bob", 0),
+    ]

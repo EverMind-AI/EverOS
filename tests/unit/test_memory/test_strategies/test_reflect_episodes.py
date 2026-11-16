@@ -14,6 +14,7 @@ import structlog.testing
 
 from everos.memory.events import (
     AtomicFactsExtracted,
+    EpisodeCopy,
     EpisodeExtracted,
     ReflectedEpisode,
     ReflectionContext,
@@ -114,10 +115,11 @@ async def test_reflect_returns_every_owner_merge() -> None:
         return [
             EpisodeExtracted(
                 memcell_id=f"m_{scope.owner_id}",
-                episode_entry_id=f"m_{scope.owner_id}",
+                copies=[
+                    EpisodeCopy(owner_id=scope.owner_id, entry_id=f"m_{scope.owner_id}")
+                ],
                 episode_text="merged",
                 episode_timestamp_ms=1,
-                owner_id=scope.owner_id,
                 source="reflection",
             )
         ]
@@ -132,7 +134,7 @@ async def test_reflect_returns_every_owner_merge() -> None:
         orchestrator_cls.return_value.run = AsyncMock(side_effect=merged_for)
         events = await reflect_episodes(_TICK, deps)
 
-    assert sorted(e.owner_id for e in events) == ["u_alice", "u_bob"]
+    assert sorted(c.owner_id for e in events for c in e.copies) == ["u_alice", "u_bob"]
     reflector_cls.assert_called_once_with(llm=deps.llms.reflection)
 
 

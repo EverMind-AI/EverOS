@@ -21,6 +21,7 @@ from everos.infra.persistence.markdown import (
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AgentPipelineStarted,
+    EpisodeCopy,
     EpisodeExtracted,
     UserPipelineStarted,
 )
@@ -48,10 +49,9 @@ def _markdown_deps(tmp_path: Path) -> MemoryDeps:
 def _episode_event_for(owner: str) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id="mc_a",
-        episode_entry_id="ep_20260517_0001",
+        copies=[EpisodeCopy(owner_id=owner, entry_id="ep_20260517_0001")],
         episode_text="hi",
         episode_timestamp_ms=1_700_000_000_000,
-        owner_id=owner,
         session_id="s1",
     )
 

@@ -284,6 +284,22 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
             scope, entries=entries, replaced_by=replaced_by, only_if=only_if
         )
 
+    async def replace_summary(
+        self, scope: Scope, entry_id: str, *, expected: str, summary: str
+    ) -> bool:
+        """Rewrite only the entry's ``Summary`` section, under the owner lock.
+
+        The frontmatter (``entry_count``, ``last_appended_at``) and the other
+        entries are left byte for byte; the cascade re-indexes the entry.
+        """
+        path = self._path_of(scope, entry_id)
+        if path is None or not expected:
+            return False
+        async with LOCKS.hold("owner", owner_lock(scope)):
+            return await self._writer.replace_section(
+                path, entry_id, "Summary", expected=expected, value=summary
+            )
+
     async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
         return {entry.id for entry in await self._entries(scope, entry_ids)}
 

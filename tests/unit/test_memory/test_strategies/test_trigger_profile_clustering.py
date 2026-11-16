@@ -18,14 +18,20 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everos.core.locks import LOCKS
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeCopy, EpisodeExtracted
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
 from everos.memory.ports import Scope
 from everos.memory.strategies import (
     TRIGGER_PROFILE_CLUSTERING_SPEC,
     trigger_profile_clustering,
 )
-from tests.fakes import InMemoryClusterStore, make_deps, make_stores, seed_sources
+from tests.fakes import (
+    FakeEmbeddingProvider,
+    InMemoryClusterStore,
+    make_deps,
+    make_stores,
+    seed_sources,
+)
 
 _MODULE = "everos.memory.strategies.trigger_profile_clustering"
 _ALICE = Scope(
@@ -50,10 +56,9 @@ def _event(
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
-        episode_entry_id=episode_entry_id,
         episode_text=episode_text,
         episode_timestamp_ms=episode_timestamp_ms,
-        owner_id=owner_id,
+        copies=[EpisodeCopy(owner_id=owner_id, entry_id=episode_entry_id)],
         session_id="s_test",
         source=source,
         language=language,
@@ -229,7 +234,7 @@ async def test_returns_without_side_effects_when_embedding_unavailable() -> None
     ]
     assert len(gated) == 1
     assert gated[0]["strategy_name"] == "trigger_profile_clustering"
-    assert gated[0]["owner_id"] == "u_alice"
+    assert gated[0]["memcell_id"] == "mc_aaaaaaaaaaa1"
 
 
 def test_applies_to_rejects_non_pipeline_source() -> None:
@@ -299,10 +304,9 @@ async def test_clustering_result_unchanged_for_fixture_sequence() -> None:
         await trigger_profile_clustering(
             EpisodeExtracted(
                 memcell_id=f"mc_{n}",
-                episode_entry_id=entry,
                 episode_text=text,
                 episode_timestamp_ms=1_700_000_000_000 + n * 60_000,
-                owner_id="u",
+                copies=[EpisodeCopy(owner_id="u", entry_id=entry)],
                 session_id="s",
             ),
             deps,
@@ -322,3 +326,73 @@ async def test_clustering_result_unchanged_for_fixture_sequence() -> None:
         ),
         (["ep_20260101_0002", "ep_20260101_0005", "ep_20260101_0008"], 3),
     ]
+
+
+# ── one episode, several owners ──────────────────────────────────────────
+
+_TWO_OWNERS = [
+    EpisodeCopy(owner_id="u_alice", entry_id="ep_20260517_0001"),
+    EpisodeCopy(owner_id="u_bob", entry_id="ep_20260517_0004"),
+]
+
+
+def _two_owner_event() -> EpisodeExtracted:
+    return EpisodeExtracted(
+        memcell_id="mc_aaaaaaaaaaa1",
+        episode_text="alice likes hiking",
+        episode_timestamp_ms=1_700_000_001_000,
+        copies=_TWO_OWNERS,
+        session_id="s_test",
+    )
+
+
+def _two_owner_deps() -> tuple[MemoryDeps, InMemoryClusterStore, FakeEmbeddingProvider]:
+    """Both copies in md with their memcell; the cluster store and embedder."""
+    clusters, embedder = InMemoryClusterStore(), FakeEmbeddingProvider()
+    deps = make_deps(stores=make_stores(cluster=clusters), embedding=embedder)
+    for copy in _TWO_OWNERS:
+        _with_episode(deps, owner_id=copy.owner_id, episode_entry_id=copy.entry_id)
+    return deps, clusters, embedder
+
+
+def _members_by_owner(clusters: InMemoryClusterStore) -> dict[str, list[str]]:
+    return {
+        clusters.owners[cid][0].owner_id: cluster.members
+        for cid, cluster in clusters.clusters.items()
+    }
+
+
+async def test_one_embedding_is_folded_into_every_owners_clusters() -> None:
+    deps, clusters, embedder = _two_owner_deps()
+
+    await trigger_profile_clustering(_two_owner_event(), deps)
+
+    assert embedder.calls == ["alice likes hiking"]
+    assert _members_by_owner(clusters) == {
+        "u_alice": ["ep_20260517_0001"],
+        "u_bob": ["ep_20260517_0004"],
+    }
+
+
+async def test_a_replay_folds_no_owner_twice() -> None:
+    """A retry after one owner's fold failed re-runs every owner's fold."""
+    deps, clusters, _ = _two_owner_deps()
+    event = _two_owner_event()
+
+    await trigger_profile_clustering(event, deps)
+    await trigger_profile_clustering(event, deps)
+
+    assert sorted((c.members, c.count) for c in clusters.clusters.values()) == [
+        (["ep_20260517_0001"], 1),
+        (["ep_20260517_0004"], 1),
+    ]
+
+
+async def test_an_owner_whose_copy_is_gone_is_skipped_the_others_folded() -> None:
+    clusters = InMemoryClusterStore()
+    deps = make_deps(stores=make_stores(cluster=clusters))
+    _with_episode(deps, owner_id="u_bob", episode_entry_id="ep_20260517_0004")
+
+    await trigger_profile_clustering(_two_owner_event(), deps)
+
+    assert _members_by_owner(clusters) == {"u_bob": ["ep_20260517_0004"]}

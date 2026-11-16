@@ -39,7 +39,12 @@ from everos.core.locks import LOCKS, owner_key
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory._partition_locks import get_partition_lock, user_cluster_lock
-from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
+from everos.memory.events import (
+    EpisodeCopy,
+    EpisodeExtracted,
+    ReflectedEpisode,
+    ReflectionContext,
+)
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
     AtomicFactIndex,
@@ -254,10 +259,9 @@ class ReflectionOrchestrator:
         )
         return EpisodeExtracted(
             memcell_id=merged_entry_id,
-            episode_entry_id=merged_entry_id,
             episode_text=algo_result.episode,
             episode_timestamp_ms=last_ts,
-            owner_id=scope.owner_id,
+            copies=[EpisodeCopy(owner_id=scope.owner_id, entry_id=merged_entry_id)],
             session_id=None,
             app_id=scope.app_id,
             project_id=scope.project_id,

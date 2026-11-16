@@ -27,6 +27,12 @@ from .finish_reflection import FINISH_REFLECTION_SPEC as FINISH_REFLECTION_SPEC
 from .finish_reflection import finish_reflection as finish_reflection
 from .reflect_episodes import REFLECT_EPISODES_SPEC as REFLECT_EPISODES_SPEC
 from .reflect_episodes import reflect_episodes as reflect_episodes
+from .split_episode_by_owner import (
+    SPLIT_EPISODE_BY_OWNER_SPEC as SPLIT_EPISODE_BY_OWNER_SPEC,
+)
+from .split_episode_by_owner import split_episode_by_owner as split_episode_by_owner
+from .summarize_episode import SUMMARIZE_EPISODE_SPEC as SUMMARIZE_EPISODE_SPEC
+from .summarize_episode import summarize_episode as summarize_episode
 from .trigger_profile_clustering import (
     TRIGGER_PROFILE_CLUSTERING_SPEC as TRIGGER_PROFILE_CLUSTERING_SPEC,
 )
@@ -42,8 +48,10 @@ from .trigger_skill_clustering import (
 
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     EXTRACT_ATOMIC_FACTS_SPEC,
+    SUMMARIZE_EPISODE_SPEC,
     EXTRACT_FORESIGHT_SPEC,
     EXTRACT_AGENT_CASE_SPEC,
+    SPLIT_EPISODE_BY_OWNER_SPEC,
     EXTRACT_USER_PROFILE_SPEC,
     TRIGGER_SKILL_CLUSTERING_SPEC,
     EXTRACT_AGENT_SKILL_SPEC,
@@ -61,7 +69,9 @@ __all__ = [
     "EXTRACT_USER_PROFILE_SPEC",
     "FINISH_REFLECTION_SPEC",
     "REFLECT_EPISODES_SPEC",
+    "SPLIT_EPISODE_BY_OWNER_SPEC",
     "STRATEGY_SPECS",
+    "SUMMARIZE_EPISODE_SPEC",
     "TRIGGER_PROFILE_CLUSTERING_SPEC",
     "TRIGGER_SKILL_CLUSTERING_SPEC",
     "extract_agent_case",
@@ -71,6 +81,8 @@ __all__ = [
     "extract_user_profile",
     "finish_reflection",
     "reflect_episodes",
+    "split_episode_by_owner",
+    "summarize_episode",
     "trigger_profile_clustering",
     "trigger_skill_clustering",
 ]

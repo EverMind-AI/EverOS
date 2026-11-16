@@ -359,6 +359,36 @@ def parse_structured_entry(
     )
 
 
+def section_value_span(text: str, entry_id: str, title: str) -> tuple[int, int] | None:
+    """Offsets in ``text`` of the ``### title`` value of entry ``entry_id``.
+
+    The span covers what :func:`parse_structured_entry` returns for that
+    section -- the blank lines around it and its trailing whitespace are
+    outside -- so putting another stripped value there round-trips through
+    the parser. With the title repeated, the last one wins, as in the parser.
+
+    Returns:
+        ``(start, end)``, or ``None`` when the entry or the section is absent.
+    """
+    entry = find_entry(text, entry_id)
+    if entry is None:
+        return None
+    inner_start = entry.start + len(f"<!-- entry:{entry_id} -->")
+    inner_end = entry.end - len(f"<!-- /entry:{entry_id} -->")
+    headings = list(_H3_RE.finditer(text, inner_start, inner_end))
+    titled = [i for i, h in enumerate(headings) if h.group(1).strip() == title]
+    if not titled:
+        return None
+    index = titled[-1]
+    content_start = headings[index].end()
+    content_end = (
+        headings[index + 1].start() if index + 1 < len(headings) else inner_end
+    )
+    content = text[content_start:content_end]
+    start = content_start + len(content) - len(content.lstrip("\n"))
+    return start, start + len(content.strip("\n").rstrip())
+
+
 def _render_value(value: object) -> str:
     """Stringify an inline value the audit-friendly way."""
     if value is None:

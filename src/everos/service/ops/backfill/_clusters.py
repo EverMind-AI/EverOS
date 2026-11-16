@@ -20,7 +20,7 @@ import anyio.to_thread
 from everos.core.errors import MemoryRootLockedError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
-from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
+from everos.memory.events import AgentCaseExtracted, EpisodeCopy, EpisodeExtracted
 from everos.memory.models import ClusterKind
 from everos.memory.ports import ClusterStore, OwnerType, Scope
 from everos.memory.strategies import (
@@ -82,11 +82,12 @@ async def _scan_all_rows(deps: BackfillDeps, table: str) -> list[dict[str, Any]]
 
 
 def _episode_row_to_event(raw: dict[str, Any]) -> EpisodeExtracted:
-    """Synthesize the ``EpisodeExtracted(source="pipeline")`` this row's
-    original pipeline run never emitted — Tier 1 gated
+    """Synthesize a one-copy ``EpisodeExtracted(source="pipeline")`` for this
+    row, whose clustering never ran — Tier 1 gated
     ``trigger_profile_clustering`` off before it could fire (its
     per-dispatch body-guard returns early when embedding is
-    unavailable).
+    unavailable). Each row is its own event: the engine runs clustering
+    only, which folds every copy on an event independently.
 
     ``event_id`` carries a ``backfill_`` prefix so ops can tell a
     synthesized run apart from a real one in logs / run records.
@@ -94,10 +95,9 @@ def _episode_row_to_event(raw: dict[str, Any]) -> EpisodeExtracted:
     return EpisodeExtracted(
         event_id=f"backfill_{uuid4().hex}",
         memcell_id=raw["parent_id"],
-        episode_entry_id=raw["entry_id"],
         episode_text=raw["episode"],
         episode_timestamp_ms=to_timestamp_ms(raw["timestamp"]),
-        owner_id=raw["owner_id"],
+        copies=[EpisodeCopy(owner_id=raw["owner_id"], entry_id=raw["entry_id"])],
         session_id=raw.get("session_id"),
         app_id=raw.get("app_id", "default"),
         project_id=raw.get("project_id", "default"),

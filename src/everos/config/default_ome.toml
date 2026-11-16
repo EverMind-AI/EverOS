@@ -26,8 +26,18 @@
 
 # ── User-memory pipeline ────────────────────────────────────────────────
 
-# Atomic fact extraction runs per memcell. Always enabled — search
-# depends on atomic facts for MaxSim retrieval.
+# Atomic fact extraction runs once per memcell episode (each
+# EpisodeExtracted) and writes the facts under every user sender of the
+# memcell. Always enabled — search depends on atomic facts for MaxSim
+# retrieval.
+
+# Episode summary (fires on each EpisodeExtracted). Episodes are written
+# with a placeholder summary, the opening of the episode cut with "…";
+# this writes the model's preview in the episode's language over every
+# copy still showing it. One LLM call per memcell ([llm.summary]).
+# Disabled, the placeholder stays.
+# [strategies.summarize_episode]
+# enabled = true
 
 # Foresight extraction (runs per memcell). Heavy LLM call.
 #
@@ -38,12 +48,20 @@
 # [strategies.extract_foresight]
 # enabled = true
 
-# Profile clustering trigger (fires on each EpisodeExtracted event).
+# Profile clustering trigger (fires on each EpisodeExtracted: embeds the
+# episode once and folds it into the clusters of every user sender).
 # [strategies.trigger_profile_clustering]
 # enabled = true
 
-# User-profile extraction (fires on each EpisodeExtracted event). Set
-# enabled = false to turn the profile off or to skip it in evaluation runs.
+# Per-owner split (fires on each EpisodeExtracted, no LLM call): emits one
+# EpisodeExtractedForOwner per user sender of the memcell. It only feeds
+# extract_user_profile; disable it together with the profile.
+# [strategies.split_episode_by_owner]
+# enabled = true
+
+# User-profile extraction (fires on each EpisodeExtractedForOwner, so each
+# owner is a run of its own). Set enabled = false to turn the profile off
+# or to skip it in evaluation runs.
 # [strategies.extract_user_profile]
 # enabled = true
 

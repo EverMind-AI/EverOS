@@ -562,3 +562,107 @@ async def test_deprecation_groups_in_first_seen_order_and_preserves_partial_writ
         _user(), entries=[], replaced_by="merged", only_if=NO_SOURCE_CHECK
     )
     assert visited == []
+
+
+# ── Episode summary compare-and-set ──────────────────────────────────────
+
+
+async def _three_episodes(root: MemoryRoot) -> tuple[list[str], Path]:
+    """Three episodes in one daily file; their entry ids and the file."""
+    refs = await MarkdownEpisodeStore(root).append_many(
+        _user(),
+        [
+            _episode(summary="first summary", episode="first body"),
+            _episode(summary="second summary", episode="second body"),
+            _episode(summary="third summary", episode="third body"),
+        ],
+        only_if=NO_SOURCE_CHECK,
+    )
+    return [ref.entry_id for ref in refs], root.root / refs[0].md_path
+
+
+async def test_replace_summary_rewrites_only_that_section(root: MemoryRoot) -> None:
+    """Every other byte stays: the other entries, the entry's other fields and
+    the frontmatter (``entry_count``, ``last_appended_at``)."""
+    store = MarkdownEpisodeStore(root)
+    ids, path = await _three_episodes(root)
+    before = path.read_text(encoding="utf-8")
+
+    replaced = await store.replace_summary(
+        _user(), ids[1], expected="second summary", summary="A model preview.\n"
+    )
+
+    assert replaced is True
+    after = path.read_text(encoding="utf-8")
+    assert after == before.replace(
+        "### Summary\nsecond summary", "### Summary\nA model preview."
+    )
+    (stored,) = await store.read_many(_user(), [ids[1]])
+    assert stored.item.summary == "A model preview."
+    assert stored.item.episode == "second body"
+
+
+async def test_replace_summary_leaves_a_changed_summary_alone(root: MemoryRoot) -> None:
+    store = MarkdownEpisodeStore(root)
+    ids, path = await _three_episodes(root)
+    before = path.read_text(encoding="utf-8")
+
+    replaced = await store.replace_summary(
+        _user(), ids[0], expected="a placeholder", summary="A model preview."
+    )
+
+    assert replaced is False
+    assert path.read_text(encoding="utf-8") == before
+
+
+async def test_replace_summary_round_trips_a_multi_line_value(root: MemoryRoot) -> None:
+    store = MarkdownEpisodeStore(root)
+    ids, _ = await _three_episodes(root)
+
+    assert await store.replace_summary(
+        _user(), ids[2], expected="third summary", summary="Line one.\nLine two."
+    )
+    assert await store.replace_summary(
+        _user(), ids[2], expected="Line one.\nLine two.", summary="Again."
+    )
+    (stored,) = await store.read_many(_user(), [ids[2]])
+    assert stored.item.summary == "Again."
+
+
+@pytest.mark.parametrize("entry_id", ["ep_20250514_00000009", "not-an-entry-id"])
+async def test_replace_summary_of_a_missing_entry_is_false(
+    root: MemoryRoot, entry_id: str
+) -> None:
+    await _three_episodes(root)
+
+    assert not await MarkdownEpisodeStore(root).replace_summary(
+        _user(), entry_id, expected="first summary", summary="x"
+    )
+
+
+async def test_an_entry_without_a_summary_never_matches(root: MemoryRoot) -> None:
+    store = MarkdownEpisodeStore(root)
+    (ref,) = await store.append_many(
+        _user(), [_episode(summary="")], only_if=NO_SOURCE_CHECK
+    )
+
+    assert not await store.replace_summary(
+        _user(), ref.entry_id, expected="", summary="x"
+    )
+    (stored,) = await store.read_many(_user(), [ref.entry_id])
+    assert stored.item.summary == ""
+
+
+async def test_replace_summary_holds_the_owner_lock(root: MemoryRoot) -> None:
+    """A deletion takes the same lock; the rewrite must wait for it."""
+    store = MarkdownEpisodeStore(root)
+    ids, _ = await _three_episodes(root)
+    async with LOCKS.hold("owner", owner_key("app", "proj", "user", "u1")):
+        blocked = asyncio.create_task(
+            store.replace_summary(
+                _user(), ids[0], expected="first summary", summary="x"
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not blocked.done()
+    assert await blocked is True

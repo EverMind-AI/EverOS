@@ -48,7 +48,7 @@ from everos.infra.persistence.sqlite import (
 from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
 from everos.infra.persistence.sqlite._tables import Cluster, ClusterMember
 from everos.memory._partition_locks import _reset_for_tests
-from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
+from everos.memory.events import AgentCaseExtracted, EpisodeCopy, EpisodeExtracted
 from everos.memory.strategies import (
     trigger_profile_clustering,
     trigger_skill_clustering,
@@ -136,10 +136,9 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                 if which == "profile":
                     ev: Any = EpisodeExtracted(
                         memcell_id=f"mc_{n}",
-                        episode_entry_id=entry,
+                        copies=[EpisodeCopy(owner_id="u", entry_id=entry)],
                         episode_text=text,
                         episode_timestamp_ms=1_700_000_000_000 + n,
-                        owner_id="u",
                         session_id="s",
                     )
                     # The episode exists, as it does when the pipeline emits.

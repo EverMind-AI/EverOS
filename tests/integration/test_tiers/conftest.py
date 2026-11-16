@@ -382,7 +382,8 @@ async def seed_atomic_fact_for_episode(
     The manager's VECTOR method (``_maxsim_atomic_recall``) scans
     ``atomic_fact`` (denser, finer-grained) and max-pools back to the
     parent episode via ``AtomicFact.parent_id == Episode.entry_id`` (see
-    ``extract_atomic_facts.py``: ``parent_id=event.episode_entry_id``);
+    ``extract_atomic_facts.py``: ``parent_id`` is the owner's copy's
+    ``entry_id``);
     it only ANN-searches the episode table when no fact is in scope.
     A Tier 2/3 test that wants ``method="vector"`` to exercise the MaxSim
     path therefore needs at least one embedded atomic fact --

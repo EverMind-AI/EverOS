@@ -6,11 +6,10 @@ Cells / memcell_ids / message_id-mapping / sender lists are produced by
 user-perspective output of one cell: Episode md, plus the
 ``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
 
-Each cell costs two model calls made at once: the episode
-(``EpisodeExtractor.aextract``) and its display summary
-(``EpisodeSummarizer.asummarize_memcell``), both read from the cell. The
-summary is cosmetic: when its call fails, the episode keeps extraction's own
-summary, the content's first 200 characters, and the cell goes on.
+Each cell costs one model call (``EpisodeExtractor.aextract``). Every copy
+is written with :func:`~everos.memory.episode_summary.placeholder_summary`
+as its summary; the ``summarize_episode`` strategy writes the model's preview
+afterwards, from the episode text and in its language.
 
 ``MemoryService.add`` runs it cell by cell alongside
 :class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``) and
@@ -19,19 +18,18 @@ publishes each cell's events as soon as the cell is done.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor, EpisodeSummarizer
+from everalgo.user_memory import EpisodeExtractor
 
-from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
-from everos.memory.events import EpisodeExtracted, UserPipelineStarted
+from everos.memory.episode_summary import placeholder_summary
+from everos.memory.events import EpisodeCopy, EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
@@ -39,8 +37,6 @@ from everos.memory.ports import EpisodeStore, Event, MemcellStore, MemoryRef, Sc
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
-
-logger = get_logger(__name__)
 
 
 class UserMemoryPipeline:
@@ -52,7 +48,6 @@ class UserMemoryPipeline:
             written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
         episode_llm: LLM for the episode extraction.
-        summary_llm: LLM for the display summary.
         tz: The zone message times are shown to the model in.
     """
 
@@ -63,11 +58,9 @@ class UserMemoryPipeline:
         instructions: CustomInstructions,
         *,
         episode_llm: LLMClient,
-        summary_llm: LLMClient,
         tz: tzinfo = UTC,
     ) -> None:
         self._ep_ext = EpisodeExtractor(llm=episode_llm)
-        self._summarizer = EpisodeSummarizer(llm=summary_llm)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
         self._instructions = instructions
@@ -78,10 +71,10 @@ class UserMemoryPipeline:
     ) -> CellOutcome:
         """Extract the cell's Episode, write one copy per user sender.
 
-        The returned events start with the cell's ``UserPipelineStarted`` so
-        the strategies that consume the MemCell directly (atomic_fact /
-        foresight / clustering) are published first, followed by one
-        ``EpisodeExtracted`` per written episode.
+        The returned events start with the cell's ``UserPipelineStarted``, so
+        the strategies that read the memcell itself start first, followed by
+        one ``EpisodeExtracted`` listing every copy written (none when no
+        copy was).
         """
         cell, memcell_id = prepared.cell, prepared.memcell_id
         events: list[Event] = [
@@ -96,31 +89,21 @@ class UserMemoryPipeline:
         md_paths: list[str] = []
         user_senders = _unique_user_senders(cell)
         if user_senders:
-            algo_ep = await self._extract(ingested, prepared)
+            algo_ep = await self._extract_episode(ingested, prepared)
             # The model writes in the conversation's language; what it chose
             # pins every extraction downstream of this episode.
             language = detect_output_language(algo_ep.episode)
-            for sender_id in user_senders:
-                ep = Episode.from_algo(
-                    algo_ep,
-                    owner_id=sender_id,
-                    session_id=ingested.session_id,
-                    sender_ids=list(prepared.sender_ids),
-                    parent_id=memcell_id,
-                    language=language,
-                )
-                ref = await self._persist(ingested, ep, memcell_id)
-                if ref is None:
-                    continue
-                md_paths.append(ref.md_path)
+            written = await self._write_copies(
+                ingested, prepared, algo_ep, senders=user_senders, language=language
+            )
+            md_paths = [md_path for _, md_path in written]
+            if written:
                 events.append(
                     EpisodeExtracted(
                         memcell_id=memcell_id,
-                        episode_entry_id=ref.entry_id,
-                        episode_text=ep.episode,
-                        episode_timestamp_ms=ep.timestamp,
-                        owner_id=ep.owner_id,
-                        owner_name=_sender_label(cell, sender_id),
+                        episode_text=algo_ep.episode,
+                        episode_timestamp_ms=algo_ep.timestamp,
+                        copies=[episode_copy for episode_copy, _ in written],
                         session_id=ingested.session_id,
                         app_id=ingested.app_id,
                         project_id=ingested.project_id,
@@ -134,27 +117,15 @@ class UserMemoryPipeline:
             md_paths=md_paths,
         )
 
-    async def _extract(
+    async def _extract_episode(
         self, ingested: IngestResult, prepared: PreparedCell
     ) -> AlgoEpisode:
         """One whole-cell episode, shared by every user sender of the cell.
 
         ``sender_id=None`` binds the episode to no user; the fan-out to one
-        copy per sender happens in markdown only, so a cell costs one episode
-        call, made at once with its summary call. An unusable reply is tried
-        again by :func:`retry_llm_output`.
+        copy per sender happens in markdown only, so a cell costs one model
+        call. An unusable reply is tried again by :func:`retry_llm_output`.
         """
-        algo_ep, summary = await asyncio.gather(
-            self._extract_episode(ingested, prepared),
-            self._summarize(ingested, prepared),
-        )
-        if summary is None:
-            return algo_ep
-        return algo_ep.model_copy(update={"summary": summary})
-
-    async def _extract_episode(
-        self, ingested: IngestResult, prepared: PreparedCell
-    ) -> AlgoEpisode:
         extractor = self._ep_ext
         custom_instructions = self._instructions.load("episode_extract")
 
@@ -183,36 +154,43 @@ class UserMemoryPipeline:
             capture_output(extract_span, algo_ep.episode)
         return algo_ep
 
-    async def _summarize(
-        self, ingested: IngestResult, prepared: PreparedCell
-    ) -> str | None:
-        """The model's display summary of the cell, or ``None`` when it failed.
+    async def _write_copies(
+        self,
+        ingested: IngestResult,
+        prepared: PreparedCell,
+        algo_ep: AlgoEpisode,
+        *,
+        senders: list[str],
+        language: str | None,
+    ) -> list[tuple[EpisodeCopy, str]]:
+        """Write one copy of the episode per sender; each written one, with its path.
 
-        ``None`` keeps extraction's own summary. Any failure is caught: the
-        summary is display-only and must never cost the cell its episode.
+        Every copy carries the placeholder summary. A copy whose write was
+        skipped (the memcell was deleted meanwhile) is left out.
         """
-        summarizer = self._summarizer
-
-        async def attempt() -> str:
-            return await summarizer.asummarize_memcell(prepared.cell, tz=self._tz)
-
-        with memory_span(
-            "everos.extract.summary",
-            observation_type="generation",
-            session_id=ingested.session_id,
-            metadata={"memcell_id": prepared.memcell_id},
-        ):
-            try:
-                return await retry_llm_output(
-                    attempt, operator="episode_summary", memcell_id=prepared.memcell_id
-                )
-            except Exception as exc:  # display-only: fall back, never fail the cell
-                logger.warning(
-                    "episode_summary_fallback",
-                    memcell_id=prepared.memcell_id,
-                    error_type=type(exc).__name__,
-                )
-                return None
+        episode = algo_ep.model_copy(
+            update={"summary": placeholder_summary(algo_ep.episode)}
+        )
+        written: list[tuple[EpisodeCopy, str]] = []
+        for sender_id in senders:
+            ep = Episode.from_algo(
+                episode,
+                owner_id=sender_id,
+                session_id=ingested.session_id,
+                sender_ids=list(prepared.sender_ids),
+                parent_id=prepared.memcell_id,
+                language=language,
+            )
+            ref = await self._persist(ingested, ep, prepared.memcell_id)
+            if ref is None:
+                continue
+            episode_copy = EpisodeCopy(
+                owner_id=sender_id,
+                entry_id=ref.entry_id,
+                owner_name=_sender_label(prepared.cell, sender_id),
+            )
+            written.append((episode_copy, ref.md_path))
+        return written
 
     async def _persist(
         self, ingested: IngestResult, ep: Episode, memcell_id: str

@@ -113,7 +113,10 @@ async def test_emit_synthetic_events_skips_already_clustered_rows() -> None:
     # already-clustered rows were skipped.
     assert len(engine.emitted) == 2
     episode_ids = {
-        e.episode_entry_id for e in engine.emitted if isinstance(e, EpisodeExtracted)
+        c.entry_id
+        for e in engine.emitted
+        if isinstance(e, EpisodeExtracted)
+        for c in e.copies
     }
     case_ids = {
         e.case_entry_id for e in engine.emitted if isinstance(e, AgentCaseExtracted)

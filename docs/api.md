@@ -986,7 +986,7 @@ query within this episode (already nested, no separate call needed).
 | `session_id` | `string` | The `session_id` whose messages produced this episode |
 | `timestamp` | `string` | ISO-8601 with timezone offset; default `UTC` renders as `Z`, non-UTC defaults render as `±HH:MM` — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
-| `summary` | `string` | Short display summary (1-3 sentences) the model writes from the same conversation as the episode; the episode's first 200 characters when that call failed. Suitable for list-view rendering |
+| `summary` | `string` | Short display summary (1-3 sentences), suitable for list-view rendering. A new episode starts with its own opening, cut at a word boundary to a width of 120 (a CJK character counts as two) and closed with `…`, or the whole episode when it is shorter. Shortly after, a model-written preview of the episode, in the episode's language, replaces it; a summary edited in the meantime is kept |
 | `subject` | `string` | One-line subject / title |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
@@ -1220,7 +1220,7 @@ sub-facts).
 | `session_id` | `string \| null` | Originating session; `null` for an episode Reflection merged from several sessions |
 | `timestamp` | `string` | ISO-8601 with timezone offset, identical to `/search` (both go through the same `from_iso_format` path) — see [Conventions](#conventions) |
 | `sender_ids` | `array<string>` | Distinct `sender_id`s in the underlying messages |
-| `summary` | `string` | Short summary |
+| `summary` | `string` | Short display summary; starts as the episode's opening and is then replaced by a model-written preview, as in [SearchEpisodeItem](#searchepisodeitem) |
 | `subject` | `string` | One-line subject |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | — |

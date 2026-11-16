@@ -1,0 +1,16 @@
+{
+  "event_id": "frozen-episode-extracted-event",
+  "ts": "2026-11-13T08:00:00Z",
+  "memcell_id": "mc-frozen",
+  "episode_entry_id": "ep_20261113_00000002",
+  "episode_text": "On 2026-11-13 Alice told the assistant she plans a spring trip to Kyoto.",
+  "episode_timestamp_ms": 1763020800000,
+  "owner_id": "u_alice",
+  "owner_name": "Alice",
+  "session_id": "session-frozen",
+  "app_id": "default",
+  "project_id": "default",
+  "source": "pipeline",
+  "reflection": null,
+  "language": "English"
+}

@@ -257,7 +257,8 @@ async def test_episodes_and_cases_synthesize_matching_events(
 
     assert all(e.source == "pipeline" for e in episode_events)
     assert all(e.event_id.startswith("backfill_") for e in fake_engine.emitted)
-    assert {e.owner_id for e in episode_events} == {"u1"}
+    assert [len(e.copies) for e in episode_events] == [1, 1]
+    assert {e.copies[0].owner_id for e in episode_events} == {"u1"}
     assert case_events[0].agent_id == "agent1"
     assert case_events[0].task_intent == "task intent ac1"
     assert case_events[0].quality_score == pytest.approx(0.8)

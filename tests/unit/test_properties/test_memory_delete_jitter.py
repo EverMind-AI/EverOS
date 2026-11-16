@@ -67,7 +67,9 @@ from everos.infra.persistence.factories import build_stores
 from everos.infra.persistence.markdown import MarkdownReader
 from everos.memory import IngestResult
 from everos.memory.events import (
+    EpisodeCopy,
     EpisodeExtracted,
+    EpisodeExtractedForOwner,
     SkillClusterUpdated,
 )
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
@@ -439,7 +441,6 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
         memcell_store=world.stores.memcell,
         instructions=bundled_instructions(),
         episode_llm=llm,
-        summary_llm=llm,
     )
     # The extraction model; sometimes slow enough for a whole session
     # deletion to land between the memcell row and the episode write.
@@ -450,7 +451,8 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
     )
     for ev in outcome.events:
         if isinstance(ev, EpisodeExtracted):
-            world.written[(ev.owner_id, ev.episode_entry_id)] = (session, memcell_id)
+            for copy in ev.copies:
+                world.written[(copy.owner_id, copy.entry_id)] = (session, memcell_id)
     if len(outcome.events) == 1:
         _event("add: episode skipped, memcell gone")
 
@@ -466,10 +468,9 @@ async def _facts(world: _World, owner: str, entry: str | None = None) -> None:
     deps = make_deps(stores=world.stores, embedding=_Embedder(world))
     event = EpisodeExtracted(
         memcell_id=memcell,
-        episode_entry_id=entry,
+        copies=[EpisodeCopy(owner_id=owner, entry_id=entry)],
         episode_text="t",
         episode_timestamp_ms=_TS,
-        owner_id=owner,
         session_id=session,
         app_id="a",
         project_id="p",
@@ -492,10 +493,9 @@ async def _cluster(world: _World, owner: str, entry: str | None = None) -> None:
     await trigger_profile_clustering(
         EpisodeExtracted(
             memcell_id=memcell,
-            episode_entry_id=entry,
+            copies=[EpisodeCopy(owner_id=owner, entry_id=entry)],
             episode_text="t",
             episode_timestamp_ms=_TS,
-            owner_id=owner,
             session_id=session,
             app_id="a",
             project_id="p",
@@ -559,14 +559,15 @@ async def _reflect(world: _World, owner: str) -> None:
         embedder=_Embedder(world),  # type: ignore[arg-type]
     )
     for ev in merged:
-        world.written[(owner, ev.episode_entry_id)] = ("", ev.episode_entry_id)
+        (copy,) = ev.copies
+        world.written[(owner, copy.entry_id)] = ("", copy.entry_id)
         assert ev.reflection is not None
-        world.merged[(owner, ev.episode_entry_id)] = {
+        world.merged[(owner, copy.entry_id)] = {
             e.entry_id for e in ev.reflection.episodes
         }
         await finisher.finish(
             scope=_scope(owner),
-            merged_entry_id=ev.episode_entry_id,
+            merged_entry_id=copy.entry_id,
             context=ev.reflection,
         )
 
@@ -681,16 +682,13 @@ async def _profile(world: _World, owner: str) -> None:
     mine = [(e, m) for (o, e), m in world.written.items() if o == owner]
     if not mine:
         return
-    entry, (session, memcell) = world.rng.choice(mine)
+    entry, (_session, memcell) = world.rng.choice(mine)
     deps = make_deps(stores=world.stores, embedding=_Embedder(world))
     await extract_user_profile(
-        EpisodeExtracted(
+        EpisodeExtractedForOwner(
             memcell_id=memcell,
             episode_entry_id=entry,
-            episode_text="t",
-            episode_timestamp_ms=_TS,
             owner_id=owner,
-            session_id=session,
             app_id="a",
             project_id="p",
         ),

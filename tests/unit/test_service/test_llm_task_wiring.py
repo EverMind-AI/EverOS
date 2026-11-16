@@ -71,7 +71,6 @@ def test_each_consumer_gets_its_own_tasks_client(
 
     assert _model(boundary[0][-1]["llm"]) == "m-boundary"
     assert _model(pipeline[0][-1]["episode_llm"]) == "m-episode"
-    assert _model(pipeline[0][-1]["summary_llm"]) == "m-summary"
     assert _model(search[0][-1]["llm_client"]) == "m-search"
     assert _model(search[0][-1]["decider_client"]) == "m-decider"
     assert _model(judge[0][0]) == "m-agent_case"
