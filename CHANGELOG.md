@@ -12,6 +12,48 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A user's profile reads what the conversation says about the user, and no
+  longer updates at every flush.** Measured on the 2026-11-14 builds
+  (DeepSeek V4.1 Flash), a profile update read the person's whole queued
+  segments, every speaker's lines and every picture they posted (as pixels, a
+  second time after the episode call), while its operations quoted 18% of a
+  LoCoMo conversation (13% Mem-Gallery, 37% MemEye, 4-5% of a group's), 92-99%
+  of the quoted lines were the person's own, and 44-48% of a group member's
+  updates changed nothing. Now, with `[profile] input = "cues"` (the
+  default), the episode call of a cell whose profiles read cues also marks,
+  per human speaker, the messages (a short verbatim quote) and the pictures
+  that say something lasting about them -- a role, a constraint, an
+  environment, the people in one's life, a preference, a habit; never a
+  one-off event, another person's opinion, a joke or a hypothetical -- in a
+  `<profile_cues>` block appended after what the cell adds and before the
+  `<output_language>` block, and a `profile_cues` reply field
+  (`chat.episode_profile_cues`, version 1, recorded in `everos prompts`). The
+  block is sent only when a profile of the cell's space reads it, as the
+  picture block reaches only picture cells: a user's own space while
+  `extract_user_profile` runs with `input = "cues"`, a group's while
+  `update_member_profiles` runs (decided at startup, `ome.toml` included);
+  with no such profile the episode request is unchanged, byte for byte. The
+  cues are mapped in code to one message of their speaker (a quote compared
+  without case, extra whitespace or curly quotation marks) and to the
+  pictures that speaker posted, and kept in `system.db` (`profile_cue`, one
+  row per segment and person; derived state, never markdown); cues that map
+  to nothing are dropped and counted (`everos_profile_cue_entries_total`).
+  The profile update then shows the model only the marked messages, each
+  after the message before it by someone else (cut to 200 characters), and a
+  marked picture as its picture memory's text (`[profile] picture_pixels`
+  attaches the picture instead); segments that marked nothing for the person
+  make no call at all and are marked read. A segment never marked is read in
+  full, and a forgotten message or picture is read by no update, its cue
+  included. `input = "full"` sends the update of before, byte for byte. A
+  user's profile no longer updates at each flush (`[profile] update_on_flush`,
+  default `false`): it updates every `update_every` segments, once the user
+  has been idle for `[profile] idle_seconds` (600, the group profile's idle
+  mechanism, strategy `extract_user_profile_idle`), and its first segment at
+  once; `everos.memory.strategies.update_pending_profile` brings one user's
+  queue up to date on demand. The selection is
+  `everos.memory.extract.pipeline.profile_input.select_profile_input`, which a
+  member's profile in a group can call too
+  ([docs/configuration.md](docs/configuration.md#profile)).
 - **Every chat cell is sent the original episode request again.** everalgo's
   rewritten episode rules (2026-10) told the model not to copy a message's
   time into the content: with GPT-4.1-mini extraction 1% of LoCoMo episodes

@@ -12,7 +12,7 @@ __all__ = [
 ]
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from everalgo.testing import FakeLLMClient
 
@@ -40,6 +40,7 @@ from .stores import (
     InMemoryImageStore,
     InMemoryMemcellStore,
     InMemoryMessageForgetStore,
+    InMemoryProfileCueStore,
     InMemoryProfileStore,
     InMemorySceneStore,
     UnusedPort,
@@ -87,6 +88,7 @@ def make_stores(**overrides: Any) -> Stores:
         "scene": InMemorySceneStore(),
         "group_profile": InMemoryGroupProfileStore(),
         "message_forget": InMemoryMessageForgetStore(),
+        "profile_cues": InMemoryProfileCueStore(),
     }
     return Stores(**{**fields, **overrides})
 
@@ -110,13 +112,16 @@ def make_deps(
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
     picture_limits: ImageLimits | None = None,
+    profile_input: Literal["cues", "full"] = "full",
+    profile_picture_pixels: bool = False,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
     ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
     :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
     unconfigured provider. ``picture_limits`` stays ``None`` (a profile
-    update reads no pictures) unless given.
+    update reads no pictures) unless given. A profile update reads its
+    segments in full unless ``profile_input = "cues"``.
     """
     return MemoryDeps(
         llm=unscripted_llm() if llm is _DEFAULT else llm,
@@ -125,6 +130,8 @@ def make_deps(
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
         picture_limits=picture_limits,
+        profile_input=profile_input,
+        profile_picture_pixels=profile_picture_pixels,
     )
 
 

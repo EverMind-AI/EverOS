@@ -509,7 +509,11 @@ A user's own profile (`users/<user_id>/user.md`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `update_every` | int | `5` | The profile is updated after this many new segments of the user's own conversations, all read in one update call, and at every flush of one of them (the cadence of `[groups] member_profile_every`). A user's first segment, while they have no profile, is read at once. Episodes are searchable at once; only the profile lags. `1` updates at every segment, as before 2026-11-13. |
+| `update_every` | int | `5` | The profile is updated after this many new segments of the user's own conversations, all read in one update call. A user's first segment, while they have no profile, is read at once. Episodes are searchable at once; only the profile lags. `1` updates at every segment, as before 2026-11-13. |
+| `idle_seconds` | int | `600` | Or once the user has had no new segment for this long (the `extract_user_profile_idle` strategy, the group profile's idle mechanism). |
+| `update_on_flush` | bool | `false` | And at every flush of one of the user's conversations, the cadence before 2026-11-14. |
+| `input` | `"cues"` \| `"full"` | `"cues"` | What an update reads. `cues`: only the messages and pictures the segment's episode call marked as saying something lasting about the person -- the episode request then carries a `<profile_cues>` block (`chat.episode_profile_cues`) -- each message after the message before it by someone else (cut to 200 characters); a segment never marked is read in full, and an update whose segments marked nothing for the person makes no call. `full`: every message of the segments and every picture the person posted, the request of 2026-11-13; the episode request then carries no cue block. |
+| `picture_pixels` | bool | `false` | In `cues` mode, attach the cued pictures themselves instead of their picture memories' text (description and visible text). |
 
 ### `[groups]`
 

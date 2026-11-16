@@ -5,9 +5,10 @@ fingerprint of their text:
 
 * EverOS's own (:class:`~everos.memory.prompts.PromptTemplate`, id, version
   and fingerprint pinned by tests): the episode prompt every chat cell is
-  extracted with, the group roster block, the group-profile update, the scene
-  update, the constraint binding a group search may call, and the multi-round
-  decider every search round sends.
+  extracted with, the profile-cue block appended to it when a profile of the
+  cell's space reads cues, the group roster block, the group-profile update,
+  the scene update, the constraint binding a group search may call, and the
+  multi-round decider every search round sends.
 * everalgo's, sent as the installed package wrote them
   (:class:`~everos.memory.prompts.AlgoPrompt`): the boundary detection that
   cuts a conversation into segments, the original episode request every
@@ -69,6 +70,7 @@ from everos.memory.custom_instructions import CustomInstructions, Operator
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.extract.pipeline.episode import CHAT_EPISODE
 from everos.memory.extract.pipeline.group_render import ROSTER_BLOCK
+from everos.memory.extract.pipeline.profile_cues import CHAT_PROFILE_CUES
 from everos.memory.extract.scene import SCENE_UPDATE
 from everos.memory.prompts import AlgoPrompt, PromptTemplate
 from everos.memory.search.constraints import CONSTRAINT_BIND
@@ -80,6 +82,7 @@ entries (``owner: config``) beside the prompts."""
 
 EVEROS_PROMPTS: tuple[tuple[PromptTemplate, str], ...] = (
     (CHAT_EPISODE, "write"),
+    (CHAT_PROFILE_CUES, "write"),
     (ROSTER_BLOCK, "write"),
     (GROUP_PROFILE_UPDATE, "write"),
     (SCENE_UPDATE, "write"),
@@ -152,7 +155,8 @@ def prompt_manifest(*, config_root: Path | None = None) -> dict[str, Any]:
     """Every prompt above by id: owner, when it is sent, version, fingerprint.
 
     A prompt assembled by rule also lists each variant's fingerprint
-    (``chat.episode`` and ``search.decider``: ``text`` and ``pictures``). An
+    (``chat.episode``, ``chat.episode_profile_cues`` and ``search.decider``:
+    ``text`` and ``pictures``). An
     everalgo prompt carries its package and the version installed in place of
     an EverOS version. A custom-instruction entry names the prompt it is
     appended to and whether it is on; its fingerprint is ``None`` while off

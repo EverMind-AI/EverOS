@@ -1113,15 +1113,31 @@ class ProfileSettings(_Section):
     """A user's own profile (``[profile]``, ``users/<u>/user.md``).
 
     ``update_every``: the profile is updated after this many new segments of
-    the user's own conversations, all read in one update, and at every flush
-    of one of them -- the cadence a member's profile in a group has
-    (``[groups] member_profile_every``). Episodes are searchable at once, only
-    the profile lags. ``1`` updates at every segment, as before.
+    the user's own conversations, all read in one update. Episodes are
+    searchable at once, only the profile lags. ``1`` updates at every segment.
+    ``idle_seconds``: or once the user has had no new segment for this long.
+    ``update_on_flush``: and at every flush of one of the user's
+    conversations, as before 2026-11-14.
 
-    Env binding: EVEROS_PROFILE__UPDATE_EVERY
+    ``input``: what an update reads. ``cues`` -- the messages and pictures the
+    episode call marked as saying something lasting about the person (the
+    episode request then carries the ``<profile_cues>`` block), each message
+    after the message before it by someone else; a person with no cue in the
+    segments read gets no update call. ``full`` -- every message of the
+    segments and every picture the person posted, the request of 2026-11-13.
+    ``picture_pixels``: in ``cues`` mode, attach the cued pictures themselves
+    instead of their picture memories' text (description and visible text).
+
+    Env bindings: EVEROS_PROFILE__UPDATE_EVERY, EVEROS_PROFILE__IDLE_SECONDS,
+    EVEROS_PROFILE__UPDATE_ON_FLUSH, EVEROS_PROFILE__INPUT,
+    EVEROS_PROFILE__PICTURE_PIXELS
     """
 
     update_every: int = Field(default=5, ge=1)
+    idle_seconds: int = Field(default=600, ge=2)
+    update_on_flush: bool = False
+    input: Literal["cues", "full"] = "cues"
+    picture_pixels: bool = False
 
 
 class GroupsSettings(_Section):

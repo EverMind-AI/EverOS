@@ -19,6 +19,8 @@ from .memcell import MemcellRepo as MemcellRepo
 from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
 from .memory_strength import MemoryStrengthRepo as MemoryStrengthRepo
 from .memory_strength import StrengthRow as StrengthRow
+from .profile_cue import CueRow as CueRow
+from .profile_cue import ProfileCueRepo as ProfileCueRepo
 from .session_cut import SessionCutRepo as SessionCutRepo
 from .session_purge import SessionPurgeRepo as SessionPurgeRepo
 from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
@@ -26,6 +28,7 @@ from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
 __all__ = [
     "MTIME_TOLERANCE_SECONDS",
     "ClusterRepo",
+    "CueRow",
     "ForgetLogRepo",
     "GroupMessageRepo",
     "GroupRosterRepo",
@@ -35,6 +38,7 @@ __all__ = [
     "MemorizeInboxRepo",
     "MemoryStrengthRepo",
     "MessageForgetRepo",
+    "ProfileCueRepo",
     "QueueSummary",
     "SessionCutRepo",
     "SessionPurgeRepo",

@@ -840,6 +840,14 @@ else's (section 7.4). The same routing (poster only) applies on the one-to-one
 path, which removes the leak at `user_memory.py:163-170` without changing any
 single-sender result.
 
+While the member profiles run (`update_member_profiles`), a group cell's
+episode call also carries the `<profile_cues>` block (2026-11-14): per human
+speaker, the messages and pictures that say something lasting about them,
+kept per segment and member in `system.db` (`profile_cue`), never the
+assistant's. A member's profile update can read only those
+(`select_profile_input`, as a user's does with `[profile] input = "cues"`);
+on 2026-11-14 the member profiles still read their segments in full.
+
 ### 7.4 Member-in-group profile
 
 `groups/<group_id>/members/<member_id>.md` holds what the group's conversations

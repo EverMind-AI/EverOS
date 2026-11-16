@@ -159,9 +159,11 @@ and a group's profile. `/flush` returns once the episode is on disk; the
 `extract_user_profile` strategy then runs its own LLM call, so `/get` with
 `memory_type: "profile"` can legitimately return the profile as it was
 before that conversation (or `total_count: 0` for a new user) for seconds
-after a flush that returned `"extracted"`. A member's profile in a group
-waits longer: it is updated every `[groups] member_profile_every` segments
-and on each flush of the group. `GET /health`'s `cascade.pending` does
+after a flush that returned `"extracted"` -- and, past a user's first
+segment, until `[profile] update_every` segments are queued or the user has
+been idle for `[profile] idle_seconds` (a flush updates it only with
+`[profile] update_on_flush`). A member's profile in a group is updated every
+`[groups] member_profile_every` segments and on each flush of the group. `GET /health`'s `cascade.pending` does
 **not** cover this window — it only tracks the md → index queue, which is
 empty while the strategy is still thinking. Poll `/get` with a budget
 instead. The same "seconds later" rule for every OME-produced kind is

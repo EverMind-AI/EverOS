@@ -20,6 +20,7 @@ from everalgo.types import ChatMessage
 
 from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC
 from everos.service import ForgetTarget
+from tests.fakes.llm import quote_every_message
 
 from .groups import APP, PROJECT, GroupWorld
 
@@ -62,9 +63,15 @@ class ForgetModel:
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": False}
             )
-        if name == "EpisodeReply":
+        if name in {"EpisodeReply", "CuedEpisodeReply"}:
             said = " ".join(sorted(set(_MARK.findall(prompt)))) or "nothing"
-            return json.dumps({"title": "Notes", "content": said})
+            reply: dict[str, Any] = {"title": "Notes", "content": said}
+            if name == "CuedEpisodeReply":
+                # The profile-cue block: every message holding a fact marker.
+                reply["profile_cues"] = quote_every_message(
+                    prompt, keep=lambda content: bool(_FACT.search(content))
+                )
+            return json.dumps(reply)
         if name == "_ProfileUpdateReply":
             stored = prompt.split("<new_conversation>")[0]
             ops = [
@@ -91,9 +98,13 @@ class ForgetModel:
         raise AssertionError(f"unexpected model call {name}")
 
 
-def open_world(tmp_path: Path, model: ForgetModel) -> Any:
+def open_world(
+    tmp_path: Path, model: ForgetModel, *, profile_cues: bool = False
+) -> Any:
     client = FakeLLMClient(handler=model)
-    return GroupWorld.open(tmp_path, llm=client, decider=client)
+    return GroupWorld.open(
+        tmp_path, llm=client, decider=client, profile_cues=profile_cues
+    )
 
 
 async def send(

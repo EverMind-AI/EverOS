@@ -21,6 +21,8 @@ __all__ = [
     "boundary_reply",
     "boundary_window",
     "memorize_llm",
+    "prompt_text",
+    "quote_every_message",
     "user_track_llm",
     "user_track_script",
 ]
@@ -43,6 +45,58 @@ _SCRIPTS = Path(__file__).parent / "llm_scripts"
 _WINDOW = re.compile(r'<messages count="(\d+)">|</messages>\n<count>(\d+)</count>')
 """The window size: everalgo's rendering, or EverOS's with the count after the
 records (``memory.extract.boundary.prompt_order``)."""
+
+_BLOCK = re.compile(
+    r'^ {20}"speaker": (.*?),\n {20}"content": (.*?)\n {16}\}$',
+    re.MULTILINE | re.DOTALL,
+)
+"""A message of the original episode request (one pseudo-JSON block)."""
+
+_CUED = {
+    "CuedEpisodeReply": "EpisodeReply",
+    "CuedImageEpisodeReply": "ImageEpisodeReply",
+}
+"""The episode reply models a call with the profile-cue block asks for, and the
+model of the same call without it."""
+
+
+def prompt_text(messages: Sequence[Any]) -> str:
+    """Every text part of ``messages``, joined."""
+    parts: list[str] = []
+    for message in messages:
+        content = getattr(message, "content", message)
+        if isinstance(content, str):
+            parts.append(content)
+            continue
+        for part in content or []:
+            text = (
+                part.get("text")
+                if isinstance(part, dict)
+                else getattr(part, "text", None)
+            )
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def quote_every_message(
+    prompt: str, *, keep: Callable[[str], bool] | None = None
+) -> list[dict[str, Any]]:
+    """Profile cues quoting each message of an episode request (each one
+    ``keep`` accepts): the speaker as rendered and the message's start."""
+    return [
+        {"speaker": speaker.strip(), "quote": content.strip()[:40]}
+        for speaker, content in _BLOCK.findall(prompt)
+        if content.strip() and (keep is None or keep(content))
+    ]
+
+
+def _with_cues(reply: str, messages: Sequence[Any]) -> str:
+    """``reply`` with profile cues quoting every message of the request."""
+    data = json.loads(reply)
+    data["profile_cues"] = quote_every_message(prompt_text(messages))
+    return json.dumps(data)
+
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "_BatchReply",
@@ -124,6 +178,9 @@ def memorize_llm(
             return boundary_reply(cuts, tail_complete=tail_complete)
         if name == "EpisodeReply":
             return episode
+        if name == "CuedEpisodeReply":
+            # The profile-cue block: every message is marked.
+            return _with_cues(episode, messages)
         if name == "_DecisionReply":
             return DECIDER_KEEP_FIRST_TEN
         return canned.get(name, UNUSABLE_REPLY)
@@ -149,13 +206,15 @@ def user_track_llm(**scripts: str) -> FakeLLMClient:
 
 
 def _scripted_llm(track: str, by_reply: Mapping[str, str]) -> FakeLLMClient:
-    def _answer(_messages: Any, *, response_format: type, **_kwargs: Any) -> str:
+    def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:
+        name = response_format.__name__
+        if name in _CUED and _CUED[name] in by_reply:
+            # The profile-cue block: the script's episode, every message marked.
+            return _with_cues(by_reply[_CUED[name]], messages)
         try:
-            return by_reply[response_format.__name__]
+            return by_reply[name]
         except KeyError:
-            raise AssertionError(
-                f"no {track} script answers {response_format.__name__}"
-            ) from None
+            raise AssertionError(f"no {track} script answers {name}") from None
 
     return FakeLLMClient(handler=_answer)
 

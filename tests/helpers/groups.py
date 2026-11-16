@@ -45,6 +45,7 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.infra.persistence.markdown._base.frontmatter import parse_frontmatter
 from everos.memory.deps import MemoryDeps, Stores
+from everos.memory.extract.pipeline import CueConsumers
 from everos.memory.models import (
     Episode,
     Group,
@@ -133,13 +134,16 @@ class GroupWorld:
         llm: Any = None,
         decider: Any = None,
         settings: Settings | None = None,
+        profile_cues: bool = False,
     ) -> AsyncIterator[GroupWorld]:
         """The stack over ``tmp_path``.
 
         ``llm`` is the extraction model (default: one that fails the test if
         a read path calls it). ``decider`` is the multi-round search's model
         (default: a scripted one that keeps the first ten candidates and
-        stops).
+        stops). ``profile_cues`` runs the profiles on cues, as the bootstrap
+        does by default: the episode call marks them, a user's profile reads
+        them (``[profile] input = "cues"``).
         """
         base = settings or Settings()
         settings = base.model_copy(
@@ -167,6 +171,7 @@ class GroupWorld:
             picture_limits=_image_limits(settings)
             if settings.extraction.vision
             else None,
+            profile_input="cues" if profile_cues else "full",
         )
         bus = _Bus()
         # The eraser a forget erases index rows through, as the bootstrap
@@ -185,6 +190,9 @@ class GroupWorld:
             build_tokenizer(),
             bus,
             eraser,
+            cue_consumers=CueConsumers(users=True, groups=True)
+            if profile_cues
+            else None,
         )
         try:
             yield cls(

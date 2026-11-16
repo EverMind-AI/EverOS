@@ -71,7 +71,7 @@ async def test_boundary_scripts(
 
 
 async def _episode(**scripts: str) -> AlgoEpisode:
-    episode, described = await extract_cell(
+    episode, described, _ = await extract_cell(
         user_track_llm(**scripts),
         _CELL,
         pictures=[],

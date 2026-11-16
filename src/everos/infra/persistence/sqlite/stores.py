@@ -15,6 +15,7 @@ __all__ = [
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",
+    "SqliteProfileCueStore",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",
     "SqliteStrengthStore",
@@ -47,6 +48,7 @@ from everos.memory.ports import (
     ForgetTarget,
     OwnerType,
     PageResult,
+    PersonCues,
     Scope,
     SessionKey,
     Strength,
@@ -55,12 +57,14 @@ from everos.memory.ports import (
 
 from ._repos import (
     ClusterRepo,
+    CueRow,
     ForgetLogRepo,
     GroupMessageRepo,
     MemcellRepo,
     MemorizeInboxRepo,
     MemoryStrengthRepo,
     MessageForgetRepo,
+    ProfileCueRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     StrengthRow,
@@ -786,6 +790,53 @@ class SqliteMessageForgetStore:
             memcell_id: frozenset(live.get(key, ()))
             for memcell_id, key in sessions.items()
         }
+
+
+class SqliteProfileCueStore:
+    """A segment's profile cues over ``profile_cue``, one row per person.
+
+    Args:
+        repo: Repository of the ``profile_cue`` table.
+    """
+
+    def __init__(self, repo: ProfileCueRepo) -> None:
+        self._repo = repo
+
+    async def record(
+        self,
+        session: SessionKey,
+        memcell_id: str,
+        cues: Mapping[str, PersonCues],
+    ) -> None:
+        await self._repo.write(
+            app_id=session.app_id,
+            project_id=session.project_id,
+            session_id=session.session_id,
+            rows=[
+                CueRow(
+                    memcell_id,
+                    person_id,
+                    json.dumps(list(found.message_ids)),
+                    json.dumps(list(found.image_ids)),
+                )
+                for person_id, found in cues.items()
+            ],
+        )
+
+    async def of_person(
+        self, person_id: str, memcell_ids: Collection[str]
+    ) -> dict[str, PersonCues]:
+        return {
+            row.memcell_id: PersonCues(
+                message_ids=tuple(json.loads(row.message_ids_json or "[]")),
+                image_ids=tuple(json.loads(row.image_ids_json or "[]")),
+                read=row.read,
+            )
+            for row in await self._repo.of_person(person_id, memcell_ids)
+        }
+
+    async def mark_read(self, person_id: str, memcell_ids: Collection[str]) -> None:
+        await self._repo.mark_read(person_id, memcell_ids)
 
 
 def _forget_entry(row: ForgetLogRow) -> ForgetEntry:

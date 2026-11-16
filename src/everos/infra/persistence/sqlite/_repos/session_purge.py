@@ -7,17 +7,24 @@ from sqlalchemy import delete, select, update
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
 
-from .._tables import ConversationStatus, Memcell, MemorizeInbox, UnprocessedBuffer
+from .._tables import (
+    ConversationStatus,
+    Memcell,
+    MemorizeInbox,
+    ProfileCue,
+    UnprocessedBuffer,
+)
 
 
 class SessionPurgeRepo(RepoBase[Memcell]):
     """Everything a session left in ``system.db`` before extraction.
 
-    Deletes its memcells, its unprocessed buffer (every track, the
-    quarantine one included) and its conversation status, and blanks the
-    request body of its failed ``memorize_inbox`` rows. Queued, processing
-    and succeeded inbox rows are left as they are: a deletion only runs once
-    none of the first two exist, and a succeeded row's body is already gone.
+    Deletes its memcells and their profile cues, its unprocessed buffer
+    (every track, the quarantine one included) and its conversation status,
+    and blanks the request body of its failed ``memorize_inbox`` rows.
+    Queued, processing and succeeded inbox rows are left as they are: a
+    deletion only runs once none of the first two exist, and a succeeded
+    row's body is already gone.
     """
 
     model = Memcell
@@ -39,7 +46,7 @@ class SessionPurgeRepo(RepoBase[Memcell]):
                 .scalars()
                 .all()
             )
-            for table in (Memcell, UnprocessedBuffer, ConversationStatus):
+            for table in (Memcell, ProfileCue, UnprocessedBuffer, ConversationStatus):
                 await s.execute(
                     delete(table)
                     .where(table.app_id == app_id)

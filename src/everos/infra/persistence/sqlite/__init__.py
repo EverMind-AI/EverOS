@@ -45,6 +45,7 @@ from ._repos import MemcellRepo as MemcellRepo
 from ._repos import MemorizeInboxRepo as MemorizeInboxRepo
 from ._repos import MemoryStrengthRepo as MemoryStrengthRepo
 from ._repos import MessageForgetRepo as MessageForgetRepo
+from ._repos import ProfileCueRepo as ProfileCueRepo
 from ._repos import QueueSummary as QueueSummary
 from ._repos import UnprocessedBufferRepo as UnprocessedBufferRepo
 from ._tables import Cluster as Cluster
@@ -60,6 +61,7 @@ from ._tables import Memcell as Memcell
 from ._tables import MemorizeInbox as MemorizeInbox
 from ._tables import MemoryStrength as MemoryStrength
 from ._tables import MessageForget as MessageForget
+from ._tables import ProfileCue as ProfileCue
 from ._tables import SessionBinding as SessionBinding
 from ._tables import UnprocessedBuffer as UnprocessedBuffer
 from .repositories import SqliteRepos as SqliteRepos
@@ -70,6 +72,7 @@ from .stores import SqliteGroupMessageStore as SqliteGroupMessageStore
 from .stores import SqliteMemcellStore as SqliteMemcellStore
 from .stores import SqliteMemorizeInboxStore as SqliteMemorizeInboxStore
 from .stores import SqliteMessageForgetStore as SqliteMessageForgetStore
+from .stores import SqliteProfileCueStore as SqliteProfileCueStore
 from .stores import SqliteSessionBufferStore as SqliteSessionBufferStore
 from .stores import SqliteSessionPurgeStore as SqliteSessionPurgeStore
 from .stores import SqliteStrengthStore as SqliteStrengthStore
@@ -101,6 +104,8 @@ __all__ = [
     "MemoryStrengthRepo",
     "MessageForget",
     "MessageForgetRepo",
+    "ProfileCue",
+    "ProfileCueRepo",
     "QueueSummary",
     "Relationship",
     "RepoBase",
@@ -113,6 +118,7 @@ __all__ = [
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteMessageForgetStore",
+    "SqliteProfileCueStore",
     "SqliteRepos",
     "SqliteSessionBufferStore",
     "SqliteSessionPurgeStore",

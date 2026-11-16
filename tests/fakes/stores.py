@@ -16,6 +16,7 @@ __all__ = [
     "InMemoryImageStore",
     "InMemoryMemcellStore",
     "InMemoryMessageForgetStore",
+    "InMemoryProfileCueStore",
     "InMemoryProfileStore",
     "InMemorySceneStore",
     "UnusedPort",
@@ -53,6 +54,7 @@ from everos.memory.ports import (
     NoSourceCheck,
     OwnerType,
     PendingBatch,
+    PersonCues,
     Scope,
     SessionKey,
     SourceCheck,
@@ -939,6 +941,42 @@ class InMemoryMessageForgetStore:
         }
 
 
+class InMemoryProfileCueStore:
+    """Profile cue records, in memory: ``(memcell_id, person_id) -> cues``."""
+
+    def __init__(self) -> None:
+        self.records: dict[tuple[str, str], PersonCues] = {}
+        self.sessions: dict[str, SessionKey] = {}
+
+    async def record(
+        self,
+        session: SessionKey,
+        memcell_id: str,
+        cues: Mapping[str, PersonCues],
+    ) -> None:
+        self.sessions[memcell_id] = session
+        for person_id, found in cues.items():
+            before = self.records.get((memcell_id, person_id))
+            self.records[(memcell_id, person_id)] = dataclasses.replace(
+                found, read=before.read if before is not None else False
+            )
+
+    async def of_person(
+        self, person_id: str, memcell_ids: Collection[str]
+    ) -> dict[str, PersonCues]:
+        return {
+            memcell_id: self.records[(memcell_id, person_id)]
+            for memcell_id in memcell_ids
+            if (memcell_id, person_id) in self.records
+        }
+
+    async def mark_read(self, person_id: str, memcell_ids: Collection[str]) -> None:
+        for memcell_id in memcell_ids:
+            key = (memcell_id, person_id)
+            if key in self.records:
+                self.records[key] = dataclasses.replace(self.records[key], read=True)
+
+
 class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
     """Image-memory daily log, in memory."""
 
@@ -1014,6 +1052,12 @@ class InMemoryImageMemoryStore(_DailyLog[ImageMemory]):
     ) -> list[Stored[ImageMemory]]:
         wanted = set(entry_ids)
         return [s for s in await self.read_all(scope) if s.ref.entry_id in wanted]
+
+    async def read_for_segments(
+        self, scope: Scope, memcell_ids: Collection[str]
+    ) -> list[Stored[ImageMemory]]:
+        wanted = set(memcell_ids)
+        return [s for s in await self.read_all(scope) if s.item.parent_id in wanted]
 
     async def read_all(self, scope: Scope) -> list[Stored[ImageMemory]]:
         found: list[Stored[ImageMemory]] = []

@@ -488,8 +488,9 @@ class Memorizer:
 
         Published whether or not the flush cut a segment: the profiles
         waiting on ``[groups] member_profile_every`` (a group's members,
-        section 7.4) or on ``[profile] update_every`` (the users of a
-        one-to-one session) are brought up to date on it.
+        section 7.4) are brought up to date on it, and so are those waiting on
+        ``[profile] update_every`` (the users of a one-to-one session) with
+        ``[profile] update_on_flush``.
         """
         if not is_final:
             return

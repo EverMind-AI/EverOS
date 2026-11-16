@@ -26,6 +26,7 @@ def test_every_strategy_function_has_one_spec_under_its_name() -> None:
     assert len(by_name) == len(STRATEGY_SPECS)
     assert by_name == {
         "extract_user_profile": extract_user_profile,
+        "extract_user_profile_idle": extract_user_profile,
         "update_user_scenes": update_user_scenes,
         "update_member_profiles": update_member_profiles,
         "update_group_scenes": update_group_scenes,
@@ -90,3 +91,11 @@ def test_only_a_group_episode_starts_the_group_profile_s_idle_clock() -> None:
     field = idle.trigger.event_field
     assert getattr(_episode("user"), field) is None
     assert getattr(_episode("group"), field) == "a/p/trip"
+
+
+def test_only_a_user_episode_starts_the_user_profile_s_idle_clock() -> None:
+    idle = next(s for s in STRATEGY_SPECS if s.name == "extract_user_profile_idle")
+    assert isinstance(idle.trigger, Idle)
+    field = idle.trigger.event_field
+    assert getattr(_episode("user"), field) == "a/p/u_ann"
+    assert getattr(_episode("group"), field) is None

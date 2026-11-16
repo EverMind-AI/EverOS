@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from everos.memory.ports import StrategySpec
 
+from .extract_user_profile import (
+    EXTRACT_USER_PROFILE_IDLE_SPEC as EXTRACT_USER_PROFILE_IDLE_SPEC,
+)
 from .extract_user_profile import EXTRACT_USER_PROFILE_SPEC as EXTRACT_USER_PROFILE_SPEC
 from .extract_user_profile import extract_user_profile as extract_user_profile
+from .extract_user_profile import update_pending_profile as update_pending_profile
 from .update_group_profile import (
     UPDATE_GROUP_PROFILE_IDLE_SPEC as UPDATE_GROUP_PROFILE_IDLE_SPEC,
 )
@@ -35,6 +39,7 @@ from .update_user_scenes import update_user_scenes as update_user_scenes
 
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     EXTRACT_USER_PROFILE_SPEC,
+    EXTRACT_USER_PROFILE_IDLE_SPEC,
     UPDATE_USER_SCENES_SPEC,
     UPDATE_MEMBER_PROFILES_SPEC,
     UPDATE_GROUP_SCENES_SPEC,
@@ -44,6 +49,7 @@ STRATEGY_SPECS: tuple[StrategySpec, ...] = (
 """Every strategy the service registers, in registration order."""
 
 __all__ = [
+    "EXTRACT_USER_PROFILE_IDLE_SPEC",
     "EXTRACT_USER_PROFILE_SPEC",
     "STRATEGY_SPECS",
     "UPDATE_GROUP_PROFILE_IDLE_SPEC",
@@ -55,5 +61,6 @@ __all__ = [
     "update_group_profile",
     "update_group_scenes",
     "update_member_profiles",
+    "update_pending_profile",
     "update_user_scenes",
 ]

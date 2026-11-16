@@ -2,44 +2,59 @@
 
 The 2.0 design's profile update: the new segments of a one-to-one
 conversation update the profile of each user who spoke in them, and the update
-reads those segments only -- with the pictures the owner posted in them --
-against the stored profile. What older segments said is already in the
-profile, so reading them again only re-adds it. The update is the one a
-member's profile in a group runs (:mod:`._profiles`), and so is the cadence:
+reads those segments only -- by default only what their episode calls marked
+as lasting about the owner -- against the stored profile. What older segments
+said is already in the profile, so reading them again only re-adds it. The
+update is the one a member's profile in a group runs (:mod:`._profiles`):
 
 - **Cadence.** ``[profile] update_every`` (5): a user's segment is queued on
   their profile (``pending_memcell_ids``), and the profile is updated once
-  that many are queued -- all of them in one update -- and at every flush of
-  one of the user's conversations (:class:`SessionFlushed`), for every sender
-  of its segments with something queued. A user's first segment, while they
-  have no profile, is read at once: a personal search attaches the user's
-  profile, and a profile of a queue only would be an empty one. ``1`` reads
-  every segment at once, as before. Episodes are searchable at once; only the
-  profile lags. An update that fails leaves every segment it was to read
-  queued (the event's included), so a later update -- the engine's retry,
-  the next segment past the cadence, a flush -- reads them: a failed window
-  is never skipped.
+  that many are queued -- all of them in one update -- and once the user has
+  had no new segment for ``[profile] idle_seconds`` (600; the group profile's
+  idle trigger, :data:`EXTRACT_USER_PROFILE_IDLE_SPEC`), and, with ``[profile]
+  update_on_flush`` (off since 2026-11-14), at every flush of one of the
+  user's conversations (:class:`SessionFlushed`), for every sender of its
+  segments with something queued. A user's first segment, while they have no
+  profile, is read at once: a personal search attaches the user's profile,
+  and a profile of a queue only would be an empty one. ``1`` reads every
+  segment at once. Episodes are searchable at once; only the profile lags.
+  An update that fails leaves every segment it was to read queued (the
+  event's included), so a later update -- the engine's retry, the next
+  segment past the cadence, the idle tick -- reads them: a failed window is
+  never skipped. :func:`update_pending_profile` brings one user's queue up to
+  date on demand.
 - **Trigger.** :class:`EpisodeExtracted` of a user's own episode (one per
-  one-to-one segment), with or without an embedding provider, and
-  :class:`SessionFlushed`. A group's episode -- a session of three or more
-  people is a group's -- never triggers it; each of two people talking
-  without a ``group_id`` has their own episode, so their own update.
+  one-to-one segment), with or without an embedding provider, the idle tick
+  of a user's space, and -- with ``update_on_flush`` -- :class:`SessionFlushed`.
+  A group's episode -- a session of three or more people is a group's --
+  never triggers it; each of two people talking without a ``group_id`` has
+  their own episode, so their own update.
 - **Input.** The queued segments, read from the SQLite ledger (an event
   carries its segment's id, so nothing waits for the index), each without the
-  messages a live forget names, oldest first, and the pictures the owner
-  posted in them (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
-  none when ``[extraction] vision`` is off). The queue also holds the segments
-  a message forget queued: the items it took out because they rested on a
-  segment that lost a message are written again from what the owner's
-  segments still say. A queued segment is read only while it has a live
-  episode and a message of the owner's. A segment the profile already rests
-  on (a replayed event) is not queued again, and neither is a segment whose
-  episode the owner forgot -- by its conversation, by id, by a time range or
-  with everything -- nor is a picture they forgot read: a forget leaves the
-  bytes in place for its undo, so the episode's mark and the forget log, read
-  under the profile lock a forget holds while it records, are what tell. A
-  conversation sent again (or continued) after its forget is new material:
-  its new episodes are not forgotten, and the profile reads them.
+  messages a live forget names, oldest first. ``[profile] input`` decides
+  what of them the model is shown
+  (:func:`~everos.memory.extract.pipeline.profile_input.select_profile_input`):
+  ``cues`` (the default) -- the messages and pictures the segments' episode
+  calls marked as lasting facts about the owner, each message after the one
+  before it by someone else, the pictures as their picture memories' text
+  (``[profile] picture_pixels`` attaches them instead); a segment never
+  marked is read in full -- or ``full``, every message and every picture the
+  owner posted (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
+  none when ``[extraction] vision`` is off), the request of 2026-11-13. An
+  update whose segments marked nothing for the owner makes **no call**: its
+  segments are taken off the queue and marked read. The queue also holds the
+  segments a message forget queued: the items it took out because they
+  rested on a segment that lost a message are written again from what the
+  owner's segments still say. A queued segment is read only while it has a
+  live episode and a message of the owner's. A segment the profile already
+  rests on, or has read (a replayed event), is not queued again, and neither
+  is a segment whose episode the owner forgot -- by its conversation, by id,
+  by a time range or with everything -- nor is a picture they forgot read: a
+  forget leaves the bytes in place for its undo, so the episode's mark and
+  the forget log, read under the profile lock a forget holds while it
+  records, are what tell. A conversation sent again (or continued) after its
+  forget is new material: its new episodes are not forgotten, and the
+  profile reads them.
 - **Operator.** everalgo's ``ProfileExtractor.aupdate``: one update call with
   the two-prompt design's add / modify / deprecate / none, then a
   consolidation call only for a part of the profile that is over its cap and
@@ -68,19 +83,37 @@ member's profile in a group runs (:mod:`._profiles`), and so is the cadence:
 
 from __future__ import annotations
 
+from collections.abc import Collection, Sequence
+
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted, SessionFlushed
+from everos.memory.events import EpisodeExtracted, SessionFlushed, parse_user_key
 from everos.memory.extract.conversation_language import conversation_language
 from everos.memory.extract.pipeline.member_profile import wrote_in
+from everos.memory.extract.pipeline.profile_input import select_profile_input
 from everos.memory.extract.pipeline.profile_items import already_read
 from everos.memory.groups import readable_segments
 from everos.memory.models import FORGOTTEN_MARK, MemCell, Profile
-from everos.memory.ports import Event, Immediate, Scope, SessionKey, StrategySpec
+from everos.memory.ports import (
+    Event,
+    Idle,
+    IdleTick,
+    Immediate,
+    Scope,
+    SessionKey,
+    StrategySpec,
+)
 
 from ._profiles import update_profile
+
+__all__ = [
+    "EXTRACT_USER_PROFILE_IDLE_SPEC",
+    "EXTRACT_USER_PROFILE_SPEC",
+    "extract_user_profile",
+    "update_pending_profile",
+]
 
 logger = get_logger(__name__)
 
@@ -174,14 +207,31 @@ async def _segments(
 
 
 async def extract_user_profile(
-    event: EpisodeExtracted | SessionFlushed, deps: MemoryDeps
+    event: EpisodeExtracted | SessionFlushed | IdleTick, deps: MemoryDeps
 ) -> list[Event]:
     """Queue the event's segment on its owner's profile and read the queue
-    when it is due; at a flush, read what each sender's profile queued."""
+    when it is due; at a flush, read what each sender's profile queued; at a
+    user's idle tick, read what their profile queued."""
+    if isinstance(event, IdleTick):
+        key = parse_user_key(event.bucket_key)
+        if key is None:
+            logger.warning("profile_bad_idle_key", key=event.bucket_key)
+            return []
+        app_id, project_id, user_id = key
+        await update_pending_profile(
+            deps,
+            Scope(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=user_id,
+                owner_type="user",
+            ),
+        )
+        return []
     if isinstance(event, SessionFlushed):
         session = SessionKey(event.app_id, event.project_id, event.session_id)
         for person in await deps.stores.memcell.senders_in_session(session):
-            await _flush_pending(deps, _scope(event, person))
+            await update_pending_profile(deps, _scope(event, person))
         return []
     every = load_settings().profile.update_every
     scope = _scope(event, event.owner_id)
@@ -197,7 +247,9 @@ async def extract_user_profile(
             )
             return []
         existing = await deps.stores.profile.read(scope)
-        if already_read(existing, event.memcell_id):
+        if already_read(existing, event.memcell_id) or await _read_before(
+            deps, scope, event.memcell_id
+        ):
             logger.info(
                 "profile_segment_already_read",
                 owner_id=event.owner_id,
@@ -224,13 +276,27 @@ async def extract_user_profile(
     return []
 
 
-async def _flush_pending(deps: MemoryDeps, scope: Scope) -> None:
-    """Read what the person's profile has queued, if anything."""
+async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
+    """Bring a user's profile up to date with the segments queued on it.
+
+    What a due update reads, under the profile's lock: every queued segment,
+    as ``[profile] input`` shows them -- the cadence's own reads, the idle
+    tick's and a flush's (``update_on_flush``) all go through it, and so can a
+    caller that needs the profile current now (an evaluation's catch-up at
+    the end of an ingest). A profile with nothing queued is left as it is.
+
+    Args:
+        deps: The strategies' dependencies.
+        scope: The user's own space (``owner_type`` ``user``).
+
+    Returns:
+        How many queued segments the update read; 0 with nothing queued.
+    """
     async with profile_lock(scope):
         existing = await deps.stores.profile.read(scope)
         if existing is None or not existing.pending_memcell_ids:
-            return
-        await _read(
+            return 0
+        return await _read(
             deps,
             scope,
             existing,
@@ -248,20 +314,39 @@ async def _read(
     *,
     memcell_id: str | None,
     language: str | None,
-) -> None:
+) -> int:
     """Read the queue (and the event's segment) into the profile and write
-    it; the caller holds the lock.
+    it; the caller holds the lock. Returns how many segments were read.
 
     An update that fails writes the queue with the event's segment in it
     before the error goes on: those segments stay to be read by a later
-    update, never skipped.
+    update, never skipped. Segments that marked nothing for the owner are
+    read without a call (``[profile] input = "cues"``).
     """
     segments = await _segments(deps, scope, queued, memcell_id)
     if not segments:
-        return
+        return 0
     if language is None:
         found = conversation_language([cell for _, cell in reversed(segments)])
         language = None if found is None else str(found)
+    chosen = await select_profile_input(
+        segments,
+        scope.owner_id,
+        mode=deps.profile_input,
+        cues=deps.stores.profile_cues,
+        image_memory=deps.stores.image_memory,
+        scope=scope,
+        picture_pixels=deps.profile_picture_pixels,
+        forgotten_pictures=await _forgotten_pictures(deps, scope),
+    )
+    if not chosen.segments:
+        await _read_without_call(deps, scope, existing, chosen.read)
+        logger.info(
+            "user_profile_no_cues",
+            owner_id=scope.owner_id,
+            segments=len(segments),
+        )
+        return len(segments)
     try:
         updated = await update_profile(
             deps,
@@ -271,9 +356,11 @@ async def _read(
             if _has_items(existing)
             else None,
             history=existing.history if existing else [],
-            segments=segments,
-            shown=[cell for _, cell in segments],
+            segments=chosen.segments,
+            shown=chosen.shown,
             language=_profile_language(existing, language),
+            pictures=chosen.pictures,
+            picture_text=chosen.picture_text,
         )
     except Exception:
         await _keep_queued(deps, scope, existing, [m for m, _ in segments])
@@ -285,15 +372,61 @@ async def _read(
             item_ids=updated.held,
         )
     await deps.stores.profile.write(scope, updated.profile)
+    await _mark_read(deps, scope, chosen.read)
     logger.info(
         "user_profile_extracted",
         owner_id=scope.owner_id,
         segments=len(segments),
+        shown=len(chosen.segments),
+        without_cues=len(chosen.skipped),
         pictures=updated.pictures,
         mode="UPDATE" if _has_items(existing) else "FIRST",
         retired=updated.retired,
         consolidated=updated.consolidated,
     )
+    return len(segments)
+
+
+async def _forgotten_pictures(deps: MemoryDeps, scope: Scope) -> Collection[str]:
+    """The owner's pictures a live forget names, for a ``cues`` read (``full``
+    leaves them to the picture read, as before, and reads nothing here)."""
+    if deps.profile_input != "cues" or deps.stores.profile_cues is None:
+        return ()
+    return await deps.stores.forget_log.live_targets(
+        target="image",
+        app_id=scope.app_id,
+        project_id=scope.project_id,
+        owner_id=scope.owner_id,
+        owner_type=scope.owner_type,
+    )
+
+
+async def _read_without_call(
+    deps: MemoryDeps, scope: Scope, existing: Profile | None, read: Sequence[str]
+) -> None:
+    """Take what an update read without a call off the queue, and mark it
+    read: its segments marked nothing for the owner."""
+    if existing is not None and existing.pending_memcell_ids:
+        await deps.stores.profile.write(
+            scope, existing.model_copy(update={"pending_memcell_ids": []})
+        )
+    await _mark_read(deps, scope, read)
+
+
+async def _mark_read(deps: MemoryDeps, scope: Scope, read: Sequence[str]) -> None:
+    cues = deps.stores.profile_cues
+    if cues is not None and read:
+        await cues.mark_read(scope.owner_id, read)
+
+
+async def _read_before(deps: MemoryDeps, scope: Scope, memcell_id: str) -> bool:
+    """Whether the owner's profile has read the segment already (its cue
+    record says so: an update read it, with a call or without one)."""
+    cues = deps.stores.profile_cues
+    if cues is None:
+        return False
+    found = await cues.of_person(scope.owner_id, [memcell_id])
+    return memcell_id in found and found[memcell_id].read
 
 
 async def _keep_queued(
@@ -323,3 +456,22 @@ EXTRACT_USER_PROFILE_SPEC = StrategySpec(
     applies_to=_profile_applies,
     max_retries=2,
 )
+"""The segment half, and the flush: the bootstrap drops :class:`SessionFlushed`
+from the trigger unless ``[profile] update_on_flush``."""
+
+EXTRACT_USER_PROFILE_IDLE_SPEC = StrategySpec(
+    name="extract_user_profile_idle",
+    fn=extract_user_profile,
+    trigger=Idle(
+        on=[EpisodeExtracted],
+        event_field="user_key",
+        idle_seconds=600,
+        scan_interval_seconds=60,
+    ),
+    max_retries=2,
+)
+"""The idle half: ``[profile] idle_seconds`` after a user's last segment (the
+bootstrap sets the configured value), the group profile's mechanism. Only a
+user's episode carries a ``user_key``, so a group's episode starts no idle
+clock. The scheduler keeps firing for a user who stays idle; with nothing
+queued a tick returns at once."""
