@@ -460,7 +460,13 @@ function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
-- `extract_atomic_facts` / `extract_foresight` / `extract_user_profile` — user pipeline
+- `extract_atomic_facts` / `summarize_episode` / `extract_foresight` /
+  `split_episode_by_owner` / `extract_user_profile` — user pipeline.
+  `EpisodeExtracted` is one event per memcell listing every owner's copy:
+  facts, the summary and clustering run once on it and fan out over the
+  copies; `split_episode_by_owner` turns it into one
+  `EpisodeExtractedForOwner` per copy for the profile, which works on one
+  owner's state
 - `extract_agent_case` / `extract_agent_skill` — agent pipeline
 - `reflect_episodes` / `finish_reflection` — offline episode consolidation
   (cron merge, then deprecation once the merged episode's facts exist)

@@ -3,7 +3,8 @@
 Every event is an :class:`~everos.memory.ports.Event`: frozen, and
 round-trippable through JSON, because the scheduler persists the triggering
 event of each run and replays it after a crash. Fields added later carry
-defaults so payloads persisted by an older release still validate.
+defaults, and a reshaped event maps its old payload onto the new shape, so
+payloads persisted by an older release still validate.
 """
 
 from __future__ import annotations
@@ -11,18 +12,19 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from everalgo.types import MemCell
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from everos.memory.ports import Event
+from everos.memory.ports import Event, Scope
 
 
 class UserPipelineStarted(Event):
     """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
 
-    Hot-path emit, so atomic_fact / foresight / clustering strategies can
-    start in parallel with the in-pipeline Episode extraction. Carries the
-    algo-side ``MemCell`` so crash recovery has the full payload (OME
-    serialises events to JSON via Pydantic v2 nested-model handling).
+    Hot-path emit, so the strategies that read the memcell itself
+    (foresight) can start in parallel with the in-pipeline Episode
+    extraction. Carries the algo-side ``MemCell`` so crash recovery has the
+    full payload (OME serialises events to JSON via Pydantic v2 nested-model
+    handling).
     """
 
     memcell_id: str
@@ -86,28 +88,51 @@ class ReflectionContext(BaseModel):
     last_ts: int
 
 
-class EpisodeExtracted(Event):
-    """Fired once per Episode after :class:`UserMemoryPipeline` writes its md.
+class EpisodeCopy(BaseModel):
+    """One owner's copy of an extracted episode, as written to their files.
 
-    Carries ``episode_text`` so downstream clustering can embed it without
-    racing the cascade (cascade also embeds, but at the LanceDB layer —
-    keeping a copy on the event is cheaper than polling LanceDB until the
-    row appears). ``episode_timestamp_ms`` rides along so the cluster
-    strategy can stamp the algo-side ``Cluster.last_ts`` without a second
-    md read. One memcell can produce multiple episodes (one per user
-    sender), so this event fires per-episode, not per-memcell.
+    Entry ids are sequences within each owner's daily file, so a copy's id
+    cannot be derived from the memcell and travels on the event.
     """
 
-    memcell_id: str
-    episode_entry_id: str
-    episode_text: str
-    episode_timestamp_ms: int
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     owner_id: str
+    entry_id: str
     owner_name: str | None = None
     """How the owner's chat lines were labelled in the source memcell -- their
     ``sender_name``, else ``owner_id`` -- so the narrative names the owner by
     it. ``None`` where no pipeline run labelled them (Reflection's merged
     episodes, backfill's synthesized events, a payload from before the field)."""
+
+
+class EpisodeExtracted(Event):
+    """Fired once per memcell after its episode is written to markdown.
+
+    The pipeline extracts one episode per memcell and writes a copy of it
+    into the files of every user sender; ``copies`` lists the copies actually
+    written (a write skipped because the memcell was deleted is not listed,
+    and a cell with no written copy emits no event). The copies share the
+    text, timestamp and language, so work done once per episode (atomic
+    facts, the clustering embedding, the summary) consumes this event and
+    fans out over the copies itself, while work on one owner's state (the
+    profile) consumes :class:`EpisodeExtractedForOwner`, which
+    ``split_episode_by_owner`` derives from it. Reflection's merged episode
+    is an event with one copy (``source="reflection"``).
+
+    Carries ``episode_text`` so the strategies need no markdown read and do
+    not race the cascade, and ``episode_timestamp_ms`` so clustering can
+    stamp ``Cluster.last_ts``.
+
+    A payload persisted by a release that emitted one event per copy
+    (``owner_id`` / ``episode_entry_id`` / ``owner_name`` at the top level)
+    validates as a one-copy event.
+    """
+
+    memcell_id: str
+    episode_text: str
+    episode_timestamp_ms: int
+    copies: list[EpisodeCopy] = Field(min_length=1)
     session_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
@@ -119,6 +144,48 @@ class EpisodeExtracted(Event):
     language: str | None = None
     """The episode's detected ``OutputLanguage`` value; the extractions this
     event drives write in it. ``None`` lets each extractor infer its own."""
+
+    def owner_scope(self, copy: EpisodeCopy) -> Scope:
+        """The user scope ``copy`` was written under."""
+        return Scope(
+            app_id=self.app_id,
+            project_id=self.project_id,
+            owner_id=copy.owner_id,
+            owner_type="user",
+        )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_copy_from_per_copy_payload(cls, data: Any) -> Any:
+        """Map a per-copy payload of an older release onto ``copies``."""
+        if not isinstance(data, dict) or "episode_entry_id" not in data:
+            return data
+        fields = dict(data)
+        copy = {
+            "owner_id": fields.pop("owner_id", None),
+            "entry_id": fields.pop("episode_entry_id"),
+            "owner_name": fields.pop("owner_name", None),
+        }
+        return {**fields, "copies": [copy]}
+
+
+class EpisodeExtractedForOwner(Event):
+    """One owner's copy of a pipeline :class:`EpisodeExtracted`.
+
+    Emitted by ``split_episode_by_owner`` for work that reads and rewrites one
+    owner's state (the profile), so each owner is a run of its own, retried
+    on its own.
+    """
+
+    memcell_id: str
+    episode_entry_id: str
+    owner_id: str
+    owner_name: str | None = None
+    """As :attr:`EpisodeCopy.owner_name`."""
+    app_id: str = "default"
+    project_id: str = "default"
+    language: str | None = None
+    """As :attr:`EpisodeExtracted.language`."""
 
 
 class AtomicFactsExtracted(Event):

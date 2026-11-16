@@ -123,7 +123,7 @@ index catches up asynchronously.
                                      ▼                              ▼
                           ┌───────────────────  Offline Memory Engine (OME)  ───────────────────┐
                           │  async strategies write derived .md:                                 │
-                          │  atomic_facts · foresight · user profile · agent cases · agent skills │
+                          │  atomic_facts · summary · foresight · profile · agent cases · skills │
                           └───────────────────────────────┬──────────────────────────────────────┘
                                                            ▼
                                             cascade daemon watches the .md tree
@@ -151,7 +151,11 @@ index catches up asynchronously.
   and reflection prompts with
   [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
-  `extracted`, the episode file is already on disk.
+  `extracted`, the episode file is already on disk. A memcell costs one
+  extraction call: the episode is copied into the files of every user
+  sender of the memcell, each copy with a placeholder summary (the
+  episode's opening, cut and closed with `…`) that the OME replaces with
+  a model-written preview shortly after.
 - Everything else (atomic facts, foresight, profile, agent cases/skills)
   is produced **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
@@ -212,12 +216,19 @@ with `everos cascade` ([Operating it](#operating-it)); deeper runbook in
 
 Most memory kinds are **not** extracted on the request path — they are
 derived later by the OME, an in-process async strategy engine. When
-extraction carves a MemCell, it emits an event; OME strategies pick it up
-and write their markdown when ready:
+extraction carves a MemCell, it emits events; OME strategies pick them up
+and write their markdown when ready. Each memcell's episode is announced
+once (`EpisodeExtracted`, listing every owner's copy), so work done on the
+episode runs once and is shared by its owners:
 
-- `extract_atomic_facts` — single-sentence facts from an episode
+- `extract_atomic_facts` — single-sentence facts from an episode, extracted
+  once and written under every owner of the episode
+- `summarize_episode` — the episode's display summary, written in the
+  episode's language over the placeholder it was stored with
 - `extract_foresight` — anticipatory notes
-- `extract_user_profile` — the aggregated `user.md`
+- `split_episode_by_owner` — hands each owner's copy of an episode to the
+  profile as an event of its own (no model call)
+- `extract_user_profile` — the aggregated `user.md`, one run per owner
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design, and the
   `agent_case_skipped` log line says which check skipped them). With
@@ -225,7 +236,8 @@ and write their markdown when ready:
   was completed correctly decides instead
 - `extract_agent_skill` — clusters related cases into a named skill
 - `trigger_profile_clustering` — groups a user's episodes into topic clusters,
-  which agentic search and Reflection read
+  which agentic search and Reflection read (the episode is embedded once
+  for all of its owners)
 - `trigger_skill_clustering` — triggers agent skill clustering
 - `reflect_episodes` (cron, default off) — offline memory consolidation.
   Merges fragmented episodes within a cluster into a single coherent
@@ -242,6 +254,9 @@ enabled = false
 [strategies.extract_user_profile]
 enabled = false
 ```
+
+Turning the profile off, also turn off `split_episode_by_owner`: it only
+feeds the profile.
 
 OME keeps its own state in `.index/sqlite/ome.db` (run records, counters)
 and its scheduler jobstore in `.index/sqlite/ome.aps.db` (split so the sync
@@ -265,8 +280,9 @@ enabled = true
 !!! tip "Implication for clients"
     After `/flush` returns `extracted`, the **episode** is queryable soon
     (once cascade indexes it), but **atomic facts / profile / agent cases**
-    appear only after their OME strategy runs — typically seconds later.
-    Poll / retry if you need them immediately.
+    appear only after their OME strategy runs — typically seconds later —
+    and the episode's `summary` is its placeholder until `summarize_episode`
+    replaces it. Poll / retry if you need them immediately.
 
 ## Consistency model
 

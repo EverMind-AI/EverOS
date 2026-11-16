@@ -1,8 +1,10 @@
 """extract_user_profile strategy — fold new episodes into their owner's profile.
 
-Fires on every pipeline :class:`EpisodeExtracted` and hands the event's episode,
-with up to ``max_episodes_per_call - 1`` of the owner's newer episodes still
-waiting, to everalgo's ``ProfileExtractor.aextract_from_episodes`` in one call:
+Fires on every :class:`EpisodeExtractedForOwner` -- one per owner's copy of a
+pipeline episode, split off by ``split_episode_by_owner`` -- and hands that
+episode, with up to ``max_episodes_per_call - 1`` of the owner's newer
+episodes still waiting, to everalgo's ``ProfileExtractor.aextract_from_episodes``
+in one call:
 INIT when the owner has no ``user.md`` yet, UPDATE on the stored profile
 otherwise. The runs of the episodes folded along find them marked and end
 without a call, so a backlog drains in a fraction of the calls.
@@ -10,8 +12,9 @@ without a call, so a backlog drains in a fraction of the calls.
 Invariants a change must keep:
 
 - **One owner per event.** A memcell with several user senders yields the
-  same narrative once per sender, each copy in its own owner's files with its
-  own ``EpisodeExtracted``; each copy updates only that owner's profile.
+  same narrative once per sender, each copy in its own owner's files and
+  split into its own ``EpisodeExtractedForOwner``; each copy updates only
+  that owner's profile, in a run of its own with its own retries.
 - **The narrative names the owner by the label it was written with.** The
   pipeline puts that label on the event (``owner_name``: the owner's
   ``sender_name``, else their id); an event without one falls back to
@@ -29,7 +32,7 @@ Invariants a change must keep:
   gone (the user deleted it before this run) is left out, and a run whose own
   episode is gone ends there.
 - **Reflection's merged episodes are not profiled**: their source episodes
-  already were. Their runs do not apply, and the index read takes
+  already were. They are never split per owner, and the index read takes
   ``parent_type="memcell"`` only.
 - **At least once.** OME re-enqueues a run that was RUNNING when the process
   died, and :class:`~everos.memory.profile_batcher.ProfileBatcher` keeps the
@@ -56,7 +59,7 @@ from everalgo.utils import InvalidInputError as AlgoInvalidInputError
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtractedForOwner
 from everos.memory.mappers import episode as episode_mapper
 from everos.memory.mappers import profile as profile_mapper
 from everos.memory.models import Episode, Profile
@@ -66,7 +69,7 @@ logger = get_logger(__name__)
 
 
 async def extract_user_profile(
-    event: EpisodeExtracted, deps: MemoryDeps
+    event: EpisodeExtractedForOwner, deps: MemoryDeps
 ) -> list[Event]:
     """Fold the event's episode, and the owner's waiting ones, into the profile."""
     scope = Scope(
@@ -88,7 +91,9 @@ async def extract_user_profile(
     return []
 
 
-async def _fold(event: EpisodeExtracted, scope: Scope, deps: MemoryDeps) -> None:
+async def _fold(
+    event: EpisodeExtractedForOwner, scope: Scope, deps: MemoryDeps
+) -> None:
     """Fold the event's episode and the owner's waiting ones into ``user.md``."""
     own = await _read_episodes(scope, [event.episode_entry_id], deps)
     if not own:
@@ -122,7 +127,10 @@ async def _fold(event: EpisodeExtracted, scope: Scope, deps: MemoryDeps) -> None
 
 
 async def _waiting_episodes(
-    scope: Scope, existing: Profile | None, event: EpisodeExtracted, deps: MemoryDeps
+    scope: Scope,
+    existing: Profile | None,
+    event: EpisodeExtractedForOwner,
+    deps: MemoryDeps,
 ) -> list[tuple[str, Episode]]:
     """The owner's oldest unfolded episodes newer than the profile, up to the cap.
 
@@ -160,7 +168,7 @@ async def _memcell_exists(memcell_id: str, deps: MemoryDeps) -> bool:
 
 
 async def _extract(
-    event: EpisodeExtracted,
+    event: EpisodeExtractedForOwner,
     deps: MemoryDeps,
     *,
     episodes: list[tuple[str, Episode]],
@@ -191,7 +199,9 @@ async def _extract(
         return None
 
 
-def _profile_language(existing: Profile | None, event: EpisodeExtracted) -> str | None:
+def _profile_language(
+    existing: Profile | None, event: EpisodeExtractedForOwner
+) -> str | None:
     """The language to write the profile in, frozen once known.
 
     A stored profile's ``primary_language`` wins and is never changed
@@ -206,7 +216,6 @@ def _profile_language(existing: Profile | None, event: EpisodeExtracted) -> str 
 EXTRACT_USER_PROFILE_SPEC = StrategySpec(
     name="extract_user_profile",
     fn=extract_user_profile,
-    trigger=Immediate(on=[EpisodeExtracted]),
-    applies_to=lambda event, _deps: event.source == "pipeline",
+    trigger=Immediate(on=[EpisodeExtractedForOwner]),
     max_retries=2,
 )

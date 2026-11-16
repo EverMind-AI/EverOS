@@ -79,6 +79,8 @@ EVEROS_CLUSTERING__THRESHOLD = "0.7"
 [ome_strategies.extract_user_profile]   # written to each server root's ome.toml
 enabled = false                         # answers never read the profile (include_profile
                                         # = false); off, it costs no calls and no failed runs
+[ome_strategies.split_episode_by_owner]
+enabled = false                         # feeds only the profile; off with it
 
 # --- ANSWER ----------------------------------------------------------------
 [answer]

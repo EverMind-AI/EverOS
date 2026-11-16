@@ -480,7 +480,14 @@ async def test_add_flush_search_get_on_canned_user_track(
             return resp.json()["data"]["episodes"]
 
         async def _indexed() -> bool:
-            return bool(await _get("episode")) and bool(await _get("profile"))
+            # The episode is stored with its placeholder summary; the offline
+            # summary strategy replaces it with the model's preview.
+            episodes = await _get("episode")
+            return (
+                bool(episodes)
+                and episodes[0]["summary"] == summary
+                and bool(await _get("profile"))
+            )
 
         await _poll_until(_indexed)
         (got_episode,) = await _get("episode")
@@ -504,6 +511,7 @@ async def test_add_flush_search_get_on_canned_user_track(
     replies = [call.response_format.__name__ for call in llm.calls]
     assert replies.count("Reply") == 2  # the add and the flush
     assert replies.count("_EpisodeReply") == 1
+    assert replies.count("_SummaryReply") == 1
     assert "_AtomicFactsReply" in replies
     assert "_EpisodeInitOutput" in replies
 

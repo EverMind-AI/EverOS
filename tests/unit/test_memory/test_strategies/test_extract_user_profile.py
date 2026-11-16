@@ -24,7 +24,7 @@ from everalgo.utils import InvalidInputError as AlgoInvalidInputError
 
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.deps import MemoryDeps
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtractedForOwner
 from everos.memory.models import Episode, EpisodeParentType, Profile
 from everos.memory.ports import MemoryRef, Scope, Stored
 from everos.memory.profile_batcher import ProfileBatcher
@@ -52,17 +52,13 @@ def _event(
     memcell_id: str = "mc_aaaaaaaaaaa1",
     episode_entry_id: str = "ep_20260101_0001",
     owner_name: str | None = "Alice",
-    source: str = "pipeline",
     language: str | None = None,
-) -> EpisodeExtracted:
-    return EpisodeExtracted(
+) -> EpisodeExtractedForOwner:
+    return EpisodeExtractedForOwner(
         memcell_id=memcell_id,
         episode_entry_id=episode_entry_id,
-        episode_text="as carried on the event",
-        episode_timestamp_ms=_TS,
         owner_id=owner_id,
         owner_name=owner_name,
-        source=source,
         language=language,
     )
 
@@ -117,19 +113,10 @@ def _algo_profile(owner_id: str = "u_alice", **fields: object) -> AlgoProfile:
 def test_spec() -> None:
     spec = EXTRACT_USER_PROFILE_SPEC
     assert spec.name == "extract_user_profile"
-    assert spec.trigger.on == [EpisodeExtracted]
+    assert spec.trigger.on == [EpisodeExtractedForOwner]
     assert spec.emits == frozenset()
     assert spec.max_retries == 2
-
-
-@pytest.mark.parametrize(
-    ("source", "applies"), [("pipeline", True), ("reflection", False)]
-)
-def test_only_pipeline_episodes_are_profiled(source: str, applies: bool) -> None:
-    assert (
-        EXTRACT_USER_PROFILE_SPEC.applies_to(_event(source=source), make_deps())
-        is applies
-    )
+    assert spec.applies_to is None  # only pipeline episodes are split per owner
 
 
 async def test_init_extracts_from_the_episode_read_back_from_md() -> None:
@@ -309,7 +296,7 @@ def _seed_indexed(
     deps.indexes.episode.seed(Stored(ref=ref, scope=scope, item=episode))
 
 
-def _own_event(entry_id: str) -> EpisodeExtracted:
+def _own_event(entry_id: str) -> EpisodeExtractedForOwner:
     return _event(episode_entry_id=entry_id, memcell_id=f"mc_{entry_id}")
 
 

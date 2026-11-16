@@ -187,7 +187,7 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 |---|---|
 | `boundary` | Cutting a session's messages into memcells (user and agent tracks) |
 | `episode` | Extracting each memcell's episode |
-| `summary` | The episode's display summary, a separate call made beside `episode` |
+| `summary` | The episode's display summary, written offline from the stored episode (`summarize_episode`) |
 | `atomic_fact` | Atomic-fact extraction |
 | `foresight` | Foresight extraction |
 | `profile` | User-profile extraction |

@@ -1,4 +1,8 @@
-"""Real profile/cluster strategies through OME, with local model and store ports."""
+"""Real profile/cluster strategies through OME, with local model and store ports.
+
+Pipeline ``EpisodeExtracted`` events go in; ``split_episode_by_owner`` hands
+each owner's copy to the profile, and clustering folds it, as in production.
+"""
 
 from __future__ import annotations
 
@@ -9,19 +13,34 @@ from everalgo.testing import FakeLLMClient
 
 from everos.core.locks import LOCKS
 from everos.infra.ome import OfflineEngine, OMEConfig, RunStatus, to_ome_strategy
+from everos.memory.events import EpisodeCopy, EpisodeExtracted
 from everos.memory.models import Cluster, ClusterKind, ClusterMemberType
 from everos.memory.ports import Scope
 from everos.memory.strategies import (
     EXTRACT_USER_PROFILE_SPEC,
+    SPLIT_EPISODE_BY_OWNER_SPEC,
     TRIGGER_PROFILE_CLUSTERING_SPEC,
 )
 from tests.fakes import InMemoryClusterStore, make_deps, make_stores
 from tests.fakes.llm import user_track_script
 from tests.unit.test_memory.test_strategies.test_extract_user_profile import (
-    _event,
     _scope,
     _seed,
 )
+
+
+def _event(
+    *, entry_id: str, memcell_id: str, owner_id: str = "u_alice", owner_name: str
+) -> EpisodeExtracted:
+    """A pipeline episode with one copy, as the pipeline emits it."""
+    return EpisodeExtracted(
+        memcell_id=memcell_id,
+        episode_text="as carried on the event",
+        episode_timestamp_ms=1_700_000_001_000,
+        copies=[
+            EpisodeCopy(owner_id=owner_id, entry_id=entry_id, owner_name=owner_name)
+        ],
+    )
 
 
 class LocalEmbedding:
@@ -95,32 +114,37 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
         stores=make_stores(cluster=clusters),
     )
     alice = [
-        _event(episode_entry_id=f"ep_20260101_{i + 1:04d}", memcell_id=f"mc_{i:012x}")
+        _event(
+            entry_id=f"ep_20260101_{i + 1:04d}",
+            memcell_id=f"mc_{i:012x}",
+            owner_name="Alice",
+        )
         for i in range(20)
     ]
     for event in alice:
         _seed(
             deps,
             _scope(),
-            entry_id=event.episode_entry_id,
+            entry_id=event.copies[0].entry_id,
             memcell_id=event.memcell_id,
         )
     bob = _event(
         owner_id="u_bob",
-        episode_entry_id="ep_20260101_0099",
+        entry_id="ep_20260101_0099",
         memcell_id="mc_bob",
         owner_name="Bob",
     )
     _seed(
         deps,
         _scope("u_bob"),
-        entry_id=bob.episode_entry_id,
+        entry_id=bob.copies[0].entry_id,
         memcell_id=bob.memcell_id,
         narrative="Bob plans a trip to Kyoto.",
     )
     config = OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
     assert config.max_concurrent_runs == 20
     engine = OfflineEngine(config=config)
+    engine.register(to_ome_strategy(SPLIT_EPISODE_BY_OWNER_SPEC, deps))
     engine.register(to_ome_strategy(EXTRACT_USER_PROFILE_SPEC, deps))
     engine.register(to_ome_strategy(TRIGGER_PROFILE_CLUSTERING_SPEC, deps))
     LOCKS.set_acquire_hook(observe)
@@ -144,16 +168,22 @@ async def test_other_owner_finishes_while_twenty_profile_attempts_are_blocked(
             (bob_cluster,) = await clusters.list_for_owner(
                 _scope("u_bob"), "user_memory"
             )
-            assert bob.episode_entry_id in bob_cluster.members
+            assert bob.copies[0].entry_id in bob_cluster.members
             assert not release_model.is_set()
 
             release_model.set()
             assert await engine.wait_idle(timeout=5)
+            split_runs = await engine.list_runs("split_episode_by_owner")
             profile_runs = await engine.list_runs("extract_user_profile")
             cluster_runs = await engine.list_runs("trigger_profile_clustering")
-            assert (len(profile_runs), len(cluster_runs)) == (21, 21)
+            assert (len(split_runs), len(profile_runs), len(cluster_runs)) == (
+                21,
+                21,
+                21,
+            )
             assert all(
-                r.status == RunStatus.SUCCESS for r in profile_runs + cluster_runs
+                r.status == RunStatus.SUCCESS
+                for r in split_runs + profile_runs + cluster_runs
             )
             assert calls == 21 and peak == 2
             assert len(deps.stores.profile.writes) == 21

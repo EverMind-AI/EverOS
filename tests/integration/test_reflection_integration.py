@@ -204,9 +204,10 @@ class _World:
         reports = []
         for event in merged:
             assert event.reflection is not None
+            (copy,) = event.copies
             report = await self.finisher.finish(
                 scope=SCOPE,
-                merged_entry_id=event.episode_entry_id,
+                merged_entry_id=copy.entry_id,
                 context=event.reflection,
             )
             if report is not None:
@@ -290,7 +291,10 @@ async def test_init_merge_deprecates_members_and_their_facts(
     merged_id = report.merged_entry_id
     assert (report.mode, report.source_count, report.cluster_id) == ("init", 3, CLUSTER)
     (event,) = emitted
-    assert (event.episode_entry_id, event.source) == (merged_id, "reflection")
+    assert ([c.entry_id for c in event.copies], event.source) == (
+        [merged_id],
+        "reflection",
+    )
     for ref in refs:
         assert await world.deprecated_by("episode", ref.entry_id) == merged_id
     facts = await world.index.atomic_fact.find_where(eq("owner_id", OWNER))

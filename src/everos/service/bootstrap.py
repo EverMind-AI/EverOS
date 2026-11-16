@@ -618,7 +618,6 @@ def _build_memory_service(
             memcell_store=stores.memcell,
             instructions=deps.instructions,
             episode_llm=providers.llms.episode,
-            summary_llm=providers.llms.summary,
             tz=deps.tz,
         ),
         agent_pipeline=AgentMemoryPipeline(),

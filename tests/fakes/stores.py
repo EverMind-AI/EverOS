@@ -166,6 +166,19 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
             entries=entries, replaced_by=replaced_by, only_if=only_if
         )
 
+    async def replace_summary(
+        self, scope: Scope, entry_id: str, *, expected: str, summary: str
+    ) -> bool:
+        for i, stored in enumerate(self.records):
+            if stored.scope != scope or stored.ref.entry_id != entry_id:
+                continue
+            if not expected or stored.item.summary != expected:
+                return False
+            item = stored.item.model_copy(update={"summary": summary})
+            self.records[i] = Stored(ref=stored.ref, scope=scope, item=item)
+            return True
+        return False
+
     async def exists(self, scope: Scope, entry_ids: Collection[str]) -> set[str]:
         wanted = set(entry_ids)
         return {

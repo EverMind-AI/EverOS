@@ -383,7 +383,8 @@ class LLMSettings(LLMClientSettings):
     episode: LLMTaskSettings = LLMTaskSettings()
     """Episode extraction from each memcell."""
     summary: LLMTaskSettings = LLMTaskSettings()
-    """The episode's display summary, a call of its own made beside ``episode``."""
+    """The episode's display summary, written offline from the stored episode
+    (the ``summarize_episode`` strategy) over the placeholder it is stored with."""
     atomic_fact: LLMTaskSettings = LLMTaskSettings()
     """Atomic-fact extraction."""
     foresight: LLMTaskSettings = LLMTaskSettings()

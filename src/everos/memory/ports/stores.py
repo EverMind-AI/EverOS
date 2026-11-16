@@ -100,8 +100,10 @@ NO_SOURCE_CHECK: Final = NoSourceCheck()
 class EpisodeStore(Protocol):
     """Episode truth: append-only daily logs per owner.
 
-    Every write takes ``only_if`` (no default, so no writer can forget it):
-    a skipped write returns ``None`` / an empty list / ``False``.
+    Every write that adds or retires entries takes ``only_if`` (no default,
+    so no writer can forget it): a skipped write returns ``None`` / an empty
+    list / ``False``. :meth:`replace_summary` rewrites an existing entry in
+    place, so it needs none: an entry that is gone simply does not match.
     """
 
     async def append(
@@ -135,6 +137,21 @@ class EpisodeStore(Protocol):
 
         Returns:
             Whether the references were marked (``False``: ``only_if`` failed).
+        """
+        ...
+
+    async def replace_summary(
+        self, scope: Scope, entry_id: str, *, expected: str, summary: str
+    ) -> bool:
+        """Set one entry's summary to ``summary`` if it still reads ``expected``.
+
+        A compare-and-set under the owner lock, like every write: a summary
+        changed since the caller read it (an edit, an earlier replacement)
+        is left alone, and nothing else of the entry or its file changes. An
+        entry with no summary never matches.
+
+        Returns:
+            Whether the summary was replaced.
         """
         ...
 

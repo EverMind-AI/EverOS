@@ -29,7 +29,12 @@ from everos.infra.persistence.sqlite import (
     SqliteDatabase,
     SqliteRepos,
 )
-from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
+from everos.memory.events import (
+    EpisodeCopy,
+    EpisodeExtracted,
+    ReflectedEpisode,
+    ReflectionContext,
+)
 from everos.memory.models import Cluster, ClusterKind, Episode
 from everos.memory.ports import Scope
 from everos.memory.reflection.orchestrator import ReflectionFinisher
@@ -112,10 +117,9 @@ async def _scenario(cluster_store: SqliteClusterStore, *, joiner: bool) -> Clust
         await trigger_profile_clustering(
             EpisodeExtracted(
                 memcell_id="mc_3",
-                episode_entry_id="ep3",
+                copies=[EpisodeCopy(owner_id=_OWNER, entry_id="ep3")],
                 episode_text=_JOINER_TEXT,
                 episode_timestamp_ms=_T0 + 2000,
-                owner_id=_OWNER,
                 session_id="s1",
             ),
             deps,
@@ -279,10 +283,9 @@ async def test_reflection_waits_for_clustering_read_to_write(
                 trigger_profile_clustering(
                     EpisodeExtracted(
                         memcell_id="mc_3",
-                        episode_entry_id="ep3",
+                        copies=[EpisodeCopy(owner_id=_OWNER, entry_id="ep3")],
                         episode_text=_JOINER_TEXT,
                         episode_timestamp_ms=_T0,
-                        owner_id=_OWNER,
                         session_id="s1",
                     ),
                     deps,

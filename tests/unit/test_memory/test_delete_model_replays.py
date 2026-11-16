@@ -38,6 +38,7 @@ from everos.infra.persistence.markdown import (
     MarkdownReader,
 )
 from everos.memory.events import (
+    EpisodeCopy,
     EpisodeExtracted,
     ReflectedEpisode,
     ReflectionContext,
@@ -92,10 +93,9 @@ async def _write_episode(
 def _episode_event(ref: MemoryRef, *, memcell_id: str) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
-        episode_entry_id=ref.entry_id,
+        copies=[EpisodeCopy(owner_id="u1", entry_id=ref.entry_id)],
         episode_text="we talked",
         episode_timestamp_ms=_TS,
-        owner_id="u1",
         session_id="s1",
         app_id="app",
         project_id="proj",

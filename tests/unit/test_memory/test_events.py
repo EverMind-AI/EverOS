@@ -12,14 +12,14 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    EpisodeCopy,
+    EpisodeExtracted,
     SkillClusterUpdated,
     UserPipelineStarted,
 )
 
-_FROZEN_PAYLOADS = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures/compatibility/head_0d3b502_core_0_6_0"
-)
+_COMPATIBILITY = Path(__file__).resolve().parents[2] / "fixtures/compatibility"
+_FROZEN_PAYLOADS = _COMPATIBILITY / "head_0d3b502_core_0_6_0"
 
 
 def test_frozen_agent_case_payload_keeps_identity_and_omitted_defaults() -> None:
@@ -189,3 +189,70 @@ def test_skill_cluster_updated_carries_case_vector() -> None:
         SkillClusterUpdated.model_validate(payload).model_dump_json()
     )
     assert event.case_vector == [0.1, 0.2, 0.3]
+
+
+def test_a_per_copy_payload_of_1_7_0_validates_as_a_one_copy_event() -> None:
+    """OME replays the payload of every run pending when 1.7.0 stopped."""
+    payload = (_COMPATIBILITY / "v1_7_0" / "episode_extracted.json").read_text()
+
+    event = EpisodeExtracted.model_validate_json(payload)
+
+    assert event.event_id == "frozen-episode-extracted-event"
+    assert event.memcell_id == "mc-frozen"
+    assert event.copies == [
+        EpisodeCopy(
+            owner_id="u_alice", entry_id="ep_20261113_00000002", owner_name="Alice"
+        )
+    ]
+    assert (event.session_id, event.source, event.language) == (
+        "session-frozen",
+        "pipeline",
+        "English",
+    )
+    assert event.episode_timestamp_ms == 1_763_020_800_000
+
+
+def test_a_per_copy_payload_without_owner_name_defaults_it() -> None:
+    event = EpisodeExtracted.model_validate(
+        {
+            "memcell_id": "mc_a",
+            "episode_entry_id": "ep_1",
+            "episode_text": "t",
+            "episode_timestamp_ms": 1,
+            "owner_id": "u1",
+        }
+    )
+    assert event.copies == [EpisodeCopy(owner_id="u1", entry_id="ep_1")]
+
+
+def test_an_episode_event_lists_its_copies_and_round_trips() -> None:
+    event = EpisodeExtracted(
+        memcell_id="mc_a",
+        episode_text="t",
+        episode_timestamp_ms=1,
+        copies=[
+            EpisodeCopy(owner_id="u1", entry_id="ep_1", owner_name="Alice"),
+            EpisodeCopy(owner_id="u2", entry_id="ep_7"),
+        ],
+        app_id="app",
+        project_id="proj",
+    )
+
+    restored = EpisodeExtracted.model_validate_json(event.model_dump_json())
+
+    assert restored == event
+    scope = restored.owner_scope(restored.copies[1])
+    assert (scope.app_id, scope.project_id, scope.owner_id, scope.owner_type) == (
+        "app",
+        "proj",
+        "u2",
+        "user",
+    )
+
+
+def test_an_episode_event_without_copies_is_refused() -> None:
+    """A cell with no written copy emits no event."""
+    with pytest.raises(pydantic.ValidationError):
+        EpisodeExtracted(
+            memcell_id="mc_a", episode_text="t", episode_timestamp_ms=1, copies=[]
+        )
