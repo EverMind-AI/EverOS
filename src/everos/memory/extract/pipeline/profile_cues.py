@@ -252,7 +252,7 @@ _QUOTE_MARKS = str.maketrans(
         "‚": "'",
         "‛": "'",
         "′": "'",
-        "＇": "'",
+        "\uff07": "'",  # fullwidth apostrophe
         "`": "'",
         "“": '"',
         "”": '"',
@@ -261,7 +261,7 @@ _QUOTE_MARKS = str.maketrans(
         "″": '"',
         "«": '"',
         "»": '"',
-        "＂": '"',
+        "\uff02": '"',  # fullwidth quotation mark
     }
 )
 """Every quotation mark read as a plain one, so a quote a model retyped with
