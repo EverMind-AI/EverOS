@@ -81,6 +81,7 @@ from everos.service import Application, build_application
 from everos.service.bootstrap import Providers
 from tests._consistency_assertions import assert_md_lance_strict_consistent
 from tests.fakes import FakeEmbeddingProvider
+from tests.fakes.llm import quote_every_message
 from tests.fakes.storage import StorageView, open_storage_view
 
 from .groups import live_markdown
@@ -114,6 +115,13 @@ _GP_LINE = re.compile(
 )
 _GP_SEGMENT = re.compile(r"^=== SEGMENT (\S+) ===$", re.MULTILINE)
 _PROBE = "Reply with OK."
+_UNCUED = {
+    "CuedEpisodeReply": "EpisodeReply",
+    "CuedImageEpisodeReply": "ImageEpisodeReply",
+}
+"""The episode reply model of a call with the profile-cue block, by the model
+of the same call without it."""
+_EPISODE_REPLIES = frozenset({*_UNCUED, *_UNCUED.values()})
 
 T0 = 1_772_323_200_000
 """2026-03-01 00:00 UTC, the first message time of every conversation here."""
@@ -207,7 +215,10 @@ class Upstream:
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        name = _reply_name(request, body)
+        asked = _reply_name(request, body)
+        # The episode call with the profile-cue block asks for a cued reply
+        # model; it is still the episode call every fault names.
+        name = _UNCUED.get(asked, asked)
         self.calls.append(name)
         wait = self.delay.get(name, self.delay.get("*", 0.0))
         if wait:
@@ -224,9 +235,9 @@ class Upstream:
                 json={"error": {"message": f"scripted {fault}", "type": "scripted"}},
                 headers={"retry-after-ms": "1"},
             )
-        text = self._answer(name, body)
+        text = self._answer(asked, body)
         if text is None:
-            self.unexpected.append(name)
+            self.unexpected.append(asked)
             return httpx.Response(400, json={"error": {"message": f"no {name}"}})
         finish = "stop"
         reply: str | None = text
@@ -254,14 +265,19 @@ class Upstream:
             return json.dumps(
                 {"reasoning": "s", "boundaries": [], "tail_complete": self.cut_on_add}
             )
-        if name in {"EpisodeReply", "ImageEpisodeReply"}:
+        if name in _EPISODE_REPLIES:
             found = " ".join(dict.fromkeys(markers(said))) or "nothing"
             reply: dict[str, Any] = {"title": "Notes", "content": found}
-            if name == "ImageEpisodeReply":
+            if "Image" in name:
                 reply["images"] = [
                     {"ref": ref, "description": f"picture {ref} of {found}", "ocr": ""}
                     for ref in dict.fromkeys(_PICTURE.findall(said))
                 ]
+            if name.startswith("Cued"):
+                # The profile-cue block: every message holding a fact marker.
+                reply["profile_cues"] = quote_every_message(
+                    said, keep=lambda content: bool(_FACT.search(content))
+                )
             return json.dumps(reply)
         if name == "_ProfileUpdateReply":
             return json.dumps({"operations": _profile_operations(prompt)})

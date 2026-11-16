@@ -2,7 +2,8 @@
 
 External usage:
     from everos.memory.extract.pipeline import (
-        CellOutcome, ConversationPipeline, PipelineOutcome, PreparedCell,
+        CellOutcome, ConversationPipeline, CueConsumers, PipelineOutcome,
+        PreparedCell,
     )
 
 Calls everalgo (the algorithm library) for synchronous Episode extraction.
@@ -16,10 +17,12 @@ from .base import Pipeline as Pipeline
 from .base import PipelineOutcome as PipelineOutcome
 from .base import PreparedCell as PreparedCell
 from .conversation import ConversationPipeline as ConversationPipeline
+from .profile_cues import CueConsumers as CueConsumers
 
 __all__ = [
     "CellOutcome",
     "ConversationPipeline",
+    "CueConsumers",
     "Pipeline",
     "PipelineOutcome",
     "PreparedCell",

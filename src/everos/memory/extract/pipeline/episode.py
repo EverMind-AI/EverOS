@@ -18,17 +18,25 @@ cell adds follows the original's text, in this order, after one blank line:
   the ``images`` field the reply carries beside ``title`` and ``content``, and
   the labels in order. Each picture then follows the text as an image part
   after a ``<picture>`` element naming its label.
+* **A cell whose space has a profile reading cues** (``[profile] input =
+  "cues"`` for a user's own space, the member profiles for a group's) adds
+  the ``<profile_cues>`` block (:mod:`.profile_cues`): which messages and
+  pictures say something lasting about each human speaker, as one more reply
+  field, ``profile_cues``. With no such profile the request is the one of
+  2026-11-14, byte for byte.
 * **Every cell** ends with the ``<output_language>`` block naming the
   conversation's language.
 
-The reply is ``title`` and ``content`` (and ``images`` with pictures); the
-summary is the content's first 200 characters, cut in code, as the original
-filled it. The two renderings are the template's variants ``text`` and
-``pictures``, each with its own fingerprint. The call is EverOS's own because
-of what a cell adds: everalgo's episode operator sends the original and the
-language block and nothing else (a one-to-one text cell's request is byte for
-byte the operator's), and carries no picture and no roster. The original's
-text and its rendering stay everalgo's (``_render_original_prompt``).
+The reply is ``title`` and ``content`` (and ``images`` with pictures, and
+``profile_cues`` with the cue block); the summary is the content's first 200
+characters, cut in code, as the original filled it. The two renderings are
+the template's variants ``text`` and ``pictures``, each with its own
+fingerprint; the cue block is a template of its own,
+``chat.episode_profile_cues``. The call is EverOS's own because of what a cell
+adds: everalgo's episode operator sends the original and the language block
+and nothing else (a one-to-one text cell's request is byte for byte the
+operator's), and carries no picture and no roster. The original's text and
+its rendering stay everalgo's (``_render_original_prompt``).
 
 History. Until 2026-11-12 a picture cell's prompt carried everalgo's whole
 system prompt -- its reply format and an empty language block included --
@@ -54,7 +62,8 @@ Two rules keep a picture's record and its episode apart:
 What a picture says about its sender reaches the profile through the profile
 update, which reads the segment's pictures itself
 (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`); this
-call writes no profile item.
+call writes no profile item. With the cue block it names which of them a
+profile should read (:func:`extract_cell` maps the cues).
 
 The reply is read leniently in form and strictly in meaning
 (:mod:`everos.memory.extract.reply_form`): a top-level key the reply model does
@@ -87,6 +96,8 @@ __all__ = [
     "REPLY_TOKENS_BASE",
     "REPLY_TOKENS_CEILING",
     "REPLY_TOKENS_PER_PICTURE",
+    "CuedEpisodeReply",
+    "CuedImageEpisodeReply",
     "EpisodeReply",
     "ImageEpisodeReply",
     "ImageFact",
@@ -132,6 +143,13 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from everos.core.observability.logging import get_logger
 from everos.core.observability.metrics import Counter as MetricCounter
 from everos.memory.extract.llm_retry import retry_llm_output
+from everos.memory.extract.pipeline.profile_cues import (
+    CellCues,
+    ProfileCue,
+    cue_block,
+    map_cues,
+    readable_cues,
+)
 from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
 from everos.memory.prompts import PromptTemplate
 
@@ -244,11 +262,17 @@ _LABEL_REFERENCE = re.compile(r"\s*(?:\((img-\d+)\)|\[IMAGE: (img-\d+)\])")
 before it."""
 
 
-def reply_token_cap(*, pictures: int, conversation_chars: int) -> int:
+def reply_token_cap(
+    *, pictures: int, conversation_chars: int, cues: bool = False
+) -> int:
     """``max_tokens`` of an episode call reading ``pictures`` and its conversation.
 
     ``2,048``, plus ``1,024`` per picture, plus one token per four characters
     of the rendered ``<conversation>``, at most :data:`REPLY_TOKENS_CEILING`.
+    A call that asks for profile cues (``cues``) gets the conversation's
+    allowance twice: the cues quote the conversation, and a reply cut at the
+    cap would cost the cell its episode, while a cap the reply never reaches
+    costs nothing.
 
     A reply that reaches the cap is a runaway (a transcription repeating
     itself), not a long answer. Picture replies grow with their pictures: of
@@ -265,10 +289,11 @@ def reply_token_cap(*, pictures: int, conversation_chars: int) -> int:
     reply's output. A ``max_tokens`` the deployment sets lower still wins
     (``[llm] extra``).
     """
+    allowance = conversation_chars // REPLY_CHARS_PER_TOKEN
     cap = (
         REPLY_TOKENS_BASE
         + REPLY_TOKENS_PER_PICTURE * pictures
-        + conversation_chars // REPLY_CHARS_PER_TOKEN
+        + allowance * (2 if cues else 1)
     )
     return min(cap, REPLY_TOKENS_CEILING)
 
@@ -384,6 +409,37 @@ class ImageEpisodeReply(_LenientReply):
         return value
 
 
+class CuedEpisodeReply(EpisodeReply):
+    """The episode of a cell without pictures, and its profile cues."""
+
+    profile_cues: list[ProfileCue] = Field(default_factory=list)
+
+    @field_validator("profile_cues", mode="before")
+    @classmethod
+    def _unreadable_cues_are_dropped(cls, value: object) -> object:
+        return readable_cues(value)
+
+
+class CuedImageEpisodeReply(ImageEpisodeReply):
+    """The episode, every picture's memory, and the profile cues."""
+
+    profile_cues: list[ProfileCue] = Field(default_factory=list)
+
+    @field_validator("profile_cues", mode="before")
+    @classmethod
+    def _unreadable_cues_are_dropped(cls, value: object) -> object:
+        return readable_cues(value)
+
+
+_REPLY_MODELS: dict[tuple[bool, bool], type[EpisodeReply | ImageEpisodeReply]] = {
+    (False, False): EpisodeReply,
+    (True, False): ImageEpisodeReply,
+    (False, True): CuedEpisodeReply,
+    (True, True): CuedImageEpisodeReply,
+}
+"""The reply model by ``(pictures, cues)``."""
+
+
 def build_original_prompt(
     memcell: MemCell,
     *,
@@ -391,6 +447,7 @@ def build_original_prompt(
     output_language: OutputLanguage | None,
     roster: str | None = None,
     labels: Sequence[str] = (),
+    cues: bool = False,
 ) -> str:
     """A cell's prompt text: the original, then what this cell adds.
 
@@ -399,9 +456,9 @@ def build_original_prompt(
     principles when none are set), then one blank line and the blocks that
     follow it: a group's roster block in ``<group_chat>``; with pictures, the
     ``<pictures>`` block (the picture rules, the ``images`` field, the labels
-    in order); then the ``<output_language>`` block every cell is sent -- the
-    conversation's language, resolved in code, or the participant rule when
-    none is.
+    in order); when a profile reads cues, the ``<profile_cues>`` block; then
+    the ``<output_language>`` block every cell is sent -- the conversation's
+    language, resolved in code, or the participant rule when none is.
 
     Args:
         memcell: The cell being extracted.
@@ -409,6 +466,7 @@ def build_original_prompt(
         output_language: The language to write in.
         roster: A group cell's roster block; ``None`` for a user's own cell.
         labels: The labels of the pictures the cell attaches, in order.
+        cues: Ask for the profile cues (:mod:`.profile_cues`).
     """
     original = _render_original_prompt(memcell, custom_instructions=custom_instructions)
     blocks = [tagged("group_chat", roster)] if roster is not None else []
@@ -416,6 +474,8 @@ def build_original_prompt(
         rules, reply_field, labels_line = CHAT_EPISODE.parts[2:5]
         names = labels_line.format(labels=", ".join(labels))
         blocks.append(tagged("pictures", paragraphs(rules, reply_field, names)))
+    if cues:
+        blocks.append(tagged("profile_cues", cue_block(pictures=bool(labels))))
     language = build_language_rule(output_language, fallback=PARTICIPANT_LANGUAGE_RULE)
     blocks.append(tagged("output_language", language))
     return f"{original}\n{paragraphs(*blocks)}"
@@ -429,6 +489,7 @@ def build_messages(
     output_language: OutputLanguage | None,
     roster: str | None = None,
     detail: str = "high",
+    cues: bool = False,
 ) -> list[LLMMessage]:
     """The call's one user message: the prompt text, then each picture after its label.
 
@@ -448,6 +509,7 @@ def build_messages(
         detail: ``detail`` hint on each image part. ``high`` because this call
             has to read small text out of a picture; the decider's
             thumbnail-only default is set separately.
+        cues: Ask for the profile cues (:func:`build_original_prompt`).
     """
     prompt = build_original_prompt(
         memcell,
@@ -455,6 +517,7 @@ def build_messages(
         output_language=output_language,
         roster=roster,
         labels=[label for label, _, _ in pictures],
+        cues=cues,
     )
     if not pictures:
         return [LLMMessage(role="user", content=prompt)]
@@ -572,16 +635,18 @@ async def extract(
     output_language: OutputLanguage | None,
     max_tokens: int | None = None,
     roster: str | None = None,
+    cues: bool = False,
 ) -> EpisodeReply | ImageEpisodeReply:
     """One call: the episode and every picture's memory, from the same reading.
 
     A cell without pictures asks for :class:`EpisodeReply`, one with pictures
-    for :class:`ImageEpisodeReply`. The call asks for at most ``max_tokens``
-    output tokens, by default :func:`reply_token_cap` of its pictures and
-    conversation, and a reply cut there is retried like an invalid one
-    (``retry_cut``): once more by default, sampled at
-    ``[llm] retry_temperature``, with the same cap. The first attempt keeps
-    the configured temperature.
+    for :class:`ImageEpisodeReply`; with ``cues`` (the ``<profile_cues>``
+    block) for :class:`CuedEpisodeReply` or :class:`CuedImageEpisodeReply`.
+    The call asks for at most ``max_tokens`` output tokens, by default
+    :func:`reply_token_cap` of its pictures and conversation, and a reply cut
+    there is retried like an invalid one (``retry_cut``): once more by
+    default, sampled at ``[llm] retry_temperature``, with the same cap. The
+    first attempt keeps the configured temperature.
 
     Raises:
         everalgo.llm.LLMOutputError: The reply leaves ``content`` or
@@ -596,16 +661,17 @@ async def extract(
         custom_instructions=custom_instructions,
         output_language=output_language,
         roster=roster,
+        cues=cues,
     )
     conversation = _original_conversation(memcell)
     cap = (
-        reply_token_cap(pictures=len(pictures), conversation_chars=len(conversation))
+        reply_token_cap(
+            pictures=len(pictures), conversation_chars=len(conversation), cues=cues
+        )
         if max_tokens is None
         else max_tokens
     )
-    model: type[EpisodeReply | ImageEpisodeReply] = (
-        ImageEpisodeReply if pictures else EpisodeReply
-    )
+    model = _REPLY_MODELS[bool(pictures), cues]
     text = await llm.achat(
         messages, response_format=model, max_tokens=cap, retry_cut=True
     )
@@ -633,19 +699,29 @@ async def extract_cell(
     output_language: OutputLanguage | None,
     memcell_id: str,
     roster: str | None = None,
-) -> tuple[AlgoEpisode, dict[str, tuple[str, str]]]:
-    """The cell's episode and each picture's ``(description, ocr)`` by label.
+    cue_people: Sequence[str] = (),
+) -> tuple[AlgoEpisode, dict[str, tuple[str, str]], CellCues | None]:
+    """The cell's episode, each picture's ``(description, ocr)`` by label, its cues.
 
     One :func:`extract` call, tried again by
     :func:`~everos.memory.extract.llm_retry.retry_llm_output` while its reply
-    is unusable. The two results are readings of the same call and are never
+    is unusable. The results are readings of the same call and are never
     split. Only a picture the cell attached is described or referenced.
     ``roster`` is a group cell's roster block (:func:`build_messages`).
+
+    ``cue_people`` are the cell's human speakers (``sender_id``) when a
+    profile of its space reads cues: the call then carries the
+    ``<profile_cues>`` block, and the cues come back mapped to their messages
+    and pictures (:func:`~.profile_cues.map_cues`), one record per person.
+    Empty sends no block, and the cues are ``None``.
     """
     sent = [(picture.label, picture.data, picture.mime) for picture in pictures]
     by_label = {picture.label: picture.image_id for picture in pictures}
+    cues = bool(cue_people)
 
-    async def attempt() -> tuple[AlgoEpisode, dict[str, tuple[str, str]]]:
+    async def attempt() -> tuple[
+        AlgoEpisode, dict[str, tuple[str, str]], CellCues | None
+    ]:
         reply = await extract(
             llm,
             memcell,
@@ -653,6 +729,7 @@ async def extract_cell(
             custom_instructions=custom_instructions,
             output_language=output_language,
             roster=roster,
+            cues=cues,
         )
         described = (
             {
@@ -674,7 +751,21 @@ async def extract_cell(
                 pictures=len(pictures),
                 memcell_id=memcell_id,
             )
-        return to_episode(reply, memcell, labels=by_label), described
+        marked = (
+            map_cues(reply.profile_cues, memcell, people=cue_people, pictures=pictures)
+            if isinstance(reply, CuedEpisodeReply | CuedImageEpisodeReply)
+            else None
+        )
+        if marked is not None:
+            logger.info(
+                "memory.episode.profile_cues",
+                memcell_id=memcell_id,
+                people=len(marked.by_person),
+                given=marked.given,
+                mapped=marked.mapped,
+                dropped=marked.dropped,
+            )
+        return to_episode(reply, memcell, labels=by_label), described, marked
 
     return await retry_llm_output(
         attempt, operator="episode", memcell_id=memcell_id, pictures=len(pictures)

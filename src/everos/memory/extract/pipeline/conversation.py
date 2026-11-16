@@ -42,10 +42,17 @@ choice, and the language its episode was written in is pinned instead.
 A picture is evidence about its poster as well as a memory of its own; what it
 says about its poster reaches that person's profile through the profile
 update, which reads the poster's pictures itself (D17), so this pipeline
-writes no profile item. The event's owner type routes it: a user's episode to
-the personal strategies, a group's -- with its human speakers -- to the group
-strategies (member-in-group profiles, the group profile, scenes). Group
-content never feeds personal memory.
+writes no profile item. When the profiles of a segment's space read cues
+(:class:`~.profile_cues.CueConsumers`, decided by the bootstrap), the episode
+call also marks which messages and pictures say something lasting about each
+human speaker, and this pipeline records them (one record per speaker, in the
+system database) before it writes the segment's memories, so a profile update
+the segment's event starts always finds them. A re-extraction after a forget
+asks for none and changes none: a cue resting on a forgotten message or
+picture is skipped by every read, as the message is. The event's owner type
+routes it: a user's episode to the personal strategies, a group's -- with its
+human speakers -- to the group strategies (member-in-group profiles, the
+group profile, scenes). Group content never feeds personal memory.
 """
 
 from __future__ import annotations
@@ -78,6 +85,7 @@ from everos.memory.extract.pipeline.pictures import (
     memcell_alive,
     pictures_of,
 )
+from everos.memory.extract.pipeline.profile_cues import CellCues, CueConsumers
 from everos.memory.groups import named_members, roster_names, without_forgotten
 from everos.memory.models import (
     Episode,
@@ -95,6 +103,7 @@ from everos.memory.ports import (
     MemcellStore,
     MemoryRef,
     MessageForgetStore,
+    ProfileCueStore,
     Scope,
     SessionKey,
 )
@@ -105,11 +114,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_Extraction = tuple[AlgoEpisode, dict[str, tuple[str, str]]]
-"""What one cell's extraction answers: the episode, and each picture's
-``(description, ocr)`` by label (empty for a cell without pictures). One tuple
-because the two are readings of the same call and splitting them would let
-them drift apart."""
+_Extraction = tuple[AlgoEpisode, dict[str, tuple[str, str]], CellCues | None]
+"""What one cell's extraction answers: the episode, each picture's
+``(description, ocr)`` by label (empty for a cell without pictures), and the
+profile cues (``None`` when the call asked for none). One tuple because they
+are readings of the same call and splitting them would let them drift
+apart."""
 
 
 @dataclass(frozen=True)
@@ -138,12 +148,15 @@ class _Segment:
         pictures: The pictures the call was shown.
         described: Each picture's ``(description, ocr)`` by label.
         language: The episode's language (the conversation's).
+        cues: The profile cues of the segment's human speakers; ``None`` when
+            the call asked for none.
     """
 
     episode: Episode
     pictures: list[Picture]
     described: dict[str, tuple[str, str]]
     language: str | None
+    cues: CellCues | None = None
 
 
 class ConversationPipeline:
@@ -164,6 +177,10 @@ class ConversationPipeline:
             model sees it.
         message_forget: Which messages of a session are forgotten; a cell is
             extracted without them. ``None`` reads every message.
+        cue_consumers: Which spaces' profiles read the episode call's cues;
+            none by default, and then no call carries the cue block.
+        profile_cues: Where a segment's cues are recorded; required for a
+            space in ``cue_consumers`` to be asked for any.
     """
 
     def __init__(
@@ -178,6 +195,8 @@ class ConversationPipeline:
         image_memory_store: ImageMemoryStore | None = None,
         image_limits: ImageLimits | None = None,
         message_forget: MessageForgetStore | None = None,
+        cue_consumers: CueConsumers | None = None,
+        profile_cues: ProfileCueStore | None = None,
     ) -> None:
         self._episode_store = episode_store
         self._memcell_store = memcell_store
@@ -188,6 +207,8 @@ class ConversationPipeline:
         self._image_memory_store = image_memory_store
         self._image_limits = image_limits
         self._message_forget = message_forget
+        self._cue_consumers = cue_consumers or CueConsumers()
+        self._profile_cues = profile_cues
 
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
@@ -243,8 +264,19 @@ class ConversationPipeline:
             if not spaces:
                 return CellOutcome(message_count=message_count)
         found = await self._extract_segment(
-            spaces[0], session, prepared.memcell_id, cell, senders=prepared.sender_ids
+            spaces[0],
+            session,
+            prepared.memcell_id,
+            cell,
+            senders=prepared.sender_ids,
+            cues=self._reads_cues(spaces[0]),
         )
+        if found.cues is not None and self._profile_cues is not None:
+            # Before any memory of the segment: its event starts the profile
+            # update that reads them.
+            await self._profile_cues.record(
+                session, prepared.memcell_id, found.cues.by_person
+            )
         md_paths: list[str] = []
         events: list[Event] = []
         for space in spaces:
@@ -304,6 +336,13 @@ class ConversationPipeline:
         )
         return found.episode
 
+    def _reads_cues(self, space: _Space) -> bool:
+        """Whether the profiles of ``space`` read the episode call's cues."""
+        if self._profile_cues is None:
+            return False
+        consumers = self._cue_consumers
+        return consumers.groups if space.group is not None else consumers.users
+
     async def _unwritten(
         self, spaces: Sequence[_Space], memcell_id: str
     ) -> list[_Space]:
@@ -357,11 +396,13 @@ class ConversationPipeline:
         cell: MemCell,
         *,
         senders: Sequence[str] = (),
+        cues: bool = False,
     ) -> _Segment:
         """Run the episode call over ``cell`` and build the space's episode.
 
         ``senders`` are the boundary's senders of the cell, which a user's
-        episode records; a group's records the attribution's.
+        episode records; a group's records the attribution's. ``cues`` asks
+        the call for the profile cues of the cell's human speakers.
         """
         # Named to the model, never left to it: the language is the
         # conversation's, resolved from its human messages.
@@ -378,11 +419,23 @@ class ConversationPipeline:
         )
         custom = self._instructions.load("episode_extract")
         shown, roster = cell, None
+        people: list[str] = []
         if space.group is not None:
             roster = roster_block(space.group, space.roster, cell)
             shown = label_cell(cell, space.roster)
-        algo_ep, described = await self._extract(
-            space, session, memcell_id, shown, pictures, custom, named, roster
+            people = _human_speakers(cell, space.roster) if cues else []
+        elif cues:
+            people = _human_senders(cell)
+        algo_ep, described, cell_cues = await self._extract(
+            space,
+            session,
+            memcell_id,
+            shown,
+            pictures,
+            custom,
+            named,
+            roster,
+            cue_people=people,
         )
         # That language pins every extraction downstream of this episode.
         # Only a conversation without a letter in it left the choice to the
@@ -425,6 +478,7 @@ class ConversationPipeline:
             pictures=list(pictures),
             described=described,
             language=language,
+            cues=cell_cues,
         )
 
     async def _extract(
@@ -437,12 +491,15 @@ class ConversationPipeline:
         custom_instructions: str | None,
         language: OutputLanguage | None,
         roster: str | None = None,
+        *,
+        cue_people: Sequence[str] = (),
     ) -> _Extraction:
-        """One whole-cell episode (and picture descriptions).
+        """One whole-cell episode (and picture descriptions, and cues).
 
         An unusable reply is tried again (:func:`.episode.extract_cell`).
         ``language`` is named to the model; ``None`` leaves it the choice.
-        ``roster`` is a group cell's roster block.
+        ``roster`` is a group cell's roster block. ``cue_people`` are the
+        human speakers to mark profile cues for; empty asks for none.
         """
         metadata: dict[str, Any] = {
             "app_id": space.scope.app_id,
@@ -467,6 +524,7 @@ class ConversationPipeline:
                 output_language=language,
                 memcell_id=memcell_id,
                 roster=roster,
+                cue_people=cue_people,
             )
             capture_output(extract_span, extraction[0].episode)
         return extraction

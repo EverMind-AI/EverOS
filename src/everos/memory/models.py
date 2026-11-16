@@ -374,8 +374,8 @@ class Profile(BaseModel):
     and ``reason``, ``merged_into``, or ``reason``)."""
     pending_memcell_ids: list[str] = Field(default_factory=list)
     """Segments the person spoke in that no update has read yet: a group's
-    profile is updated every ``[groups] member_profile_every`` of them. Always
-    empty in a one-to-one space, which reads every segment at once."""
+    profile is updated every ``[groups] member_profile_every`` of them, a
+    user's own every ``[profile] update_every`` (and once they are idle)."""
 
     @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod

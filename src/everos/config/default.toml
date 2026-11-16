@@ -364,9 +364,21 @@ run_timeout_seconds = 1800.0
 
 [profile]
 # A user's own profile (users/<u>/user.md) is updated after this many new
-# segments of their conversations, read in one update, and at every flush of
-# one of them -- like a member's profile in a group. 1 updates every segment.
+# segments of their conversations, read in one update. 1 updates every segment.
 update_every = 5
+# Or once the user has had no new segment for this long.
+idle_seconds = 600
+# And at every flush of one of the user's conversations (the cadence before
+# 2026-11-14).
+update_on_flush = false
+# What an update reads: "cues" -- the messages and pictures the episode call
+# marked as saying something lasting about the person (the episode request
+# then carries a <profile_cues> block); no cue, no update call. "full" --
+# every message of the segments and every picture the person posted.
+input = "cues"
+# In "cues" mode, attach the cued pictures themselves instead of their
+# picture memories' text.
+picture_pixels = false
 
 [groups]
 # Group memory (docs/group-memory.md, section 5.2).

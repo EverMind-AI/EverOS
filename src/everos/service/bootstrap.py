@@ -36,12 +36,14 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
+import tomllib
 from collections.abc import Awaitable, Callable
 from functools import partial
 from pathlib import Path
 from types import TracebackType
 
 from everalgo.llm import LLMClient
+from pydantic import ValidationError
 
 from everos.component.embedding import (
     EmbeddingProvider,
@@ -85,6 +87,7 @@ from everos.infra.ome import (
     OmeLock,
     to_ome_strategy,
 )
+from everos.infra.ome.config import TomlRoot
 from everos.infra.persistence import MemoryRoot, StoreVersion
 from everos.infra.persistence.factories import (
     build_derived_index,
@@ -99,12 +102,13 @@ from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 from everos.memory.access import AccessPolicy
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import MemoryDeps, Stores
+from everos.memory.events import SessionFlushed
 from everos.memory.extract.boundary import BoundaryDetection
-from everos.memory.extract.pipeline import ConversationPipeline
+from everos.memory.extract.pipeline import ConversationPipeline, CueConsumers
 from everos.memory.extract.scene import SceneNarrator
 from everos.memory.get import GetManager
 from everos.memory.groups import RosterManager
-from everos.memory.ports import EventBus, Idle, IndexEraser, StrategySpec
+from everos.memory.ports import EventBus, Idle, Immediate, IndexEraser, StrategySpec
 from everos.memory.ports.images import ImageStore
 from everos.memory.search import Curve, DeciderStatus
 from everos.memory.search.manager import SearchManager
@@ -115,10 +119,13 @@ from everos.memory.search.recall import (
     RecallerDeps,
 )
 from everos.memory.strategies import (
+    EXTRACT_USER_PROFILE_IDLE_SPEC,
+    EXTRACT_USER_PROFILE_SPEC,
     STRATEGY_SPECS,
     UPDATE_GROUP_PROFILE_IDLE_SPEC,
     UPDATE_GROUP_PROFILE_SPEC,
     UPDATE_MEMBER_PROFILES_IDLE_SPEC,
+    UPDATE_MEMBER_PROFILES_SPEC,
 )
 from everos.service._warmup import warm_token_counter
 from everos.service.memory import MemoryService, StrengthWriter
@@ -357,6 +364,8 @@ def build_application(
         instructions=CustomInstructions(_CONFIG_ROOT),
         # The profile update reads a segment's pictures when [llm] reads images.
         picture_limits=_image_limits(settings) if settings.extraction.vision else None,
+        profile_input=settings.profile.input,
+        profile_picture_pixels=settings.profile.picture_pixels,
     )
     ome_lock = OmeLock(root.ome_db)
     engine = _build_engine(root, deps, settings, lock=ome_lock)
@@ -413,6 +422,7 @@ def build_application(
         eraser,
         access=access,
         decider_status=decider_status,
+        cue_consumers=profile_cue_consumers(settings, root.ome_config),
     )
     return Application(
         memory=memory,
@@ -582,8 +592,11 @@ def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
     after a group's last segment (scanned at most every minute), and both group
     profile strategies are off with ``[groups] group_profile = false``. The
     member profiles' idle trigger fires on the same clock, and only in
-    ``[groups] member_profile_mode = "batched"``. ``ome.toml`` overrides still
-    apply on top, by strategy name.
+    ``[groups] member_profile_mode = "batched"``. A user's profile is updated
+    on its own idle trigger, ``[profile] idle_seconds`` after the user's last
+    segment, and at a flush of their conversation only with ``[profile]
+    update_on_flush``. ``ome.toml`` overrides still apply on top, by strategy
+    name.
     """
     groups = settings.groups
     if spec.name in (
@@ -605,7 +618,69 @@ def configured_spec(spec: StrategySpec, settings: Settings) -> StrategySpec:
         return dataclasses.replace(spec, trigger=trigger, enabled=spec.enabled and on)
     if spec.name == UPDATE_GROUP_PROFILE_SPEC.name:
         return dataclasses.replace(spec, enabled=spec.enabled and groups.group_profile)
+    if spec.name == EXTRACT_USER_PROFILE_IDLE_SPEC.name:
+        idle = settings.profile.idle_seconds
+        trigger = Idle(
+            on=list(EXTRACT_USER_PROFILE_IDLE_SPEC.trigger.on),  # type: ignore[union-attr]
+            event_field="user_key",
+            idle_seconds=idle,
+            scan_interval_seconds=max(1, min(60, idle // 2)),
+        )
+        return dataclasses.replace(spec, trigger=trigger)
+    if spec.name == EXTRACT_USER_PROFILE_SPEC.name and not (
+        settings.profile.update_on_flush
+    ):
+        on = [
+            event
+            for event in EXTRACT_USER_PROFILE_SPEC.trigger.on  # type: ignore[union-attr]
+            if event is not SessionFlushed
+        ]
+        return dataclasses.replace(spec, trigger=Immediate(on=on))
     return spec
+
+
+def profile_cue_consumers(settings: Settings, ome_config: Path) -> CueConsumers:
+    """Which spaces' profiles read the episode call's cues, so get the cue block.
+
+    A user's own space when ``extract_user_profile`` runs and ``[profile]
+    input = "cues"``; a group's when ``update_member_profiles`` runs. A
+    strategy runs when the engine does (``[ome] enabled``), its spec as
+    configured (:func:`configured_spec`) enables it and ``ome.toml``, as it
+    reads at startup, does not turn it off. Decided once: an ``ome.toml``
+    edit that turns a profile on or off later reaches the episode request at
+    the next start (a profile turned on meanwhile reads the segments its
+    cells did not mark in full).
+    """
+    if not settings.ome.enabled:
+        return CueConsumers()
+    overrides = _enabled_overrides(ome_config)
+
+    def runs(spec: StrategySpec) -> bool:
+        enabled = configured_spec(spec, settings).enabled
+        return overrides.get(spec.name, enabled)
+
+    return CueConsumers(
+        users=settings.profile.input == "cues" and runs(EXTRACT_USER_PROFILE_SPEC),
+        groups=runs(UPDATE_MEMBER_PROFILES_SPEC),
+    )
+
+
+def _enabled_overrides(ome_config: Path) -> dict[str, bool]:
+    """The ``enabled`` each strategy section of ``ome.toml`` sets.
+
+    Nothing when there is no file or it cannot be read: the engine, which
+    owns the file, reports a bad one itself.
+    """
+    try:
+        with ome_config.open("rb") as handle:
+            root = TomlRoot.model_validate(tomllib.load(handle))
+    except (OSError, tomllib.TOMLDecodeError, ValidationError):
+        return {}
+    return {
+        name: override.enabled
+        for name, override in root.strategies.items()
+        if override.enabled is not None
+    }
 
 
 def _image_limits(settings: Settings) -> ImageLimits:
@@ -638,7 +713,14 @@ def _build_memory_service(
     *,
     access: AccessPolicy | None = None,
     decider_status: DeciderStatus | None = None,
+    cue_consumers: CueConsumers | None = None,
 ) -> MemoryService:
+    """The memory service over ``deps``.
+
+    ``cue_consumers`` are the spaces whose profiles read the episode call's
+    cues (:func:`profile_cue_consumers`); none when omitted -- a service built
+    without its engine runs no profile.
+    """
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     # The one access policy every read path asks (docs/group-memory.md, D9).
@@ -677,6 +759,8 @@ def _build_memory_service(
             image_memory_store=stores.image_memory,
             image_limits=_image_limits(settings),
             message_forget=stores.message_forget,
+            cue_consumers=cue_consumers,
+            profile_cues=stores.profile_cues,
         ),
         # A forget inside a group writes a changed scene again with the scene
         # strategy's own capped call (docs/scenes.md).

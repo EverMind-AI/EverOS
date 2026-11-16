@@ -213,11 +213,17 @@ extraction carves a MemCell, it emits an event; OME strategies pick it up
 and write their markdown when ready:
 
 - `extract_user_profile` — the owner's `user.md`, updated from the new
-  segments only (with the pictures the owner posted in them): a user's first
-  segment at once, then every `[profile] update_every` (5) new segments, read
-  together, and at each flush of one of their conversations -- the cadence a
-  member's profile in a group has. One update call, and a consolidation call
-  only when a part of the profile is
+  segments only: a user's first segment at once, then every `[profile]
+  update_every` (5) new segments, read together, and once the user has been
+  idle for `[profile] idle_seconds` (600; `extract_user_profile_idle`) --
+  at each flush of one of their conversations too with `[profile]
+  update_on_flush`. By default (`[profile] input = "cues"`) an update reads
+  only what the segments' episode calls marked as lasting about the owner
+  (their `<profile_cues>` block): those messages, each after the message
+  before it by someone else, and the marked pictures as their picture
+  memories' text; segments that marked nothing make no call. `input =
+  "full"` reads every message and every picture the owner posted. One update
+  call, and a consolidation call only when a part of the profile is
   over its cap and has grown since it was last consolidated. Every item keeps
   its id and source segments; a replaced or retired item moves to the file's
   `history`, and a new value names the item it replaced. A segment whose

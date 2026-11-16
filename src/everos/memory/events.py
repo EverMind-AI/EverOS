@@ -26,6 +26,16 @@ def parse_group_key(key: str) -> tuple[str, str, str] | None:
     return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
 
 
+def user_key(app_id: str, project_id: str, user_id: str) -> str:
+    """One string naming a user's own space: ``<app>/<project>/<user>``."""
+    return f"{app_id}/{project_id}/{user_id}"
+
+
+def parse_user_key(key: str) -> tuple[str, str, str] | None:
+    """``(app_id, project_id, user_id)`` back from :func:`user_key`."""
+    return parse_group_key(key)
+
+
 class EpisodeExtracted(Event):
     """Fired once per episode the conversation pipeline writes.
 
@@ -51,8 +61,10 @@ class EpisodeExtracted(Event):
         group_key: ``<app_id>/<project_id>/<group_id>`` on a group episode,
             filled from the three: the bucket an idle trigger keys on, so the
             tick it fires names the whole group (ids are path-safe, so the
-            separator cannot occur inside one). ``None`` on a user's episode,
-            which no idle trigger buckets.
+            separator cannot occur inside one). ``None`` on a user's episode.
+        user_key: ``<app_id>/<project_id>/<user_id>`` on a user's episode,
+            the bucket the user profile's idle trigger keys on; ``None`` on a
+            group's.
     """
 
     memcell_id: str
@@ -70,6 +82,7 @@ class EpisodeExtracted(Event):
     owner_type: Literal["user", "group"] = "user"
     speaker_ids: list[str] = Field(default_factory=list)
     group_key: str | None = None
+    user_key: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -89,6 +102,9 @@ class EpisodeExtracted(Event):
         if self.owner_type == "group" and self.group_key is None:
             key = group_key(self.app_id, self.project_id, self.owner_id)
             object.__setattr__(self, "group_key", key)
+        if self.owner_type == "user" and self.user_key is None:
+            key = user_key(self.app_id, self.project_id, self.owner_id)
+            object.__setattr__(self, "user_key", key)
         return self
 
 
@@ -98,10 +114,9 @@ _REFLECTION_KEYS = frozenset({"source", "reflection"})
 class SessionFlushed(Event):
     """Fired when a flush of a session bound to no group has run.
 
-    The users' profiles waiting on ``[profile] update_every`` are brought up
-    to date on it, as a group's flush does for its members: a flush is where a
-    client says it wants the rest current too. Fired whether or not the flush
-    cut a segment.
+    With ``[profile] update_on_flush`` the users' profiles waiting on
+    ``[profile] update_every`` are brought up to date on it, as a group's
+    flush does for its members. Fired whether or not the flush cut a segment.
     """
 
     session_id: str

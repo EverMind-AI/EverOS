@@ -32,7 +32,7 @@ from __future__ import annotations
 
 __all__ = ["ProfileUpdated", "finish_update", "update_profile"]
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any
@@ -86,6 +86,8 @@ async def update_profile(
     shown: Sequence[MemCell],
     language: str | None,
     reads: AbstractAsyncContextManager[Any] | None = None,
+    pictures: Collection[str] | None = None,
+    picture_text: Mapping[str, str] | None = None,
 ) -> ProfileUpdated:
     """Read ``segments`` into the person's profile; the caller holds its lock.
 
@@ -102,6 +104,10 @@ async def update_profile(
         reads: Held while the update reads storage (the pictures and the
             forget log), never across the model call: a group's flush bounds
             how many members read at once with it.
+        pictures: Attach only these of the person's pictures, by content
+            hash (:func:`~everos.memory.extract.pipeline.profile_input.
+            select_profile_input`); ``None`` attaches every one they posted.
+        picture_text: Attach each picture as this text instead of its pixels.
     """
     async with reads or nullcontext():
         cells, pictures = await profile_pictures(
@@ -116,6 +122,8 @@ async def update_profile(
                 owner_id=scope.owner_id,
                 owner_type=scope.owner_type,
             ),
+            only=pictures,
+            as_text=picture_text,
         )
     update = await ProfileExtractor(llm=deps.llm).aupdate(
         cells,

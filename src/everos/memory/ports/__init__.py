@@ -38,6 +38,8 @@ from .indexes import GroupProfileIndex as GroupProfileIndex
 from .indexes import ImageMemoryIndex as ImageMemoryIndex
 from .indexes import IndexEraser as IndexEraser
 from .indexes import ProfileIndex as ProfileIndex
+from .profile_cues import PersonCues as PersonCues
+from .profile_cues import ProfileCueStore as ProfileCueStore
 from .projects import ProjectLinkStore as ProjectLinkStore
 from .query import All as All
 from .query import AnyOf as AnyOf
@@ -153,6 +155,8 @@ __all__ = [
     "Page",
     "PageResult",
     "PendingBatch",
+    "PersonCues",
+    "ProfileCueStore",
     "ProfileIndex",
     "ProfileStore",
     "ProjectLinkStore",

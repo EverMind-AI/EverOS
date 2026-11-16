@@ -18,7 +18,7 @@ from __future__ import annotations
 __all__ = ["Indexes", "MemoryDeps", "Stores"]
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from everalgo.llm import LLMClient
 
@@ -40,6 +40,7 @@ from everos.memory.ports import (
     MemorizeInboxStore,
     MessageForgetStore,
     OwnerDirStore,
+    ProfileCueStore,
     ProfileIndex,
     ProfileStore,
     ProjectLinkStore,
@@ -80,6 +81,10 @@ class Stores:
     strength: StrengthStore | None = None
     """Each memory's strength under the forgetting curve (``[search]
     forgetting_curve``); ``None`` reads every memory as never reinforced."""
+    profile_cues: ProfileCueStore | None = None
+    """What each segment's episode call marked for a person's profile
+    (``[profile] input = "cues"``); ``None`` records none, and a profile then
+    reads its segments in full."""
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,14 @@ class MemoryDeps:
         picture_limits: ``[images]``, the scale a profile update reads a
             segment's pictures at; ``None`` when ``llm`` reads no images
             (``[extraction] vision`` off), and the update then reads text only.
+        profile_input: ``[profile] input``, what a user's profile update
+            reads: ``cues`` (the marked messages and pictures,
+            :mod:`everos.memory.extract.pipeline.profile_input`) or ``full``
+            (every message of its segments). ``full`` unless the bootstrap
+            says otherwise.
+        profile_picture_pixels: ``[profile] picture_pixels``: in ``cues``
+            mode, attach the cued pictures themselves instead of their
+            picture memories' text.
     """
 
     llm: LLMClient
@@ -113,3 +126,5 @@ class MemoryDeps:
     indexes: Indexes
     instructions: CustomInstructions
     picture_limits: ImageLimits | None = None
+    profile_input: Literal["cues", "full"] = "full"
+    profile_picture_pixels: bool = False

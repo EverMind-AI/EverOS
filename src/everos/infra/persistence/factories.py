@@ -42,6 +42,7 @@ from .sqlite import (
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
     SqliteMessageForgetStore,
+    SqliteProfileCueStore,
     SqliteRepos,
     SqliteSessionBufferStore,
     SqliteSessionPurgeStore,
@@ -78,6 +79,7 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
         message_forget=SqliteMessageForgetStore(sqlite.message_forget),
         group_messages=SqliteGroupMessageStore(sqlite.group_message),
         strength=SqliteStrengthStore(sqlite.memory_strength),
+        profile_cues=SqliteProfileCueStore(sqlite.profile_cue),
     )
 
 

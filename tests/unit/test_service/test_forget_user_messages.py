@@ -88,6 +88,53 @@ async def test_a_forgotten_messages_fact_leaves_the_profile_and_is_written_again
         ]
 
 
+async def test_a_forgotten_cued_message_is_read_by_no_later_update(
+    tmp_path: Path,
+) -> None:
+    """``[profile] input = "cues"``: the profile reads the marked messages
+    only, and a marked message a forget took out is never read again -- the
+    segment queued again is read from the cues it has left; the undo puts the
+    fact back."""
+    model = ForgetModel()
+    async with open_world(tmp_path, model, profile_cues=True) as world:
+        await send(
+            world,
+            "p1",
+            ("amy", "My door code is ZQFPIN20, keep it.", 1_000),
+            ("amy", "Unrelated: I like ZQFHIKE21.", 1_001),
+            ("amy", "What a day.", 1_002),
+            ("bot", "Ok.", 1_003),
+        )
+        await profile_update(world)
+        (profile,) = [p for name, p in model.take() if name == "_ProfileUpdateReply"]
+        assert "ZQFPIN20" in profile and "What a day." not in profile
+        assert sorted(await items(world)) == ["Holds ZQFHIKE21", "Holds ZQFPIN20"]
+        ids = await message_ids(world, "p1")
+        done = await forget(
+            world,
+            ForgetTarget(
+                kind="message",
+                session_id="p1",
+                message_ids=(ids["My door code is ZQFPIN20, keep it."],),
+            ),
+        )
+        assert await items(world) == []
+        model.take()
+        await send(
+            world, "p2", ("amy", "Later: ZQFNEW22.", 9_000), ("bot", "Ok.", 9_001)
+        )
+        await profile_update(world)
+        (profile,) = [p for name, p in model.take() if name == "_ProfileUpdateReply"]
+        assert "ZQFPIN20" not in profile and "ZQFHIKE21" in profile
+        assert sorted(await items(world)) == ["Holds ZQFHIKE21", "Holds ZQFNEW22"]
+        await undo(world, done.forget_id)
+        assert sorted(await items(world)) == [
+            "Holds ZQFHIKE21",
+            "Holds ZQFNEW22",
+            "Holds ZQFPIN20",
+        ]
+
+
 async def test_undoing_a_message_forget_puts_its_profile_items_back(
     tmp_path: Path,
 ) -> None:

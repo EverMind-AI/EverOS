@@ -230,7 +230,7 @@ async def test_a_text_reply_s_summary_is_the_content_s_start() -> None:
         responses=[json.dumps({"title": "Hike", "content": content, "summary": "x"})]
     )
 
-    episode, _ = await extract_cell(
+    episode, _, _ = await extract_cell(
         llm,
         _TEXT,
         pictures=[],
@@ -310,7 +310,7 @@ async def test_a_text_cell_is_given_no_picture_it_did_not_send() -> None:
     }
     llm = FakeLLMClient(responses=[json.dumps(hallucinated)])
 
-    episode, described = await extract_cell(
+    episode, described, _ = await extract_cell(
         llm,
         _TEXT,
         pictures=[],
@@ -338,7 +338,7 @@ async def test_a_reference_to_a_label_not_attached_is_taken_out() -> None:
     llm = FakeLLMClient(responses=[json.dumps(reply)])
     picture = Picture(label="img-1", image_id=_IMAGE_ID, data=_PNG, mime="image/png")
 
-    episode, described = await extract_cell(
+    episode, described, _ = await extract_cell(
         llm,
         _PICTURES,
         pictures=[picture],

@@ -21,6 +21,7 @@ from .md_change_state import MdChangeState as MdChangeState
 from .memcell import Memcell as Memcell
 from .memorize_inbox import MemorizeInbox as MemorizeInbox
 from .memory_strength import MemoryStrength as MemoryStrength
+from .profile_cue import ProfileCue as ProfileCue
 from .unprocessed_buffer import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "MemorizeInbox",
     "MemoryStrength",
     "MessageForget",
+    "ProfileCue",
     "SessionBinding",
     "UnprocessedBuffer",
 ]

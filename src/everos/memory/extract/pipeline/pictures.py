@@ -33,9 +33,10 @@ __all__ = [
     "without_pictures",
 ]
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
+from typing import TYPE_CHECKING, cast
 
-from everalgo.llm import image_url_part_from_bytes
+from everalgo.llm import TextPart, image_url_part_from_bytes
 from everalgo.types import ChatMessage
 from everalgo.user_memory.profile import ProfilePicture
 
@@ -44,6 +45,9 @@ from everos.core.observability.logging import get_logger
 from everos.memory.models import MemCell
 from everos.memory.ports import MemcellStore, SourceCheck
 from everos.memory.ports.images import ImageStore
+
+if TYPE_CHECKING:
+    from everalgo.llm import ImageUrlPart
 
 logger = get_logger(__name__)
 
@@ -140,6 +144,8 @@ async def profile_pictures(
     limits: ImageLimits | None,
     forgotten: Collection[str] = (),
     detail: str = "high",
+    only: Collection[str] | None = None,
+    as_text: Mapping[str, str] | None = None,
 ) -> tuple[list[MemCell], list[ProfilePicture]]:
     """The cells as a profile update reads them, and the pictures ``owner_id`` posted.
 
@@ -155,6 +161,13 @@ async def profile_pictures(
     bytes stay on disk for the undo, so whether they can be read says
     nothing. ``detail`` is the image parts' hint, as the episode call sends.
 
+    ``only`` attaches only the pictures it names (the profile cues', see
+    :mod:`.profile_input`); ``None`` attaches every one the owner posted.
+    ``as_text`` attaches each picture as its text instead of its pixels --
+    the picture memory's description and visible text, after the picture's
+    ``<picture>`` element as the image would be -- and a picture it has no
+    text for is not attached; the bytes are not read then.
+
     Without a picture store or limits (the extraction model reads no images),
     no picture is attached.
     """
@@ -165,6 +178,8 @@ async def profile_pictures(
         limits=limits,
         forgotten=forgotten,
         detail=detail,
+        only=only,
+        as_text=as_text,
     )
     return shown, pictures
 
@@ -177,13 +192,16 @@ async def members_pictures(
     limits: ImageLimits | None,
     forgotten: Collection[str] = (),
     detail: str = "high",
+    only: Collection[str] | None = None,
+    as_text: Mapping[str, str] | None = None,
 ) -> tuple[list[MemCell], list[ProfilePicture], dict[str, list[str]]]:
     """:func:`profile_pictures` for several people read in one update.
 
     Every picture one of ``members`` posted is labelled once for the whole
     batch, in conversation order, whoever posted it; a picture anyone else
     posted (an assistant, someone who is not among ``members``) or one that
-    cannot be read becomes a bare ``[IMAGE]``.
+    cannot be read becomes a bare ``[IMAGE]``. ``only`` and ``as_text`` are
+    :func:`profile_pictures`' (a picture not attached is a bare ``[IMAGE]``).
 
     Returns:
         ``(cells, pictures, posted)``: the cells as the update reads them, the
@@ -194,12 +212,16 @@ async def members_pictures(
         cells = [without_pictures(cell, forgotten) for cell in cells]
     if images is None or limits is None:
         return list(cells), [], {}
+    if as_text is not None:
+        return _with_picture_texts(cells, members, only=only, texts=as_text)
     labels: dict[str, str] = {}
     pictures: list[ProfilePicture] = []
     posted: dict[str, list[str]] = {}
     for cell in cells:
         for picture in await pictures_of(cell, images=images, limits=limits):
             if picture.poster not in members or picture.image_id in labels:
+                continue
+            if only is not None and picture.image_id not in only:
                 continue
             label = f"img-{len(labels) + 1}"
             labels[picture.image_id] = label
@@ -214,6 +236,47 @@ async def members_pictures(
                 )
             pictures.append(ProfilePicture(label=label, id=picture.image_id, part=part))
             posted.setdefault(picture.poster, []).append(label)
+    return [_relabelled(cell, labels) for cell in cells], pictures, posted
+
+
+def _with_picture_texts(
+    cells: Sequence[MemCell],
+    members: Collection[str],
+    *,
+    only: Collection[str] | None,
+    texts: Mapping[str, str],
+) -> tuple[list[MemCell], list[ProfilePicture], dict[str, list[str]]]:
+    """:func:`members_pictures` with each picture attached as its text.
+
+    The picture goes to the update as a text part where its image part would
+    be, after the same ``<picture>`` element: everalgo appends a
+    :class:`~everalgo.user_memory.profile.ProfilePicture`'s part to the user
+    message as it is, and its lineage reads the label back to the hash, so an
+    item read off a picture's text still names the picture a forget of it
+    reaches.
+    """
+    labels: dict[str, str] = {}
+    pictures: list[ProfilePicture] = []
+    posted: dict[str, list[str]] = {}
+    for cell in cells:
+        posters: dict[str, str] = {}
+        for item in cell.items:
+            sender = str(getattr(item, "sender_id", "") or "")
+            poster = sender if getattr(item, "role", None) == "user" else ""
+            for image_id in image_ids_in(str(getattr(item, "content", "") or "")):
+                # A picture is its poster's where it first appears in the cell.
+                posters.setdefault(image_id, poster)
+        for image_id, poster in posters.items():
+            text = texts.get(image_id)
+            if poster not in members or image_id in labels or text is None:
+                continue
+            if only is not None and image_id not in only:
+                continue
+            label = f"img-{len(labels) + 1}"
+            labels[image_id] = label
+            part = cast("ImageUrlPart", TextPart(text=text))
+            pictures.append(ProfilePicture(label=label, id=image_id, part=part))
+            posted.setdefault(poster, []).append(label)
     return [_relabelled(cell, labels) for cell in cells], pictures, posted
 
 

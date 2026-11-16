@@ -17,6 +17,7 @@ from ._repos import (
     MemorizeInboxRepo,
     MemoryStrengthRepo,
     MessageForgetRepo,
+    ProfileCueRepo,
     SessionCutRepo,
     SessionPurgeRepo,
     UnprocessedBufferRepo,
@@ -38,6 +39,7 @@ class SqliteRepos:
     memorize_inbox: MemorizeInboxRepo
     memory_strength: MemoryStrengthRepo
     message_forget: MessageForgetRepo
+    profile_cue: ProfileCueRepo
     session_cut: SessionCutRepo
     session_purge: SessionPurgeRepo
     unprocessed_buffer: UnprocessedBufferRepo
@@ -57,6 +59,7 @@ class SqliteRepos:
             memorize_inbox=MemorizeInboxRepo(factory),
             memory_strength=MemoryStrengthRepo(factory),
             message_forget=MessageForgetRepo(factory),
+            profile_cue=ProfileCueRepo(factory),
             session_cut=SessionCutRepo(factory),
             session_purge=SessionPurgeRepo(factory),
             unprocessed_buffer=UnprocessedBufferRepo(factory),

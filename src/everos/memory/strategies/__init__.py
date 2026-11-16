@@ -16,8 +16,12 @@ from everos.memory.ports import StrategySpec
 from .catch_up_profiles import GROUP_PROFILES as GROUP_PROFILES
 from .catch_up_profiles import CatchUpProvider as CatchUpProvider
 from .catch_up_profiles import catch_up_spec as catch_up_spec
+from .extract_user_profile import (
+    EXTRACT_USER_PROFILE_IDLE_SPEC as EXTRACT_USER_PROFILE_IDLE_SPEC,
+)
 from .extract_user_profile import EXTRACT_USER_PROFILE_SPEC as EXTRACT_USER_PROFILE_SPEC
 from .extract_user_profile import extract_user_profile as extract_user_profile
+from .extract_user_profile import update_pending_profile as update_pending_profile
 from .update_group_profile import (
     UPDATE_GROUP_PROFILE_IDLE_SPEC as UPDATE_GROUP_PROFILE_IDLE_SPEC,
 )
@@ -49,6 +53,7 @@ CATCH_UP_PROFILES_SPEC: StrategySpec = catch_up_spec(CATCH_UP_PROVIDERS)
 
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     EXTRACT_USER_PROFILE_SPEC,
+    EXTRACT_USER_PROFILE_IDLE_SPEC,
     UPDATE_USER_SCENES_SPEC,
     UPDATE_MEMBER_PROFILES_SPEC,
     UPDATE_MEMBER_PROFILES_IDLE_SPEC,
@@ -62,6 +67,7 @@ STRATEGY_SPECS: tuple[StrategySpec, ...] = (
 __all__ = [
     "CATCH_UP_PROFILES_SPEC",
     "CATCH_UP_PROVIDERS",
+    "EXTRACT_USER_PROFILE_IDLE_SPEC",
     "EXTRACT_USER_PROFILE_SPEC",
     "GROUP_PROFILES",
     "STRATEGY_SPECS",
@@ -77,5 +83,6 @@ __all__ = [
     "update_group_profile",
     "update_group_scenes",
     "update_member_profiles",
+    "update_pending_profile",
     "update_user_scenes",
 ]
