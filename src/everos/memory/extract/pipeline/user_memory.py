@@ -32,6 +32,7 @@ from everos.memory.episode_summary import placeholder_summary
 from everos.memory.events import EpisodeCopy, EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
+from everos.memory.extract.trace import record_construction
 from everos.memory.models import Episode, IngestResult
 from everos.memory.ports import EpisodeStore, Event, MemcellStore, MemoryRef, Scope
 
@@ -89,7 +90,24 @@ class UserMemoryPipeline:
         md_paths: list[str] = []
         user_senders = _unique_user_senders(cell)
         if user_senders:
+            record_construction(
+                "extraction_attempt",
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                session_id=ingested.session_id,
+                memcell_id=memcell_id,
+                owners=user_senders,
+            )
             algo_ep = await self._extract_episode(ingested, prepared)
+            record_construction(
+                "extraction_result",
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                session_id=ingested.session_id,
+                memcell_id=memcell_id,
+                owners=user_senders,
+                content=algo_ep.episode,
+            )
             # The model writes in the conversation's language; what it chose
             # pins every extraction downstream of this episode.
             language = detect_output_language(algo_ep.episode)
@@ -226,6 +244,15 @@ class UserMemoryPipeline:
             )
             if ref is None:
                 return None
+            record_construction(
+                "persisted_episode",
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                session_id=ingested.session_id,
+                memcell_id=memcell_id,
+                owners=[ep.owner_id],
+                entry_id=ref.entry_id,
+            )
             # Written .md path, memory-root-relative (only when
             # capture_content is on) — never the host absolute path.
             capture_output(persist_span, ref.md_path)

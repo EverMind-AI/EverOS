@@ -22,6 +22,7 @@ from everos.memory.episode_summary import placeholder_summary
 from everos.memory.events import EpisodeCopy, EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
+from everos.memory.extract.trace import collect_construction_trace
 from everos.memory.ports import MemoryRef
 from tests.fakes import (
     bundled_instructions,
@@ -108,10 +109,18 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
 
-    outcome = await _pipeline(user_track_llm(), episode_store).run_cell(
-        _INGESTED, _prepared("u1")
-    )
+    with collect_construction_trace() as events:
+        outcome = await _pipeline(user_track_llm(), episode_store).run_cell(
+            _INGESTED, _prepared("u1")
+        )
 
+    assert [event["phase"] for event in events] == [
+        "extraction_attempt",
+        "extraction_result",
+        "persisted_episode",
+    ]
+    assert events[1]["content"] == _EPISODE["content"]
+    assert events[2]["entry_id"] == _REF.entry_id
     assert outcome.md_paths == [_REF.md_path]
     assert isinstance(outcome.events[0], UserPipelineStarted)
     (extracted,) = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]

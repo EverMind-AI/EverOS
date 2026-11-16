@@ -113,6 +113,9 @@ dependencies = [
 
 [project.optional-dependencies]
 multimodal = ["everalgo-parser[svg]==0.3.0"]  # [svg] bundles cairosvg → SVG works by default
+# MemTrace execution-graph tracer (infra/memtrace). Optional — the hooks are
+# no-ops without it. Install with: uv sync --extra memtrace
+memtrace = ["smartcomment>=0.1.2"]
 # Native OpenTelemetry tracing export. Optional — EverOS never imports these
 # unless [observability] is enabled. Install with: pip install everos[otel]
 otel = [

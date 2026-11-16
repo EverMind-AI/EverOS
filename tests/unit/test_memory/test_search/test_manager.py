@@ -31,7 +31,7 @@ from everos.config import load_settings
 from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.models import CanonicalMessage, Cluster
 from everos.memory.ports import Scope, SearchHit, SessionKey
-from everos.memory.search.dto import SearchMethod, SearchRequest
+from everos.memory.search.dto import SearchMethod, SearchProfileItem, SearchRequest
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
@@ -40,6 +40,7 @@ from everos.memory.search.recall import (
     EpisodeRecaller,
 )
 from everos.memory.search.recall.base import RecallerDeps
+from everos.memory.search.trace import collect_search_trace
 from tests.fakes import static_trace_path, static_tuning, unscripted_llm
 
 from ._records import (
@@ -917,7 +918,8 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
         skill_dense=[skill_direct],
         skill_by_case=[skill_bridged],
     )
-    await mgr.search(_agent_req(method=SearchMethod.HYBRID, enable_llm_rerank=True))
+    with collect_search_trace() as stages:
+        await mgr.search(_agent_req(method=SearchMethod.HYBRID, enable_llm_rerank=True))
 
     dense_ids = {c.id for c in seen_skill_dense["dense"]}
     # Direct dense recall is preserved AND the case-bridged skill is unioned.
@@ -925,6 +927,16 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     # The bridged skill inherits the matched case's score (0.85 from the case).
     by_id = {c.id: c for c in seen_skill_dense["dense"]}
     assert by_id["s_bridged"].score == pytest.approx(0.85)
+    by_phase = {(s.kind, s.phase): s for s in stages}
+    bridge = by_phase[("agent_skill", "bridged_dense")]
+    assert bridge.input_stage_ids == (
+        by_phase[("agent_skill", "dense")].stage_id,
+        by_phase[("agent_case", "fusion")].stage_id,
+    )
+    assert by_phase[("agent_skill", "fusion")].input_stage_ids == (
+        by_phase[("agent_skill", "sparse")].stage_id,
+        bridge.stage_id,
+    )
 
 
 async def test_search_emits_memory_search_span() -> None:
@@ -1153,3 +1165,171 @@ async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert "langfuse.observation.input" not in attrs
+
+
+# ── Stage trace hooks (MemTrace collector) ──────────────────────────────
+
+
+async def test_keyword_user_records_single_route_stage() -> None:
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+    with collect_search_trace() as stages:
+        await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    branches = {s.phase: s for s in stages if s.phase.startswith("_")}
+    assert set(branches) == {"_load_unprocessed"}
+    assert all(s.metadata["status"] == "skipped" for s in branches.values())
+    assert all(s.input_stage_ids == () for s in branches.values())
+    assert [(s.phase, s.kind) for s in stages if s.kind == "episode"] == [
+        ("single_route", "episode")
+    ]
+    stage = next(s for s in stages if s.kind == "episode")
+    assert [c.id for c in stage.candidates] == ["ep_1"]
+    assert stage.candidates[0].source == "keyword"
+
+
+async def test_profile_fetch_returns_content_without_recording_a_branch() -> None:
+    profile = SearchProfileItem(
+        id="profile_alice", user_id="alice", profile_data={"summary": "camping"}
+    )
+
+    class ProfileRecaller:
+        async def fetch(self, owner_id: str, **kwargs: Any) -> list[SearchProfileItem]:
+            assert owner_id == "alice"
+            return [profile]
+
+    mgr = _build_manager()
+    mgr._profile = ProfileRecaller()
+    with collect_search_trace() as stages:
+        response = await mgr.search(
+            _user_req(method=SearchMethod.KEYWORD, include_profile=True)
+        )
+    assert response.data.profiles == [profile]
+    assert all(s.kind != "profile" for s in stages)
+
+
+async def test_keyword_agent_records_single_route_per_kind() -> None:
+    mgr = _build_manager(case_sparse=[_case_row("c1")], skill_sparse=[_skill_row("s1")])
+    with collect_search_trace() as stages:
+        await mgr.search(_agent_req(method=SearchMethod.KEYWORD))
+    by_kind: dict[str, list[str]] = {}
+    for stage in stages:
+        if stage.kind != "unprocessed":
+            by_kind.setdefault(stage.kind, []).append(stage.phase)
+    assert by_kind == {"agent_case": ["single_route"], "agent_skill": ["single_route"]}
+
+
+async def test_vector_user_records_maxsim_atomic_stage() -> None:
+    mgr = _build_manager(
+        episode_dense=[_episode_row("ep_dense")],
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_dense", score=0.85)],
+        embedding=_StubEmbedding(),
+    )
+    with collect_search_trace() as stages:
+        await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert [(s.phase, s.kind) for s in stages if s.kind == "episode"] == [
+        ("maxsim_atomic", "episode")
+    ]
+    stage = next(s for s in stages if s.kind == "episode")
+    assert [c.id for c in stage.candidates] == ["ep_dense"]
+
+
+async def test_hybrid_user_records_hierarchy_stage_sequence() -> None:
+    ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
+    mgr = _build_manager(
+        episode_sparse=[ep1], episode_dense=[ep1], embedding=_StubEmbedding()
+    )
+    with collect_search_trace() as stages:
+        await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, min_score=0.0))
+    assert [(s.phase, s.kind) for s in stages if s.kind == "episode"] == [
+        ("sparse", "episode"),
+        ("dense", "episode"),
+        ("rrf", "episode"),
+        ("hierarchy", "episode"),
+        ("filtered", "episode"),
+    ]
+
+
+async def test_hybrid_user_without_min_score_skips_filtered_stage() -> None:
+    ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
+    mgr = _build_manager(
+        episode_sparse=[ep1], episode_dense=[ep1], embedding=_StubEmbedding()
+    )
+    with collect_search_trace() as stages:
+        await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10))
+    assert [s.phase for s in stages if s.kind == "episode"] == [
+        "sparse",
+        "dense",
+        "rrf",
+        "hierarchy",
+    ]
+
+
+async def test_hybrid_agent_records_fusion_stages_with_metadata() -> None:
+    mgr = _build_manager(
+        case_sparse=[_case_row("c1")],
+        skill_sparse=[_skill_row("s1")],
+        embedding=_StubEmbedding(),
+        reranker=_StubReranker(),
+    )
+    with collect_search_trace() as stages:
+        await mgr.search(_agent_req(method=SearchMethod.HYBRID))
+    by_kind: dict[str, list[str]] = {}
+    for stage in stages:
+        if stage.kind != "unprocessed":
+            by_kind.setdefault(stage.kind, []).append(stage.phase)
+    assert by_kind["agent_case"] == ["sparse", "dense", "fusion"]
+    assert by_kind["agent_skill"] == ["sparse", "dense", "bridged_dense", "fusion"]
+    case_fusion = next(
+        s for s in stages if s.kind == "agent_case" and s.phase == "fusion"
+    )
+    assert case_fusion.metadata["enable_rerank"] is False
+    skill_fusion = next(
+        s for s in stages if s.kind == "agent_skill" and s.phase == "fusion"
+    )
+    assert skill_fusion.metadata == {
+        "fusion_mode": "skill_hybrid",
+        "enable_rerank": False,
+    }
+    skill_dense = next(
+        s for s in stages if s.kind == "agent_skill" and s.phase == "dense"
+    )
+    skill_sparse = next(
+        s for s in stages if s.kind == "agent_skill" and s.phase == "sparse"
+    )
+    bridge = next(s for s in stages if s.phase == "bridged_dense")
+    assert bridge.input_stage_ids == (skill_dense.stage_id,)
+    assert skill_fusion.input_stage_ids == (skill_sparse.stage_id, bridge.stage_id)
+
+
+async def test_agentic_records_final_stage_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from everos.memory.search.dto import SearchEpisodeItem
+
+    async def _fake_agentic(*args: Any, **kwargs: Any) -> list[SearchEpisodeItem]:
+        return [
+            SearchEpisodeItem(
+                id="ep_1",
+                score=0.9,
+                session_id="s",
+                user_id="alice",
+                timestamp=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
+                sender_ids=["alice"],
+                subject="s",
+                summary="s",
+                episode="body",
+                type="Conversation",
+                atomic_facts=[],
+            )
+        ]
+
+    monkeypatch.setattr(
+        "everos.memory.search.manager.search_episodes_agentic", _fake_agentic
+    )
+    mgr = _build_manager(embedding=_StubEmbedding(), reranker=_StubReranker())
+    with collect_search_trace() as stages:
+        await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    assert [(s.phase, s.kind) for s in stages if s.kind == "episode"] == [
+        ("agentic", "episode")
+    ]
+    stage = next(s for s in stages if s.kind == "episode")
+    assert [c.id for c in stage.candidates] == ["ep_1"]

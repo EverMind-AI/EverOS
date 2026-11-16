@@ -30,6 +30,7 @@ from everos.core.observability.tracing import memory_span
 from everos.core.purge_marks import origin_or_now
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
+from everos.memory.extract.trace import record_construction
 from everos.service.memory._extraction import ExtractionSupervisor
 from everos.service.memory._models import MemorizeResult
 
@@ -232,12 +233,50 @@ class Memorizer:
         )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested, mode=mode)
+            record_construction(
+                "boundary",
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                session_id=ingested.session_id,
+                status=buffered.status,
+                reason="deferred",
+                detection_performed=False,
+                cells=[],
+            )
             return MemorizeResult(
                 message_count=len(payload.get("messages", [])),
                 status=_merge_status(buffered.status, "skipped"),
             )
 
         boundary = await self._boundary.detect(ingested, mode=mode, is_final=is_final)
+        record_construction(
+            "boundary",
+            app_id=ingested.app_id,
+            project_id=ingested.project_id,
+            session_id=ingested.session_id,
+            status=boundary.status,
+            detection_performed=(boundary.detection or {}).get(
+                "detection_performed", False
+            ),
+            detection=boundary.detection,
+            snapshot_factory=lambda: {
+                "cells": [
+                    {
+                        "id": memcell_id,
+                        "message_ids": message_ids,
+                        "sender_ids": sender_ids,
+                        "content": cell.model_dump(mode="json"),
+                    }
+                    for memcell_id, message_ids, sender_ids, cell in zip(
+                        boundary.memcell_ids,
+                        boundary.per_cell_message_ids,
+                        boundary.per_cell_all_senders,
+                        boundary.cells,
+                        strict=True,
+                    )
+                ]
+            },
+        )
 
         if not boundary.cells:
             # Nothing went past the boundary stage — no pipelines to dispatch.

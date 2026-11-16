@@ -86,6 +86,7 @@ from .shaper import (
     shape_episodes,
 )
 from .skill_hybrid import search_agent_skills_hybrid
+from .trace import record_branch, record_stage
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
@@ -308,12 +309,34 @@ class SearchManager:
         """
         session_id = _extract_top_level_session_id(req.filters)
         if session_id is None:
+            record_branch(
+                "_load_unprocessed",
+                "unprocessed",
+                [],
+                status="skipped",
+                skip_reason="no_session_filter",
+            )
             return []
         session = SessionKey(
             app_id=req.app_id, project_id=req.project_id, session_id=session_id
         )
-        messages = await self._session_buffer.list(session)
-        return [_unprocessed_message_to_dto(m, session) for m in messages]
+        try:
+            messages = await self._session_buffer.list(session)
+            results = [_unprocessed_message_to_dto(m, session) for m in messages]
+        except Exception as exc:
+            record_branch(
+                "_load_unprocessed",
+                "unprocessed",
+                [],
+                status="error",
+                session_id=session_id,
+                error_type=type(exc).__name__,
+            )
+            raise
+        record_branch(
+            "_load_unprocessed", "unprocessed", results, session_id=session_id
+        )
+        return results
 
     # ── Agent partition ─────────────────────────────────────────────
 
@@ -375,7 +398,7 @@ class SearchManager:
         decider: RoundDecider | None = None,
     ) -> list[SearchEpisodeItem]:
         if req.method == SearchMethod.AGENTIC:
-            return await search_episodes_agentic(
+            results = await search_episodes_agentic(
                 req.query,
                 owner_id=req.owner_id,
                 where=where,
@@ -391,9 +414,11 @@ class SearchManager:
                 radius=_effective_radius(req),
                 tz=self._tz,
             )
+            record_stage("agentic", "episode", results)
+            return results
 
         if req.method == SearchMethod.LLM_MULTIROUND:
-            return await search_episodes_llm_multiround(
+            results = await search_episodes_llm_multiround(
                 req.query,
                 owner_id=req.owner_id,
                 where=where,
@@ -409,6 +434,8 @@ class SearchManager:
                 tuning_source=self._tuning_source,
                 trace_path_source=self._trace_path_source,
             )
+            record_stage("agentic", "episode", results)
+            return results
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
         top_k = self._top_k(req.top_k)
@@ -426,6 +453,8 @@ class SearchManager:
                     )
                 else:
                     recalled = await self._maxsim_atomic_recall(req, where, top_k)
+            if req.method == SearchMethod.KEYWORD:
+                record_stage("single_route", "episode", recalled.candidates)
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
@@ -443,6 +472,7 @@ class SearchManager:
             metadata={"phase": fusion_mode},
         ):
             rrf_candidates = rrf(sparse.candidates, dense.candidates)
+            record_stage("rrf", "episode", rrf_candidates)
             facts = await self._fact.facts_for_episodes(
                 build_ep_to_fact_parents(rrf_candidates),
                 where,
@@ -455,6 +485,7 @@ class SearchManager:
                 episode_to_facts=facts.buckets,
                 top_k=top_k,
             )
+            record_stage("hierarchy", "episode", scored)
             shaped = reshape_hybrid_output(
                 scored,
                 episodes_by_id=merge_stored(sparse, dense),
@@ -462,6 +493,7 @@ class SearchManager:
             )
             if req.min_score is not None:
                 shaped = [s for s in shaped if s.score >= req.min_score]
+                record_stage("filtered", "episode", shaped)
             return shaped
 
     # ── Agent cases ─────────────────────────────────────────────────
@@ -470,7 +502,7 @@ class SearchManager:
         self, req: SearchRequest, where: Filter
     ) -> list[SearchAgentCaseItem]:
         if req.method == SearchMethod.AGENTIC:
-            return await search_agent_cases_agentic(
+            results = await search_agent_cases_agentic(
                 req.query,
                 where=where,
                 case_recaller=self._case,
@@ -481,6 +513,8 @@ class SearchManager:
                 radius=_effective_radius(req),
                 tz=self._tz,
             )
+            record_stage("agentic", "agent_case", results)
+            return results
         fusion_mode, _ = resolve_pipeline(req.method, "agent_case")
         enable_rerank = _effective_llm_rerank(req)
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
@@ -514,6 +548,12 @@ class SearchManager:
                 enable_rerank=enable_rerank,
                 rerank_top_k=top_k,
             )
+        record_stage(
+            "fusion",
+            "agent_case",
+            output.items,
+            metadata={"fusion_mode": fusion_mode, "enable_rerank": enable_rerank},
+        )
         return shape_agent_cases_ranked(output, merge_stored(sparse, dense))
 
     # ── Agent skills ────────────────────────────────────────────────
@@ -531,7 +571,7 @@ class SearchManager:
         skill's ``source_case_ids`` holds the md-side entry ids.
         """
         if req.method == SearchMethod.AGENTIC:
-            return await search_agent_skills_agentic(
+            results = await search_agent_skills_agentic(
                 req.query,
                 where=where,
                 skill_recaller=self._skill,
@@ -542,6 +582,8 @@ class SearchManager:
                 radius=_effective_radius(req),
                 tz=self._tz,
             )
+            record_stage("agentic", "agent_skill", results)
+            return results
         fusion_mode, _ = resolve_pipeline(req.method, "agent_skill")
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
 
@@ -564,6 +606,12 @@ class SearchManager:
                 case_scores, where, top_k=top_k
             )
             dense = merge_by_id_max(dense, bridged)
+        bridge_inputs = [("agent_skill", "dense")]
+        if case_scores is not None:
+            bridge_inputs.append(("agent_case", "fusion"))
+        record_stage(
+            "bridged_dense", "agent_skill", dense.candidates, inputs=bridge_inputs
+        )
 
         # Lane selection lives here so ``skill_hybrid`` stays single-purpose
         # (cross-encoder) and symmetry with the case path is preserved.
@@ -590,19 +638,37 @@ class SearchManager:
                     enable_rerank=True,
                     rerank_top_k=top_k,
                 )
+            record_stage(
+                "fusion",
+                "agent_skill",
+                output.items,
+                metadata={"fusion_mode": "rrf", "enable_rerank": True},
+                inputs=[
+                    ("agent_skill", "sparse"),
+                    ("agent_skill", "bridged_dense"),
+                ],
+            )
             return shape_agent_skills_ranked(output, merge_stored(sparse, dense))
 
         # Cross-encoder lane (default): rrf + skill-shaped cross-encoder rerank.
         # The rank span is emitted inside build_skill_rerank_fn (callbacks),
         # so the cross-encoder rerank is covered uniformly with the agentic
         # path rather than double-wrapped here.
-        return await search_agent_skills_hybrid(
+        results = await search_agent_skills_hybrid(
             req.query,
             sparse=sparse,
             dense=dense,
             reranker=self._reranker,  # type: ignore[arg-type]
             top_k=top_k,
         )
+        record_stage(
+            "fusion",
+            "agent_skill",
+            results,
+            metadata={"fusion_mode": "skill_hybrid", "enable_rerank": False},
+            inputs=[("agent_skill", "sparse"), ("agent_skill", "bridged_dense")],
+        )
+        return results
 
     # ── Profile ─────────────────────────────────────────────────────
 
@@ -630,14 +696,17 @@ class SearchManager:
             metadata={"phase": "single_route", "method": req.method.value},
         ):
             if req.method == SearchMethod.KEYWORD:
-                return await recaller.sparse_recall(
+                recalled = await recaller.sparse_recall(
                     req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
                 )
-            vector = await self._embed_query(req.query)
-            recalled = await recaller.dense_recall(
-                vector, where, limit=self._recall_limit(req.top_k, cap=cap)
-            )
-            return recalled.within_radius(_effective_radius(req))
+            else:
+                vector = await self._embed_query(req.query)
+                recalled = await recaller.dense_recall(
+                    vector, where, limit=self._recall_limit(req.top_k, cap=cap)
+                )
+            recalled = recalled.within_radius(_effective_radius(req))
+            record_stage("single_route", recaller.kind, recalled.candidates)
+            return recalled
 
     async def _recall_sparse_dense(
         self,
@@ -669,7 +738,10 @@ class SearchManager:
                 if vector
                 else _no_recall(),
             )
-            return sparse, dense.within_radius(_effective_radius(req)), vector
+            dense = dense.within_radius(_effective_radius(req))
+            record_stage("sparse", recaller.kind, sparse.candidates)
+            record_stage("dense", recaller.kind, dense.candidates)
+            return sparse, dense, vector
 
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: Filter, top_k: int
@@ -689,7 +761,9 @@ class SearchManager:
             fallback_limit=self._recall_limit(req.top_k),
             owner_id=req.owner_id,
         )
-        return recalled.within_radius(_effective_radius(req))
+        recalled = recalled.within_radius(_effective_radius(req))
+        record_stage("maxsim_atomic", "episode", recalled.candidates)
+        return recalled
 
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:

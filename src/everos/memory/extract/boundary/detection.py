@@ -29,7 +29,7 @@ import asyncio
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, tzinfo
-from typing import Literal, NamedTuple, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from everalgo.boundary import Cuts
 from everalgo.llm import LLMOutputError
@@ -40,6 +40,7 @@ from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
+from everos.memory.extract.trace import record_construction
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord
 from everos.memory.ports import SessionBufferStore, SessionKey
 
@@ -82,6 +83,7 @@ class BoundaryOutcome(NamedTuple):
     per_cell_all_senders: list[list[str]]
     status: Status
     message_count: int
+    detection: dict[str, Any] | None = None
 
 
 class BoundaryOperator(Protocol):
@@ -158,7 +160,9 @@ class BoundaryDetection:
         if not fresh:
             return _empty_outcome("skipped", message_count=0)
         session = _session_of(ingested)
-        merged = merge_dedupe_sort(await self._session_buffer.list(session), fresh)
+        buffered = await self._session_buffer.list(session)
+        merged = merge_dedupe_sort(buffered, fresh)
+        _record_buffer_loaded(ingested, buffered, merged)
         await self._keep_buffered(session, merged)
         return _empty_outcome("accumulated", message_count=len(fresh))
 
@@ -192,20 +196,36 @@ class BoundaryDetection:
             return _empty_outcome("skipped", message_count=0)
         buffered = await self._session_buffer.list(session)
         merged = merge_dedupe_sort(buffered, fresh)
+        _record_buffer_loaded(ingested, buffered, merged)
+        detection: dict[str, Any] = {
+            "message_ids": [m.message_id for m in merged],
+            "is_final": is_final,
+            "mode": mode,
+            "detection_performed": False,
+        }
         if not merged:
-            return _empty_outcome("accumulated", message_count=0)
+            return _empty_outcome("accumulated", message_count=0, detection=detection)
         if not is_final and not any(m.role == "user" for m in merged):
             # Episode extraction needs a user message; wait for one.
             await self._keep_buffered(session, merged)
-            return _empty_outcome("accumulated", message_count=len(fresh))
+            return _empty_outcome(
+                "accumulated", message_count=len(fresh), detection=detection
+            )
         result = await self._segment_or_quarantine(
             session, merged, buffered=buffered, mode=mode, is_final=is_final
         )
+        detection["detection_performed"] = True
+        detection["model_result"] = {
+            "cell_message_ids": result.message_ids,
+            "tail_message_ids": [m.message_id for m in result.tail],
+        }
         if not result.cells:
             await self._keep_buffered(session, merged)
-            return _empty_outcome("accumulated", message_count=len(fresh))
+            return _empty_outcome(
+                "accumulated", message_count=len(fresh), detection=detection
+            )
         return await self._commit_cells(
-            session, result, mode=mode, message_count=len(fresh)
+            session, result, mode=mode, message_count=len(fresh), detection=detection
         )
 
     async def _segment_or_quarantine(
@@ -332,6 +352,7 @@ class BoundaryDetection:
         *,
         mode: Mode,
         message_count: int,
+        detection: dict[str, Any] | None = None,
     ) -> BoundaryOutcome:
         """Record one memcell row per cell and keep only the tail buffered,
         in one transaction: a failure leaves the buffer as it was."""
@@ -356,6 +377,7 @@ class BoundaryDetection:
             tail=result.tail,
             last_memcell_ts=from_timestamp(last_cell_ts) if last_cell_ts else None,
         )
+        _record_buffer_persisted(session, result.tail)
         return BoundaryOutcome(
             cells=result.cells,
             memcell_ids=memcell_ids,
@@ -363,6 +385,7 @@ class BoundaryDetection:
             per_cell_all_senders=senders,
             status="extracted",
             message_count=message_count,
+            detection=detection,
         )
 
     async def _keep_buffered(
@@ -371,6 +394,37 @@ class BoundaryDetection:
         await self._session_buffer.keep(
             session, merged, last_message_ts=max(m.timestamp for m in merged)
         )
+        _record_buffer_persisted(session, merged)
+
+
+def _record_buffer_loaded(
+    ingested: IngestResult,
+    buffered: Sequence[CanonicalMessage],
+    merged: Sequence[CanonicalMessage],
+) -> None:
+    record_construction(
+        "buffer_loaded",
+        app_id=ingested.app_id,
+        project_id=ingested.project_id,
+        session_id=ingested.session_id,
+        snapshot_factory=lambda: {
+            "before_message_ids": [m.message_id for m in buffered],
+            "message_ids": [m.message_id for m in merged],
+            "sender_ids": list(dict.fromkeys(m.sender_id for m in merged)),
+        },
+    )
+
+
+def _record_buffer_persisted(
+    session: SessionKey, rows: Sequence[CanonicalMessage]
+) -> None:
+    record_construction(
+        "buffer_persisted",
+        app_id=session.app_id,
+        project_id=session.project_id,
+        session_id=session.session_id,
+        snapshot_factory=lambda: {"message_ids": [m.message_id for m in rows]},
+    )
 
 
 def _session_of(ingested: IngestResult) -> SessionKey:
@@ -418,7 +472,9 @@ def _mint_memcell_id() -> str:
     return f"mc_{uuid.uuid4().hex[:12]}"
 
 
-def _empty_outcome(status: Status, *, message_count: int) -> BoundaryOutcome:
+def _empty_outcome(
+    status: Status, *, message_count: int, detection: dict[str, Any] | None = None
+) -> BoundaryOutcome:
     return BoundaryOutcome(
         cells=[],
         memcell_ids=[],
@@ -426,4 +482,5 @@ def _empty_outcome(status: Status, *, message_count: int) -> BoundaryOutcome:
         per_cell_all_senders=[],
         status=status,
         message_count=message_count,
+        detection=detection,
     )
