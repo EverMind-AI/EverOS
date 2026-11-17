@@ -992,6 +992,7 @@ memories, ranked together, plus optional profiles.
 | `method` | [SearchMethod](#searchmethod) | no | `"llm_multiround"` | only `"llm_multiround"` |
 | `top_k` | `integer` | no | `-1` | `-1` or `1..100` |
 | `include_profile` | `boolean` | no | `false` | — |
+| `include_group_profile` | `boolean \| null` | no | `null` | group scopes; see [Groups](#groups) |
 | `include_groups` | `boolean` | no | `false` | with `user_id` only; see below |
 | `include_group_ids` | `array<string> \| null` | no | `null` | with `include_groups`; `1..16` ids |
 | `images` | `array` | no | `[]` | at most 4 pictures that are part of the question |
@@ -1937,7 +1938,12 @@ segment's first and last message. A scene has `type: "Scene"` and
 `memcell_id: null`. With `include_profile: true` a group search attaches the
 asker's member-in-group profile and those of up to three members the query
 names by roster name or alias, in each group:
-`{owner_type: "group", group_id, member_id, profile_data}`. Items whose
+`{owner_type: "group", group_id, member_id, profile_data}`. `group_profile`
+carries, by default, the current group-profile items linked to the search's
+core -- the decisions, dissent and topics the constraint block rests on
+(`constraints`), each with its sources; `include_group_profile: true` attaches
+every visible current item instead (topics, decisions, open dissent, roles;
+each kind capped at `[search] group_profile_cap`), and `false` none. Items whose
 sources lie outside the asker's windows are left out, and so is the summary
 then. An item that replaced earlier values of the same fact carries `since`
 (epoch ms), `supersedes` and `previous`: the values it replaced, newest

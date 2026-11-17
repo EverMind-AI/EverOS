@@ -12,6 +12,17 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **A group search attaches only the group-profile items linked to its core
+  by default.** Measured on a GroupAssistBench slice (2026-11-16), every
+  group search response carried the whole current group profile, about 37k
+  characters, which no benchmark harness renders and every client that hands
+  the response to a model pays for. Unset, `include_group_profile` now
+  attaches the current items the constraint block rests on (decisions,
+  dissent and topics linked to the core, a chain's newest version, the open
+  dissent about a linked decision; no roles); `include_group_profile: true`
+  attaches the whole current profile as before, `false` none. The linking is
+  read once for both, so the default reads less. A personal search with
+  `include_groups` is unchanged. No model request changes.
 - **A group's member profiles are read in batches, and a flush no longer
   forces a profile.** Measured on 2026-11-14 (DeepSeek V4.1 Flash, an
   EverMemBench slice): the member profiles were $0.207 and the group profile
@@ -215,6 +226,13 @@ machinery that keeps a deleted memory from coming back.
   [docs/group-memory.md](docs/group-memory.md#94-forget-and-delete-propagation)).
 
 ### Fixed
+
+- **A search over several groups links each group's own profile items.** An
+  item id is unique within its group only; the constraint block compared ids
+  alone, so in a pool the second group's item of the same id was dropped, a
+  dissent disputed another group's decision of the same id, and a decision
+  chain could continue into another group's item. Every lookup now names the
+  group.
 
 - **A cell whose episode replies fail both attempts in form keeps what they
   hold.** On the multimodal builds of 2026-11-17 (DeepSeek V4.1 Flash) two

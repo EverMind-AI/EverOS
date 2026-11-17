@@ -546,7 +546,7 @@ No key here adds a model call except `constraints = "model"`.
 | `expansion` | bool | `true` | A group search follows the stored links of each round's new core (decision chains, shared topics, members, a scene's episodes) into the next round. |
 | `link_slots` | int | `5` | Linked records that join a round at most. |
 | `constraints` | str | `"rules"` | The constraint block of a group search: `rules` (verified group-profile items and the core's metadata) or `model` (one extra call stating applicability and scope). |
-| `group_profile_cap` | int | `20` | Current group-profile items attached per kind. |
+| `group_profile_cap` | int | `20` | Current group-profile items attached per kind: by default the items linked to the core, with `include_group_profile: true` every visible one. |
 | `forgetting_curve` | bool | `false` | Rank by the forgetting curve (below). Off: a search ranks exactly as before and nothing is reinforced. |
 | `initial_strength_days` | float | `30.0` | `S` of a memory never reinforced: the days its retention takes to fall to 0.9. Episodes, scenes and picture memories alike. |
 | `max_strength_days` | float | `3650.0` | The most `S` grows to (ten years). At least `initial_strength_days`. |

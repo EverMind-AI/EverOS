@@ -7,7 +7,10 @@ asker's windows is absent, exactly as if it did not exist:
 
 * :func:`visible_profile_items` -- the current items (``predicate`` excludes
   superseded and forgotten ones), folded to the current profile: the newest
-  version of each topic, current decisions, open dissent, active roles;
+  version of each topic, current decisions, open dissent, active roles --
+  what a group search attaches when asked (``include_group_profile: true``);
+* :func:`linked_profile` -- the current ones of the items the constraint
+  block links to the core, what a group search attaches by default;
 * :func:`item_versions` -- every version but the forgotten
   (``include_superseded``), through the scope's ``history_predicate``.
 
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 __all__ = [
     "item_versions",
+    "linked_profile",
     "shape_profile_item",
     "visible_profile",
     "visible_profile_items",
@@ -28,7 +32,11 @@ __all__ = [
 from collections.abc import Sequence
 
 from everos.memory.access import ReadScope
-from everos.memory.extract.group_profile import GroupProfileView, current_profile
+from everos.memory.extract.group_profile import (
+    GroupProfileView,
+    current_profile,
+    is_current,
+)
 from everos.memory.models import GroupProfileItem
 from everos.memory.ports import Filter, GroupProfileIndex, Stored, all_of
 
@@ -106,6 +114,29 @@ def visible_profile(
             roles=shaped(view.roles),
         ),
         view,
+    )
+
+
+def linked_profile(
+    linked: Sequence[Stored[GroupProfileItem]], *, cap: int
+) -> SearchGroupProfile:
+    """The current items of ``linked`` by kind, in the order given, each cut to ``cap``.
+
+    ``linked`` is the newest visible version of every item the constraint
+    block links to the core (:func:`~.constraints.link_items`); a version
+    the asker sees superseded, a settled dissent or a retired role is left
+    out, as from the whole profile.
+    """
+    current = [s for s in linked if is_current(s.item)]
+
+    def shaped(kind: str) -> list[GroupProfileEntry]:
+        return [shape_profile_item(s) for s in current if s.item.kind == kind][:cap]
+
+    return SearchGroupProfile(
+        topics=shaped("topic"),
+        decisions=shaped("decision"),
+        dissent=shaped("dissent"),
+        roles=shaped("role"),
     )
 
 

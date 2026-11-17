@@ -466,7 +466,7 @@ Further fields for group scopes:
 | Field | Default | Meaning |
 |---|---|---|
 | `include_profile` | `false` | attach the asker's member-in-group profile and those of members named in the query (at most three) |
-| `include_group_profile` | `true` for group scopes (Step 2) | attach the visible current group-profile items, capped |
+| `include_group_profile` | unset (Step 2) | unset: attach the current group-profile items linked to the core (those the constraint block rests on; no roles); `true`: every visible current item, each kind capped; `false`: none |
 | `constraints` | `true` for group scopes (Step 2) | return the constraint block |
 | `history` | `false` | the 2.0 history mode: superseded and forgotten versions may enter the candidates |
 
@@ -1256,7 +1256,10 @@ It is built in two layers:
 
 1. **Rules (default).** Group-profile items linked to the core (decisions,
    dissent, topic status) become constraints directly: their quotes, speakers and
-   statuses were verified at write time. Core episodes and picture memories not
+   statuses were verified at write time. The current ones among them are also
+   what the response attaches as `group_profile` by default. An item id is
+   unique within its group only, so in a pool of groups every link is followed
+   in the item's own group. Core episodes and picture memories not
    covered by an item get a metadata constraint (subjects, status, source segment,
    speakers, times) whose quote is the source message with the highest token
    overlap with the record. Quotes are read from the segment without its
@@ -1279,9 +1282,10 @@ incomplete:
 - `coverage` says `complete` (the decider stopped with a core), `partial` (the
   round budget ran out, or the loop ended on a round the decider did not
   decide -- listed in `degraded`) or `none` (no core);
-- for group scopes the current group-profile items are attached
-  (`include_group_profile`), which grounds requests about the group itself
-  (purpose, current plan, who does what);
+- for group scopes the current group-profile items linked to the core are
+  attached; a request about the group itself (purpose, current plan, who
+  does what) asks for the whole current profile with
+  `include_group_profile: true`;
 - the documented answer prompt for applications tells the model to complete open
   requests from what is known, name what is missing, and decline only when
   neither memory nor general knowledge supports the request. Benchmarks keep their
@@ -1295,9 +1299,10 @@ You answer for the group's assistant. {asker} asks: {question}
 
 Memory from the group (JSON: "episodes" and "images" are the records found,
 the decider's core first; "group_profile" is the group's current topics,
-decisions, open disagreements and roles; "constraints" are what the answer
-must respect, each with the message it rests on; "coverage" says how complete
-the search was):
+decisions and open disagreements linked to those records (with
+include_group_profile, all of them and the roles); "constraints" are what the
+answer must respect, each with the message it rests on; "coverage" says how
+complete the search was):
 {memory}
 
 Rules:
@@ -2134,7 +2139,10 @@ Step 2 differs from the text above in these places:
   against the segment read without forgotten messages.
 - **Partial memory.** `coverage` is reported for group scopes only; a loop
   ended by the no-new-core patience counts as `partial`. The group profile is attached by default, each kind capped at
-  `[search] group_profile_cap` (default 20). The decline share on
+  `[search] group_profile_cap` (default 20). Since 2026-11-17 the default is
+  only the items linked to the core (the constraint block's); the whole
+  profile is `include_group_profile: true` (see the Implementation notes of
+  2026-11-17 below). The decline share on
   GroupAssistBench L2 is reported with task 18.
 - **Who knew what.** `present` reads membership stays, not visibility
   windows, and includes assistants; `joined_after` leaves out members who
@@ -2235,6 +2243,29 @@ Step 2 differs from the text above in these places:
   the batched request byte for byte (a test holds it there).
 - **A/B.** `member_profile_mode = "per_member"` with `profile_on_flush = true`
   is the update before this change, request for request.
+
+### Implementation notes (group read and write cost, 2026-11-17)
+
+- **The default `group_profile` is the items linked to the core.** Measured
+  on a GroupAssistBench slice (2026-11-16), a group search attached about
+  37k characters (30 items) of group profile to every response, which
+  neither benchmark harness renders and every client that hands the whole
+  response to a model pays for. Unset, `include_group_profile` now attaches
+  the current items the constraint block links to the core (section 8.4,
+  `link_items`): a decision, dissent or topic whose evidence lies in a core
+  segment, followed to its newest visible version, and the open dissent about
+  such a decision; a version the asker sees superseded, a settled dissent and
+  roles are not attached. The linking is read once for the constraint block
+  and the attachment, so the default reads less than before (no profile scan
+  beside the loop); `constraints: false` keeps the attachment. `true` attaches
+  the whole visible current profile as before; `false` none. A personal
+  search with `include_groups` is unchanged (the groups' current decisions).
+  No model request changes: the decider never saw the attachment.
+- **Pools of groups.** An item id (`gp_<YYYYMMDD>_<seq>`) is unique within its
+  group only. The linking used to compare ids alone: in a pool, the second
+  group's item of the same id was dropped, a dissent in one group disputed
+  another group's decision of the same id, and a chain could continue into
+  another group's item. Every lookup and comparison now names the group.
 
 ## 15. Risks
 

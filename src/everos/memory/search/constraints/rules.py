@@ -2,14 +2,18 @@
 
 Built once the search loop has stopped, from its core:
 
-1. **Linked items.** The group-profile decisions, dissent and topics whose
-   evidence lies in a core segment become constraints directly: their quotes,
-   speakers and statuses were verified when they were written. A decision is
-   followed to the newest version the asker can see, which becomes the
-   constraint (``current``, or ``disputed`` while a dissent about it is open)
-   with the versions it replaced listed in ``supersedes``; a decision whose
-   newer version the asker cannot see stays as it is, ``superseded``. The
-   open dissent about a constrained decision is a constraint of its own.
+1. **Linked items** (:func:`link_items`). The group-profile decisions,
+   dissent and topics whose evidence lies in a core segment become
+   constraints directly: their quotes, speakers and statuses were verified
+   when they were written. A decision is followed to the newest version the
+   asker can see, which becomes the constraint (``current``, or ``disputed``
+   while a dissent about it is open) with the versions it replaced listed in
+   ``supersedes``; a decision whose newer version the asker cannot see stays
+   as it is, ``superseded``. The open dissent about a constrained decision is
+   a constraint of its own. The same items are what a group search attaches
+   as its ``group_profile`` by default (section 5.3). An item id is unique
+   within its group only, so every lookup and every comparison names the
+   group too.
 2. **Metadata.** A core episode or picture memory no linked item rests on gets
    a constraint of its own -- its subjects, speakers, segment and time -- whose
    quote is the segment's message sharing the most words with the record.
@@ -27,10 +31,18 @@ see.
 
 from __future__ import annotations
 
-__all__ = ["QUOTE_CHARS", "build_constraints"]
+__all__ = [
+    "QUOTE_CHARS",
+    "CoreRecord",
+    "LinkedItem",
+    "LinkedItems",
+    "build_constraints",
+    "link_items",
+]
 
 import re
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 
 from everalgo.types import ChatMessage, MemCell
 
@@ -42,6 +54,7 @@ from everos.memory.ports import (
     GroupProfileIndex,
     MemcellStore,
     MessageForgetStore,
+    Stored,
     all_of,
     any_of,
     contains,
@@ -73,11 +86,109 @@ type CoreRecord = SearchEpisodeItem | SearchImageItem
 """A record of the core, as the search returns it."""
 
 
+@dataclass(frozen=True)
+class LinkedItem:
+    """A group-profile item linked to the core, as the asker can see it.
+
+    ``stored`` is the newest visible version of the chain whose evidence lies
+    in a core segment (or an open dissent about such a decision); ``chain``
+    the versions it replaced, newest first, as far as the asker can see.
+    """
+
+    stored: Stored[GroupProfileItem]
+    chain: tuple[GroupProfileItem, ...] = ()
+
+    @property
+    def item(self) -> GroupProfileItem:
+        return self.stored.item
+
+    @property
+    def group_id(self) -> str:
+        return self.stored.scope.owner_id
+
+
+@dataclass(frozen=True)
+class LinkedItems:
+    """Step 1 of the rules layer: the items linked to one search's core."""
+
+    items: tuple[LinkedItem, ...] = ()
+    """In block order: decisions, dissent, topics, then the open dissent about
+    the decisions."""
+    disputed: frozenset[tuple[str, str]] = frozenset()
+    """``(group id, decision id)`` of every linked decision an open dissent is
+    about."""
+
+
+async def link_items(
+    *, scope: ReadScope, core: Sequence[CoreRecord], profile: GroupProfileIndex
+) -> LinkedItems:
+    """The group-profile items linked to ``core`` (step 1), in block order.
+
+    Every read carries the read scope's predicate: an item the asker cannot
+    see is never linked, and a chain stops at the last version they can see.
+    """
+    if not scope.is_group or not core:
+        return LinkedItems()
+    segments = list(dict.fromkeys(m for m in (_segment(r) for r in core) if m))
+    if not segments:
+        return LinkedItems()
+    linked = await profile.find(
+        all_of(
+            scope.history_predicate,
+            one_of("kind", list(_KINDS)),
+            any_of(*(contains("source_memcell_ids", m) for m in segments)),
+        )
+    )
+    built: list[LinkedItem] = []
+    seen: set[tuple[str, str]] = set()
+    for stored in sorted(linked, key=lambda s: _KINDS.index(s.item.kind)):
+        newest, chain = await _newest(profile, scope, stored)
+        key = _key(newest)
+        # An update may rewrite an item into another kind: a chain whose
+        # newest visible version is a role is no longer a constraint.
+        if key in seen or newest.item.kind not in _KINDS:
+            continue
+        seen.add(key)
+        built.append(LinkedItem(stored=newest, chain=tuple(chain)))
+    decisions: dict[str, list[str]] = {}
+    for linked_item in built:
+        if linked_item.item.kind == "decision" and linked_item.item.item_id:
+            decisions.setdefault(linked_item.group_id, []).append(
+                linked_item.item.item_id
+            )
+    dissent = (
+        await profile.find(
+            all_of(
+                scope.predicate,
+                eq("kind", "dissent"),
+                any_of(
+                    *(
+                        all_of(eq("owner_id", group_id), one_of("about", ids))
+                        for group_id, ids in decisions.items()
+                    )
+                ),
+            )
+        )
+        if decisions
+        else []
+    )
+    disputed = frozenset(
+        (d.scope.owner_id, d.item.about)
+        for d in dissent
+        if d.item.about and not d.item.resolved
+    )
+    for stored in dissent:
+        if _key(stored) not in seen and not stored.item.resolved:
+            seen.add(_key(stored))
+            built.append(LinkedItem(stored=stored))
+    return LinkedItems(items=tuple(built), disputed=disputed)
+
+
 async def build_constraints(
     *,
     scope: ReadScope,
     core: Sequence[CoreRecord],
-    profile: GroupProfileIndex,
+    linked: LinkedItems,
     memcells: MemcellStore,
     forgotten: MessageForgetStore,
     forgotten_pictures: Callable[[], Awaitable[Mapping[str, Collection[str]]]]
@@ -85,55 +196,24 @@ async def build_constraints(
 ) -> tuple[list[ConstraintItem], dict[str, MemCell]]:
     """The rules-layer constraints of one group search, in block order.
 
-    Also returns the segments read on the way, by memcell id: what the model
-    layer is shown and checks its quotes against. ``forgotten_pictures``
-    reads the pictures each group forgot (by group id), and only when a
-    segment read shows a picture: a segment is read without their
-    references, so no quote names a forgotten picture.
+    ``linked`` is :func:`link_items` over the same core. Also returns the
+    segments read on the way, by memcell id: what the model layer is shown
+    and checks its quotes against. ``forgotten_pictures`` reads the pictures
+    each group forgot (by group id), and only when a segment read shows a
+    picture: a segment is read without their references, so no quote names
+    a forgotten picture.
     """
     if not scope.is_group or not core:
         return [], {}
     segments = list(dict.fromkeys(m for m in (_segment(r) for r in core) if m))
-    linked = (
-        await profile.find(
-            all_of(
-                scope.history_predicate,
-                one_of("kind", list(_KINDS)),
-                any_of(*(contains("source_memcell_ids", m) for m in segments)),
-            )
-        )
-        if segments
-        else []
-    )
-    built: list[tuple[GroupProfileItem, str, list[GroupProfileItem]]] = []
-    seen: set[str] = set()
-    for stored in sorted(linked, key=lambda s: _KINDS.index(s.item.kind)):
-        item, chain = await _newest(profile, scope, stored.item)
-        # An update may rewrite an item into another kind: a chain whose
-        # newest visible version is a role is no longer a constraint.
-        if item.item_id in seen or item.kind not in _KINDS:
-            continue
-        seen.add(item.item_id or "")
-        built.append((item, stored.scope.owner_id, chain))
-    decisions = [i.item_id for i, _, _ in built if i.kind == "decision" and i.item_id]
-    dissent = (
-        await profile.find(
-            all_of(scope.predicate, eq("kind", "dissent"), one_of("about", decisions))
-        )
-        if decisions
-        else []
-    )
-    disputed = {d.item.about for d in dissent if not d.item.resolved}
-    for stored in dissent:
-        if stored.item.item_id not in seen and not stored.item.resolved:
-            seen.add(stored.item.item_id or "")
-            built.append((stored.item, stored.scope.owner_id, []))
 
     # A forgotten message is quoted nowhere: the segments are read without
     # the messages a live forget names (section 9.4), and without the
     # references to the pictures their group forgot.
     # A segment is one session's, and a session is one group's.
-    groups_of = {s.memcell_id: g for i, g, _ in built for s in i.sources}
+    groups_of = {
+        s.memcell_id: li.group_id for li in linked.items for s in li.item.sources
+    }
     for record in core:
         segment = _segment(record)
         if segment is not None and record.group_id is not None:
@@ -143,7 +223,10 @@ async def build_constraints(
         await memcells.cells_by_id(
             list(
                 dict.fromkeys(
-                    [*segments, *(s.memcell_id for i, _, _ in built for s in i.sources)]
+                    [
+                        *segments,
+                        *(s.memcell_id for li in linked.items for s in li.item.sources),
+                    ]
                 )
             )
         ),
@@ -158,13 +241,18 @@ async def build_constraints(
         }
     out: list[ConstraintItem] = []
     covered: set[str] = set()
-    for item, group_id, chain in built:
+    for li in linked.items:
         constraint = _from_item(
-            item, group_id, chain, disputed=disputed, cells=cells, scope=scope
+            li.item,
+            li.group_id,
+            li.chain,
+            disputed=linked.disputed,
+            cells=cells,
+            scope=scope,
         )
         if constraint is not None:
             out.append(constraint)
-            covered.update(item.source_memcell_ids)
+            covered.update(li.item.source_memcell_ids)
     for record in core:
         segment = _segment(record)
         if segment is None or segment in covered:
@@ -177,45 +265,55 @@ async def build_constraints(
 
 
 async def _newest(
-    profile: GroupProfileIndex, scope: ReadScope, item: GroupProfileItem
-) -> tuple[GroupProfileItem, list[GroupProfileItem]]:
-    """The newest visible version of ``item``'s chain, and the versions it replaced.
+    profile: GroupProfileIndex, scope: ReadScope, stored: Stored[GroupProfileItem]
+) -> tuple[Stored[GroupProfileItem], list[GroupProfileItem]]:
+    """The newest visible version of ``stored``'s chain, and the versions it replaced.
 
     The chain is followed forward through ``superseded_by`` while the next
     version is visible to the asker; when it is not, the chain stops there
     and the item comes back as it is, marked ``superseded``. The replaced
     versions are then walked back through ``supersedes``, newest first, as
-    far as the asker can see.
+    far as the asker can see. Every version is looked up in the item's own
+    group.
     """
-    current = item
+    group_id = stored.scope.owner_id
+    current = stored
     for _ in range(_CHAIN_DEPTH):
-        if current.superseded_by is None:
+        if current.item.superseded_by is None:
             break
-        newer = await _version(profile, scope, current.superseded_by)
+        newer = await _version(profile, scope, group_id, current.item.superseded_by)
         if newer is None:
             break
         current = newer
     replaced: list[GroupProfileItem] = []
-    older_id = current.supersedes
+    older_id = current.item.supersedes
     for _ in range(_CHAIN_DEPTH):
         if older_id is None:
             break
-        older = await _version(profile, scope, older_id)
+        older = await _version(profile, scope, group_id, older_id)
         if older is None:
             break
-        replaced.append(older)
-        older_id = older.supersedes
+        replaced.append(older.item)
+        older_id = older.item.supersedes
     return current, replaced
 
 
 async def _version(
-    profile: GroupProfileIndex, scope: ReadScope, entry_id: str
-) -> GroupProfileItem | None:
-    """One version of a chain, if the asker may see it (forgotten ones never)."""
+    profile: GroupProfileIndex, scope: ReadScope, group_id: str, entry_id: str
+) -> Stored[GroupProfileItem] | None:
+    """One version of a chain in ``group_id``, if the asker may see it.
+
+    Forgotten versions never.
+    """
     found = await profile.find(
-        all_of(scope.history_predicate, eq("entry_id", entry_id)), limit=1
+        all_of(
+            scope.history_predicate,
+            eq("owner_id", group_id),
+            eq("entry_id", entry_id),
+        ),
+        limit=1,
     )
-    return found[0].item if found else None
+    return found[0] if found else None
 
 
 def _from_item(
@@ -223,7 +321,7 @@ def _from_item(
     group_id: str,
     chain: Sequence[GroupProfileItem],
     *,
-    disputed: set[str | None],
+    disputed: frozenset[tuple[str, str]],
     cells: dict[str, MemCell],
     scope: ReadScope,
 ) -> ConstraintItem | None:
@@ -232,7 +330,11 @@ def _from_item(
         return None
     source, quote = cited
     status = item.status or item.own_status()
-    if item.kind == "decision" and status == "current" and item.item_id in disputed:
+    if (
+        item.kind == "decision"
+        and status == "current"
+        and (group_id, item.item_id or "") in disputed
+    ):
         status = "disputed"
     return ConstraintItem(
         id="",
@@ -350,6 +452,11 @@ def _statement(item: GroupProfileItem) -> str:
     if item.kind == "topic":
         return f"{item.name}: {item.summary}" if item.summary else item.name
     return item.statement
+
+
+def _key(stored: Stored[GroupProfileItem]) -> tuple[str, str]:
+    """An item's identity across a pool of groups: its group and its id."""
+    return stored.scope.owner_id, stored.item.item_id or ""
 
 
 def _segment(record: CoreRecord) -> str | None:

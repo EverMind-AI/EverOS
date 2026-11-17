@@ -173,8 +173,11 @@ class SearchRequest(BaseModel):
     top_k: int = -1
     include_profile: bool = False
     include_group_profile: bool | None = None
-    """Attach the visible current group-profile items (section 5.3). Unset:
-    on for a group scope; a user scope has none to attach."""
+    """The group profile a group scope attaches (section 5.3). Unset: the
+    current items linked to the search's core -- the decisions, dissent and
+    topics the constraint block rests on. ``true``: every visible current
+    item, each kind capped (``[search] group_profile_cap``). ``false``: none.
+    A user scope has none to attach, unless ``include_groups``."""
     constraints: bool | None = None
     """Return the constraint block (section 8.4). Unset: on for a group scope;
     a user scope has none."""
@@ -731,7 +734,8 @@ class ConstraintItem(BaseModel):
 
 
 class SearchGroupProfile(BaseModel):
-    """The visible current group-profile items of a group scope, by kind."""
+    """Current group-profile items of a group scope, by kind: those linked to
+    the core, or every visible one (``include_group_profile``)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -824,10 +828,11 @@ class SearchData(BaseModel):
     whose scope is the owner the request named, unless it had
     ``include_groups``: then the groups it searched too."""
     group_profile: SearchGroupProfile | None = None
-    """The visible current group-profile items of a group scope
-    (``include_group_profile``); for a user search with ``include_groups``,
-    the current decisions of the groups it searched (other kinds empty);
-    ``None`` otherwise."""
+    """For a group scope, the current group-profile items linked to the core
+    (no roles), or every visible current item with ``include_group_profile:
+    true``; for a user search with ``include_groups``, the current decisions
+    of the groups it searched (other kinds empty); ``None`` otherwise, or
+    with ``include_group_profile: false``."""
     constraints: list[ConstraintItem] = Field(default_factory=list)
     """What an answer must respect (``constraints``, group scopes)."""
     coverage: Literal["complete", "partial", "none"] | None = None

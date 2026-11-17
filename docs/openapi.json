@@ -7693,7 +7693,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SearchGroupProfile",
-        "description": "The visible current group-profile items of a group scope, by kind."
+        "description": "Current group-profile items of a group scope, by kind: those linked to\nthe core, or every visible one (``include_group_profile``)."
       },
       "SearchImageItem": {
         "properties": {

@@ -11,8 +11,9 @@ What differs is only what the scope switches on:
   of every group of a project the asker belongs to), as one pool (+ the
   asker's and named members' member-in-group ``profiles`` when
   ``include_profile=true``); the question names the asker, the loop follows
-  stored links, and the response adds the visible current group profile,
-  the constraint block, the ``coverage`` of the loop and an ``audience`` on
+  stored links, and the response adds the group-profile items linked to the
+  core (the whole visible current profile when the request asks), the
+  constraint block, the ``coverage`` of the loop and an ``audience`` on
   every record (docs/group-memory.md, sections 8.3-8.7)
 * ``user`` with ``include_groups`` (off by default) → the personal pool and
   the user's current groups, read as a group search by the user reads them,
@@ -102,7 +103,13 @@ from everos.memory.ports import (
 )
 
 from .audience import with_audience
-from .constraints import bind_constraints, build_constraints
+from .constraints import (
+    CoreRecord,
+    LinkedItems,
+    bind_constraints,
+    build_constraints,
+    link_items,
+)
 from .decider_health import DeciderStatus
 from .dto import (
     ConstraintItem,
@@ -122,7 +129,7 @@ from .dto import (
 from .expansion import GroupLinks
 from .filters import compile_scoped
 from .forgetting import Curve, CurveRanking, reinforcements
-from .group_profile import visible_profile, visible_profile_items
+from .group_profile import linked_profile, visible_profile, visible_profile_items
 from .llm_multiround import (
     Coverage,
     DeciderFailure,
@@ -395,15 +402,20 @@ class SearchManager:
 
         Every group record gets its audience (section 8.6). A group scope adds
         the scope block, the constraint block (section 8.4, built from the
-        records before their audience is set) and the loop's ``coverage``. A
-        personal search with ``include_groups`` adds the scope block of the
-        groups it covered and names the owner of every record; it has no
-        constraint block and no ``coverage``. A search its question's wording
-        sent to the past names the trigger (``past_trigger``).
+        records before their audience is set), by default the group-profile
+        items linked to the core, and the loop's ``coverage``. A personal
+        search with ``include_groups`` adds the scope block of the groups it
+        covered and names the owner of every record; it has no constraint
+        block and no ``coverage``. A search its question's wording sent to the
+        past names the trigger (``past_trigger``).
         """
         constraints: list[ConstraintItem] = []
         if scope.is_group:
-            constraints = await self._constraints(req, scope, ranked, images)
+            core = _current_core(ranked, images)
+            linked = await self._linked(req, scope, core)
+            constraints = await self._constraints(req, scope, core, linked)
+            if req.include_group_profile is None and self._group_profile is not None:
+                group_profile = self._linked_group_profile(scope, linked)
         episodes = ranked.episodes
         pool = _groups_of(scope, groups)
         if pool is not None:
@@ -837,20 +849,24 @@ class SearchManager:
     async def _attach_group_profile(
         self, req: SearchRequest, scope: ReadScope, groups: ReadScope | None
     ) -> SearchGroupProfile | None:
-        """The visible current group-profile items (section 5.3), each kind capped.
+        """The whole visible current group profile (section 5.3), each kind capped.
 
-        On by default for a group scope (``include_group_profile``): it is
-        what grounds a request about the group itself -- its purpose, its
-        current plan, who does what -- when the ranking found little. A
-        personal search over its groups (``include_groups``) attaches their
-        current decisions only, the cap across all the groups. One index
-        read, no model call; ``include_group_profile = false`` leaves it out.
+        A group scope attaches it when the request asks
+        (``include_group_profile: true``): what grounds a request about the
+        group itself -- its purpose, its current plan, who does what -- when
+        the ranking found little. Unset, a group scope attaches only the items
+        linked to the core, once the loop has stopped
+        (:meth:`_linked_group_profile`). A personal search over its groups
+        (``include_groups``) attaches their current decisions only, the cap
+        across all the groups. One index read, run beside the loop, no model
+        call; ``include_group_profile: false`` leaves it out.
         """
         pool = _groups_of(scope, groups)
         if (
             req.include_group_profile is False
             or pool is None
             or self._group_profile is None
+            or (scope.is_group and req.include_group_profile is None)
         ):
             return None
         stored = await visible_profile_items(
@@ -868,18 +884,49 @@ class SearchManager:
             roles=with_audience(pool, attached.roles),
         )
 
+    async def _linked(
+        self, req: SearchRequest, scope: ReadScope, core: Sequence[CoreRecord]
+    ) -> LinkedItems:
+        """The group-profile items linked to the core (section 8.4, step 1).
+
+        Read once for the constraint block and the default ``group_profile``;
+        not at all when the request turned both off.
+        """
+        if self._group_profile is None or (
+            req.constraints is False and req.include_group_profile is not None
+        ):
+            return LinkedItems()
+        return await link_items(scope=scope, core=core, profile=self._group_profile)
+
+    def _linked_group_profile(
+        self, scope: ReadScope, linked: LinkedItems
+    ) -> SearchGroupProfile:
+        """What a group search attaches by default (section 5.3): the current
+        items the constraint block links to the core, each kind capped, with
+        their audience. No read of its own."""
+        attached = linked_profile(
+            [li.stored for li in linked.items],
+            cap=self._group_search.group_profile_cap,
+        )
+        return SearchGroupProfile(
+            topics=with_audience(scope, attached.topics),
+            decisions=with_audience(scope, attached.decisions),
+            dissent=with_audience(scope, attached.dissent),
+            roles=with_audience(scope, attached.roles),
+        )
+
     async def _constraints(
         self,
         req: SearchRequest,
         scope: ReadScope,
-        ranked: _Ranked,
-        images: Sequence[SearchImageItem],
+        core: Sequence[CoreRecord],
+        linked: LinkedItems,
     ) -> list[ConstraintItem]:
         """The constraint block (section 8.4), on by default for a group scope.
 
-        Built from the decider's core among the returned records. ``[search]
-        constraints = "model"`` adds the binding call over the rules layer's
-        constraints.
+        Built from the decider's core among the returned records and the
+        items linked to it. ``[search] constraints = "model"`` adds the
+        binding call over the rules layer's constraints.
         """
         if req.constraints is False:
             return []
@@ -889,18 +936,10 @@ class SearchManager:
             or self._message_forget is None
         ):
             return []
-        core_ids = set(ranked.core)
-        # A search for the past may keep an old version as core; what an
-        # answer must respect is read from current records only.
-        core = [
-            r
-            for r in (*ranked.episodes, *images)
-            if r.id in core_ids and r.status in (None, "current")
-        ]
         constraints, cells = await build_constraints(
             scope=scope,
             core=core,
-            profile=self._group_profile,
+            linked=linked,
             memcells=self._memcells,
             forgotten=self._message_forget,
             forgotten_pictures=lambda: self._access.forgotten_pictures(scope),
@@ -982,6 +1021,22 @@ def _named(req: SearchRequest, scope: ReadScope) -> list[str]:
     ]
     return list(dict.fromkeys(named_members(req.query, candidates)))[
         :_NAMED_PROFILES_CAP
+    ]
+
+
+def _current_core(
+    ranked: _Ranked, images: Sequence[SearchImageItem]
+) -> list[CoreRecord]:
+    """The decider's core among the returned records, current versions only.
+
+    A search for the past may keep an old version as core; what an answer
+    must respect, and the items linked to it, are read from current records.
+    """
+    core_ids = set(ranked.core)
+    return [
+        r
+        for r in (*ranked.episodes, *images)
+        if r.id in core_ids and r.status in (None, "current")
     ]
 
 
