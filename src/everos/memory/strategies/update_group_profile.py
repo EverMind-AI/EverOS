@@ -248,6 +248,7 @@ async def _update(deps: MemoryDeps, scope: Scope, pending: list[str]) -> str | N
         segments=len(segments),
         proposed=checked.proposed,
         written=len(refs),
+        replaced=sum(1 for i in checked.items if i.kind == "decision" and i.supersedes),
         dropped=drop_summary(checked.dropped),
         links_dropped=drop_summary(checked.links_dropped),
     )

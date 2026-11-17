@@ -38,6 +38,14 @@ by reason (``everos_group_profile_links_dropped_total``):
 ``unknown_reference``, or ``ambiguous_reference`` for a label two new topics
 share.
 
+A ``decision.new``'s ``replaces`` (prompt version 4) is such a link. A
+rendered current decision's id makes the new decision its next version,
+exactly as a ``decision.supersede`` of it would (``supersedes`` set, the
+replaced decision's topic kept when the operation names none); ``none``, or
+nothing, names no decision. An id that is no rendered current decision is
+dropped as ``unknown_reference``, and one an earlier operation of the reply
+already replaced as ``already_replaced``; the decision is kept as a new one.
+
 Speakers and times are copied from the cited messages, and a quote is stored
 as the message's own words; the attribution fields and the span of an item
 come from its verified evidence alone.
@@ -90,7 +98,11 @@ DROP_REASONS: tuple[str, ...] = (
     "invalid_field",
     "duplicate",
 )
-LINK_DROP_REASONS: tuple[str, ...] = ("unknown_reference", "ambiguous_reference")
+LINK_DROP_REASONS: tuple[str, ...] = (
+    "unknown_reference",
+    "ambiguous_reference",
+    "already_replaced",
+)
 
 _ops_total = MetricCounter(
     name="group_profile_ops_total",
@@ -312,12 +324,13 @@ class _Checker:
             raise _DroppedError("invalid_field")
         self._grounded([*op.decided_by, *op.agreed_by], speakers)
         self._members([*op.assignees, *op.applies_to])
-        old = None
         if op.op == "decision.supersede":
             old = self._decisions.get(op.target)
             if old is None:
                 raise _DroppedError("unknown_target")
             self._claim(op.target)
+        else:
+            old = self._replaced(op.replaces)
         # An empty topic_id, or one dropped as a link, keeps a superseded
         # decision's topic.
         topic_id = self._link(op.topic_id, self._topics) or (
@@ -465,6 +478,26 @@ class _Checker:
         if label and label not in self._topics and label not in self._decisions:
             self._labels[label] = None if label in self._labels else topic_id
         return topic_id
+
+    def _replaced(self, ref: str) -> GroupProfileItem | None:
+        """The rendered current decision a ``decision.new`` replaces, claimed.
+
+        Called last, as :meth:`_link` is. ``none`` or nothing names no
+        decision; an id that is no rendered current decision, or one an
+        earlier operation of the reply replaced, is a dropped link, counted.
+        """
+        ref = ref.strip()
+        if not ref or ref.lower() == "none":
+            return None
+        old = self._decisions.get(ref)
+        if old is None:
+            self.links_dropped["unknown_reference"] += 1
+            return None
+        if ref in self._targets:
+            self.links_dropped["already_replaced"] += 1
+            return None
+        self._targets.add(ref)
+        return old
 
     def _link(self, ref: str, *rendered: Mapping[str, GroupProfileItem]) -> str | None:
         """The id ``ref`` names: a rendered one, or the topic its label names.

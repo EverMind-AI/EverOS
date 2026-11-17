@@ -36,6 +36,14 @@ def test_left_out_and_null_fields_read_as_empty() -> None:
     assert op.decided_by == [] and op.held_by == [] and op.evidence == []
 
 
+def test_replaces_is_read_and_left_out_reads_as_none() -> None:
+    named = _one({"op": "decision.new", "statement": "x", "replaces": "gp_2"})
+    left_out = _one({"op": "decision.new", "statement": "x"})
+    null = _one({"op": "decision.new", "statement": "x", "replaces": None})
+
+    assert (named.replaces, left_out.replaces, null.replaces) == ("gp_2", "", "")
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [("user_101", ["user_101"]), ("", []), (None, []), (["a", "b"], ["a", "b"])],

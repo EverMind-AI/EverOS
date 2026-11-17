@@ -19,6 +19,9 @@ What these pin:
 - superseding a decision appends a new item and marks the old one
   superseded; a dissent moves from open to resolved; a topic update keeps
   every earlier version stored -- nothing is ever deleted;
+- a decision.new in version 4's shape -- only its own fields -- whose
+  ``replaces`` names a listed decision does the same as a supersede of it;
+  ``none`` adds a decision;
 - a decision stored from the reply that creates its topic links to it, and
   the next call shows it under that topic; a link that names nothing is
   dropped and counted, the item stored;
@@ -171,8 +174,8 @@ async def _items(deps: Any) -> list[Any]:
 
 def test_the_prompt_is_registered_and_pinned() -> None:
     assert GROUP_PROFILE_UPDATE.id == "chat.group_profile_update"
-    assert GROUP_PROFILE_UPDATE.version == 3
-    assert GROUP_PROFILE_UPDATE.fingerprint == "4e4f531149128e69"
+    assert GROUP_PROFILE_UPDATE.version == 4
+    assert GROUP_PROFILE_UPDATE.fingerprint == "638637ce95ed3d1e"
 
 
 async def test_a_batch_runs_at_the_batch_size_once_per_segment(groups: Any) -> None:
@@ -625,3 +628,60 @@ async def test_a_reply_that_never_parses_is_a_failure_too(
     assert len(calls) == 3  # the operator's own attempts, then the back-off
     batch = await deps.stores.group_profile.pending_batch(_SCOPE)
     assert batch.memcell_ids == ("mc_1",) and batch.failures == 1
+
+
+async def test_a_decision_that_replaces_one_supersedes_it(groups: Any) -> None:
+    """Version 4's reply: each operation in its own shape, no empty fields."""
+    groups(group_profile_batch=1)
+    model = _Model(
+        [
+            {
+                "op": "decision.new",
+                "statement": "Walnuts sell at 12 a jin.",
+                "replaces": "none",
+                "decided_by": ["u_chen"],
+                "evidence": [
+                    {"segment": "mc_1", "message": "m-1", "quote": "12 a jin"}
+                ],
+            }
+        ]
+    )
+    deps = _deps(model)
+    _segment(deps, "mc_1", 1_000, ("m-1", "u_chen", "Walnuts are 12 a jin."))
+    await update_group_profile(_extracted("mc_1"), deps)
+    (old,) = await _items(deps)
+
+    model.replies.append(
+        [
+            {
+                "op": "decision.new",
+                "statement": "Walnuts sell at 15 a jin.",
+                "replaces": old.item_id,
+                "decided_by": ["u_chen"],
+                "evidence": [{"segment": "mc_2", "message": "m-2", "quote": "15"}],
+            },
+            {
+                "op": "decision.new",
+                "statement": "Betty posts the poster.",
+                "replaces": "none",
+                "decided_by": ["u_betty"],
+                "evidence": [{"segment": "mc_2", "message": "m-3", "quote": "poster"}],
+            },
+        ]
+    )
+    _segment(
+        deps,
+        "mc_2",
+        5_000,
+        ("m-2", "u_chen", "Make it 15, final."),
+        ("m-3", "u_betty", "I'll post the poster."),
+    )
+    await update_group_profile(_extracted("mc_2"), deps)
+
+    assert f"[{old.item_id}] Walnuts sell at 12 a jin." in model.prompts[1]
+    items = await _items(deps)
+    assert [(i.statement, i.status, i.supersedes) for i in items] == [
+        ("Walnuts sell at 12 a jin.", "superseded", None),
+        ("Walnuts sell at 15 a jin.", "current", old.item_id),
+        ("Betty posts the poster.", "current", None),
+    ]

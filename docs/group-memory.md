@@ -1007,15 +1007,20 @@ catch-up (`catch_up_profiles`, section 7.4). One call per batch. Its input:
 - the roster block;
 - the current items, rendered with their ids: active topics (at most 20, most
   recently active first; replaced topics stay stored but are not rendered),
-  their current decisions, open dissent and active roles;
+  each summary cut to its first 200 characters, their current decisions, open
+  dissent and active roles;
 - the new segments, each opened by `=== SEGMENT <memcell_id> ===`, one line per
   message: `[<message_id>] <time> <speaker>: <text>`.
 
 Its output is a list of operations: `topic.new` (with a label of its own in
 `topic_id`: `new_1`, `new_2`, ...), `topic.update` (with the old `topic_id`),
-`decision.new`, `decision.supersede` (with the replaced item id),
-`dissent.open`, `dissent.resolve`, `role.add`, `role.retire`. Each operation
-cites evidence as `(memcell_id, message_id, quote)`. A decision's `topic_id`
+`decision.new` (with `replaces`: the id of the listed decision it changes, or
+`none`), `dissent.open`, `dissent.resolve`, `role.add`, `role.retire`; a
+`decision.supersede` (with the replaced item id) is still accepted, though the
+prompt no longer asks for it. Each operation is written in a shape of its own
+fields, a field without a value left out, and a topic's summary is at most 300
+characters. Each operation cites evidence as `(memcell_id, message_id,
+quote)`. A decision's `topic_id`
 and a dissent's `about` name a rendered item, or a topic the same reply
 creates by its label, before or after the `topic.new`. Code mints every topic
 id and maps the label to it.
@@ -1035,10 +1040,16 @@ that fails:
 A link never drops its operation: a `topic_id` or `about` that names neither a
 rendered current item nor a topic the reply creates is dropped, and the
 operation is kept as if the field were empty (a superseding decision keeps the
-replaced decision's topic). Dropped operations are counted in metrics by
-reason (`everos_group_profile_ops_dropped_total`), dropped links likewise
-(`everos_group_profile_links_dropped_total`: `unknown_reference`, or
-`ambiguous_reference` for a label two new topics share).
+replaced decision's topic). A `decision.new`'s `replaces` is such a link: a
+rendered current decision's id makes the new decision that decision's next
+version, exactly as a `decision.supersede` of it would; `none` names nothing;
+another id is dropped as `unknown_reference`, and a second replacement of one
+decision in a reply as `already_replaced`, the decision kept as a new one.
+Dropped operations are counted in metrics by reason
+(`everos_group_profile_ops_dropped_total`), dropped links likewise
+(`everos_group_profile_links_dropped_total`: `unknown_reference`,
+`ambiguous_reference` for a label two new topics share, or
+`already_replaced`).
 
 **Reading the profile.** The current profile is the fold of the items: the
 newest version of each topic, decisions not superseded, open dissent, active
@@ -2266,6 +2277,30 @@ Step 2 differs from the text above in these places:
   group's item of the same id was dropped, a dissent in one group disputed
   another group's decision of the same id, and a chain could continue into
   another group's item. Every lookup and comparison now names the group.
+- **`chat.group_profile_update` version 4: a smaller call that writes its
+  replacements.** Measured on the 2026-11-14 builds (DeepSeek V4.1 Flash), an
+  EverMemBench call averaged 9.8k input tokens, 73% of them the stored profile
+  sent again (topics 58%: every listed topic's summary in full, and a
+  `topic.update` rewrote one at 1,029 characters on average), and 1.6k output
+  tokens, 9% of them empty fields the single reply shape listed for every
+  operation. And the model almost never wrote a replacement: 1
+  `decision.supersede` in 197 operations on a GroupAssistBench slice, 0 in
+  940 on EverMemBench, while 13 of 40 (GroupAssistBench) and 169 of 314
+  (EverMemBench) `decision.new` landed on a topic with a listed current
+  decision. Read by hand (2026-11-17), 3 of the 13 were a new value for a
+  listed decision (a vote's interim count and its final result; a price
+  changed twice) and 2 of a sample of 40 on EverMemBench (a mechanism
+  refined; a draft replaced by the final version); the rest added a decision,
+  reported progress on one, or restated one. Each such miss left the old value
+  current, so the constraint block could not mark it superseded. Version 4
+  shows a listed topic's summary cut to its first 200 characters (an
+  ellipsis marks the cut) and asks for summaries of at most 300 characters;
+  the reply shows each operation in a shape of its own fields and leaves out
+  a field without a value; and every `decision.new` says what it `replaces`,
+  a listed decision's id or `none`. Code turns a listed id into the supersede
+  it already checks (`supersedes` set, the topic kept), so nothing new is
+  trusted: an unknown id is a dropped link, the decision kept as a new one.
+  The strategy logs how many decisions each update replaced (`replaced`).
 
 ## 15. Risks
 

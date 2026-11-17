@@ -23,6 +23,20 @@ machinery that keeps a deleted memory from coming back.
   attaches the whole current profile as before, `false` none. The linking is
   read once for both, so the default reads less. A personal search with
   `include_groups` is unchanged. No model request changes.
+- **The group-profile update asks for less and writes its replacements**
+  (`chat.group_profile_update` version 4). Measured on the 2026-11-14 builds
+  (DeepSeek V4.1 Flash), 73% of an EverMemBench call's input was the stored
+  profile sent again, mostly topic summaries in full, 9% of its output was
+  empty fields, and the model wrote 1 `decision.supersede` in 197 operations
+  on a GroupAssistBench slice and 0 in 940 on EverMemBench, leaving an old
+  value current next to its new one. Now a listed topic shows its summary cut
+  to 200 characters and a summary is asked for in at most 300; each operation
+  is written in its own shape with no empty fields; and every `decision.new`
+  says what it `replaces` -- a listed decision's id, which code turns into the
+  supersede it already checks, or `none`. An id that is no listed decision is
+  a dropped link (`unknown_reference`), a second replacement of one decision
+  in a reply too (`already_replaced`, new), and the decision is kept as a new
+  one. `decision.supersede` is still read.
 - **A group's member profiles are read in batches, and a flush no longer
   forces a profile.** Measured on 2026-11-14 (DeepSeek V4.1 Flash, an
   EverMemBench slice): the member profiles were $0.207 and the group profile

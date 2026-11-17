@@ -15,6 +15,10 @@ one). What the values mean is :mod:`.verify`'s to judge: an operation whose
 evidence is missing is dropped as ``no_evidence``, never repaired. The JSON
 schema the call sends is unchanged -- every field is still required and
 carries no default -- so a provider that enforces it sees the same request.
+
+``replaces`` (version 4 of the prompt) is what a ``decision.new`` changes: a
+listed decision's id, or ``none``. :mod:`.verify` turns a listed id into the
+supersede it checks; a reply without the key reads as ``none``.
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ OPERATIONS: tuple[str, ...] = (
 
 _TEXTS = (
     "target",
+    "replaces",
     "topic_id",
     "name",
     "summary",
@@ -100,6 +105,9 @@ class Operation(StrictOutputModel):
     target: str = ""
     """``topic.update``: the topic id. ``decision.supersede`` /
     ``dissent.resolve`` / ``role.retire``: the id of the item replaced."""
+    replaces: str = ""
+    """``decision.new``: the id of the listed decision it replaces, or
+    ``none`` (empty reads the same)."""
     topic_id: str = ""
     """``topic.new``: the new topic's label, by which the reply's other
     operations name it. ``decision.*``: a listed topic id or a new topic's

@@ -13,7 +13,12 @@ What these pin:
   topic by, before or after it; code mints the id;
 - a link that names nothing (a made-up id, the label of a dropped topic, a
   label two new topics share) is dropped and counted, the item kept; targets
-  and the semantic checks stay strict, and a dropped operation counts no link.
+  and the semantic checks stay strict, and a dropped operation counts no link;
+- a decision.new whose ``replaces`` names a listed decision is its new
+  version, as a decision.supersede of it is; ``none`` names nothing; an id
+  that is no listed decision, or one the reply already replaced, is a link
+  dropped and counted, the decision kept as a new one; a dropped decision
+  replaces nothing.
 """
 
 from __future__ import annotations
@@ -524,4 +529,84 @@ def test_targets_and_the_semantic_checks_stay_strict() -> None:
         "ungrounded_member": 1,
         "unknown_member": 1,
     }
+    assert not result.links_dropped
+
+
+# ── replaces (prompt version 4) ───────────────────────────────────────────
+
+_HOTEL_DECISION = _stored(
+    GroupProfileItem(
+        owner_id="trip",
+        kind="decision",
+        statement="Stay at the Alfama hotel.",
+        topic_id="tp_trip",
+        decided_by=["u_betty"],
+        sources=[_SOURCE],
+        source_start=600,
+        source_end=600,
+        observed_at=600,
+    ),
+    "gp_4",
+)
+_BOOKS = {"statement": "Betty books the hotel.", "decided_by": ["u_betty"]}
+
+
+def test_a_decision_that_replaces_a_listed_one_is_its_new_version() -> None:
+    profile = GroupProfileView(topics=[_TOPIC], decisions=[_DECISION, _HOTEL_DECISION])
+
+    result = _check(
+        _op("decision.new", _DEPART, replaces="gp_2", **_DECIDED),
+        # "none", in any case, and nothing at all name no decision.
+        _op("decision.new", _AGREE, replaces="None", **_BOOKS),
+        _op("decision.new", _AGREE, **_BOOKS),
+        profile=profile,
+    )
+
+    replaced, added, plain = result.items
+    # As a decision.supersede of gp_2 would be: its topic kept.
+    assert (replaced.supersedes, replaced.topic_id) == ("gp_2", "tp_trip")
+    assert added.supersedes is None and plain.supersedes is None
+    assert not result.dropped and not result.links_dropped
+
+
+def test_a_replaces_that_names_no_listed_decision_is_a_dropped_link() -> None:
+    before = (_links_dropped("unknown_reference"), _links_dropped("already_replaced"))
+    profile = GroupProfileView(topics=[_TOPIC], decisions=[_DECISION, _HOTEL_DECISION])
+
+    result = _check(
+        # A made-up id, and a topic's id: no decision.
+        _op("decision.new", _DEPART, replaces="gp_9", **_DECIDED),
+        _op("decision.new", _DEPART, replaces="tp_trip", **_DECIDED),
+        # Two decisions replacing one: the first is its new version.
+        _op("decision.new", _AGREE, replaces="gp_4", **_BOOKS),
+        _op("decision.new", _DEPART, replaces="gp_4", **_DECIDED),
+        # A supersede of what a replaces already took is a duplicate, as ever.
+        _op("decision.supersede", _DEPART, target="gp_4", **_DECIDED),
+        profile=profile,
+    )
+
+    made_up, topic, first, second = result.items
+    assert made_up.supersedes is None and topic.supersedes is None
+    assert topic.topic_id is None
+    assert first.supersedes == "gp_4" and second.supersedes is None
+    assert dict(result.dropped) == {"duplicate": 1}
+    assert drop_summary(result.links_dropped) == {
+        "unknown_reference": 2,
+        "already_replaced": 1,
+    }
+    after = (_links_dropped("unknown_reference"), _links_dropped("already_replaced"))
+    assert (after[0] - before[0], after[1] - before[1]) == (2.0, 1.0)
+
+
+def test_a_dropped_decision_replaces_nothing() -> None:
+    result = _check(
+        # The assistant's words alone: dropped before its replaces is read.
+        _op("decision.new", _ASSISTANT, replaces="gp_2", statement="Fly 08:10."),
+        _op("decision.new", _DEPART, replaces="gp_2", **_DECIDED),
+        profile=GroupProfileView(topics=[_TOPIC], decisions=[_DECISION]),
+    )
+
+    (decision,) = result.items
+    assert decision.supersedes == "gp_2"
+    assert dict(result.dropped) == {"assistant_only_decision": 1}
     assert not result.links_dropped
