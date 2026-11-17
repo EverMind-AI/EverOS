@@ -1,6 +1,7 @@
 """The profile cues an episode call marks: the block, the entries, their mapping.
 
-A profile update reads, by default (``[profile] input = "cues"``), only what
+A profile update reads, with ``[profile] input = "cues"`` (not the default:
+``full`` is, since 2026-11-17), only what
 the segment says about the person: the messages and pictures the episode call
 marked as lasting facts about their speaker (:mod:`.profile_input`). The
 marking rides on the episode call -- the model is reading the segment

@@ -217,12 +217,14 @@ and write their markdown when ready:
   update_every` (5) new segments, read together, and once the user has been
   idle for `[profile] idle_seconds` (600; `extract_user_profile_idle`) --
   at each flush of one of their conversations too with `[profile]
-  update_on_flush`. By default (`[profile] input = "cues"`) an update reads
-  only what the segments' episode calls marked as lasting about the owner
-  (their `<profile_cues>` block): those messages, each after the message
-  before it by someone else, and the marked pictures as their picture
-  memories' text; segments that marked nothing make no call. `input =
-  "full"` reads every message and every picture the owner posted. One update
+  update_on_flush`. By default (`[profile] input = "full"`) an update reads
+  every message and every picture the owner posted -- how the person acts is
+  what their traits are read from, and a paired judge preferred these
+  profiles to the cue-only ones 18 to 2 (2026-11-17). With `input = "cues"`
+  an update reads only what the segments' episode calls marked as lasting
+  about the owner (their `<profile_cues>` block): those messages, each after
+  the message before it by someone else, and the marked pictures as their
+  picture memories' text; segments that marked nothing make no call. One update
   call, and a consolidation call only when a part of the profile is
   over its cap and has grown since it was last consolidated. Every item keeps
   its id and source segments; a replaced or retired item moves to the file's

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Profiles read the whole conversation again (input = "full" is the default).**
+A paired judge on 2026-11-17 (DeepSeek V4.1 Flash, LoCoMo, 20 owners, the
+profile_quality.py A/B) preferred the profiles kept from every message to the
+cue-only ones 18 to 2 overall (p 4e-4; coverage 19 to 1, specificity 18 to 2,
+portrait 17 to 3), and to the pre-2026-11-14 profiles (2eea6f7, read once per
+flush) 12 to 8 at the same 5-segment cadence (n.s.: the cadence is not what
+lost the quality). The cue-only input saves $0.017 per 1,000 messages, but it
+keeps 46% of the messages the full input's updates write from, and 18% of
+those for traits -- the cue block asks for what a person states about
+themselves, and traits are read out of how they act. `[profile] input =
+"full"` is therefore the default again; `cues` stays as an option and its
+block is asked for only with that setting. Measured write cost, LoCoMo,
+fresh, off-peak, per 1,000 messages: $0.1354 before the 2026-11-14 changes,
+$0.0949 on this default (-30%), $0.0775 cue-only (-43%).
+
+### Changed
+
 **Memory deletion.** Two endpoints aligned with the Cloud API, and the
 machinery that keeps a deleted memory from coming back.
 
@@ -51,15 +68,15 @@ machinery that keeps a deleted memory from coming back.
   second time after the episode call), while its operations quoted 18% of a
   LoCoMo conversation (13% Mem-Gallery, 37% MemEye, 4-5% of a group's), 92-99%
   of the quoted lines were the person's own, and 44-48% of a group member's
-  updates changed nothing. Now, with `[profile] input = "cues"` (the
-  default), the episode call of a cell whose profiles read cues also marks,
-  per human speaker, the messages (a short verbatim quote) and the pictures
-  that say something lasting about them -- a role, a constraint, an
-  environment, the people in one's life, a preference, a habit; never a
-  one-off event, another person's opinion, a joke or a hypothetical -- in a
-  `<profile_cues>` block appended after what the cell adds and before the
-  `<output_language>` block, and a `profile_cues` reply field
-  (`chat.episode_profile_cues`, version 1, recorded in `everos prompts`). The
+  updates changed nothing. Now, with `[profile] input = "cues"`, the episode
+  call of a cell whose profiles read cues also marks, per human speaker, the
+  messages (a short verbatim quote) and the pictures that say something
+  lasting about them -- a role, a constraint, an environment, the people in
+  one's life, a preference, a habit; never a one-off event, another person's
+  opinion, a joke or a hypothetical -- in a `<profile_cues>` block appended
+  after what the cell adds and before the `<output_language>` block, and a
+  `profile_cues` reply field (`chat.episode_profile_cues`, version 1,
+  recorded in `everos prompts`). The
   block is sent only when a profile of the cell's space reads it, as the
   picture block reaches only picture cells: a user's own space while
   `extract_user_profile` runs with `input = "cues"`, a group's while

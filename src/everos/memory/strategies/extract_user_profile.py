@@ -37,13 +37,14 @@ update is the one a member's profile in a group runs (:mod:`._profiles`):
   messages a live forget names, oldest first. ``[profile] input`` decides
   what of them the model is shown
   (:func:`~everos.memory.extract.pipeline.profile_input.select_profile_input`):
-  ``cues`` (the default) -- the messages and pictures the segments' episode
-  calls marked as lasting facts about the owner, each message after the one
-  before it by someone else, the pictures as their picture memories' text
-  (``[profile] picture_pixels`` attaches them instead); a segment never
-  marked is read in full -- or ``full``, every message and every picture the
-  owner posted (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`;
-  none when ``[extraction] vision`` is off), the request of 2026-11-13. An
+  ``full`` (the default), every message and every picture the owner posted
+  (:func:`~everos.memory.extract.pipeline.pictures.profile_pictures`; none
+  when ``[extraction] vision`` is off), the request of 2026-11-13 -- or
+  ``cues``, the messages and pictures the segments' episode calls marked as
+  lasting facts about the owner, each message after the one before it by
+  someone else, the pictures as their picture memories' text (``[profile]
+  picture_pixels`` attaches them instead); a segment never marked is read in
+  full, and the cues that marked nothing make **no call**. An
   update whose segments marked nothing for the owner makes **no call**: its
   segments are taken off the queue and marked read. The queue also holds the
   segments a message forget queued: the items it took out because they

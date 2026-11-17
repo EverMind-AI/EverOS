@@ -372,11 +372,16 @@ idle_seconds = 600
 # every user's queue at once (an evaluation does it before it searches).
 update_on_flush = false
 # What an update reads -- a user's, and a group's batched member update:
-# "cues" -- the messages and pictures the episode call marked as saying
+# "full" -- every message of the segments and every picture the person
+# posted (the default: it keeps the whole conversation, so an update can read
+# traits out of how the person acts, not only what they state about
+# themselves); no episode request carries a cue block.
+# "cues" -- only the messages and pictures the episode call marked as saying
 # something lasting about the person (the episode request then carries a
-# <profile_cues> block); no cue, no update call. "full" -- every message of
-# the segments and every picture the person posted; no cue block.
-input = "cues"
+# <profile_cues> block); no cue, no update call. Saves 18% of the write cost
+# on one-to-one text and 38-49% of the conversation read, and is an
+# experiment until a paired judge shows it ties "full" on profile quality.
+input = "full"
 # In "cues" mode, attach the cued pictures themselves instead of their
 # picture memories' text.
 picture_pixels = false

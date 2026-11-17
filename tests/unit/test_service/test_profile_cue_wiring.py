@@ -2,13 +2,16 @@
 
 What these pin:
 
-- the episode call carries the ``<profile_cues>`` block only with
-  ``[profile] input = "cues"``: for a user's own space while
-  ``extract_user_profile`` runs, and for a group's while
-  ``update_member_profiles`` runs in ``[groups] member_profile_mode =
-  "batched"`` (``per_member`` reads every message); an ``ome.toml`` that
-  turns either off at startup turns its block off, a file that cannot be
-  read changes nothing, and a server without its engine asks for no cue;
+- ``[profile] input`` is ``full`` by default (since 2026-11-17: a paired
+  judge preferred the profiles it keeps to the cue-only ones 18 to 2), so
+  by default no episode request carries the ``<profile_cues>`` block;
+- with ``[profile] input = "cues"`` the episode call carries the block only
+  for a user's own space while ``extract_user_profile`` runs, and for a
+  group's while ``update_member_profiles`` runs in ``[groups]
+  member_profile_mode = "batched"`` (``per_member`` reads every message); an
+  ``ome.toml`` that turns either off at startup turns its block off, a file
+  that cannot be read changes nothing, and a server without its engine asks
+  for no cue;
 - ``build_application`` hands the conversation pipeline that decision and the
   strategies the ``[profile]`` input, and the memory service built without
   its engine asks for none;
@@ -42,15 +45,15 @@ def _profile(**values: object) -> Settings:
     return base.model_copy(update={"profile": base.profile.model_copy(update=values)})
 
 
-def test_by_default_both_spaces_read_cues(tmp_path: Path) -> None:
-    assert profile_cue_consumers(Settings(), tmp_path / "ome.toml") == CueConsumers(
-        users=True, groups=True
-    )
+def test_by_default_neither_space_reads_cues(tmp_path: Path) -> None:
+    """``[profile] input = "full"`` is the default: no request asks for cues."""
+    assert Settings().profile.input == "full"
+    assert profile_cue_consumers(Settings(), tmp_path / "ome.toml") == CueConsumers()
 
 
-def test_a_full_profile_reads_no_cue_in_either_space(tmp_path: Path) -> None:
-    consumers = profile_cue_consumers(_profile(input="full"), tmp_path / "ome.toml")
-    assert consumers == CueConsumers(users=False, groups=False)
+def test_a_cue_profile_reads_cues_in_both_spaces(tmp_path: Path) -> None:
+    consumers = profile_cue_consumers(_profile(input="cues"), tmp_path / "ome.toml")
+    assert consumers == CueConsumers(users=True, groups=True)
 
 
 def test_per_member_profiles_read_no_cue(tmp_path: Path) -> None:
@@ -62,7 +65,12 @@ def test_per_member_profiles_read_no_cue(tmp_path: Path) -> None:
             )
         }
     )
-    consumers = profile_cue_consumers(per_member, tmp_path / "ome.toml")
+    consumers = profile_cue_consumers(
+        per_member.model_copy(
+            update={"profile": per_member.profile.model_copy(update={"input": "cues"})}
+        ),
+        tmp_path / "ome.toml",
+    )
     assert consumers == CueConsumers(users=True, groups=False)
 
 
@@ -78,13 +86,13 @@ def test_a_profile_ome_toml_turns_off_gets_no_block(
 ) -> None:
     path = tmp_path / "ome.toml"
     path.write_text(f"[strategies.{section}]\nenabled = false\n", encoding="utf-8")
-    assert profile_cue_consumers(Settings(), path) == expected
+    assert profile_cue_consumers(_profile(input="cues"), path) == expected
 
 
 def test_an_unreadable_ome_toml_changes_nothing(tmp_path: Path) -> None:
     path = tmp_path / "ome.toml"
     path.write_text("[strategies.extract_user_profile\nenabled = ", encoding="utf-8")
-    assert profile_cue_consumers(Settings(), path) == CueConsumers(
+    assert profile_cue_consumers(_profile(input="cues"), path) == CueConsumers(
         users=True, groups=True
     )
 
@@ -101,7 +109,7 @@ def test_the_application_hands_the_pipeline_and_the_strategies_their_choice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "root"))
-    monkeypatch.setenv("EVEROS_PROFILE__INPUT", "full")
+    monkeypatch.setenv("EVEROS_PROFILE__INPUT", "cues")
     monkeypatch.setenv("EVEROS_PROFILE__PICTURE_PIXELS", "true")
     bound: list[MemoryDeps] = []
     original = bootstrap.to_ome_strategy
@@ -118,10 +126,10 @@ def test_the_application_hands_the_pipeline_and_the_strategies_their_choice(
         load_settings.cache_clear()
 
     pipeline = application.memory._memorizer._conversation_pipeline
-    assert pipeline._cue_consumers == CueConsumers()  # type: ignore[attr-defined]
+    assert pipeline._cue_consumers == CueConsumers(users=True, groups=True)  # type: ignore[attr-defined]
     assert pipeline._profile_cues is not None  # type: ignore[attr-defined]
     assert {(d.profile_input, d.profile_picture_pixels) for d in bound} == {
-        ("full", True)
+        ("cues", True)
     }
     assert all(d.stores.profile_cues is not None for d in bound)
 

@@ -141,9 +141,10 @@ class GroupWorld:
         ``llm`` is the extraction model (default: one that fails the test if
         a read path calls it). ``decider`` is the multi-round search's model
         (default: a scripted one that keeps the first ten candidates and
-        stops). ``profile_cues`` runs the profiles on cues, as the bootstrap
-        does by default: the episode call marks them, a user's profile reads
-        them (``[profile] input = "cues"``).
+        stops). ``profile_cues`` runs the profiles on cues (``[profile]
+        input = "cues"``, an experiment since 2026-11-17; the default reads
+        every message): the episode call marks them, a user's profile reads
+        them.
         """
         base = settings or Settings()
         settings = base.model_copy(

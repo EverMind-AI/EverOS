@@ -840,9 +840,9 @@ else's (section 7.4). The same routing (poster only) applies on the one-to-one
 path, which removes the leak at `user_memory.py:163-170` without changing any
 single-sender result.
 
-While the member profiles run batched with `[profile] input = "cues"` (both
-defaults), a group cell's episode call also carries the `<profile_cues>`
-block: per human speaker, the messages and pictures that say something
+While the member profiles run batched with `[profile] input = "cues"` (an
+experiment since 2026-11-17; the default input is `full`, which asks for no
+cue), a group cell's episode call also carries the `<profile_cues>` block: per human speaker, the messages and pictures that say something
 lasting about them, kept per segment and member in `system.db`
 (`profile_cue`), never the assistant's. The batched member update reads only
 those (`select_members_input`, section 7.4), as a user's update does. With
@@ -879,7 +879,7 @@ say about one member: preferences, constraints, commitments, expertise.
   the history, held items, picture items for the poster only), and a
   consolidation runs per member and part, only over its cap and grown.
   Members whose stored languages differ are read in one call per language.
-- **Cues (`[profile] input = "cues"`, the default).** The batched call reads
+- **Cues (`[profile] input = "cues"`; the default is `full`).** The batched call reads
   what the batch's episode calls marked about each member, not the whole
   batch: a member with no cue in the batch is not a target (no label, no
   operation, no token, their document not written); the conversation is

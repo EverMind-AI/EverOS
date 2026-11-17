@@ -14,8 +14,10 @@ without one, on a flush with ``profile_on_flush``, and when a catch-up asks
   their refs carry, and the pictures they posted (D17: a picture is evidence
   about its poster only). The reply is grouped per member; a member it
   leaves out has nothing new, and their document is not written.
-- **What the call reads.** ``[profile] input = "cues"`` (the default) reads
-  what the batch's episode calls marked about each member
+- **What the call reads.** ``[profile] input = "full"`` (the default) shows
+  the whole batch and every picture its members posted, as before cues.
+  With ``input = "cues"`` it reads what the batch's episode calls marked
+  about each member
   (:func:`~everos.memory.extract.pipeline.profile_input.select_members_input`):
   a member with no cue in the batch is not read (no operation, no token), the
   conversation is rendered once from the union of the members' marked
@@ -24,8 +26,7 @@ without one, on a flush with ``profile_on_flush``, and when a catch-up asks
   text (``[profile] picture_pixels`` attaches the picture); a batch that
   marked nothing for anyone makes no call. Every segment a member's update
   read with a cue record is marked read once the batch is written, so a
-  batch read again reads it no more. ``full`` shows the whole batch and every
-  picture its members posted, as before cues.
+  batch read again reads it no more.
 - **Each member as before.** A named member's operations apply to their own
   document as a one-person update's do (:func:`~._profiles.finish_update`):
   item ids, sources and spans, ``supersedes`` / ``since`` and the history,

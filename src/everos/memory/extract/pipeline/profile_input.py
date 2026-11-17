@@ -4,9 +4,13 @@ A person's profile update reads the segments queued on it (the strategies
 choose them: a user's own space, a group's members). ``[profile] input``
 decides what of them the model is shown:
 
-- ``full`` -- every message of every segment, and every picture the person
-  posted in them: the update of 2026-11-13, request for request.
-- ``cues`` (the default) -- only what the segments' episode calls marked as
+- ``full`` (the default) -- every message of every segment, and every picture
+  the person posted in them: the update of 2026-11-13, request for request.
+  A paired judge on 2026-11-17 preferred the profiles it keeps to the cue-only
+  ones 18 to 2 on LoCoMo at the same update cadence (p 4e-4): the whole
+  conversation carries how the person acts, which a cue list of self-
+  statements does not.
+- ``cues`` -- only what the segments' episode calls marked as
   saying something lasting about the person (:mod:`.profile_cues`), each
   marked message with its timestamp and, before it, the message before it by
   someone else, cut to :data:`CONTEXT_CHARS` characters, so the model can

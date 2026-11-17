@@ -1107,14 +1107,19 @@ class ProfileSettings(_Section):
     reads every user's queue at once.
 
     ``input``: what an update reads -- a user's, and a group's batched member
-    update. ``cues`` -- the messages and pictures the episode call marked as
-    saying something lasting about the person (the episode request then
-    carries the ``<profile_cues>`` block), each message after the nearest
-    earlier message by someone else; a person with no cue in the segments
-    read gets no update call (a batch renders its members' cues once).
-    ``full`` -- every message of the segments and every picture the person
-    posted, the requests from before cues; no episode request carries the
-    cue block.
+    update. ``full`` (the default) -- every message of the segments and every
+    picture the person posted, the requests from before cues; no episode
+    request carries the cue block. It is the default because a paired judge
+    on 2026-11-17 preferred the profiles it keeps to the cue-only ones 18 to
+    2 on LoCoMo (p 4e-4) at the same update cadence: the whole conversation
+    carries how the person acts, which traits are read from and a self-
+    statement cue list does not. ``cues`` -- the messages and pictures the
+    episode call marked as saying something lasting about the person (the
+    episode request then carries the ``<profile_cues>`` block), each message
+    after the nearest earlier message by someone else; a person with no cue
+    in the segments read gets no update call (a batch renders its members'
+    cues once). It saves ~18% of the one-to-one write cost and stays an
+    experiment until it ties ``full`` on a paired profile judge.
     ``picture_pixels``: in ``cues`` mode, attach the cued pictures themselves
     instead of their picture memories' text (description and visible text).
 
@@ -1126,7 +1131,7 @@ class ProfileSettings(_Section):
     update_every: int = Field(default=5, ge=1)
     idle_seconds: int = Field(default=600, ge=2)
     update_on_flush: bool = False
-    input: Literal["cues", "full"] = "cues"
+    input: Literal["cues", "full"] = "full"
     picture_pixels: bool = False
 
 
