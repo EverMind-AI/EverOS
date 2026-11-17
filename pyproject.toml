@@ -56,7 +56,7 @@ dependencies = [
     "PyYAML>=6.0",                # YAML frontmatter parsing
     # 7.x changes event semantics and can kill recursive inotify delivery
     # under warnings=error. Keep installs on the supported, lock-tested line.
-    "watchdog>=4.0.2,<7",         # macOS event_filter support; tested pre-7 contract
+    "watchdog>=4.0.2,<8",         # macOS event_filter support; tested pre-7 contract
 
     # Web framework (entrypoints/api)
     "fastapi>=0.104.0",
@@ -123,7 +123,7 @@ milvus = ["pymilvus>=3.0.0"]
 # NLTK keyword tokenizer (`[tokenizer] name = "nltk"`). Pinned to the release the
 # EverAlgo LoCoMo harness used: tokens change across NLTK releases, and the
 # indexed side and the query side must produce the same ones.
-nltk = ["nltk==3.9.4"]
+nltk = ["nltk==3.10.4"]
 
 [project.urls]
 Homepage = "https://evermind.ai"
@@ -566,6 +566,6 @@ dev = [
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
     "pymilvus>=3.0.0",
     # The NLTK tokenizer tests must run, not skip, so the [nltk] extra is present too.
-    "nltk==3.9.4",
+    "nltk==3.10.4",
     "hypothesis>=6.100",
 ]
