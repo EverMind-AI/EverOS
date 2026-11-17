@@ -63,7 +63,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from everos.config import GroupSearchSettings, load_settings
-from everos.config.settings import DeciderSettings
+from everos.config.settings import AnswerCopies, DeciderSettings
 from everos.core.context import resolve_request_id
 from everos.core.errors import ConfigurationError
 from everos.core.observability.logging import get_logger
@@ -212,6 +212,7 @@ class SearchManager:
         image_recaller: ImageMemoryRecaller | None = None,
         image_store: ImageStore | None = None,
         image_limits: ImageLimits | None = None,
+        answer_copies: AnswerCopies = "ranked",
         access: AccessPolicy,
         group_profile_index: GroupProfileIndex | None = None,
         episode_index: EpisodeIndex | None = None,
@@ -257,9 +258,11 @@ class SearchManager:
         self._decider_llm = decider_client
         self._images = image_recaller
         self._image_store = image_store
-        # ``[images]``: the size of the answering model's copy each returned
-        # picture names (``model_path``). Without it the field stays empty.
+        # ``[images]``: the size of the answering model's copy a returned
+        # picture names (``model_path``), and which pictures name it
+        # (``answer_copies``). Without limits the field stays empty.
         self._image_limits = image_limits
+        self._answer_copies: AnswerCopies = answer_copies
         # The picture-side embedder, when configured. Its query encoder puts the
         # user's question into the space the pictures' bytes live in; without
         # it the visual route is skipped and search is exactly as before.
@@ -770,6 +773,7 @@ class SearchManager:
             limits=self._image_limits,
             thumbnail_edge=tune.image_thumbnail_edge,
             thumbnail_quality=tune.image_quality,
+            answer_copies=self._answer_copies,
         )
 
     # ── Profile ─────────────────────────────────────────────────────

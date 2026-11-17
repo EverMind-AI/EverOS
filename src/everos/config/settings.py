@@ -86,6 +86,10 @@ CoreOrder = Literal["score", "round"]
 """How a multi-round search orders the decider's core; see
 :attr:`DeciderSettings.core_order`."""
 
+AnswerCopies = Literal["ranked", "all"]
+"""Which returned pictures name the answering model's copy; see
+:attr:`ImagesSettings.answer_copies`."""
+
 
 class _Section(BaseModel):
     """One configuration section: a key it does not declare is an error.
@@ -553,7 +557,7 @@ class ImagesSettings(_Section):
 
     Env binding (via parent ``Settings``):
         EVEROS_IMAGES__MAX_BYTES / __MAX_PER_MESSAGE / __MAX_REQUEST_BYTES /
-        __MAX_PER_REQUEST / __MODEL_EDGE / __CACHE_QUALITY
+        __MAX_PER_REQUEST / __MODEL_EDGE / __CACHE_QUALITY / __ANSWER_COPIES
     """
 
     max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
@@ -568,6 +572,21 @@ class ImagesSettings(_Section):
     """Long-side cap of the copy handed to the extraction / answer model."""
     cache_quality: int = Field(default=85, ge=1, le=100)
     """JPEG quality of both derived copies."""
+    answer_copies: AnswerCopies = "ranked"
+    """Which pictures a search result names the answering model's copy for.
+
+    ``ranked``: the pictures the search ranked (``data.images``). A picture
+    that comes back only inside an episode, because the episode refers to it
+    and the search did not rank it, names no ``model_path``: an answering
+    model reads it as text, its description and OCR. ``all``: those name the
+    copy too, as every picture did before 2026-11-18.
+
+    Counted on the official answer requests of the multimodal benchmarks
+    (2026-11-17 searches, offline): such pictures were 84% of the pictures an
+    H2HMem answer received as images (7.3 of 8.7 a question) and 55% of a
+    MemEye one's (7.3 of 13.4). Sent as text, an H2HMem answer request is
+    projected at about 6,000 input tokens instead of 15,400, a MemEye one at
+    10,200 instead of 17,100."""
     formats: list[str] = Field(default_factory=lambda: ["png", "jpeg", "webp", "gif"])
     """Accepted picture formats, by the format ``Pillow`` reports."""
 

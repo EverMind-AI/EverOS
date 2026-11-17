@@ -177,6 +177,12 @@ max_request_bytes = 33554432  # 32 MiB of pictures per add request
 max_per_request = 16        # pictures per add request
 model_edge = 1024           # long side of the copy the extraction / answer model sees
 cache_quality = 85          # JPEG quality of both derived copies
+# Which pictures a search result names the answering model's copy for
+# (model_path): "ranked" -- the pictures the search ranked; a picture that
+# comes back only inside an episode (one the episode refers to and the search
+# did not rank) names none, so an answering model reads it as text: its
+# description and OCR. "all" -- every returned picture (before 2026-11-18).
+answer_copies = "ranked"
 formats = ["png", "jpeg", "webp", "gif"]
 
 [extraction]

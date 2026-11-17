@@ -418,6 +418,9 @@ class SearchEpisodeItem(BaseModel):
     Attached so a reader of the episode — the answering model above all — gets
     what the body points at without a second lookup. A forgotten picture is
     omitted rather than revived: the reference stays, its content does not.
+    The search did not choose these pictures, so by default (``[images]
+    answer_copies = "ranked"``) they name no ``model_path``: an answering
+    model reads them as text, their description and OCR.
     """
     summary: str
     subject: str
@@ -459,7 +462,9 @@ class SearchImageItem(BaseModel):
     The three paths are memory-root-relative; a caller resolves them against
     its own root. ``model_path`` is the copy to hand an answering model: the
     ``[images] model_edge`` copy (1024 px on the long side by default), the
-    same size the extraction model read the picture at.
+    same size the extraction model read the picture at. It is empty on a
+    picture attached to an episode (``[images] answer_copies``, default
+    ``ranked``): give an answering model that one as text.
     ``GET /memory/images/{image_id}?variant=model`` serves the same bytes by
     id. ``original_path`` is the picture byte for byte as it arrived, for a
     caller that wants it (a download, an export); it can be many times the

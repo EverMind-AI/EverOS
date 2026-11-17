@@ -308,6 +308,7 @@ message it arrived in.
 | `max_per_request` | int | `16` | No | Pictures one add request may carry. |
 | `model_edge` | int | `1024` | No | Long side of the extraction / answer model's copy, px. A search result names this copy as `model_path`; `GET /memory/images/{id}?variant=model` serves it. |
 | `cache_quality` | int | `85` | No | JPEG quality of both derived copies. |
+| `answer_copies` | str | `"ranked"` | No | Which pictures a search result names the answering model's copy for (`model_path`). `ranked`: the pictures the search ranked (`data.images`); a picture that comes back only inside an episode (`episodes[].images`: one the episode refers to and the search did not rank) names none, so an answering model reads it as text, its description and OCR. `all`: every returned picture, as before 2026-11-18. |
 | `formats` | list[string] | `["png","jpeg","webp","gif"]` | No | Accepted formats, by Pillow's name in lowercase. |
 
 ### `[extraction]`

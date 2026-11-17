@@ -1107,7 +1107,7 @@ owner scope; arrays that do not apply stay `[]`.
 | Field | Type | Notes |
 |---|---|---|
 | `episodes` | `array<SearchEpisodeItem>` | The selected episodes (and group scenes) |
-| `images` | `array<SearchImageItem>` | Picture memories ranked in the same pool as the episodes. Show an answering model `model_path`: the `[images] model_edge` copy (1024 px), on disk when the response returns (`GET /api/v2/memory/images/{image_id}?variant=model` serves it by id). `original_path` is the picture as sent; `thumbnail_path` the decider's copy |
+| `images` | `array<SearchImageItem>` | Picture memories ranked in the same pool as the episodes. Show an answering model `model_path`: the `[images] model_edge` copy (1024 px), on disk when the response returns (`GET /api/v2/memory/images/{image_id}?variant=model` serves it by id). `original_path` is the picture as sent; `thumbnail_path` the decider's copy. A picture an episode refers to that the search did not rank comes inside that episode (`episodes[].images`) and, by default (`[images] answer_copies = "ranked"`), with an empty `model_path`: give it to an answering model as text, its `description` and `ocr` |
 | `profiles` | `array<SearchProfileItem>` | Populated **only** when `include_profile=true` |
 | `unprocessed_messages` | `array<UnprocessedMessageDTO>` | Populated **only** when `filters.session_id` is a top-level eq scalar; otherwise stays `[]`. Buffer rows have no owner attribution — boundary detection runs before owner inference |
 | `scope` | `object \| null` | For a group scope: the groups, the asker and the asker's windows; for `include_groups`, the groups searched alongside the user |

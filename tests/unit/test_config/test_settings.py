@@ -173,3 +173,17 @@ def test_memorize_async_queue_defaults_and_env_override(
     monkeypatch.setenv("EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION", "7")
     load_settings.cache_clear()
     assert load_settings().memorize.async_queue.max_pending_per_session == 7
+
+
+def test_images_answer_copies_default_and_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only ranked pictures name the answering model's copy unless told otherwise."""
+    assert load_settings().images.answer_copies == "ranked"
+
+    monkeypatch.setenv("EVEROS_IMAGES__ANSWER_COPIES", "all")
+    load_settings.cache_clear()
+    assert load_settings().images.answer_copies == "all"
+
+    with pytest.raises(ValueError):
+        Settings(images={"answer_copies": "some"})

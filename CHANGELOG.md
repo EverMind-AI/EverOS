@@ -12,6 +12,18 @@ machinery that keeps a deleted memory from coming back.
 
 ### Changed
 
+- **Only a ranked picture names the answering model's copy.** A picture an
+  episode refers to and the search did not rank comes back inside that
+  episode (`episodes[].images`); it now names no `model_path`, so an answering
+  model reads it as text -- its description and OCR -- and only the pictures
+  the search chose go to it as images. No answer copy is rendered for it at
+  search time. `[images] answer_copies = "all"` (new; default `"ranked"`)
+  names the copy for every returned picture, as before. Counted on the
+  official answer requests of the 2026-11-17 searches (offline): such
+  pictures were 84% of the pictures an H2HMem answer received as images (7.3
+  of 8.7 a question) and 55% of a MemEye one's; sent as text, an H2HMem answer
+  request is projected at about 6,000 input tokens instead of 15,400 and a
+  MemEye one at 10,200 instead of 17,100.
 - **A group's member profiles are read in batches, and a flush no longer
   forces a profile.** Measured on 2026-11-14 (DeepSeek V4.1 Flash, an
   EverMemBench slice): the member profiles were $0.207 and the group profile

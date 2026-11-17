@@ -15,7 +15,9 @@ keyed by ``Candidate.id``), so no column name of any index is read here.
   model as a dangling id and nothing else.
 * A picture's copies are named last, once for the whole response
   (:func:`name_copies`): the store says which copy files the picture has,
-  which no stored record does.
+  which no stored record does. By default only a ranked picture names the
+  answering model's copy; a picture attached to an episode is for that
+  model's text (``[images] answer_copies``).
 
 A candidate whose record is missing or belongs to the wrong owner type is
 dropped with a warning rather than failing the request.
@@ -40,6 +42,7 @@ from .dto import SearchEpisodeItem, SearchImageItem, SearchSource
 
 if TYPE_CHECKING:
     from everos.component.images import ImageLimits
+    from everos.config.settings import AnswerCopies
     from everos.memory.ports.images import ImageStore
 
 logger = get_logger(__name__)
@@ -154,16 +157,23 @@ async def name_copies(
     limits: ImageLimits | None,
     thumbnail_edge: int,
     thumbnail_quality: int = 85,
+    answer_copies: AnswerCopies = "ranked",
 ) -> list[SearchImageItem]:
-    """Name every returned picture's two copies after the files the store has.
+    """Name every returned picture's copies after the files the store has.
 
     ``model_path`` is the answering model's copy (``[images] model_edge``), the
     one to show an answering model: the original can be many times its size
-    and visual tokens. ``thumbnail_path`` is the decider's copy (``[decider]
-    image_thumbnail_edge``). Either is usually on disk already -- written when
-    extraction read the picture, or when the decider was shown it; a store
-    that has none renders it now, once, so a caller resolving a path finds the
-    file (a decider shown no picture, the default, never wrote a thumbnail).
+    and visual tokens. With ``answer_copies`` ``ranked`` (the default) only a
+    ranked picture names it: a picture inside an episode is there because the
+    episode refers to it, not because the search chose it, so an answering
+    model is meant to read it as text (its description and OCR) and its
+    ``model_path`` stays empty; ``all`` names it for those too.
+    ``thumbnail_path`` is the decider's copy (``[decider]
+    image_thumbnail_edge``), named for every picture. Either is usually on
+    disk already -- written when extraction read the picture, or when the
+    decider was shown it; a store that has none renders it now, once, so a
+    caller resolving a path finds the file (a decider shown no picture, the
+    default, never wrote a thumbnail).
 
     A picture the store cannot copy keeps empty paths and is logged: its
     description still answers. Without a store or ``[images]`` limits nothing
@@ -177,6 +187,8 @@ async def name_copies(
         thumbnail_edge: The decider's copy size.
         thumbnail_quality: The decider's copy quality (``[decider]
             image_quality``).
+        answer_copies: Which pictures name the answering model's copy
+            (``[images] answer_copies``).
 
     Returns:
         ``images`` with both copies named.
@@ -191,13 +203,18 @@ async def name_copies(
     )
     if not ids:
         return images
+    answered = (
+        ids
+        if answer_copies == "all"
+        else list(dict.fromkeys(image.image_id for image in images))
+    )
     found = await asyncio.gather(
         *(
             _copy(store, i, edge=limits.model_edge, quality=limits.cache_quality)
-            for i in ids
+            for i in answered
         )
     )
-    model_paths = dict(zip(ids, found, strict=True))
+    model_paths = dict(zip(answered, found, strict=True))
     found = await asyncio.gather(
         *(_copy(store, i, edge=thumbnail_edge, quality=thumbnail_quality) for i in ids)
     )
@@ -206,7 +223,7 @@ async def name_copies(
     def named(image: SearchImageItem) -> SearchImageItem:
         return image.model_copy(
             update={
-                "model_path": model_paths[image.image_id],
+                "model_path": model_paths.get(image.image_id, ""),
                 "thumbnail_path": thumbnails[image.image_id],
             }
         )

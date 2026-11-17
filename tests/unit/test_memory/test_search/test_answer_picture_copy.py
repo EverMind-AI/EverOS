@@ -4,8 +4,12 @@ What these pin:
 
 - A picture reaches the answering model as the ``[images] model_edge`` copy,
   not the original: the original can be many times its size and visual tokens,
-  and it is the size extraction read the picture at. Both a ranked picture and
-  one attached to the episode that refers to it carry ``model_path``.
+  and it is the size extraction read the picture at. A ranked picture carries
+  ``model_path``.
+- A picture attached to the episode that refers to it, which the search did
+  not rank, names no answering-model copy by default (``[images]
+  answer_copies = "ranked"``): the answering model reads it as text, and no
+  copy is rendered for it. ``answer_copies = "all"`` names it as before.
 - The copy is asked of the picture store with the configured edge and quality,
   so the file is on disk when the response is read.
 - A picture the store cannot copy keeps an empty ``model_path``; the search
@@ -34,6 +38,7 @@ from PIL import Image
 from everos.component.images import ImageLimits, derived_relpath
 from everos.component.tokenizer import Tokenizer
 from everos.config import SqliteSettings
+from everos.config.settings import AnswerCopies
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.groups import PartitionProjectLinkStore
 from everos.infra.persistence.images import FileImageStore
@@ -169,7 +174,11 @@ class _CopyStore:
 
 
 def _manager(
-    *, store: _CopyStore, limits: ImageLimits | None = _LIMITS, ranked: bool = True
+    *,
+    store: _CopyStore,
+    limits: ImageLimits | None = _LIMITS,
+    ranked: bool = True,
+    answer_copies: AnswerCopies = "ranked",
 ) -> SearchManager:
     episode = stored_episode("ep_1", parent_id="mc_ep_1")
     episode = dataclasses.replace(
@@ -199,6 +208,7 @@ def _manager(
         ),
         image_store=store,  # type: ignore[arg-type]
         image_limits=limits,
+        answer_copies=answer_copies,
     )
 
 
@@ -206,10 +216,28 @@ def _request() -> SearchRequest:
     return SearchRequest(user_id="alice", query="the sign")
 
 
-async def test_ranked_and_attached_pictures_name_the_answer_copy() -> None:
+async def test_only_a_ranked_picture_names_the_answer_copy() -> None:
     store = _CopyStore()
 
     response = await _manager(store=store).search(_request())
+
+    [ranked] = response.data.images
+    assert ranked.model_path == f"figures/.cache/{_SIGN}-1024.jpeg"
+    [attached] = response.data.episodes[0].images
+    assert attached.image_id == _LATTE
+    assert attached.model_path == ""  # read as text: its description and OCR
+    assert "EST. 2019" in attached.description
+    assert attached.thumbnail_path == f"figures/.cache/{_LATTE}-448.jpeg"
+    # No answer copy is rendered for the attached picture.
+    assert sorted(store.asked) == sorted(
+        [(_SIGN, 1024, 85), (_SIGN, 448, 85), (_LATTE, 448, 85)]
+    )
+
+
+async def test_ranked_and_attached_pictures_name_the_answer_copy_with_all() -> None:
+    store = _CopyStore()
+
+    response = await _manager(store=store, answer_copies="all").search(_request())
 
     [ranked] = response.data.images
     assert ranked.image_id == _SIGN
@@ -227,7 +255,7 @@ async def test_ranked_and_attached_pictures_name_the_answer_copy() -> None:
 async def test_a_picture_without_a_copy_keeps_its_description() -> None:
     store = _CopyStore(missing={_LATTE})
 
-    response = await _manager(store=store).search(_request())
+    response = await _manager(store=store, answer_copies="all").search(_request())
 
     [attached] = response.data.episodes[0].images
     assert attached.model_path == ""
@@ -248,7 +276,7 @@ async def test_a_greyscale_picture_s_thumbnail_is_named_png() -> None:
     """The decider's copy of a greyscale picture is PNG, as its model copy is."""
     store = _CopyStore(grey={_LATTE})
 
-    response = await _manager(store=store).search(_request())
+    response = await _manager(store=store, answer_copies="all").search(_request())
 
     [attached] = response.data.episodes[0].images
     assert attached.model_path == f"figures/.cache/{_LATTE}-1024.png"
