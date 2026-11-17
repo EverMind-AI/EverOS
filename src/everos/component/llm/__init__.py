@@ -7,7 +7,8 @@ This package exports only what EverOS itself defines:
 - :class:`OpenAIProvider` -- the one ``LLMClient`` implementation, over any
   OpenAI-compatible Chat Completions endpoint. Its ``achat_raw`` (returning a
   :class:`RawReply`) is the one unchecked call, for the retrieval decider.
-- :class:`LLMCallError` -- what a failed call raises, with a ``reason``.
+- :class:`LLMCallError` -- what a failed call raises, with a ``reason`` (and,
+  when its attempts ran out, each :class:`FailedAttempt` with its reply).
 - :class:`LLMCallObserver` / :class:`TokenUsage` / :class:`NullObserver` --
   the hook that sees each completion's usage and finish reason.
 - :class:`LLMClientConfig` / :func:`build_llm_provider` -- the factory.
@@ -30,6 +31,7 @@ External usage::
     )
 """
 
+from .errors import FailedAttempt as FailedAttempt
 from .errors import LLMCallError as LLMCallError
 from .factory import DeciderClientConfig as DeciderClientConfig
 from .factory import LLMClientConfig as LLMClientConfig
@@ -47,6 +49,7 @@ from .openai_provider import RawReply as RawReply
 
 __all__ = [
     "DeciderClientConfig",
+    "FailedAttempt",
     "LLMCallError",
     "LLMCallObserver",
     "LLMClientConfig",

@@ -47,7 +47,7 @@ from pydantic import BaseModel, ValidationError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.metrics import Counter as MetricCounter
 
-from .errors import LLMCallError
+from .errors import FailedAttempt, LLMCallError
 from .observer import LLMCallObserver, NullObserver, TokenUsage
 
 if TYPE_CHECKING:
@@ -101,6 +101,8 @@ class _AttemptFailedError(Exception):
         message: What went wrong, without request or reply content.
         reason: The :class:`LLMCallError` reason if no attempt succeeds.
         error_count: Validation errors found, when validation is what failed.
+        reply: The reply's text, when the upstream sent one; handed to the
+            caller only through :attr:`LLMCallError.failed_attempts`.
     """
 
     def __init__(
@@ -109,10 +111,12 @@ class _AttemptFailedError(Exception):
         *,
         reason: Literal["invalid_reply", "transport", "cut_short"],
         error_count: int | None = None,
+        reply: str | None = None,
     ) -> None:
         super().__init__(message)
         self.reason: Literal["invalid_reply", "transport", "cut_short"] = reason
         self.error_count = error_count
+        self.reply = reply
 
 
 class OpenAIProvider:
@@ -405,6 +409,7 @@ class OpenAIProvider:
         """
         attempts = 1 + self._invalid_reply_retries
         failure: _AttemptFailedError | None = None
+        failed: list[FailedAttempt] = []
         for attempt in range(1, attempts + 1):
             sent = request if attempt == 1 else self._retry_request(request)
             try:
@@ -413,6 +418,7 @@ class OpenAIProvider:
                 )
             except _AttemptFailedError as exc:
                 failure = exc
+                failed.append(FailedAttempt(exc.reason, exc.reply))
                 self._log_failed_attempt(exc, attempt, attempts)
                 if exc.reason == "cut_short":
                     outcome = "retried" if attempt < attempts else "failed"
@@ -422,6 +428,7 @@ class OpenAIProvider:
             f"no usable reply in {attempts} attempts (model={self._model!r}, "
             f"response_format_mode={self._response_format_mode!r}): {failure}",
             reason=failure.reason if failure else "invalid_reply",
+            failed_attempts=failed,
         ) from (failure.__cause__ if failure else None)
 
     def _retry_request(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -529,6 +536,7 @@ def _check_upstream(
             f"generation cut short (model={completion.model!r}, "
             f"finish_reason='length', max_tokens={max_tokens!r})",
             reason="cut_short",
+            reply=choice.message.content,
         )
     if choice.finish_reason in _CUT_SHORT_REASONS:
         raise LLMCallError(
@@ -564,4 +572,5 @@ def _validate(text: str, response_format: type[BaseModel]) -> None:
             f"reply failed validation against {response_format.__name__}",
             reason="invalid_reply",
             error_count=exc.error_count(),
+            reply=text,
         ) from exc

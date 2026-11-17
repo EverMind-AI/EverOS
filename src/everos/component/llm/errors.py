@@ -8,15 +8,31 @@ failed, which is what decides whether retrying the operator is worth it.
 
 from __future__ import annotations
 
-__all__ = ["LLMCallError", "LLMCallFailureReason"]
+__all__ = ["FailedAttempt", "LLMCallError", "LLMCallFailureReason"]
 
-from typing import Literal
+from collections.abc import Sequence
+from typing import Literal, NamedTuple
 
 from everos.core.errors import LLMServiceError
 
 LLMCallFailureReason = Literal[
     "refusal", "cut_short", "no_content", "invalid_reply", "transport"
 ]
+
+
+class FailedAttempt(NamedTuple):
+    """One attempt of a call that failed where resending it might have helped.
+
+    Attributes:
+        reason: ``invalid_reply`` (the reply failed validation),
+            ``cut_short`` (the reply was cut at ``max_tokens`` on a call that
+            retries a cut) or ``transport`` (no choice, or a generation
+            aborted upstream).
+        reply: The reply's text, ``None`` when the upstream sent none.
+    """
+
+    reason: LLMCallFailureReason
+    reply: str | None
 
 
 class LLMCallError(LLMServiceError):
@@ -38,8 +54,19 @@ class LLMCallError(LLMServiceError):
     Args:
         message: Human-readable detail; never carries request content.
         reason: Failure category the host branches on.
+        failed_attempts: When the call failed because its attempts ran out,
+            each attempt, in order, with its reply: what a host that salvages
+            a reply reads. Empty when a failure ended the call at once. Never
+            part of the message.
     """
 
-    def __init__(self, message: str, *, reason: LLMCallFailureReason) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: LLMCallFailureReason,
+        failed_attempts: Sequence[FailedAttempt] = (),
+    ) -> None:
         super().__init__(message)
         self.reason: LLMCallFailureReason = reason
+        self.failed_attempts: tuple[FailedAttempt, ...] = tuple(failed_attempts)

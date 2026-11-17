@@ -8,11 +8,12 @@ profile operations (the profile update reads the pictures itself), so a reply
 that still writes an empty ``profile`` reads as one without it. What these
 pin:
 
-- a top-level key the reply model does not define is ignored, empty or not
-  -- the keys DeepSeek V4.1 Flash added to the original's reply on the LoCoMo
-  probe of 2026-11-14 (``type``, ``_meta``, ``_comment``, ``emotional_tone``,
-  ``_time_resolution``) included -- as everalgo-user-memory 0.3.1 read it;
-  in a picture's entry an unknown key left empty reads as absent;
+- a key the reply model does not define is ignored, empty or not, at the
+  top -- the keys DeepSeek V4.1 Flash added to the original's reply on the
+  LoCoMo probe of 2026-11-14 (``type``, ``_meta``, ``_comment``,
+  ``emotional_tone``, ``_time_resolution``) included -- as everalgo-user-memory
+  0.3.1 read it, and in a picture's entry alike (the ``ocr_language`` and
+  ``ocr_lang`` of the multimodal builds of 2026-11-17);
 - an array element left open, and a reply split in two objects, are mended
   before validation -- in the provider's check and in the operator's parse
   alike, so the call is answered by its first reply;
@@ -22,9 +23,8 @@ pin:
 - a ``summary`` the reply writes is dropped (the summary is cut in code), and
   a reply that leaves ``title`` or ``content`` blank is unusable
   (``LLMOutputError``, which the pipeline retries), as it is for everalgo;
-- what is not a slip of form still fails: an unknown key that carries
-  something inside a picture's entry (profile operations included), a missing
-  description or episode, a wrong type, a form slip the repair does not know;
+- what is not a slip of form still fails: a missing description or episode,
+  a wrong type, a form slip the repair does not know;
 - the JSON schema the call sends is pinned.
 """
 
@@ -75,9 +75,17 @@ def _reply(images: str = f"[{_IMAGE}]") -> str:
         '"profile": []}',
         '{"ref": "img-1", "description": "a latte with heart foam", "ocr": "", '
         '"ocr_note": "", "unused": ""}',
+        # the keys of the multimodal builds of 2026-11-17, values and all
+        '{"ref": "img-1", "description": "a latte with heart foam", "ocr": "", '
+        '"ocr_language": "German, French"}',
+        '{"ref": "img-1", "description": "a latte with heart foam", "ocr": "", '
+        '"ocr_lang": "zh"}',
+        # profile operations, which the reply no longer carries
+        '{"ref": "img-1", "description": "a latte with heart foam", "ocr": "", '
+        '"profile": [' + _OP + "]}",
     ],
 )
-def test_an_empty_unknown_key_in_a_pictures_entry_reads_as_absent(image: str) -> None:
+def test_an_unknown_key_in_a_pictures_entry_is_ignored(image: str) -> None:
     reply = ImageEpisodeReply.model_validate_json(_reply(images=f"[{image}]"))
 
     assert [(f.ref, f.description, f.ocr) for f in reply.images] == [
@@ -165,12 +173,6 @@ def test_a_text_cell_s_reply_is_mended_like_a_picture_cell_s() -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        # an unknown key that carries something: content in the wrong place
-        _reply(
-            images='[{"ref": "img-1", "description": "a latte", "profile": ['
-            + _OP
-            + "]}]"
-        ),
         _reply(images='[{"ref": "img-1", "ocr": ""}]'),  # no description
         _reply(images='[{"ref": "img-1", "description": "a latte", "ocr": 7}]'),
         '{"summary": "s", "title": "t", "images": []}',  # no episode

@@ -11,7 +11,11 @@ What these pin (``everos.memory.extract.reply_form``):
   an array element, an unterminated string, a key given twice across a split,
   a value left open at the end all return ``None``, and so does a text that
   needed nothing;
-- an unknown key reads as absent only while its value is empty.
+- the lenient reading of a reply nothing can mend (the episode call's
+  salvage): a string whose closing quote is lost ends at its line, a quote
+  copied into a string unescaped is text, the other slips of form are read as
+  meant, and where the text ends or stops being JSON the strings and
+  containers left open are marked.
 """
 
 from __future__ import annotations
@@ -19,11 +23,12 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
 
 from everos.memory.extract.reply_form import (
-    drop_empty_unknown_keys,
-    is_empty,
+    CutText,
+    OpenArray,
+    OpenObject,
+    read_leniently,
     repair_json_form,
 )
 
@@ -89,50 +94,86 @@ def test_any_other_slip_is_left_to_fail(text: str) -> None:
     assert repair_json_form(text) is None
 
 
-class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    name: str
-    kind: str = Field(alias="type")
+# ---------------------------------------------------------------------------
+# read_leniently: as much of a broken reply as can be read, marked
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("empty", ["", "  ", None, [], {}])
-def test_an_unknown_key_left_empty_reads_as_absent(empty: object) -> None:
-    value = {"name": "n", "type": "t", "note": empty}
+def test_a_string_closed_by_a_typographic_quote_ends_at_its_line() -> None:
+    """The closing quote was written as \u201d; the next line is the next key."""
+    text = '{\n  "ocr": "PHASE ONE \u201cdefine\u201d\u201d\n  },\n  "next": "x"\n}'
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(text)
 
-    assert drop_empty_unknown_keys(_Model, value) == {"name": "n", "type": "t"}
+    value = read_leniently(text)
 
-
-def test_an_unknown_key_with_content_is_kept_for_the_model_to_reject() -> None:
-    value = {"name": "n", "type": "t", "note": "said something", "count": 0}
-
-    assert drop_empty_unknown_keys(_Model, value) == value
-
-
-def test_a_known_field_is_never_dropped_even_when_empty() -> None:
-    value = {"name": "", "kind": None}
-
-    assert drop_empty_unknown_keys(_Model, value) == value
+    assert isinstance(value, dict)
+    assert value["ocr"] == "PHASE ONE \u201cdefine\u201d\u201d"
+    assert isinstance(value["ocr"], CutText)
+    assert value["ocr"].how == "line"
 
 
-def test_anything_but_a_mapping_passes_through() -> None:
-    assert drop_empty_unknown_keys(_Model, ["a"]) == ["a"]
+def test_a_quote_copied_into_a_string_unescaped_is_its_text() -> None:
+    text = '{"ocr": "rating 2\'00" 1\'30" and "star" plan", "n": 1}'
+
+    value = read_leniently(text)
+
+    assert value == {"ocr": 'rating 2\'00" 1\'30" and "star" plan', "n": 1}
+    assert not isinstance(value["ocr"], CutText)
+
+
+def test_a_reply_cut_off_marks_what_it_was_reading() -> None:
+    text = '{"title": "t", "images": [{"ref": "img-1", "ocr": "1 2 3 1 2 3 1'
+
+    value = read_leniently(text)
+
+    assert isinstance(value, OpenObject)
+    assert value["title"] == "t"
+    images = value["images"]
+    assert isinstance(images, OpenArray)
+    assert isinstance(images[0], OpenObject)
+    assert images[0]["ref"] == "img-1"
+    assert isinstance(images[0]["ocr"], CutText)
+    assert images[0]["ocr"].how == "end"
+
+
+def test_a_line_break_inside_a_string_followed_by_text_is_text() -> None:
+    value = read_leniently('{"ocr": "line one\nline two", "n": 1}')
+
+    assert value == {"ocr": "line one\nline two", "n": 1}
 
 
 @pytest.mark.parametrize(
-    ("value", "empty"),
+    ("text", "expected"),
     [
-        (None, True),
-        ("", True),
-        (" \n", True),
-        ([], True),
-        ({}, True),
-        ("x", False),
-        (0, False),
-        (False, False),
-        ([""], False),
-        ({"a": ""}, False),
+        # a comma missing between members on separate lines
+        ('{"a": "x"\n "b": "y"}', {"a": "x", "b": "y"}),
+        # one comma too many
+        ('{"a": "x",}', {"a": "x"}),
+        # an array element left open, before the next one and before the end
+        ('{"l": [{"a": 1, {"a": 2]}', {"l": [{"a": 1}, {"a": 2}]}),
+        # an escape JSON does not know reads as the character escaped
+        ('{"a": "it\\\'s"}', {"a": "it's"}),
+        # a surrogate pair written as two escapes
+        ('{"a": "\\ud83d\\ude00"}', {"a": "\U0001f600"}),
+        # a reply split in two objects
+        ('{"a": 1}\n{"b": 2}', {"a": 1, "b": 2}),
+        # text around the object
+        ('Here it is: {"a": 1} done', {"a": 1}),
     ],
 )
-def test_what_counts_as_empty(value: object, empty: bool) -> None:
-    assert is_empty(value) is empty
+def test_other_slips_of_form_are_read_as_meant(
+    text: str, expected: dict[str, object]
+) -> None:
+    assert read_leniently(text) == expected
+
+
+def test_a_text_with_no_object_reads_as_none() -> None:
+    assert read_leniently("no reply at all") is None
+
+
+def test_where_the_text_stops_being_json_reading_stops() -> None:
+    value = read_leniently('{"a": "x", "b": ??? "c": "y"}')
+
+    assert isinstance(value, OpenObject)
+    assert value == {"a": "x"}

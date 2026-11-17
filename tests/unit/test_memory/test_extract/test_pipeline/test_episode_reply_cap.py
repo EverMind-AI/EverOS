@@ -15,8 +15,9 @@ picture memory. What these pin:
   ``max_tokens`` (the builds' 32,768 in ``[llm] extra``), and keeps the
   configured temperature;
 - a reply cut at the cap is sent again once, at ``retry_temperature``, with
-  the same cap; a second cut fails the call (``cut_short``), as one cut did
-  before;
+  the same cap; after a second cut the cell keeps what the replies hold
+  (:mod:`~everos.memory.extract.pipeline.episode_salvage`), and fails
+  (``cut_short``) only when that is nothing;
 - a normal reply is answered by the first request, unchanged.
 """
 
@@ -180,12 +181,27 @@ async def test_a_cut_reply_is_retried_once_at_the_retry_temperature() -> None:
     }
 
 
-async def test_a_second_cut_fails_the_call() -> None:
+async def test_after_a_second_cut_the_cell_keeps_what_the_replies_hold() -> None:
     seen: list[dict[str, Any]] = []
     replies = [_completion(_LOOP, "length"), _completion(_LOOP, "length")]
+
+    reply = await _extract(_provider(replies, seen))
+
+    assert (reply.title, reply.content) == ("t", "c")
+    assert [(f.ref, f.ocr) for f in reply.images] == [
+        ("img-1", "I'D RATHER BE A BARRIER!")
+    ]
+    assert len(seen) == 2
+
+
+async def test_a_second_cut_that_holds_no_episode_fails_the_call() -> None:
+    """Cut inside ``content``: one fallback request, cut again, and the call fails."""
+    cut = '{"title": "t", "content": "' + "I'D RATHER BE A BARRIER! " * 40
+    seen: list[dict[str, Any]] = []
+    replies = [_completion(cut, "length") for _ in range(3)]
 
     with pytest.raises(LLMCallError) as info:
         await _extract(_provider(replies, seen))
 
     assert info.value.reason == "cut_short"
-    assert len(seen) == 2
+    assert len(seen) == 3

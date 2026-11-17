@@ -66,11 +66,11 @@ call writes no profile item. With the cue block it names which of them a
 profile should read (:func:`extract_cell` maps the cues).
 
 The reply is read leniently in form and strictly in meaning
-(:mod:`everos.memory.extract.reply_form`): a top-level key the reply model does
-not define is ignored, an unknown key left empty in a picture entry reads as
-absent, ``null`` reads as empty for ``ocr`` and as no entries for ``images``
-(one entry given bare reads as a list of it), and a reply with an array
-element left open or split in two objects is mended before it is validated. A
+(:mod:`everos.memory.extract.reply_form`): a key the reply model does not
+define is ignored, at the top and in a picture's entry alike, ``null`` reads
+as empty for ``ocr`` and as no entries for ``images`` (one entry given bare
+reads as a list of it), and a reply with an array element left open or split
+in two objects is mended before it is validated. A
 cell is never given a picture it did not send: a text cell's reply loses any
 ``images`` it writes, and a reference ``(img-N)`` to a label the cell did not
 attach is taken out of the episode. A reply that leaves ``title`` or
@@ -85,7 +85,11 @@ reply cut at that cap is sampled again once, warmer, before the cell fails:
 at temperature 0 a long transcription in ``ocr`` can repeat itself until the
 output limit (on 2026-11-11 two or three of MemEye's 168 picture calls did,
 in each of three builds, ran to the builds' 32,768-token cap and left their
-cells with no memory at all).
+cells with no memory at all). When every attempt fails in form -- cut, or not
+JSON -- the cell keeps what its replies still hold (:mod:`.episode_salvage`):
+the title and the episode, and each picture entry with its ``ocr`` trimmed
+when that ran away; a picture cell whose replies keep no episode sends one
+fallback request asking for a short ``ocr``.
 """
 
 from __future__ import annotations
@@ -138,11 +142,13 @@ from everalgo.user_memory.prompts.en.episode_original import (
     EPISODE_GENERATION_PROMPT,
 )
 from everalgo.utils import paragraphs, tagged
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from everos.component.llm import LLMCallError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.metrics import Counter as MetricCounter
 from everos.memory.extract.llm_retry import retry_llm_output
+from everos.memory.extract.pipeline.episode_salvage import recover
 from everos.memory.extract.pipeline.profile_cues import (
     CellCues,
     ProfileCue,
@@ -150,7 +156,7 @@ from everos.memory.extract.pipeline.profile_cues import (
     map_cues,
     readable_cues,
 )
-from everos.memory.extract.reply_form import drop_empty_unknown_keys, repair_json_form
+from everos.memory.extract.reply_form import repair_json_form
 from everos.memory.prompts import PromptTemplate
 
 if TYPE_CHECKING:
@@ -161,8 +167,8 @@ logger = get_logger(__name__)
 _ignored_keys = MetricCounter(
     name="episode_reply_keys_ignored_total",
     description=(
-        "Top-level keys an episode reply carried beyond its model's fields, "
-        "dropped unread, by reply model."
+        "Keys an episode reply, or a picture entry in it, carried beyond its "
+        "model's fields, dropped unread, by model."
     ),
     labelnames=("reply",),
     namespace="everos",
@@ -298,6 +304,28 @@ def reply_token_cap(
     return min(cap, REPLY_TOKENS_CEILING)
 
 
+def _known_keys_only(model: type[BaseModel], value: object) -> object:
+    """``value`` without the keys ``model`` does not define, which are counted.
+
+    For a ``model_validator(mode="before")``: anything but a mapping passes
+    through untouched for the model to reject. A field is known by its name
+    and by its alias. The names dropped are logged at debug level.
+    """
+    if not isinstance(value, dict):
+        return value
+    known = set(model.model_fields) | {
+        field.alias for field in model.model_fields.values() if field.alias
+    }
+    ignored = sorted(key for key in value if key not in known)
+    if not ignored:
+        return value
+    _ignored_keys.labels(reply=model.__name__).inc(len(ignored))
+    logger.debug(
+        "memory.episode.reply_keys_ignored", reply=model.__name__, keys=ignored
+    )
+    return {key: item for key, item in value.items() if key in known}
+
+
 class ImageFact(StrictOutputModel):
     """One picture, as the model described it while looking at it.
 
@@ -319,8 +347,8 @@ class ImageFact(StrictOutputModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _empty_unknown_keys_read_as_absent(cls, value: object) -> object:
-        return drop_empty_unknown_keys(cls, value)
+    def _unknown_keys_are_ignored(cls, value: object) -> object:
+        return _known_keys_only(cls, value)
 
     @field_validator("ocr", mode="before")
     @classmethod
@@ -338,26 +366,17 @@ class _LenientReply(StrictOutputModel):
     the LoCoMo probe of 2026-11-14 DeepSeek V4.1 Flash added keys of its own
     (``type``, ``_meta``, ``_comment``, ``emotional_tone``,
     ``_time_resolution``, ...) to 123 of its 127 replies. The names are
-    logged at debug level and counted. A picture entry is still read
-    strictly (:class:`ImageFact`).
+    logged at debug level and counted. A picture entry is read the same way
+    (:class:`ImageFact`): on the multimodal builds of 2026-11-17 the model
+    added an ``ocr_language`` (or ``ocr_lang``) to picture entries of 6 of
+    its 13,612 episode replies, and each of them failed and was sent again
+    with every picture.
     """
 
     @model_validator(mode="before")
     @classmethod
     def _read_only_known_keys(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        known = set(cls.model_fields) | {
-            field.alias for field in cls.model_fields.values() if field.alias
-        }
-        ignored = sorted(key for key in value if key not in known)
-        if not ignored:
-            return value
-        _ignored_keys.labels(reply=cls.__name__).inc(len(ignored))
-        logger.debug(
-            "memory.episode.reply_keys_ignored", reply=cls.__name__, keys=ignored
-        )
-        return {key: item for key, item in value.items() if key in known}
+        return _known_keys_only(cls, value)
 
     @classmethod
     def model_validate_json(
@@ -636,6 +655,7 @@ async def extract(
     max_tokens: int | None = None,
     roster: str | None = None,
     cues: bool = False,
+    memcell_id: str | None = None,
 ) -> EpisodeReply | ImageEpisodeReply:
     """One call: the episode and every picture's memory, from the same reading.
 
@@ -646,14 +666,18 @@ async def extract(
     :func:`reply_token_cap` of its pictures and conversation, and a reply cut
     there is retried like an invalid one (``retry_cut``): once more by
     default, sampled at ``[llm] retry_temperature``, with the same cap. The
-    first attempt keeps the configured temperature.
+    first attempt keeps the configured temperature. When every attempt fails
+    in form, what the replies still hold is kept, or a picture cell sends one
+    fallback request (:func:`.episode_salvage.recover`); ``memcell_id`` names
+    the cell in what that logs.
 
     Raises:
         everalgo.llm.LLMOutputError: The reply leaves ``content`` or
             ``title`` blank.
-        everos.component.llm.errors.LLMCallError: The upstream failed, no
-            attempt produced a reply that validates, or every attempt was cut
-            at the cap (``cut_short``).
+        everos.component.llm.errors.LLMCallError: The upstream failed, or no
+            attempt produced a reply that validates -- every attempt was cut
+            at the cap (``cut_short``) or invalid -- and none could be
+            salvaged.
     """
     messages = build_messages(
         memcell,
@@ -672,10 +696,22 @@ async def extract(
         else max_tokens
     )
     model = _REPLY_MODELS[bool(pictures), cues]
-    text = await llm.achat(
-        messages, response_format=model, max_tokens=cap, retry_cut=True
-    )
-    reply = parse_reply(model, text, operator="episode")
+    try:
+        text = await llm.achat(
+            messages, response_format=model, max_tokens=cap, retry_cut=True
+        )
+    except LLMCallError as err:
+        reply, text = await recover(
+            llm,
+            err,
+            messages=messages,
+            model=model,
+            max_tokens=cap,
+            pictures=len(pictures),
+            memcell_id=memcell_id,
+        )
+    else:
+        reply = parse_reply(model, text, operator="episode")
     _check_fields_written(reply, ("content", "title"), operator="episode")
     dropped = 0 if pictures else _picture_entries_written(text)
     if dropped:
@@ -730,6 +766,7 @@ async def extract_cell(
             output_language=output_language,
             roster=roster,
             cues=cues,
+            memcell_id=memcell_id,
         )
         described = (
             {

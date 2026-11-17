@@ -216,6 +216,23 @@ machinery that keeps a deleted memory from coming back.
 
 ### Fixed
 
+- **A cell whose episode replies fail both attempts in form keeps what they
+  hold.** On the multimodal builds of 2026-11-17 (DeepSeek V4.1 Flash) two
+  cells lost their episode and every picture memory, again on each of six
+  re-sends: a picture whose `ocr` ran away to the cap at temperature 0 and at
+  the warmer retry, and replies that closed an `ocr` with a typographic quote
+  (20 of 20 not JSON, all else in them complete). Now, once every attempt was
+  cut or not JSON, the replies are read leniently: the title and the episode
+  are kept with every picture entry whose `ref` and `description` were read
+  whole, a cut, runaway or overlong `ocr` trimmed (each run cut to one copy,
+  then 4,000 characters); a picture cell whose replies keep no episode sends
+  one fallback request, the same request plus a line asking for a short
+  `ocr` (`chat.episode_fallback`). Each is logged with the cell's id and
+  counted (`everos_episode_reply_salvage_total`). A key the episode reply
+  does not define is now ignored in a picture's entry too, not only at the
+  top (an `ocr_language` failed 6 of 13,612 replies). `LLMCallError` carries
+  each failed attempt's reply (`failed_attempts`). A reply that validates
+  reads as before: all 13,567 recorded ones parse to the identical reply.
 - **A group search no longer fails on a profile item rewritten into a role.**
   The constraint block follows each linked decision, dissent or topic to its
   newest visible version, and an update may rewrite an item into another

@@ -72,6 +72,7 @@ import everos.config
 from everos.memory.custom_instructions import CustomInstructions, Operator
 from everos.memory.extract.group_profile import GROUP_PROFILE_UPDATE
 from everos.memory.extract.pipeline.episode import CHAT_EPISODE
+from everos.memory.extract.pipeline.episode_salvage import CHAT_EPISODE_FALLBACK
 from everos.memory.extract.pipeline.group_render import ROSTER_BLOCK
 from everos.memory.extract.pipeline.profile_cues import CHAT_PROFILE_CUES
 from everos.memory.extract.scene import SCENE_UPDATE
@@ -85,6 +86,7 @@ entries (``owner: config``) beside the prompts."""
 
 EVEROS_PROMPTS: tuple[tuple[PromptTemplate, str], ...] = (
     (CHAT_EPISODE, "write"),
+    (CHAT_EPISODE_FALLBACK, "write"),
     (CHAT_PROFILE_CUES, "write"),
     (ROSTER_BLOCK, "write"),
     (GROUP_PROFILE_UPDATE, "write"),

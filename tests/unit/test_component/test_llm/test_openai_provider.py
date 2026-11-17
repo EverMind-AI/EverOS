@@ -18,7 +18,12 @@ import pytest
 from everalgo.llm import LLMMessage, StrictOutputModel
 from pydantic import ValidationError
 
-from everos.component.llm import LLMCallError, OpenAIProvider, TokenUsage
+from everos.component.llm import (
+    FailedAttempt,
+    LLMCallError,
+    OpenAIProvider,
+    TokenUsage,
+)
 from everos.core.observability.metrics import get_metrics_registry
 
 _VALID = '{"text": "ok"}'
@@ -213,6 +218,52 @@ async def test_exhausted_validation_raises_invalid_reply_chained() -> None:
     assert info.value.reason == "invalid_reply"
     assert isinstance(info.value.__cause__, ValidationError)
     assert len(upstream.bodies) == 2
+
+
+async def test_the_failed_attempts_carry_their_replies_in_order() -> None:
+    """What a caller that salvages a reply reads; never part of the message."""
+    upstream = _Upstream(
+        _completion('{"text": "a loop', finish_reason="length"),
+        _completion("not json"),
+    )
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream, temperature=0.0, retry_temperature=0.3).achat(
+            _prompt(), response_format=_Reply, max_tokens=3072, retry_cut=True
+        )
+    assert info.value.failed_attempts == (
+        FailedAttempt("cut_short", '{"text": "a loop'),
+        FailedAttempt("invalid_reply", "not json"),
+    )
+    assert "a loop" not in str(info.value)
+    assert "not json" not in str(info.value)
+
+
+async def test_a_resent_attempt_without_a_reply_carries_none() -> None:
+    upstream = _Upstream(_completion(choices=False), _completion("nope"))
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream).achat(_prompt(), response_format=_Reply)
+    assert info.value.failed_attempts == (
+        FailedAttempt("transport", None),
+        FailedAttempt("invalid_reply", "nope"),
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        lambda: _completion(_VALID, refusal="no"),
+        lambda: _completion(_VALID, finish_reason="length"),
+        lambda: _completion(None),
+    ],
+    ids=["refusal", "cut-without-retry-cut", "no-content"],
+)
+async def test_a_failure_that_ends_the_call_at_once_carries_no_attempt(
+    response: Callable[[], httpx.Response],
+) -> None:
+    upstream = _Upstream(response())
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream).achat(_prompt(), response_format=_Reply)
+    assert info.value.failed_attempts == ()
 
 
 async def test_sdk_failure_raises_transport() -> None:
