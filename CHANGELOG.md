@@ -38,8 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns at most 50 episodes when `top_k` is `-1`.
 - **Agent case and skill `hybrid` search recall `top_k * 2` per lane**, and 50
   when `top_k` is `-1`, so the rerank picks the 10 it returns from a wider
-  pool. Agent case `agentic` search returns at most 10 cases when `top_k` is
-  `-1`, as skill search does.
+  pool. The skill cross-encoder scores the best of the fused skills, as many
+  as one lane holds. Agent case `agentic` search returns at most 10 cases when
+  `top_k` is `-1`, as skill search does.
 - **One `EpisodeExtracted` per memcell.** The event announces a memcell's
   episode once and lists every owner's copy in `copies` (each with its
   `owner_id`, `entry_id` and `owner_name`), instead of one event per copy.

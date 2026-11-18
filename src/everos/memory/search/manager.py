@@ -671,6 +671,7 @@ class SearchManager:
             dense=dense,
             reranker=self._reranker,  # type: ignore[arg-type]
             top_k=top_k,
+            rerank_pool=self._recall_limit(req.top_k, cap=_AGENT_HYBRID_LANE_CAP),
         )
 
     # ── Profile ─────────────────────────────────────────────────────

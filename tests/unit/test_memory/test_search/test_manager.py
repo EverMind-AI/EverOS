@@ -958,6 +958,7 @@ async def test_agent_hybrid_no_llm_rerank_runs_cross_encoder_lane(
         dense: Any,
         reranker: Any,
         top_k: int,
+        rerank_pool: int,
     ) -> list[Any]:
         captured.update(
             query=query, sparse=sparse, dense=dense, reranker=reranker, top_k=top_k
@@ -992,10 +993,17 @@ async def test_agent_hybrid_lanes_recall_top_k_times_2_and_50_when_unlimited(
         return RankOutput(items=[], metadata={})
 
     async def _fake_hybrid(
-        query: str, *, sparse: Any, dense: Any, reranker: Any, top_k: int
+        query: str,
+        *,
+        sparse: Any,
+        dense: Any,
+        reranker: Any,
+        top_k: int,
+        rerank_pool: int,
     ) -> list[Any]:
         lanes["skill_sparse"] = len(sparse.candidates)
         lanes["skill_dense"] = len(dense.candidates)
+        lanes["skill_rerank_pool"] = rerank_pool
         return []
 
     monkeypatch.setattr("everos.memory.search.manager.arank", _fake_arank)
@@ -1014,7 +1022,14 @@ async def test_agent_hybrid_lanes_recall_top_k_times_2_and_50_when_unlimited(
     )
     await mgr.search(_agent_req(method=SearchMethod.HYBRID, top_k=top_k))
     assert lanes == dict.fromkeys(
-        ("case_sparse", "case_dense", "skill_sparse", "skill_dense"), lane
+        (
+            "case_sparse",
+            "case_dense",
+            "skill_sparse",
+            "skill_dense",
+            "skill_rerank_pool",
+        ),
+        lane,
     )
 
 
