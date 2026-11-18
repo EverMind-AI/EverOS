@@ -6,8 +6,8 @@ Passing ``AGENTIC`` here is a caller contract violation and raises
 ``ValueError`` as a defensive guard.
 
 * ``KEYWORD`` / ``VECTOR`` → ``None`` → manager skips ``everalgo.rank``.
-* ``HYBRID``  → ``"hierarchy"`` (episode / atomic_fact) — heap-expand
-  pipeline (RRF-ordered expansion → LR-calibrated global top-N competition)
+* ``HYBRID``  → ``"hierarchy"`` (episode / atomic_fact) — three recall lanes
+  fused by RRF, then LR-calibrated scoring (``memory.search.hierarchy``)
   or ``"vector_anchored"`` (agent_case) — everalgo vector-anchored fusion (alpha=0.7)
   or ``"skill_hybrid"`` (agent_skill) — custom rrf → cross-encoder rerank → optional
   verify.
@@ -30,8 +30,8 @@ def resolve_pipeline(
 
     ``pipeline_signal`` of ``None`` means "do not call ``everalgo.rank.arank``;
     the manager runs single-route recall and returns directly".
-    ``"hierarchy"`` routes to the heap-expand episode pipeline in
-    ``memory.search.hierarchy`` (RRF → LR → heap expansion → eviction).
+    ``"hierarchy"`` routes to the episode pipeline in
+    ``memory.search.hierarchy`` (RRF over three lanes → LR-calibrated scoring).
     ``"vector_anchored"`` routes to ``everalgo.rank.arank`` with vector-anchored
     fusion (alpha=0.7, saturation_k=5.0) — matches the opensource case retrieval.
     ``"skill_hybrid"`` routes to the custom skill hybrid orchestrator in

@@ -27,6 +27,7 @@ from everos.memory.search.agentic import _with_doc_metadata, search_episodes_age
 from everos.memory.search.dto import SearchEpisodeItem
 from everos.memory.search.recall import AtomicFactRecaller, EpisodeRecaller
 from everos.memory.search.recall.base import RecallerDeps
+from tests.fakes._filter import matches
 
 from ._records import ScriptedIndex, hit, stored_episode, stored_fact
 
@@ -420,28 +421,21 @@ async def test_cross_encoder_scores_the_episode_text(
     assert passages == ["body ep_1"]
 
 
-@pytest.mark.parametrize("size", [999, 1000, 1001])
-@pytest.mark.parametrize("sufficient", [True, False])
-async def test_large_cluster_bounds_rerank_without_losing_top_recall(
-    size: int,
-    sufficient: bool,
-) -> None:
-    """Run real cluster/agentic algorithms; fake only storage and model ports.
+_SUFFICIENT = json.dumps(
+    {
+        "is_sufficient": True,
+        "reasoning": "fixture",
+        "key_information_found": [],
+        "missing_information": [],
+    }
+)
 
-    The best recall is stored last, so slicing the expanded storage order
-    would lose it. Ordinary clusters retain every member, including at the cap.
-    """
-    records = [stored_episode(f"ep_{i}") for i in range(size)]
-    ranked = [hit(record, 1.0 / (i + 1)) for i, record in enumerate(reversed(records))]
-    index = ScriptedIndex(
-        sparse=ranked,
-        subject=ranked,
-        found=[hit(record) for record in records],
-        filter_found=True,
-    )
-    target = records[-1].item.episode
-    batches: list[list[str]] = []
 
+async def _embed(query: str) -> list[float]:
+    return [0.1] * 4
+
+
+def _target_first_reranker(target: str, batches: list[list[str]]) -> Any:
     class Reranker:
         async def rerank(self, query, passages, *, instruction=None):
             batches.append(list(passages))
@@ -451,55 +445,100 @@ async def test_large_cluster_bounds_rerank_without_losing_top_recall(
                 for rank, i in enumerate(order)
             ]
 
-    replies = [
-        json.dumps(
-            {
-                "is_sufficient": sufficient,
-                "reasoning": "fixture",
-                "key_information_found": [],
-                "missing_information": [],
-            }
-        )
+    return Reranker()
+
+
+@pytest.mark.parametrize("size", [99, 100, 150])
+async def test_cluster_scope_is_capped_by_episode_vector_rank(size: int) -> None:
+    """Round 1 keeps at most 100 cluster members.
+
+    Only the last ten episodes have facts, so they are the seed hits; the rest
+    of the budget goes to the members whose episode vector ranks highest,
+    searched among the remaining members only. Episodes are never MaxSim
+    children: the episode index serves no sparse or subject search.
+    """
+    records = [stored_episode(f"ep_{i}") for i in range(size)]
+    seeds = records[-10:]
+    fact_hits = [
+        hit(stored_fact(f"af_{i}", parent_id=r.ref.entry_id), 1.0 / (i + 1))
+        for i, r in enumerate(reversed(seeds))
     ]
-    if not sufficient:
-        replies.append(
-            json.dumps({"queries": ["more relevant detail"], "reasoning": "fixture"})
-        )
-
-    async def embed(query: str) -> list[float]:
-        return [0.1] * 4
-
-    from structlog.testing import capture_logs
-
-    with capture_logs() as logs:
-        result = await search_episodes_agentic(
-            "find relevant episode",
-            owner_id="alice",
-            where=Comparison("owner_id", "eq", "alice"),
-            episode_recaller=EpisodeRecaller(_deps(), index),
-            atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
-            cluster_store=_StubClusterStore(
-                [
-                    Cluster(
-                        id="large",
-                        members=[record.ref.entry_id for record in records],
-                        centroid=np.zeros(4, dtype=np.float32),
-                        last_ts=0,
-                    )
-                ]
-            ),
-            embed_query_fn=embed,
-            reranker=Reranker(),
-            llm=FakeLLMClient(responses=replies),
-            top_k=5,
-        )
-
-    assert len(result) == 5 and result[0].id == records[-1].ref.id
-    assert len(batches) == (1 if sufficient else 2)
-    assert len(batches[0]) == (size if size <= 1000 else 50)
-    assert target in batches[0]
-    if not sufficient:
-        assert len(batches[1]) == 40
-    assert any(log["event"] == "agentic_cluster_expansion_capped" for log in logs) == (
-        size > 1000
+    ep_index = ScriptedIndex(
+        dense=[hit(r, 1.0 / (i + 1)) for i, r in enumerate(records)],
+        found=[hit(r) for r in records],
+        filter_found=True,
     )
+    target = records[-1].item.episode
+    batches: list[list[str]] = []
+
+    result = await search_episodes_agentic(
+        "find relevant episode",
+        owner_id="alice",
+        where=Comparison("owner_id", "eq", "alice"),
+        episode_recaller=EpisodeRecaller(_deps(), ep_index),
+        atomic_fact_recaller=AtomicFactRecaller(
+            _deps(), ScriptedIndex(sparse=fact_hits, dense=fact_hits)
+        ),
+        cluster_store=_StubClusterStore(
+            [
+                Cluster(
+                    id="large",
+                    members=[r.ref.entry_id for r in records],
+                    centroid=np.zeros(4, dtype=np.float32),
+                    last_ts=0,
+                )
+            ]
+        ),
+        embed_query_fn=_embed,
+        reranker=_target_first_reranker(target, batches),
+        llm=FakeLLMClient(responses=[_SUFFICIENT]),
+        top_k=5,
+    )
+
+    assert result[0].id == records[-1].ref.id
+    assert len(batches) == 1
+    assert len(batches[0]) == min(size, 100)
+    assert {r.item.episode for r in seeds} <= set(batches[0])
+    assert {call[0] for call in ep_index.calls} <= {"find", "dense"}
+    member_searches = [call for call in ep_index.calls if call[0] == "dense"]
+    if size <= 100:
+        assert member_searches == []
+        return
+    kept = {r.item.episode for r in records[:90]}
+    assert set(batches[0]) == kept | {r.item.episode for r in seeds}
+    [(_, _, where, limit)] = member_searches
+    assert limit == 90
+    fields = {"owner_id": "alice", "deprecated_by": None}
+    assert matches(where, {**fields, "entry_id": records[0].ref.entry_id})
+    assert not matches(where, {**fields, "entry_id": seeds[0].ref.entry_id})
+
+
+async def test_empty_cluster_scope_falls_back_to_unscoped_hybrid() -> None:
+    """With no clusters, Round 1 runs on the un-scoped hybrid."""
+    records = [stored_episode(f"ep_{i}") for i in range(3)]
+    fact_hits = [
+        hit(stored_fact(f"af_{i}", parent_id=r.ref.entry_id), 0.9 - i * 0.1)
+        for i, r in enumerate(records)
+    ]
+    batches: list[list[str]] = []
+
+    result = await search_episodes_agentic(
+        "q",
+        owner_id="alice",
+        where=Comparison("owner_id", "eq", "alice"),
+        episode_recaller=EpisodeRecaller(
+            _deps(),
+            ScriptedIndex(found=[hit(r) for r in records], filter_found=True),
+        ),
+        atomic_fact_recaller=AtomicFactRecaller(
+            _deps(), ScriptedIndex(sparse=fact_hits, dense=fact_hits)
+        ),
+        cluster_store=_StubClusterStore([]),
+        embed_query_fn=_embed,
+        reranker=_target_first_reranker(records[0].item.episode, batches),
+        llm=FakeLLMClient(responses=[_SUFFICIENT]),
+        top_k=5,
+    )
+
+    assert [r.id for r in result] == [r.ref.id for r in records]
+    assert batches and len(batches[0]) == 3
