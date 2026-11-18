@@ -1432,17 +1432,9 @@ IGNORED_KEYS: Mapping[str, str] = {
         "a label the evaluation launchers export (EVEROS_DECIDER__CODE_PIN) to "
         "record which EverOS build ran; EverOS does not read it"
     ),
-    "decider.dedupe_within_round": (
-        "removed: a decider round lists every copy of a memory its sub-queries "
-        "retrieved"
-    ),
     "decider.full_text": "removed: the decider always reads the full episode text",
     "decider.invalid_reply_retries": (
         "removed: an unusable decider reply is one failed attempt of [decider] retries"
-    ),
-    "images.thumbnail_edge": (
-        "never read: the thumbnail is the decider's copy, [decider] "
-        "image_thumbnail_edge"
     ),
     "knowledge": "removed in EverOS 2.0 with the knowledge base",
     "llm.search_timeout_seconds": (

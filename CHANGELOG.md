@@ -243,25 +243,6 @@ machinery that keeps a deleted memory from coming back.
 
 ### Removed
 
-- **`[decider] dedupe_within_round`: a round lists every copy of a memory
-  again.** From 2026-11-13 a round after the first listed a memory that
-  several sub-queries retrieved only once, in the block where it ranked
-  highest. On a small owner that left the decider little to choose from. On
-  CUE-Mem (57 memories an owner on average), among the implicit questions
-  whose first round kept nothing, it cut the second round from 58.1 to 23.8
-  lines, and that round kept nothing either on 61 of the 73, against 42
-  without it (paired 19:0; the recorded prompts rendered both ways and
-  replayed at temperature 0). A full CUE-Mem search without it, everything
-  else equal, ended with an empty core on 86 of 1,483 questions instead of
-  121 and answered 14 more right (72.5% to 73.4%; 27 gained, 13 lost, exact
-  McNemar p = 0.04), 7 of them implicit (55.8% to 57.2%, p = 0.21). The
-  tokens it saved are read again: decider input per search rises by 18.0% /
-  21.4% / 14.5% / 10.9% on LoCoMo / LongMemEval / BEAM 1M / EverMemBench (the
-  2026-11-13 replays of recorded searches), and rose by 35% on that CUE-Mem
-  search (22.7k to 30.5k). A round prompt is again the one sent before
-  2026-11-13, byte for byte, and the round trace has no `decider_dedupe`. A
-  configuration that still sets the key (`EVEROS_DECIDER__DEDUPE_WITHIN_ROUND`
-  included) loads; the key is ignored with a `config_key_ignored` warning.
 - **Hard-delete storage nothing called any more**: the stores'
   `remove_session`, `remove`, `remove_naming` and `undeprecate`, the writer's
   `remove_entries`, `OwnerDirStore.delete` (the start-up sweep of an earlier
@@ -1234,10 +1215,10 @@ machinery that keeps a deleted memory from coming back.
   (`image_candidates_per_round = 0`) is never. Both copies are now rendered
   when a result names them, and a picture the store cannot copy names no file
   (both paths empty).
-- **`[images] thumbnail_edge` is retired.** It was accepted and had no
-  effect: the thumbnail is the decider's copy, `[decider]
-  image_thumbnail_edge`. The key is now ignored with a `config_key_ignored`
-  warning, and gone from the shipped `default.toml`.
+- **`[images] thumbnail_edge` never had an effect and is gone.** The
+  thumbnail is the decider's copy, `[decider] image_thumbnail_edge`; the key
+  is out of the shipped `default.toml` and out of the settings, so setting it
+  fails the load like any unknown key.
 - **A bad configuration value exits `3` with the key, not a traceback.** A
   value no setting accepts, an unknown timezone, a past-trigger pattern that
   is not a regular expression and an `everos.toml` that is not TOML raised a

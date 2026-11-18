@@ -91,10 +91,8 @@ an older `everos init` wrote, and exported `EVEROS_RERANK__*` or
 |---|---|
 | `[agent_memory]` (section) | Removed in EverOS 2.0 with agent memory |
 | `[decider] code_pin` | A label evaluation launchers export (`EVEROS_DECIDER__CODE_PIN`); EverOS does not read it |
-| `[decider] dedupe_within_round` | Removed: a decider round lists every copy of a memory its sub-queries retrieved |
 | `[decider] full_text` | Removed: the decider always reads the full episode text |
 | `[decider] invalid_reply_retries` | Removed: an unusable reply is one failed attempt of `[decider] retries` |
-| `[images] thumbnail_edge` | Never read: the thumbnail a search result names and `GET /memory/images/{id}?variant=thumbnail` serves is the decider's copy, `[decider] image_thumbnail_edge` |
 | `[knowledge]` (section, with `[knowledge.search]`) | Removed in EverOS 2.0 with the knowledge base |
 | `[llm] search_timeout_seconds` | Not read by EverOS 2; a decider round's deadline is `[decider] timeout_seconds` |
 | `[memorize] mode` | Removed in EverOS 2.0 with agent memory: memory is chat memory, and a tool row is dropped before segmentation |
