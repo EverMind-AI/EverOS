@@ -2,8 +2,8 @@
 
 everalgo-core 0.6.0 removed ``everalgo.types.FactCandidate`` together with
 ``RankInput.episode_to_facts``. The search layer still uses it to group
-prefetched atomic facts under their parent episode for the MaxSim step of
-:func:`everos.memory.search.hierarchy.heap_expand`, so it lives here for now.
+prefetched atomic facts under their parent episode for the scoring step of
+:func:`everos.memory.search.hierarchy.score_episodes`, so it lives here for now.
 Whether it stays, moves into a mapper, or goes away is decided with the rest
 of the search rework (alignment stage 5).
 """

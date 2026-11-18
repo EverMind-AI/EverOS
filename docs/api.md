@@ -513,7 +513,7 @@ Examples:
 |---|---|
 | `"keyword"` | BM25 only — pure lexical match, no embedding cost |
 | `"vector"` | Dense vector ANN only — semantic recall, no lexical |
-| `"hybrid"` *(default)* | Reciprocal-rank fuse of BM25 + vector + optional scalar filter against the configured derived index backend |
+| `"hybrid"` *(default)* | Reciprocal-rank fuse of BM25 + vector (plus an atomic-fact lane for episodes) + optional scalar filter against the configured derived index backend |
 | `"agentic"` | Iterative cluster-path retrieval driven by a cross-encoder rerank loop; higher quality at higher latency / cost |
 
 `"hybrid"` is the default because it balances recall and precision
@@ -923,6 +923,8 @@ Default `"hybrid"` is the recommended starting point.
   and **no** default `radius` is applied unless you set it yourself.
 
 Values of `0` or outside `-1` / `1..100` are rejected with `422`.
+For episodes `top_k` counts episodes; the atomic facts nested under them do
+not count.
 
 **`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`,
 applied to the **dense (vector) recall before fusion or rerank**:
@@ -947,8 +949,8 @@ ranked; `score` is `null`. Ignored when `agent_id` is set.
 
 **`enable_llm_rerank`** — Opt-in LLM rerank pass for
 `method: "hybrid"`. Applies to `agent_case` and `agent_skill` fusion
-only; the episode hybrid path has built-in fact eviction and
-ignores this flag. Adds one LLM call per request. Ignored by
+only; the episode hybrid path ranks with its own LR-calibrated
+scoring and ignores this flag. Adds one LLM call per request. Ignored by
 `keyword` / `vector` (no fusion to rerank) and `agentic` (uses its
 own cross-encoder loop).
 
@@ -974,8 +976,10 @@ owner kind stay as `[]`.
 #### SearchEpisodeItem
 
 User-track conversation episode hit. `score` is the fused retrieval
-score; `atomic_facts` lists single-sentence facts that matched the
-query within this episode (already nested, no separate call needed).
+score. Under `hybrid`, `atomic_facts` holds the single-sentence fact the
+episode's score came from, when that fact matched the query better than
+the episode text itself (already nested, no separate call needed); the
+fact carries the episode's score.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -991,7 +995,7 @@ query within this episode (already nested, no separate call needed).
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
 | `score` | `number` | Fused retrieval score for this episode |
-| `atomic_facts` | `array<SearchAtomicFactItem>` | Sub-facts extracted from the same episode that matched the query |
+| `atomic_facts` | `array<SearchAtomicFactItem>` | `hybrid` only: at most one fact from this episode, the one its score came from; empty otherwise |
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
 > under two projects (each project keeps its own daily files and sequence);

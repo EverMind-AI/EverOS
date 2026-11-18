@@ -503,3 +503,74 @@ async def test_large_cluster_bounds_rerank_without_losing_top_recall(
     assert any(log["event"] == "agentic_cluster_expansion_capped" for log in logs) == (
         size > 1000
     )
+
+
+_SUFFICIENT = json.dumps(
+    {
+        "is_sufficient": True,
+        "reasoning": "fixture",
+        "key_information_found": [],
+        "missing_information": [],
+    }
+)
+
+
+async def _embed(query: str) -> list[float]:
+    return [0.1] * 4
+
+
+async def _search_three_episodes(
+    clusters: list[Cluster], fact_index: ScriptedIndex
+) -> list[SearchEpisodeItem]:
+    records = [stored_episode(f"ep_{i}") for i in range(3)]
+    ranked = [hit(r, 1.0 / (i + 1)) for i, r in enumerate(records)]
+    return await search_episodes_agentic(
+        "q",
+        owner_id="alice",
+        where=Comparison("owner_id", "eq", "alice"),
+        episode_recaller=EpisodeRecaller(
+            _deps(),
+            ScriptedIndex(
+                sparse=ranked,
+                subject=ranked,
+                found=[hit(r) for r in records],
+                filter_found=True,
+            ),
+        ),
+        atomic_fact_recaller=AtomicFactRecaller(_deps(), fact_index),
+        cluster_store=_StubClusterStore(clusters),
+        embed_query_fn=_embed,
+        reranker=_StubReranker(),
+        llm=FakeLLMClient(responses=[_SUFFICIENT]),
+        top_k=5,
+    )
+
+
+@pytest.mark.parametrize("members", [None, ["ep_unrelated"]])
+async def test_empty_cluster_scope_falls_back_to_unscoped_hybrid(
+    members: list[str] | None,
+) -> None:
+    """No cluster yet, or no base hit in one: Round 1 runs un-scoped, not empty."""
+    clusters = (
+        []
+        if members is None
+        else [
+            Cluster(
+                id="c",
+                members=members,
+                centroid=np.zeros(4, dtype=np.float32),
+                last_ts=0,
+            )
+        ]
+    )
+    result = await _search_three_episodes(clusters, ScriptedIndex())
+    assert len(result) == 3
+
+
+async def test_fact_lanes_read_at_most_500_facts() -> None:
+    facts = ScriptedIndex()
+    await _search_three_episodes([], facts)
+    assert {(kind, limit) for kind, _, _, limit in facts.calls} == {
+        ("dense", 500),
+        ("sparse", 500),
+    }

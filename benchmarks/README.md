@@ -384,7 +384,7 @@ others from `benchmarks/configs/<dataset>.toml`.
 |---|---|---|
 | `agentic` | **94.61\*** | 94.35\* |
 | `llm_multiround` | 94.29\* | 94.29\* |
-| `hybrid` | 93.18\* | 92.08\* |
+| `hybrid` | 93.64\* | 93.38\* |
 | `vector` | 92.73\* | 92.08\* |
 | `keyword` | 91.04\* | 92.27\* |
 

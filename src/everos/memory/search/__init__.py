@@ -15,7 +15,7 @@ Where everalgo's candidate types (``Candidate`` / ``RankInput`` /
   ``ScoredItem`` + stored records -> response DTOs.
 * Six rank algorithms still hosted here, pending upstreaming to
   everalgo-rank (they speak ``Candidate`` natively and move as a whole):
-  ``hierarchy.py`` (heap-expand episode/fact competition),
+  ``hierarchy.py`` (episode HYBRID lane fusion and scoring),
   ``llm_multiround.py`` (iterative per-sub-query blocks with an LLM core
   selector), ``skill_hybrid.py`` (RRF + skill cross-encoder lane),
   ``callbacks.py`` (kind-shaped cross-encoder ``RerankFn`` factories),

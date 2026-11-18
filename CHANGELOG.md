@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Episode `hybrid` search ranks three recall lanes.** BM25 and the episode
+  vector are fused with an atomic-fact lane (200 facts max-pooled onto at most
+  50 episodes) by two RRF passes, and each kept episode is scored on the
+  better of its own vector and its best atomic fact, LR-calibrated with BM25.
+  `top_k` now counts episodes, and an episode carries at most one atomic fact,
+  the one its score came from, when that fact matched the query better than
+  the episode. `radius` floors the atomic-fact lane, and the facts an episode
+  is scored on, as it floors the episode vector lane. This replaces the
+  heap-expand ranking, whose `top_k` counted episodes and facts together.
+- **Episode `agentic` search reads at most 500 atomic facts per MaxSim lane**,
+  however many facts an owner has. When the cluster scope comes back empty
+  (no cluster yet, or no base hit in one), Round 1 runs on the un-scoped
+  hybrid instead of returning nothing.
 - **One `EpisodeExtracted` per memcell.** The event announces a memcell's
   episode once and lists every owner's copy in `copies` (each with its
   `owner_id`, `entry_id` and `owner_name`), instead of one event per copy.

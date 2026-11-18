@@ -11,11 +11,12 @@ or "sparse + dense → everalgo.rank" (``HYBRID`` / ``AGENTIC``). Component
 guards (embedding / cross-encoder / LLM) raise early when a method is
 selected without its prerequisites.
 
-``HYBRID`` defaults to **no LLM rerank** — the response comes back
-straight after the heap-expand pipeline (RRF-ordered expansion → LR-calibrated
-global top-N competition with fact eviction). ``enable_llm_rerank`` is
-**ignored** for the hierarchy path. ``AGENTIC`` keeps its own
-internal cross-encoder rerank loop; the flag is ignored there.
+Episode ``HYBRID`` recalls three lanes — BM25, episode vectors, and the
+atomic-fact MaxSim lane — and ranks them with :mod:`memory.search.hierarchy`
+(two RRF fusions, then LR-calibrated scoring); ``top_k`` counts episodes. It
+has **no LLM rerank**: ``enable_llm_rerank`` is **ignored** there and only
+applies to agent fusion. ``AGENTIC`` keeps its own internal cross-encoder
+rerank loop; the flag is ignored there.
 
 ``SearchEpisodeItem.atomic_facts`` is populated **only** when the HYBRID
 pipeline runs over episodes. The other methods leave it empty: there is
@@ -30,10 +31,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from datetime import UTC, tzinfo
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
-from everalgo.rank.fusion import rrf
 
 from everos.config import load_settings
 from everos.config.settings import DeciderSettings
@@ -67,7 +67,7 @@ from .dto import (
     UnprocessedMessageDTO,
 )
 from .filters import compile_filters
-from .hierarchy import build_ep_to_fact_parents, heap_expand
+from .hierarchy import build_ep_to_fact_parents, fuse_lanes, score_episodes
 from .llm_multiround import RoundDecider, search_episodes_llm_multiround
 from .recall import (
     KindRecaller,
@@ -133,6 +133,14 @@ _DEFAULT_UNLIMITED_RADIUS = 0.5
 # scan bounded on very large top_k requests.
 _MAXSIM_FACT_MULTIPLIER = 20
 _MAXSIM_FACT_POOL_CAP = 2000
+
+# Episode HYBRID lane sizes. Each episode lane recalls ``max(top_k * 2, 50)``;
+# the atomic-fact lane max-pools 200 facts onto at most 50 episodes; scoring
+# reads up to 20 facts per kept episode, of which it uses the best.
+_HYBRID_LANE_FLOOR = 50
+_HYBRID_FACT_POOL = 200
+_HYBRID_FACT_LANE_EPISODES = 50
+_HYBRID_FACTS_PER_EPISODE = 20
 
 # The unprocessed buffer (``memorize`` track) is a single
 # shared track because boundary detection is single-pass — switching mode
@@ -433,36 +441,91 @@ class SearchManager:
             # semantics are ambiguous.
             return shape_episodes(recalled.candidates[:top_k], recalled.stored_by_id)
 
-        # ── HYBRID: heap-expand hierarchy over parallel sparse + dense recall ──
-        sparse, dense, query_vector = await self._recall_sparse_dense(
-            self._ep, req, where, top_k
-        )
+        # ── HYBRID: three recall lanes ranked by ``hierarchy`` ──
+        shaped = await self._search_episodes_hybrid(req, where, top_k)
+        if req.min_score is not None:
+            shaped = [s for s in shaped if s.score >= req.min_score]
+        return shaped
+
+    async def _search_episodes_hybrid(
+        self, req: SearchRequest, where: Filter, top_k: int
+    ) -> list[SearchEpisodeItem]:
+        """Recall the three episode lanes and rank them (see ``hierarchy``).
+
+        ``radius`` also floors the facts each kept episode is scored on, so a
+        fact below it neither lifts the episode's score nor is attached.
+        """
+        lanes = await self._hybrid_lanes(req, where, top_k)
         with memory_span(
             "everos.search.rank",
             observation_type="span",
-            metadata={"phase": fusion_mode},
+            metadata={"phase": "hierarchy"},
         ):
-            rrf_candidates = rrf(sparse.candidates, dense.candidates)
-            facts = await self._fact.facts_for_episodes(
-                build_ep_to_fact_parents(rrf_candidates),
-                where,
-                per_episode=max(top_k * 2, 20),
-                query_vector=query_vector,
-            )
-            scored = heap_expand(
-                sparse=sparse.candidates,
-                dense=dense.candidates,
-                episode_to_facts=facts.buckets,
+            kept = fuse_lanes(
+                lanes.sparse.candidates,
+                lanes.dense.candidates,
+                lanes.facts.candidates,
                 top_k=top_k,
             )
-            shaped = reshape_hybrid_output(
-                scored,
-                episodes_by_id=merge_stored(sparse, dense),
-                facts_by_id=facts.stored_by_id,
+            facts = await self._fact.facts_for_episodes(
+                build_ep_to_fact_parents(kept),
+                where,
+                per_episode=_HYBRID_FACTS_PER_EPISODE,
+                query_vector=lanes.vector,
             )
-            if req.min_score is not None:
-                shaped = [s for s in shaped if s.score >= req.min_score]
-            return shaped
+            facts = facts.within_radius(_effective_radius(req))
+            scored = score_episodes(
+                kept,
+                facts.buckets,
+                sparse=lanes.sparse.candidates,
+                dense=lanes.dense.candidates,
+                fact_lane=lanes.facts.candidates,
+            )
+        return reshape_hybrid_output(
+            scored,
+            episodes_by_id=merge_stored(lanes.sparse, lanes.dense, lanes.facts),
+            facts_by_id=facts.stored_by_id,
+        )
+
+    async def _hybrid_lanes(
+        self, req: SearchRequest, where: Filter, top_k: int
+    ) -> _HybridLanes:
+        """BM25, episode-vector and atomic-fact lanes, recalled in parallel.
+
+        ``radius`` floors both vector lanes; the fact lane on the max-pooled
+        fact cosine, as the VECTOR route does. With no fact in scope the fact
+        lane is empty rather than a copy of the episode-vector lane.
+        """
+        with memory_span(
+            "everos.search.recall",
+            observation_type="retriever",
+            metadata={"phase": "hybrid_lanes", "method": req.method.value},
+        ):
+            vector = await self._embed_query(req.query)
+            pool = max(top_k * 2, _HYBRID_LANE_FLOOR)
+            sparse, dense, facts = await asyncio.gather(
+                self._ep.sparse_recall(req.query, where, limit=pool),
+                self._ep.dense_recall(vector, where, limit=pool)
+                if vector
+                else _no_recall(),
+                maxsim_episode_recall(
+                    vector,
+                    where,
+                    facts=self._fact,
+                    episodes=self._ep,
+                    top_k=_HYBRID_FACT_LANE_EPISODES,
+                    fact_limit=_HYBRID_FACT_POOL,
+                    fallback_limit=None,
+                    owner_id=req.owner_id,
+                ),
+            )
+        radius = _effective_radius(req)
+        return _HybridLanes(
+            sparse=sparse,
+            dense=dense.within_radius(radius),
+            facts=facts.within_radius(radius),
+            vector=vector,
+        )
 
     # ── Agent cases ─────────────────────────────────────────────────
 
@@ -491,7 +554,7 @@ class SearchManager:
             )
             return shape_agent_cases(recalled.candidates[:top_k], recalled.stored_by_id)
 
-        sparse, dense, _ = await self._recall_sparse_dense(
+        sparse, dense = await self._recall_sparse_dense(
             self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
         )
         with memory_span(
@@ -553,7 +616,7 @@ class SearchManager:
                 recalled.candidates[:top_k], recalled.stored_by_id
             )
 
-        sparse, dense, _ = await self._recall_sparse_dense(
+        sparse, dense = await self._recall_sparse_dense(
             self._skill, req, where, top_k, cap=_AGENT_TOP_K_CAP
         )
 
@@ -647,14 +710,10 @@ class SearchManager:
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
-    ) -> tuple[RecallResult[Any], RecallResult[Any], list[float]]:
+    ) -> tuple[RecallResult[Any], RecallResult[Any]]:
         """Fan out keyword + vector recall in parallel.
 
-        The third return is the query embedding itself — the HYBRID
-        pipeline passes it into ``facts_for_episodes`` so per-fact
-        cosine scoring reuses the same vector instead of re-embedding
-        the query. Dense recall is empty when no embedding provider is
-        configured.
+        Dense recall is empty when no embedding provider is configured.
         """
         with memory_span(
             "everos.search.recall",
@@ -669,7 +728,7 @@ class SearchManager:
                 if vector
                 else _no_recall(),
             )
-            return sparse, dense.within_radius(_effective_radius(req)), vector
+            return sparse, dense.within_radius(_effective_radius(req))
 
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: Filter, top_k: int
@@ -910,6 +969,15 @@ def _unprocessed_message_to_dto(
         tool_calls=tool_calls,
         tool_call_id=message.tool_call_id,
     )
+
+
+class _HybridLanes(NamedTuple):
+    """The three episode HYBRID recall lanes and the query vector."""
+
+    sparse: RecallResult[Any]
+    dense: RecallResult[Any]
+    facts: RecallResult[Any]
+    vector: list[float]
 
 
 async def _no_recall() -> RecallResult[Any]:

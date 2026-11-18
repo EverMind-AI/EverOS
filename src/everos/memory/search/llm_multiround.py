@@ -612,7 +612,7 @@ async def _search_episodes_subq(
     # accumulation and the stop conditions. Re-implementing diverged: measured against
     # this loop, a hand-built environment retrieved a different candidate set on 25/25
     # sampled sub-queries (Jaccard median 0.538): the HTTP search route it called
-    # dispatches to the hierarchy/heap-expand hybrid pipeline, not this file's
+    # dispatches to the hierarchy hybrid pipeline, not this file's
     # per-sub-query rrf(sparse, dense)[:topk].
     decide = decider or LLMRoundDecider(llm, tuning_source=tuning_source)
 

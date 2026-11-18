@@ -46,6 +46,17 @@ class FactsByEpisode:
     buckets: dict[str, list[FactCandidate]]
     stored_by_id: Mapping[str, Stored[AtomicFact]]
 
+    def within_radius(self, radius: float | None) -> FactsByEpisode:
+        """Drop the facts scoring below ``radius``; ``None`` keeps all."""
+        if radius is None:
+            return self
+        buckets = {
+            episode_id: kept
+            for episode_id, facts in self.buckets.items()
+            if (kept := [f for f in facts if f.score >= radius])
+        }
+        return dataclasses.replace(self, buckets=buckets)
+
 
 class AtomicFactRecaller:
     """BM25 + vector recall over the atomic-fact index.

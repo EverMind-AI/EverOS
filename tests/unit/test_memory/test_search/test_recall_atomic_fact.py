@@ -31,7 +31,7 @@ from everos.infra.persistence.lancedb import (
 )
 from everos.memory.ports.query import all_of, eq
 from everos.memory.search._candidates import FactCandidate
-from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
+from everos.memory.search.recall.atomic_fact import AtomicFactRecaller, FactsByEpisode
 from everos.memory.search.recall.base import RecallerDeps
 from tests.fakes.storage import Storage
 
@@ -369,3 +369,22 @@ async def test_facts_for_episodes_returns_the_stored_facts(storage: Storage) -> 
     assert stored.item.content == "likes hiking"
     assert stored.item.parent_id == "mc_1"
     assert out.buckets["alice_ep_a"][0].metadata == {"parent_id": "mc_1"}
+
+
+def test_facts_by_episode_within_radius_drops_the_facts_below_it() -> None:
+    """Facts under the floor go; an episode left with none drops out."""
+    facts = FactsByEpisode(
+        buckets={
+            "ep_a": [
+                FactCandidate(id="f1", parent_episode_id="ep_a", score=0.7),
+                FactCandidate(id="f2", parent_episode_id="ep_a", score=0.4),
+            ],
+            "ep_b": [FactCandidate(id="f3", parent_episode_id="ep_b", score=0.3)],
+        },
+        stored_by_id={},
+    )
+    assert facts.within_radius(None) is facts
+    kept = facts.within_radius(0.5)
+    assert {ep: [f.id for f in fs] for ep, fs in kept.buckets.items()} == {
+        "ep_a": ["f1"]
+    }
