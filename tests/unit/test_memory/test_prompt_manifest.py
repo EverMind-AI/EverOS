@@ -82,27 +82,27 @@ def test_the_everalgo_prompts_are_recorded_against_the_vendored_build() -> None:
         ),
         "everalgo.user_memory.episode_original": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev9+v031episode",
+            "0.9.0rc6.dev11+cite",
             "f9c003f109a466ea",
         ),
         "everalgo.user_memory.profile_update": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev9+v031episode",
+            "0.9.0rc6.dev11+cite",
             "6cc9e75ee44c2c98",
         ),
         "everalgo.user_memory.profile_update_many": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev9+v031episode",
+            "0.9.0rc6.dev11+cite",
             "686858869fef3228",
         ),
         "everalgo.user_memory.profile_consolidate": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev9+v031episode",
+            "0.9.0rc6.dev11+cite",
             "d70ed25f5e44ede3",
         ),
         "everalgo.user_memory.language_rules": (
             "everalgo-user-memory",
-            "0.9.0rc6.dev9+v031episode",
+            "0.9.0rc6.dev11+cite",
             "10d1df0535db08bf",
         ),
         "everalgo.parser.prompts": (
