@@ -41,6 +41,7 @@ why the system is shaped the way it is.
 | [how-memory-works.md](how-memory-works.md) | Storage stack + on-disk paths + write→index→read pipeline + consistency |
 | [architecture.md](architecture.md) | DDD layered architecture + dependency rules |
 | [datetime.md](datetime.md) | Two-zone discipline — UTC at storage, display tz at boundaries |
+| [device-assistant.md](device-assistant.md) | One agent, many people: identity mapping, request surface and cost for a hardware device |
 
 ## How-to
 

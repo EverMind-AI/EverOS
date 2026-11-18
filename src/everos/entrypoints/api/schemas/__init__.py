@@ -11,6 +11,12 @@ from .delete import DeleteByIdsRequest as DeleteByIdsRequest
 from .delete import DeleteByIdsResponseData as DeleteByIdsResponseData
 from .delete import DeleteRequest as DeleteRequest
 from .delete import DeleteResponseData as DeleteResponseData
+from .device import DeviceAddRequest as DeviceAddRequest
+from .device import DeviceAddResponseData as DeviceAddResponseData
+from .device import DeviceSpeaker as DeviceSpeaker
+from .device import DeviceUtterance as DeviceUtterance
+from .device import MemoryScope as MemoryScope
+from .device import speaker_owner_id as speaker_owner_id
 from .envelope import ErrorDetail as ErrorDetail
 from .envelope import ErrorResponse as ErrorResponse
 from .envelope import SuccessEnvelope as SuccessEnvelope
@@ -67,6 +73,10 @@ __all__ = [
     "DeleteByIdsResponseData",
     "DeleteRequest",
     "DeleteResponseData",
+    "DeviceAddRequest",
+    "DeviceAddResponseData",
+    "DeviceSpeaker",
+    "DeviceUtterance",
     "DocumentContextDTO",
     "DocumentCreateResponse",
     "DocumentDeleteResponse",
@@ -85,6 +95,7 @@ __all__ = [
     "MemorizeAddRequest",
     "MemorizeFlushRequest",
     "MemorizeQueueHealthBlock",
+    "MemoryScope",
     "MessageItemDTO",
     "PathSafeId",
     "ProjectScopeId",
@@ -104,4 +115,5 @@ __all__ = [
     "TopicOverviewDTO",
     "TriggerRequest",
     "TriggerResponse",
+    "speaker_owner_id",
 ]
