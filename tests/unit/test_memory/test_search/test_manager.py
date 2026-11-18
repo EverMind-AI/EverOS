@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from everalgo.rank.fusion import cosine_to_lr_score
 
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
@@ -606,6 +607,25 @@ async def test_hybrid_radius_floors_the_fact_lane(
     )
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, radius=0.5))
     assert ("ep_far" in [e.id for e in resp.data.episodes]) is kept
+
+
+async def test_hybrid_radius_floors_the_facts_an_episode_is_scored_on() -> None:
+    """A fact below ``radius`` neither lifts its episode's score nor is attached.
+
+    ep_1 comes in on BM25 alone (its own cosine, 0.3, is under the floor); its
+    fact, at 0.4, is under it too, so the episode is scored on BM25 only.
+    """
+    ep = _episode_row("ep_1", score=0.3)
+    mgr = _build_manager(
+        episode_sparse=[ep],
+        episode_dense=[ep],
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.4)],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, radius=0.5))
+    [episode] = resp.data.episodes
+    assert episode.atomic_facts == []
+    assert episode.score == pytest.approx(cosine_to_lr_score(0.0, 0.3))
 
 
 async def test_agentic_requires_reranker(

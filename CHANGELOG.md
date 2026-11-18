@@ -23,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   better of its own vector and its best atomic fact, LR-calibrated with BM25.
   `top_k` now counts episodes, and an episode carries at most one atomic fact,
   the one its score came from, when that fact matched the query better than
-  the episode. `radius` floors the atomic-fact lane as it floors the episode
-  vector lane. This replaces the heap-expand ranking, whose `top_k` counted
-  episodes and facts together.
+  the episode. `radius` floors the atomic-fact lane, and the facts an episode
+  is scored on, as it floors the episode vector lane. This replaces the
+  heap-expand ranking, whose `top_k` counted episodes and facts together.
 - **Episode `agentic` search recalls through atomic facts only.** Its MaxSim
   lanes read at most 500 facts each and no longer treat the episode itself as
   a candidate. Round 1 is scoped to at most 100 members of the top clusters

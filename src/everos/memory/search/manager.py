@@ -450,7 +450,11 @@ class SearchManager:
     async def _search_episodes_hybrid(
         self, req: SearchRequest, where: Filter, top_k: int
     ) -> list[SearchEpisodeItem]:
-        """Recall the three episode lanes and rank them (see ``hierarchy``)."""
+        """Recall the three episode lanes and rank them (see ``hierarchy``).
+
+        ``radius`` also floors the facts each kept episode is scored on, so a
+        fact below it neither lifts the episode's score nor is attached.
+        """
         lanes = await self._hybrid_lanes(req, where, top_k)
         with memory_span(
             "everos.search.rank",
@@ -469,6 +473,7 @@ class SearchManager:
                 per_episode=_HYBRID_FACTS_PER_EPISODE,
                 query_vector=lanes.vector,
             )
+            facts = facts.within_radius(_effective_radius(req))
             scored = score_episodes(
                 kept,
                 facts.buckets,
