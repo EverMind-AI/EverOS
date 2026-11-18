@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hybrid fallback for scopes over 1,000 episodes. When the cluster scope comes
   back empty (no cluster yet, or no base hit in one), Round 1 runs on the
   un-scoped hybrid instead of returning nothing.
+- **Episode `vector` search reads 200 atomic facts** whatever the `top_k`, and
+  returns at most 50 episodes when `top_k` is `-1`.
+- **Agent case and skill `hybrid` search recall `top_k * 2` per lane**, and 50
+  when `top_k` is `-1`, so the rerank picks the 10 it returns from a wider
+  pool. Agent case `agentic` search returns at most 10 cases when `top_k` is
+  `-1`, as skill search does.
 - **One `EpisodeExtracted` per memcell.** The event announces a memcell's
   episode once and lists every owner's copy in `copies` (each with its
   `owner_id`, `entry_id` and `owner_name`), instead of one event per copy.

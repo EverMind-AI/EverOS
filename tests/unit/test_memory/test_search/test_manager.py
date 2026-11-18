@@ -524,6 +524,47 @@ async def test_vector_falls_back_to_episode_vector_when_no_facts() -> None:
     assert [e.id for e in resp.data.episodes] == ["ep_high"]
 
 
+@pytest.mark.parametrize(
+    ("top_k", "facts_before_b", "b_kept"), [(5, 150, True), (100, 200, False)]
+)
+async def test_vector_reads_200_atomic_facts_whatever_the_top_k(
+    top_k: int, facts_before_b: int, b_kept: bool
+) -> None:
+    """The fact pool is 200 facts: neither shrunk by a small nor grown by a
+    large ``top_k``."""
+    mgr = _build_manager(
+        episode_dense=[_episode_row("ep_A"), _episode_row("ep_B")],
+        atomic_fact_dense=[
+            *(
+                _atomic_fact_row(f"f_A{i}", parent_id="ep_A", score=0.99)
+                for i in range(facts_before_b)
+            ),
+            _atomic_fact_row("f_B", parent_id="ep_B", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=top_k))
+    assert [e.id for e in resp.data.episodes] == (
+        ["ep_A", "ep_B"] if b_kept else ["ep_A"]
+    )
+
+
+@pytest.mark.parametrize(("top_k", "returned"), [(-1, 50), (60, 60)])
+async def test_vector_returns_top_k_episodes_and_50_when_unlimited(
+    top_k: int, returned: int
+) -> None:
+    mgr = _build_manager(
+        episode_dense=[_episode_row(f"ep_{i}") for i in range(60)],
+        atomic_fact_dense=[
+            _atomic_fact_row(f"f_{i}", parent_id=f"ep_{i}", score=0.9 - i / 1000)
+            for i in range(60)
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=top_k))
+    assert len(resp.data.episodes) == returned
+
+
 # ── HYBRID / AGENTIC: prerequisite errors ──────────────────────────────
 
 
@@ -874,6 +915,30 @@ async def test_agentic_agent_skills_delegates_to_search_agent_skills_agentic(
     assert resp.data.agent_skills == fake_skills
 
 
+async def test_agentic_agent_kinds_cap_unlimited_top_k_at_10(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    top_ks: dict[str, int] = {}
+
+    def _capture(kind: str) -> Any:
+        async def _agentic(*args: Any, top_k: int, **kwargs: Any) -> list[Any]:
+            top_ks[kind] = top_k
+            return []
+
+        return _agentic
+
+    for kind in ("cases", "skills"):
+        monkeypatch.setattr(
+            f"everos.memory.search.manager.search_agent_{kind}_agentic",
+            _capture(kind),
+        )
+    mgr = _build_manager(
+        embedding=_StubEmbedding(), reranker=_StubReranker(), llm_client=_StubLLM()
+    )
+    await mgr.search(_agent_req(method=SearchMethod.AGENTIC))
+    assert top_ks == {"cases": 10, "skills": 10}
+
+
 # ── Agent HYBRID lane selection ──────────────────────────────────────────
 
 
@@ -911,6 +976,46 @@ async def test_agent_hybrid_no_llm_rerank_runs_cross_encoder_lane(
     assert captured["reranker"] is stub_reranker
     # Agent kinds cap unlimited-mode top_k at _AGENT_TOP_K_CAP (10).
     assert captured["top_k"] == 10
+
+
+@pytest.mark.parametrize(("top_k", "lane"), [(-1, 50), (3, 6)])
+async def test_agent_hybrid_lanes_recall_top_k_times_2_and_50_when_unlimited(
+    monkeypatch: pytest.MonkeyPatch, top_k: int, lane: int
+) -> None:
+    from everalgo.types import RankOutput
+
+    lanes: dict[str, int] = {}
+
+    async def _fake_arank(rank_input: Any, **kwargs: Any) -> RankOutput:
+        lanes["case_sparse"] = len(rank_input.sparse_candidates)
+        lanes["case_dense"] = len(rank_input.dense_candidates)
+        return RankOutput(items=[], metadata={})
+
+    async def _fake_hybrid(
+        query: str, *, sparse: Any, dense: Any, reranker: Any, top_k: int
+    ) -> list[Any]:
+        lanes["skill_sparse"] = len(sparse.candidates)
+        lanes["skill_dense"] = len(dense.candidates)
+        return []
+
+    monkeypatch.setattr("everos.memory.search.manager.arank", _fake_arank)
+    monkeypatch.setattr(
+        "everos.memory.search.manager.search_agent_skills_hybrid", _fake_hybrid
+    )
+    cases = [_case_row(f"c_{i}") for i in range(60)]
+    skills = [_skill_row(f"s_{i}") for i in range(60)]
+    mgr = _build_manager(
+        case_sparse=cases,
+        case_dense=cases,
+        skill_sparse=skills,
+        skill_dense=skills,
+        embedding=_StubEmbedding(),
+        reranker=_StubReranker(),
+    )
+    await mgr.search(_agent_req(method=SearchMethod.HYBRID, top_k=top_k))
+    assert lanes == dict.fromkeys(
+        ("case_sparse", "case_dense", "skill_sparse", "skill_dense"), lane
+    )
 
 
 async def test_agent_hybrid_llm_rerank_dispatches_arank_for_case_then_skill(
