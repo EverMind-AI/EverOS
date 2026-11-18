@@ -136,14 +136,21 @@ def narrative_char_cap(max_words: int) -> int:
 
 
 def reply_token_cap(max_words: int) -> int:
-    """``max_tokens`` of one call: about three tokens per word, plus the rest.
+    """``max_tokens`` of one call: three tokens per word, or the character cap.
 
     A guard against a reply that repeats itself until the cap, not a bound on
     a normal reply (a capped narrative, two sentences and a title come to
     roughly half of it). A ``max_tokens`` the deployment sets lower still
     wins (``[llm] extra``).
+
+    The character cap wins where it is larger: a language written without
+    spaces spends about one token per character, so a narrative of
+    :func:`narrative_char_cap` characters needs those tokens, and three per
+    word (about 1,400 for the default 300) cuts it far short -- in a group of
+    15 groups on 2026-11-18, 3,948 of 5,010 updates were cut that way, at a
+    median of 2,110 characters.
     """
-    return max_words * 3 + 512
+    return max(max_words * 3 + 512, narrative_char_cap(max_words) + 512)
 
 
 def clip_text(text: str, max_chars: int) -> str:
