@@ -135,23 +135,6 @@ machinery that keeps a deleted memory from coming back.
   ([vendor/wheels/README.md](vendor/wheels/README.md)). A test fails if an
   EverOS module imports that operator or a rewrite module again, or if an
   episode request does not open with the original's role sentence.
-- **A multi-round search lists each memory once per round.** A round after the
-  first shows the decider one block per sub-query, and a memory that several
-  sub-queries retrieved was listed in each of their blocks, under an index of
-  its own: 16.7% of the candidate slots of recorded LoCoMo searches.
-  `[decider] dedupe_within_round` (default `true`) lists it once, in the block
-  where it ranks highest (a tie goes to the earlier block), and numbers the
-  round's indices over what is listed, so a reply names the memories it was
-  shown -- parsed, salvaged, as the fallback core or after a fit. Rounds are
-  not compared with each other: a memory an earlier round showed is listed
-  again, so one the decider passed over can still be chosen. The prompt
-  template, the recall, the trace's recall pools and the result's ranking are
-  unchanged; the round trace lists the copies left out (`decider_dedupe`).
-  Replayed on recorded searches with the decider's tokenizer (no model call),
-  decider input tokens per search fell by 15.3% / 17.6% / 12.7% / 9.8% on
-  LoCoMo / LongMemEval / BEAM 1M / EverMemBench (LoCoMo p90 39.7k to 30.5k).
-  Its effect on answer accuracy is not measured yet; `false` sends the round
-  prompts from before ([docs/configuration.md](docs/configuration.md#decider)).
 - **A user's profile is updated every five segments and at each flush.** A
   one-to-one conversation updated `user.md` after every new segment: the
   profile update was 70% of the write path's input tokens. Now a user's
@@ -243,6 +226,25 @@ machinery that keeps a deleted memory from coming back.
 
 ### Removed
 
+- **`[decider] dedupe_within_round`: a round lists every copy of a memory
+  again.** From 2026-11-13 a round after the first listed a memory that
+  several sub-queries retrieved only once, in the block where it ranked
+  highest. On a small owner that left the decider little to choose from. On
+  CUE-Mem (57 memories an owner on average), among the implicit questions
+  whose first round kept nothing, it cut the second round from 58.1 to 23.8
+  lines, and that round kept nothing either on 61 of the 73, against 42
+  without it (paired 19:0; the recorded prompts rendered both ways and
+  replayed at temperature 0). A full CUE-Mem search without it, everything
+  else equal, ended with an empty core on 86 of 1,483 questions instead of
+  121 and answered 14 more right (72.5% to 73.4%; 27 gained, 13 lost, exact
+  McNemar p = 0.04), 7 of them implicit (55.8% to 57.2%, p = 0.21). The
+  tokens it saved are read again: decider input per search rises by 18.0% /
+  21.4% / 14.5% / 10.9% on LoCoMo / LongMemEval / BEAM 1M / EverMemBench (the
+  2026-11-13 replays of recorded searches), and rose by 35% on that CUE-Mem
+  search (22.7k to 30.5k). A round prompt is again the one sent before
+  2026-11-13, byte for byte, and the round trace has no `decider_dedupe`. A
+  configuration that still sets the key (`EVEROS_DECIDER__DEDUPE_WITHIN_ROUND`
+  included) loads; the key is ignored with a `config_key_ignored` warning.
 - **Hard-delete storage nothing called any more**: the stores'
   `remove_session`, `remove`, `remove_naming` and `undeprecate`, the writer's
   `remove_entries`, `OwnerDirStore.delete` (the start-up sweep of an earlier
