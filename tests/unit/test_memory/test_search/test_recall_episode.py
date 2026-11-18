@@ -131,10 +131,31 @@ async def test_fetch_by_entry_ids_keys_by_global_id() -> None:
     assert [c.id for c in result.candidates] == [ep.ref.id]
 
 
+async def test_dense_recall_among_ranks_only_the_given_episodes() -> None:
+    """Cluster members are ranked by body vector and keyed by entry id."""
+    near, far, outside = (stored_episode(f"ep_{i}") for i in range(3))
+    index = ScriptedIndex(
+        dense=[hit(outside, 0.95), hit(near, 0.9), hit(far, 0.2)], filter_dense=True
+    )
+
+    result = await _recaller(index).dense_recall_among(
+        [0.1], ["ep_0", "ep_1"], _ALICE, limit=5
+    )
+
+    assert [(c.id, c.score) for c in result.candidates] == [
+        ("ep_0", pytest.approx(0.9)),
+        ("ep_1", pytest.approx(0.2)),
+    ]
+    assert result.stored_by_id["ep_0"] is near
+
+
 async def test_fetches_with_no_ids_skip_the_index() -> None:
     index = ScriptedIndex(found=[hit(stored_episode("ep_1"))])
     recaller = _recaller(index)
 
     assert (await recaller.fetch_parents([], _ALICE)).candidates == []
     assert (await recaller.fetch_by_entry_ids([], _ALICE)).candidates == []
+    assert (
+        await recaller.dense_recall_among([0.1], [], _ALICE, limit=5)
+    ).candidates == []
     assert index.calls == []

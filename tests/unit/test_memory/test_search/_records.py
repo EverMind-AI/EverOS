@@ -172,6 +172,7 @@ class ScriptedIndex:
         found: Hits for ``find``.
         filter_found: Evaluate ``find``'s filter against each record, as
             the real index does, instead of returning ``found`` as is.
+        filter_dense: The same for ``dense_search``, before its ``limit``.
     """
 
     def __init__(
@@ -182,12 +183,14 @@ class ScriptedIndex:
         subject: Sequence[Any] = (),
         found: Sequence[Any] = (),
         filter_found: bool = False,
+        filter_dense: bool = False,
     ) -> None:
         self._sparse = list(sparse)
         self._dense = list(dense)
         self._subject = list(subject)
         self._found = list(found)
         self._filter_found = filter_found
+        self._filter_dense = filter_dense
         self.calls: list[tuple[str, Any, Filter, int | None]] = []
 
     async def sparse_search(
@@ -200,7 +203,12 @@ class ScriptedIndex:
         self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[Any]:
         self.calls.append(("dense", list(vector), where, limit))
-        return self._dense[:limit]
+        dense = [
+            h
+            for h in self._dense
+            if not self._filter_dense or matches(where, _fields(h))
+        ]
+        return dense[:limit]
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int
