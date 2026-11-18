@@ -1115,6 +1115,23 @@ class ProfileSettings(_Section):
     ``update_every``: the profile is updated after this many new segments of
     the user's own conversations, all read in one update. Episodes are
     searchable at once, only the profile lags. ``1`` updates at every segment.
+    ``8`` is the default since 2026-11-18: the replay of the LoCoMo control
+    arm's 674 segments and 158 update calls reads 110 calls at 8, 94 at 10 and
+    84 at 12 where 5 reads 158 (--30 / --40 / --47%), and what a segment adds
+    to a call is small next to the call's fixed part (17,900 characters of
+    system message and stored profile against 3,285 characters of
+    conversation per segment, so 4.27 segments a call carry 44% of its
+    text).
+    ``max_age_seconds``: or once the oldest segment waiting on the profile is
+    this old (7 days). This is the rule that reaches a deployment at all: the
+    idle trigger fires in every pause longer than ``idle_seconds``, and
+    between two of one person's segments the LoCoMo arm has 524 pauses over
+    24 hours out of 654, so an idle-only cadence reads 556 calls where the
+    age rule reads 362 and the evaluation's own catch-up reads 158. A profile
+    may then lag its segments by up to this long; the episodes do not.
+    The age rule is checked by the idle tick, the flush and the catch-up; the
+    segment trigger reads the queue by count alone, so a segment costs no
+    extra read.
     ``idle_seconds``: or once the user has had no new segment for this long.
     ``update_on_flush``: and at every flush of one of the user's
     conversations, as before 2026-11-14. The ``catch_up_profiles`` trigger
@@ -1131,17 +1148,26 @@ class ProfileSettings(_Section):
     cue block.
     ``picture_pixels``: in ``cues`` mode, attach the cued pictures themselves
     instead of their picture memories' text (description and visible text).
+    ``stored_grounding``: whether an update is shown each stored item's
+    evidence or basis. ``false`` sends the description and its name alone --
+    option A of the 2026-11-16 cost plan: on the LoCoMo control arm's 158
+    recorded update calls the two were 49% of the stored profile's
+    characters, and 11% of a call's text. The model still finds an item by
+    its ref and judges a duplicate; what it adds it writes its own quote for.
 
-    Env bindings: EVEROS_PROFILE__UPDATE_EVERY, EVEROS_PROFILE__IDLE_SECONDS,
-    EVEROS_PROFILE__UPDATE_ON_FLUSH, EVEROS_PROFILE__INPUT,
-    EVEROS_PROFILE__PICTURE_PIXELS
+    Env bindings: EVEROS_PROFILE__UPDATE_EVERY, EVEROS_PROFILE__MAX_AGE_SECONDS,
+    EVEROS_PROFILE__IDLE_SECONDS, EVEROS_PROFILE__UPDATE_ON_FLUSH,
+    EVEROS_PROFILE__INPUT, EVEROS_PROFILE__PICTURE_PIXELS,
+    EVEROS_PROFILE__STORED_GROUNDING
     """
 
-    update_every: int = Field(default=5, ge=1)
+    update_every: int = Field(default=8, ge=1)
+    max_age_seconds: int = Field(default=7 * 24 * 3600, ge=2)
     idle_seconds: int = Field(default=600, ge=2)
     update_on_flush: bool = False
     input: Literal["cues", "full"] = "cues"
     picture_pixels: bool = False
+    stored_grounding: bool = True
 
 
 class GroupsSettings(_Section):

@@ -133,6 +133,7 @@ async def update_profile(
         pictures=pictures,
         custom_instructions=deps.instructions.load("profile_extract"),
         output_language=language,
+        stored_grounding=deps.profile_stored_grounding,
     )
     return finish_update(
         old,

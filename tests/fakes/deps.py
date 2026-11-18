@@ -114,6 +114,7 @@ def make_deps(
     picture_limits: ImageLimits | None = None,
     profile_input: Literal["cues", "full"] = "full",
     profile_picture_pixels: bool = False,
+    profile_stored_grounding: bool = True,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
@@ -132,6 +133,7 @@ def make_deps(
         picture_limits=picture_limits,
         profile_input=profile_input,
         profile_picture_pixels=profile_picture_pixels,
+        profile_stored_grounding=profile_stored_grounding,
     )
 
 

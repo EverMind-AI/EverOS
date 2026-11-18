@@ -119,6 +119,9 @@ class MemoryDeps:
         profile_picture_pixels: ``[profile] picture_pixels``: in ``cues``
             mode, attach the cued pictures themselves instead of their
             picture memories' text.
+        profile_stored_grounding: ``[profile] stored_grounding``: whether an
+            update is shown each stored item's evidence or basis (True) or its
+            description and name alone (False).
     """
 
     llm: LLMClient
@@ -129,3 +132,4 @@ class MemoryDeps:
     picture_limits: ImageLimits | None = None
     profile_input: Literal["cues", "full"] = "full"
     profile_picture_pixels: bool = False
+    profile_stored_grounding: bool = True

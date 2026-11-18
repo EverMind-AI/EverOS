@@ -505,16 +505,19 @@ strategies and is hot-reloaded; these require a restart.
 
 ### `[profile]`
 
-A user's own profile (`users/<user_id>/user.md`); `input` and
-`picture_pixels` apply to a group's batched member profiles too.
+A user's own profile (`users/<user_id>/user.md`); `input`,
+`picture_pixels` and `stored_grounding` apply to a group's batched member
+profiles too.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `update_every` | int | `5` | The profile is updated after this many new segments of the user's own conversations, all read in one update call. A user's first segment, while they have no profile, is read at once. Episodes are searchable at once; only the profile lags. `1` updates at every segment, as before 2026-11-13. |
+| `update_every` | int | `8` | The profile is updated after this many new segments of the user's own conversations, all read in one update call. A user's first segment, while they have no profile, is read at once. Episodes are searchable at once; only the profile lags. `1` updates at every segment, as before 2026-11-13. `8` since 2026-11-18: the replay of the LoCoMo control arm's 158 update calls reads 110 at 8, 94 at 10 and 84 at 12 where 5 reads 158 (-30 / -40 / -47%), and 4.27 segments a call carry 44% of its text. |
+| `max_age_seconds` | int | `604800` | Or once the oldest segment waiting on the profile is this old (7 days). This is the rule that reaches a deployment: the idle trigger fires in every pause longer than `idle_seconds`, and 524 of the LoCoMo arm's 654 gaps between one person's segments are over 24 hours, so an idle-only cadence reads 556 calls where this rule reads 362. Checked by the idle tick, the flush and the catch-up only -- the segment trigger reads by count, so a segment costs no extra read. The profile may lag its segments by up to this long; the episodes do not. |
 | `idle_seconds` | int | `600` | Or once the user has had no new segment for this long (the `extract_user_profile_idle` strategy, the group profile's idle mechanism). |
 | `update_on_flush` | bool | `false` | And at every flush of one of the user's conversations, the cadence before 2026-11-14. `POST /api/v2/ome/trigger` with `{"name": "catch_up_profiles"}` reads every user's queue at once (and every group's profiles), which an evaluation does before it searches. |
 | `input` | `"cues"` \| `"full"` | `"cues"` | What an update reads -- a user's, and a group's batched member update. `cues`: only the messages and pictures the segment's episode call marked as saying something lasting about the person -- the episode request then carries a `<profile_cues>` block (`chat.episode_profile_cues`; a group cell only while its member profiles run `batched`) -- each message after the nearest earlier message by someone else (cut to 200 characters); a segment never marked is read in full, and an update whose segments marked nothing for the person makes no call. A batched member update renders its batch once from the union of its members' marked messages and leaves out a member with no cue (no call when no member has one). `full`: every message of the segments and every picture the person posted, the requests from before cues; no episode request then carries the cue block. |
 | `picture_pixels` | bool | `false` | In `cues` mode, attach the cued pictures themselves instead of their picture memories' text (description and visible text). |
+| `stored_grounding` | bool | `true` | Whether an update is shown each stored item's evidence or basis. `false` sends the description and its name alone (option A of the 2026-11-16 cost plan): on the LoCoMo control arm's 158 recorded update calls the two were 49% of the stored profile's characters and 11% of a call's text. The model still finds an item by its ref and judges a duplicate, and it writes its own quote for what it adds. |
 
 ### `[groups]`
 

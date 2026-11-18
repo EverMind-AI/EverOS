@@ -366,6 +366,7 @@ def build_application(
         picture_limits=_image_limits(settings) if settings.extraction.vision else None,
         profile_input=settings.profile.input,
         profile_picture_pixels=settings.profile.picture_pixels,
+        profile_stored_grounding=settings.profile.stored_grounding,
     )
     ome_lock = OmeLock(root.ome_db)
     engine = _build_engine(root, deps, settings, lock=ome_lock)

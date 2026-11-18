@@ -365,7 +365,19 @@ run_timeout_seconds = 1800.0
 [profile]
 # A user's own profile (users/<u>/user.md) is updated after this many new
 # segments of their conversations, read in one update. 1 updates every segment.
-update_every = 5
+# 8 since 2026-11-18: the replay of the LoCoMo control arm's 158 update calls
+# reads 110 at 8, 94 at 10 and 84 at 12 (-30/-40/-47%), and 4.27 segments a
+# call carry 44% of its text, so more of them per call costs little.
+update_every = 8
+# Or once the oldest segment waiting on the profile is this old (7 days). This
+# is the rule that reaches a deployment: the idle trigger fires in every pause
+# longer than idle_seconds, and 524 of the LoCoMo arm's 654 gaps between one
+# person's segments are over 24 hours, so an idle-only cadence reads 556 calls
+# where this rule reads 362. Checked by the idle tick, the flush and the
+# catch-up only: the segment trigger reads by count, so a segment costs no
+# extra read. The profile may lag its segments by up to this long; the
+# episodes do not.
+max_age_seconds = 604800
 # Or once the user has had no new segment for this long.
 idle_seconds = 600
 # And at every flush of one of the user's conversations (the cadence before
@@ -381,6 +393,12 @@ input = "cues"
 # In "cues" mode, attach the cued pictures themselves instead of their
 # picture memories' text.
 picture_pixels = false
+# Whether an update is shown each stored item's evidence or basis. false sends
+# the description and its name alone (2026-11-16 plan, option A): on the LoCoMo
+# control arm's 158 recorded update calls the two were 49% of the stored
+# profile's characters, 11% of a call's text. The model still finds an item by
+# its ref and judges a duplicate; what it adds it writes its own quote for.
+stored_grounding = true
 
 [groups]
 # Group memory (docs/group-memory.md, section 5.2).

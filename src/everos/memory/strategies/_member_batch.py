@@ -488,6 +488,7 @@ async def _call(
             pictures=pictures,
             custom_instructions=deps.instructions.load("profile_extract"),
             output_language=language,
+            stored_grounding=deps.profile_stored_grounding,
         )
 
     with memory_span(

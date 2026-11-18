@@ -90,6 +90,7 @@ from collections.abc import Collection, Sequence
 
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now, to_timestamp_ms
 from everos.memory._partition_locks import profile_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
@@ -247,6 +248,7 @@ async def extract_user_profile(
                 owner_id=user_id,
                 owner_type="user",
             ),
+            max_age_seconds=load_settings().profile.max_age_seconds,
         )
         return []
     if isinstance(event, SessionFlushed):
@@ -297,7 +299,9 @@ async def extract_user_profile(
     return []
 
 
-async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
+async def update_pending_profile(
+    deps: MemoryDeps, scope: Scope, *, max_age_seconds: int | None = None
+) -> int:
     """Bring a user's profile up to date with the segments queued on it.
 
     What a due update reads, under the profile's lock: every queued segment,
@@ -306,9 +310,20 @@ async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
     (:class:`UserProfileDue`, at the end of an evaluation's ingest) all go
     through it. A profile with nothing queued is left as it is.
 
+    ``max_age_seconds``, when given, is the age rule: the queue is read only
+    once its oldest segment is at least that old, so the idle tick -- which
+    fires in every pause longer than ``[profile] idle_seconds``, and a
+    person's own segments are usually days apart -- no longer reads a queue
+    that would wait for the count anyway (2026-11-18: 556 reads of the
+    LoCoMo arm's 674 segments by idle alone, 362 with a 7-day rule, against
+    the 158 the arm's own catch-up made). ``None`` reads whatever is queued:
+    the catch-up and a flush ask for the profile to be current now.
+
     Args:
         deps: The strategies' dependencies.
         scope: The user's own space (``owner_type`` ``user``).
+        max_age_seconds: Read only once the oldest queued segment is this
+            old; ``None`` reads at once.
 
     Returns:
         How many queued segments the update read; 0 with nothing queued.
@@ -316,6 +331,10 @@ async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
     async with profile_lock(scope):
         existing = await deps.stores.profile.read(scope)
         if existing is None or not existing.pending_memcell_ids:
+            return 0
+        if max_age_seconds is not None and not await _older_than(
+            deps, existing.pending_memcell_ids[0], max_age_seconds
+        ):
             return 0
         return await _read(
             deps,
@@ -325,6 +344,21 @@ async def update_pending_profile(deps: MemoryDeps, scope: Scope) -> int:
             memcell_id=None,
             language=None,
         )
+
+
+async def _older_than(deps: MemoryDeps, memcell_id: str, seconds: int) -> bool:
+    """Whether the segment ``memcell_id`` began at least ``seconds`` ago.
+
+    One indexed read of the segment's own timestamp. A segment that is gone
+    counts as old: its age cannot be told, and reading the queue is what the
+    next step would do anyway, so a missing row never strands a queue.
+    """
+    found = await deps.stores.memcell.cells_by_id([memcell_id])
+    cell = found.get(memcell_id)
+    if cell is None:
+        return True
+    age_ms = to_timestamp_ms(get_utc_now()) - cell.timestamp
+    return age_ms >= seconds * 1000
 
 
 async def _read(
